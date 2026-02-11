@@ -1,0 +1,171 @@
+# ============================================================================
+# Development Tools (IDE/AI Assistant configs)
+# ============================================================================
+.claude/
+.kilocode/
+.plans/
+
+# Claude AI assistant documentation (not for commits)
+CLAUDE.md
+
+# ============================================================================
+# Build Directories
+# ============================================================================
+build/
+build-*/
+build_asan/
+build_new/
+build_bench/
+build-both/
+build-encoding/
+build-iconv/
+build-shared/
+build-test/
+*/build/
+
+# ============================================================================
+# Build Artifacts
+# ============================================================================
+*.o
+*.a
+*.so
+*.dylib
+*.lib
+*.dll
+*.exe
+
+# Benchmark and profile executables
+bench_*
+profile_*
+element_layout
+
+# ============================================================================
+# Test and Source Files (only allow in proper directories)
+# ============================================================================
+# Root-level C files (test, debug, or temporary files)
+*.c
+!cli/**/*.c
+!src/**/*.c
+!test/**/*.c
+!benchmarks/**/*.c
+!examples/**/*.c
+!cmake/**/*.c
+
+# Root-level test binaries (compiled from test_*.c)
+/test_*
+
+# ============================================================================
+# Coverage and Profiling Data
+# ============================================================================
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+gcov/
+*.gcov
+lcov.info
+coverage/
+
+# ============================================================================
+# CMake Generated Files
+# ============================================================================
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+*-config.cmake
+*-config-version.cmake
+CMakeFiles/
+Testing/
+compile_commands.json
+Makefile
+*.cmake.in
+
+# Generated binaries in test directories
+test/Makefile
+test/test/Makefile
+
+# Generated benchmark binaries
+benchmarks/*_benchmark*
+benchmarks/bench_*
+
+# ============================================================================
+# vcpkg
+# ============================================================================
+vcpkg_installed/
+.vcpkg-root
+
+# ============================================================================
+# IDE Files
+# ============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+
+# ============================================================================
+# OS Files
+# ============================================================================
+Thumbs.db
+desktop.ini
+
+# ============================================================================
+# Temporary and Transient Files
+# ============================================================================
+/tmp/
+*.log
+*.tmp
+*.temp
+*~
+
+# Compiled Object files (redundant but explicit)
+*.obj
+*.exp
+
+# Archived documentation (old planning docs)
+archived/
+
+# ============================================================================
+# Documentation Build
+# ============================================================================
+docs/_build/
+
+# ============================================================================
+# Debug Symbols
+# ============================================================================
+*.dSYM/
+*.pdb
+*.su
+*.idb
+*.pdb
+
+# ============================================================================
+# Test Artifacts
+# ============================================================================
+/test/tmp/
+/test/version_tmp/
+
+# Test build artifacts in test/ directory
+test/cmake_install.cmake
+test/CTestTestfile.cmake
+test/*[!.]*
+
+# ============================================================================
+# XML Files (only allow in proper directories)
+# ============================================================================
+# Root-level XML files (should be in test/fixtures or benchmarks/fixtures)
+*.xml
+!test/**/*.xml
+!benchmarks/**/*.xml
+!examples/**/*.xml
+!fixtures/**/*.xml
+
+# ============================================================================
+# External Dependencies (for benchmarking comparison)
+# ============================================================================
+# These are full clones for benchmarking - should NOT be committed
+# Only test fixtures should be in test/fixtures/
+benchmarks/fixtures/libxml2_repo/
+benchmarks/fixtures/pugixml_repo/

@@ -1,0 +1,51 @@
+╔══════════════════════════════════════════════════════════╗
+║   TAURUS vs PUGIXML DOM MODIFICATION BENCHMARK          ║
+╚══════════════════════════════════════════════════════════╝
+
+Running 10000 iterations per test...
+
+[1/10] dom_node_append_child... Done (1.30x)
+[2/10] dom_node_prepend_child... Done (1.33x)
+[3/10] dom_node_insert_child_after... Done (1.28x)
+[4/10] dom_node_insert_child_before... Done (1.21x)
+[5/10] dom_node_set_name... Done (0.94x)
+[6/10] dom_node_append_copy... Done (1.25x)
+[7/10] dom_node_prepend_copy... Done (1.32x)
+[8/10] dom_node_insert_copy_after... Done (1.35x)
+[9/10] dom_node_insert_copy_before... Done (1.22x)
+[10/10] dom_node_remove_child... Done (1.01x)
+
+╔══════════════════════════════════════════════════════════╗
+║                     BENCHMARK RESULTS                    ║
+╚══════════════════════════════════════════════════════════╝
+
+Test                               pugixml      Taurus     Ratio  Status
+------------------------------------------------------------------------
+dom_node_append_child               0.05 μs      0.06 μs     1.30x     ✓
+dom_node_prepend_child              0.04 μs      0.06 μs     1.33x     ✓
+dom_node_insert_child_after         0.05 μs      0.06 μs     1.28x     ✓
+dom_node_insert_child_before        0.05 μs      0.06 μs     1.21x     ✓
+dom_node_set_name                   0.04 μs      0.04 μs     0.94x     ✓
+dom_node_append_copy                0.05 μs      0.06 μs     1.25x     ✓
+dom_node_prepend_copy               0.05 μs      0.07 μs     1.32x     ✓
+dom_node_insert_copy_after          0.06 μs      0.09 μs     1.35x     ✓
+dom_node_insert_copy_before         0.07 μs      0.08 μs     1.22x     ✓
+dom_node_remove_child               0.06 μs      0.06 μs     1.01x     ✓
+------------------------------------------------------------------------
+
+╔══════════════════════════════════════════════════════════╗
+║                         SUMMARY                          ║
+╚══════════════════════════════════════════════════════════╝
+
+  Tests Run:          10
+  Tests Passed:       10/10
+  Average Ratio:      1.22x
+
+  Performance:        ACCEPTABLE (within 50% of pugixml)
+
+  Interpretation:
+    - Ratio < 1.0:  Taurus is faster
+    - Ratio = 1.0:  Equal performance
+    - Ratio > 1.0:  pugixml is faster
+
+

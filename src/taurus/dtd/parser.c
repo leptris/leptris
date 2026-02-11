@@ -1,0 +1,381 @@
+/**
+ * @file dtd/parser.c
+ * @brief DTD parser implementation
+ *
+ * Parses DTD internal subset declarations (ENTITY, ELEMENT, NOTATION, ATTLIST).
+ * Uses stateless parsing with hash table storage for O(1) lookup.
+ */
+
+#include "model.h"
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+/* Parser state */
+typedef struct {
+    const char* pos;
+    const char* end;
+} DTDParser;
+
+/* Helper functions */
+static int dtd_at_end(DTDParser* p) {
+    return p->pos >= p->end;
+}
+
+static char dtd_peek(DTDParser* p) {
+    if (dtd_at_end(p)) return '\0';
+    return *p->pos;
+}
+
+static void dtd_advance(DTDParser* p) {
+    if (!dtd_at_end(p)) p->pos++;
+}
+
+static void dtd_skip_whitespace(DTDParser* p) {
+    while (!dtd_at_end(p) && isspace((unsigned char)dtd_peek(p))) {
+        dtd_advance(p);
+    }
+}
+
+static int dtd_match(DTDParser* p, const char* str) {
+    size_t len = strlen(str);
+    if (p->pos + len > p->end) return 0;
+    return strncmp(p->pos, str, len) == 0;
+}
+
+static char* dtd_parse_name(DTDParser* p) {
+    dtd_skip_whitespace(p);
+    const char* start = p->pos;
+
+    /* XML name: letter, '_', ':', followed by letters, digits, '_', '-', '.', ':', combine chars */
+    while (!dtd_at_end(p)) {
+        char c = dtd_peek(p);
+        if (isalnum((unsigned char)c) || c == '_' || c == ':' || c == '-' ||
+            c == '.' || c == '\240' || /* No-break space */
+            (c >= 0x80 && c <= 0xFF)) { /* Allow extended chars */
+            dtd_advance(p);
+        } else {
+            break;
+        }
+    }
+
+    size_t len = p->pos - start;
+    if (len == 0) return NULL;
+
+    char* name = (char*)malloc(len + 1);
+    if (!name) return NULL;
+    memcpy(name, start, len);
+    name[len] = '\0';
+    return name;
+}
+
+/**
+ * Parse quoted string (single or double quotes)
+ */
+static char* dtd_parse_quoted_string(DTDParser* p) {
+    dtd_skip_whitespace(p);
+
+    char quote = dtd_peek(p);
+    if (quote != '"' && quote != '\'') return NULL;
+
+    dtd_advance(p); /* Skip opening quote */
+    const char* start = p->pos;
+
+    /* Find closing quote */
+    while (!dtd_at_end(p) && dtd_peek(p) != quote) {
+        dtd_advance(p);
+    }
+
+    size_t len = p->pos - start;
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+
+    memcpy(result, start, len);
+    result[len] = '\0';
+
+    if (dtd_peek(p) == quote) dtd_advance(p); /* Skip closing quote */
+
+    return result;
+}
+
+/**
+ * Parse <!ENTITY name "value"> or <!ENTITY name SYSTEM "uri">
+ */
+static DTDEntityDecl* dtd_parse_entity(DTDParser* p) {
+    /* Skip "<!ENTITY" */
+    p->pos += 8;
+    dtd_skip_whitespace(p);
+
+    /* Parse entity name */
+    char* name = dtd_parse_name(p);
+    if (!name) return NULL;
+
+    DTDEntityDecl* entity = ttdtd_entity_create(name);
+    free(name);
+    if (!entity) return NULL;
+
+    dtd_skip_whitespace(p);
+
+    /* Check for SYSTEM or PUBLIC keyword (external entity) */
+    if (dtd_match(p, "SYSTEM")) {
+        entity->type = DTD_ENTITY_EXTERNAL;
+        p->pos += 6;
+        dtd_skip_whitespace(p);
+
+        /* Parse system literal (quoted URI) */
+        entity->system_id = dtd_parse_quoted_string(p);
+    } else if (dtd_match(p, "PUBLIC")) {
+        entity->type = DTD_ENTITY_EXTERNAL;
+        p->pos += 6;
+        dtd_skip_whitespace(p);
+
+        /* Parse public identifier (quoted string) */
+        entity->public_id = dtd_parse_quoted_string(p);
+        dtd_skip_whitespace(p);
+
+        /* Optional system literal */
+        if (dtd_peek(p) == '"' || dtd_peek(p) == '\'') {
+            entity->system_id = dtd_parse_quoted_string(p);
+        }
+    } else {
+        /* Internal entity - parse entity value */
+        entity->type = DTD_ENTITY_INTERNAL;
+        entity->value = dtd_parse_quoted_string(p);
+    }
+
+    /* Check for NDATA notation (unparsed entities) */
+    dtd_skip_whitespace(p);
+    if (dtd_match(p, "NDATA")) {
+        p->pos += 5;
+        dtd_skip_whitespace(p);
+        entity->notation_name = dtd_parse_name(p);
+    }
+
+    /* Skip to '>' */
+    while (!dtd_at_end(p) && dtd_peek(p) != '>') {
+        dtd_advance(p);
+    }
+    if (dtd_peek(p) == '>') dtd_advance(p);
+
+    return entity;
+}
+
+/**
+ * Parse <!ELEMENT name content-model>
+ */
+static DTDElementDecl* dtd_parse_element(DTDParser* p) {
+    /* Skip "<!ELEMENT" */
+    p->pos += 9;
+    dtd_skip_whitespace(p);
+
+    /* Parse element name */
+    char* name = dtd_parse_name(p);
+    if (!name) return NULL;
+
+    DTDElementDecl* elem = ttdtd_element_create(name);
+    free(name);
+    if (!elem) return NULL;
+
+    dtd_skip_whitespace(p);
+
+    /* Parse content model */
+    if (dtd_match(p, "EMPTY")) {
+        elem->content_type = DTD_CONTENT_EMPTY;
+        p->pos += 5;
+    } else if (dtd_match(p, "ANY")) {
+        elem->content_type = DTD_CONTENT_ANY;
+        p->pos += 3;
+    } else if (dtd_peek(p) == '(') {
+        /* Parse content model - store as string for now */
+        const char* start = p->pos;
+        int depth = 0;
+        int in_quote = 0;
+        char quote_char = 0;
+
+        while (!dtd_at_end(p)) {
+            char c = dtd_peek(p);
+
+            if (in_quote) {
+                if (c == quote_char) in_quote = 0;
+            } else if (c == '"' || c == '\'') {
+                in_quote = 1;
+                quote_char = c;
+            } else if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+                dtd_advance(p);
+                if (depth == 0) break;
+                dtd_advance(p);
+                continue;
+            }
+            dtd_advance(p);
+        }
+
+        size_t len = p->pos - start;
+        elem->content_model = (char*)malloc(len + 1);
+        if (elem->content_model) {
+            memcpy(elem->content_model, start, len);
+            elem->content_model[len] = '\0';
+
+            /* Determine type based on content */
+            if (strstr(elem->content_model, "#PCDATA")) {
+                elem->content_type = DTD_CONTENT_MIXED;
+            } else {
+                elem->content_type = DTD_CONTENT_CHILDREN;
+            }
+        }
+    }
+
+    /* Skip to '>' */
+    while (!dtd_at_end(p) && dtd_peek(p) != '>') {
+        dtd_advance(p);
+    }
+    if (dtd_peek(p) == '>') dtd_advance(p);
+
+    return elem;
+}
+
+/**
+ * Parse <!NOTATION name (SYSTEM "uri" | PUBLIC "pubid" "uri"?>
+ */
+static DTDNotationDecl* dtd_parse_notation(DTDParser* p) {
+    /* Skip "<!NOTATION" */
+    p->pos += 10;
+    dtd_skip_whitespace(p);
+
+    /* Parse notation name */
+    char* name = dtd_parse_name(p);
+    if (!name) return NULL;
+
+    DTDNotationDecl* notation = ttdtd_notation_create(name);
+    free(name);
+    if (!notation) return NULL;
+
+    dtd_skip_whitespace(p);
+
+    /* Check for SYSTEM or PUBLIC */
+    if (dtd_match(p, "SYSTEM")) {
+        p->pos += 6;
+        dtd_skip_whitespace(p);
+        notation->system_id = dtd_parse_quoted_string(p);
+    } else if (dtd_match(p, "PUBLIC")) {
+        p->pos += 6;
+        dtd_skip_whitespace(p);
+        notation->public_id = dtd_parse_quoted_string(p);
+        dtd_skip_whitespace(p);
+
+        /* Optional system literal */
+        if (dtd_peek(p) == '"' || dtd_peek(p) == '\'') {
+            notation->system_id = dtd_parse_quoted_string(p);
+        }
+    }
+
+    /* Skip to '>' */
+    while (!dtd_at_end(p) && dtd_peek(p) != '>') {
+        dtd_advance(p);
+    }
+    if (dtd_peek(p) == '>') dtd_advance(p);
+
+    return notation;
+}
+
+/**
+ * Parse DTD internal subset
+ *
+ * @param dtd_content DTD content string (UTF-8)
+ * @param len Length of DTD content in bytes
+ * @return Parsed DTD object or NULL on error
+ */
+TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len) {
+    if (!dtd_content || len == 0) return NULL;
+
+    /* Create DTD container with hash tables */
+    TaurusDTD* dtd = taurus_dtd_create();
+    if (!dtd) return NULL;
+
+    DTDParser parser = {dtd_content, dtd_content + len};
+
+    while (!dtd_at_end(&parser)) {
+        dtd_skip_whitespace(&parser);
+
+        /* Handle comments in DTD */
+        if (dtd_match(&parser, "<!--")) {
+            parser.pos += 4;
+            while (!dtd_at_end(&parser) && !dtd_match(&parser, "-->")) {
+                dtd_advance(&parser);
+            }
+            if (dtd_match(&parser, "-->")) parser.pos += 3;
+            continue;
+        }
+
+        /* Handle parameter entity references (%name;) - skip for now */
+        if (dtd_peek(&parser) == '%') {
+            /* Skip to semicolon */
+            while (!dtd_at_end(&parser) && dtd_peek(&parser) != ';') {
+                dtd_advance(&parser);
+            }
+            if (dtd_peek(&parser) == ';') dtd_advance(&parser);
+            continue;
+        }
+
+        /* Parse declarations */
+        if (dtd_match(&parser, "<!ENTITY")) {
+            DTDEntityDecl* entity = dtd_parse_entity(&parser);
+            if (entity) {
+                if (!ttdtd_add_entity(dtd, entity)) {
+                    ttdtd_entity_free(entity);
+                }
+            }
+        } else if (dtd_match(&parser, "<!ELEMENT")) {
+            DTDElementDecl* elem = dtd_parse_element(&parser);
+            if (elem) {
+                if (!ttdtd_add_element(dtd, elem)) {
+                    ttdtd_element_free(elem);
+                }
+            }
+        } else if (dtd_match(&parser, "<!NOTATION")) {
+            DTDNotationDecl* notation = dtd_parse_notation(&parser);
+            if (notation) {
+                if (!ttdtd_add_notation(dtd, notation)) {
+                    ttdtd_notation_free(notation);
+                }
+            }
+        } else if (dtd_match(&parser, "<!ATTLIST")) {
+            /* Skip ATTLIST for now - Phase 5/6 */
+            while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>') {
+                dtd_advance(&parser);
+            }
+            if (dtd_peek(&parser) == '>') dtd_advance(&parser);
+        } else {
+            /* Skip unknown declaration */
+            while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>') {
+                dtd_advance(&parser);
+            }
+            if (dtd_peek(&parser) == '>') dtd_advance(&parser);
+        }
+    }
+
+    return dtd;
+}
+
+/**
+ * Free DTD (wrapper for ttdtd_free for API compatibility)
+ */
+void taurus_dtd_free(TaurusDTD* dtd) {
+    ttdtd_free(dtd);
+}
+
+/**
+ * Parse DTD from string (public API - wrapper for internal_subset)
+ *
+ * This is the public API function declared in include/taurus/dtd.h.
+ * It's a wrapper that calls taurus_dtd_parse_internal_subset.
+ *
+ * @param dtd_content DTD content string (UTF-8)
+ * @param len Length of DTD content in bytes
+ * @return Parsed DTD object or NULL on error
+ */
+TaurusDTD* taurus_dtd_parse(const char* dtd_content, size_t len) {
+    return taurus_dtd_parse_internal_subset(dtd_content, len);
+}

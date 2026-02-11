@@ -1,0 +1,24 @@
+
+================================================================
+libxml2 XPath Benchmarks
+================================================================
+Test Data: Medium XML (~10KB)
+Iterations: 1000 per benchmark
+================================================================
+  Simple Path (//book)      Mean:     4.02 µs  ±  0.17 µs  Min:     3.00 µs  Max:     5.00 µs
+  Predicate ([@id='101'])   Mean:    22.30 µs  ± 45.01 µs  Min:    15.00 µs  Max:  1121.00 µs
+  Function (count())        Mean:     4.01 µs  ±  3.30 µs  Min:     3.00 µs  Max:    70.00 µs
+  Complex Query             Mean:    35.22 µs  ±337.44 µs  Min:    14.00 µs  Max:  9882.00 µs
+  Union (//book | //magazine) Mean:     3.87 µs  ±  4.25 µs  Min:     3.00 µs  Max:   113.00 µs
+
+libxml2 XPath Summary:
+----------------------------------------------------------
+  Simple Path (//book)      4.02 µs
+  Predicate ([@id='101'])   22.30 µs
+  Function (count())        4.01 µs
+  Complex Query             35.22 µs
+  Union (//book | //magazine) 3.87 µs
+----------------------------------------------------------
+  Total:                    69.42 µs
+  Average:                  13.88 µs
+

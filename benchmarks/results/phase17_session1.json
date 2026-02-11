@@ -1,0 +1,30 @@
+{
+  "benchmark": "end_to_end_workflows",
+  "date": "2024-12-24",
+  "iterations": 10,
+  "document_sizes": {
+    "small": "1.4KB",
+    "medium": "13.7KB",
+    "large": "207.3KB"
+  },
+  "results": {
+    "small": {
+      "parse_only_us": 331.40,
+      "parse_query_us": 35.90,
+      "parse_modify_serialize_us": 11.70,
+      "complex_modification_us": 13.00
+    },
+    "medium": {
+      "parse_only_us": 520.70,
+      "parse_query_us": 351.50,
+      "parse_modify_serialize_us": 170.60,
+      "complex_modification_us": 512.30
+    },
+    "large": {
+      "parse_only_us": 3074.40,
+      "parse_query_us": 14906.50,
+      "parse_modify_serialize_us": 2567.50,
+      "complex_modification_us": 1892.40
+    }
+  }
+}

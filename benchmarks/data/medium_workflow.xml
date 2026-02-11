@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog>
+  <book id="1" isbn="978-0-123456-78-9" year="2020">
+    <title>Introduction to XML Processing</title>
+    <author><first>John</first><last>Smith</last></author>
+    <publisher>Tech Books Publishing</publisher>
+    <price currency="USD">29.99</price>
+    <item>Sample item 1</item>
+  </book>
+  <book id="2" isbn="978-0-987654-32-1" year="2021">
+    <title>Advanced XPath Techniques</title>
+    <author><first>Jane</first><last>Doe</last></author>
+    <publisher>Data Press</publisher>
+    <price currency="USD">39.99</price>
+    <item>Sample item 2</item>
+  </book>
+  <book id="3" isbn="978-0-555555-55-5" year="2022">
+    <title>XML Performance Optimization</title>
+    <author><first>Bob</first><last>Johnson</last></author>
+    <publisher>Performance Books</publisher>
+    <price currency="USD">49.99</price>
+    <item>Sample item 3</item>
+  </book>
+  <book id="4" isbn="978-0-111111-11-1" year="2019">
+    <title>Database Design Patterns</title>
+    <author><first>Alice</first><last>Williams</last></author>
+    <publisher>DB Press</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 4</item>
+  </book>
+  <book id="5" isbn="978-0-222222-22-2" year="2020">
+    <title>Web Services Architecture</title>
+    <author><first>Charlie</first><last>Brown</last></author>
+    <publisher>Web Tech</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 5</item>
+  </book>
+  <book id="6" isbn="978-0-333333-33-3" year="2021">
+    <title>RESTful API Development</title>
+    <author><first>David</first><last>Miller</last></author>
+    <publisher>API Publishing</publisher>
+    <price currency="USD">34.99</price>
+    <item>Sample item 6</item>
+  </book>
+  <book id="7" isbn="978-0-444444-44-4" year="2022">
+    <title>Microservices Patterns</title>
+    <author><first>Emma</first><last>Davis</last></author>
+    <publisher>Cloud Books</publisher>
+    <price currency="USD">59.99</price>
+    <item>Sample item 7</item>
+  </book>
+  <book id="8" isbn="978-0-666666-66-6" year="2020">
+    <title>Container Orchestration</title>
+    <author><first>Frank</first><last>Wilson</last></author>
+    <publisher>DevOps Press</publisher>
+    <price currency="USD">64.99</price>
+    <item>Sample item 8</item>
+  </book>
+  <book id="9" isbn="978-0-777777-77-7" year="2021">
+    <title>Kubernetes in Action</title>
+    <author><first>Grace</first><last>Moore</last></author>
+    <publisher>Container Books</publisher>
+    <price currency="USD">69.99</price>
+    <item>Sample item 9</item>
+  </book>
+  <book id="10" isbn="978-0-888888-88-8" year="2022">
+    <title>Cloud Native Applications</title>
+    <author><first>Henry</first><last>Taylor</last></author>
+    <publisher>Cloud Press</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 10</item>
+  </book>
+  <book id="11" isbn="978-0-999999-99-9" year="2019">
+    <title>Distributed Systems Design</title>
+    <author><first>Isabel</first><last>Anderson</last></author>
+    <publisher>Systems Books</publisher>
+    <price currency="USD">74.99</price>
+    <item>Sample item 11</item>
+  </book>
+  <book id="12" isbn="978-0-101010-10-1" year="2020">
+    <title>Message Queue Patterns</title>
+    <author><first>Jack</first><last>Thomas</last></author>
+    <publisher>Messaging Press</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 12</item>
+  </book>
+  <book id="13" isbn="978-0-121212-12-1" year="2021">
+    <title>Event-Driven Architecture</title>
+    <author><first>Karen</first><last>Jackson</last></author>
+    <publisher>Event Books</publisher>
+    <price currency="USD">59.99</price>
+    <item>Sample item 13</item>
+  </book>
+  <book id="14" isbn="978-0-131313-13-1" year="2022">
+    <title>Serverless Computing</title>
+    <author><first>Liam</first><last>White</last></author>
+    <publisher>Serverless Press</publisher>
+    <price currency="USD">49.99</price>
+    <item>Sample item 14</item>
+  </book>
+  <book id="15" isbn="978-0-141414-14-1" year="2020">
+    <title>GraphQL API Design</title>
+    <author><first>Maria</first><last>Harris</last></author>
+    <publisher>Graph Books</publisher>
+    <price currency="USD">39.99</price>
+    <item>Sample item 15</item>
+  </book>
+  <book id="16" isbn="978-0-151515-15-1" year="2021">
+    <title>Caching Strategies</title>
+    <author><first>Nathan</first><last>Martin</last></author>
+    <publisher>Performance Press</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 16</item>
+  </book>
+  <book id="17" isbn="978-0-161616-16-1" year="2022">
+    <title>Load Balancing Techniques</title>
+    <author><first>Olivia</first><last>Thompson</last></author>
+    <publisher>Scale Books</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 17</item>
+  </book>
+  <book id="18" isbn="978-0-171717-17-1" year="2019">
+    <title>API Gateway Patterns</title>
+    <author><first>Paul</first><last>Garcia</last></author>
+    <publisher>Gateway Press</publisher>
+    <price currency="USD">49.99</price>
+    <item>Sample item 18</item>
+  </book>
+  <book id="19" isbn="978-0-181818-18-1" year="2020">
+    <title>Service Mesh Architecture</title>
+    <author><first>Quinn</first><last>Martinez</last></author>
+    <publisher>Mesh Books</publisher>
+    <price currency="USD">64.99</price>
+    <item>Sample item 19</item>
+  </book>
+  <book id="20" isbn="978-0-191919-19-1" year="2021">
+    <title>Monitoring and Observability</title>
+    <author><first>Rachel</first><last>Robinson</last></author>
+    <publisher>Ops Press</publisher>
+    <price currency="USD">59.99</price>
+    <item>Sample item 20</item>
+  </book>
+  <book id="21" isbn="978-0-202020-20-2" year="2022">
+    <title>Infrastructure as Code</title>
+    <author><first>Steve</first><last>Clark</last></author>
+    <publisher>IaC Books</publisher>
+    <price currency="USD">69.99</price>
+    <item>Sample item 21</item>
+  </book>
+  <book id="22" isbn="978-0-212121-21-2" year="2020">
+    <title>CI/CD Pipelines</title>
+    <author><first>Tina</first><last>Rodriguez</last></author>
+    <publisher>DevOps Books</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 22</item>
+  </book>
+  <book id="23" isbn="978-0-222222-22-2" year="2021">
+    <title>Test Automation Strategies</title>
+    <author><first>Uma</first><last>Lewis</last></author>
+    <publisher>Test Press</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 23</item>
+  </book>
+  <book id="24" isbn="978-0-232323-23-2" year="2022">
+    <title>Security Best Practices</title>
+    <author><first>Victor</first><last>Lee</last></author>
+    <publisher>Security Books</publisher>
+    <price currency="USD">74.99</price>
+    <item>Sample item 24</item>
+  </book>
+  <book id="25" isbn="978-0-242424-24-2" year="2019">
+    <title>OAuth 2.0 Implementation</title>
+    <author><first>Wendy</first><last>Walker</last></author>
+    <publisher>Auth Press</publisher>
+    <price currency="USD">39.99</price>
+    <item>Sample item 25</item>
+  </book>
+  <book id="26" isbn="978-0-252525-25-2" year="2020">
+    <title>JWT Authentication</title>
+    <author><first>Xavier</first><last>Hall</last></author>
+    <publisher>Token Books</publisher>
+    <price currency="USD">34.99</price>
+    <item>Sample item 26</item>
+  </book>
+  <book id="27" isbn="978-0-262626-26-2" year="2021">
+    <title>API Rate Limiting</title>
+    <author><first>Yara</first><last>Allen</last></author>
+    <publisher>Throttle Press</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 27</item>
+  </book>
+  <book id="28" isbn="978-0-272727-27-2" year="2022">
+    <title>Circuit Breaker Patterns</title>
+    <author><first>Zack</first><last>Young</last></author>
+    <publisher>Resilience Books</publisher>
+    <price currency="USD">49.99</price>
+    <item>Sample item 28</item>
+  </book>
+  <book id="29" isbn="978-0-282828-28-2" year="2020">
+    <title>Retry and Backoff Strategies</title>
+    <author><first>Amy</first><last>King</last></author>
+    <publisher>Retry Press</publisher>
+    <price currency="USD">39.99</price>
+    <item>Sample item 29</item>
+  </book>
+  <book id="30" isbn="978-0-292929-29-2" year="2021">
+    <title>Bulkhead Pattern Implementation</title>
+    <author><first>Ben</first><last>Wright</last></author>
+    <publisher>Pattern Books</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 30</item>
+  </book>
+  <book id="31" isbn="978-0-303030-30-3" year="2022">
+    <title>Database Sharding</title>
+    <author><first>Cathy</first><last>Lopez</last></author>
+    <publisher>DB Scaling Press</publisher>
+    <price currency="USD">64.99</price>
+    <item>Sample item 31</item>
+  </book>
+  <book id="32" isbn="978-0-313131-31-3" year="2019">
+    <title>Read Replica Patterns</title>
+    <author><first>Dan</first><last>Hill</last></author>
+    <publisher>Replication Books</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 32</item>
+  </book>
+  <book id="33" isbn="978-0-323232-32-3" year="2020">
+    <title>CQRS Architecture</title>
+    <author><first>Eva</first><last>Scott</last></author>
+    <publisher>CQRS Press</publisher>
+    <price currency="USD">59.99</price>
+    <item>Sample item 33</item>
+  </book>
+  <book id="34" isbn="978-0-333333-33-3" year="2021">
+    <title>Event Sourcing Patterns</title>
+    <author><first>Fred</first><last>Green</last></author>
+    <publisher>Event Press</publisher>
+    <price currency="USD">69.99</price>
+    <item>Sample item 34</item>
+  </book>
+  <book id="35" isbn="978-0-343434-34-3" year="2022">
+    <title>Saga Pattern Implementation</title>
+    <author><first>Gina</first><last>Adams</last></author>
+    <publisher>Saga Books</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 35</item>
+  </book>
+  <book id="36" isbn="978-0-353535-35-3" year="2020">
+    <title>Domain-Driven Design</title>
+    <author><first>Harry</first><last>Baker</last></author>
+    <publisher>DDD Press</publisher>
+    <price currency="USD">74.99</price>
+    <item>Sample item 36</item>
+  </book>
+  <book id="37" isbn="978-0-363636-36-3" year="2021">
+    <title>Hexagonal Architecture</title>
+    <author><first>Iris</first><last>Nelson</last></author>
+    <publisher>Architecture Books</publisher>
+    <price currency="USD">49.99</price>
+    <item>Sample item 37</item>
+  </book>
+  <book id="38" isbn="978-0-373737-37-3" year="2022">
+    <title>Clean Architecture Principles</title>
+    <author><first>James</first><last>Carter</last></author>
+    <publisher>Clean Press</publisher>
+    <price currency="USD">59.99</price>
+    <item>Sample item 38</item>
+  </book>
+  <book id="39" isbn="978-0-383838-38-3" year="2019">
+    <title>Onion Architecture</title>
+    <author><first>Kelly</first><last>Mitchell</last></author>
+    <publisher>Onion Books</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 39</item>
+  </book>
+  <book id="40" isbn="978-0-393939-39-3" year="2020">
+    <title>Vertical Slice Architecture</title>
+    <author><first>Larry</first><last>Perez</last></author>
+    <publisher>Slice Press</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 40</item>
+  </book>
+  <book id="41" isbn="978-0-404040-40-4" year="2021">
+    <title>Feature Toggles Guide</title>
+    <author><first>Monica</first><last>Roberts</last></author>
+    <publisher>Feature Books</publisher>
+    <price currency="USD">39.99</price>
+    <item>Sample item 41</item>
+  </book>
+  <book id="42" isbn="978-0-414141-41-4" year="2022">
+    <title>Blue-Green Deployment</title>
+    <author><first>Nick</first><last>Turner</last></author>
+    <publisher>Deployment Press</publisher>
+    <price currency="USD">49.99</price>
+    <item>Sample item 42</item>
+  </book>
+  <book id="43" isbn="978-0-424242-42-4" year="2020">
+    <title>Canary Release Strategies</title>
+    <author><first>Oscar</first><last>Phillips</last></author>
+    <publisher>Release Books</publisher>
+    <price currency="USD">44.99</price>
+    <item>Sample item 43</item>
+  </book>
+  <book id="44" isbn="978-0-434343-43-4" year="2021">
+    <title>A/B Testing Framework</title>
+    <author><first>Patty</first><last>Campbell</last></author>
+    <publisher>Testing Press</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 44</item>
+  </book>
+  <book id="45" isbn="978-0-444444-44-4" year="2022">
+    <title>Feature Flag Management</title>
+    <author><first>Quincy</first><last>Parker</last></author>
+    <publisher>Flag Books</publisher>
+    <price currency="USD">39.99</price>
+    <item>Sample item 45</item>
+  </book>
+  <book id="46" isbn="978-0-454545-45-4" year="2019">
+    <title>Progressive Delivery</title>
+    <author><first>Rita</first><last>Evans</last></author>
+    <publisher>Progressive Press</publisher>
+    <price currency="USD">64.99</price>
+    <item>Sample item 46</item>
+  </book>
+  <book id="47" isbn="978-0-464646-46-4" year="2020">
+    <title>Chaos Engineering Practices</title>
+    <author><first>Sam</first><last>Edwards</last></author>
+    <publisher>Chaos Books</publisher>
+    <price currency="USD">69.99</price>
+    <item>Sample item 47</item>
+  </book>
+  <book id="48" isbn="978-0-474747-47-4" year="2021">
+    <title>Site Reliability Engineering</title>
+    <author><first>Tara</first><last>Collins</last></author>
+    <publisher>SRE Press</publisher>
+    <price currency="USD">74.99</price>
+    <item>Sample item 48</item>
+  </book>
+  <book id="49" isbn="978-0-484848-48-4" year="2022">
+    <title>Platform Engineering</title>
+    <author><first>Umar</first><last>Stewart</last></author>
+    <publisher>Platform Books</publisher>
+    <price currency="USD">59.99</price>
+    <item>Sample item 49</item>
+  </book>
+  <book id="50" isbn="978-0-494949-49-4" year="2020">
+    <title>Developer Experience Optimization</title>
+    <author><first>Vera</first><last>Sanchez</last></author>
+    <publisher>DX Press</publisher>
+    <price currency="USD">54.99</price>
+    <item>Sample item 50</item>
+  </book>
+</catalog>

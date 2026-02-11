@@ -1,0 +1,24 @@
+
+================================================================
+Taurus XPath Benchmarks
+================================================================
+Test Data: Medium XML (~10KB)
+Iterations: 1000 per benchmark
+================================================================
+  Simple Path (//book)      Mean:     2.13 µs  ±  9.19 µs  Min:     1.00 µs  Max:   181.00 µs
+  Predicate ([@id='101'])   Mean:     2.72 µs  ±  4.24 µs  Min:     1.00 µs  Max:    80.00 µs
+  Function (count())        Mean:     3.44 µs  ± 14.92 µs  Min:     1.00 µs  Max:   400.00 µs
+  Complex Query             Mean:     5.87 µs  ± 43.49 µs  Min:     2.00 µs  Max:  1350.00 µs
+  Union (//book | //magazine) Mean:     5.12 µs  ±  6.23 µs  Min:     2.00 µs  Max:   134.00 µs
+
+Taurus XPath Summary:
+----------------------------------------------------------
+  Simple Path (//book)      2.13 µs
+  Predicate ([@id='101'])   2.72 µs
+  Function (count())        3.44 µs
+  Complex Query             5.87 µs
+  Union (//book | //magazine) 5.12 µs
+----------------------------------------------------------
+  Total:                    19.28 µs
+  Average:                  3.86 µs
+

@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog>
+  <book id="000">
+    <title>Book Title 0</title>
+    <author>Author Name 0</author>
+    <price>29.99</price>
+    <category>Category 0</category>
+    <isbn>978-0-000000-0-0</isbn>
+    <description>This is a longer description for book 0 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="001">
+    <title>Book Title 1</title>
+    <author>Author Name 1</author>
+    <price>30.99</price>
+    <category>Category 1</category>
+    <isbn>978-0-000001-1-1</isbn>
+    <description>This is a longer description for book 1 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="002">
+    <title>Book Title 2</title>
+    <author>Author Name 2</author>
+    <price>31.99</price>
+    <category>Category 2</category>
+    <isbn>978-0-000002-2-2</isbn>
+    <description>This is a longer description for book 2 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="003">
+    <title>Book Title 3</title>
+    <author>Author Name 3</author>
+    <price>32.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000003-3-3</isbn>
+    <description>This is a longer description for book 3 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="004">
+    <title>Book Title 4</title>
+    <author>Author Name 4</author>
+    <price>33.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000004-4-4</isbn>
+    <description>This is a longer description for book 4 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="005">
+    <title>Book Title 5</title>
+    <author>Author Name 5</author>
+    <price>34.989999999999995</price>
+    <category>Category 0</category>
+    <isbn>978-0-000005-5-5</isbn>
+    <description>This is a longer description for book 5 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="006">
+    <title>Book Title 6</title>
+    <author>Author Name 6</author>
+    <price>35.989999999999995</price>
+    <category>Category 1</category>
+    <isbn>978-0-000006-6-6</isbn>
+    <description>This is a longer description for book 6 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="007">
+    <title>Book Title 7</title>
+    <author>Author Name 7</author>
+    <price>36.989999999999995</price>
+    <category>Category 2</category>
+    <isbn>978-0-000007-7-7</isbn>
+    <description>This is a longer description for book 7 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="008">
+    <title>Book Title 8</title>
+    <author>Author Name 8</author>
+    <price>37.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000008-8-8</isbn>
+    <description>This is a longer description for book 8 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="009">
+    <title>Book Title 9</title>
+    <author>Author Name 9</author>
+    <price>38.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000009-9-9</isbn>
+    <description>This is a longer description for book 9 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="010">
+    <title>Book Title 10</title>
+    <author>Author Name 10</author>
+    <price>39.989999999999995</price>
+    <category>Category 0</category>
+    <isbn>978-0-000010-0-0</isbn>
+    <description>This is a longer description for book 10 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="011">
+    <title>Book Title 11</title>
+    <author>Author Name 11</author>
+    <price>40.989999999999995</price>
+    <category>Category 1</category>
+    <isbn>978-0-000011-1-1</isbn>
+    <description>This is a longer description for book 11 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="012">
+    <title>Book Title 12</title>
+    <author>Author Name 12</author>
+    <price>41.989999999999995</price>
+    <category>Category 2</category>
+    <isbn>978-0-000012-2-2</isbn>
+    <description>This is a longer description for book 12 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="013">
+    <title>Book Title 13</title>
+    <author>Author Name 13</author>
+    <price>42.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000013-3-3</isbn>
+    <description>This is a longer description for book 13 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="014">
+    <title>Book Title 14</title>
+    <author>Author Name 14</author>
+    <price>43.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000014-4-4</isbn>
+    <description>This is a longer description for book 14 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="015">
+    <title>Book Title 15</title>
+    <author>Author Name 15</author>
+    <price>44.989999999999995</price>
+    <category>Category 0</category>
+    <isbn>978-0-000015-5-5</isbn>
+    <description>This is a longer description for book 15 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="016">
+    <title>Book Title 16</title>
+    <author>Author Name 16</author>
+    <price>45.989999999999995</price>
+    <category>Category 1</category>
+    <isbn>978-0-000016-6-6</isbn>
+    <description>This is a longer description for book 16 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="017">
+    <title>Book Title 17</title>
+    <author>Author Name 17</author>
+    <price>46.989999999999995</price>
+    <category>Category 2</category>
+    <isbn>978-0-000017-7-7</isbn>
+    <description>This is a longer description for book 17 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="018">
+    <title>Book Title 18</title>
+    <author>Author Name 18</author>
+    <price>47.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000018-8-8</isbn>
+    <description>This is a longer description for book 18 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="019">
+    <title>Book Title 19</title>
+    <author>Author Name 19</author>
+    <price>48.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000019-9-9</isbn>
+    <description>This is a longer description for book 19 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="020">
+    <title>Book Title 20</title>
+    <author>Author Name 20</author>
+    <price>29.99</price>
+    <category>Category 0</category>
+    <isbn>978-0-000020-0-0</isbn>
+    <description>This is a longer description for book 20 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="021">
+    <title>Book Title 21</title>
+    <author>Author Name 21</author>
+    <price>30.99</price>
+    <category>Category 1</category>
+    <isbn>978-0-000021-1-1</isbn>
+    <description>This is a longer description for book 21 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="022">
+    <title>Book Title 22</title>
+    <author>Author Name 22</author>
+    <price>31.99</price>
+    <category>Category 2</category>
+    <isbn>978-0-000022-2-2</isbn>
+    <description>This is a longer description for book 22 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="023">
+    <title>Book Title 23</title>
+    <author>Author Name 23</author>
+    <price>32.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000023-3-3</isbn>
+    <description>This is a longer description for book 23 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="024">
+    <title>Book Title 24</title>
+    <author>Author Name 24</author>
+    <price>33.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000024-4-4</isbn>
+    <description>This is a longer description for book 24 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="025">
+    <title>Book Title 25</title>
+    <author>Author Name 25</author>
+    <price>34.989999999999995</price>
+    <category>Category 0</category>
+    <isbn>978-0-000025-5-5</isbn>
+    <description>This is a longer description for book 25 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="026">
+    <title>Book Title 26</title>
+    <author>Author Name 26</author>
+    <price>35.989999999999995</price>
+    <category>Category 1</category>
+    <isbn>978-0-000026-6-6</isbn>
+    <description>This is a longer description for book 26 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="027">
+    <title>Book Title 27</title>
+    <author>Author Name 27</author>
+    <price>36.989999999999995</price>
+    <category>Category 2</category>
+    <isbn>978-0-000027-7-7</isbn>
+    <description>This is a longer description for book 27 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="028">
+    <title>Book Title 28</title>
+    <author>Author Name 28</author>
+    <price>37.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000028-8-8</isbn>
+    <description>This is a longer description for book 28 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="029">
+    <title>Book Title 29</title>
+    <author>Author Name 29</author>
+    <price>38.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000029-9-9</isbn>
+    <description>This is a longer description for book 29 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="030">
+    <title>Book Title 30</title>
+    <author>Author Name 30</author>
+    <price>39.989999999999995</price>
+    <category>Category 0</category>
+    <isbn>978-0-000030-0-0</isbn>
+    <description>This is a longer description for book 30 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="031">
+    <title>Book Title 31</title>
+    <author>Author Name 31</author>
+    <price>40.989999999999995</price>
+    <category>Category 1</category>
+    <isbn>978-0-000031-1-1</isbn>
+    <description>This is a longer description for book 31 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="032">
+    <title>Book Title 32</title>
+    <author>Author Name 32</author>
+    <price>41.989999999999995</price>
+    <category>Category 2</category>
+    <isbn>978-0-000032-2-2</isbn>
+    <description>This is a longer description for book 32 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="033">
+    <title>Book Title 33</title>
+    <author>Author Name 33</author>
+    <price>42.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000033-3-3</isbn>
+    <description>This is a longer description for book 33 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="034">
+    <title>Book Title 34</title>
+    <author>Author Name 34</author>
+    <price>43.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000034-4-4</isbn>
+    <description>This is a longer description for book 34 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="035">
+    <title>Book Title 35</title>
+    <author>Author Name 35</author>
+    <price>44.989999999999995</price>
+    <category>Category 0</category>
+    <isbn>978-0-000035-5-5</isbn>
+    <description>This is a longer description for book 35 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="036">
+    <title>Book Title 36</title>
+    <author>Author Name 36</author>
+    <price>45.989999999999995</price>
+    <category>Category 1</category>
+    <isbn>978-0-000036-6-6</isbn>
+    <description>This is a longer description for book 36 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="037">
+    <title>Book Title 37</title>
+    <author>Author Name 37</author>
+    <price>46.989999999999995</price>
+    <category>Category 2</category>
+    <isbn>978-0-000037-7-7</isbn>
+    <description>This is a longer description for book 37 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="038">
+    <title>Book Title 38</title>
+    <author>Author Name 38</author>
+    <price>47.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000038-8-8</isbn>
+    <description>This is a longer description for book 38 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="039">
+    <title>Book Title 39</title>
+    <author>Author Name 39</author>
+    <price>48.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000039-9-9</isbn>
+    <description>This is a longer description for book 39 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="040">
+    <title>Book Title 40</title>
+    <author>Author Name 40</author>
+    <price>29.99</price>
+    <category>Category 0</category>
+    <isbn>978-0-000040-0-0</isbn>
+    <description>This is a longer description for book 40 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="041">
+    <title>Book Title 41</title>
+    <author>Author Name 41</author>
+    <price>30.99</price>
+    <category>Category 1</category>
+    <isbn>978-0-000041-1-1</isbn>
+    <description>This is a longer description for book 41 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="042">
+    <title>Book Title 42</title>
+    <author>Author Name 42</author>
+    <price>31.99</price>
+    <category>Category 2</category>
+    <isbn>978-0-000042-2-2</isbn>
+    <description>This is a longer description for book 42 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="043">
+    <title>Book Title 43</title>
+    <author>Author Name 43</author>
+    <price>32.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000043-3-3</isbn>
+    <description>This is a longer description for book 43 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="044">
+    <title>Book Title 44</title>
+    <author>Author Name 44</author>
+    <price>33.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000044-4-4</isbn>
+    <description>This is a longer description for book 44 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="045">
+    <title>Book Title 45</title>
+    <author>Author Name 45</author>
+    <price>34.989999999999995</price>
+    <category>Category 0</category>
+    <isbn>978-0-000045-5-5</isbn>
+    <description>This is a longer description for book 45 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="046">
+    <title>Book Title 46</title>
+    <author>Author Name 46</author>
+    <price>35.989999999999995</price>
+    <category>Category 1</category>
+    <isbn>978-0-000046-6-6</isbn>
+    <description>This is a longer description for book 46 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="047">
+    <title>Book Title 47</title>
+    <author>Author Name 47</author>
+    <price>36.989999999999995</price>
+    <category>Category 2</category>
+    <isbn>978-0-000047-7-7</isbn>
+    <description>This is a longer description for book 47 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="048">
+    <title>Book Title 48</title>
+    <author>Author Name 48</author>
+    <price>37.989999999999995</price>
+    <category>Category 3</category>
+    <isbn>978-0-000048-8-8</isbn>
+    <description>This is a longer description for book 48 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+  <book id="049">
+    <title>Book Title 49</title>
+    <author>Author Name 49</author>
+    <price>38.989999999999995</price>
+    <category>Category 4</category>
+    <isbn>978-0-000049-9-9</isbn>
+    <description>This is a longer description for book 49 with more text content to increase the file size and make it more realistic for benchmarking purposes.</description>
+  </book>
+</catalog>

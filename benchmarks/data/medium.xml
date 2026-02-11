@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns:pub="http://example.com/publisher">
+  <book id="1">
+    <title>XML Programming</title>
+    <author>John Smith</author>
+    <pub:publisher>Tech Press</pub:publisher>
+    <pub:year>2023</pub:year>
+    <price>39.99</price>
+    <category>Programming</category>
+    <reviews>
+      <review rating="5">Excellent book!</review>
+      <review rating="4">Very informative</review>
+      <review rating="5">Best XML resource</review>
+    </reviews>
+  </book>
+  <book id="2">
+    <title>XPath Mastery</title>
+    <author>Jane Doe</author>
+    <pub:publisher>Dev Books</pub:publisher>
+    <pub:year>2024</pub:year>
+    <price>44.99</price>
+    <category>Programming</category>
+    <reviews>
+      <review rating="5">Must read</review>
+      <review rating="5">Comprehensive</review>
+    </reviews>
+  </book>
+  <book id="3">
+    <title>Web Services</title>
+    <author>Bob Johnson</author>
+    <pub:publisher>Tech Press</pub:publisher>
+    <pub:year>2023</pub:year>
+    <price>49.99</price>
+    <category>Web</category>
+    <reviews>
+      <review rating="4">Good coverage</review>
+      <review rating="4">Practical examples</review>
+      <review rating="3">Needs more detail</review>
+    </reviews>
+  </book>
+  <book id="4">
+    <title>Database Design</title>
+    <author>Alice Williams</author>
+    <pub:publisher>Data Press</pub:publisher>
+    <pub:year>2022</pub:year>
+    <price>54.99</price>
+    <category>Database</category>
+    <reviews>
+      <review rating="5">Essential reading</review>
+      <review rating="5">Clear explanations</review>
+      <review rating="5">Great examples</review>
+      <review rating="4">Very helpful</review>
+    </reviews>
+  </book>
+  <book id="5">
+    <title>Network Programming</title>
+    <author>Charlie Brown</author>
+    <pub:publisher>Net Books</pub:publisher>
+    <pub:year>2024</pub:year>
+    <price>59.99</price>
+    <category>Networking</category>
+    <reviews>
+      <review rating="4">Good introduction</review>
+      <review rating="5">Thorough coverage</review>
+    </reviews>
+  </book>
+</catalog>

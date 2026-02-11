@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "taurus",
+  "version": "0.1.2",
+  "description": "High-performance XML parser and XPath 1.0 engine in C",
+  "homepage": "https://github.com/lutaml/taurus",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "gtest",
+      "platform": "!windows"
+    },
+    {
+      "name": "utf8proc",
+      "default-features": true
+    },
+    {
+      "name": "libiconv",
+      "default-features": true,
+      "platform": "!osx"
+    }
+  ],
+  "builtin-baseline": "cd5e746ec203c8c3c61647e0886a8df8c1e78e41"
+}

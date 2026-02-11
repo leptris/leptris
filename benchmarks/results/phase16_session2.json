@@ -1,0 +1,21 @@
+{
+  "benchmark": "node_creation",
+  "iterations": 10000,
+  "results": {
+  "comment": {
+    "regular_us": 0.1717,
+    "fast_us": 0.0147,
+    "speedup": 11.68x
+  },
+  "cdata": {
+    "regular_us": 0.9603,
+    "fast_us": 0.0526,
+    "speedup": 18.26x
+  },
+  "pi": {
+    "regular_us": 26.9360,
+    "fast_us": 0.7139,
+    "speedup": 37.73x
+  }
+  }
+}

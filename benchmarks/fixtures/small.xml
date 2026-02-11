@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog>
+  <book id="001">
+    <title>Introduction to XML</title>
+    <author>John Smith</author>
+    <price>29.99</price>
+    <category>Technology</category>
+    <isbn>978-0-123456-78-9</isbn>
+  </book>
+  <book id="002">
+    <title>Advanced XPath</title>
+    <author>Jane Doe</author>
+    <price>39.99</price>
+    <category>Technology</category>
+    <isbn>978-0-987654-32-1</isbn>
+  </book>
+  <book id="003">
+    <title>XML Processing in C</title>
+    <author>Bob Johnson</author>
+    <price>34.99</price>
+    <category>Programming</category>
+    <isbn>978-0-111222-33-4</isbn>
+  </book>
+  <book id="004">
+    <title>Data Structures</title>
+    <author>Alice Williams</author>
+    <price>44.99</price>
+    <category>Computer Science</category>
+    <isbn>978-0-555666-77-8</isbn>
+  </book>
+  <book id="005">
+    <title>Web Development</title>
+    <author>Charlie Brown</author>
+    <price>49.99</price>
+    <category>Web</category>
+    <isbn>978-0-999888-77-6</isbn>
+  </book>
+</catalog>

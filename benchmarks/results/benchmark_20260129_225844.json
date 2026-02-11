@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-29T14:58:44Z",
+    "system": "Darwin arm64",
+    "compiler": "",
+    "build_type": "Release",
+    "iterations": 1000
+  },
+  "benchmarks": {
+    "dom": {},
+    "xpath": {}
+  }
+}

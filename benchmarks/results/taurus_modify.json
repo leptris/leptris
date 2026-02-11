@@ -1,0 +1,36 @@
+{
+  "library": "taurus",
+  "version": "0.3.0",
+  "operations": {
+  "create_element": {
+    "iterations": 1000,
+    "total_us": 40.00,
+    "avg_us": 0.0400
+  },
+  "append_child": {
+    "iterations": 1000,
+    "total_us": 3.00,
+    "avg_us": 0.0030
+  },
+  "remove_child": {
+    "iterations": 1000,
+    "total_us": 4.00,
+    "avg_us": 0.0040
+  },
+  "set_text": {
+    "iterations": 1000,
+    "total_us": 37.00,
+    "avg_us": 0.0370
+  },
+  "set_attribute": {
+    "iterations": 1000,
+    "total_us": 5503.00,
+    "avg_us": 5.5030
+  },
+  "remove_attribute": {
+    "iterations": 1000,
+    "total_us": 5.00,
+    "avg_us": 0.0050
+  }
+  }
+}

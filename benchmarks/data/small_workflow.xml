@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog>
+  <book id="1" isbn="978-0-123456-78-9" year="2020">
+    <title>Introduction to XML Processing</title>
+    <author>
+      <first>John</first>
+      <last>Smith</last>
+      <email>john.smith@example.com</email>
+    </author>
+    <publisher>Tech Books Publishing</publisher>
+    <price currency="USD">29.99</price>
+    <description>A comprehensive guide to XML parsing and manipulation in modern applications. Covers parsing, validation, XPath queries, and transformation techniques.</description>
+  </book>
+  <book id="2" isbn="978-0-987654-32-1" year="2021">
+    <title>Advanced XPath Techniques</title>
+    <author>
+      <first>Jane</first>
+      <last>Doe</last>
+      <email>jane.doe@example.com</email>
+    </author>
+    <publisher>Data Press</publisher>
+    <price currency="USD">39.99</price>
+    <description>Master XPath 1.0 with real-world examples and optimization strategies. Learn all 27 functions and 13 axes.</description>
+  </book>
+  <book id="3" isbn="978-0-555555-55-5" year="2022">
+    <title>XML Performance Optimization</title>
+    <author>
+      <first>Bob</first>
+      <last>Johnson</last>
+      <email>bob.johnson@example.com</email>
+    </author>
+    <publisher>Performance Books</publisher>
+    <price currency="USD">49.99</price>
+    <description>Learn how to optimize XML processing for high-performance applications.</description>
+  </book>
+</catalog>

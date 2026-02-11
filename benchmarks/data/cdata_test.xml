@@ -1,0 +1,13 @@
+<root>
+  <script><![CDATA[
+    function test() {
+      return x < 5 && y > 3;
+    }
+  ]]></script>
+  <data><![CDATA[Raw data with <special> &characters& preserved]]></data>
+  <long><![CDATA[
+    Longer CDATA section with multiple lines
+    and various content types including
+    numbers 123, symbols @#$%, and text
+  ]]></long>
+</root>

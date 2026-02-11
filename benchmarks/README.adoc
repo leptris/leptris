@@ -1,0 +1,228 @@
+= Taurus Benchmark Suite
+:toc:
+:toclevels: 3
+
+== Overview
+
+The Taurus benchmark suite compares performance against libxml2 and pugixml across:
+
+* DOM parsing
+* DOM traversal
+* DOM modification
+* Serialization
+* XPath queries (all 13 axes)
+
+== Building Benchmarks
+
+[source,bash]
+----
+cmake -B build -S . \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DTAURUS_BUILD_BENCHMARKS=ON \
+  -DTAURUS_ENABLE_LIBXML2_BENCH=ON \
+  -DTAURUS_ENABLE_PUGIXML_BENCH=ON
+
+cmake --build build --target benchmarks
+----
+
+== Running Benchmarks
+
+=== All Benchmarks
+
+[source,bash]
+----
+cd build/benchmarks
+./bench_all
+----
+
+=== Individual Benchmarks
+
+[source,bash]
+----
+# DOM Operations
+./bench_dom_parse
+./bench_dom_traverse
+./bench_dom_modify
+./bench_dom_serialize
+
+# XPath Operations
+./bench_xpath_axes
+./bench_xpath_functions
+./bench_xpath_predicates
+----
+
+== Benchmark Categories
+
+=== DOM Parsing
+
+Measures time to parse XML from string to DOM tree.
+
+**Test Cases**:
+- Small document (< 1KB)
+- Medium document (10-100KB)
+- Large document (1-10MB)
+- Deep nesting (10+ levels)
+- Wide fanout (100+ siblings)
+
+=== DOM Traversal
+
+Measures time to traverse DOM tree structure.
+
+**Operations**:
+- Get root element
+- Iterate children
+- Access attributes
+- Navigate parent chain
+- Find descendants
+
+=== DOM Modification
+
+Measures time to modify DOM tree.
+
+**Operations**:
+- Add child element
+- Remove child element
+- Set attribute
+- Remove attribute
+- Modify text content
+
+=== Serialization
+
+Measures time to convert DOM to XML string.
+
+**Formats**:
+- Compact (no whitespace)
+- Pretty-printed (indented)
+- With XML declaration
+- Namespace handling
+
+=== XPath Axes
+
+Measures XPath query performance for each axis.
+
+**Axes Tested** (all 13):
+- `child::`
+- `descendant::`
+- `descendant-or-self::`
+- `parent::`
+- `ancestor::`
+- `ancestor-or-self::`
+- `following-sibling::`
+- `preceding-sibling::`
+- `following::`
+- `preceding::`
+- `attribute::`
+- `namespace::`
+- `self::`
+
+=== XPath Functions
+
+Measures XPath function evaluation performance.
+
+**Function Categories**:
+- String functions (concat, substring, etc.)
+- Number functions (sum, round, etc.)
+- Boolean functions (not, true, false)
+- Node-set functions (count, position, etc.)
+
+=== XPath Predicates
+
+Measures predicate evaluation performance.
+
+**Predicate Types**:
+- Position predicates (`[1]`, `[last()]`)
+- Boolean predicates (`[@attr]`)
+- Comparison predicates (`[. > 10]`)
+- Complex predicates (`[@id and @class]`)
+
+== Output Format
+
+Benchmark results are reported in table format:
+
+[source]
+----
+Benchmark                    | Taurus  | libxml2 | pugixml | Winner
+-----------------------------|---------|---------|---------|--------
+DOM Parse Small             |  5.3µs  |  8.2µs  |  2.4µs  | pugixml
+DOM Parse Medium            | 42.1µs  | 67.3µs  | 31.2µs  | pugixml
+XPath child::               |  3.1µs  |  5.4µs  |   N/A   | Taurus
+XPath descendant::          | 12.3µs  | 18.7µs  |   N/A   | Taurus
+...
+----
+
+== Interpreting Results
+
+**Metrics**:
+- Time: Average execution time (microseconds)
+- Memory: Peak memory usage (bytes)
+- Winner: Fastest implementation for each test
+
+**Notes**:
+- pugixml does not support XPath (marked N/A)
+- All times are averages over 1000 iterations
+- Tests run with compiler optimizations enabled (`-O3`)
+
+== Benchmark Data
+
+Test XML files are in `benchmarks/data/`:
+
+* `small.xml` - 500 bytes, basic structure
+* `medium.xml` - 50KB, realistic document
+* `large.xml` - 5MB, complex document
+* `deep.xml` - 100-level nesting
+* `wide.xml` - 1000-sibling fanout
+
+== Adding Benchmarks
+
+=== Structure
+
+[source,cpp]
+----
+#include "benchmark_base.h"
+
+class MyBenchmark : public BenchmarkBase {
+public:
+    void setup() override {
+        load_document("data/medium.xml");
+    }
+
+    void run_taurus() override {
+        // Taurus implementation
+    }
+
+    void run_libxml2() override {
+        // libxml2 implementation
+    }
+
+    void run_pugixml() override {
+        // pugixml implementation (if applicable)
+    }
+};
+
+int main() {
+    MyBenchmark bench;
+    bench.run_all();
+    bench.report();
+    return 0;
+}
+----
+
+=== Registration
+
+Add to `benchmarks/CMakeLists.txt`:
+
+[source,cmake]
+----
+add_benchmark(bench_my_feature src/bench_my_feature.cc)
+----
+
+== Requirements
+
+* CMake 3.20+
+* C++11 compiler
+* libxml2 (optional, for comparison)
+* pugixml (optional, for comparison)
+
+== License
+
+Benchmark code follows Taurus license (MIT).

@@ -1,0 +1,318 @@
+{
+  "library": "libxml2",
+  "timestamp": "1766475020",
+  "results": [
+    {
+      "name": "child::*",
+      "mean_us": 0.45,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "child::book",
+      "mean_us": 0.51,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "child::*[@id]",
+      "mean_us": 0.54,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "descendant::*",
+      "mean_us": 0.47,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "descendant::title",
+      "mean_us": 0.58,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "descendant::*[@id]",
+      "mean_us": 0.56,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "descendant-or-self::*",
+      "mean_us": 0.54,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "descendant-or-self::book",
+      "mean_us": 0.61,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "descendant-or-self::*[@id]",
+      "mean_us": 0.64,
+      "stddev_us": 0.48,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "parent::*",
+      "mean_us": 0.47,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "parent::catalog",
+      "mean_us": 0.56,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "parent::*[@version]",
+      "mean_us": 0.59,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 3.00,
+      "iterations": 1000
+    },
+    {
+      "name": "ancestor::*",
+      "mean_us": 0.48,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "ancestor::catalog",
+      "mean_us": 0.58,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "ancestor::*[@version]",
+      "mean_us": 0.57,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "ancestor-or-self::*",
+      "mean_us": 0.57,
+      "stddev_us": 1.35,
+      "min_us": 0.00,
+      "max_us": 36.00,
+      "iterations": 1000
+    },
+    {
+      "name": "ancestor-or-self::book",
+      "mean_us": 0.60,
+      "stddev_us": 0.52,
+      "min_us": 0.00,
+      "max_us": 6.00,
+      "iterations": 1000
+    },
+    {
+      "name": "ancestor-or-self::*[@id]",
+      "mean_us": 0.65,
+      "stddev_us": 0.98,
+      "min_us": 0.00,
+      "max_us": 25.00,
+      "iterations": 1000
+    },
+    {
+      "name": "following-sibling::*",
+      "mean_us": 0.54,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "following-sibling::book",
+      "mean_us": 0.59,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "following-sibling::*[@id]",
+      "mean_us": 0.61,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "preceding-sibling::*",
+      "mean_us": 0.52,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "preceding-sibling::book",
+      "mean_us": 0.59,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "preceding-sibling::*[@id]",
+      "mean_us": 0.62,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "following::*",
+      "mean_us": 0.46,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "following::title",
+      "mean_us": 0.56,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 2.00,
+      "iterations": 1000
+    },
+    {
+      "name": "following::*[@id]",
+      "mean_us": 0.57,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "preceding::*",
+      "mean_us": 0.47,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "preceding::title",
+      "mean_us": 0.57,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "preceding::*[@id]",
+      "mean_us": 0.57,
+      "stddev_us": 0.49,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "attribute::*",
+      "mean_us": 0.46,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "attribute::id",
+      "mean_us": 0.52,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "@*[string-length() > 0]",
+      "mean_us": 0.67,
+      "stddev_us": 1.11,
+      "min_us": 0.00,
+      "max_us": 32.00,
+      "iterations": 1000
+    },
+    {
+      "name": "namespace::*",
+      "mean_us": 0.56,
+      "stddev_us": 1.26,
+      "min_us": 0.00,
+      "max_us": 23.00,
+      "iterations": 1000
+    },
+    {
+      "name": "namespace::xml",
+      "mean_us": 0.54,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "namespace::*[local-name() != 'xml']",
+      "mean_us": 0.82,
+      "stddev_us": 0.39,
+      "min_us": 0.00,
+      "max_us": 2.00,
+      "iterations": 1000
+    },
+    {
+      "name": "self::*",
+      "mean_us": 0.45,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "self::book",
+      "mean_us": 0.50,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    },
+    {
+      "name": "self::*[@id]",
+      "mean_us": 0.54,
+      "stddev_us": 0.50,
+      "min_us": 0.00,
+      "max_us": 1.00,
+      "iterations": 1000
+    }
+  ]
+}

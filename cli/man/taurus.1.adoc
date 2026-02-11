@@ -1,0 +1,192 @@
+= taurus(1)
+:doctype: manpage
+:man manual: Taurus Manual
+:man source: Taurus 2.0.0
+:man version: 2.0.0
+
+== NAME
+taurus - fast XML parser and XPath evaluator
+
+== SYNOPSIS
+*taurus* [_GLOBAL-OPTIONS_] _COMMAND_ [_COMMAND-OPTIONS_] [_ARGUMENTS_...]
+
+== DESCRIPTION
+Taurus is a high-performance XML parser and XPath 1.0 evaluator written in pure C. 
+It provides command-line tools for parsing, validating, querying, and formatting 
+XML documents with zero external dependencies.
+
+*Key Features*:
+
+* Fast XML 1.0 parsing with SIMD optimizations
+* Complete XPath 1.0 support (27 functions, 13 axes)
+* Full XML Namespaces 1.0 specification
+* Multiple output formats (XML, JSON, text)
+* Compatible with xmllint for common operations
+* No libxml2 or external dependencies required
+
+== COMMANDS
+
+*parse*::
+    Parse and validate XML documents. Supports multiple output formats 
+    and can validate without producing output. See *taurus-parse*(1).
+
+*xpath*::
+    Execute XPath 1.0 queries against XML documents. Returns node-sets,
+    strings, numbers, or boolean values. See *taurus-xpath*(1).
+
+*format*::
+    Pretty-print or reformat XML documents with customizable indentation
+    and optional whitespace compaction. See *taurus-format*(1).
+
+*version*::
+    Display version information and build details.
+
+== GLOBAL OPTIONS
+
+*-h, --help*::
+    Show help message for taurus or a specific command.
+
+*-v, --verbose*::
+    Enable verbose output for debugging.
+
+== EXAMPLES
+
+=== Parse and validate an XML file
+[source,bash]
+----
+taurus parse document.xml
+----
+
+=== Execute an XPath query
+[source,bash]
+----
+taurus xpath library.xml "//book/title"
+----
+
+=== Format XML with 4-space indentation
+[source,bash]
+----
+taurus format --indent 4 document.xml
+----
+
+=== Parse from stdin
+[source,bash]
+----
+cat document.xml | taurus parse -
+----
+
+=== Get command-specific help
+[source,bash]
+----
+taurus parse --help
+taurus xpath --help
+----
+
+=== Check version
+[source,bash]
+----
+taurus version
+----
+
+== EXIT STATUS
+
+*0*::
+    Success - command completed without errors
+
+*1*::
+    Parse error - XML document is malformed or invalid
+
+*2*::
+    XPath error - XPath expression is invalid or evaluation failed
+
+*3*::
+    I/O error - file not found, permission denied, or read/write failure
+
+*4*::
+    Invalid arguments - incorrect command-line options or missing required arguments
+
+*5*::
+    Memory allocation failure - out of memory
+
+*6*::
+    Internal error - unexpected condition (please report as bug)
+
+== ENVIRONMENT
+
+*TAURUS_LOG_LEVEL*::
+    Set logging verbosity level: DEBUG, INFO, WARN, ERROR (not yet implemented)
+
+== FILES
+
+*~/.taurusrc*::
+    User configuration file (not yet implemented)
+
+*/etc/taurus/taurus.conf*::
+    System-wide configuration file (not yet implemented)
+
+== SEE ALSO
+
+*taurus-parse*(1), *taurus-xpath*(1), *taurus-format*(1), *libtaurus*(5)
+
+Online documentation: https://github.com/lutaml/taurus
+
+XPath 1.0 Specification: https://www.w3.org/TR/xpath-10/
+
+XML 1.0 Specification: https://www.w3.org/TR/xml/
+
+== STANDARDS
+
+*taurus* implements the following W3C specifications:
+
+* XML 1.0 (Fifth Edition)
+* XML Namespaces 1.0 (Third Edition)
+* XPath 1.0
+
+== NOTES
+
+=== Comparison with xmllint
+
+Taurus provides similar functionality to xmllint with a more intuitive 
+command structure:
+
+[cols="2,2",options="header"]
+|===
+|xmllint |taurus
+
+|`xmllint --noout file.xml`
+|`taurus parse --noout file.xml`
+
+|`xmllint --format file.xml`
+|`taurus format file.xml`
+
+|`xmllint --xpath '//book' file.xml`
+|`taurus xpath file.xml '//book'`
+|===
+
+Exit codes are compatible with xmllint for drop-in replacement.
+
+=== Performance
+
+Taurus is optimized for speed:
+
+* XML parsing: ~2-3× slower than Ox, ~2× faster than Nokogiri
+* XPath queries: Complete XPath 1.0 (Ox has no XPath support)
+* Memory usage: Comparable to Ox (~7% overhead)
+
+== BUGS
+
+Report bugs at: https://github.com/lutaml/taurus/issues
+
+== COPYRIGHT
+
+Copyright (c) 2024 Ribose Inc.
+
+Licensed under the MIT License. See LICENSE file for details.
+
+== AUTHORS
+
+Taurus is developed and maintained by the Ribose development team.
+
+Main contributors:
+* Ronald Tse
+* Ribose Inc.

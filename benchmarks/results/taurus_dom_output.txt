@@ -1,0 +1,24 @@
+
+================================================================
+Taurus DOM Benchmarks
+================================================================
+Test Data: Medium XML (~10KB)
+Iterations: 1000 per benchmark
+================================================================
+  Parse + Root              Mean:    24.29 µs  ± 16.23 µs  Min:    16.00 µs  Max:   201.00 µs
+  Tree Traversal            Mean:     0.94 µs  ±  0.25 µs  Min:     0.00 µs  Max:     3.00 µs
+  Attribute Access (100x)   Mean:     0.81 µs  ±  0.40 µs  Min:     0.00 µs  Max:     1.00 µs
+  Text Extraction (100x)    Mean:    20.25 µs  ±310.99 µs  Min:     2.00 µs  Max:  8866.00 µs
+  Child Iteration (100x)    Mean:     8.76 µs  ±100.11 µs  Min:     1.00 µs  Max:  2586.00 µs
+
+Taurus DOM Summary:
+----------------------------------------------------------
+  Parse + Root              24.29 µs
+  Tree Traversal            0.94 µs
+  Attribute Access (100x)   0.81 µs
+  Text Extraction (100x)    20.25 µs
+  Child Iteration (100x)    8.76 µs
+----------------------------------------------------------
+  Total:                    55.04 µs
+  Average:                  11.01 µs
+

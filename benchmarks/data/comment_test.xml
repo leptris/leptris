@@ -1,0 +1,15 @@
+<root>
+  <!-- Short comment -->
+  <element attr="value">
+    <!-- Inline comment with some text -->
+    <nested>
+      <!-- Another comment -->
+      Content here
+    </nested>
+  </element>
+  <!-- Long comment with more detailed text that spans multiple conceptual lines
+       and includes various characters and spacing to test performance -->
+  <another>
+    <!-- Final comment -->
+  </another>
+</root>
