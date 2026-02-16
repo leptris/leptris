@@ -16,6 +16,9 @@
 /* Need access to internal structures for result handling */
 #include "../../src/taurus/taurus_internal.h"
 
+/* Forward declarations */
+static void xpath_print_help(void);
+
 /* ------------------------------------------------------------------------- */
 /* XPath Command Options                                                     */
 /* ------------------------------------------------------------------------- */
@@ -103,7 +106,7 @@ static cli_result_t xpath_options_parse(
         }
         else if (strcmp(argv[i], "-h") == 0 ||
                  strcmp(argv[i], "--help") == 0) {
-            return CLI_ERROR_ARGS; /* Trigger help */
+            return CLI_HELP; /* Request help display */
         }
         else if (argv[i][0] == '-' && strcmp(argv[i], "-") != 0) {
             cli_error("unknown option: %s", argv[i]);
@@ -250,8 +253,13 @@ static cli_result_t xpath_execute(int argc, char** argv) {
         goto cleanup;
     }
 
-    if (xpath_options_parse(opts, argc, argv) != CLI_SUCCESS) {
-        result = CLI_ERROR_ARGS;
+    result = xpath_options_parse(opts, argc, argv);
+    if (result == CLI_HELP) {
+        xpath_print_help();
+        result = CLI_SUCCESS;
+        goto cleanup;
+    }
+    if (result != CLI_SUCCESS) {
         goto cleanup;
     }
 

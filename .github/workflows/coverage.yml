@@ -1,0 +1,91 @@
+name: Code Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov gcovr
+
+      - name: Configure with coverage
+        shell: bash
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DTAURUS_ENABLE_UTF8PROC=OFF \
+            -DTAURUS_ENABLE_ICONV=OFF \
+            -DTAURUS_BUILD_CLI=OFF \
+            -DTAURUS_BUILD_TESTS=ON \
+            -DTAURUS_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_FLAGS="-coverage -g -O0" \
+            -DCMAKE_CXX_FLAGS="-coverage -g -O0"
+
+      - name: Build with coverage
+        shell: bash
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests
+        shell: bash
+        run: |
+          cd build && ctest --output-on-failure --timeout 300
+
+      - name: Generate coverage report
+        shell: bash
+        run: |
+          # Generate HTML coverage report
+          lcov --capture --directory . --output-file coverage.info \
+            --base-directory "${{ github.workspace }}" \
+            --include '*src/taurus/*' \
+            --exclude '*test/*' \
+            --exclude '*build/*' \
+            --exclude '*vendor/*'
+
+          # Filter out test files and generated code
+          lcov --remove coverage.info \
+            --output-file coverage_filtered.info \
+            '*/googletest/*' \
+            '*/test/*' \
+            '*/benchmarks/*' \
+            '*/build/*'
+
+          # Generate HTML
+          genhtml coverage_filtered.info --output-directory coverage_html
+
+          # Print summary
+          lcov --list coverage_filtered.info
+
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage_filtered.info
+          directory: ./coverage_html
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_html/
+          retention-days: 7
+
+      - name: Comment coverage summary
+        shell: bash
+        run: |
+          COVERAGE=$(lcov --list coverage_filtered.info 2>/dev/null | tail -1 | awk '{print $NF}')
+          echo "Coverage: ${COVERAGE:-N/A}"
+          echo "Full report available in artifacts"

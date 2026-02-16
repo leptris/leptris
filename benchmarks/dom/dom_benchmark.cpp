@@ -1,9 +1,9 @@
 /**
- * DOM Benchmark v2 - Proper Isolated Performance Measurement
+ * DOM Benchmark - Isolated Performance Measurement
  *
- * This benchmark parses ONCE then measures DOM operations in isolation.
- * The original benchmark was flawed because it parsed on every iteration,
- * making parsing time dominate the measurements.
+ * Parses ONCE then measures DOM operations in isolation.
+ * This provides accurate measurements by separating parsing time
+ * from DOM operation time.
  */
 
 #include <stdio.h>
@@ -67,19 +67,17 @@ static void bench_taurus_child_access(const char* xml, size_t len) {
 
     // Warmup
     for (int i = 0; i < WARMUP_ITERS; i++) {
-        volatile size_t count = taurus_element_child_count(root);
-        for (size_t j = 0; j < count; j++) {
-            volatile TaurusElement child = taurus_element_child(root, j);
+        for (TaurusElement child = taurus_element_first_child_any(root);
+             child; child = taurus_element_next_sibling_any(child)) {
             (void)child;
         }
     }
 
-    // Measure ONLY child access
+    // Measure ONLY child access - PERFORMANCE: Use iterator-style (matches pugixml)
     long start = benchmark_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        size_t count = taurus_element_child_count(root);
-        for (size_t j = 0; j < count; j++) {
-            TaurusElement child = taurus_element_child(root, j);
+        for (TaurusElement child = taurus_element_first_child_any(root);
+             child; child = taurus_element_next_sibling_any(child)) {
             const char* name = taurus_element_name(child);
             (void)name;  // Use result
         }
@@ -123,23 +121,22 @@ static void bench_pugixml_child_access(const char* xml, size_t len) {
 static void bench_taurus_attribute_access(const char* xml, size_t len) {
     TaurusDocument doc = taurus_parse_string(xml, len, NULL);
     TaurusElement root = taurus_document_root(doc);
-    size_t count = taurus_element_child_count(root);
 
     // Warmup
     for (int i = 0; i < WARMUP_ITERS; i++) {
-        for (size_t j = 0; j < count; j++) {
-            TaurusElement child = taurus_element_child(root, j);
+        for (TaurusElement child = taurus_element_first_child_any(root);
+             child; child = taurus_element_next_sibling_any(child)) {
             const char* id = taurus_element_attribute(child, "id");
             const char* category = taurus_element_attribute(child, "category");
             (void)id; (void)category;
         }
     }
 
-    // Measure ONLY attribute access
+    // Measure ONLY attribute access - PERFORMANCE: Use iterator-style
     long start = benchmark_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        for (size_t j = 0; j < count; j++) {
-            TaurusElement child = taurus_element_child(root, j);
+        for (TaurusElement child = taurus_element_first_child_any(root);
+             child; child = taurus_element_next_sibling_any(child)) {
             const char* id = taurus_element_attribute(child, "id");
             const char* category = taurus_element_attribute(child, "category");
             (void)id; (void)category;
@@ -184,9 +181,10 @@ static void bench_pugixml_attribute_access(const char* xml, size_t len) {
 
 static int walk_taurus(TaurusElement elem) {
     int count = 1;
-    size_t children = taurus_element_child_count(elem);
-    for (size_t i = 0; i < children; i++) {
-        count += walk_taurus(taurus_element_child(elem, i));
+    // PERFORMANCE: Use iterator-style (matches pugixml pattern)
+    for (TaurusElement child = taurus_element_first_child_any(elem);
+         child; child = taurus_element_next_sibling_any(child)) {
+        count += walk_taurus(child);
     }
     return count;
 }
@@ -289,8 +287,8 @@ int main(int argc, char** argv) {
 
     printf("\n");
     printf("╔════════════════════════════════════════════════════════════╗\n");
-    printf("║     DOM Benchmark v2 - Isolated Operation Measurement         ║\n");
-    printf("║     (parse once, measure %d iterations)                       ║\n", ITERATIONS);
+    printf("║     DOM Benchmark - Isolated Operation Measurement         ║\n");
+    printf("║     (parse once, measure %d iterations)                    ║\n", ITERATIONS);
     printf("╚════════════════════════════════════════════════════════════╝\n");
     printf("\nFile: %s (%.1f KB)\n", filename, len / 1024.0);
 

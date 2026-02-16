@@ -10,16 +10,10 @@
 
 #include "serialize.h"
 #include "../taurus_internal.h"
+#include "../../include/taurus.h"  /* For taurus_element_attribute() and TaurusSerializeOptions */
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
-
-/* Forward declaration for public API types */
-typedef struct {
-    int indent;
-    int xml_declaration;
-    const char* encoding;
-} TaurusSerializeOptions;
 
 /* Initial buffer capacity */
 #define INITIAL_BUFFER_CAPACITY 1024
@@ -43,6 +37,19 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->data[0] = '\0';
     buf->indent = 0;
     buf->indent_spaces = indent_spaces;
+    buf->preserve_whitespace = 0;  /* Default: allow whitespace normalization */
+    buf->indent_char = INDENT_CHAR_SPACE;  /* Default: spaces */
+    buf->line_ending = LINE_ENDING_LF;     /* Default: Unix line endings */
+
+    return buf;
+}
+
+SerializeBuffer* buffer_create_with_options(int indent_spaces, IndentChar indent_char, LineEnding line_ending) {
+    SerializeBuffer* buf = buffer_create(indent_spaces);
+    if (!buf) return NULL;
+
+    buf->indent_char = indent_char;
+    buf->line_ending = line_ending;
 
     return buf;
 }
@@ -91,19 +98,39 @@ void buffer_append_char(SerializeBuffer* buf, char c) {
 
 void buffer_append_indent(SerializeBuffer* buf) {
     if (!buf || buf->indent_spaces <= 0) return;
+    /* Don't add indentation when xml:space="preserve" is in effect */
+    if (buf->preserve_whitespace) return;
 
-    int spaces = buf->indent * buf->indent_spaces;
-    buffer_ensure_capacity(buf, spaces + 1);
+    int indent_count = buf->indent * buf->indent_spaces;
+    buffer_ensure_capacity(buf, indent_count + 1);
 
-    for (int i = 0; i < spaces; i++) {
-        buf->data[buf->size++] = ' ';
+    if (buf->indent_char == INDENT_CHAR_TAB) {
+        /* Use tabs for indentation */
+        for (int i = 0; i < indent_count; i++) {
+            buf->data[buf->size++] = '\t';
+        }
+    } else {
+        /* Use spaces for indentation (default) */
+        for (int i = 0; i < indent_count; i++) {
+            buf->data[buf->size++] = ' ';
+        }
     }
     buf->data[buf->size] = '\0';
 }
 
 void buffer_append_newline(SerializeBuffer* buf) {
     if (!buf || buf->indent_spaces <= 0) return;
-    buffer_append_char(buf, '\n');
+    /* Don't add newlines when xml:space="preserve" is in effect */
+    if (buf->preserve_whitespace) return;
+
+    if (buf->line_ending == LINE_ENDING_CRLF) {
+        /* Windows line ending */
+        buffer_append_char(buf, '\r');
+        buffer_append_char(buf, '\n');
+    } else {
+        /* Unix line ending (default) */
+        buffer_append_char(buf, '\n');
+    }
 }
 
 char* buffer_to_string(SerializeBuffer* buf) {
@@ -334,15 +361,38 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         buffer_append_char(buf, ' ');
         buffer_append(buf, "xmlns");
 
-        /* Add prefix if not default namespace */
+        /* Add prefix if not default namespace
+         * OPTIMIZATION (Phase B): Check both prefix C string and prefix_view
+         * After Phase B optimization, prefix may be NULL while prefix_view has data */
         if (ns->prefix) {
             buffer_append_char(buf, ':');
             buffer_append(buf, ns->prefix);
+        } else if (!taurus_sv_is_empty(&ns->prefix_view)) {
+            buffer_append_char(buf, ':');
+            buffer_append_len(buf, ns->prefix_view.data, ns->prefix_view.length);
         }
 
         buffer_append(buf, "=\"");
-        buffer_append(buf, ns->uri ? ns->uri : "");
+        /* OPTIMIZATION (Phase B): Check both uri C string and uri_view */
+        if (ns->uri) {
+            buffer_append(buf, ns->uri);
+        } else if (!taurus_sv_is_empty(&ns->uri_view)) {
+            buffer_append_len(buf, ns->uri_view.data, ns->uri_view.length);
+        }
         buffer_append_char(buf, '"');
+    }
+
+    /* Handle xml:space attribute for whitespace preservation
+     * xml:space="preserve" means preserve all whitespace in this element
+     * xml:space="default" resets to default whitespace handling */
+    int old_preserve_whitespace = buf->preserve_whitespace;
+    const char* space_attr = taurus_element_attribute(elem, "xml:space");
+    if (space_attr) {
+        if (strcmp(space_attr, "preserve") == 0) {
+            buf->preserve_whitespace = 1;
+        } else if (strcmp(space_attr, "default") == 0) {
+            buf->preserve_whitespace = 0;
+        }
     }
 
     /* Check if element has children */
@@ -441,6 +491,9 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             buffer_append_newline(buf);
         }
     }
+
+    /* Restore previous xml:space state */
+    buf->preserve_whitespace = old_preserve_whitespace;
 }
 
 void serialize_node_internal(TaurusNode* node, SerializeBuffer* buf) {
@@ -499,6 +552,23 @@ char* taurus_serialize_element(TaurusElement elem) {
     if (!elem) return NULL;
 
     SerializeBuffer* buf = buffer_create(0);  /* Compact mode */
+    if (!buf) return NULL;
+
+    serialize_element_internal(elem, buf, 1);  /* is_root=1 */
+
+    char* result = buffer_to_string(buf);
+    buffer_free(buf);
+
+    return result;
+}
+
+char* taurus_serialize_element_with_options(TaurusElement elem,
+                                             int indent_spaces,
+                                             IndentChar indent_char,
+                                             LineEnding line_ending) {
+    if (!elem) return NULL;
+
+    SerializeBuffer* buf = buffer_create_with_options(indent_spaces, indent_char, line_ending);
     if (!buf) return NULL;
 
     serialize_element_internal(elem, buf, 1);  /* is_root=1 */

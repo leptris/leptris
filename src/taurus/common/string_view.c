@@ -147,6 +147,20 @@ size_t taurus_sv_length(const TaurusStringView* sv) {
     return sv ? sv->length : 0;
 }
 
+/* OPTIMIZATION (Phase C): Check if StringView is already null-terminated
+ * After in-place null termination during parsing, StringView.data points
+ * to a valid C string. This function checks if we can use it directly
+ * without copying.
+ */
+int taurus_sv_is_null_terminated(const TaurusStringView* sv) {
+    if (!sv || !sv->data || sv->length == 0) {
+        return 0;  /* Empty or invalid - not null-terminated in meaningful way */
+    }
+
+    /* Check if the character after the string is '\0' */
+    return sv->data[sv->length] == '\0';
+}
+
 /* Comparison: Compare two StringViews (SIMD-accelerated) */
 int taurus_sv_equals(const TaurusStringView* a, const TaurusStringView* b) {
     if (!a || !b) return 0;

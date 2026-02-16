@@ -25,22 +25,31 @@ struct taurus_compact_overflow_entry;  /* typedef in dom/compact.h */
 
 /* ============================================================================
  * Error Codes (Internal)
+ *
+ * These map to public TaurusStatus codes in taurus/types.h.
+ * Kept for backward compatibility with internal code.
  * ============================================================================ */
 
-typedef enum {
-    TAURUS_ERROR_NONE = 0,
-    TAURUS_ERROR_MEMORY_ALLOCATION,
-    TAURUS_ERROR_PARSE_FAILED,
-    TAURUS_ERROR_XPATH_EVALUATION,
-    TAURUS_ERROR_XPATH_SYNTAX,
-    TAURUS_ERROR_XPATH_FUNCTION,
-    TAURUS_ERROR_EVAL_CONTEXT,
-    TAURUS_ERROR_INVALID_ARGUMENT,
-    TAURUS_ERROR_NULL_INPUT,
-    TAURUS_ERROR_EMPTY_INPUT,
-    TAURUS_ERROR_OUT_OF_MEMORY,
-    TAURUS_ERROR_INVALID_XML
-} taurus_error_code;
+/* Include public error types */
+#include "../include/taurus/error.h"
+
+/* Internal error codes - map to public TaurusStatus */
+/* DEPRECATED: Use TaurusStatus directly in new code */
+#define TAURUS_ERROR_NONE            TAURUS_OK
+#define TAURUS_ERROR_MEMORY_ALLOCATION TAURUS_ERROR_MEMORY
+#define TAURUS_ERROR_PARSE_FAILED    TAURUS_ERROR_PARSE
+#define TAURUS_ERROR_XPATH_EVALUATION TAURUS_ERROR_XPATH
+#define TAURUS_ERROR_XPATH_SYNTAX    TAURUS_ERROR_XPATH
+#define TAURUS_ERROR_XPATH_FUNCTION  TAURUS_ERROR_XPATH
+#define TAURUS_ERROR_EVAL_CONTEXT    TAURUS_ERROR_XPATH
+#define TAURUS_ERROR_INVALID_ARGUMENT TAURUS_ERROR_INVALID_ARG
+#define TAURUS_ERROR_NULL_INPUT      TAURUS_ERROR_NULL_ARG
+#define TAURUS_ERROR_EMPTY_INPUT     TAURUS_ERROR_INVALID_ARG
+#define TAURUS_ERROR_OUT_OF_MEMORY   TAURUS_ERROR_MEMORY
+#define TAURUS_ERROR_INVALID_XML     TAURUS_ERROR_PARSE
+
+/* Legacy typedef - DEPRECATED: Use TaurusStatus */
+typedef TaurusStatus taurus_error_code;
 
 /* ============================================================================
  * Internal Structures - Match ext/taurus/taurus.h but without Ruby
@@ -87,6 +96,12 @@ struct taurus_document {
     char* xml_buffer;               /* Owned writable XML buffer (NULL if not in-place) */
     size_t xml_buffer_len;       /* Length of xml_buffer */
     int xml_buffer_needs_free;   /* 1 if xml_buffer needs free(), 0 if stack/const */
+    /* Per-document strict mode (thread-safe, no global state) */
+    int strict_mode;                /* 1=strict XML 1.0, 0=lenient (pugixml compat) */
+    /* Observer list for change tracking (lazy initialization) */
+    void* observer_list;            /* ObserverList* - for document change events */
+    /* Per-document allocator (NULL = use global allocator) */
+    void* allocator;                /* TaurusAllocator* - document-specific memory allocator */
 };
 
 /* Parse options structure */
@@ -96,16 +111,26 @@ typedef struct {
     int track_positions;         /* Track positions (1=enabled, 0=disabled) */
 } taurus_parse_options;
 
-/* Internal parse function - implemented in parse_simple.c or parser_new.c */
-extern struct taurus_document* taurus_parse(const char* xml, size_t len);
+/* taurus_parse() is now declared in the public header (taurus.h) */
 
 /* Get current strict parsing mode */
 extern int taurus_get_strict_mode(void);
 
-/* Namespace structure - Matches ext/taurus/taurus.h _namespace */
+/* Namespace structure - Matches ext/taurus/taurus.h _namespace
+ *
+ * OPTIMIZATION (Phase B): Added StringView fields for zero-copy namespace storage.
+ * The prefix_view and uri_view fields store StringViews directly pointing into
+ * the XML buffer, eliminating the need to copy strings during parsing.
+ */
 struct taurus_namespace {
-    char* prefix;                /* Namespace prefix (NULL = default namespace) */
-    char* uri;                   /* Namespace URI (required) */
+    /* StringView storage (32 bytes) - zero-copy into XML buffer */
+    TaurusStringView prefix_view;  /* Namespace prefix (empty = default namespace) */
+    TaurusStringView uri_view;     /* Namespace URI (required) */
+
+    /* Cached NULL-terminated strings (16 bytes) - lazy conversion */
+    char* prefix;                  /* NULL until first access, or set directly */
+    char* uri;                     /* NULL until first access, or set directly */
+
     struct taurus_namespace* next; /* Linked list for multiple declarations */
 };
 
@@ -369,8 +394,8 @@ static inline void* taurus_realloc(void* ptr, size_t size) {
     return realloc(ptr, size);
 }
 
-/* Generic free wrapper */
-static inline void taurus_free(void* ptr) {
+/* Generic free wrapper (renamed to avoid conflict with public API) */
+static inline void taurus_internal_free(void* ptr) {
     free(ptr);
 }
 
@@ -404,17 +429,18 @@ static inline int taurus_strcmp(const char* s1, const char* s2) {
 
 /* ============================================================================
  * Internal Error Functions (from error.c)
+ *
+ * These are thin wrappers around the public error API in taurus/error.h.
+ * New code should use the public API directly:
+ *   - taurus_set_error_ex(code, line, col, context, fmt, ...)
+ *   - taurus_set_error(code, fmt, ...)
  * ============================================================================ */
 
-/* Set error with basic message */
-void taurus_set_error(taurus_error_code code, const char* message);
-
-/* Set error with line/column position */
+/* Legacy compatibility functions - use taurus_set_error_ex() instead */
 void taurus_set_parse_error_position(int line, int column);
 
-/* Set error with full context (message, input, position, snippet) */
 void taurus_set_error_with_context(
-    taurus_error_code code,
+    TaurusStatus code,
     const char* message,
     const char* input,
     size_t byte_offset,
@@ -422,7 +448,6 @@ void taurus_set_error_with_context(
     int column
 );
 
-/* Extract context snippet from input around error position */
 void taurus_extract_context_snippet(
     const char* input,
     size_t offset,
@@ -430,5 +455,33 @@ void taurus_extract_context_snippet(
     char* out_buffer,
     size_t buffer_size
 );
+
+/* ============================================================================
+ * Observer Integration (Internal API)
+ *
+ * These functions are used by DOM modification functions to emit events.
+ * See taurus/observer.h for the public observer API.
+ * ============================================================================ */
+
+/* Include observer types (TaurusEventType is defined there) */
+#include "../include/taurus/observer.h"
+
+/* Emit an event to document observers (called by DOM modification functions) */
+void taurus_emit_event(
+    struct taurus_document* doc,
+    TaurusEventType type,
+    struct taurus_element* target,
+    struct taurus_element* parent,
+    struct taurus_element* sibling,
+    const char* name,
+    const char* old_value,
+    const char* new_value
+);
+
+/* Initialize observer list for a document (called during document creation) */
+void taurus_observer_init_document(struct taurus_document* doc);
+
+/* Cleanup observer list for a document (called during document free) */
+void taurus_observer_cleanup_document(struct taurus_document* doc);
 
 #endif /* TAURUS_INTERNAL_H */

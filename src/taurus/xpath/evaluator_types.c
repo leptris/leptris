@@ -72,8 +72,10 @@ double xpath_to_number(struct taurus_xpath_result* result) {
             /* Skip leading whitespace */
             while (isspace((unsigned char)*str)) str++;
 
-            /* Per W3C XPath 1.0 Section 4.4: empty string converts to 0 */
-            if (*str == '\0') return 0.0;
+            /* Per W3C XPath 1.0 Section 4.4: any string that doesn't match
+             * the number pattern (optional whitespace, optional minus, Number,
+             * whitespace) is converted to NaN. Empty string = NaN. */
+            if (*str == '\0') return NAN;
 
             /* Parse number */
             char* endptr;

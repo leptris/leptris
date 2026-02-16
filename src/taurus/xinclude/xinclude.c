@@ -9,7 +9,7 @@
 #include "../dom/element.h"
 #include "../dom/node.h"
 #include "../dom/text.h"
-#include "../parse/parser_new.h"
+#include "../parse/parser.h"
 #include "../common/string_view.h"
 #include <stdio.h>
 #include <stdlib.h>

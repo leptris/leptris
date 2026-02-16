@@ -48,10 +48,27 @@ typedef struct xml_formatter_context {
     xml_format_options_t options;
 } xml_formatter_context_t;
 
-static void xml_print_indent(int level, int indent, FILE* out) {
-    for (int i = 0; i < level * indent; i++) {
-        fputc(' ', out);
+static void xml_print_indent(int level, int indent, bool use_tabs, FILE* out) {
+    int count;
+    if (use_tabs) {
+        /* For tabs, use 1 tab per level regardless of indent value */
+        count = level;
+        for (int i = 0; i < count; i++) {
+            fputc('\t', out);
+        }
+    } else {
+        count = level * indent;
+        for (int i = 0; i < count; i++) {
+            fputc(' ', out);
+        }
     }
+}
+
+static void xml_print_newline(const xml_formatter_context_t* ctx, FILE* out) {
+    if (ctx && ctx->options.use_crlf) {
+        fputc('\r', out);
+    }
+    fputc('\n', out);
 }
 
 static void xml_print_element_recursive(
@@ -64,7 +81,7 @@ static void xml_print_element_recursive(
 
     /* Indent */
     if (ctx->options.pretty_print) {
-        xml_print_indent(level, ctx->options.indent, out);
+        xml_print_indent(level, ctx->options.indent, ctx->options.use_tabs, out);
     }
 
     /* Opening tag - use API to get name */
@@ -158,7 +175,7 @@ static void xml_print_element_recursive(
         /* Self-closing tag */
         fprintf(out, "/>");
         if (ctx->options.pretty_print) {
-            fprintf(out, "\n");
+            xml_print_newline(ctx, out);
         }
         return;
     }
@@ -168,7 +185,7 @@ static void xml_print_element_recursive(
 
     /* Add newline after opening tag if pretty print and first child is element */
     if (ctx->options.pretty_print && first_is_element) {
-        fprintf(out, "\n");
+        xml_print_newline(ctx, out);
     }
 
     /* Children - iterate through ALL children (including text nodes) */
@@ -250,11 +267,11 @@ static void xml_print_element_recursive(
 
     /* Closing tag */
     if (has_children && ctx->options.pretty_print && first_is_element) {
-        xml_print_indent(level, ctx->options.indent, out);
+        xml_print_indent(level, ctx->options.indent, ctx->options.use_tabs, out);
     }
     fprintf(out, "</%s>", name ? name : "");
     if (ctx->options.pretty_print) {
-        fprintf(out, "\n");
+        xml_print_newline(ctx, out);
     }
 }
 
@@ -269,8 +286,9 @@ static void xml_print_document_impl(
 
     /* XML declaration */
     if (xml_ctx && xml_ctx->options.include_declaration) {
-        fprintf(out, "<?xml version=\"1.0\" encoding=\"%s\"?>\n",
+        fprintf(out, "<?xml version=\"1.0\" encoding=\"%s\"?>",
                 xml_ctx->options.encoding);
+        xml_print_newline(xml_ctx, out);
     }
 
     /* Root element - use compact accessor */

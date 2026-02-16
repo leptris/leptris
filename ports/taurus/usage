@@ -1,0 +1,20 @@
+taurus provides CMake targets:
+
+    find_package(taurus CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE taurus::taurus)
+
+For static linking:
+
+    find_package(taurus CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE taurus::static)
+
+For shared linking:
+
+    find_package(taurus CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE taurus::shared)
+
+Using pkg-config:
+
+    pkg_check_modules(taurus REQUIRED taurus)
+    target_link_libraries(main PRIVATE ${taurus_LIBRARIES})
+    target_include_directories(main PRIVATE ${taurus_INCLUDE_DIRS})

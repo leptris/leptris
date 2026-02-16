@@ -842,6 +842,98 @@ if (taurus_is_true(free_shipping)) {
 }
 ----
 
+=== Thread Safety & Per-Document Concurrency
+
+Taurus supports **per-document concurrency**: multiple documents can be parsed and processed concurrently in different threads without interference.
+
+==== Global vs Per-Document Settings
+
+Taurus uses a two-level configuration model:
+
+[horizontal]
+Global Default:: `taurus_set_strict_mode()` sets the default for new documents
+Per-Document:: Each document captures the global setting at creation time and operates independently
+
+This means:
+
+* Parsing one document does not affect the behavior of another
+* Changing global settings after document creation has no effect on existing documents
+* Each document can have its own strict mode setting via `taurus_document_set_strict()`
+
+==== Strict Mode Behavior
+
+[horizontal]
+Lenient (0):: Unknown entities copied literally (pugixml compatibility)
+Strict (1):: Unknown entities cause parse errors (XML 1.0 compliance)
+
+[source,c]
+----
+// Set global default (applies to newly created documents)
+taurus_set_strict_mode(1);  // Enable strict mode globally
+
+// Parse with strict mode (document captures current global setting)
+TaurusDocument doc1 = taurus_parse_string(xml, len, &status);
+
+// Change global setting - does NOT affect doc1
+taurus_set_strict_mode(0);  // Back to lenient
+
+// Parse another document (captures lenient mode)
+TaurusDocument doc2 = taurus_parse_string(xml, len, &status);
+
+// Verify per-document settings
+printf("Doc1 strict: %d\n", taurus_document_get_strict(doc1));  // 1
+printf("Doc2 strict: %d\n", taurus_document_get_strict(doc2));  // 0
+
+// Can also modify per-document settings after creation
+taurus_document_set_strict(doc2, 1);  // Enable strict for doc2
+----
+
+==== Concurrency Patterns
+
+When using threads:
+
+[source,c]
+----
+// Thread-safe: Each thread works on its own document
+void* parse_thread(void* arg) {
+    const char* xml = (const char*)arg;
+
+    // Each thread sets its own preference
+    taurus_set_strict_mode(1);  // This thread wants strict parsing
+
+    // Document captures current setting
+    TaurusStatus status;
+    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+
+    // Process document...
+    if (doc) {
+        TaurusElement root = taurus_document_root(doc);
+        // ... DOM operations ...
+        taurus_document_free(doc);
+    }
+    return NULL;
+}
+
+// Multiple threads can parse concurrently
+pthread_t threads[4];
+for (int i = 0; i < 4; i++) {
+    pthread_create(&threads[i], NULL, parse_thread, xml_data[i]);
+}
+for (int i = 0; i < 4; i++) {
+    pthread_join(threads[i], NULL);
+}
+----
+
+==== API Reference
+
+[horizontal]
+`taurus_set_strict_mode(strict)`:: Set global default strict mode (0=lenient, 1=strict)
+`taurus_get_strict_mode()`:: Get current global default strict mode
+`taurus_document_set_strict(doc, strict)`:: Set per-document strict mode
+`taurus_document_get_strict(doc)`:: Get document's strict mode setting
+
+IMPORTANT: The `TaurusDocument` type is opaque and thread-safe for concurrent reads on the same document. However, write operations (modification, freeing) on the same document from multiple threads require external synchronization.
+
 == Comprehensive Test Suite & Production Quality
 
 **Phase 11 Achievement** (December 2024): Taurus achieves **production-ready status** with comprehensive validation across 777+ tests and 123 real-world fixtures.
@@ -1424,85 +1516,126 @@ Taurus achieves excellent performance through three key optimizations:
 2. **Pool Allocation**: O(1) bump-pointer allocation for all structures
 3. **String Deduplication**: Adaptive hash table for files ≥1KB
 
-=== XPath Performance
+=== DOM Operations vs pugixml
 
-Taurus demonstrates **industry-leading XPath performance**, averaging **5.91x faster** than libxml2:
+[cols="1,1,1,1",options="header"]
+|===
+| Operation | Result vs pugixml | Target | Status
+
+| Tree Walking
+| **2.14x faster**
+| ≥1.2x
+| ✅ Exceeds
+
+| Child Access
+| 0.87x (parity)
+| ≥1.2x
+| ⚠️ At parity
+
+| Attribute Access
+| 0.90x (parity)
+| ≥1.2x
+| ⚠️ At parity
+
+| Parsing
+| 0.10x (10x slower)
+| ≥1.2x
+| ❌ Needs optimization
+|===
+
+**Analysis**:
+
+* **Tree Walking** (2.14x faster): Iterator-style traversal (`taurus_element_first_child_any()`, `taurus_element_next_sibling_any()`) matches pugixml's pattern, enabling excellent performance.
+* **Child/Attribute Access** (parity): The public API functions are non-inline, while pugixml uses C++ methods that can be inlined. Achieving 1.2x would require exposing inline functions in the public header.
+* **Parsing** (10x slower): pugixml uses SIMD-accelerated scanning and minimal allocations. Taurus parsing optimization is planned for a future release.
+
+=== XPath Performance vs libxml2
+
+Taurus XPath averages **3.60x faster** than libxml2 (target: 2.0x):
 
 [cols="1,1,1,1",options="header"]
 |===
 | Operation | Taurus | libxml2 | Speedup
 
 | Simple Path (`//book`)
-| 27.76 µs
-| 54.69 µs
-| 1.97x faster ✓
+| 2.13 µs
+| 4.02 µs
+| 1.89x faster ✓
 
 | Predicate (`[@id='101']`)
-| 4.74 µs
-| 133.16 µs
-| 28.1x faster ✓
+| 2.72 µs
+| 22.30 µs
+| 8.20x faster ✓
 
 | Function (`count()`)
-| 1.48 µs
-| 5.58 µs
-| 3.77x faster ✓
+| 3.44 µs
+| 4.01 µs
+| 1.17x faster ✓
 
 | Complex Query
-| 6.04 µs
-| 47.02 µs
-| 7.78x faster ✓
+| 5.87 µs
+| 35.22 µs
+| 6.00x faster ✓
 
 | Union (`//book \| //magazine`)
-| 3.38 µs
-| 15.99 µs
-| 4.73x faster ✓
+| 5.12 µs
+| 3.87 µs
+| 0.76x slower
 
 | **Average**
-| **8.68 µs**
-| **51.29 µs**
-| **5.91x faster** ✓
+| **3.86 µs**
+| **13.88 µs**
+| **3.60x faster** ✓
 |===
 
-**Conclusion**: Taurus XPath implementation validates the core architecture and provides exceptional performance for XML query operations.
+**Conclusion**: Taurus XPath exceeds the 2x performance target with 3.60x average speedup over libxml2.
 
-=== DOM Performance
-
-Taurus provides competitive DOM performance:
+=== Overall Assessment
 
 [cols="1,1,1,1",options="header"]
 |===
-| Comparison | Taurus | Competitor | Ratio
+| Category | Target | Result | Status
 
-| vs libxml2
-| Fast
-| Slow
-| 11.9x faster ✓
+| Tree Walking
+| ≥1.2x vs pugixml
+| **2.14x faster**
+| ✅ PASS
 
-| vs pugixml
-| Acceptable
-| Fastest
-| 2.6x slower
+| XPath Average
+| ≥2.0x vs libxml2
+| **3.60x faster**
+| ✅ PASS
 
-| XPath vs libxml2
-| **Fastest**
-| Slow
-| **5.91x faster** ✓
+| Child Access
+| ≥1.2x vs pugixml
+| 0.87x (parity)
+| ⚠️ Below target
 
-| XPath vs pugixml
-| Complete
-| N/A
-| pugixml has no XPath
+| Attribute Access
+| ≥1.2x vs pugixml
+| 0.90x (parity)
+| ⚠️ Below target
+
+| Parsing
+| ≥1.2x vs pugixml
+| 0.10x (10x slower)
+| ❌ TODO
 |===
 
-**Trade-off Assessment**:
+**Strengths**:
 
-* **Strengths**: Industry-leading XPath (5.91x faster), complete feature set, zero dependencies
-* **Acceptable**: DOM modification slower than pugixml (specialized DOM-only C++ parser)
-* **Context**: pugixml lacks XPath entirely, making Taurus the complete XML/XPath solution
+* **Industry-leading XPath**: 3.60x faster than libxml2 on average
+* **Excellent tree traversal**: 2.14x faster than pugixml
+* **Complete feature set**: Full XML 1.0, Namespaces 1.0, XPath 1.0 support
+* **Zero dependencies**: Pure C implementation
 
-**Notable**: Taurus is 3.4x faster than pugixml at element renaming (`set_name` operation).
+**Trade-offs**:
 
-For detailed benchmarks, methodology, and analysis, see link:PERFORMANCE_BENCHMARKS.md[Performance Benchmarks].
+* **Child/Attribute access at parity** with pugixml (not ahead)
+* **Parsing needs optimization** (planned for future release)
+* **pugixml lacks XPath**, making Taurus the complete XML/XPath solution
+
+For detailed benchmarks and methodology, see link:REMAINING_WORK.adoc[Remaining Work Checklist] and link:PERFORMANCE_PLAN.adoc[Performance Plan].
 
 === Zero-Copy Parsing
 
@@ -1589,6 +1722,157 @@ For files ≥1KB, identical strings are deduplicated using a hash table with FNV
 1. **During Parse**: Strings remain as pointers into the XML buffer (zero-copy)
 2. **Lazy Conversion**: Original buffer is modified to add null terminators
 3. **Ownership**: Document takes ownership of the buffer and frees it on cleanup
+
+== Installation
+
+=== Using vcpkg (Recommended)
+
+Taurus can be installed using vcpkg in manifest mode or classic mode.
+
+==== Using Overlay Ports (Until Registry Inclusion)
+
+Until Taurus is included in the official vcpkg registry, use overlay ports:
+
+[source,bash]
+----
+# Clone taurus to get the port files
+git clone https://github.com/lutaml/taurus.git
+
+# Use overlay ports when building your project
+cmake -B build -S . \
+    -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+    -DVCPKG_OVERLAY_PORTS=/path/to/taurus/ports
+----
+
+Add to your project's `vcpkg.json`:
+
+[source,json]
+----
+{
+  "dependencies": [
+    {
+      "name": "taurus",
+      "features": ["iconv"]
+    }
+  ]
+}
+----
+
+==== Manifest Mode
+
+Add to your project's `vcpkg.json`:
+
+[source,json]
+----
+{
+  "dependencies": [
+    {
+      "name": "taurus",
+      "features": ["iconv"]
+    }
+  ]
+}
+----
+
+Then use CMake with vcpkg toolchain:
+
+[source,bash]
+----
+cmake -B build -S . \
+    -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+cmake --build build
+----
+
+==== Classic Mode
+
+[source,bash]
+----
+vcpkg install taurus
+----
+
+==== CMake Integration After vcpkg Install
+
+[source,cmake]
+----
+find_package(taurus CONFIG REQUIRED)
+
+# Static library (default when only static is built)
+target_link_libraries(your_target PRIVATE taurus::taurus_static)
+
+# Or shared library (if available)
+target_link_libraries(your_target PRIVATE taurus::taurus_shared)
+
+# Or use the alias (points to the appropriate library)
+target_link_libraries(your_target PRIVATE taurus::taurus)
+----
+
+=== Using CMake FetchContent
+
+Taurus can be included directly in your CMake project without installation:
+
+[source,cmake]
+----
+include(FetchContent)
+FetchContent_Declare(
+    taurus
+    GIT_REPOSITORY https://github.com/lutaml/taurus.git
+    GIT_TAG v0.1.0  # Pin to specific release
+)
+FetchContent_MakeAvailable(taurus)
+
+# Static linking (recommended for smaller binaries)
+target_link_libraries(your_target PRIVATE taurus::static)
+
+# Or shared linking
+target_link_libraries(your_target PRIVATE taurus::shared)
+
+# Or use the default alias
+target_link_libraries(your_target PRIVATE taurus::taurus)
+----
+
+To disable optional dependencies:
+
+[source,cmake]
+----
+FetchContent_Declare(
+    taurus
+    GIT_REPOSITORY https://github.com/lutaml/taurus.git
+    GIT_TAG v0.1.0
+)
+set(TAURUS_ENABLE_UTF8PROC OFF CACHE BOOL "" FORCE)
+set(TAURUS_ENABLE_ICONV OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(taurus)
+----
+
+=== Using find_package()
+
+If Taurus is installed on your system (via `cmake --install` or package manager):
+
+[source,cmake]
+----
+# Basic usage
+find_package(taurus REQUIRED)
+target_link_libraries(your_target PRIVATE taurus::taurus)
+
+# Static linking (explicit)
+find_package(taurus REQUIRED)
+target_link_libraries(your_target PRIVATE taurus::taurus_static)
+
+# Shared linking (explicit, if available)
+find_package(taurus REQUIRED)
+target_link_libraries(your_target PRIVATE taurus::taurus_shared)
+----
+
+=== Using pkg-config
+
+[source,bash]
+----
+# Compile
+pkg-config --cflags taurus
+
+# Link
+pkg-config --libs taurus
+----
 
 == Building
 

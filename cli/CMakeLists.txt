@@ -11,6 +11,7 @@ add_executable(taurus-cli
     commands/parse.c
     commands/xpath.c
     commands/format.c
+    commands/c14n.c
 )
 
 # Link to libtaurus

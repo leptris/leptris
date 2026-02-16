@@ -9,6 +9,10 @@
 #define LIBTAURUS_H
 
 #include <stddef.h>
+#include "taurus/types.h"
+#include "taurus/error.h"
+#include "taurus/allocator.h"
+#include "taurus/observer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,42 +34,10 @@ extern "C" {
 #endif
 
 /* ============================================================================
- * Opaque Types - Hide implementation details
+ * Additional Opaque Types - Not in types.h
  * ============================================================================ */
 
 typedef struct taurus_node*            TaurusNodeRef;
-typedef struct taurus_document*        TaurusDocument;
-typedef struct taurus_element*         TaurusElement;
-typedef struct taurus_attribute*       TaurusAttribute;
-/* In compact mode, TaurusNamespace is just the namespace URI string (inline storage) */
-typedef const char*                    TaurusNamespace;
-typedef struct taurus_xpath_result*    TaurusXPathResult;
-
-/* ============================================================================
- * Status Codes
- * ============================================================================ */
-
-typedef enum {
-    TAURUS_OK = 0,
-    TAURUS_ERROR_MEMORY = -1,      /* Memory allocation failed */
-    TAURUS_ERROR_PARSE = -2,       /* XML parsing error */
-    TAURUS_ERROR_XPATH = -3,       /* XPath evaluation error */
-    TAURUS_ERROR_NULL_ARG = -4,    /* NULL argument passed */
-    TAURUS_ERROR_INVALID_ARG = -5, /* Invalid argument */
-    TAURUS_ERROR_NOT_FOUND = -6,   /* Resource not found */
-    TAURUS_ERROR_IO = -7           /* I/O error (file not found, etc.) */
-} TaurusStatus;
-
-/* ============================================================================
- * XPath Result Types
- * ============================================================================ */
-
-typedef enum {
-    TAURUS_XPATH_NODESET,
-    TAURUS_XPATH_BOOLEAN,
-    TAURUS_XPATH_NUMBER,
-    TAURUS_XPATH_STRING
-} TaurusXPathResultType;
 
 /* ============================================================================
  * Node Operations
@@ -335,7 +307,30 @@ TAURUS_API TaurusElement taurus_document_root(TaurusDocument doc);
 TAURUS_API int taurus_document_finalize_strings(TaurusDocument doc);
 
 /**
- * Set strict parsing mode
+ * Set strict parsing mode for a specific document
+ *
+ * Controls whether operations on this document should be strict or lenient.
+ * This is the per-document version of taurus_set_strict_mode() for thread safety.
+ *
+ * @param doc    Document to modify (can be NULL)
+ * @param strict 1 for strict mode, 0 for lenient mode
+ *
+ * Thread safety: Thread-safe. Each document has its own strict mode setting.
+ */
+TAURUS_API void taurus_document_set_strict(TaurusDocument doc, int strict);
+
+/**
+ * Get strict parsing mode for a specific document
+ *
+ * @param doc Document to query (can be NULL)
+ * @return 1 if strict mode, 0 if lenient mode or document is NULL
+ *
+ * Thread safety: Thread-safe. Each document has its own strict mode setting.
+ */
+TAURUS_API int taurus_document_get_strict(TaurusDocument doc);
+
+/**
+ * Set strict parsing mode (global default)
  *
  * Controls whether the parser should be strict or lenient when parsing XML.
  * In strict mode, the parser will reject malformed XML and return errors.
@@ -345,6 +340,7 @@ TAURUS_API int taurus_document_finalize_strings(TaurusDocument doc);
  *
  * Thread safety: Not thread-safe. Affects all subsequent parsing operations.
  * Note: This is a global setting. Use with caution in multi-threaded environments.
+ * Deprecated: Use taurus_document_set_strict() for per-document thread-safe settings.
  */
 TAURUS_API void taurus_set_strict_mode(int strict);
 
@@ -987,14 +983,7 @@ TAURUS_API TaurusElement taurus_element_insert_copy_after(TaurusElement sibling,
  * Serialization Operations
  * ============================================================================ */
 
-/**
- * Options for XML serialization
- */
-typedef struct {
-    int indent;              /* 0 = compact, >0 = pretty-print with N spaces */
-    int xml_declaration;     /* 1 = include <?xml?>, 0 = omit */
-    const char* encoding;    /* "UTF-8" or NULL for default */
-} TaurusSerializeOptions;
+/* TaurusSerializeOptions is defined in taurus/types.h */
 
 /**
  * Serialize document to XML string
@@ -1055,13 +1044,7 @@ TAURUS_API TaurusStatus taurus_document_save_file(TaurusDocument doc,
  * Canonical XML (C14N) Operations
  * ============================================================================ */
 
-/**
- * C14N (Canonical XML) version flags
- */
-typedef enum {
-    TAURUS_C14N_1_0 = 0,      /* Canonical XML 1.0 */
-    TAURUS_C14N_1_1 = 1       /* Canonical XML 1.1 */
-} TaurusC14NVersion;
+/* TaurusC14NVersion is defined in taurus/types.h */
 
 /**
  * Canonicalize document to C14N format
@@ -1245,21 +1228,7 @@ TAURUS_API void taurus_xpath_result_free(TaurusXPathResult result);
  * XPath Variables (XPath 1.0)
  * ============================================================================ */
 
-/**
- * XPath variable value types
- */
-typedef enum {
-    TAURUS_XPATH_VAR_TYPE_NONE = 0,      /* Invalid type */
-    TAURUS_XPATH_VAR_TYPE_BOOLEAN,       /* Boolean value */
-    TAURUS_XPATH_VAR_TYPE_NUMBER,        /* Floating-point number */
-    TAURUS_XPATH_VAR_TYPE_STRING,        /* String value */
-    TAURUS_XPATH_VAR_TYPE_NODE_SET       /* Node set */
-} TaurusXPathVariableType;
-
-/**
- * Opaque variable set type
- */
-typedef struct taurus_xpath_variable_set* TaurusXPathVariableSet;
+/* TaurusXPathVariableType and TaurusXPathVariableSet are defined in taurus/types.h */
 
 /**
  * Create a new variable set
@@ -1363,18 +1332,10 @@ TAURUS_API void taurus_explicit_cleanup(void);
  * Memory Allocation Hooks (for testing and custom allocators)
  * ============================================================================ */
 
-/**
- * Function pointer type for memory allocation (compatible with malloc)
- * @param size Number of bytes to allocate
- * @return Pointer to allocated memory or NULL on failure
+/* Note: taurus_allocation_function and taurus_deallocation_function are
+ * defined in taurus/types.h. The newer taurus/allocator.h provides a more
+ * flexible vtable-based allocator interface.
  */
-typedef void* (*taurus_allocation_function)(size_t size);
-
-/**
- * Function pointer type for memory deallocation (compatible with free)
- * @param ptr Pointer to memory to deallocate
- */
-typedef void (*taurus_deallocation_function)(void* ptr);
 
 /**
  * Set custom memory management functions for all allocations
@@ -1511,6 +1472,69 @@ TAURUS_API const char* taurus_xinclude_get_encoding(TaurusElement include_elem);
  * @return Version string (e.g., "0.2.0")
  */
 TAURUS_API const char* taurus_version(void);
+
+/* ============================================================================
+ * Simplified Quick-Start API
+ *
+ * Convenience functions for common use cases. These provide a simpler interface
+ * for basic XML operations while still returning dynamically allocated strings
+ * that the caller is responsible for freeing.
+ * ============================================================================ */
+
+/**
+ * Parse XML string into document (simplified API)
+ *
+ * Wrapper around taurus_parse_string() with automatic encoding detection.
+ * Caller owns the returned document and must call taurus_document_free() when done.
+ *
+ * @param xml XML string to parse
+ * @param length Length of XML string (or 0 for auto-detection)
+ * @return Parsed document, or NULL on error
+ */
+TAURUS_API TaurusDocument taurus_parse(const char* xml, size_t length);
+
+/**
+ * Get root element of document (simplified API)
+ *
+ * @param doc Document
+ * @return Root element, or NULL if doc is NULL or empty
+ */
+TAURUS_API TaurusElement taurus_root(TaurusDocument doc);
+
+/**
+ * Find first child element by name (simplified API)
+ *
+ * @param parent Parent element
+ * @param name Child element name to find
+ * @return First matching child element, or NULL if not found
+ */
+TAURUS_API TaurusElement taurus_child(TaurusElement parent, const char* name);
+
+/**
+ * Get element attribute value (simplified API)
+ *
+ * @param elem Element
+ * @param name Attribute name
+ * @return Attribute value, or NULL if not found
+ */
+TAURUS_API const char* taurus_attr(TaurusElement elem, const char* name);
+
+/**
+ * Get element text content (simplified API)
+ *
+ * @param elem Element
+ * @return Text content, or NULL if elem is NULL
+ */
+TAURUS_API const char* taurus_text(TaurusElement elem);
+
+/**
+ * Free document (simplified API)
+ *
+ * Wrapper around taurus_document_free() for cleaner code.
+ *
+ * @param doc Document to free (can be NULL)
+ */
+TAURUS_API void taurus_free(TaurusDocument doc);
 
 #ifdef __cplusplus
 }

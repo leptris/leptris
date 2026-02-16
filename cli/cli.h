@@ -43,7 +43,8 @@ typedef enum {
     CLI_ERROR_IO = 3,       /**< I/O error (file not found, etc.) */
     CLI_ERROR_ARGS = 4,     /**< Invalid arguments */
     CLI_ERROR_MEMORY = 5,   /**< Memory allocation failed */
-    CLI_ERROR_INTERNAL = 6  /**< Internal error (bug) */
+    CLI_ERROR_INTERNAL = 6, /**< Internal error (bug) */
+    CLI_HELP = 100          /**< Internal: help requested (translates to success) */
 } cli_result_t;
 
 /* ------------------------------------------------------------------------- */
@@ -194,15 +195,23 @@ extern cli_command_t* cli_command_xpath(void);
 
 /**
  * Get the 'format' command
- * 
+ *
  * Command: taurus format [OPTIONS] FILE
  * Purpose: Pretty-print XML
  */
 extern cli_command_t* cli_command_format(void);
 
 /**
+ * Get the 'c14n' command
+ *
+ * Command: taurus c14n [OPTIONS] FILE
+ * Purpose: Canonicalize XML (C14N) for digital signatures
+ */
+extern cli_command_t* cli_command_c14n(void);
+
+/**
  * Get the 'version' command
- * 
+ *
  * Command: taurus version
  * Purpose: Show version information
  */

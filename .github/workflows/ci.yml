@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Release
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+
+jobs:
+  # ==========================================================================
+  # Build Matrix Job
+  # ==========================================================================
+  build:
+    name: Build (${{ matrix.config.os }}-${{ matrix.config.compiler }}-${{ matrix.config.utf8proc }}-${{ matrix.config.iconv }})
+    runs-on: ${{ matrix.config.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-latest, compiler: gcc, utf8proc: OFF, iconv: OFF }
+          - { os: ubuntu-latest, compiler: gcc, utf8proc: ON, iconv: ON }
+          - { os: ubuntu-latest, compiler: clang, utf8proc: OFF, iconv: OFF }
+          - { os: macos-latest, compiler: clang, utf8proc: OFF, iconv: OFF }
+          - { os: windows-latest, compiler: msvc, utf8proc: OFF, iconv: OFF }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup CMake
+        if: matrix.config.os != 'windows-latest'
+        run: cmake --version
+
+      - name: Setup MSVC
+        if: matrix.config.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DTAURUS_ENABLE_UTF8PROC=${{ matrix.config.utf8proc }} \
+            -DTAURUS_ENABLE_ICONV=${{ matrix.config.iconv }} \
+            -DTAURUS_BUILD_CLI=ON \
+            -DTAURUS_BUILD_TESTS=ON \
+            -DTAURUS_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.config.os }}-${{ matrix.config.compiler }}-${{ matrix.config.utf8proc }}-${{ matrix.config.iconv }}
+          path: build/
+          retention-days: 1
+
+  # ==========================================================================
+  # Test Job
+  # ==========================================================================
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-ubuntu-latest-gcc-OFF-OFF
+          path: build/
+
+      - name: Run tests
+        shell: bash
+        run: |
+          cd build && ctest --output-on-failure --timeout 300
+
+  # ==========================================================================
+  # Sanitizer Jobs
+  # ==========================================================================
+  sanitizers:
+    name: Sanitizers (${{ matrix.sanitizer }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, undefined, thread]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure with sanitizer
+        shell: bash
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer -g" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer -g" \
+            -DTAURUS_ENABLE_UTF8PROC=OFF \
+            -DTAURUS_ENABLE_ICONV=OFF \
+            -DTAURUS_BUILD_CLI=OFF \
+            -DTAURUS_BUILD_TESTS=ON \
+            -DTAURUS_BUILD_BENCHMARKS=OFF
+
+      - name: Build with sanitizer
+        shell: bash
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests with sanitizer
+        shell: bash
+        run: |
+          cd build && ctest --output-on-failure --timeout 300
+
+  # ==========================================================================
+  # Lint Job
+  # ==========================================================================
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check formatting (clang-format)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if command -v clang-format &> /dev/null; then
+            find src/ include/ -name '*.c' -o -name '*.h' | xargs clang-format --dry-run --Werror 2>&1 | head -50
+          else
+            echo "clang-format not found, skipping"
+          fi
+
+      - name: Check CMake formatting (cmake-format)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if command -v cmake-format &> /dev/null; then
+            cmake-format --check CMakeLists.txt 2>&1 || true
+          else
+            echo "cmake-format not found, skipping"
+          fi
+
+  # ==========================================================================
+  # Documentation Check
+  # ==========================================================================
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check README.adoc syntax
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if command -v asciidoctor &> /dev/null; then
+            asciidoctor --dry-run README.adoc 2>&1 || true
+          else
+            echo "asciidoctor not found, skipping"
+          fi

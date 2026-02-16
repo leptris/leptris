@@ -22,6 +22,7 @@ static void print_usage(void) {
     printf("  parse      Parse and validate XML\n");
     printf("  xpath      Execute XPath queries\n");
     printf("  format     Pretty-print XML\n");
+    printf("  c14n       Canonicalize XML (for digital signatures)\n");
     printf("  version    Show version information\n");
     printf("\n");
     printf("Global Options:\n");
@@ -94,6 +95,7 @@ int main(int argc, char** argv) {
     cli_registry_register(registry, cli_command_parse());
     cli_registry_register(registry, cli_command_xpath());
     cli_registry_register(registry, cli_command_format());
+    cli_registry_register(registry, cli_command_c14n());
 
     /* Check if command specified */
     if (argc < 2) {

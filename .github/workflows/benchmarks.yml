@@ -1,0 +1,180 @@
+name: Benchmarks
+
+on:
+  schedule:
+    # Run weekly benchmark to track performance over time
+    - cron: '0 0 * * 0'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**/*.c'
+      - 'src/**/*.h'
+      - 'benchmarks/**'
+      - 'CMakeLists.txt'
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # ==========================================================================
+  # Benchmark Build Job
+  # ==========================================================================
+  build-benchmarks:
+    name: Build Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup vcpkg (for optional dependencies)
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: '3.28.1'
+
+      - name: Install vcpkg dependencies
+        run: |
+          # Install optional dependencies via vcpkg if needed
+          # For now, build without optional dependencies
+          echo "Building without optional UTF-8proc and Iconv"
+
+      - name: Configure with benchmarks
+        shell: bash
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DTAURUS_ENABLE_UTF8PROC=OFF \
+            -DTAURUS_ENABLE_ICONV=OFF \
+            -DTAURUS_BUILD_CLI=ON \
+            -DTAURUS_BUILD_TESTS=ON \
+            -DTAURUS_BUILD_BENCHMARKS=ON
+
+      - name: Build benchmarks
+        shell: bash
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks
+          path: build/benchmarks/
+          retention-days: 7
+
+  # ==========================================================================
+  # DOM Performance Benchmarks
+  # ==========================================================================
+  dom-benchmarks:
+    name: DOM Benchmarks
+    runs-on: ubuntu-latest
+    needs: build-benchmarks
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download benchmark artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmarks
+          path: build/
+
+           - name: Run DOM benchmarks
+        shell: bash
+        run: |
+          chmod +x build/benchmarks/dom_benchmark_v2
+          echo "=== DOM Benchmark (small.xml) ==="
+          ./build/benchmarks/dom_benchmark_v2 fixtures/small.xml 2>&1 || echo "Benchmark completed with status: $?"
+
+          echo ""
+          echo "=== DOM Benchmark (medium.xml) ==="
+          ./build/benchmarks/dom_benchmark_v2 fixtures/medium.xml 2>&1 || echo "Benchmark completed with status: $?"
+
+      - name: Parse benchmark results
+        id: parse-results
+        shell: bash
+        run: |
+          # Create a JSON summary of benchmark results
+          cat > benchmark_results.json << 'EOF'
+          {
+            "benchmark_type": "dom",
+            "runner": "github-actions",
+            "results_summary": "See detailed output above"
+          }
+          EOF
+          cat benchmark_results.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-dom
+          path: benchmark_results.json
+          retention-days: 30
+
+  # ==========================================================================
+  # XPath Performance Benchmarks
+  # ==========================================================================
+  xpath-benchmarks:
+    name: XPath Benchmarks
+    runs-on: ubuntu-latest
+    needs: build-benchmarks
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download benchmark artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmarks
+          path: build/
+
+      - name: Run XPath benchmarks
+        shell: bash
+        run: |
+          if [ -f "build/benchmarks/xpath/xpath_benchmark" ]; then
+            chmod +x build/benchmarks/xpath/xpath_benchmark
+            echo "=== XPath Benchmark ==="
+            ./build/benchmarks/xpath/xpath_benchmark 2>&1 || echo "Benchmark completed with status: $?"
+          else
+            echo "XPath benchmark not found, skipping"
+          fi
+
+      - name: Upload XPath results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-xpath
+          path: .
+          retention-days: 30
+
+  # ==========================================================================
+  # Comprehensive Benchmark Report
+  # ==========================================================================
+  benchmark-report:
+    name: Generate Report
+    runs-on: ubuntu-latest
+    needs: [dom-benchmarks, xpath-benchmarks]
+    if: always()
+
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          path: results/
+          pattern: benchmark-results-*
+          merge-multiple: true
+
+      - name: Generate summary report
+        shell: bash
+        run: |
+          echo "=== Benchmark Summary ==="
+          echo ""
+          echo "DOM Performance Results:"
+          cat results/benchmark_results.json 2>/dev/null || echo "No DOM results available"
+          echo ""
+          echo "Benchmarks completed at: $(date)"

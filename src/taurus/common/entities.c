@@ -13,9 +13,7 @@
 /**
  * Decode XML entities and character references in a string.
  *
- * Handles:
- * - Predefined entities: &lt; &gt; &amp; &apos; &quot;
- * - Numeric character references: &#65; &#x42;
+ * This is the lenient version - calls the options version with strict_mode=0.
  *
  * @param input  Input string with entities
  * @param output Output buffer (must be large enough)
@@ -23,6 +21,27 @@
  * @return Number of characters written, or 0 on error
  */
 size_t decode_entity(const char* input, char* output, size_t outlen) {
+    return decode_entity_with_options(input, output, outlen, 0);
+}
+
+/**
+ * Decode XML entities and character references in a string with strict mode.
+ *
+ * Handles:
+ * - Predefined entities: &lt; &gt; &amp; &apos; &quot;
+ * - Numeric character references: &#65; &#x42;
+ *
+ * In strict mode:
+ * - Unknown entities cause an error (not copied literally)
+ * - Missing semicolons on character references cause an error
+ *
+ * @param input       Input string with entities
+ * @param output      Output buffer (must be large enough)
+ * @param outlen      Size of output buffer
+ * @param strict_mode 1 for strict XML 1.0, 0 for lenient (pugixml compat)
+ * @return Number of characters written, or 0 on error
+ */
+size_t decode_entity_with_options(const char* input, char* output, size_t outlen, int strict_mode) {
     if (!input || !output || outlen == 0) return 0;
 
     size_t in_pos = 0;
@@ -93,12 +112,11 @@ size_t decode_entity(const char* input, char* output, size_t outlen) {
                     break;
                 }
 
-                /* XML requires ';' at the end of character references
-                 * In lenient mode, semicolon is optional (pugixml compatibility) */
-                int strict_mode = taurus_get_strict_mode();
+                /* XML requires ';' at the end of character references */
                 if (input[in_pos] != ';') {
+                    /* STRICT MODE: Missing semicolon is an error */
                     if (strict_mode) {
-                        has_error = 1; /* Missing semicolon - error in strict mode */
+                        has_error = 1;
                         break;
                     }
                     /* Lenient mode: accept incomplete character reference */
@@ -130,16 +148,14 @@ size_t decode_entity(const char* input, char* output, size_t outlen) {
                 }
             } else {
                 /* Unknown entity (e.g., &copy;, &nbsp;, etc.)
-                 * In strict mode: XML well-formedness ERROR
-                 * In lenient mode: Copy literal text (pugixml compatibility) */
-                int strict_mode = taurus_get_strict_mode();
+                 * STRICT MODE: Unknown entities are errors
+                 * Lenient mode: Copy literal text (pugixml compatibility) */
                 if (strict_mode) {
-                    /* Strict mode: Only predefined entities and character references allowed */
-                    has_error = 1;
+                    has_error = 1; /* Unknown entity in strict mode */
                     break;
                 }
+
                 /* Lenient mode: Copy the entity literally to output */
-                /* Copy the '&' and continue reading until we find ';' or end */
                 if (out_pos < outlen - 1) output[out_pos++] = '&';
                 /* NOTE: in_pos already points past '&' (incremented at line 35) */
 
@@ -176,6 +192,17 @@ size_t decode_entity(const char* input, char* output, size_t outlen) {
  * @return Newly allocated string with entities decoded, or NULL on error
  */
 char* taurus_decode_entities(const char* input) {
+    return taurus_decode_entities_with_options(input, 0);
+}
+
+/**
+ * Decode entities in a string with strict mode option.
+ *
+ * @param input       Input string with entities
+ * @param strict_mode 1 for strict XML 1.0, 0 for lenient
+ * @return Newly allocated string with entities decoded, or NULL on error
+ */
+char* taurus_decode_entities_with_options(const char* input, int strict_mode) {
     if (!input) return NULL;
 
     /* Calculate worst case output size (same as input) */
@@ -183,7 +210,7 @@ char* taurus_decode_entities(const char* input) {
     char* output = (char*)malloc(input_len + 1);
     if (!output) return NULL;
 
-    size_t result = decode_entity(input, output, input_len + 1);
+    size_t result = decode_entity_with_options(input, output, input_len + 1, strict_mode);
     if (result == 0) {
         /* Entity decoding failed (invalid entity) */
         free(output);
@@ -200,6 +227,20 @@ char* taurus_decode_entities(const char* input) {
  * @return Newly allocated string with entities decoded, or NULL on error
  */
 char* taurus_decode_entities_view(const struct taurus_string_view* sv, TaurusMemoryPool* pool) {
+    return taurus_decode_entities_view_with_options(sv, pool, 0);
+}
+
+/**
+ * Decode entities in a string view with strict mode option.
+ *
+ * @param sv          StringView with entities
+ * @param pool        Memory pool for allocation (can be NULL for malloc)
+ * @param strict_mode 1 for strict XML 1.0, 0 for lenient
+ * @return Newly allocated string with entities decoded, or NULL on error
+ */
+char* taurus_decode_entities_view_with_options(const struct taurus_string_view* sv,
+                                                TaurusMemoryPool* pool,
+                                                int strict_mode) {
     if (!sv || taurus_sv_is_empty(sv)) {
         if (pool) {
             char* empty = (char*)taurus_pool_alloc(pool, 1);
@@ -231,7 +272,7 @@ char* taurus_decode_entities_view(const struct taurus_string_view* sv, TaurusMem
     }
 
     /* Decode the NULL-terminated temporary buffer */
-    size_t result = decode_entity(temp_buf, output, sv->length + 1);
+    size_t result = decode_entity_with_options(temp_buf, output, sv->length + 1, strict_mode);
     free(temp_buf);
 
     if (result == 0) {
@@ -260,6 +301,20 @@ char* taurus_decode_entities_view(const struct taurus_string_view* sv, TaurusMem
  *         Caller must free() the returned string.
  */
 char* taurus_decode_entities_with_dtd(const char* input, const TaurusDTD* dtd) {
+    return taurus_decode_entities_with_dtd_options(input, dtd, 0);
+}
+
+/**
+ * Decode XML entities with DTD support and strict mode option.
+ *
+ * @param input       Input string with entities
+ * @param dtd         DTD container for user-defined entities (can be NULL)
+ * @param strict_mode 1 for strict XML 1.0, 0 for lenient
+ * @return Newly allocated string with entities decoded, or NULL on error.
+ */
+char* taurus_decode_entities_with_dtd_options(const char* input,
+                                               const TaurusDTD* dtd,
+                                               int strict_mode) {
     if (!input) return NULL;
 
     /* If DTD is available, use it for full entity expansion */
@@ -270,7 +325,7 @@ char* taurus_decode_entities_with_dtd(const char* input, const TaurusDTD* dtd) {
     }
 
     /* Otherwise, fall back to predefined entities only */
-    return taurus_decode_entities(input);
+    return taurus_decode_entities_with_options(input, strict_mode);
 }
 
 /**
@@ -285,6 +340,22 @@ char* taurus_decode_entities_with_dtd(const char* input, const TaurusDTD* dtd) {
 char* taurus_decode_entities_view_with_dtd(const struct taurus_string_view* sv,
                                           const TaurusDTD* dtd,
                                           TaurusMemoryPool* pool) {
+    return taurus_decode_entities_view_with_dtd_options(sv, dtd, pool, 0);
+}
+
+/**
+ * Decode entities in a string view with DTD support and strict mode.
+ *
+ * @param sv          StringView with entities
+ * @param dtd         DTD container for user-defined entities (can be NULL)
+ * @param pool        Memory pool for allocation (can be NULL for malloc)
+ * @param strict_mode 1 for strict XML 1.0, 0 for lenient
+ * @return Newly allocated string with entities decoded, or NULL on error.
+ */
+char* taurus_decode_entities_view_with_dtd_options(const struct taurus_string_view* sv,
+                                                    const TaurusDTD* dtd,
+                                                    TaurusMemoryPool* pool,
+                                                    int strict_mode) {
     if (!sv || taurus_sv_is_empty(sv)) {
         if (pool) {
             char* empty = (char*)taurus_pool_alloc(pool, 1);
@@ -325,5 +396,5 @@ char* taurus_decode_entities_view_with_dtd(const struct taurus_string_view* sv,
     }
 
     /* Otherwise, fall back to predefined entities only */
-    return taurus_decode_entities_view(sv, pool);
+    return taurus_decode_entities_view_with_options(sv, pool, strict_mode);
 }

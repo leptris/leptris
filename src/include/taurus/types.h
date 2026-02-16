@@ -9,6 +9,7 @@
 
 #ifndef TAURUS_TYPES_H
 #define TAURUS_TYPES_H
+#pragma once
 
 #include <stddef.h>
 
@@ -39,7 +40,8 @@ typedef enum {
     TAURUS_ERROR_NULL_ARG = -4,    /* NULL argument passed */
     TAURUS_ERROR_INVALID_ARG = -5, /* Invalid argument */
     TAURUS_ERROR_NOT_FOUND = -6,   /* Resource not found */
-    TAURUS_ERROR_IO = -7           /* I/O error (file not found, etc.) */
+    TAURUS_ERROR_IO = -7,          /* I/O error (file not found, etc.) */
+    TAURUS_ERROR_INVALID_STATE = -8 /* Invalid state for operation */
 } TaurusStatus;
 
 /* ============================================================================

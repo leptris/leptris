@@ -69,13 +69,14 @@ cli_result_t cli_global_options_parse(
     /* Build new argv without global options */
     char** new_argv = malloc(sizeof(char*) * (*argc));
     if (!new_argv) return CLI_ERROR_MEMORY;
-    
+
     int new_argc = 0;
     new_argv[new_argc++] = (*argv)[0]; /* Keep program name */
-    
+    bool seen_command = false;  /* Track if we've seen a potential command */
+
     while (option_parser_has_more(&parser)) {
         const char* arg = option_parser_current(&parser);
-        
+
         /* Note: --verbose and --quiet are passed through to commands, not consumed here */
         if (option_parser_match(&parser, "-v", "--verbose")) {
             options->verbose++;
@@ -102,16 +103,35 @@ cli_result_t cli_global_options_parse(
             option_parser_advance(&parser);
         }
         else if (option_parser_match(&parser, "-h", "--help")) {
-            options->help = true;
             option_parser_advance(&parser);
+            /* Pass --help through to commands if we've already seen a potential command.
+             * This allows "taurus c14n --help" to show c14n help.
+             */
+            if (seen_command) {
+                new_argv[new_argc++] = (char*)arg;
+            } else {
+                options->help = true;
+            }
         }
         else if (option_parser_match(&parser, NULL, "--version")) {
-            options->version = true;
+            /* Check if next arg looks like a version value (for commands like c14n)
+             * Global --version has no argument, command --version has 1.0 or 1.1
+             */
             option_parser_advance(&parser);
+            const char* next = option_parser_current(&parser);
+            if (next && (strcmp(next, "1.0") == 0 || strcmp(next, "1.1") == 0)) {
+                /* This is a command-specific --version, pass it through */
+                new_argv[new_argc++] = (char*)"--version";
+            } else {
+                /* Global --version (no argument) */
+                options->version = true;
+            }
         }
         else {
             /* Not a global option - keep in argv */
             new_argv[new_argc++] = (char*)arg;
+            /* Track that we've seen a non-option arg (potential command) */
+            seen_command = true;
             option_parser_advance(&parser);
         }
     }

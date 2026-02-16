@@ -26,6 +26,16 @@ TaurusStringView taurus_sv_empty(void);
 int taurus_sv_is_empty(const TaurusStringView* sv);
 size_t taurus_sv_length(const TaurusStringView* sv);
 
+/* OPTIMIZATION (Phase C): Check if StringView is already null-terminated
+ * After in-place null termination during parsing, StringView.data points
+ * to a valid C string. This function checks if we can use it directly
+ * without copying.
+ *
+ * Returns 1 if sv->data[sv->length] == '\0', 0 otherwise.
+ * Returns 0 for empty or NULL StringViews.
+ */
+int taurus_sv_is_null_terminated(const TaurusStringView* sv);
+
 /* Comparison */
 int taurus_sv_equals(const TaurusStringView* a, const TaurusStringView* b);
 int taurus_sv_equals_cstr(const TaurusStringView* sv, const char* str);

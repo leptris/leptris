@@ -8,6 +8,7 @@
 #include "evaluator.h"
 #include "evaluator_internal.h"
 #include "functions.h"
+#include "functions_internal.h"
 #include "xpath_variables.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
 #include "lexer.h"
@@ -524,7 +525,15 @@ static struct taurus_xpath_result* evaluate_function_call(XPathContext* ctx,
         return NULL;
     }
 
-    /* Get function registry */
+    /* First, check custom function registry */
+    XPathFunctionHandler custom_handler = xpath_custom_function_lookup(func_name);
+    if (custom_handler) {
+        /* Custom functions accept variable args, so skip validation */
+        size_t arg_count = ast->child_count;
+        return custom_handler(ctx, ast->children, arg_count);
+    }
+
+    /* Get function registry for built-in functions */
     if (!ctx->function_registry) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                 "Function registry not initialized");
@@ -533,7 +542,7 @@ static struct taurus_xpath_result* evaluate_function_call(XPathContext* ctx,
 
     XPathFunctionRegistry* registry = (XPathFunctionRegistry*)ctx->function_registry;
 
-    /* Look up function */
+    /* Look up built-in function */
     XPathFunctionDef* func_def = xpath_function_registry_get(registry, func_name);
     if (!func_def) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),

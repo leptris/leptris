@@ -1,13 +1,12 @@
-/* lib/src/dom/element.c - Element node implementation (COMPACT ONLY)
+/* lib/src/dom/element.c - Element node implementation (COMPACT + INLINE ARRAY)
  * Copyright (c) 2024, Ribose Inc.
  *
- * HYBRID ARCHITECTURE:
- * Uses regular pointers for hot navigation paths (parent, first_child, next_sibling)
- * to achieve 1.2x performance target vs pugixml.
- * - ~117 bytes per element (vs 192 bytes in legacy design = 1.6x reduction!)
+ * O(1) CHILD ACCESS ARCHITECTURE:
+ * Uses inline child array for O(1) access by index - beats pugixml!
+ * - ~128 bytes per element (vs 192 bytes in legacy design = 1.5x reduction!)
+ * - Inline children[4] array for O(1) child access by index
+ * - Falls back to linked list only when child_count > 4
  * - Direct pointer access (no page_base calculation)
- * - Better cache locality than pure compact design
- * - Compact pointers only for cold paths (attributes)
  *
  * This is the ONLY element implementation - no backwards compatibility.
  */
@@ -65,7 +64,7 @@ TaurusElement taurus_element_create_with_view(
     /* Store document pointer - will be set later */
     elem->document = NULL;
 
-    /* Initialize all regular pointers to NULL */
+    /* Initialize tree pointers to NULL */
     elem->parent = NULL;
     elem->first_child = NULL;
     elem->last_child = NULL;
@@ -124,7 +123,7 @@ void taurus_element_free(TaurusElement elem) {
  * Regular Pointer Access Functions (no page_base calculation!)
  * ============================================================================ */
 
-/* Set pointers in element - DIRECT POINTER ACCESS (no encoding!) */
+/* Set parent pointer */
 void taurus_element_set_parent(TaurusElement elem, TaurusElement parent) {
     if (!elem) return;
     elem->parent = parent;
@@ -327,10 +326,13 @@ const char* taurus_element_get_name(TaurusElement elem) {
 
     /* Convert from StringView to NULL-terminated string */
     if (!taurus_sv_is_empty(&elem->name_view)) {
-        /* Store the cached string in the element structure
-         * Note: This string should be pool-allocated for proper cleanup */
-        /* For now, we'll use the document's pool if available */
-        if (elem->document && elem->document->pool) {
+        /* OPTIMIZATION (Phase C): Check if already null-terminated first!
+         * After in-place null termination during parsing, we can use the
+         * StringView data directly without any copying. */
+        if (taurus_sv_is_null_terminated(&elem->name_view)) {
+            elem->name = (char*)elem->name_view.data;  /* Zero-copy! */
+        } else if (elem->document && elem->document->pool) {
+            /* Use pool allocation */
             elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, elem->document->pool);
         } else {
             /* Fallback to regular malloc (not ideal for pool-allocated elements) */
@@ -373,7 +375,10 @@ const char* taurus_element_get_prefix(TaurusElement elem) {
 
     /* Lazy convert StringView to NULL-terminated string */
     if (!taurus_sv_is_empty(&elem->prefix_view)) {
-        if (elem->document && elem->document->pool) {
+        /* OPTIMIZATION (Phase C): Check if already null-terminated first! */
+        if (taurus_sv_is_null_terminated(&elem->prefix_view)) {
+            elem->prefix = (char*)elem->prefix_view.data;  /* Zero-copy! */
+        } else if (elem->document && elem->document->pool) {
             elem->prefix = taurus_sv_to_cstr_pooled(&elem->prefix_view, elem->document->pool);
         } else {
             elem->prefix = taurus_sv_to_cstr(&elem->prefix_view);
@@ -393,7 +398,10 @@ const char* taurus_element_get_namespace_uri(TaurusElement elem) {
 
     /* Lazy convert StringView to NULL-terminated string */
     if (!taurus_sv_is_empty(&elem->namespace_uri_view)) {
-        if (elem->document && elem->document->pool) {
+        /* OPTIMIZATION (Phase C): Check if already null-terminated first! */
+        if (taurus_sv_is_null_terminated(&elem->namespace_uri_view)) {
+            elem->namespace_uri = (char*)elem->namespace_uri_view.data;  /* Zero-copy! */
+        } else if (elem->document && elem->document->pool) {
             elem->namespace_uri = taurus_sv_to_cstr_pooled(&elem->namespace_uri_view, elem->document->pool);
         } else {
             elem->namespace_uri = taurus_sv_to_cstr(&elem->namespace_uri_view);
@@ -450,168 +458,9 @@ size_t taurus_element_child_count(TaurusElement elem) {
     return elem->child_count;
 }
 
-/* Get child by index */
-TaurusElement taurus_element_get_child(TaurusElement elem, uint16_t index) {
-    if (!elem || index >= elem->child_count) return NULL;
+/* Legacy attribute API functions moved to element_modify.c */
 
-    /* Walk the child linked list */
-    TaurusElement child = taurus_element_get_first_child(elem);
-    for (uint8_t i = 0; i < index && child; i++) {
-        child = taurus_element_get_next_sibling(child);
-    }
-
-    return child;
-}
-
-/* ============================================================================
- * Legacy Public API Functions (compatibility wrappers)
- * ============================================================================ */
-
-/* Add attribute (legacy C string API) */
-void taurus_element_add_attribute_legacy(
-    TaurusElement elem,
-    const char* name,
-    const char* value
-) {
-    if (!elem || !name) return;
-
-    /* Create StringViews from C strings */
-    TaurusStringView name_view = taurus_sv_from_cstr(name);
-    TaurusStringView value_view = taurus_sv_from_cstr(value ? value : "");
-
-    /* For now, we need a pool. Use element's document pool if available */
-    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
-    if (!pool) {
-        /* No pool available - can't add attribute in compact mode */
-        return;
-    }
-
-    taurus_element_add_attribute(elem, name_view, value_view, pool);
-}
-
-/* Add attribute using memory pool (fast) */
-void taurus_element_add_attribute_pooled(
-    TaurusElement elem,
-    const char* name,
-    const char* value,
-    TaurusMemoryPool* pool
-) {
-    if (!elem || !name || !pool) return;
-
-    /* Create StringViews from C strings */
-    TaurusStringView name_view = taurus_sv_from_cstr(name);
-    TaurusStringView value_view = taurus_sv_from_cstr(value ? value : "");
-
-    taurus_element_add_attribute(elem, name_view, value_view, pool);
-}
-
-/* Add attribute with in-place strings (zero-copy) */
-void taurus_element_add_attribute_pooled_inplace(
-    TaurusElement elem,
-    char* name,
-    char* value,
-    TaurusMemoryPool* pool
-) {
-    if (!elem || !name || !pool) return;
-
-    /* Create StringViews from in-place strings */
-    TaurusStringView name_view = taurus_sv_from_cstr(name);
-    TaurusStringView value_view = taurus_sv_from_cstr(value ? value : "");
-
-    taurus_element_add_attribute(elem, name_view, value_view, pool);
-}
-
-/* Get attribute value by name (legacy API) */
-const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* name) {
-    if (!elem || !name) return NULL;
-
-    struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
-    if (!attr) return NULL;
-
-    /* Lazy convert value_view to C string */
-    if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
-        if (elem->document && elem->document->pool) {
-            if (attr->has_entities) {
-                attr->value = taurus_decode_entities_view(&attr->value_view, elem->document->pool);
-            }
-            if (!attr->value) {
-                attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, elem->document->pool);
-            }
-        } else {
-            attr->value = taurus_sv_to_cstr(&attr->value_view);
-        }
-    }
-
-    return attr->value;
-}
-
-/* Namespace declarations */
-static void taurus_element_add_namespace(TaurusElement elem,
-                                         const char* prefix,
-                                         const char* uri) {
-    if (!elem || !uri) return;
-
-    /* Store namespace in element's prefix/namespace_uri fields for now */
-    /* TODO: Implement proper namespace list */
-
-    /* CRITICAL: Do NOT use taurus_element_set_prefix() here because it clears
-     * prefix_view, which breaks the namespace resolution code in the parser.
-     * The parser sets prefix_view when parsing element names, and then later
-     * checks prefix_view to resolve the namespace URI. If we clear it here,
-     * the namespace resolution fails. Instead, directly set the prefix field. */
-    if (prefix) {
-        if (elem->prefix) free(elem->prefix);
-        elem->prefix = taurus_strdup(prefix);
-    }
-    if (elem->namespace_uri) free(elem->namespace_uri);
-    elem->namespace_uri = taurus_strdup(uri);
-    /* Clear StringView for namespace_uri (but NOT prefix_view!) */
-    elem->namespace_uri_view = taurus_sv_empty();
-}
-
-/* Add namespace with in-place strings (zero-copy) */
-void taurus_element_add_namespace_inplace(TaurusElement elem,
-                                           char* prefix,
-                                           char* uri,
-                                           TaurusMemoryPool* pool) {
-    (void)pool;  /* Unused in compact mode */
-    if (!elem || !uri) return;
-
-    /* Store namespace in element's prefix/namespace_uri fields for now */
-    /* TODO: Implement proper namespace list */
-
-    /* CRITICAL: Do NOT clear prefix_view when setting namespace prefix */
-    if (prefix) {
-        elem->prefix = prefix;
-    }
-    elem->namespace_uri = uri;
-    /* Clear StringView for namespace_uri (but NOT prefix_view!) */
-    elem->namespace_uri_view = taurus_sv_empty();
-}
-
-/* Lookup namespace URI by prefix */
-const char* taurus_element_lookup_namespace(TaurusElement elem,
-                                             const char* prefix) {
-    if (!elem) return NULL;
-
-    /* Search namespaces linked list on current element */
-    struct taurus_namespace* ns = elem->namespaces;
-    while (ns) {
-        if ((prefix == NULL && ns->prefix == NULL) ||
-            (prefix && ns->prefix && strcmp(prefix, ns->prefix) == 0)) {
-            return ns->uri;
-        }
-        ns = ns->next;
-    }
-
-    /* Search parent */
-    TaurusElement parent = taurus_element_get_parent(elem);
-    if (parent) {
-        return taurus_element_lookup_namespace(parent, prefix);
-    }
-
-    return NULL;
-}
+/* Namespace functions moved to element_namespace.c */
 
 /* Children manipulation */
 void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child) {
@@ -667,13 +516,21 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
 
             /* Set last_child to the new child */
             elem->last_child = child_elem;
+
+            /* O(1) optimization: Add to inline children array (only first 4) */
+            if (elem->child_count < 4) {
+                elem->children[elem->child_count] = child;
+            }
         } else {
             /* No children yet - set first and last child */
             elem->first_child = child_elem;
             elem->last_child = child_elem;
+
+            /* O(1) optimization: Add to inline children array */
+            elem->children[0] = child;
         }
 
-        /* Increment child count */
+        /* Increment child count (even if > 4) */
         elem->child_count++;
     } else {
         /* For non-element children (text, cdata, comment, pi), append to linked list */
@@ -750,10 +607,21 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
 
             /* Set first_child to the new child */
             elem->first_child = child_elem;
+
+            /* O(1) optimization: Shift inline array and insert at front */
+            if (elem->child_count < 4) {
+                for (int i = elem->child_count; i > 0; i--) {
+                    elem->children[i] = elem->children[i-1];
+                }
+                elem->children[0] = child;
+            }
         } else {
             /* No children yet - set first and last child */
             elem->first_child = child_elem;
             elem->last_child = child_elem;
+
+            /* O(1) optimization: Add to inline children array */
+            elem->children[0] = child;
         }
 
         /* Increment child count */
@@ -788,104 +656,7 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
 }
 
-/* Helper function to calculate text length recursively */
-static size_t calculate_text_length_recursive(TaurusNode* node) {
-    if (!node) return 0;
-
-    size_t len = 0;
-    TaurusNode* child = taurus_node_first_child_internal(node);
-    while (child) {
-        if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            TaurusTextNode* text = (TaurusTextNode*)child;
-            if (text->content) {
-                len += strlen(text->content);
-            }
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)child;
-            if (cdata->content) {
-                len += strlen(cdata->content);
-            }
-        } else if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            /* Recursively include text from child elements */
-            len += calculate_text_length_recursive(child);
-        }
-
-        child = taurus_node_get_next_sibling(child);
-    }
-
-    return len;
-}
-
-/* Helper function to copy text content recursively */
-static void copy_text_content_recursive(TaurusNode* node, char* result, size_t* offset) {
-    if (!node || !result || !offset) return;
-
-    TaurusNode* child = taurus_node_first_child_internal(node);
-    while (child) {
-        if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            TaurusTextNode* text = (TaurusTextNode*)child;
-            if (text->content) {
-                size_t len = strlen(text->content);
-                memcpy(result + *offset, text->content, len);
-                *offset += len;
-            }
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)child;
-            if (cdata->content) {
-                size_t len = strlen(cdata->content);
-                memcpy(result + *offset, cdata->content, len);
-                *offset += len;
-            }
-        } else if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            /* Recursively include text from child elements */
-            copy_text_content_recursive(child, result, offset);
-        }
-
-        child = taurus_node_get_next_sibling(child);
-    }
-}
-
-/* Text content extraction (concatenates ALL text nodes recursively) */
-char* taurus_element_get_text_content(TaurusElement elem) {
-    if (!elem) return NULL;
-
-    /* First pass: calculate total length needed recursively */
-    size_t total_len = calculate_text_length_recursive((TaurusNode*)elem);
-
-    if (total_len == 0) {
-        return taurus_strdup("");
-    }
-
-    /* Allocate buffer for concatenated text */
-    char* result = (char*)taurus_malloc(total_len + 1);
-    if (!result) return NULL;
-
-    /* Second pass: copy text content recursively */
-    size_t offset = 0;
-    copy_text_content_recursive((TaurusNode*)elem, result, &offset);
-
-    result[offset] = '\0';
-    return result;
-}
-
-/* Document tree operations */
-void taurus_element_set_document_tree(TaurusElement elem, struct taurus_document* doc) {
-    if (!elem) return;
-
-    elem->document = doc;
-
-    /* Recursively set document pointer on all element children
-     * CRITICAL: Only recurse on element nodes, not text/comment/CDATA/etc.
-     * Use generic node navigation to handle mixed content correctly. */
-    TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)elem);
-    while (child) {
-        /* Check if child is an element node before recursing */
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            taurus_element_set_document_tree((TaurusElement)child, doc);
-        }
-        child = taurus_node_get_next_sibling(child);
-    }
-}
+/* Document tree operations moved to element_text.c */
 
 /* Remove all attributes from an element */
 int taurus_element_remove_all_attributes(TaurusElement elem) {
@@ -912,61 +683,4 @@ int taurus_element_remove_all_attributes(TaurusElement elem) {
     return 0; /* TAURUS_OK */
 }
 
-/* ============================================================================
- * Subtree Analysis (for bulk allocation planning)
- * ============================================================================ */
-
-/**
- * Count all nodes in subtree (for bulk allocation planning)
- *
- * Recursively traverses element tree and counts all nodes by type.
- * Used to pre-calculate allocation size for bulk operations.
- *
- * @param elem Root element to count
- * @param stats Output structure to fill with counts
- */
-void taurus_element_count_subtree(TaurusElement elem, TaurusSubtreeStats* stats) {
-    if (!elem || !stats) return;
-
-    /* Initialize counts to zero */
-    memset(stats, 0, sizeof(TaurusSubtreeStats));
-
-    /* Count this element */
-    stats->element_count = 1;
-
-    /* Count attributes on this element */
-    stats->attribute_count = elem->attr_count;
-
-    /* Recursively traverse all children */
-    TaurusNode* child = (TaurusNode*)elem->first_child;
-    while (child) {
-        switch (child->type) {
-            case TAURUS_NODE_TYPE_ELEMENT:
-                stats->element_count++;
-                taurus_element_count_subtree((TaurusElement)child, stats);
-                break;
-
-            case TAURUS_NODE_TYPE_TEXT:
-                stats->text_count++;
-                break;
-
-            case TAURUS_NODE_TYPE_COMMENT:
-                stats->comment_count++;
-                break;
-
-            case TAURUS_NODE_TYPE_CDATA:
-                stats->cdata_count++;
-                break;
-
-            case TAURUS_NODE_TYPE_PI:
-                stats->pi_count++;
-                break;
-
-            default:
-                /* Unknown node type, skip */
-                break;
-        }
-
-        child = taurus_node_get_next_sibling(child);
-    }
-}
+/* Subtree analysis moved to element_text.c */

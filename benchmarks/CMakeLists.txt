@@ -108,15 +108,16 @@ if(PUGIXML_AVAILABLE)
         CXX_STANDARD_REQUIRED ON
     )
 
-    # Comprehensive DOM Benchmark
+    # DOM Benchmark (parse once, measure operations in isolation)
     add_executable(dom_benchmark
-        dom_benchmark.cpp
+        dom/dom_benchmark.cpp
         utils.c
     )
 
     target_include_directories(dom_benchmark PRIVATE
         ${CMAKE_SOURCE_DIR}/src/include
         ${PUGIXML_INCLUDE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
     target_link_libraries(dom_benchmark PRIVATE
@@ -124,30 +125,7 @@ if(PUGIXML_AVAILABLE)
         ${PUGIXML_LIBRARY}
     )
 
-    # Enable C++11 for pugixml
     set_target_properties(dom_benchmark PROPERTIES
-        CXX_STANDARD 11
-        CXX_STANDARD_REQUIRED ON
-    )
-
-    # Comprehensive DOM Benchmark v2 (parse once, measure operations)
-    add_executable(dom_benchmark_v2
-        dom/dom_benchmark_v2.cpp
-        utils.c
-    )
-
-    target_include_directories(dom_benchmark_v2 PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/include
-        ${PUGIXML_INCLUDE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    target_link_libraries(dom_benchmark_v2 PRIVATE
-        taurus
-        ${PUGIXML_LIBRARY}
-    )
-
-    set_target_properties(dom_benchmark_v2 PROPERTIES
         CXX_STANDARD 11
         CXX_STANDARD_REQUIRED ON
     )
@@ -179,5 +157,27 @@ if(PUGIXML_AVAILABLE)
         DEPENDS bench_dom_pugixml
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running Taurus vs pugixml DOM modification benchmark"
+    )
+
+    # Parsing Benchmark (measure parse time only)
+    add_executable(bench_dom_parse
+        src/bench_dom_parse.cc
+        utils.c
+    )
+
+    target_include_directories(bench_dom_parse PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/include
+        ${PUGIXML_INCLUDE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    target_link_libraries(bench_dom_parse PRIVATE
+        taurus
+        ${PUGIXML_LIBRARY}
+    )
+
+    set_target_properties(bench_dom_parse PROPERTIES
+        CXX_STANDARD 11
+        CXX_STANDARD_REQUIRED ON
     )
 endif()

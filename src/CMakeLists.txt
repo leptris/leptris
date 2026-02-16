@@ -21,6 +21,9 @@ set(TAURUS_SOURCES
     taurus/dom/node.c
     taurus/dom/element.c
     taurus/dom/element_modify.c
+    taurus/dom/element_copy.c
+    taurus/dom/element_text.c
+    taurus/dom/element_namespace.c
     taurus/dom/text.c
     taurus/dom/comment.c
     taurus/dom/cdata.c
@@ -42,7 +45,7 @@ set(TAURUS_SOURCES
     taurus/encoding/unicode.c
 
     # Parser and Serializer
-    taurus/parse/parser_new.c
+    taurus/parse/parser.c
     taurus/parse/compact_parser.c
     taurus/serialize/serialize.c
 
@@ -55,6 +58,12 @@ set(TAURUS_SOURCES
     taurus/xpath/evaluator_operators.c
     taurus/xpath/evaluator_path.c
     taurus/xpath/functions.c
+    taurus/xpath/functions_registry.c
+    taurus/xpath/functions_core.c
+    taurus/xpath/functions_boolean.c
+    taurus/xpath/functions_number.c
+    taurus/xpath/functions_string.c
+    taurus/xpath/functions_nodeset.c
     taurus/xpath/xpath_variables.c
 
     # SAX
@@ -69,9 +78,17 @@ set(TAURUS_SOURCES
     # XInclude - TODO: Update for compact architecture
     # taurus/xinclude/xinclude.c
 
-    # Core library
-    taurus/taurus.c
+    # Core library (split into focused modules)
+    taurus/taurus_api.c
+    taurus/taurus_document.c
+    taurus/taurus_parse_api.c
+    taurus/taurus_element_api.c
+    taurus/taurus_xpath_api.c
+    taurus/taurus_c14n.c
+    taurus/taurus_node_api.c
     taurus/error.c
+    taurus/allocator.c
+    taurus/observer.c
 )
 
 # ============================================================================
@@ -265,11 +282,10 @@ include(GNUInstallDirs)
 # Install static library (Development component)
 if(TAURUS_BUILD_STATIC)
     install(TARGETS taurus_static
+        EXPORT taurus-targets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
                 COMPONENT taurus_Development
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                COMPONENT taurus_Development
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
                 COMPONENT taurus_Development
     )
 endif()
@@ -277,6 +293,7 @@ endif()
 # Install shared library (separate Runtime and Development components)
 if(TAURUS_BUILD_SHARED)
     install(TARGETS taurus_shared
+        EXPORT taurus-targets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
                 COMPONENT taurus_Development
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -284,10 +301,15 @@ if(TAURUS_BUILD_SHARED)
                 NAMELINK_COMPONENT taurus_Development
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
                 COMPONENT taurus_Runtime
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-                COMPONENT taurus_Development
     )
 endif()
+
+# Export targets for find_package()
+install(EXPORT taurus-targets
+    NAMESPACE taurus::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/taurus
+    COMPONENT taurus_Development
+)
 
 # Install public headers (Development component)
 install(DIRECTORY include/

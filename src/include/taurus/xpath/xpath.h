@@ -210,6 +210,68 @@ TAURUS_API TaurusStatus taurus_xpath_variable_set_number(TaurusXPathVariableSet 
  */
 TAURUS_API TaurusStatus taurus_xpath_variable_set_string(TaurusXPathVariableSet set, const char* name, const char* value);
 
+/* ============================================================================
+ * XPath Custom Function Extension API
+ * ============================================================================ */
+
+/**
+ * Custom XPath function callback type
+ *
+ * @param context XPath evaluation context (provides document, context node, etc.)
+ * @param argc Number of arguments passed to the function
+ * @param argv Array of argument results (already evaluated)
+ * @return Function result, or NULL on error
+ *
+ * Memory: The returned result will be freed by the XPath engine.
+ *         Do not free argv elements; they are owned by the engine.
+ */
+typedef TaurusXPathResult (*TaurusXPathCustomFunction)(
+    void* context,
+    int argc,
+    TaurusXPathResult* argv
+);
+
+/**
+ * Register a custom XPath function
+ *
+ * Custom functions can override built-in functions with the same name.
+ * The function is registered globally and affects all XPath evaluations.
+ *
+ * @param name Function name (must be a valid XPath function name)
+ * @param func Function callback
+ * @return TAURUS_OK on success, error code on failure
+ *
+ * Thread safety: This function is not thread-safe. Register all custom
+ * functions before using XPath in a multi-threaded context.
+ *
+ * Example:
+ *   TaurusXPathResult my_concat(void* ctx, int argc, TaurusXPathResult argv) {
+ *       // Custom implementation
+ *   }
+ *   taurus_xpath_register_custom_function("my-concat", my_concat);
+ *   // Now can use: //item[my-concat(@first, @last)]
+ */
+TAURUS_API TaurusStatus taurus_xpath_register_custom_function(
+    const char* name,
+    TaurusXPathCustomFunction func
+);
+
+/**
+ * Unregister a custom XPath function
+ *
+ * @param name Function name to unregister
+ * @return TAURUS_OK on success, error code if function not found
+ */
+TAURUS_API TaurusStatus taurus_xpath_unregister_custom_function(const char* name);
+
+/**
+ * Check if a custom function is registered
+ *
+ * @param name Function name to check
+ * @return 1 if registered, 0 otherwise
+ */
+TAURUS_API int taurus_xpath_has_custom_function(const char* name);
+
 #ifdef __cplusplus
 }
 #endif

@@ -22,6 +22,22 @@
 #include "../dom/doctype.h"
 
 /* ============================================================================
+ * Serialization Options
+ * ============================================================================ */
+
+/* Line ending options */
+typedef enum {
+    LINE_ENDING_LF,     /* Unix: \n (default) */
+    LINE_ENDING_CRLF    /* Windows: \r\n */
+} LineEnding;
+
+/* Indent character options */
+typedef enum {
+    INDENT_CHAR_SPACE,  /* Spaces (default) */
+    INDENT_CHAR_TAB     /* Tabs */
+} IndentChar;
+
+/* ============================================================================
  * Public API
  * ============================================================================ */
 
@@ -30,6 +46,12 @@ char* taurus_serialize_node(TaurusNode* node);
 
 /* Serialize element and children to XML string (caller must free) */
 char* taurus_serialize_element(TaurusElement elem);
+
+/* Serialize element with formatting options (caller must free) */
+char* taurus_serialize_element_with_options(TaurusElement elem,
+                                             int indent_spaces,
+                                             IndentChar indent_char,
+                                             LineEnding line_ending);
 
 /* Serialize with XML declaration (caller must free) */
 char* taurus_serialize_document_with_declaration(TaurusElement root,
@@ -46,14 +68,18 @@ char* taurus_serialize_document_with_declaration(TaurusElement root,
 /* Dynamic string buffer for building output */
 typedef struct {
     char* data;
-    size_t size;       /* Current string length */
-    size_t capacity;   /* Allocated capacity */
-    int indent;        /* Current indentation level (for pretty-printing) */
-    int indent_spaces; /* Number of spaces per indent level (0 = compact) */
+    size_t size;            /* Current string length */
+    size_t capacity;        /* Allocated capacity */
+    int indent;             /* Current indentation level (for pretty-printing) */
+    int indent_spaces;      /* Number of spaces per indent level (0 = compact) */
+    int preserve_whitespace; /* xml:space="preserve" in effect */
+    IndentChar indent_char;  /* Character to use for indentation */
+    LineEnding line_ending;  /* Line ending style */
 } SerializeBuffer;
 
 /* Buffer operations */
 SerializeBuffer* buffer_create(int indent_spaces);
+SerializeBuffer* buffer_create_with_options(int indent_spaces, IndentChar indent_char, LineEnding line_ending);
 void buffer_append(SerializeBuffer* buf, const char* str);
 void buffer_append_char(SerializeBuffer* buf, char c);
 void buffer_append_len(SerializeBuffer* buf, const char* str, size_t len);

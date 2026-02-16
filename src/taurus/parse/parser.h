@@ -1,4 +1,4 @@
-/* lib/src/parse/parser_new.h - Integrated XML Parser
+/* lib/src/parse/parser.h - Integrated XML Parser
  * Copyright (c) 2024, Ribose Inc.
  *
  * Direct character-level parser that creates DOM nodes immediately.
@@ -7,8 +7,8 @@
  * CRITICAL RULE: NEVER trim whitespace - preserve ALL characters exactly.
  */
 
-#ifndef TAURUS_PARSER_NEW_H
-#define TAURUS_PARSER_NEW_H
+#ifndef TAURUS_PARSER_H
+#define TAURUS_PARSER_H
 
 #include "../dom/element.h"
 #include "../dom/text.h"
@@ -52,6 +52,9 @@ typedef struct {
     /* PERFORMANCE: Track if any namespace prefixes were found during parsing
      * This allows us to skip post-parse namespace resolution for documents without namespaces */
     int has_namespace_prefixes;  /* 1 if any element has a prefix (e.g., "foo:bar"), 0 otherwise */
+
+    /* Per-document strict mode (thread-safe, no global state) */
+    int strict_mode;             /* 1=strict XML 1.0, 0=lenient (pugixml compat) */
 } Parser;
 
 /* ============================================================================
@@ -61,8 +64,14 @@ typedef struct {
 /* Create parser for given XML string with memory pool */
 Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool);
 
+/* Create parser with strict mode option */
+Parser* parser_create_with_options(const char* xml, size_t len, TaurusMemoryPool* pool, int strict_mode);
+
 /* Create parser with in-place optimization (writable buffer) */
 Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool);
+
+/* Create parser with in-place optimization and strict mode */
+Parser* parser_create_writable_with_options(char* xml, size_t len, TaurusMemoryPool* pool, int strict_mode);
 
 /* Free parser state */
 void parser_free(Parser* p);

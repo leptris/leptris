@@ -81,6 +81,9 @@ struct taurus_namespace* taurus_namespace_new_pooled(const char* prefix,
     struct taurus_namespace* ns = (struct taurus_namespace*)taurus_pool_alloc(pool, sizeof(struct taurus_namespace));
     if (!ns) return NULL;
 
+    /* Initialize all fields */
+    ns->prefix_view = taurus_sv_empty();
+    ns->uri_view = taurus_sv_empty();
     ns->prefix = prefix ? taurus_pool_strdup(pool, prefix) : NULL;
     ns->uri = taurus_pool_strdup(pool, uri);
     ns->next = NULL;
@@ -88,6 +91,40 @@ struct taurus_namespace* taurus_namespace_new_pooled(const char* prefix,
     /* If allocation failed, return NULL - pool will be cleaned up on document free */
     if (!ns->uri) {
         return NULL;
+    }
+
+    return ns;
+}
+
+/* OPTIMIZATION (Phase B): Create namespace with StringViews - ZERO COPY!
+ * This is the preferred constructor during parsing as it eliminates all string
+ * allocations. The StringViews point directly into the XML buffer.
+ */
+struct taurus_namespace* taurus_namespace_new_with_views(
+    TaurusStringView* prefix_view,
+    TaurusStringView* uri_view,
+    TaurusMemoryPool* pool
+) {
+    if (!uri_view || taurus_sv_is_empty(uri_view) || !pool) return NULL;
+
+    struct taurus_namespace* ns = (struct taurus_namespace*)taurus_pool_alloc(pool, sizeof(struct taurus_namespace));
+    if (!ns) return NULL;
+
+    /* Store StringViews directly - NO STRING COPIES! */
+    ns->prefix_view = prefix_view ? *prefix_view : taurus_sv_empty();
+    ns->uri_view = *uri_view;
+
+    /* Initialize cached strings to NULL - lazy conversion on first access */
+    ns->prefix = NULL;
+    ns->uri = NULL;
+    ns->next = NULL;
+
+    /* Check for in-place null termination optimization */
+    if (taurus_sv_is_null_terminated(&ns->uri_view)) {
+        ns->uri = (char*)ns->uri_view.data;  /* Safe to use directly */
+    }
+    if (!taurus_sv_is_empty(&ns->prefix_view) && taurus_sv_is_null_terminated(&ns->prefix_view)) {
+        ns->prefix = (char*)ns->prefix_view.data;  /* Safe to use directly */
     }
 
     return ns;

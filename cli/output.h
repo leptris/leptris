@@ -217,10 +217,12 @@ void output_formatter_free(output_formatter_t* fmt);
  * Options specific to XML output formatting.
  */
 typedef struct xml_format_options {
-    int indent;                 /**< Indentation size (spaces) */
+    int indent;                 /**< Indentation size (spaces or tabs) */
     bool pretty_print;          /**< Enable pretty-printing */
     bool include_declaration;   /**< Include <?xml?> declaration */
     const char* encoding;       /**< Output encoding (default: UTF-8) */
+    bool use_tabs;              /**< Use tabs for indentation instead of spaces */
+    bool use_crlf;              /**< Use CRLF line endings (Windows) instead of LF (Unix) */
 } xml_format_options_t;
 
 /**

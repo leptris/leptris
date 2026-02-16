@@ -1,4 +1,4 @@
-/* lib/src/parse/parser_new.c - Integrated XML Parser Implementation
+/* lib/src/parse/parser.c - Integrated XML Parser Implementation
  * Copyright (c) 2024, Ribose Inc.
  *
  * CRITICAL PRINCIPLES:
@@ -13,8 +13,9 @@
  * - Bulk allocate where possible
  */
 
-#include "parser_new.h"
+#include "parser.h"
 #include "../taurus_internal.h"
+#include "../include/taurus/error.h"
 #include "../dom/element.h"
 #include "../common/string_view.h"
 #include "../common/entities.h"
@@ -148,6 +149,7 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
     p->writable = 0;  /* Read-only by default */
     p->dtd = NULL;    /* No DTD parsed yet */
     p->has_namespace_prefixes = 0;  /* No namespaces seen yet */
+    p->strict_mode = 0;  /* Default: lenient mode (pugixml compatibility) */
 
     /* Check for UTF-8 BOM (EF BB BF) */
     if (len >= 3 &&
@@ -216,6 +218,15 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
     return p;
 }
 
+/* Create parser with strict mode option */
+Parser* parser_create_with_options(const char* xml, size_t len, TaurusMemoryPool* pool, int strict_mode) {
+    Parser* p = parser_create(xml, len, pool);
+    if (p) {
+        p->strict_mode = strict_mode;
+    }
+    return p;
+}
+
 Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     if (!xml || len == 0) return NULL;
 
@@ -227,6 +238,9 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     p->end = xml + len;
     p->pool = pool;  /* Store pool for fast DOM allocation */
     p->writable = 1;  /* Writable mode - can modify buffer in-place */
+    p->dtd = NULL;    /* No DTD parsed yet */
+    p->has_namespace_prefixes = 0;  /* No namespaces seen yet */
+    p->strict_mode = 0;  /* Default: lenient mode (pugixml compatibility) */
 
     /* Check for UTF-8 BOM (EF BB BF) */
     if (len >= 3 &&
@@ -292,6 +306,15 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     p->pi_list = NULL;
     p->pi_list_tail = NULL;
 
+    return p;
+}
+
+/* Create writable parser with strict mode option */
+Parser* parser_create_writable_with_options(char* xml, size_t len, TaurusMemoryPool* pool, int strict_mode) {
+    Parser* p = parser_create_writable(xml, len, pool);
+    if (p) {
+        p->strict_mode = strict_mode;
+    }
     return p;
 }
 
@@ -500,6 +523,9 @@ void parser_set_error(Parser* p, const char* message) {
     snprintf(p->error, sizeof(p->error), "Line %d, Column %d: %s",
              p->line, p->column, message);
     p->has_error = 1;
+
+    /* Also set rich error context for user debugging */
+    taurus_set_error_ex(TAURUS_ERROR_PARSE, p->line, p->column, NULL, "%s", message);
 }
 
 /* ============================================================================
@@ -562,9 +588,9 @@ static char* parse_attribute_value(Parser* p) {
         /* Use DTD-aware entity decoding if DTD is available */
         char* resolved;
         if (p->dtd) {
-            resolved = taurus_decode_entities_with_dtd(value, (const TaurusDTD*)p->dtd);
+            resolved = taurus_decode_entities_with_dtd_options(value, (const TaurusDTD*)p->dtd, p->strict_mode);
         } else {
-            resolved = taurus_decode_entities(value);
+            resolved = taurus_decode_entities_with_options(value, p->strict_mode);
         }
 
         if (resolved) {
@@ -649,11 +675,39 @@ static TaurusStringView parse_name_view(Parser* p) {
     }
 
     size_t len = p->pos - start;
+
+    /* OPTIMIZATION (Phase C): In-place null termination for element names
+     *
+     * If the next character after the name is whitespace, we can safely
+     * replace it with '\0' to make the name a valid C string.
+     *
+     * CRITICAL: We must advance p->pos after null-terminating to ensure
+     * parser_skip_whitespace_inline() works correctly. Without this advance,
+     * the '\0' would cause the whitespace skipper to exit early.
+     *
+     * This is safe because:
+     * 1. Whitespace is always followed by more content (attributes, '>', '/>')
+     * 2. We're in writable mode (buffer is owned by document)
+     * 3. We advance past the null terminator so parsing continues correctly
+     */
+    if (p->writable && len > 0 && p->pos < p->end) {
+        unsigned char next = (unsigned char)*p->pos;
+        if (next == ' ' || next == '\t' || next == '\n' || next == '\r') {
+            *(char*)p->pos = '\0';  /* Replace whitespace with null terminator */
+            p->pos++;               /* Advance past the null we just wrote */
+        }
+    }
+
     return taurus_sv_from_ptr(start, len);
 }
 
 /* Parse attribute value returning StringView (TRUE ZERO-COPY!)
- * PERFORMANCE: Use memchr for fast quote finding instead of character-by-character parsing */
+ * PERFORMANCE: Use memchr for fast quote finding instead of character-by-character parsing
+ *
+ * OPTIMIZATION (Phase C): In-place null termination.
+ * After finding the closing quote, we replace it with '\0' to make
+ * the attribute value a valid null-terminated C string without copying.
+ */
 static TaurusStringView parse_attribute_value_view(Parser* p) {
     char quote = parser_peek(p);
     if (quote != '"' && quote != '\'') {
@@ -673,6 +727,18 @@ static TaurusStringView parse_attribute_value_view(Parser* p) {
         p->pos = end_quote + 1;  /* Move past the quote */
         /* Approximate line/column update (good enough for most cases) */
         p->column += (int)(len + 1);
+
+        /* OPTIMIZATION (Phase C): In-place null termination for zero-copy strings
+         * Replace the closing quote with '\0' to make the attribute value
+         * a valid C string. This eliminates the need to copy the string later.
+         *
+         * Only do this in writable mode. The quote character is no longer needed
+         * since we've already advanced past it.
+         */
+        if (p->writable) {
+            *(char*)end_quote = '\0';
+        }
+
         return taurus_sv_from_ptr(start, len);
     } else {
         /* No closing quote found - run to end */
@@ -714,7 +780,7 @@ TaurusTextNode* parser_parse_text(Parser* p) {
      *
      * We DON'T validate standalone continuation bytes to allow raw control
      * characters to pass through (for test_high_control_characters). */
-    if (taurus_get_strict_mode()) {
+    if (p->strict_mode) {
         for (size_t i = 0; i < len; i++) {
             unsigned char c = (unsigned char)start[i];
 
@@ -784,9 +850,9 @@ TaurusTextNode* parser_parse_text(Parser* p) {
         /* Use DTD-aware entity decoding if DTD is available */
         char* resolved;
         if (p->dtd) {
-            resolved = taurus_decode_entities_with_dtd(content, (const TaurusDTD*)p->dtd);
+            resolved = taurus_decode_entities_with_dtd_options(content, (const TaurusDTD*)p->dtd, p->strict_mode);
         } else {
-            resolved = taurus_decode_entities(content);
+            resolved = taurus_decode_entities_with_options(content, p->strict_mode);
         }
 
         if (resolved) {
@@ -845,7 +911,7 @@ TaurusCommentNode* parser_parse_comment(Parser* p) {
      * - Extracted content: indices 4-12 = " comment " (len=9, contains no "--")
      * - But actual comment text " comment --" contains "--" at indices 13-14!
      * - We need to check start[0..len+1] (indices 4-14) to catch the "--" */
-    if (taurus_get_strict_mode()) {
+    if (p->strict_mode) {
         /* VALIDATION per XML spec: Comments must not contain "--" and must not end with "-"
          *
          * Due to parser's greedy "-->" matching, we need to check:
@@ -1004,7 +1070,7 @@ TaurusPINode* parser_parse_pi(Parser* p) {
 
     /* STRICT MODE VALIDATION: PI target cannot be "xml" (case-insensitive)
      * The "xml" target is reserved for XML declarations */
-    if (taurus_get_strict_mode()) {
+    if (p->strict_mode) {
         /* Case-insensitive check for "xml" */
         if (target_len == 3) {
             char lower[4] = {0};
@@ -1315,7 +1381,7 @@ TaurusElement parser_parse_element(Parser* p) {
             /* STRICT MODE VALIDATION: Check for undeclared namespace prefix
              * Per XML Namespaces spec, a prefix used in an element name must be declared
              * For self-closing elements, we check this before returning */
-            if (taurus_get_strict_mode() && !taurus_sv_is_empty(&elem->prefix_view)) {
+            if (p->strict_mode && !taurus_sv_is_empty(&elem->prefix_view)) {
                 /* Check if prefix is "xml" - reserved prefix that's always valid */
                 int is_xml_prefix = (elem->prefix_view.length == 3) &&
                                    (elem->prefix_view.data[0] == 'x' || elem->prefix_view.data[0] == 'X') &&
@@ -1323,11 +1389,14 @@ TaurusElement parser_parse_element(Parser* p) {
                                    (elem->prefix_view.data[2] == 'l' || elem->prefix_view.data[2] == 'L');
 
                 if (!is_xml_prefix) {
-                    /* Check if prefix is declared in this element's namespaces */
+                    /* Check if prefix is declared in this element's namespaces
+                     * OPTIMIZATION (Phase E): Use StringView comparison instead of
+                     * C string comparison. Since Phase B, namespaces store StringViews
+                     * directly and ns->prefix may be NULL if not null-terminated. */
                     int prefix_declared = 0;
                     struct taurus_namespace* ns = elem->namespaces;
                     while (ns) {
-                        if (ns->prefix && taurus_sv_equals_cstr(&elem->prefix_view, ns->prefix)) {
+                        if (taurus_sv_equals(&elem->prefix_view, &ns->prefix_view)) {
                             prefix_declared = 1;
                             break;
                         }
@@ -1427,13 +1496,13 @@ TaurusElement parser_parse_element(Parser* p) {
 
         /* Check for namespace declarations */
         if (taurus_sv_equals_cstr(&attr_name_view, "xmlns")) {
-            /* Default namespace declaration - use pool allocation */
-            char* uri = taurus_sv_to_cstr(&attr_value_view);
-            struct taurus_namespace* ns = taurus_namespace_new_pooled(NULL, uri, p->pool);
+            /* Default namespace declaration - OPTIMIZATION (Phase B): ZERO COPY!
+             * Use StringView directly instead of allocating temp strings. */
+            struct taurus_namespace* ns = taurus_namespace_new_with_views(NULL, &attr_value_view, p->pool);
             if (ns) {
                 taurus_element_add_namespace(elem, ns);
             }
-            free(uri);
+            /* No malloc/free needed - StringView points into buffer! */
         } else if (attr_name_view.length > 6 &&
                    memcmp(attr_name_view.data, "xmlns:", 6) == 0) {
             /* Prefixed namespace declaration - use pool allocation */
@@ -1444,7 +1513,7 @@ TaurusElement parser_parse_element(Parser* p) {
              * 1. Prefix must be a valid XML name (must not start with digit)
              * 2. Prefix "xml" is reserved and must have specific URI
              */
-            if (taurus_get_strict_mode()) {
+            if (p->strict_mode) {
                 /* Check if prefix starts with digit (invalid XML name) */
                 if (prefix.length > 0 && prefix.data[0] >= '0' && prefix.data[0] <= '9') {
                     parser_set_error(p, "Namespace prefix cannot start with digit");
@@ -1460,32 +1529,31 @@ TaurusElement parser_parse_element(Parser* p) {
                     if (is_xml) {
                         /* Validate that the URI is the correct reserved URI
                          * xml: http://www.w3.org/XML/1998/namespace
-                         * xmlns: http://www.w3.org/2000/xmlns/ */
-                        char* uri = taurus_sv_to_cstr(&attr_value_view);
-                        const char* reserved_uri = "http://www.w3.org/XML/1998/namespace";
-                        if (strcmp(uri, reserved_uri) != 0) {
-                            free(uri);
+                         * xmlns: http://www.w3.org/2000/xmlns/
+                         *
+                         * OPTIMIZATION (Phase E): Use StringView comparison
+                         * instead of allocating temp string for validation. */
+                        static const TaurusStringView reserved_uri = TAURUS_SV_LIT("http://www.w3.org/XML/1998/namespace");
+                        if (!taurus_sv_equals(&attr_value_view, &reserved_uri)) {
                             parser_set_error(p, "The 'xml' prefix is reserved and must use the correct namespace URI");
                             return NULL;
                         }
-                        free(uri);
                     }
                 }
             }
 
-            char* prefix_cstr = taurus_sv_to_cstr(&prefix);
-            char* uri = taurus_sv_to_cstr(&attr_value_view);
-            struct taurus_namespace* ns = taurus_namespace_new_pooled(prefix_cstr, uri, p->pool);
+            /* OPTIMIZATION (Phase B): ZERO COPY namespace creation!
+             * Use StringViews directly instead of allocating temp strings. */
+            struct taurus_namespace* ns = taurus_namespace_new_with_views(&prefix, &attr_value_view, p->pool);
             if (ns) {
                 taurus_element_add_namespace(elem, ns);
             }
-            free(prefix_cstr);
-            free(uri);
+            /* No malloc/free needed - StringViews point into buffer! */
         } else {
             /* Regular attribute - USE STRINGVIEW (zero-copy!) */
             /* STRICT MODE VALIDATION: Check for invalid characters in attribute value
              * Per XML spec, attribute values must not contain '<' or certain control characters */
-            if (taurus_get_strict_mode()) {
+            if (p->strict_mode) {
                 /* Check for '<' in attribute value - this is always invalid */
                 for (size_t i = 0; i < attr_value_view.length; i++) {
                     if (attr_value_view.data[i] == '<') {
@@ -1716,7 +1784,7 @@ TaurusElement parser_parse_document(Parser* p) {
             } else {
                 /* STRICT MODE: In strict mode, reject XML declarations with malformed attributes
                  * (missing '=' after attribute name) */
-                if (taurus_get_strict_mode()) {
+                if (p->strict_mode) {
                     TAURUS_FREE(attr_name);
                     parser_set_error(p, "Malformed XML declaration (missing '=' after attribute name)");
                     return NULL;
@@ -1862,7 +1930,7 @@ TaurusElement parser_parse_document(Parser* p) {
          * Lenient mode (pugixml compatibility): Allow multiple root elements */
         parser_skip_whitespace(p);
         if (!parser_at_end(p)) {
-            int strict_mode = taurus_get_strict_mode();
+            int strict_mode = p->strict_mode;
             if (strict_mode) {
                 /* Strict mode: Enforce single root element */
                 parser_set_error(p, "Extra content after root element");

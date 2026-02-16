@@ -13,6 +13,9 @@
 #include <string.h>
 #include <errno.h>
 
+/* Forward declarations */
+static void format_print_help(void);
+
 /* ------------------------------------------------------------------------- */
 /* Format Command Options                                                    */
 /* ------------------------------------------------------------------------- */
@@ -25,6 +28,8 @@ typedef struct {
     bool verbose;
     const char* encoding;
     output_format_t format;
+    bool use_tabs;       /* --indent-char tabs */
+    bool use_crlf;       /* --crlf for Windows line endings */
 } format_options_t;
 
 static format_options_t* format_options_new(void) {
@@ -38,6 +43,8 @@ static format_options_t* format_options_new(void) {
     opts->verbose = false;
     opts->encoding = "UTF-8";
     opts->format = OUTPUT_FORMAT_XML;
+    opts->use_tabs = false;
+    opts->use_crlf = false;
 
     return opts;
 }
@@ -115,9 +122,35 @@ static cli_result_t format_options_parse(
             i += 2;
             continue;  /* Skip positional argument handling */
         }
+        else if (strcmp(argv[i], "--indent-char") == 0) {
+            if (i + 1 >= argc) {
+                cli_error("--indent-char requires an argument (spaces or tabs)");
+                return CLI_ERROR_ARGS;
+            }
+            if (strcmp(argv[i + 1], "tabs") == 0) {
+                opts->use_tabs = true;
+            } else if (strcmp(argv[i + 1], "spaces") == 0) {
+                opts->use_tabs = false;
+            } else {
+                cli_error("--indent-char must be 'spaces' or 'tabs'");
+                return CLI_ERROR_ARGS;
+            }
+            i += 2;
+            continue;
+        }
+        else if (strcmp(argv[i], "--crlf") == 0) {
+            opts->use_crlf = true;
+            i++;
+            continue;
+        }
+        else if (strcmp(argv[i], "--lf") == 0) {
+            opts->use_crlf = false;  /* Explicit Unix line endings */
+            i++;
+            continue;
+        }
         else if (strcmp(argv[i], "-h") == 0 ||
                  strcmp(argv[i], "--help") == 0) {
-            return CLI_ERROR_ARGS; /* Trigger help */
+            return CLI_HELP; /* Request help display */
         }
         else if (argv[i][0] == '-' && strcmp(argv[i], "-") != 0) {
             cli_error("unknown option: %s", argv[i]);
@@ -257,8 +290,13 @@ static cli_result_t format_execute(int argc, char** argv) {
         goto cleanup;
     }
 
-    if (format_options_parse(opts, argc, argv) != CLI_SUCCESS) {
-        result = CLI_ERROR_ARGS;
+    result = format_options_parse(opts, argc, argv);
+    if (result == CLI_HELP) {
+        format_print_help();
+        result = CLI_SUCCESS;
+        goto cleanup;
+    }
+    if (result != CLI_SUCCESS) {
         goto cleanup;
     }
 
@@ -322,6 +360,8 @@ static cli_result_t format_execute(int argc, char** argv) {
         xml_opts.pretty_print = !opts->compact;
         xml_opts.include_declaration = true;
         xml_opts.encoding = opts->encoding;
+        xml_opts.use_tabs = opts->use_tabs;
+        xml_opts.use_crlf = opts->use_crlf;
         output_formatter_set_xml_options(fmt, &xml_opts);
     }
 
@@ -348,13 +388,23 @@ static void format_print_help(void) {
     printf("\n");
     printf("Options:\n");
     printf("  -o, --output FILE   Output file (default: stdout)\n");
-    printf("  --indent N          Indentation size (default: 2)\n");
+    printf("  -i, --indent N      Indentation size (default: 2)\n");
+    printf("  --indent-char CHAR  Indentation character: spaces|tabs (default: spaces)\n");
     printf("  --compact           Remove all whitespace\n");
+    printf("  --crlf              Use Windows line endings (CRLF)\n");
+    printf("  --lf                Use Unix line endings (LF, default)\n");
     printf("  --encode ENCODING   Output encoding (default: UTF-8)\n");
     printf("  --format FORMAT     Output format: xml|json|text (default: xml)\n");
     printf("  -v, --verbose       Show verbose output\n");
     printf("  -q, --quiet         Suppress warnings\n");
     printf("  -h, --help          Show this help\n");
+    printf("\n");
+    printf("Examples:\n");
+    printf("  taurus format doc.xml                    # Pretty-print with 2 spaces\n");
+    printf("  taurus format -i 4 doc.xml               # 4-space indentation\n");
+    printf("  taurus format --indent-char tabs doc.xml # Tab indentation\n");
+    printf("  taurus format --crlf doc.xml             # Windows line endings\n");
+    printf("  taurus format --compact doc.xml          # Minified output\n");
     printf("\n");
     printf("Exit codes:\n");
     printf("  0    Success\n");
