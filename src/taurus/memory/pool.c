@@ -283,6 +283,10 @@ char* taurus_pool_strdup(TaurusMemoryPool* pool, const char* str) {
  * Fast, simple, and well-distributed hash function.
  * FNV-1a is proven to work well for string hashing.
  */
+
+/* Forward declaration for use in growth function */
+static uint32_t hash_cstring(const char* str, size_t len);
+
 static uint32_t hash_string_view(const TaurusStringView* sv) {
     if (!sv || !sv->data || sv->length == 0) return 0;
 
@@ -333,6 +337,61 @@ StringHashTable* taurus_hash_table_create(TaurusMemoryPool* pool, size_t bucket_
     table->cache_misses = 0;
 
     return table;
+}
+
+/**
+ * Grow hash table when load factor exceeds threshold
+ *
+ * PERFORMANCE: This is critical for large files. Without growth,
+ * a 10MB file with 1M strings would have ~7800 entries per bucket,
+ * making lookups O(7800) instead of O(1).
+ *
+ * With growth, we maintain ~4 entries per bucket for O(1) lookups.
+ */
+static int taurus_hash_table_grow(TaurusMemoryPool* pool, StringHashTable* table) {
+    if (!pool || !table) return 0;
+
+    /* Double the bucket count */
+    size_t new_bucket_count = table->bucket_count * 2;
+
+    /* Safety limit: don't exceed 16M buckets (128MB for bucket array) */
+    if (new_bucket_count > 16 * 1024 * 1024) return 1;  /* Table is big enough */
+
+    /* Allocate new bucket array */
+    StringHashEntry** new_buckets = (StringHashEntry**)taurus_pool_alloc(
+        pool, sizeof(StringHashEntry*) * new_bucket_count);
+    if (!new_buckets) return 0;  /* Growth failed, continue with current size */
+
+    /* Initialize new buckets to NULL */
+    for (size_t i = 0; i < new_bucket_count; i++) {
+        new_buckets[i] = NULL;
+    }
+
+    /* Rehash all existing entries into new buckets */
+    for (size_t i = 0; i < table->bucket_count; i++) {
+        StringHashEntry* entry = table->buckets[i];
+        while (entry) {
+            StringHashEntry* next = entry->next;
+
+            /* Recalculate bucket index with new bucket count
+             * Use hash_cstring directly to avoid creating temporary StringView */
+            uint32_t hash = hash_cstring(entry->key_data, entry->key_length);
+            size_t new_index = hash % new_bucket_count;
+
+            /* Prepend to new bucket chain */
+            entry->next = new_buckets[new_index];
+            new_buckets[new_index] = entry;
+
+            entry = next;
+        }
+    }
+
+    /* Update table with new buckets */
+    /* Note: Old bucket array remains in pool memory (wasted but acceptable) */
+    table->buckets = new_buckets;
+    table->bucket_count = new_bucket_count;
+
+    return 1;
 }
 
 /**
@@ -404,6 +463,15 @@ char* taurus_pool_intern_string(TaurusMemoryPool* pool, const TaurusStringView* 
 
     /* 3. Cache miss - allocate new string */
     table->cache_misses++;
+
+    /* PERFORMANCE: Check if we need to grow the hash table
+     * Grow when load factor > 0.75 (entry_count > bucket_count * 3/4)
+     * This keeps bucket chains short for O(1) lookup performance */
+    if (table->entry_count > (table->bucket_count * 3) / 4) {
+        taurus_hash_table_grow(pool, table);
+        /* Recalculate bucket index after potential growth */
+        bucket_index = hash % table->bucket_count;
+    }
 
     /* Allocate NULL-terminated string from pool */
     char* new_string = (char*)taurus_pool_alloc(pool, sv->length + 1);

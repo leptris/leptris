@@ -92,9 +92,12 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
 
     /* Enable string deduplication for files >= 256B (PERFORMANCE optimization)
      * This significantly improves performance for documents with repeated strings
-     * by using a hash table to intern strings, avoiding duplicate allocations */
+     * by using a hash table to intern strings, avoiding duplicate allocations
+     *
+     * PERFORMANCE: Start with 1024 buckets for better large file scaling.
+     * Table will grow dynamically as needed (see taurus_hash_table_grow). */
     if (len >= 256) {
-        pool->string_cache = taurus_hash_table_create(pool, 128);
+        pool->string_cache = taurus_hash_table_create(pool, 1024);
         /* Note: If hash table creation fails, string_cache will be NULL
          * and code will fall back to non-interned allocation (safe degradation) */
     }
@@ -241,9 +244,12 @@ static struct taurus_document* taurus_parse_inplace(char* xml, size_t len) {
     if (!pool) return NULL;
 
     /* Enable deduplication for files >= 256B (PERFORMANCE: reduced from 1KB)
-     * This improves performance for small documents with repeated strings */
-    if (len >= 100000000) {  /* Disable for now - debugging memory corruption */
-        pool->string_cache = taurus_hash_table_create(pool, 128);
+     * This improves performance for small documents with repeated strings
+     *
+     * PERFORMANCE: Start with 1024 buckets for better large file scaling.
+     * Table will grow dynamically as needed (see taurus_hash_table_grow). */
+    if (len >= 256) {
+        pool->string_cache = taurus_hash_table_create(pool, 1024);
         /* Note: If hash table creation fails, string_cache will be NULL
          * and code will fall back to non-interned allocation (safe degradation) */
     }
