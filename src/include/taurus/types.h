@@ -28,6 +28,9 @@ typedef struct taurus_attribute*    TaurusAttribute;
 typedef const char*                 TaurusNamespace;
 typedef struct taurus_xpath_result* TaurusXPathResult;
 
+/* Compiled XPath expression - pre-parsed for faster repeated evaluation */
+typedef struct taurus_xpath_compiled* TaurusXPathCompiled;
+
 /* ============================================================================
  * Status Codes
  * ============================================================================ */
@@ -54,6 +57,42 @@ typedef enum {
     TAURUS_XPATH_NUMBER,
     TAURUS_XPATH_STRING
 } TaurusXPathResultType;
+
+/* ============================================================================
+ * Parsing Options
+ * ============================================================================ */
+
+/**
+ * Parsing option flags for performance optimization
+ *
+ * These flags control trade-offs between correctness/validation and performance.
+ * Use taurus_parse_string_ex() to specify these options.
+ */
+typedef enum {
+    /* Default: Full XML 1.0 compliance with namespaces */
+    TAURUS_PARSE_DEFAULT = 0,
+
+    /* Skip namespace resolution (faster for documents without namespace queries)
+     * Namespaces are still parsed but not resolved to URIs.
+     * Use this when you don't need XPath namespace-aware queries. */
+    TAURUS_PARSE_NO_NAMESPACE_RESOLUTION = (1 << 0),
+
+    /* Skip entity expansion (faster, but returns entity references as-is)
+     * Only use for documents without entities or when you'll handle entities yourself. */
+    TAURUS_PARSE_NO_ENTITY_EXPANSION = (1 << 1),
+
+    /* Fast mode: combines all skip flags for maximum speed
+     * Suitable for trusted input where you don't need namespace/entity features. */
+    TAURUS_PARSE_FAST = TAURUS_PARSE_NO_NAMESPACE_RESOLUTION | TAURUS_PARSE_NO_ENTITY_EXPANSION
+} TaurusParseFlags;
+
+/**
+ * Parsing options structure
+ */
+typedef struct {
+    TaurusParseFlags flags;    /* Combination of TaurusParseFlags */
+    int strict;                /* 1 = strict validation, 0 = lenient (default: 0) */
+} TaurusParseOptions;
 
 /* ============================================================================
  * Serialization Options

@@ -102,6 +102,11 @@ struct taurus_document {
     void* observer_list;            /* ObserverList* - for document change events */
     /* Per-document allocator (NULL = use global allocator) */
     void* allocator;                /* TaurusAllocator* - document-specific memory allocator */
+    /* Compact mode support (two-pass parsing optimization) */
+    void* compact_alloc;            /* CompactSingleAllocator* - single-block allocator */
+    void* compact_base;            /* Base pointer for compact element resolution */
+    uint32_t compact_root_offset;   /* Offset to root element in compact block */
+    int is_compact;                 /* 1 if document uses compact DOM format */
 };
 
 /* Parse options structure */
@@ -254,6 +259,7 @@ typedef struct xpath_nodeset {
     size_t capacity;
     int owns_attributes;         /* If true, free attribute nodes on nodeset_free */
     int owns_namespaces;         /* If true, free namespace nodes on nodeset_free */
+    struct xpath_nodeset* next_in_pool;  /* Next nodeset in pool free list (when pooled) */
 } XPathNodeSet;
 
 /* XPath result types - MUST match public enum in ext/taurus/xpath.h!
@@ -313,7 +319,23 @@ typedef struct xpath_context {
     int to_boolean;              /* Only checking existence */
     int max_results;             /* Stop after N results (0 = unlimited) */
     int enable_early_exit;       /* Master switch for early termination */
+
+    /* PERFORMANCE: Nodeset pool for O(1) allocation */
+    struct xpath_nodeset* nodeset_pool;  /* Free list of reusable nodesets */
+    size_t nodesets_allocated;           /* Total nodesets allocated */
+    size_t nodesets_reused;              /* Nodesets reused from pool */
 } XPathContext;
+
+/* Compiled XPath expression - pre-parsed AST for faster repeated evaluation */
+struct taurus_xpath_compiled {
+    XPathASTNode* ast;           /* Pre-parsed AST */
+    char* expression;            /* Original expression string (for debugging) */
+    char error_msg[256];         /* Compilation error if any */
+
+    /* PERFORMANCE: Cache for literal-only expressions (constant-folded) */
+    int is_literal;              /* 1 if AST is just a literal (STRING or NUMBER) */
+    struct taurus_xpath_result* cached_result;  /* Pre-computed result for literals */
+};
 
 /* XPath operator types - From ext/taurus/xpath.h */
 typedef enum {
