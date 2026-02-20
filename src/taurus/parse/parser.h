@@ -109,6 +109,17 @@ TaurusElement parser_parse_document(Parser* p);
 /* Parse next node from current position - dispatches to specific parsers */
 TaurusNode* parser_parse_node(Parser* p);
 
+/* Two-pass compact parser - creates 28-byte elements in single allocation
+ * This is the FAST path for achieving 1.0x vs pugixml performance.
+ * Use for read-heavy workloads where DOM modification is not needed.
+ *
+ * @param xml XML string
+ * @param len Length of XML string
+ * @param error_out Error output (0=success, 1=error)
+ * @return TaurusDocument or NULL on error
+ */
+struct taurus_document* taurus_parse_two_pass(const char* xml, size_t len, int* error_out);
+
 /* ============================================================================
  * Specific Node Type Parsers
  * ============================================================================ */

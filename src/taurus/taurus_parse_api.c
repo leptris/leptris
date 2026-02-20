@@ -28,6 +28,12 @@ extern int parser_has_error(Parser* p);
 extern const char* parser_get_xml_version(Parser* p);
 extern const char* parser_get_encoding(Parser* p);
 extern int parser_get_standalone(Parser* p);
+
+/* Two-pass compact parser (from parser_two_pass.c) - creates 28-byte elements */
+extern struct taurus_document* taurus_parse_two_pass(const char* xml, size_t len, int* error_out);
+
+/* Threshold for using two-pass compact parser (documents >= this size) */
+#define TAURUS_TWO_PASS_THRESHOLD 1024
 extern int parser_had_declaration(Parser* p);
 extern int parser_has_bom(Parser* p);
 extern TaurusDoctypeNode* parser_get_doctype(Parser* p);
