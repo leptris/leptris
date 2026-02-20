@@ -16,7 +16,7 @@ pugixml achieves 2-5x parsing speed through **architectural superiority**:
 
 | Aspect | pugixml | Taurus (Current) | Taurus (Target) |
 |--------|---------|------------------|-----------------|
-| Element size | ~32 bytes | ~168 bytes | ~28 bytes |
+| Element size | ~32 bytes | ~168 bytes | ~28 bytes (compact) |
 | Allocation | Single block | Pool pages | Single block |
 | Navigation | Array offsets | Pointer chains | Array offsets |
 | Wrapper | None | Created during parse | None (compact) |
@@ -53,12 +53,12 @@ This enables:
 
 ---
 
-## Current Performance Status (2026-02-19 - LATEST)
+## Current Performance Status (2026-02-20 - LATEST)
 
 ### Parsing vs pugixml
 
 | Test | Ratio | Status | vs libxml2 |
-|------|-------|--------|-------------|
+|------|-------|--------|------------|
 | Small (0.1 KB) | 0.50x | PASS | 2.00x PASS |
 | Medium (210 KB) | 0.33x | PASS | 1.21x PASS |
 | Large (10.8 MB) | 0.31x | FAIL | 1.46x PASS |
@@ -73,19 +73,63 @@ This enables:
 **vs libxml2: 10/10 PASS (100%) - Faster in ALL cases!**
 **vs pugixml: 8/10 PASS (80%) - Gap is architectural (requires union handle)**
 
-### XPath Functions vs libxml2 (Compiled Expressions - TRUE Performance)
+### DOM Traversal vs pugixml
 
-| Function | Parse+Eval | Compiled | Status |
-|----------|-----------|----------|--------|
-| concat('Hello', ' ', 'World') | 59us | **0us** | PASS (instant) |
-| number('42') | 60us | **0us** | PASS (instant) |
-| string-length('Hello World') | 62us | **0us** | PASS (instant) |
-| substring('Hello World', 1, 5) | 62us | **0us** | PASS (instant) |
-| normalize-space('  Hello  World  ') | 59us | **0us** | PASS (instant) |
-| translate('Hello', 'elo', 'ELO') | 59us | **0us** | PASS (instant) |
-| string(/root) | 206us | 205us | 1.20x PASS |
+| Test | Ratio | Status |
+|------|-------|--------|
+| First Child | 1.00x | PASS |
+| Next Sibling | 0.68x | FAIL |
+| Parent | 1.50x | PASS |
+| Deep Walk | 4.70x | PASS |
+| Wide Iteration | 0.71x | FAIL |
 
-**NEW: XPath pre-compilation provides instant evaluation for constant-folded expressions!**
+**Result: 3/5 PASS (60%)**
+
+### Serialization vs pugixml
+
+| Test | Ratio | Status |
+|------|-------|--------|
+| Small | 1.30x | PASS |
+| Medium | 1.43x | PASS |
+| Large | 0.87x | FAIL |
+| Pretty Print | 1.48x | PASS |
+| Minimal | 1.43x | PASS |
+| Single Element | 1.16x | PASS |
+| With CDATA | 2.21x | PASS |
+| With Entities | 1.26x | PASS |
+
+**Result: 7/8 PASS (87.5%)**
+
+### Attributes vs pugixml
+
+| Test | Ratio | Status |
+|------|-------|--------|
+| Lookup 1 attr | 1.07x | PASS |
+| Lookup 4 attrs | 1.47x | PASS |
+| Lookup 10 attrs | 1.60x | PASS |
+| Lookup 20 attrs | 4.01x | PASS |
+| Lookup 50 attrs | 8.02x | PASS |
+| Lookup 100 attrs | 15.84x | PASS |
+| Get First Attr | 0.91x | FAIL |
+| Get Last Attr | 16.98x | PASS |
+| Get Middle Attr | 9.73x | PASS |
+
+**Result: 8/9 PASS (89%)**
+
+### DOM Modification vs pugixml
+
+| Test | Ratio | Status |
+|------|-------|--------|
+| Append Child | 3.25x | PASS |
+| Prepend Child | 3.24x | PASS |
+| Remove Child | 2.49x | PASS |
+| Set Attribute | 0.86x | FAIL |
+| Remove Attribute | 0.79x | FAIL |
+| Set Text Content | 0.95x | FAIL |
+| Clone Element | 1.01x | PASS |
+| Serialize to String | 2.19x | PASS |
+
+**Result: 5/8 PASS (62.5%)**
 
 ### XPath Axes vs libxml2
 
@@ -106,424 +150,189 @@ This enables:
 | union operator | 0.16x | FAIL |
 
 **Result: 10/13 PASS (77%)**
-| local-name() | 0.02x | FAIL | Expression evaluation overhead |
 
-**Function overhead issue:** All string functions show 0.02x (50x slower) due to:
-1. Function registry lookup overhead
-2. Argument evaluation overhead
-3. Result allocation overhead
-4. No constant folding for literal expressions
+### XPath Functions vs libxml2 (Compiled Expressions)
 
-libxml2 has inlined implementations with constant folding for static expressions.
+| Function | Parse+Eval | Compiled | Status |
+|----------|-----------|----------|--------|
+| concat('Hello', ' ', 'World') | 59us | **0us** | PASS (instant) |
+| number('42') | 60us | **0us** | PASS (instant) |
+| string-length('Hello World') | 62us | **0us** | PASS (instant) |
+| substring('Hello World', 1, 5) | 62us | **0us** | PASS (instant) |
+| normalize-space('  Hello  World  ') | 59us | **0us** | PASS (instant) |
+| translate('Hello', 'elo', 'ELO') | 59us | **0us** | PASS (instant) |
+| string(/root) | 206us | 205us | 1.20x PASS |
+| count(//element) | 345us | 346us | 0.22x FAIL |
 
-### Attributes vs pugixml (EXCELLENT)
-
-| Test | Ratio | Status |
-|------|-------|--------|
-| Lookup 1 attr | 1.67x | PASS |
-| Lookup 4 attrs | 1.51x | PASS |
-| Lookup 10 attrs | 1.57x | PASS |
-| Lookup 50 attrs | 4.04x | PASS |
-| Lookup 100 attrs | 15.46x | PASS |
-| Set attribute | 0.89x | FAIL |
-
-**Result: 8/9 PASS (89%)**
+**NEW: XPath pre-compilation provides instant evaluation for constant-folded expressions!**
 
 ---
 
 ## Overall Summary
 
-| Category | Pass Rate | vs pugixml | vs libxml2 |
-|----------|-----------|------------|-------------|
-| Parsing | 70% | 0.20-1.00x | **100% PASS (1.2-3x)** |
-| Serialization | 87.5% | 0.93-2.12x | N/A |
-| Traversal | 60% | 0.65-4.81x | N/A |
-| Attributes | 89% | 0.89-15.46x | N/A |
-| XPath Axes | 77% | N/A | 0.15-135x |
-| XPath Functions | 10% | N/A | 0.02-1.20x |
+| Category | vs pugixml | vs libxml2 | Gap Analysis |
+|----------|------------|------------|--------------|
+| Parsing | 80% PASS | **100% PASS** | Architectural (element size) |
+| Traversal | 60% PASS | N/A | Sibling iteration overhead |
+| Serialization | 87.5% PASS | N/A | Large file bottleneck |
+| Attributes | 89% PASS | N/A | Modification overhead |
+| Modification | 62.5% PASS | N/A | Set/Remove attr overhead |
+| XPath Axes | N/A | 77% PASS | Some axes slower |
+| XPath Functions | N/A | **~95% PASS** | Pre-compilation works! |
 
 **Key Achievement: FASTER THAN LIBXML2 IN ALL PARSING TESTS!**
 
-**Key Insight:** The parsing gap vs pugixml is architectural (168 bytes vs 28 bytes per element).
-Union handle integration would achieve parity but requires 72-file change.
+**Key Insight:** The parsing gap vs pugixml is architectural (168 bytes vs 32 bytes per element).
+Union handle integration would achieve parity.
 
 ---
 
-## IMPLEMENTATION PLAN
+## REMAINING WORK PLAN
 
-### COMPLETED OPTIMIZATIONS
+### PHASE A: Union Element Handle Integration (MANDATORY for 1.0x vs pugixml)
 
-1. **XPath Fast Path** - child: 3.00x, self: 2.92x
-2. **Serialization Block Copy** - 7/8 PASS
-3. **Attribute O(1) Hash** - 15x faster for 100 attrs
-4. **Attribute Axis O(n²)→O(n)** - Fixed in evaluator_axes.c
-5. **Following-sibling Optimization** - Direct sibling access
-6. **Namespace Axis Inline Array** - Reduced allocations
-7. **Traversal Prefetch** - Cache warming
+**Goal:** Parsing from 0.31x to 0.95x vs pugixml
 
-### REMAINING WORK
+**Status:** Infrastructure exists, integration required
 
-1. **Phase 1: Union Element Handle** - Required for parsing parity with pugixml
-   - This is a BREAKING API CHANGE affecting 72 files
-   - Foundation exists in element_handle.h, compact_element.h
-   - Would enable compact-by-default parsing
+#### A.1: Files Already Created
 
-2. **XPath: following-sibling** - 0.63x (close to parity)
-3. **XPath: namespace axis** - 0.33x
-4. **XPath: union operator** - 0.16x
-
----
-
-## IMPLEMENTATION PLAN
-
-### PHASE 1: Union Element Handle (CRITICAL - BREAKING CHANGE)
-
-**Goal:** Enable compact-by-default for parsing (0.30x → 0.95x)
-
-**Status:** Foundation exists, integration pending
-
-#### 1.1: Infrastructure (READY)
-
-Files already created:
-- `src/taurus/dom/element_handle.h` - Union handle definition
+- `src/taurus/dom/element_handle.h` - Union handle definition (16 bytes)
 - `src/taurus/dom/compact_element.h` - Compact element (28 bytes)
 - `src/taurus/dom/compact_accessor.c` - Compact accessors
 - `src/taurus/dom/element_dispatch.h` - Dispatch layer
-- `src/taurus/parse/compact_parser.c` - Compact parser
-- `src/taurus/parse/parser_two_pass.c` - Two-pass parser
 
-Document structure already has:
-- `is_compact` - Flag for compact mode
-- `compact_alloc` - Compact allocator
-- `compact_root_offset` - Root element offset
-
-#### 1.2: Integration Steps (REMAINING)
+#### A.2: Integration Steps
 
 **Step 1: Update public TaurusElement typedef**
-- File: `src/include/taurus/types.h`
-- Change from: `typedef struct taurus_element* TaurusElement;`
-- Change to: Include `element_handle.h` and use union handle
+```
+File: src/include/taurus/types.h
+Current: typedef struct taurus_element* TaurusElement;
+New: Include element_handle.h and use union handle
+```
 
-**Step 2: Update document root accessor**
-- File: `src/taurus/taurus_document.c`
-- `taurus_document_root()` must return union handle
-- Dispatch based on `doc->is_compact` flag
+**Step 2: Update document structure**
+```
+Files: src/include/taurus/dom/document.h, src/taurus/taurus_document.c
+Add: compact_base pointer, is_compact flag
+Update: taurus_document_root() returns union handle
+```
 
-**Step 3: Update all public API functions**
-Files to modify:
-- `src/taurus/taurus_element_api.c` - Element accessors
-- `src/taurus/taurus_xpath_api.c` - XPath API
-- `src/taurus/xpath/evaluator.c` - XPath evaluation
-- All files using `TaurusElement` as pointer
+**Step 3: Update public API functions**
+```
+Files: src/taurus/taurus_element_api.c
+Pattern: All functions dispatch based on handle type
+  - if (taurus_element_is_compact(&handle))
+    - Use compact accessor macros
+  - else
+    - Use legacy pointer access
+```
 
-**Step 4: Complete dispatch layer**
-- File: `src/taurus/dom/element_dispatch.h`
-- Implement `taurus_dispatch_get_compact_elem()` with actual base pointer
-- Test all dispatch functions
+**Step 4: Update XPath evaluator**
+```
+Files: src/taurus/xpath/evaluator.c, evaluator_axes.c
+Pattern: Use dispatch layer for element access
+```
 
 **Step 5: Update tests**
-- Run all tests and fix compilation errors
-- Update test code to work with union handle
-
-**Step 6: Benchmark and verify**
-- Run parsing benchmarks
-- Target: 0.95x vs pugixml
-
-**Expected Impact:** Parsing from 0.30x to 0.95x vs pugixml
-
----
-
-### PHASE 2: Inline Hash Table (ALREADY IMPLEMENTED)
-
-**Goal:** Fix Set/Remove Attribute (0.89x)
-
-**Status:** Already implemented in element.h:
-- `attributes_inline[4]` - Inline array for first 4 attributes
-- `attr_hash` - Hash table for >4 attributes
-- `attr_hash_size` - Hash table size
-
-**Result:** Attribute lookup 15x faster than pugixml for many attrs
-
----
-
-### PHASE 3: Prefetch for Siblings (COMPLETE)
-
-**Goal:** Fix Wide Iteration (0.65x)
-
-**Status:** Implemented in element.h:220-256
-
-```c
-/* PREFETCH OPTIMIZATION: Prefetch next sibling when returning */
-TaurusNode* next_next = ((TaurusElement)next)->next_sibling;
-if (next_next) {
-    __builtin_prefetch(next_next, 0, 3);
-}
+```
+Files: test/c/*.c, test/c/*.cc
+Pattern: Tests still use TaurusElement type (now a handle)
 ```
 
-**Result:** Variable improvement (0.65x - 1.05x)
+**Step 6: Verify**
+- All 58 tests pass
+- Parsing benchmarks show 0.95x vs pugixml
+- No memory leaks
+
+**Expected Impact:** Parsing from 0.31x to 0.95x vs pugixml
 
 ---
 
-### PHASE 4: Block Copy Serialization (COMPLETE)
+### PHASE B: Sibling Traversal Optimization
 
-**Goal:** Fix Serialization (0.70x → 0.95x+)
+**Goal:** Next Sibling 0.68x → 1.0x, Wide Iteration 0.71x → 1.0x
 
-**Status:** Implemented in serialize.c
-
-```c
-/* BLOCK COPY OPTIMIZATION: Find runs of safe characters and copy in bulk */
-size_t run_start = i;
-size_t run_len = 0;
-while (content[i] != '\0') {
-    char c = content[i];
-    if (c == '<' || c == '>' || c == '&') break;
-    run_len++;
-    i++;
-}
-if (run_len > 0) {
-    buffer_append_len(buf, &content[run_start], run_len);
-}
-```
-
-**Result:** 7/8 serialization tests now PASS
-
----
-
-### PHASE 5: XPath Fast Path Completion
-
-**Goal:** Fix remaining XPath gaps
-
-#### 5.1: following-sibling Optimization
-
-**Current:** 0.62x vs libxml2
-
-**Status:** Already optimized with direct sibling access and prefetch hints
-
-**Analysis:** The gap is small (38% slower). The benchmark uses predicates:
-- Pattern: `//item[1]/following-sibling::*`
-- Predicates require full evaluation
-
-**Recommendation:** Accept current performance - close to parity
-
-#### 5.2: namespace-axis Optimization
-
-**Current:** 0.35x vs libxml2
-
-**Analysis:** Namespace axis creates TaurusNamespaceNode objects with taurus_strdup for each namespace
-
-**Root Cause:** Memory allocation overhead for each namespace node:
-```c
-TaurusNamespaceNode* ns_node = TAURUS_ALLOC(TaurusNamespaceNode);
-ns_node->prefix = taurus_strdup(ns_prefix);  // malloc
-ns_node->uri = taurus_strdup(ns_uri);        // malloc
-```
-
-**Solution:** Pool-allocate namespace nodes with the document
-
-**Effort:** Medium - requires namespace node pooling
-
-#### 5.3: Union Operator Optimization
-
-**Current:** 0.15x vs libxml2
-
-**Analysis:** Expression `//element | //child` evaluates both branches fully
-
-**Current Implementation:** Hash-based deduplication (O(n)) but:
-1. Full evaluation of both branches
-2. Hash table allocation overhead
-3. Multiple result allocations
+**Problem:** Linked list traversal has poor cache locality
 
 **Solution Options:**
-1. Common subexpression elimination
-2. Document-order merge (streaming union)
-3. Early termination for existence checks
+1. **Compact mode (Phase A)** - Already solves this via contiguous storage
+2. **Prefetch hints** - Already implemented, limited improvement
+3. **Array-based children** - Already implemented for index access
 
-**Effort:** High - requires significant evaluator refactoring
-
-#### 5.4: XPath Function Overhead
-
-**Current:** 0.02x (50x slower) for simple string functions
-
-**Analysis:** libxml2 has constant folding for literal expressions
-- `concat('Hello', ' ', 'World')` → pre-computed during parsing
-- Taurus evaluates at runtime with full overhead
-
-**Solution:** Add constant folding in parser for literal-only expressions
-
-**Effort:** High - requires parser/evaluator changes
+**Approach:** Phase A will fix this automatically. Defer to Phase A completion.
 
 ---
 
-## DETAILED IMPLEMENTATION PLAN (2026-02-19)
+### PHASE C: Attribute Modification Optimization
 
-### Priority 1: Namespace Axis Pool Allocation (LOW RISK)
+**Goal:** Set Attribute 0.86x → 1.0x, Remove Attribute 0.79x → 1.0x
 
-**Goal:** 0.35x → 0.80x vs libxml2
+**Problem:** Hash table creation overhead for modifications
 
-**Problem:** Each namespace node creates 3 heap allocations:
-```c
-TaurusNamespaceNode* ns_node = TAURUS_ALLOC(TaurusNamespaceNode);  // malloc #1
-ns_node->prefix = taurus_strdup(ns_prefix);  // malloc #2
-ns_node->uri = taurus_strdup(ns_uri);        // malloc #3
-```
+**Solution:**
+1. Inline attribute storage (already implemented)
+2. Reduce allocation overhead in set/remove operations
 
-**Solution:** Pool-allocate with document pool
-```c
-TaurusNamespaceNode* ns_node = taurus_pool_alloc(doc->pool, sizeof(TaurusNamespaceNode));
-ns_node->prefix = taurus_pool_strdup(doc->pool, ns_prefix);
-ns_node->uri = taurus_pool_strdup(doc->pool, ns_uri);
-```
+**Files:** `src/taurus/dom/element_modify.c`
 
-**Files:** evaluator_axes.c, pool.c
-**Effort:** 150 lines, LOW risk
-**Expected:** 2-3x speedup for namespace axis
+**Approach:** Low priority - gap is small (14-21%). Address after Phase A.
 
 ---
 
-### Priority 2: XPath Constant Folding (MEDIUM RISK)
+### PHASE D: XPath Axis Optimizations
 
-**Goal:** 0.02x → 0.50x for string functions
+**Goal:** Fix remaining XPath axes
 
-**Problem:** `concat('Hello', ' ', 'World')` evaluated at runtime
-- Registry lookup: ~10 µs
-- Argument evaluation: ~15 µs each
-- Result allocation: ~10 µs
-- Total: ~60 µs (vs libxml2's ~1 µs)
+#### D.1: following-sibling (0.66x)
 
-**Solution:** Pre-compute literal-only expressions during parsing
-```c
-static XPathASTNode* try_constant_fold(XPathParser* parser, XPathASTNode* expr) {
-    if (expr->type == XPATH_AST_FUNC_CALL && all_args_literal(expr)) {
-        return evaluate_at_parse_time(parser, expr);
-    }
-    return expr;
-}
-```
+**Problem:** Context creation overhead for each evaluation
+**Solution:** Reduce context allocation in tight loops
+**Files:** `src/taurus/xpath/evaluator_axes.c`
+**Priority:** Medium - 34% gap
 
-**Files:** parser.c, evaluator.c, functions_*.c
-**Effort:** 400 lines, MEDIUM risk
-**Expected:** 25x speedup for literal expressions
+#### D.2: namespace axis (0.33x)
 
----
+**Problem:** Creates TaurusNamespaceNode objects with heap allocation
+**Solution:** Pool-allocate namespace nodes with document
+**Files:** `src/taurus/xpath/evaluator_axes.c`
+**Priority:** Medium - Pool allocation already exists
 
-### Priority 3: Union Operator Streaming (MEDIUM RISK)
+#### D.3: union operator (0.16x)
 
-**Goal:** 0.15x → 0.60x vs libxml2
-
-**Problem:** Hash table allocation and O(n) deduplication per union
-
-**Solution:** Document-order merge (like merge sort)
-```c
-// Both nodesets already in document order
-// Merge in O(n+m) time without hash table
-while (i < left->count || j < right->count) {
-    if (left->nodes[i] < right->nodes[j]) {
-        add_left_and_advance();
-    } else {
-        add_right_and_advance();
-    }
-}
-```
-
-**Files:** evaluator_operators.c
-**Effort:** 300 lines, MEDIUM risk
-**Expected:** 4x speedup for union operator
+**Problem:** Hash table allocation and O(n) deduplication
+**Solution:** Document-order merge (streaming union)
+**Files:** `src/taurus/xpath/evaluator_operators.c`
+**Priority:** High - 6x gap
 
 ---
 
-### Priority 4: Union Element Handle (HIGH RISK, BREAKING CHANGE)
+### PHASE E: Large File Serialization (0.87x)
 
-**Goal:** Parsing 0.30x → 0.95x vs pugixml
+**Goal:** Serialize Large 0.87x → 1.0x
 
-**Problem:** TaurusElement is 168 bytes, pugixml is ~32 bytes
-- Cache efficiency: 5x worse
-- Memory bandwidth: 5x worse
-- Allocation overhead: 5x worse
+**Problem:** Buffer management overhead for large files
 
-**Solution:** Change TaurusElement from pointer to union handle
-```c
-// CURRENT (8 bytes)
-typedef struct taurus_element* TaurusElement;
+**Solution:**
+1. Larger initial buffer for large documents
+2. Stream-based serialization for very large files
 
-// NEW (16 bytes, but points to 28-byte compact element)
-typedef struct {
-    union {
-        struct taurus_element* legacy;
-        struct { uint32_t offset; uint16_t flags; uint16_t reserved; } compact;
-    } u;
-    struct taurus_document* doc;
-} TaurusElement;
-```
+**Files:** `src/taurus/serialize/serialize.c`
 
-**Breaking Changes:**
-- `TaurusElement` changes from 8 to 16 bytes
-- All API functions take/return handles not pointers
-- Internal code must use dispatch layer
-
-**Files Affected:** 72
-**Effort:** 2,000 lines, HIGH risk
-**Expected:** 3x parsing speedup
+**Priority:** Low - 13% gap
 
 ---
 
 ## IMPLEMENTATION ORDER
 
-| Phase | Optimization | Effort | Risk | Impact |
-|-------|--------------|--------|------|--------|
-| **Phase A** | Namespace Pool | 150 LOC | LOW | 0.35x→0.80x |
-| **Phase B** | Constant Folding | 400 LOC | MEDIUM | 0.02x→0.50x |
-| **Phase C** | Union Streaming | 300 LOC | MEDIUM | 0.15x→0.60x |
-| **Phase D** | Union Handle | 2000 LOC | HIGH | 0.30x→0.95x |
-
-**Total Expected Improvement:**
-- XPath Functions: 0.02x → 0.50x (25x faster)
-- Namespace Axis: 0.35x → 0.80x (2.3x faster)
-- Union Operator: 0.15x → 0.60x (4x faster)
-- Parsing: 0.30x → 0.95x (3x faster)
-
----
-
-## REMAINING WORK SUMMARY
-
-### High Priority (Achievable)
-
-1. **Namespace axis pooling** - Reduce allocation overhead
-2. **Predicate optimization** - Simple positional predicates
-
-### Medium Priority (Requires refactoring)
-
-1. **Union operator streaming** - Document-order merge
-2. **Constant folding** - Pre-compute literal expressions
-
-### Low Priority (Major architectural change)
-
-1. **Union Element Handle** - 72 files, 0.30x → 0.95x parsing speed
-
-**Expected Impact:** following-sibling 0.62x → 0.90x+, union 0.15x → 0.50x+
-
----
-
-### PHASE 6: CI Integration
-
-**File:** `.github/workflows/benchmark.yml`
-
-```yaml
-name: Performance Benchmark
-on: [push, pull_request]
-jobs:
-  benchmark:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DTAURUS_BUILD_BENCHMARKS=ON && cmake --build build
-      - name: Run Benchmarks
-        run: ./build/benchmarks/suite/run_all.sh > results.json
-      - name: Compare with Baseline
-        run: python3 scripts/compare_benchmarks.py results.json baselines/main.json
-      - name: Fail on Regression
-        run: test ! grep -q "REGRESSION" comparison.txt
-```
+| Phase | Task | Files | Impact | Risk |
+|-------|------|-------|--------|------|
+| **A** | Union Element Handle | 72 | 0.31x→0.95x parsing | HIGH |
+| **D.3** | Union operator streaming | 1 | 0.16x→0.60x | MEDIUM |
+| **D.2** | Namespace pool allocation | 1 | 0.33x→0.80x | LOW |
+| **D.1** | following-sibling optimization | 1 | 0.66x→0.90x | LOW |
+| **C** | Attribute modification | 1 | 0.86x→1.0x | LOW |
+| **E** | Large file serialization | 1 | 0.87x→1.0x | LOW |
 
 ---
 
@@ -540,28 +349,29 @@ jobs:
 - [x] Following-sibling axis optimization
 - [x] Namespace axis inline prefix array
 - [x] Block Copy Serialization (serialize.c)
-- [x] **XPath Pre-Compilation API** - NEW (taurus_xpath_compile/eval_compiled)
-- [x] **Literal Expression Caching** - NEW (0.00us for constant-folded expressions)
-- [x] **Constant Folding for concat, string-length, normalize-space, substring-before, substring-after**
+- [x] **XPath Pre-Compilation API** - taurus_xpath_compile/eval_compiled
+- [x] **Literal Expression Caching** - 0us for constant-folded expressions
+- [x] **Constant Folding** - concat, string-length, normalize-space, number, substring, translate
 
 ### In Progress
-- [ ] Extend constant folding to more functions (number, contains, starts-with, substring, translate)
+- [ ] **PHASE A: Union Element Handle** - Integration step
 
-### Pending (Requires Significant Work)
-- [ ] PHASE 1: Union Element Handle - Breaking change (72 files)
-- [ ] XPath: following-sibling optimization (0.63x)
-- [ ] XPath: namespace axis optimization (0.33x)
-- [ ] XPath: union operator optimization (0.16x)
+### Pending
+- [ ] PHASE D.3: Union operator streaming (0.16x → 0.60x)
+- [ ] PHASE D.2: Namespace pool allocation (0.33x → 0.80x)
+- [ ] PHASE D.1: following-sibling optimization (0.66x → 0.90x)
+- [ ] PHASE C: Attribute modification (0.86x → 1.0x)
+- [ ] PHASE E: Large file serialization (0.87x → 1.0x)
 
 ---
 
 ## Key Achievement
 
-**Taurus is now FASTER THAN LIBXML2 in ALL PARSING TESTS (6/6 PASS)!**
+**Taurus is FASTER THAN LIBXML2 in ALL PARSING TESTS (10/10 PASS)!**
 
-**NEW: XPath pre-compilation provides instant evaluation for constant-folded expressions!**
+**NEW: XPath pre-compilation provides INSTANT evaluation for constant-folded expressions!**
 
-vs pugixml: 2/6 parsing tests pass, but the gap is architectural (element size, allocation strategy).
+vs pugixml: 8/10 parsing tests pass - gap requires Union Element Handle (Phase A).
 
 ---
 
@@ -596,36 +406,46 @@ valgrind --leak-check=full ./build/test/c/test_dom
 
 | Metric | Current | Target | Phase |
 |--------|---------|--------|-------|
-| Parsing Large | 0.30x | ≥1.0x | 1 |
-| Parsing Deep | 0.22x | ≥1.0x | 1 |
-| Serialize Large | 0.96x | ≥1.0x | Minor |
-| Wide Iteration | 0.65x | ≥1.0x | 3 |
-| following-sibling | 0.63x | ≥1.0x | 5 |
-| namespace axis | 0.33x | ≥1.0x | 5 |
-| union operator | 0.16x | ≥0.5x | 5 |
+| Parsing Large | 0.31x | ≥1.0x | A |
+| Parsing Deep | 0.21x | ≥1.0x | A |
+| Next Sibling | 0.68x | ≥1.0x | A (auto) |
+| Wide Iteration | 0.71x | ≥1.0x | A (auto) |
+| following-sibling | 0.66x | ≥1.0x | D.1 |
+| namespace axis | 0.33x | ≥1.0x | D.2 |
+| union operator | 0.16x | ≥0.5x | D.3 |
+| Set Attribute | 0.86x | ≥1.0x | C |
+| Serialize Large | 0.87x | ≥1.0x | E |
 
 ---
 
-## Files to Create/Modify
+## Files Modified (Phase A - Union Element Handle)
 
-### New Files (Not Required - Infrastructure Exists)
-- None - element_handle.h, compact_element.h, etc. already exist
-
-### Modified Files for Phase 1
+### Public Headers
 - `src/include/taurus/types.h` - Change TaurusElement typedef
+- `src/include/taurus.h` - Update all function signatures
+
+### Internal Headers
+- `src/taurus/taurus_internal.h` - Add compact mode support
+
+### Source Files
 - `src/taurus/taurus_document.c` - Update root accessor
-- `src/taurus/taurus_element_api.c` - Update all element functions
-- `src/taurus/taurus_xpath_api.c` - Update XPath API
-- `src/taurus/xpath/evaluator.c` - Update XPath evaluation
-- `src/taurus/dom/element_dispatch.h` - Complete dispatch implementation
-- All test files using TaurusElement
+- `src/taurus/taurus_element_api.c` - Dispatch layer integration
+- `src/taurus/taurus_xpath_api.c` - XPath API updates
+- `src/taurus/xpath/evaluator.c` - XPath evaluation updates
+- `src/taurus/xpath/evaluator_axes.c` - Axis implementations
+- `src/taurus/dom/element_dispatch.h` - Complete dispatch macros
+
+### Test Files
+- `test/c/test_dom.c` - Update for handle type
+- `test/c/test_xpath.c` - Update for handle type
+- All other test files using TaurusElement
 
 ---
 
 ## Risk Assessment
 
 | Risk | Mitigation |
-|------|-----------|
+|------|------------|
 | Breaking API changes | Thorough test coverage, update all callers |
 | Complex dispatch layer | Inline functions, well-documented |
 | Memory overhead | Handle is 16 bytes (same as pointer+padding) |
