@@ -115,6 +115,39 @@ TAURUS_API TaurusDocument taurus_parse_string_with_encoding(const char* xml, siz
 TAURUS_API TaurusDocument taurus_parse_string_compact(const char* xml, size_t length, int* error_out);
 
 /**
+ * Parse XML string with options (extended API)
+ *
+ * This is the extended version of taurus_parse_string() that accepts options
+ * for performance optimization. Use this when you need control over parsing
+ * behavior.
+ *
+ * @param xml XML string (must be valid UTF-8)
+ * @param length Length of XML string in bytes
+ * @param options Parsing options (NULL for defaults)
+ * @param status Output status code (can be NULL)
+ * @return Document handle or NULL on error
+ *
+ * Performance tips:
+ * - Use TAURUS_PARSE_NO_NAMESPACE_RESOLUTION for documents without namespace queries
+ * - Use TAURUS_PARSE_FAST for maximum speed on trusted input
+ *
+ * Memory: Caller must call taurus_document_free() when done
+ * Thread safety: Not thread-safe. One document per thread.
+ *
+ * Example:
+ * @code
+ * TaurusParseOptions options = {
+ *     .flags = TAURUS_PARSE_NO_NAMESPACE_RESOLUTION,
+ *     .strict = 0
+ * };
+ * TaurusDocument doc = taurus_parse_string_ex(xml, len, &options, NULL);
+ * @endcode
+ */
+TAURUS_API TaurusDocument taurus_parse_string_ex(const char* xml, size_t length,
+                                                   const TaurusParseOptions* options,
+                                                   TaurusStatus* status);
+
+/**
  * Load file into memory buffer
  *
  * Reads entire file into a newly allocated buffer. Caller must free the buffer.

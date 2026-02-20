@@ -16,7 +16,217 @@
 #include <ctype.h>
 
 /* Initial buffer capacity */
-#define INITIAL_BUFFER_CAPACITY 1024
+#define INITIAL_BUFFER_CAPACITY 4096  /* Increased from 1024 for better performance */
+
+/* Growth factor for buffer - use 1.5x instead of 2x for better memory efficiency */
+#define BUFFER_GROWTH_FACTOR_NUM 3
+#define BUFFER_GROWTH_FACTOR_DEN 2
+
+/* ============================================================================
+ * Size Calculation (Pass 1 of Two-Pass Serialization)
+ * ============================================================================
+ *
+ * These functions calculate the exact serialized size without allocating
+ * or writing anything. This enables pre-allocated buffer for large documents,
+ * eliminating realloc overhead.
+ */
+
+/* Calculate escaped length of a string (worst case: every char becomes &lt; etc) */
+static size_t calc_escaped_length(const char* str) {
+    if (!str) return 0;
+
+    size_t len = 0;
+    for (size_t i = 0; str[i] != '\0'; i++) {
+        switch (str[i]) {
+            case '<':  len += 4; break;  /* &lt; */
+            case '>':  len += 4; break;  /* &gt; */
+            case '&':  len += 5; break;  /* &amp; */
+            case '"':  len += 6; break;  /* &quot; */
+            case '\'': len += 6; break;  /* &apos; */
+            default:   len += 1; break;
+        }
+    }
+    return len;
+}
+
+/* Calculate text node serialized length (with entity detection) */
+static size_t calc_text_length(TaurusTextNode* text) {
+    if (!text || !text->content) return 0;
+
+    const char* content = text->content;
+    size_t len = 0;
+
+    for (size_t i = 0; content[i] != '\0'; i++) {
+        if (content[i] == '&') {
+            /* Look ahead for entity reference */
+            size_t j = i + 1;
+            int found_semicolon = 0;
+            while (content[j] && j < i + 12) {
+                if (content[j] == ';') {
+                    found_semicolon = 1;
+                    break;
+                }
+                if (!isalnum((unsigned char)content[j]) && content[j] != '#' && content[j] != '-') {
+                    break;
+                }
+                j++;
+            }
+
+            if (found_semicolon && j > i + 1) {
+                len += j - i + 1;  /* Entity reference as-is */
+                i = j;
+            } else {
+                len += 5;  /* &amp; */
+            }
+        } else if (content[i] == '<') {
+            len += 4;  /* &lt; */
+        } else if (content[i] == '>') {
+            len += 4;  /* &gt; */
+        } else {
+            len += 1;
+        }
+    }
+    return len;
+}
+
+/* Forward declaration for recursive size calculation */
+static size_t calc_element_size(TaurusElement elem, int indent_spaces, int indent_level, int is_root);
+
+/* Calculate node serialized size */
+static size_t calc_node_size(TaurusNode* node, int indent_spaces, int indent_level) {
+    if (!node) return 0;
+
+    switch (node->type) {
+        case TAURUS_NODE_TYPE_ELEMENT:
+            return calc_element_size((TaurusElement)node, indent_spaces, indent_level, 0);
+
+        case TAURUS_NODE_TYPE_TEXT:
+            return calc_text_length((TaurusTextNode*)node);
+
+        case TAURUS_NODE_TYPE_COMMENT: {
+            TaurusCommentNode* comment = (TaurusCommentNode*)node;
+            return 4 + (comment->content ? strlen(comment->content) : 0) + 3;  /* <!-- --> */
+        }
+
+        case TAURUS_NODE_TYPE_CDATA: {
+            TaurusCDATANode* cdata = (TaurusCDATANode*)node;
+            return 9 + (cdata->content ? strlen(cdata->content) : 0) + 3;  /* <![CDATA[]]> */
+        }
+
+        case TAURUS_NODE_TYPE_PI: {
+            TaurusPINode* pi = (TaurusPINode*)node;
+            size_t len = 2 + (pi->target ? strlen(pi->target) : 0);  /* <?target */
+            if (pi->data && pi->data[0]) {
+                len += 1 + strlen(pi->data);  /* data */
+            }
+            return len + 2;  /* ?> */
+        }
+
+        case TAURUS_NODE_TYPE_DOCTYPE: {
+            TaurusDoctypeNode* doctype = (TaurusDoctypeNode*)node;
+            size_t len = 10 + (doctype->name ? strlen(doctype->name) : 0);  /* <!DOCTYPE name */
+            if (doctype->public_id) {
+                len += 9 + strlen(doctype->public_id);  /* PUBLIC "..." */
+                if (doctype->system_id) {
+                    len += 3 + strlen(doctype->system_id);  /* "..." */
+                }
+            } else if (doctype->system_id) {
+                len += 9 + strlen(doctype->system_id);  /* SYSTEM "..." */
+            }
+            if (doctype->internal_subset) {
+                len += 2 + strlen(doctype->internal_subset);  /* [...] */
+            }
+            return len + 1;  /* > */
+        }
+
+        default:
+            return 0;
+    }
+}
+
+/* Calculate element serialized size */
+static size_t calc_element_size(TaurusElement elem, int indent_spaces, int indent_level, int is_root) {
+    if (!elem) return 0;
+
+    size_t size = 0;
+
+    /* Indentation before opening tag */
+    if (!is_root && indent_spaces > 0) {
+        size += (size_t)(indent_level * indent_spaces);
+    }
+
+    /* Opening tag: <name */
+    size += 1 + (elem->name ? strlen(elem->name) : elem->name_view.length);
+
+    /* Attributes */
+    for (struct taurus_attribute* attr = elem->first_attribute; attr != NULL; attr = attr->next) {
+        if (!attr || !attr->name) continue;
+        size += 1;  /* space */
+        size += strlen(attr->name);
+        size += 2;  /* =" */
+        size += calc_escaped_length(attr->value ? attr->value : "");
+        size += 1;  /* " */
+    }
+
+    /* Namespaces */
+    for (struct taurus_namespace* ns = elem->namespaces; ns != NULL; ns = ns->next) {
+        if (!ns) continue;
+        size += 1;  /* space */
+        size += 5;  /* xmlns */
+        if (ns->prefix) {
+            size += 1 + strlen(ns->prefix);  /* :prefix */
+        } else if (!taurus_sv_is_empty(&ns->prefix_view)) {
+            size += 1 + ns->prefix_view.length;
+        }
+        size += 2;  /* =" */
+        if (ns->uri) {
+            size += strlen(ns->uri);
+        } else if (!taurus_sv_is_empty(&ns->uri_view)) {
+            size += ns->uri_view.length;
+        }
+        size += 1;  /* " */
+    }
+
+    /* Children or self-closing */
+    if (elem->first_child) {
+        size += 1;  /* > */
+
+        /* Newline after opening tag if indenting */
+        if (indent_spaces > 0) {
+            size += 1;  /* \n */
+        }
+
+        /* Children */
+        TaurusNode* child = elem->first_child;
+        while (child) {
+            size += calc_node_size(child, indent_spaces, indent_level + 1);
+            child = taurus_node_get_next_sibling(child);
+        }
+
+        /* Indentation before closing tag */
+        if (indent_spaces > 0) {
+            size += (size_t)(indent_level * indent_spaces);
+        }
+
+        /* Closing tag: </name> */
+        size += 2 + (elem->name ? strlen(elem->name) : elem->name_view.length) + 1;
+
+        /* Newline after closing tag if not root */
+        if (!is_root && indent_spaces > 0) {
+            size += 1;  /* \n */
+        }
+    } else {
+        /* Self-closing: /> */
+        size += 2;
+
+        /* Newline after self-closing if not root */
+        if (!is_root && indent_spaces > 0) {
+            size += 1;  /* \n */
+        }
+    }
+
+    return size;
+}
 
 /* ============================================================================
  * Buffer Management
@@ -57,14 +267,16 @@ SerializeBuffer* buffer_create_with_options(int indent_spaces, IndentChar indent
 void buffer_ensure_capacity(SerializeBuffer* buf, size_t needed) {
     if (buf->size + needed < buf->capacity) return;
 
-    /* Double capacity until it's enough */
-    while (buf->size + needed >= buf->capacity) {
-        buf->capacity *= 2;
+    /* Use 1.5x growth factor (industry standard) instead of 2x */
+    size_t new_capacity = buf->capacity + buf->capacity / 2;
+    while (buf->size + needed >= new_capacity) {
+        new_capacity += new_capacity / 2;
     }
 
-    char* new_data = TAURUS_REALLOC_N(buf->data, char, buf->capacity);
+    char* new_data = TAURUS_REALLOC_N(buf->data, char, new_capacity);
     if (new_data) {
         buf->data = new_data;
+        buf->capacity = new_capacity;
     }
 }
 
@@ -162,25 +374,49 @@ void buffer_free(SerializeBuffer* buf) {
 static void buffer_append_escaped(SerializeBuffer* buf, const char* str) {
     if (!str) return;
 
-    for (size_t i = 0; str[i] != '\0'; i++) {
+    /* BLOCK COPY OPTIMIZATION: Copy runs of safe characters in bulk */
+    size_t i = 0;
+    while (str[i] != '\0') {
+        /* Find start of safe run */
+        size_t run_start = i;
+        size_t run_len = 0;
+
+        /* Scan for safe characters (no escaping needed) */
+        while (str[i] != '\0') {
+            char c = str[i];
+            if (c == '<' || c == '>' || c == '&' || c == '"' || c == '\'') {
+                break;
+            }
+            run_len++;
+            i++;
+        }
+
+        /* Copy the safe run in one block */
+        if (run_len > 0) {
+            buffer_append_len(buf, &str[run_start], run_len);
+        }
+
+        /* Handle special characters that need escaping */
         switch (str[i]) {
             case '<':
                 buffer_append(buf, "&lt;");
+                i++;
                 break;
             case '>':
                 buffer_append(buf, "&gt;");
+                i++;
                 break;
             case '&':
                 buffer_append(buf, "&amp;");
+                i++;
                 break;
             case '"':
                 buffer_append(buf, "&quot;");
+                i++;
                 break;
             case '\'':
                 buffer_append(buf, "&apos;");
-                break;
-            default:
-                buffer_append_char(buf, str[i]);
+                i++;
                 break;
         }
     }
@@ -199,8 +435,32 @@ void serialize_text_internal(TaurusTextNode* text, SerializeBuffer* buf) {
     if (!text || !text->content) return;
 
     const char* content = text->content;
-    for (size_t i = 0; content[i] != '\0'; i++) {
-        /* Check if this is start of entity reference */
+
+    /* BLOCK COPY OPTIMIZATION: Find runs of safe characters and copy in bulk
+     * This avoids per-character function call overhead for the common case
+     * where most text doesn't need escaping. */
+    size_t i = 0;
+    while (content[i] != '\0') {
+        /* Find start of run */
+        size_t run_start = i;
+        size_t run_len = 0;
+
+        /* Scan for safe characters (no escaping needed) */
+        while (content[i] != '\0') {
+            char c = content[i];
+            if (c == '<' || c == '>' || c == '&') {
+                break;
+            }
+            run_len++;
+            i++;
+        }
+
+        /* Copy the safe run in one block */
+        if (run_len > 0) {
+            buffer_append_len(buf, &content[run_start], run_len);
+        }
+
+        /* Handle special characters that need escaping */
         if (content[i] == '&') {
             /* Look ahead for ';' to detect entity reference */
             size_t j = i + 1;
@@ -222,33 +482,20 @@ void serialize_text_internal(TaurusTextNode* text, SerializeBuffer* buf) {
             if (found_semicolon && j > i + 1) {
                 /* It's an entity reference - output as-is */
                 buffer_append_len(buf, &content[i], j - i + 1);
-                i = j;
-                continue;
+                i = j + 1;
+            } else {
+                /* Not an entity reference - escape the bare & */
+                buffer_append(buf, "&amp;");
+                i++;
             }
-
-            /* Not an entity reference - escape the bare & */
-            buffer_append(buf, "&amp;");
-            continue;
+        } else if (content[i] == '<') {
+            buffer_append(buf, "&lt;");
+            i++;
+        } else if (content[i] == '>') {
+            buffer_append(buf, "&gt;");
+            i++;
         }
-
-        /* Normal escaping for other special characters */
-        switch (content[i]) {
-            case '<':
-                buffer_append(buf, "&lt;");
-                break;
-            case '>':
-                buffer_append(buf, "&gt;");
-                break;
-            /* Note: &quot; and &apos; are NOT escaped in text content
-             * (they're only escaped in attribute values) */
-            case '"':
-            case '\'':
-                buffer_append_char(buf, content[i]);
-                break;
-            default:
-                buffer_append_char(buf, content[i]);
-                break;
-        }
+        /* Note: &quot; and &apos; are NOT escaped in text content */
     }
 }
 
@@ -537,7 +784,7 @@ void serialize_node_internal(TaurusNode* node, SerializeBuffer* buf) {
 char* taurus_serialize_node(TaurusNode* node) {
     if (!node) return NULL;
 
-    SerializeBuffer* buf = buffer_create(0);  /* Compact mode */
+    SerializeBuffer* buf = buffer_create(0);
     if (!buf) return NULL;
 
     serialize_node_internal(node, buf);
@@ -551,10 +798,10 @@ char* taurus_serialize_node(TaurusNode* node) {
 char* taurus_serialize_element(TaurusElement elem) {
     if (!elem) return NULL;
 
-    SerializeBuffer* buf = buffer_create(0);  /* Compact mode */
+    SerializeBuffer* buf = buffer_create(0);
     if (!buf) return NULL;
 
-    serialize_element_internal(elem, buf, 1);  /* is_root=1 */
+    serialize_element_internal(elem, buf, 1);
 
     char* result = buffer_to_string(buf);
     buffer_free(buf);

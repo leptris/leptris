@@ -386,6 +386,195 @@ inline static int simd_streq(const char* s1, const char* s2, size_t len) {
 }
 
 /* ==================================================================
+ * SIMD XML SPECIAL CHARACTER SCANNING
+ * =================================================================
+ * Find first occurrence of '<', '>', or '&' in XML content.
+ * This is the CRITICAL hot path for content scanning.
+ * Returns pointer to first special char, or end if not found.
+ * Also returns which character was found via found_char parameter.
+ */
+inline static const char* simd_find_xml_special(const char* s, const char* end, char* found_char) {
+    const char* p = s;
+
+#if defined(TAURUS_SIMD_SSE2)
+    /* SSE2 path - scan for all three characters in parallel */
+    __m128i lt = _mm_set1_epi8('<');
+    __m128i gt = _mm_set1_epi8('>');
+    __m128i amp = _mm_set1_epi8('&');
+
+    while (p + SIMD_VEC_SIZE <= end) {
+        __m128i chunk = _mm_loadu_si128((__m128i*)p);
+
+        /* Check for all three characters at once */
+        __m128i is_lt = _mm_cmpeq_epi8(chunk, lt);
+        __m128i is_gt = _mm_cmpeq_epi8(chunk, gt);
+        __m128i is_amp = _mm_cmpeq_epi8(chunk, amp);
+
+        /* Combine: any match */
+        __m128i any_match = _mm_or_si128(_mm_or_si128(is_lt, is_gt), is_amp);
+
+        int mask = _mm_movemask_epi8(any_match);
+        if (mask != 0) {
+            /* Found at least one special character */
+            int pos = __builtin_ctz(mask);
+            if (found_char) *found_char = p[pos];
+            return p + pos;
+        }
+
+        p += SIMD_VEC_SIZE;
+    }
+
+#elif defined(TAURUS_SIMD_NEON)
+    /* NEON path - scan for all three characters in parallel */
+    uint8x16_t lt = vdupq_n_u8('<');
+    uint8x16_t gt = vdupq_n_u8('>');
+    uint8x16_t amp = vdupq_n_u8('&');
+
+    while (p + SIMD_VEC_SIZE <= end) {
+        uint8x16_t chunk = vld1q_u8((uint8_t*)p);
+
+        /* Check for all three characters at once */
+        uint8x16_t is_lt = vceqq_u8(chunk, lt);
+        uint8x16_t is_gt = vceqq_u8(chunk, gt);
+        uint8x16_t is_amp = vceqq_u8(chunk, amp);
+
+        /* Combine: any match */
+        uint8x16_t any_match = vorrq_u8(vorrq_u8(is_lt, is_gt), is_amp);
+
+        /* Check if we found anything */
+        uint64_t low = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 0);
+        uint64_t high = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 1);
+
+        if (low || high) {
+            /* Found - use scalar to find exact position */
+            while (p < end) {
+                if (*p == '<' || *p == '>' || *p == '&') {
+                    if (found_char) *found_char = *p;
+                    return p;
+                }
+                p++;
+            }
+            return end;
+        }
+
+        p += SIMD_VEC_SIZE;
+    }
+#endif
+
+    /* Scalar fallback for remaining bytes or unsupported platforms */
+    while (p < end) {
+        if (*p == '<' || *p == '>' || *p == '&') {
+            if (found_char) *found_char = *p;
+            return p;
+        }
+        p++;
+    }
+
+    if (found_char) *found_char = '\0';
+    return end;
+}
+
+/* ==================================================================
+ * SIMD TAG END SCANNING
+ * =================================================================
+ * Find first occurrence of '>' or '/>' to locate tag boundaries.
+ * Returns pointer to the character, or end if not found.
+ */
+inline static const char* simd_find_tag_end(const char* s, const char* end) {
+    const char* p = s;
+
+#if defined(TAURUS_SIMD_SSE2)
+    __m128i gt = _mm_set1_epi8('>');
+    __m128i slash = _mm_set1_epi8('/');
+
+    while (p + SIMD_VEC_SIZE <= end) {
+        __m128i chunk = _mm_loadu_si128((__m128i*)p);
+
+        __m128i is_gt = _mm_cmpeq_epi8(chunk, gt);
+        __m128i is_slash = _mm_cmpeq_epi8(chunk, slash);
+
+        __m128i any_match = _mm_or_si128(is_gt, is_slash);
+
+        int mask = _mm_movemask_epi8(any_match);
+        if (mask != 0) {
+            int pos = __builtin_ctz(mask);
+            return p + pos;
+        }
+
+        p += SIMD_VEC_SIZE;
+    }
+
+#elif defined(TAURUS_SIMD_NEON)
+    uint8x16_t gt = vdupq_n_u8('>');
+    uint8x16_t slash = vdupq_n_u8('/');
+
+    while (p + SIMD_VEC_SIZE <= end) {
+        uint8x16_t chunk = vld1q_u8((uint8_t*)p);
+
+        uint8x16_t is_gt = vceqq_u8(chunk, gt);
+        uint8x16_t is_slash = vceqq_u8(chunk, slash);
+
+        uint8x16_t any_match = vorrq_u8(is_gt, is_slash);
+
+        uint64_t low = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 0);
+        uint64_t high = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 1);
+
+        if (low || high) {
+            while (p < end) {
+                if (*p == '>' || *p == '/') return p;
+                p++;
+            }
+            return end;
+        }
+
+        p += SIMD_VEC_SIZE;
+    }
+#endif
+
+    /* Scalar fallback */
+    while (p < end && *p != '>' && *p != '/') {
+        p++;
+    }
+
+    return p;
+}
+
+/* ==================================================================
+ * SIMD ATTRIBUTE VALUE SCANNING
+ * =================================================================
+ * Find end of quoted attribute value, handling escaped quotes.
+ * Returns pointer to closing quote, or end if not found.
+ */
+inline static const char* simd_find_quote_end(const char* s, const char* end, char quote) {
+    const char* p = s;
+
+#if defined(TAURUS_SIMD_SSE2)
+    __m128i quote_vec = _mm_set1_epi8(quote);
+
+    while (p + SIMD_VEC_SIZE <= end) {
+        __m128i chunk = _mm_loadu_si128((__m128i*)p);
+
+        __m128i is_quote = _mm_cmpeq_epi8(chunk, quote_vec);
+
+        int mask = _mm_movemask_epi8(is_quote);
+        if (mask != 0) {
+            int pos = __builtin_ctz(mask);
+            return p + pos;
+        }
+
+        p += SIMD_VEC_SIZE;
+    }
+#endif
+
+    /* Scalar fallback - simple scan for quote (entities are handled elsewhere) */
+    while (p < end && *p != quote) {
+        p++;
+    }
+
+    return p;
+}
+
+/* ==================================================================
  * SIMD FIRST CHARACTER SCANNING
  * =================================================================
  * Find first occurrence of character using SIMD.

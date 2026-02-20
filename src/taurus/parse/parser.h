@@ -55,6 +55,10 @@ typedef struct {
 
     /* Per-document strict mode (thread-safe, no global state) */
     int strict_mode;             /* 1=strict XML 1.0, 0=lenient (pugixml compat) */
+
+    /* PERFORMANCE: Skip namespace resolution for faster parsing
+     * When set, namespaces are still parsed but URIs are not resolved */
+    int skip_namespace_resolution;  /* 1=skip namespace resolution, 0=resolve (default) */
 } Parser;
 
 /* ============================================================================
@@ -72,6 +76,10 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool);
 
 /* Create parser with in-place optimization and strict mode */
 Parser* parser_create_writable_with_options(char* xml, size_t len, TaurusMemoryPool* pool, int strict_mode);
+
+/* Create parser with full parse options (for taurus_parse_string_ex) */
+Parser* parser_create_with_parse_options(const char* xml, size_t len, TaurusMemoryPool* pool,
+                                         int strict_mode, int skip_namespace_resolution);
 
 /* Free parser state */
 void parser_free(Parser* p);

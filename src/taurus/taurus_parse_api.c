@@ -20,6 +20,8 @@ typedef struct Parser Parser;
 extern Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool);
 extern Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool);
 extern Parser* parser_create_writable_with_options(char* xml, size_t len, TaurusMemoryPool* pool, int strict_mode);
+extern Parser* parser_create_with_parse_options(const char* xml, size_t len, TaurusMemoryPool* pool,
+                                                 int strict_mode, int skip_namespace_resolution);
 extern void parser_free(Parser* p);
 extern TaurusElement parser_parse_document(Parser* p);
 extern int parser_has_error(Parser* p);
@@ -32,6 +34,12 @@ extern TaurusDoctypeNode* parser_get_doctype(Parser* p);
 extern TaurusDoctypeNode* parser_transfer_doctype(Parser* p);
 extern struct taurus_processing_instruction* parser_get_pi_list(Parser* p);
 extern void taurus_doctype_free(TaurusDoctypeNode* doctype);
+
+/* Forward declaration for two-pass compact parser */
+extern struct taurus_document* taurus_parse_two_pass(const char* xml, size_t len, int* error_out);
+
+/* Threshold for using compact two-pass parser (documents >= 4KB) */
+#define TAURUS_COMPACT_PARSE_THRESHOLD 4096
 
 /* ============================================================================
  * Parse Options
@@ -53,13 +61,35 @@ TAURUS_API void taurus_parse_options_init(taurus_parse_options* opts) {
  * ============================================================================ */
 
 /**
- * Parse XML string into document (internal implementation)
+ * Parse XML string into document with options (internal implementation)
  *
  * PERFORMANCE: Uses in-place parsing to avoid buffer copy.
  * The buffer is stored in the document and freed when document is freed.
+ *
+ * @param xml XML string to parse
+ * @param len Length of XML string
+ * @param strict_mode 1 for strict parsing, 0 for lenient
+ * @param skip_namespace_resolution 1 to skip namespace resolution for faster parsing
  */
-TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
+static struct taurus_document* taurus_parse_internal(const char* xml, size_t len,
+                                                     int strict_mode, int skip_namespace_resolution) {
     if (!xml || len == 0) return NULL;
+
+    /* PERFORMANCE: For documents >= 4KB, try two-pass compact parser first
+     * This can be 2-5x faster due to single-block allocation and string interning.
+     * Falls back to legacy parser on any error. */
+    #define TAURUS_COMPACT_THRESHOLD 4096
+    if (len >= TAURUS_COMPACT_THRESHOLD && !skip_namespace_resolution) {
+        /* Two-pass parser currently doesn't support all features (no full namespace,
+         * no text nodes, etc.) - only use for basic documents.
+         * TODO: Enable when compact parser is feature-complete. */
+        /* int error = 0;
+        struct taurus_document* compact_doc = taurus_parse_two_pass(xml, len, &error);
+        if (compact_doc) {
+            return compact_doc;
+        }
+        // Fall through to legacy parser on error */
+    }
 
     /* PERFORMANCE: Use heap allocation for XML buffer
      * The buffer must live as long as the document because StringViews point into it.
@@ -120,9 +150,8 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
     doc->page_base = taurus_pool_get_base(pool);  /* Set page_base for compact pointer decoding */
     doc->ref_count = 1;
 
-    /* Copy global strict mode to document for thread-safe per-document settings */
-    extern int taurus_get_strict_mode(void);
-    doc->strict_mode = taurus_get_strict_mode();
+    /* Use provided strict mode */
+    doc->strict_mode = strict_mode;
 
     /* Store the copied XML buffer - StringViews point into this
      * IMPORTANT: The buffer is heap-allocated and must be freed when document is destroyed */
@@ -139,7 +168,8 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
     /* PERFORMANCE: Use writable parser since we own the buffer
      * This allows in-place modifications for null termination
      * Pass document's strict mode for per-document concurrency */
-    Parser* p = parser_create_writable_with_options(xml_copy, len, pool, doc->strict_mode);
+    Parser* p = parser_create_with_parse_options(xml_copy, len, pool,
+                                                  doc->strict_mode, skip_namespace_resolution);
     if (!p) {
         taurus_compact_set_current_document(NULL);  /* Clear current document */
         taurus_pool_destroy(pool);
@@ -221,6 +251,17 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
     taurus_compact_set_current_document(NULL);
 
     return doc;
+}
+
+/**
+ * Parse XML string into document (Internal wrapper with defaults)
+ *
+ * Uses global strict mode and enables namespace resolution by default.
+ */
+struct taurus_document* taurus_parse(const char* xml, size_t len) {
+    extern int taurus_get_strict_mode(void);
+    int strict_mode = taurus_get_strict_mode();
+    return taurus_parse_internal(xml, len, strict_mode, 0);  /* namespace resolution enabled */
 }
 
 /**
@@ -535,7 +576,140 @@ TAURUS_API TaurusDocument taurus_parse_string_with_encoding(const char* xml, siz
 }
 
 /**
- * Parse XML with custom options
+ * Parse XML string with options (extended API)
+ *
+ * This is the extended version of taurus_parse_string() that accepts options
+ * for performance optimization. Use this when you need control over parsing
+ * behavior.
+ *
+ * Performance tips:
+ * - Use TAURUS_PARSE_NO_NAMESPACE_RESOLUTION for documents without namespace queries
+ * - Use TAURUS_PARSE_FAST for maximum speed on trusted input
+ */
+TAURUS_API TaurusDocument taurus_parse_string_ex(const char* xml, size_t length,
+                                                   const TaurusParseOptions* options,
+                                                   TaurusStatus* status) {
+    if (status) *status = TAURUS_OK;
+
+    if (!xml || length == 0) {
+        if (status) *status = TAURUS_ERROR_NULL_ARG;
+        return NULL;
+    }
+
+    /* Extract options */
+    int strict_mode = options ? options->strict : 0;
+    int skip_namespace = 0;
+
+    if (options) {
+        if (options->flags & TAURUS_PARSE_NO_NAMESPACE_RESOLUTION) {
+            skip_namespace = 1;
+        }
+    }
+
+    /* Handle encoding detection/conversion first */
+    const unsigned char* data = (const unsigned char*)xml;
+    utf16_bom_t bom = utf16_detect_bom(data, length);
+
+    if (bom == UTF16_BOM_LE || bom == UTF16_BOM_BE) {
+        /* UTF-16 with BOM - convert to UTF-8 */
+        utf16_encoding_t encoding = (bom == UTF16_BOM_LE) ? UTF16_LE : UTF16_BE;
+
+        size_t utf8_size = utf16_to_utf8_size(data, length, encoding);
+        char* utf8_buffer = (char*)malloc(utf8_size);
+        if (!utf8_buffer) {
+            if (status) *status = TAURUS_ERROR_MEMORY_ALLOCATION;
+            return NULL;
+        }
+
+        size_t utf8_len = utf16_to_utf8(data, length, utf8_buffer, utf8_size, encoding);
+        utf8_buffer[utf8_len] = '\0';
+
+        struct taurus_document* doc = taurus_parse_internal(utf8_buffer, utf8_len,
+                                                             strict_mode, skip_namespace);
+
+        if (doc) {
+            doc->xml_buffer = utf8_buffer;
+            doc->xml_buffer_len = utf8_len;
+            doc->xml_buffer_needs_free = 1;
+
+            if (doc->encoding) {
+                TAURUS_FREE(doc->encoding);
+            }
+            doc->encoding = taurus_strdup((encoding == UTF16_LE) ? "UTF-16LE" : "UTF-16BE");
+        } else {
+            free(utf8_buffer);
+        }
+
+        if (!doc && status) {
+            *status = TAURUS_ERROR_PARSE;
+        }
+
+        return doc;
+    }
+
+#ifdef TAURUS_HAS_ICONV
+    /* Include encoding support for other encodings */
+    #include "encoding/encoding.h"
+
+    /* Auto-detect and convert to UTF-8 */
+    size_t utf8_len = 0;
+    char* detected_encoding = NULL;
+    char* utf8_xml = taurus_encoding_auto_convert(xml, length, &utf8_len, &detected_encoding);
+
+    if (!utf8_xml) {
+        if (status) *status = TAURUS_ERROR_PARSE;
+        if (detected_encoding) free(detected_encoding);
+        return NULL;
+    }
+
+    struct taurus_document* doc = taurus_parse_internal(utf8_xml, utf8_len,
+                                                         strict_mode, skip_namespace);
+
+    if (doc && detected_encoding) {
+        if (doc->encoding) {
+            TAURUS_FREE(doc->encoding);
+        }
+        doc->encoding = taurus_strdup(detected_encoding);
+    }
+
+    if (doc && utf8_xml != xml) {
+        doc->xml_buffer = utf8_xml;
+        doc->xml_buffer_len = utf8_len;
+        doc->xml_buffer_needs_free = 1;
+    } else if (utf8_xml != xml) {
+        free(utf8_xml);
+    }
+
+    if (detected_encoding) {
+        free(detected_encoding);
+    }
+
+    if (!doc && status) {
+        *status = TAURUS_ERROR_PARSE;
+    }
+
+    return doc;
+#else
+    /* No iconv support - fall back to regular parsing (assumes UTF-8) */
+    struct taurus_document* doc = taurus_parse_internal(xml, length,
+                                                         strict_mode, skip_namespace);
+
+    if (!doc && status) {
+        *status = TAURUS_ERROR_PARSE;
+    }
+
+    return doc;
+#endif
+}
+
+/**
+ * Parse XML with custom options (legacy API)
+ *
+ * Uses the older taurus_parse_options structure with strict, preserve_whitespace,
+ * and track_positions fields.
+ *
+ * Note: For new code, prefer taurus_parse_string_ex() with TaurusParseOptions
+ * which supports additional performance flags like TAURUS_PARSE_NO_NAMESPACE_RESOLUTION.
  */
 TAURUS_API struct taurus_document* taurus_parse_with_options(
     const char* xml,
@@ -544,8 +718,8 @@ TAURUS_API struct taurus_document* taurus_parse_with_options(
 ) {
     if (!xml || len == 0) return NULL;
 
-    /* For now, ignore options and use new parser
-     * TODO: Implement options support in parser */
-    (void)opts; /* Suppress unused parameter warning */
-    return taurus_parse(xml, len);
+    int strict_mode = opts ? opts->strict : 0;
+    /* preserve_whitespace and track_positions not yet implemented */
+
+    return taurus_parse_internal(xml, len, strict_mode, 0);  /* namespace resolution enabled */
 }

@@ -12,6 +12,7 @@
 #include "dtd/model.h"
 #include "serialize/serialize.h"
 #include "common/entities.h"
+#include "memory/compact_single_alloc.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -94,6 +95,13 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         taurus_compact_cleanup_document(doc);
     }
 
+    /* Compact mode: Free single compact block instead of pool pages */
+    if (doc->is_compact && doc->compact_alloc) {
+        compact_single_alloc_destroy((CompactSingleAllocator*)doc->compact_alloc);
+        doc->compact_alloc = NULL;
+        /* Pool may still exist for wrapper element - destroy it too */
+    }
+
     /* Destroy memory pool (frees all DOM nodes allocated from it) */
     if (doc->pool) {
         taurus_pool_destroy(doc->pool);
@@ -144,6 +152,29 @@ TAURUS_API void taurus_document_set_strict(struct taurus_document* doc, int stri
  */
 TAURUS_API int taurus_document_get_strict(struct taurus_document* doc) {
     return doc ? doc->strict_mode : 0;
+}
+
+/**
+ * Get compact base pointer for compact element resolution
+ *
+ * @param doc Document to get compact base for
+ * @return Compact base pointer, or NULL if not in compact mode
+ */
+void* taurus_document_get_compact_base(struct taurus_document* doc) {
+    if (!doc) return NULL;
+    return doc->compact_base;
+}
+
+/**
+ * Set compact base pointer for compact element resolution
+ *
+ * @param doc Document to set compact base for
+ * @param base Compact base pointer
+ */
+void taurus_document_set_compact_base(struct taurus_document* doc, void* base) {
+    if (doc) {
+        doc->compact_base = base;
+    }
 }
 
 /**

@@ -13,6 +13,7 @@
 
 #include "element.h"
 #include "compact.h"
+#include "compact_element.h"  /* For COMPACT_PTR_TO_OFFSET macro */
 #include "text.h"
 #include "comment.h"
 #include "cdata.h"
@@ -123,29 +124,199 @@ void taurus_element_free(TaurusElement elem) {
  * Regular Pointer Access Functions (no page_base calculation!)
  * ============================================================================ */
 
-/* Set parent pointer */
+/* Set parent pointer (and offset for compact mode) */
 void taurus_element_set_parent(TaurusElement elem, TaurusElement parent) {
     if (!elem) return;
     elem->parent = parent;
+
+    /* COMPACT MODE: Also set offset field */
+    if (TAURUS_ELEM_IS_COMPACT(elem) && parent) {
+        void* base = TAURUS_ELEM_COMPACT_BASE(elem);
+        elem->parent_offset = COMPACT_PTR_TO_OFFSET(base, parent);
+    } else {
+        elem->parent_offset = 0;
+    }
 }
 
 void taurus_element_set_first_child(TaurusElement elem, TaurusElement child) {
     if (!elem) return;
-    elem->first_child = child;
+    elem->first_child = (TaurusNode*)child;
+
+    /* COMPACT MODE: Also set offset field */
+    if (TAURUS_ELEM_IS_COMPACT(elem) && child) {
+        void* base = TAURUS_ELEM_COMPACT_BASE(elem);
+        elem->first_child_offset = COMPACT_PTR_TO_OFFSET(base, child);
+    } else {
+        elem->first_child_offset = 0;
+    }
 }
 
 void taurus_element_set_last_child(TaurusElement elem, TaurusElement child) {
     if (!elem) return;
-    elem->last_child = child;
+    elem->last_child = (TaurusNode*)child;
+
+    /* COMPACT MODE: Also set offset field */
+    if (TAURUS_ELEM_IS_COMPACT(elem) && child) {
+        void* base = TAURUS_ELEM_COMPACT_BASE(elem);
+        elem->last_child_offset = COMPACT_PTR_TO_OFFSET(base, child);
+    } else {
+        elem->last_child_offset = 0;
+    }
 }
 
 void taurus_element_set_next_sibling(TaurusElement elem, TaurusElement sibling) {
     if (!elem) return;
-    elem->next_sibling = sibling;
+    elem->next_sibling = (TaurusNode*)sibling;
+
+    /* COMPACT MODE: Also set offset field */
+    if (TAURUS_ELEM_IS_COMPACT(elem) && sibling) {
+        void* base = TAURUS_ELEM_COMPACT_BASE(elem);
+        elem->next_sibling_offset = COMPACT_PTR_TO_OFFSET(base, sibling);
+    } else {
+        elem->next_sibling_offset = 0;
+    }
 }
 
 /* ============================================================================
- * Attribute Access Functions (still uses compact pointers - cold path)
+ * Attribute Hash Table Functions (O(1) lookup)
+ * Exported for use by element_modify.c
+ * ============================================================================ */
+
+/* FNV-1a hash function for attribute names
+ * Fast, high-quality hash with excellent distribution */
+uint32_t attr_hash_name(const char* name, size_t len) {
+    uint32_t hash = 2166136261u;  /* FNV offset basis */
+    for (size_t i = 0; i < len; i++) {
+        hash ^= (uint8_t)name[i];
+        hash *= 16777619u;  /* FNV prime */
+    }
+    return hash;
+}
+
+/* Hash table size lookup table (powers of 2 for fast modulo) */
+static const uint8_t ATTR_HASH_SIZES[] = {0, 0, 0, 0, 0, 8, 16, 16, 32, 32, 64, 64, 64, 64, 128, 128};
+
+/* Create hash table for attribute lookup
+ * Called when attr_count exceeds 4 */
+int create_attr_hash_table(TaurusElement elem, TaurusMemoryPool* pool) {
+    if (!elem || !pool) return -1;
+
+    /* Determine hash table size based on attribute count */
+    uint8_t size;
+    if (elem->attr_count < 16) {
+        size = ATTR_HASH_SIZES[elem->attr_count];
+    } else {
+        /* For >15 attributes, use next power of 2 */
+        size = 32;
+        while (size < elem->attr_count * 2 && size < 128) {
+            size *= 2;
+        }
+    }
+
+    if (size == 0) return -1;
+
+    /* Allocate hash table array (array of pointers to entries) */
+    size_t alloc_size = size * sizeof(struct taurus_attr_hash_entry*);
+    struct taurus_attr_hash_entry** table = (struct taurus_attr_hash_entry**)taurus_pool_alloc(pool, alloc_size);
+    if (!table) return -1;
+
+    /* Initialize all buckets to NULL */
+    memset(table, 0, alloc_size);
+
+    elem->attr_hash = table;
+    elem->attr_hash_size = size;
+
+    return 0;
+}
+
+/* Add attribute to hash table */
+int add_attr_to_hash(TaurusElement elem, struct taurus_attribute* attr, TaurusMemoryPool* pool) {
+    if (!elem || !attr || !elem->attr_hash) return -1;
+
+    /* Get attribute name for hashing */
+    const char* name = attr->name ? attr->name : attr->name_view.data;
+    size_t name_len = attr->name ? strlen(attr->name) : attr->name_view.length;
+    if (!name || name_len == 0) return -1;
+
+    /* Calculate hash and bucket index */
+    uint32_t hash = attr_hash_name(name, name_len);
+    uint32_t bucket = hash & (elem->attr_hash_size - 1);
+
+    /* Allocate hash entry */
+    struct taurus_attr_hash_entry* entry = (struct taurus_attr_hash_entry*)taurus_pool_alloc(
+        pool, sizeof(struct taurus_attr_hash_entry));
+    if (!entry) return -1;
+
+    /* Initialize entry and insert at head of bucket chain */
+    entry->attr = attr;
+    entry->next = elem->attr_hash[bucket];
+    elem->attr_hash[bucket] = entry;
+
+    return 0;
+}
+
+/* Remove attribute from hash table (O(1) average case)
+ * This is much faster than rebuilding the entire hash table */
+int remove_attr_from_hash(TaurusElement elem, const char* name) {
+    if (!elem || !name || !elem->attr_hash) return -1;
+
+    size_t name_len = strlen(name);
+    if (name_len == 0) return -1;
+
+    /* Calculate hash and bucket index */
+    uint32_t hash = attr_hash_name(name, name_len);
+    uint32_t bucket = hash & (elem->attr_hash_size - 1);
+
+    /* Walk the collision chain to find and remove the entry */
+    struct taurus_attr_hash_entry* entry = elem->attr_hash[bucket];
+    struct taurus_attr_hash_entry* prev = NULL;
+
+    while (entry) {
+        const char* entry_name = entry->attr->name ? entry->attr->name : entry->attr->name_view.data;
+        size_t entry_len = entry->attr->name ? strlen(entry->attr->name) : entry->attr->name_view.length;
+
+        if (entry_len == name_len && memcmp(entry_name, name, name_len) == 0) {
+            /* Found! Remove from chain */
+            if (prev) {
+                prev->next = entry->next;
+            } else {
+                /* Was head of chain */
+                elem->attr_hash[bucket] = entry->next;
+            }
+            /* Entry is pool-allocated, don't free it - just abandon it */
+            return 0;
+        }
+
+        prev = entry;
+        entry = entry->next;
+    }
+
+    return -1;  /* Not found in hash table */
+}
+
+/* Rebuild hash table after attribute addition (when growing past 4) */
+static int rebuild_attr_hash_table(TaurusElement elem, TaurusMemoryPool* pool) {
+    if (!elem || !pool) return -1;
+
+    /* Free old hash table by just abandoning it (pool-allocated)
+     * Then create new, larger hash table */
+    int result = create_attr_hash_table(elem, pool);
+    if (result != 0) return result;
+
+    /* Re-add all attributes to hash table */
+    struct taurus_attribute* attr = elem->first_attribute;
+    while (attr) {
+        if (add_attr_to_hash(elem, attr, pool) != 0) {
+            return -1;
+        }
+        attr = attr->next;
+    }
+
+    return 0;
+}
+
+/* ============================================================================
+ * Attribute Access Functions (O(1) with inline array + hash table)
  * ============================================================================ */
 
 /* Get first attribute from element - DIRECT POINTER ACCESS (no encoding!) */
@@ -168,42 +339,93 @@ uint8_t taurus_element_attribute_count(TaurusElement elem) {
     return elem->attr_count;
 }
 
-/* Get attribute by index */
+/* Get attribute by index - O(1) for first 4, O(n) for rest */
 struct taurus_attribute* taurus_element_get_attribute_by_index(TaurusElement elem, uint8_t index) {
     if (!elem || index >= elem->attr_count) return NULL;
 
-    /* Walk the linked list to find the attribute at index */
+    /* Fast path: inline array for first 4 attributes */
+    if (index < 4 && elem->attributes_inline[index]) {
+        return elem->attributes_inline[index];
+    }
+
+    /* Fallback: walk linked list for indices >= 4 */
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     for (uint8_t i = 0; i < index && attr; i++) {
-        /* Validate attr pointer before accessing next */
-        if ((uintptr_t)attr < 0x1000) return NULL;  /* Invalid pointer */
+        if ((uintptr_t)attr < 0x1000) return NULL;
         attr = attr->next;
     }
 
-    /* Final validation before returning */
     if ((uintptr_t)attr < 0x1000) return NULL;
-
     return attr;
 }
 
-/* Get attribute by name */
+/* Get attribute by name - O(1) with inline array + hash table! */
 struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem, const char* name) {
     if (!elem || !name) return NULL;
+    if (elem->attr_count == 0) return NULL;
 
-    /* Walk the attribute linked list */
-    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
-    while (attr) {
-        /* Compare with cached name first (faster) */
+    size_t name_len = strlen(name);
+
+    /* Fast path 1: Check inline array (O(1) for first 4 attributes) */
+    for (int i = 0; i < 4 && i < elem->attr_count; i++) {
+        struct taurus_attribute* attr = elem->attributes_inline[i];
+        if (!attr) continue;
+
+        /* Check cached name first (faster) */
         if (attr->name && strcmp(attr->name, name) == 0) {
             return attr;
         }
         /* Fall back to StringView comparison */
-        if (!taurus_sv_is_empty(&attr->name_view)) {
-            size_t name_len = strlen(name);
-            if (attr->name_view.length == name_len &&
+        if (!taurus_sv_is_empty(&attr->name_view) &&
+            attr->name_view.length == name_len &&
+            memcmp(attr->name_view.data, name, name_len) == 0) {
+            return attr;
+        }
+    }
+
+    /* Fast path 2: Use hash table if available (O(1) average case) */
+    if (elem->attr_hash && elem->attr_hash_size > 0) {
+        uint32_t hash = attr_hash_name(name, name_len);
+        uint32_t bucket = hash & (elem->attr_hash_size - 1);
+
+        struct taurus_attr_hash_entry* entry = elem->attr_hash[bucket];
+        while (entry) {
+            struct taurus_attribute* attr = entry->attr;
+            /* Check cached name first */
+            if (attr->name && strcmp(attr->name, name) == 0) {
+                return attr;
+            }
+            /* Fall back to StringView comparison */
+            if (!taurus_sv_is_empty(&attr->name_view) &&
+                attr->name_view.length == name_len &&
                 memcmp(attr->name_view.data, name, name_len) == 0) {
                 return attr;
             }
+            entry = entry->next;
+        }
+        return NULL;  /* Not found in hash table */
+    }
+
+    /* Slow path: walk linked list for remaining attributes (>4 without hash) */
+    struct taurus_attribute* attr = elem->first_attribute;
+    uint8_t skipped = 0;
+    while (attr) {
+        /* Skip first 4 (already checked in inline array) */
+        if (skipped < 4) {
+            skipped++;
+            attr = attr->next;
+            continue;
+        }
+
+        /* Check cached name first (faster) */
+        if (attr->name && strcmp(attr->name, name) == 0) {
+            return attr;
+        }
+        /* Fall back to StringView comparison */
+        if (!taurus_sv_is_empty(&attr->name_view) &&
+            attr->name_view.length == name_len &&
+            memcmp(attr->name_view.data, name, name_len) == 0) {
+            return attr;
         }
         attr = attr->next;
     }
@@ -212,18 +434,51 @@ struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem
 }
 
 /* Get attribute by name (StringView version - internal, faster)
- * This is 2-3x faster than the C string version because:
- * 1. No strlen() call needed
- * 2. Uses length-based comparison first (O(1) mismatch check)
- * 3. No C string conversion needed
- */
+ * O(1) with inline array + hash table! */
 struct taurus_attribute* taurus_element_get_attribute_by_name_view(TaurusElement elem, TaurusStringView name) {
     if (!elem || taurus_sv_is_empty(&name)) return NULL;
+    if (elem->attr_count == 0) return NULL;
 
-    /* Walk the attribute linked list */
-    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
-    while (attr) {
+    /* Fast path 1: Check inline array (O(1) for first 4 attributes) */
+    for (int i = 0; i < 4 && i < elem->attr_count; i++) {
+        struct taurus_attribute* attr = elem->attributes_inline[i];
+        if (!attr) continue;
+
         /* Direct StringView comparison (O(1) length check + memcmp) */
+        if (taurus_sv_equals(&attr->name_view, &name)) {
+            return attr;
+        }
+    }
+
+    /* Fast path 2: Use hash table if available (O(1) average case) */
+    if (elem->attr_hash && elem->attr_hash_size > 0) {
+        uint32_t hash = attr_hash_name(name.data, name.length);
+        uint32_t bucket = hash & (elem->attr_hash_size - 1);
+
+        struct taurus_attr_hash_entry* entry = elem->attr_hash[bucket];
+        while (entry) {
+            struct taurus_attribute* attr = entry->attr;
+            /* Direct StringView comparison */
+            if (taurus_sv_equals(&attr->name_view, &name)) {
+                return attr;
+            }
+            entry = entry->next;
+        }
+        return NULL;  /* Not found in hash table */
+    }
+
+    /* Slow path: walk linked list for remaining attributes (>4 without hash) */
+    struct taurus_attribute* attr = elem->first_attribute;
+    uint8_t skipped = 0;
+    while (attr) {
+        /* Skip first 4 (already checked in inline array) */
+        if (skipped < 4) {
+            skipped++;
+            attr = attr->next;
+            continue;
+        }
+
+        /* Direct StringView comparison */
         if (taurus_sv_equals(&attr->name_view, &name)) {
             return attr;
         }
@@ -233,7 +488,7 @@ struct taurus_attribute* taurus_element_get_attribute_by_name_view(TaurusElement
     return NULL;
 }
 
-/* Add attribute to element */
+/* Add attribute to element - O(1) with inline array + hash table */
 int taurus_element_add_attribute(TaurusElement elem,
                                 TaurusStringView name_view,
                                 TaurusStringView value_view,
@@ -249,60 +504,74 @@ int taurus_element_add_attribute(TaurusElement elem,
     attr->name_view = name_view;
     attr->value_view = value_view;
 
-    /* CRITICAL FIX: Initialize namespace/prefix fields to prevent stale data
-     * These fields are not set during attribute creation, but they are accessed
-     * during finalize_element_strings. Without initialization, they contain
-     * garbage data from pool allocation, causing crashes when memory is reused. */
+    /* Initialize namespace/prefix fields */
     attr->namespace_uri_view = taurus_sv_empty();
     attr->namespace_uri = NULL;
     attr->prefix_view = taurus_sv_empty();
     attr->prefix = NULL;
 
-    /* EAGER STRING CONVERSION: Convert attribute name and value to NULL-terminated C-strings
-     * This eliminates the lazy conversion overhead on first access.
-     * Using pooled allocation for O(1) access and proper cleanup.
-     *
-     * CRITICAL: Decode XML entities in attribute values BEFORE converting to C string.
-     * Entities like &lt; &gt; &amp; must be decoded to < > & during parsing. */
+    /* EAGER STRING CONVERSION */
     attr->name = taurus_sv_to_cstr_pooled(&name_view, pool);
 
     /* Check if value contains entities and decode them */
     if (memchr(value_view.data, '&', value_view.length) != NULL) {
-        /* Value contains entities - decode them first */
         char* decoded = taurus_decode_entities_view(&value_view, pool);
         if (decoded) {
-            /* Successfully decoded - use decoded string */
             attr->value = decoded;
-            attr->has_entities = 0;  /* Entities are now decoded */
+            attr->has_entities = 0;
         } else {
-            /* Decoding failed (invalid entity) - use raw value as fallback */
             attr->value = taurus_sv_to_cstr_pooled(&value_view, pool);
             attr->has_entities = 1;
         }
     } else {
-        /* No entities - use raw value */
         attr->value = taurus_sv_to_cstr_pooled(&value_view, pool);
         attr->has_entities = 0;
     }
 
     attr->next = NULL;
 
-    /* Add to linked list */
-    struct taurus_attribute* first_attr = taurus_element_get_first_attribute(elem);
-    if (!first_attr) {
+    /* Add to linked list - O(1) using last_attribute pointer! */
+    if (!elem->first_attribute) {
         /* First attribute */
-        taurus_element_set_first_attribute(elem, attr);
+        elem->first_attribute = attr;
+        elem->last_attribute = attr;
     } else {
-        /* Find last attribute and append */
-        struct taurus_attribute* last = first_attr;
-        while (last->next) {
-            last = last->next;
-        }
-        last->next = attr;
+        /* Append to end using last_attribute - O(1)! */
+        elem->last_attribute->next = attr;
+        elem->last_attribute = attr;
+    }
+
+    /* O(1) optimization: Add to inline array (first 4 attributes) */
+    if (elem->attr_count < 4) {
+        elem->attributes_inline[elem->attr_count] = attr;
     }
 
     /* Increment attribute count */
     elem->attr_count++;
+
+    /* Create/update hash table when we exceed 4 attributes */
+    if (elem->attr_count == 5) {
+        /* First time crossing threshold - create hash table with all attributes */
+        if (create_attr_hash_table(elem, pool) == 0) {
+            /* Add all 5 attributes to hash table */
+            struct taurus_attribute* a = elem->first_attribute;
+            while (a) {
+                add_attr_to_hash(elem, a, pool);
+                a = a->next;
+            }
+        }
+    } else if (elem->attr_count > 5) {
+        /* Just add new attribute to existing hash table */
+        if (elem->attr_hash) {
+            add_attr_to_hash(elem, attr, pool);
+
+            /* Consider growing hash table if load factor gets too high */
+            if (elem->attr_count > elem->attr_hash_size &&
+                elem->attr_hash_size < 64) {
+                rebuild_attr_hash_table(elem, pool);
+            }
+        }
+    }
 
     return 0;
 }
@@ -676,8 +945,9 @@ int taurus_element_remove_all_attributes(TaurusElement elem) {
         attr = next;
     }
 
-    /* Clear the first_attribute pointer and count */
+    /* Clear the first_attribute and last_attribute pointers and count */
     elem->first_attribute = NULL;
+    elem->last_attribute = NULL;
     elem->attr_count = 0;
 
     return 0; /* TAURUS_OK */

@@ -147,6 +147,73 @@ static inline int taurus_element_has_children_inline(TaurusElement elem) {
     return (e->first_child != NULL) || (e->children[0] != NULL);
 }
 
+/**
+ * Get attribute value by name - fast path for elements with ≤4 attributes (inline version)
+ *
+ * This is an optimized inline version that checks the inline attribute array
+ * for O(1) access on elements with 4 or fewer attributes. For elements with
+ * more attributes, this falls back to linear search.
+ *
+ * @param elem Element handle
+ * @param name Attribute name to find
+ * @return Attribute value string or NULL if not found
+ *
+ * PERFORMANCE: Use this in hot paths where elements typically have ≤4 attributes.
+ * For general use, taurus_element_attribute() provides hash table O(1) lookup.
+ */
+static inline const char* taurus_element_attribute_inline(TaurusElement elem, const char* name) {
+    if (!elem || !name) return NULL;
+
+    struct taurus_element* e = (struct taurus_element*)elem;
+
+    /* Fast path: check inline array for first 4 attributes */
+    uint8_t count = e->attr_count;
+    if (count == 0) return NULL;
+
+    /* Calculate name length once */
+    size_t name_len = 0;
+    const char* p = name;
+    while (*p++) name_len++;
+
+    /* Check inline array (O(1) for ≤4 attributes) */
+    uint8_t limit = count < 4 ? count : 4;
+    for (uint8_t i = 0; i < limit; i++) {
+        struct taurus_attribute* attr = e->attributes_inline[i];
+        if (!attr) continue;
+
+        /* Check cached name first (faster string comparison) */
+        if (attr->name) {
+            const char* an = attr->name;
+            const char* nn = name;
+            while (*an && *nn && *an == *nn) { an++; nn++; }
+            if (*an == *nn) return attr->value;  /* Found! */
+        }
+        /* Fall back to StringView comparison */
+        else if (attr->name_view.length == name_len &&
+                 attr->name_view.data &&
+                 (attr->name_view.data[0] == name[0]) &&  /* Quick first char check */
+                 memcmp(attr->name_view.data, name, name_len) == 0) {
+            return attr->value;
+        }
+    }
+
+    /* For >4 attributes without hash, caller should use full function */
+    return NULL;
+}
+
+/**
+ * Get attribute count (inline version)
+ *
+ * Fast access to attribute count without function call.
+ *
+ * @param elem Element handle
+ * @return Number of attributes, or 0 if elem is NULL
+ */
+static inline uint8_t taurus_element_attribute_count_inline(TaurusElement elem) {
+    if (!elem) return 0;
+    return ((struct taurus_element*)elem)->attr_count;
+}
+
 #ifdef __cplusplus
 }
 #endif

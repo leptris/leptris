@@ -48,18 +48,27 @@ struct taurus_attribute {
     unsigned char has_entities;  /* 1 if value_view contains '&', 0 otherwise */
 };
 
-/* Element node - compact architecture with O(1) child access
+/* Attribute hash table entry for O(1) lookup
+ * Used when element has >4 attributes to avoid O(n) linked list traversal.
+ */
+struct taurus_attr_hash_entry {
+    struct taurus_attribute* attr;
+    struct taurus_attr_hash_entry* next;  /* Collision chain */
+};
+
+/* Element node - compact architecture with O(1) child and attribute access
  *
- * Uses inline child array for O(1) access by index (beats pugixml!).
+ * Uses inline arrays for O(1) access by index (beats pugixml!).
  * This is the key optimization for achieving 1.2x+ performance vs pugixml.
  *
- * Size: ~128 bytes (vs 192 bytes in legacy design = 1.5x reduction!)
+ * Size: ~168 bytes (with inline attribute optimization)
  *
  * Key features:
  * - Inline children[] array: O(1) child access by index
+ * - Inline attributes[] array: O(1) attribute access for first 4 attrs
+ * - Hash table for >4 attributes: O(1) lookup even with many attributes
  * - Regular pointers for parent and sibling navigation
  * - StringView storage for zero-copy parsing
- * - Falls back to linked list for >4 children
  */
 struct taurus_element {
     /* Compact base node (4 bytes) - only type, no redundant pointers */
@@ -89,8 +98,20 @@ struct taurus_element {
      * Falls back to linked list traversal via first_child for non-element children. */
     struct taurus_node* children[4];    /* 32 bytes - inline array for O(1) access */
 
-    /* Attributes */
-    struct taurus_attribute* first_attribute; /* 8 bytes */
+    /* INLINE ATTRIBUTE ARRAY (32 bytes) - O(1) attribute access for first 4!
+     * For elements with <=4 attributes, direct array access is O(1).
+     * For >4 attributes, a hash table is created for O(1) lookup. */
+    struct taurus_attribute* attributes_inline[4];  /* 32 bytes - inline array */
+
+    /* Hash table for O(1) attribute lookup when >4 attributes
+     * Allocated from pool when attr_count > 4.
+     * Uses FNV-1a hash for attribute name hashing. */
+    struct taurus_attr_hash_entry** attr_hash;  /* 8 bytes - NULL if <=4 attrs */
+    uint8_t attr_hash_size;           /* Hash table size (power of 2, 0 if no hash) */
+
+    /* Attribute linked list (for iteration and as fallback) */
+    struct taurus_attribute* first_attribute; /* 8 bytes - head of linked list */
+    struct taurus_attribute* last_attribute;  /* 8 bytes - tail for O(1) append */
     uint8_t attr_count;                /* Number of attributes */
 
     /* Children */
@@ -98,10 +119,75 @@ struct taurus_element {
     struct taurus_namespace* namespaces; /* Linked list of namespace declarations */
     struct taurus_document* document;  /* NULL if not attached to document */
 
+    /* Compact mode support (4 bytes)
+     * When document->is_compact is true, this stores the offset to the
+     * corresponding compact_element within the document's compact block.
+     * When 0 and in compact mode, this element IS the root element. */
+    uint32_t compact_offset;           /* Offset to compact element, 0 if root or not compact */
+
+    /* ============================================================================
+     * COMPACT-ONLY MIGRATION: Offset fields (Phase 2)
+     * ============================================================================
+     * These offset fields parallel the pointer fields above. During migration,
+     * accessor functions will use offsets when document->is_compact is true.
+     * Once migration is complete, pointer fields will be removed.
+     *
+     * Target: 48-byte element with these offsets + document pointer
+     * Future: 28-byte element (remove document pointer, use external lookup)
+     */
+
+    /* Tree navigation offsets (16 bytes) - parallel to pointer fields */
+    uint32_t parent_offset;            /* Offset to parent element, 0 if root */
+    uint32_t first_child_offset;       /* Offset to first child node, 0 if none */
+    uint32_t last_child_offset;        /* Offset to last child node, 0 if none */
+    uint32_t next_sibling_offset;      /* Offset to next sibling node, 0 if none */
+
+    /* String table offsets (12 bytes) - for compact string storage */
+    uint32_t name_offset;              /* Offset to element name in string table */
+    uint32_t namespace_uri_offset;     /* Offset to namespace URI, 0 if none */
+    uint32_t prefix_offset;            /* Offset to namespace prefix, 0 if none */
+
+    /* Attribute offset (4 bytes) */
+    uint32_t first_attr_offset;        /* Offset to first attribute, 0 if none */
+
 };
 
 /* Public API type - opaque pointer typedef (matches taurus.h public API) */
 typedef struct taurus_element* TaurusElement;
+
+/* ============================================================================
+ * Compact Mode Helper Macros (Phase 2 Migration)
+ * ============================================================================
+ * These macros support the transition from pointer-based to offset-based
+ * element navigation. When document->is_compact is true, offsets are used.
+ */
+
+/* Forward declaration - document structure is in taurus_internal.h */
+struct taurus_document;
+
+/* Check if element's document is in compact mode */
+#define TAURUS_ELEM_IS_COMPACT(elem) \
+    ((elem) && (elem)->document && (elem)->document->is_compact)
+
+/* Get compact base pointer from element's document */
+#define TAURUS_ELEM_COMPACT_BASE(elem) \
+    ((elem)->document ? (elem)->document->compact_base : NULL)
+
+/* Resolve offset to pointer (returns NULL if offset is 0) */
+#define TAURUS_OFFSET_TO_PTR(base, offset) \
+    ((offset) ? (void*)((char*)(base) + (offset)) : NULL)
+
+/* Resolve node offset to pointer (for tree navigation) */
+#define TAURUS_RESOLVE_NODE_OFFSET(elem, offset) \
+    (TAURUS_ELEM_IS_COMPACT(elem) ? \
+        (TaurusNode*)TAURUS_OFFSET_TO_PTR(TAURUS_ELEM_COMPACT_BASE(elem), (offset)) : \
+        NULL)
+
+/* Resolve element offset to pointer */
+#define TAURUS_RESOLVE_ELEM_OFFSET(elem, offset) \
+    (TAURUS_ELEM_IS_COMPACT(elem) ? \
+        (TaurusElement)TAURUS_OFFSET_TO_PTR(TAURUS_ELEM_COMPACT_BASE(elem), (offset)) : \
+        NULL)
 
 /* ============================================================================
  * Element Creation
@@ -137,7 +223,15 @@ void taurus_element_free(TaurusElement elem);
  * All are simple field accesses with NULL checks - O(1) operations. */
 
 static inline TaurusElement taurus_element_get_parent(TaurusElement elem) {
-    return elem ? elem->parent : NULL;
+    if (!elem) return NULL;
+
+    /* COMPACT MODE: Use offset-based navigation */
+    if (TAURUS_ELEM_IS_COMPACT(elem)) {
+        return TAURUS_RESOLVE_ELEM_OFFSET(elem, elem->parent_offset);
+    }
+
+    /* LEGACY MODE: Use pointer-based navigation */
+    return elem->parent;
 }
 
 /* ============================================================================
@@ -148,7 +242,21 @@ static inline TaurusElement taurus_element_get_parent(TaurusElement elem) {
 static inline TaurusElement taurus_element_get_first_child(TaurusElement elem) {
     if (!elem) return NULL;
 
-    /* Fast path: check inline array first */
+    /* COMPACT MODE: Use offset-based navigation */
+    if (TAURUS_ELEM_IS_COMPACT(elem)) {
+        TaurusNode* node = TAURUS_RESOLVE_NODE_OFFSET(elem, elem->first_child_offset);
+        while (node) {
+            if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
+                return (TaurusElement)node;
+            }
+            /* In compact mode, use offset for next sibling */
+            /* For now, fall back to pointer-based for non-element siblings */
+            node = taurus_node_get_next_sibling(node);
+        }
+        return NULL;
+    }
+
+    /* LEGACY MODE: Fast path - check inline array first */
     if (elem->child_count > 0) {
         TaurusNode* node = elem->children[0];
         if (node && node->type == TAURUS_NODE_TYPE_ELEMENT) {
@@ -170,7 +278,20 @@ static inline TaurusElement taurus_element_get_first_child(TaurusElement elem) {
 static inline TaurusElement taurus_element_get_last_child(TaurusElement elem) {
     if (!elem || elem->child_count == 0) return NULL;
 
-    /* For ≤4 children, use inline array */
+    /* COMPACT MODE: Use offset-based navigation */
+    if (TAURUS_ELEM_IS_COMPACT(elem)) {
+        TaurusNode* node = TAURUS_RESOLVE_NODE_OFFSET(elem, elem->first_child_offset);
+        TaurusElement last_elem = NULL;
+        while (node) {
+            if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
+                last_elem = (TaurusElement)node;
+            }
+            node = taurus_node_get_next_sibling(node);
+        }
+        return last_elem;
+    }
+
+    /* LEGACY MODE: For ≤4 children, use inline array */
     if (elem->child_count <= 4) {
         TaurusNode* node = elem->children[elem->child_count - 1];
         if (node && node->type == TAURUS_NODE_TYPE_ELEMENT) {
@@ -191,32 +312,60 @@ static inline TaurusElement taurus_element_get_last_child(TaurusElement elem) {
 }
 
 static inline TaurusElement taurus_element_get_next_sibling(TaurusElement elem) {
-    if (!elem || !elem->parent) return NULL;
+    if (!elem) return NULL;
 
-    /* O(1) via parent's inline array for first 4 children */
-    TaurusElement parent = elem->parent;
-    for (uint16_t i = 0; i < parent->child_count && i < 4; i++) {
-        if ((TaurusElement)parent->children[i] == elem) {
-            /* Found in inline array */
-            if (i + 1 < parent->child_count && i + 1 < 4) {
-                /* Next sibling also in array */
-                TaurusNode* next = parent->children[i + 1];
-                if (next && next->type == TAURUS_NODE_TYPE_ELEMENT) {
-                    return (TaurusElement)next;
-                }
+    /* COMPACT MODE: Use offset-based navigation */
+    if (TAURUS_ELEM_IS_COMPACT(elem)) {
+        TaurusNode* next = TAURUS_RESOLVE_NODE_OFFSET(elem, elem->next_sibling_offset);
+        while (next) {
+            if (next->type == TAURUS_NODE_TYPE_ELEMENT) {
+                return (TaurusElement)next;
             }
-            /* Fall through to linked list */
-            break;
+            /* For compact mode, use accessor for non-element siblings */
+            next = taurus_node_get_next_sibling(next);
         }
+        return NULL;
     }
 
-    /* Fallback: Use linked list next_sibling pointer */
+    /* LEGACY MODE: Fast path - use linked list next_sibling pointer directly */
     TaurusNode* next = elem->next_sibling;
+
+    /* OPTIMIZED: Inline the most common cases to avoid function call overhead
+     * Most non-element siblings are text nodes (whitespace), so handle them inline.
+     * This avoids calling taurus_node_get_next_sibling() in the common case. */
     while (next) {
         if (next->type == TAURUS_NODE_TYPE_ELEMENT) {
+            /* PREFETCH OPTIMIZATION: Prefetch the next sibling when returning
+             * This warms the cache for the subsequent iteration, improving
+             * wide iteration performance (0.66x -> 0.90x+ target).
+             * locality=0 (read), temporal=3 (keep in all cache levels) */
+            TaurusNode* next_next = ((TaurusElement)next)->next_sibling;
+            if (next_next) {
+                __builtin_prefetch(next_next, 0, 3);
+            }
             return (TaurusElement)next;
         }
-        next = taurus_node_get_next_sibling(next);
+
+        /* Inline next_sibling access for common node types
+         * Text, CDATA, Comment all have next_sibling at offset +12 from base
+         * This matches the layout in node.c and avoids the switch overhead */
+        if (next->type == TAURUS_NODE_TYPE_TEXT) {
+            /* Text node layout: base + content + next_sibling */
+            typedef struct { TaurusNode base; char* content; void* next_sibling; } text_layout;
+            next = (TaurusNode*)((text_layout*)next)->next_sibling;
+        } else if (next->type == TAURUS_NODE_TYPE_CDATA ||
+                   next->type == TAURUS_NODE_TYPE_COMMENT) {
+            /* CDATA and Comment have same layout as Text */
+            typedef struct { TaurusNode base; char* content; void* next_sibling; } text_layout;
+            next = (TaurusNode*)((text_layout*)next)->next_sibling;
+        } else if (next->type == TAURUS_NODE_TYPE_PI) {
+            /* PI has different layout: base + target + data + next_sibling */
+            typedef struct { TaurusNode base; char* target; char* data; void* next_sibling; } pi_layout;
+            next = (TaurusNode*)((pi_layout*)next)->next_sibling;
+        } else {
+            /* Fallback for DOCTYPE and other rare types */
+            next = taurus_node_get_next_sibling(next);
+        }
     }
     return NULL;
 }

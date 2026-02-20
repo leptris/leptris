@@ -318,7 +318,9 @@ TaurusNode* taurus_node_get_next_sibling(TaurusNode* node) {
 
     switch (node->type) {
         case TAURUS_NODE_TYPE_ELEMENT: {
-            /* Element nodes use regular pointer at specific offset */
+            /* Return the immediate next sibling, NOT using element accessor
+             * which skips non-element nodes. For mixed content traversal,
+             * we need to visit all node types. */
             TaurusElement elem = (TaurusElement)node;
             return (TaurusNode*)elem->next_sibling;
         }
@@ -358,8 +360,8 @@ void taurus_node_set_next_sibling(TaurusNode* node, TaurusNode* sibling) {
 
     switch (node->type) {
         case TAURUS_NODE_TYPE_ELEMENT: {
-            TaurusElement elem = (TaurusElement)node;
-            elem->next_sibling = sibling;
+            /* Use element setter to update both pointer and offset */
+            taurus_element_set_next_sibling((TaurusElement)node, (TaurusElement)sibling);
             break;
         }
         case TAURUS_NODE_TYPE_TEXT: {

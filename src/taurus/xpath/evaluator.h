@@ -101,6 +101,25 @@ void* xpath_nodeset_get(XPathNodeSet* nodeset, size_t index);
  */
 void xpath_nodeset_add(XPathNodeSet* nodeset, void* node);
 
+/**
+ * PERFORMANCE: Get nodeset from context pool (O(1) for reused nodesets)
+ *
+ * @param ctx XPath context with nodeset pool
+ * @return Nodeset from pool, or newly allocated if pool empty
+ */
+XPathNodeSet* xpath_nodeset_new_pooled(XPathContext* ctx);
+
+/**
+ * PERFORMANCE: Return nodeset to context pool (O(1))
+ *
+ * Resets nodeset count to 0 and returns to pool for reuse.
+ * Do NOT call xpath_nodeset_free() on pooled nodesets!
+ *
+ * @param nodeset Nodeset to release
+ * @param ctx XPath context with nodeset pool
+ */
+void xpath_nodeset_release(XPathNodeSet* nodeset, XPathContext* ctx);
+
 /* ============================================================================
  * Result Management
  * ============================================================================ */

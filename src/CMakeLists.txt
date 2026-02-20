@@ -33,7 +33,9 @@ set(TAURUS_SOURCES
     # Memory management
     taurus/memory/pool.c
     taurus/memory/compact_allocator.c
+    taurus/memory/compact_single_alloc.c
     taurus/dom/compact.c
+    taurus/dom/compact_accessor.c
     taurus/taurus_memory.c
 
     # Common utilities
@@ -46,6 +48,8 @@ set(TAURUS_SOURCES
 
     # Parser and Serializer
     taurus/parse/parser.c
+    taurus/parse/parser_size.c
+    taurus/parse/parser_two_pass.c
     taurus/parse/compact_parser.c
     taurus/serialize/serialize.c
 
@@ -65,6 +69,8 @@ set(TAURUS_SOURCES
     taurus/xpath/functions_string.c
     taurus/xpath/functions_nodeset.c
     taurus/xpath/xpath_variables.c
+    taurus/xpath/expr_cache.c
+    taurus/xpath/xpath_fast_path.c
 
     # SAX
     taurus/sax/parser.c

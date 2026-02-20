@@ -12,6 +12,7 @@
 #include "dom/comment.h"
 #include "dom/cdata.h"
 #include "dom/pi.h"
+#include "dom/compact_accessor.h"
 #include "common/entities.h"
 #include <string.h>
 #include <stdlib.h>
@@ -29,6 +30,17 @@
 TAURUS_API const char* taurus_element_name(TaurusElement elem) {
     if (!elem) return "";
 
+    /* Dispatch based on document mode */
+    struct taurus_document* doc = elem->document;
+    if (doc && doc->is_compact) {
+        struct compact_element* compact = compact_from_element(elem, doc);
+        if (compact) {
+            const char* name = compact_element_get_name(compact, doc);
+            return name ? name : "";
+        }
+    }
+
+    /* Legacy path */
     const char* name = taurus_element_get_name(elem);
     return name ? name : "";
 }
@@ -79,6 +91,16 @@ TAURUS_API const char* taurus_element_child_value(TaurusElement elem) {
 TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
+    /* Dispatch based on document mode */
+    struct taurus_document* doc = elem->document;
+    if (doc && doc->is_compact) {
+        struct compact_element* compact = compact_from_element(elem, doc);
+        if (compact) {
+            return compact_element_get_attr_value(compact, doc, name);
+        }
+    }
+
+    /* Legacy path */
     TaurusNode* node = (TaurusNode*)elem;
     if (node->type != TAURUS_NODE_TYPE_ELEMENT) {
         return NULL;
@@ -272,6 +294,20 @@ TAURUS_API int taurus_element_set_attribute_uint(TaurusElement elem, const char*
 TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index) {
     if (!elem) return NULL;
 
+    /* Dispatch based on document mode */
+    struct taurus_document* doc = elem->document;
+    if (doc && doc->is_compact) {
+        struct compact_element* compact = compact_from_element(elem, doc);
+        if (compact) {
+            struct compact_element* child = compact_element_get_child_by_index(compact, doc, (uint16_t)index);
+            /* TODO: Create wrapper element for child or return via handle */
+            /* For now, return NULL as compact children don't have wrappers */
+            (void)child;
+            return NULL;
+        }
+    }
+
+    /* Legacy path */
     if (index >= elem->child_count) {
         return NULL;
     }
@@ -292,6 +328,9 @@ TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index) 
  */
 TAURUS_API TaurusElement taurus_element_parent(TaurusElement elem) {
     if (!elem) return NULL;
+
+    /* In compact mode, parent is stored via compact offset */
+    /* The wrapper element has parent pointer, so we can use legacy path */
     return taurus_element_get_parent(elem);
 }
 
@@ -301,6 +340,7 @@ TAURUS_API TaurusElement taurus_element_parent(TaurusElement elem) {
 TAURUS_API TaurusElement taurus_element_root(TaurusElement elem) {
     if (!elem) return NULL;
 
+    /* In compact mode, traverse up using parent pointers */
     TaurusElement current = elem;
     TaurusElement parent = taurus_element_get_parent(current);
     while (parent) {
@@ -315,6 +355,20 @@ TAURUS_API TaurusElement taurus_element_root(TaurusElement elem) {
  * Get first child element regardless of name (Public API)
  */
 TAURUS_API TaurusElement taurus_element_first_child_any(TaurusElement elem) {
+    if (!elem) return NULL;
+
+    /* Dispatch based on document mode */
+    struct taurus_document* doc = elem->document;
+    if (doc && doc->is_compact) {
+        struct compact_element* compact = compact_from_element(elem, doc);
+        if (compact) {
+            struct compact_element* child = compact_element_get_first_child(compact, doc);
+            /* TODO: Create wrapper element for child */
+            (void)child;
+            return NULL;
+        }
+    }
+
     return taurus_element_get_first_child(elem);
 }
 
@@ -322,6 +376,19 @@ TAURUS_API TaurusElement taurus_element_first_child_any(TaurusElement elem) {
  * Get last child element regardless of name (Public API)
  */
 TAURUS_API TaurusElement taurus_element_last_child_any(TaurusElement elem) {
+    if (!elem) return NULL;
+
+    /* Dispatch based on document mode */
+    struct taurus_document* doc = elem->document;
+    if (doc && doc->is_compact) {
+        struct compact_element* compact = compact_from_element(elem, doc);
+        if (compact) {
+            struct compact_element* child = compact_element_get_last_child(compact, doc);
+            (void)child;
+            return NULL;
+        }
+    }
+
     return taurus_element_get_last_child(elem);
 }
 
@@ -329,6 +396,19 @@ TAURUS_API TaurusElement taurus_element_last_child_any(TaurusElement elem) {
  * Get next sibling element regardless of name (Public API)
  */
 TAURUS_API TaurusElement taurus_element_next_sibling_any(TaurusElement elem) {
+    if (!elem) return NULL;
+
+    /* Dispatch based on document mode */
+    struct taurus_document* doc = elem->document;
+    if (doc && doc->is_compact) {
+        struct compact_element* compact = compact_from_element(elem, doc);
+        if (compact) {
+            struct compact_element* sibling = compact_element_get_next_sibling(compact, doc);
+            (void)sibling;
+            return NULL;
+        }
+    }
+
     return taurus_element_get_next_sibling(elem);
 }
 
