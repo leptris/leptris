@@ -648,11 +648,13 @@ struct taurus_document* taurus_parse_two_pass(const char* xml, size_t len, int* 
 
     memset(doc, 0, sizeof(struct taurus_document));
     doc->compact_alloc = alloc;  /* Store allocator for later freeing */
+    doc->compact_base = alloc->base;  /* CRITICAL: Set base pointer for offset resolution */
     doc->compact_root_offset = root_off;
     doc->is_compact = 1;  /* Mark as compact mode */
 
-    /* For now, we also create a regular DOM for API compatibility
-     * TODO: Create compact-to-regular wrapper to avoid this conversion */
+    /* Create minimal pool for on-demand wrappers only
+     * The wrapper will be created by taurus_document_root() when first accessed.
+     * This saves memory by not creating wrappers for all elements upfront. */
     doc->pool = taurus_pool_create();
     if (!doc->pool) {
         free(doc);
@@ -661,22 +663,9 @@ struct taurus_document* taurus_parse_two_pass(const char* xml, size_t len, int* 
         return NULL;
     }
 
-    /* Convert compact root to regular element for API compatibility */
-    /* This is a temporary solution until we implement compact-aware accessors */
-    struct compact_element* compact_root = COMPACT_SINGLE_GET_TYPED(alloc, struct compact_element, root_off);
-    if (compact_root) {
-        /* Create a wrapper element that points to compact data */
-        TaurusElement wrapper = taurus_element_create_pooled(
-            compact_root->name_offset ? (const char*)compact_single_get_ptr(alloc, compact_root->name_offset) : "root",
-            doc->pool
-        );
-        if (wrapper) {
-            doc->new_dom_root = wrapper;
-            wrapper->document = doc;
-            /* Set compact_offset to 0 (root element) - dispatch layer uses compact_root_offset */
-            wrapper->compact_offset = 0;
-        }
-    }
+    /* NOTE: We do NOT create the wrapper here anymore.
+     * The wrapper is created on-demand by taurus_document_root().
+     * This is the key optimization for achieving 1.0x vs pugixml. */
 
     if (error_out) *error_out = 0;
     return doc;

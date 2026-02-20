@@ -7,6 +7,7 @@
 #include "../include/taurus.h"
 #include "taurus_internal.h"
 #include "dom/element.h"
+#include "dom/compact_element.h"  /* For compact_element structure in taurus_document_root */
 #include "dom/pi.h"
 #include "dom/doctype.h"
 #include "dtd/model.h"
@@ -116,6 +117,46 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
  */
 TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
     if (!doc) return NULL;
+
+    /* COMPACT MODE: Create minimal wrapper on demand */
+    if (doc->is_compact && doc->compact_root_offset != 0) {
+        /* Check if we already have a wrapper */
+        if (doc->new_dom_root) {
+            return (TaurusElement)doc->new_dom_root;
+        }
+
+        /* Create minimal 48-byte wrapper for the compact root
+         * This wrapper contains only offset fields + document pointer */
+        TaurusElement wrapper = (TaurusElement)taurus_pool_alloc(doc->pool, sizeof(struct taurus_element));
+        if (!wrapper) return NULL;
+
+        memset(wrapper, 0, sizeof(struct taurus_element));
+        wrapper->document = doc;
+
+        /* Copy offsets from compact element */
+        struct compact_element* compact_root =
+            (struct compact_element*)((char*)doc->compact_base + doc->compact_root_offset);
+        if (compact_root) {
+            wrapper->parent_offset = compact_root->parent;
+            wrapper->first_child_offset = compact_root->first_child;
+            wrapper->last_child_offset = 0;  /* Compact elements don't have this */
+            wrapper->next_sibling_offset = compact_root->next_sibling;
+            wrapper->name_offset = compact_root->name_offset;
+            wrapper->namespace_uri_offset = compact_root->namespace_offset;
+            wrapper->prefix_offset = 0;  /* Compact elements store prefix in namespace */
+            wrapper->first_attr_offset = compact_root->first_attr;
+            wrapper->child_count = compact_root->child_count;
+            /* Note: compact element attr_count is in the flags field */
+        }
+
+        /* Set compact_offset to 0 to indicate this is the root wrapper */
+        wrapper->compact_offset = 0;
+
+        /* Cache the wrapper */
+        doc->new_dom_root = wrapper;
+
+        return wrapper;
+    }
 
     /* Check new_dom_root first (new parser), then fall back to root (old parser) */
     if (doc->new_dom_root) {
