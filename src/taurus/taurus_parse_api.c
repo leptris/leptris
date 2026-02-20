@@ -36,9 +36,10 @@ extern struct taurus_document* taurus_parse_two_pass(const char* xml, size_t len
  * NOTE: The two-pass parser has limitations with:
  * - Namespace handling (prefix:localname parsing)
  * - Some edge cases with child linking
- * Use with caution for production code. Set to very large value to disable.
+ * - Performance issues with large files
+ * Set to SIZE_MAX to disable completely.
  */
-#define TAURUS_TWO_PASS_THRESHOLD (1024 * 1024)  /* 1 MB - effectively disabled for now */
+#define TAURUS_TWO_PASS_THRESHOLD ((size_t)-1)  /* Disabled until issues are fixed */
 extern int parser_had_declaration(Parser* p);
 extern int parser_has_bom(Parser* p);
 extern TaurusDoctypeNode* parser_get_doctype(Parser* p);
