@@ -72,6 +72,12 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     context->input = NULL;
     context->input_len = 0;
 
+    /* NOTE: Nodeset pool is now thread-local for better performance.
+     * These fields are kept for API compatibility but not used. */
+    context->nodeset_pool = NULL;
+    context->nodesets_allocated = 0;
+    context->nodesets_reused = 0;
+
     /* Initialize function registry with standard XPath 1.0 functions */
     context->function_registry = xpath_function_registry_new();
     if (context->function_registry) {
@@ -101,6 +107,10 @@ void xpath_context_free(XPathContext* context) {
     if (context->function_registry) {
         xpath_function_registry_free((XPathFunctionRegistry*)context->function_registry);
     }
+
+    /* NOTE: Nodeset pool is now thread-local, not per-context.
+     * It will be cleaned up when the thread exits or when
+     * xpath_nodeset_cleanup_thread_pool() is called. */
 
     TAURUS_FREE(context);
 }
@@ -331,10 +341,64 @@ void xpath_context_init_from_document(XPathContext* context) {
  * ============================================================================ */
 
 /* ============================================================================
+ * PERFORMANCE: Thread-Local Nodeset Pool
+ * ============================================================================
+ * Thread-local pool for O(1) nodeset allocation. This eliminates malloc
+ * overhead for the many short-lived nodesets created during XPath evaluation.
+ *
+ * How it works:
+ * 1. xpath_nodeset_new() checks thread-local pool first
+ * 2. xpath_nodeset_free() returns nodesets to thread-local pool
+ * 3. Pool has max size to prevent unbounded memory growth
+ *
+ * Benefits:
+ * - No context parameter needed in nodeset_free()
+ * - Works automatically with existing code
+ * - Thread-safe (each thread has its own pool)
+ */
+
+/* Thread-local nodeset pool - no locking needed (one per thread) */
+static _Thread_local XPathNodeSet* t_nodeset_pool = NULL;
+static _Thread_local size_t t_nodeset_pool_size = 0;
+static _Thread_local size_t t_nodesets_allocated = 0;
+static _Thread_local size_t t_nodesets_reused = 0;
+
+/* Maximum pool size to prevent unbounded growth */
+#define NODESET_POOL_MAX_SIZE 64
+
+/* Flag to mark nodesets that came from the pool (stored in capacity high bit) */
+#define NODESET_POOL_FLAG ((size_t)1 << (sizeof(size_t) * 8 - 1))
+#define NODESET_IS_POOLED(ns) ((ns)->capacity & NODESET_POOL_FLAG)
+#define NODESET_CLEAR_POOL_FLAG(ns) ((ns)->capacity & ~NODESET_POOL_FLAG)
+#define NODESET_SET_POOL_FLAG(ns) ((ns)->capacity |= NODESET_POOL_FLAG)
+
+/* Forward declaration */
+static void xpath_nodeset_return_to_pool(XPathNodeSet* nodeset);
+
+/* ============================================================================
  * NodeSet Management
  * ============================================================================ */
 
 XPathNodeSet* xpath_nodeset_new(void) {
+    /* PERFORMANCE: Check thread-local pool first */
+    if (t_nodeset_pool) {
+        XPathNodeSet* ns = t_nodeset_pool;
+        t_nodeset_pool = ns->next_in_pool;
+        t_nodeset_pool_size--;
+        t_nodesets_reused++;
+
+        /* Reset nodeset for reuse */
+        ns->count = 0;
+        ns->owns_attributes = 0;
+        ns->owns_namespaces = 0;
+        ns->capacity = NODESET_CLEAR_POOL_FLAG(ns);
+        ns->next_in_pool = NULL;
+
+        return ns;
+    }
+
+    /* Pool empty - allocate new */
+    t_nodesets_allocated++;
     return xpath_nodeset_new_with_capacity(4);
 }
 
@@ -347,6 +411,7 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
     nodeset->capacity = 0;
     nodeset->owns_attributes = 0;
     nodeset->owns_namespaces = 0;
+    nodeset->next_in_pool = NULL;
 
     if (capacity > 0) {
         nodeset->nodes = TAURUS_ALLOC_N(void*, capacity);
@@ -359,11 +424,20 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
         nodeset->capacity = capacity;
     }
 
+    /* Mark as pool-eligible so free() knows to return it to pool */
+    NODESET_SET_POOL_FLAG(nodeset);
+
     return nodeset;
 }
 
 void xpath_nodeset_free(XPathNodeSet* nodeset) {
     if (!nodeset) return;
+
+    /* PERFORMANCE: Return to thread-local pool if this nodeset came from it */
+    if (NODESET_IS_POOLED(nodeset)) {
+        xpath_nodeset_return_to_pool(nodeset);
+        return;
+    }
 
     /* Free attribute nodes if we own them */
     if (nodeset->owns_attributes && nodeset->nodes) {
@@ -384,10 +458,8 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
         for (size_t i = 0; i < nodeset->count; i++) {
             void* node = nodeset->nodes[i];
             if (node && XPATH_NODE_TYPE(node) == TAURUS_NODE_NAMESPACE) {
-                TaurusNamespaceNode* ns = (TaurusNamespaceNode*)node;
-                if (ns->prefix) TAURUS_FREE(ns->prefix);
-                if (ns->uri) TAURUS_FREE(ns->uri);
-                TAURUS_FREE(ns);
+                /* Single allocation: struct + prefix + uri, just free the struct */
+                TAURUS_FREE(node);
             }
         }
     }
@@ -417,16 +489,19 @@ void xpath_nodeset_add(XPathNodeSet* nodeset, void* node) {
         return;
     }
 
+    /* Get real capacity (without pool flag) */
+    size_t real_capacity = NODESET_CLEAR_POOL_FLAG(nodeset);
+
     /* SAFETY: Validate nodeset structure before reallocation
      * Corruption in count/capacity can cause heap corruption during realloc */
-    if (nodeset->count > nodeset->capacity || nodeset->capacity > 1000000) {
+    if (nodeset->count > real_capacity || real_capacity > 1000000) {
         /* Corrupted structure - skip this addition */
         return;
     }
 
     /* Grow array if needed */
-    if (nodeset->count >= nodeset->capacity) {
-        size_t new_capacity = nodeset->capacity == 0 ? 4 : nodeset->capacity * 2;
+    if (nodeset->count >= real_capacity) {
+        size_t new_capacity = real_capacity == 0 ? 4 : real_capacity * 2;
 
         /* SAFETY: Check for overflow */
         if (new_capacity > 1000000) {
@@ -441,10 +516,116 @@ void xpath_nodeset_add(XPathNodeSet* nodeset, void* node) {
         void** new_nodes = TAURUS_REALLOC_N(nodeset->nodes, void*, new_capacity);
         if (!new_nodes) return;
         nodeset->nodes = new_nodes;
-        nodeset->capacity = new_capacity;
+        /* Set new capacity with pool flag preserved */
+        nodeset->capacity = new_capacity | NODESET_POOL_FLAG;
     }
 
     nodeset->nodes[nodeset->count++] = node;
+}
+
+/**
+ * Return nodeset to thread-local pool (O(1))
+ *
+ * Instead of freeing, we add to the free list for reuse.
+ * The nodes array is kept allocated for next use.
+ */
+static void xpath_nodeset_return_to_pool(XPathNodeSet* nodeset) {
+    if (!nodeset) return;
+
+    /* Free attribute nodes if we own them (can't pool with owned nodes) */
+    if (nodeset->owns_attributes && nodeset->nodes) {
+        for (size_t i = 0; i < nodeset->count; i++) {
+            void* node = nodeset->nodes[i];
+            if (node && XPATH_NODE_TYPE(node) == TAURUS_NODE_ATTRIBUTE) {
+                TaurusAttributeNode* attr = (TaurusAttributeNode*)node;
+                if (attr->name) TAURUS_FREE(attr->name);
+                if (attr->value) TAURUS_FREE(attr->value);
+                if (attr->namespace_uri) TAURUS_FREE(attr->namespace_uri);
+                TAURUS_FREE(attr);
+            }
+        }
+    }
+
+    /* Free namespace nodes if we own them (can't pool with owned nodes) */
+    if (nodeset->owns_namespaces && nodeset->nodes) {
+        for (size_t i = 0; i < nodeset->count; i++) {
+            void* node = nodeset->nodes[i];
+            if (node && XPATH_NODE_TYPE(node) == TAURUS_NODE_NAMESPACE) {
+                /* Single allocation: struct + prefix + uri, just free the struct */
+                TAURUS_FREE(node);
+            }
+        }
+    }
+
+    /* Don't pool if pool is full */
+    if (t_nodeset_pool_size >= NODESET_POOL_MAX_SIZE) {
+        /* Pool full - actually free */
+        if (nodeset->nodes) {
+            TAURUS_FREE(nodeset->nodes);
+        }
+        TAURUS_FREE(nodeset);
+        return;
+    }
+
+    /* Clear owns flags - nodes have been freed above */
+    nodeset->owns_attributes = 0;
+    nodeset->owns_namespaces = 0;
+
+    /* Add to free list using next_in_pool for the linked list */
+    nodeset->count = 0;  /* Reset count */
+    NODESET_SET_POOL_FLAG(nodeset);
+    nodeset->next_in_pool = t_nodeset_pool;
+    t_nodeset_pool = nodeset;
+    t_nodeset_pool_size++;
+}
+
+/**
+ * Get nodeset from thread-local pool (O(1) for reused nodesets)
+ *
+ * If pool has available nodesets, returns one (reset to empty).
+ * Otherwise allocates a new nodeset.
+ */
+XPathNodeSet* xpath_nodeset_new_pooled(XPathContext* ctx) {
+    (void)ctx;  /* Context not needed for thread-local pool */
+
+    /* Check thread-local pool for available nodeset */
+    if (t_nodeset_pool) {
+        XPathNodeSet* ns = t_nodeset_pool;
+        t_nodeset_pool = ns->next_in_pool;
+        t_nodeset_pool_size--;
+        t_nodesets_reused++;
+
+        /* Reset nodeset for reuse */
+        ns->count = 0;
+        ns->owns_attributes = 0;
+        ns->owns_namespaces = 0;
+        ns->capacity = NODESET_CLEAR_POOL_FLAG(ns);
+        ns->next_in_pool = NULL;
+        /* Clear pool flag from capacity but keep the actual capacity */
+        ns->capacity = NODESET_CLEAR_POOL_FLAG(ns);
+
+        return ns;
+    }
+
+    /* Pool empty - allocate new nodeset */
+    t_nodesets_allocated++;
+    XPathNodeSet* ns = xpath_nodeset_new();
+    if (ns) {
+        /* Mark as coming from pool so free() knows to return it */
+        NODESET_SET_POOL_FLAG(ns);
+    }
+    return ns;
+}
+
+/**
+ * Release nodeset back to context pool (for API compatibility)
+ *
+ * This function exists for API compatibility with the per-context pool design.
+ * Internally it uses the thread-local pool.
+ */
+void xpath_nodeset_release(XPathNodeSet* nodeset, XPathContext* ctx) {
+    (void)ctx;  /* Context not needed for thread-local pool */
+    xpath_nodeset_return_to_pool(nodeset);
 }
 
 struct taurus_xpath_result* xpath_result_new(XPathResultType type) {

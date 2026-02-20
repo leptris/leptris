@@ -7,6 +7,7 @@
 #include "evaluator_internal.h"
 #include "../taurus_internal.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
+#include "../memory/pool.h"  /* For pool allocation optimization */
 #include <string.h>
 #include <stdio.h>
 
@@ -155,7 +156,7 @@ static int is_text_node_test(XPathASTNode* test) {
 /* child:: axis */
 static XPathNodeSet* axis_child(XPathContext* ctx, TaurusElement node,
                                XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     /* Check if this is a text() node test */
@@ -188,7 +189,7 @@ static XPathNodeSet* axis_child(XPathContext* ctx, TaurusElement node,
 /* descendant:: axis */
 static XPathNodeSet* axis_descendant(XPathContext* ctx, TaurusElement node,
                                     XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
     collect_descendants(ctx, node, result, test);
     return result;
@@ -198,7 +199,7 @@ static XPathNodeSet* axis_descendant(XPathContext* ctx, TaurusElement node,
 static XPathNodeSet* axis_descendant_or_self(XPathContext* ctx,
                                             TaurusElement node,
                                             XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
     collect_descendants_or_self(ctx, node, result, test);
     return result;
@@ -207,7 +208,7 @@ static XPathNodeSet* axis_descendant_or_self(XPathContext* ctx,
 /* parent:: axis */
 static XPathNodeSet* axis_parent(XPathContext* ctx, TaurusElement node,
                                 XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     /* Get parent element using compact accessor */
@@ -225,7 +226,7 @@ static XPathNodeSet* axis_parent(XPathContext* ctx, TaurusElement node,
 /* ancestor:: axis */
 static XPathNodeSet* axis_ancestor(XPathContext* ctx, TaurusElement node,
                                   XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     TaurusElement current = taurus_element_get_parent(node);
@@ -243,7 +244,7 @@ static XPathNodeSet* axis_ancestor(XPathContext* ctx, TaurusElement node,
 static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
                                           TaurusElement node,
                                           XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     if (matches_node_test(ctx, node, test)) {
@@ -264,7 +265,7 @@ static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
 /* self:: axis */
 static XPathNodeSet* axis_self(XPathContext* ctx, TaurusElement node,
                               XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     if (matches_node_test(ctx, node, test)) {
@@ -278,23 +279,16 @@ static XPathNodeSet* axis_self(XPathContext* ctx, TaurusElement node,
 static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
                                            TaurusElement node,
                                            XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
-    TaurusElement parent = taurus_element_get_parent(node);
-    if (!parent) return result;
-
-    int found = 0;
-
-    /* Iterate through siblings using compact accessor functions */
-    TaurusElement sibling = taurus_element_get_first_child(parent);
+    /* OPTIMIZED: Start from the next sibling directly instead of
+     * iterating from the first child. This is O(n) -> O(k) where
+     * k is the number of following siblings. */
+    TaurusElement sibling = taurus_element_get_next_sibling(node);
     while (sibling) {
-        if (sibling == node) {
-            found = 1;
-        } else if (found) {
-            if (matches_node_test(ctx, sibling, test)) {
-                xpath_nodeset_add(result, sibling);
-            }
+        if (matches_node_test(ctx, sibling, test)) {
+            xpath_nodeset_add(result, sibling);
         }
         sibling = taurus_element_get_next_sibling(sibling);
     }
@@ -306,7 +300,7 @@ static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
 static XPathNodeSet* axis_preceding_sibling(XPathContext* ctx,
                                            TaurusElement node,
                                            XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     TaurusElement parent = taurus_element_get_parent(node);
@@ -336,7 +330,7 @@ static XPathNodeSet* axis_preceding_sibling(XPathContext* ctx,
 /* following:: axis - all nodes after context in document order */
 static XPathNodeSet* axis_following(XPathContext* ctx, TaurusElement node,
                                    XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     /* Get following siblings and their descendants */
@@ -374,7 +368,7 @@ static XPathNodeSet* axis_following(XPathContext* ctx, TaurusElement node,
 /* preceding:: axis - all nodes before context in document order */
 static XPathNodeSet* axis_preceding(XPathContext* ctx, TaurusElement node,
                                    XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
     /* Get preceding siblings and their descendants */
@@ -415,36 +409,25 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
     DEBUG_LOG("        node=%p, name=%s", (void*)node, node ? taurus_element_get_name(node) : "(null)");
     DEBUG_LOG("        attr_count=%zu", node ? (size_t)taurus_element_attribute_count(node) : 0);
 
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) {
         DEBUG_LOG("        EARLY RETURN: result=%p, node=%p", (void*)result, (void*)node);
         return result;
     }
 
-    /* Iterate through element's attributes using compact accessor functions */
-    size_t attr_count = taurus_element_attribute_count(node);
-    for (size_t i = 0; i < attr_count; i++) {
-        /* Walk the attribute linked list to get the i-th attribute */
-        struct taurus_attribute* attr = taurus_element_get_first_attribute(node);
-        for (size_t j = 0; j < i && attr; j++) {
-            attr = attr->next;
-        }
-
-        /* Validate attribute pointer before accessing */
-        if (!attr) {
-            DEBUG_LOG("        [%zu] SKIPPED: attr is NULL", i);
-            continue;
-        }
-
+    /* OPTIMIZED: Iterate through attributes directly instead of O(n²) linked list walk
+     * This changes from O(n²) to O(n) where n is attribute count */
+    struct taurus_attribute* attr = taurus_element_get_first_attribute(node);
+    while (attr) {
         /* Sanity check: attribute should point to valid memory */
         if ((uintptr_t)attr < 0x1000) {
-            DEBUG_LOG("        [%zu] SKIPPED: attr has invalid pointer %p", i, (void*)attr);
+            DEBUG_LOG("        SKIPPED: attr has invalid pointer %p", (void*)attr);
+            attr = attr->next;
             continue;
         }
 
-        DEBUG_LOG("        [%zu] attr=%p", i, (void*)attr);
-        DEBUG_LOG("        [%zu] attr->name=%p, attr->value=%p",
-                 i, attr->name, attr->value);
+        DEBUG_LOG("        attr=%p", (void*)attr);
+        DEBUG_LOG("        attr->name=%p, attr->value=%p", attr->name, attr->value);
 
         /* Check if attribute matches node test */
         int matches = 0;
@@ -459,38 +442,40 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
                 name_matches = taurus_sv_equals_cstr(&attr->name_view, test->value);
             }
             matches = name_matches;
-            DEBUG_LOG("        [%zu] NAME test: looking for '%s', matches=%d",
-                     i, test->value ? test->value : "(null)", matches);
+            DEBUG_LOG("        NAME test: looking for '%s', matches=%d",
+                     test->value ? test->value : "(null)", matches);
         } else if (test && test->type == XPATH_AST_NODE_TEST_ALL) {
             /* Wildcard - matches all attributes */
             matches = 1;
-            DEBUG_LOG("        [%zu] WILDCARD test: matches=%d", i, matches);
+            DEBUG_LOG("        WILDCARD test: matches=%d", matches);
         } else if (!test) {
             /* No test means match all */
             matches = 1;
-            DEBUG_LOG("        [%zu] NO test: matches=%d", i, matches);
+            DEBUG_LOG("        NO test: matches=%d", matches);
         }
 
         if (matches) {
             /* Create proper attribute node */
-            DEBUG_LOG("        [%zu] Creating attribute node...", i);
+            DEBUG_LOG("        Creating attribute node...");
             TaurusAttributeNode* attr_node = create_attribute_node(attr, node);
-            DEBUG_LOG("        [%zu] attr_node=%p", i, (void*)attr_node);
+            DEBUG_LOG("        attr_node=%p", (void*)attr_node);
             if (attr_node) {
-                DEBUG_LOG("        [%zu] attr_node->node_type=%d (should be 1)",
-                         i, (int)attr_node->node_type);
-                DEBUG_LOG("        [%zu] attr_node->name=%s",
-                         i, attr_node->name ? attr_node->name : "(null)");
-                DEBUG_LOG("        [%zu] attr_node->value=%s",
-                         i, attr_node->value ? attr_node->value : "(null)");
-                DEBUG_LOG("        [%zu] Adding to nodeset...", i);
+                DEBUG_LOG("        attr_node->node_type=%d (should be 1)",
+                         (int)attr_node->node_type);
+                DEBUG_LOG("        attr_node->name=%s",
+                         attr_node->name ? attr_node->name : "(null)");
+                DEBUG_LOG("        attr_node->value=%s",
+                         attr_node->value ? attr_node->value : "(null)");
+                DEBUG_LOG("        Adding to nodeset...");
                 xpath_nodeset_add(result, (void*)attr_node);
-                DEBUG_LOG("        [%zu] Added. Nodeset count now: %zu",
-                         i, xpath_nodeset_count(result));
+                DEBUG_LOG("        Added. Nodeset count now: %zu",
+                         xpath_nodeset_count(result));
             } else {
-                DEBUG_LOG("        [%zu] FAILED to create attr_node!", i);
+                DEBUG_LOG("        FAILED to create attr_node!");
             }
         }
+
+        attr = attr->next;
     }
 
     DEBUG_LOG("        Final nodeset count: %zu", xpath_nodeset_count(result));
@@ -498,24 +483,58 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
     return result;
 }
 
-/* Helper: Create namespace node from taurus_namespace */
-static TaurusNamespaceNode* create_namespace_node(struct taurus_namespace* ns,
-                                                    TaurusElement owner) {
-    if (!ns) return NULL;
+/* PERFORMANCE: Single-allocation namespace node creation
+ * Allocates struct + prefix string + uri string in one memory block.
+ * This reduces 3 heap allocations to 1 per namespace node.
+ */
+static TaurusNamespaceNode* alloc_namespace_node_single(
+    const char* prefix,
+    const char* uri,
+    TaurusElement owner
+) {
+    if (!uri) return NULL;
 
-    TaurusNamespaceNode* ns_node = TAURUS_ALLOC(TaurusNamespaceNode);
-    if (!ns_node) return NULL;
+    size_t prefix_len = prefix ? strlen(prefix) + 1 : 0;
+    size_t uri_len = strlen(uri) + 1;
+
+    /* Allocate struct + strings in one block */
+    size_t total_size = sizeof(TaurusNamespaceNode) + prefix_len + uri_len;
+    char* block = (char*)TAURUS_ALLOC_N(char, total_size);
+    if (!block) return NULL;
+
+    TaurusNamespaceNode* ns_node = (TaurusNamespaceNode*)block;
+
+    /* Place strings after the struct */
+    char* string_area = block + sizeof(TaurusNamespaceNode);
 
     ns_node->node_type = TAURUS_NODE_NAMESPACE;
-    ns_node->prefix = ns->prefix ? taurus_strdup(ns->prefix) : NULL;
-    ns_node->uri = taurus_strdup(ns->uri);
     ns_node->owner = owner;
+
+    if (prefix && prefix_len > 0) {
+        ns_node->prefix = string_area;
+        memcpy(ns_node->prefix, prefix, prefix_len);
+        string_area += prefix_len;
+    } else {
+        ns_node->prefix = NULL;
+    }
+
+    ns_node->uri = string_area;
+    memcpy(ns_node->uri, uri, uri_len);
 
     return ns_node;
 }
 
-/* Helper: Check if prefix has already been seen */
-static int is_prefix_seen(char** seen_prefixes, size_t seen_count, const char* prefix) {
+/* Helper: Create namespace node from taurus_namespace */
+static TaurusNamespaceNode* create_namespace_node(struct taurus_namespace* ns,
+                                                    TaurusElement owner) {
+    if (!ns) return NULL;
+    return alloc_namespace_node_single(ns->prefix, ns->uri, owner);
+}
+
+/* Helper: Check if prefix has already been seen using inline array for small counts */
+#define MAX_INLINE_PREFIXES 8
+
+static int is_prefix_seen_inline(const char* seen_prefixes[], size_t seen_count, const char* prefix) {
     for (size_t i = 0; i < seen_count; i++) {
         /* Both NULL = default namespace, already seen */
         if (!prefix && !seen_prefixes[i]) return 1;
@@ -530,23 +549,27 @@ static int is_prefix_seen(char** seen_prefixes, size_t seen_count, const char* p
 /* namespace:: axis */
 static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElement node,
                                    XPathASTNode* test) {
-    XPathNodeSet* result = xpath_nodeset_new();
+    XPathNodeSet* result = xpath_nodeset_new_pooled(ctx);
     if (!result || !node) return result;
 
-    /* Track seen prefixes for deduplication (child overrides parent) */
-    char** seen_prefixes = NULL;
+    /* OPTIMIZED: Use inline array for small namespace counts (up to 8)
+     * This avoids heap allocation and realloc for the common case.
+     * For larger counts, falls back to dynamic allocation. */
+    const char* seen_prefixes[MAX_INLINE_PREFIXES];
+    const char** dyn_prefixes = NULL;
+    const char** prefixes = seen_prefixes;
     size_t seen_count = 0;
-    size_t seen_capacity = 0;
+    size_t capacity = MAX_INLINE_PREFIXES;
 
-    /* Collect namespaces from element and ancestors using compact accessor functions */
+    /* Collect namespaces from element and ancestors */
     TaurusElement current = node;
     while (current) {
-        /* Get namespace from element (inline in compact mode) */
+        /* Get namespace from element */
         const char* ns_prefix = taurus_element_get_prefix(current);
         const char* ns_uri = taurus_element_get_namespace_uri(current);
 
-        /* Skip if already seen (inheritance override) or if no namespace */
-        if (ns_uri && !is_prefix_seen(seen_prefixes, seen_count, ns_prefix)) {
+        /* Skip if already seen or if no namespace */
+        if (ns_uri && !is_prefix_seen_inline(prefixes, seen_count, ns_prefix)) {
             /* Check if matches node test */
             int matches = 0;
             if (!test || test->type == XPATH_AST_NODE_TEST_ALL) {
@@ -557,51 +580,52 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElement node,
             }
 
             if (matches) {
-                TaurusNamespaceNode* ns_node = TAURUS_ALLOC(TaurusNamespaceNode);
+                /* Create namespace node - single allocation for struct + strings */
+                TaurusNamespaceNode* ns_node = alloc_namespace_node_single(
+                    ns_prefix, ns_uri, current);
                 if (ns_node) {
-                    ns_node->node_type = TAURUS_NODE_NAMESPACE;
-                    ns_node->prefix = ns_prefix ? taurus_strdup(ns_prefix) : NULL;
-                    ns_node->uri = taurus_strdup(ns_uri);
-                    ns_node->owner = current;
                     xpath_nodeset_add(result, (void*)ns_node);
                 }
             }
 
-            /* Mark as seen */
-            if (seen_count >= seen_capacity) {
-                seen_capacity = seen_capacity == 0 ? 4 : seen_capacity * 2;
-                seen_prefixes = (char**)realloc(seen_prefixes, seen_capacity * sizeof(char*));
+            /* Add to seen prefixes */
+            if (seen_count >= capacity) {
+                /* Need to grow - switch to heap allocation */
+                size_t new_capacity = capacity * 2;
+                const char** new_prefixes = (const char**)malloc(new_capacity * sizeof(const char*));
+                if (new_prefixes) {
+                    memcpy(new_prefixes, prefixes, seen_count * sizeof(const char*));
+                    if (prefixes != seen_prefixes) free(prefixes);
+                    prefixes = new_prefixes;
+                    dyn_prefixes = new_prefixes;
+                    capacity = new_capacity;
+                }
             }
-            seen_prefixes[seen_count++] = ns_prefix ? taurus_strdup(ns_prefix) : NULL;
+            prefixes[seen_count++] = ns_prefix;
         }
 
-        /* Move to parent using compact accessor */
+        /* Move to parent */
         current = taurus_element_get_parent(current);
     }
 
     /* Always add implicit xml namespace if not already present */
-    if (!is_prefix_seen(seen_prefixes, seen_count, "xml")) {
+    if (!is_prefix_seen_inline(prefixes, seen_count, "xml")) {
         int matches = (!test || test->type == XPATH_AST_NODE_TEST_ALL ||
                       (test->type == XPATH_AST_NODE_TEST_NAME &&
                        test->value && strcmp(test->value, "xml") == 0));
 
         if (matches) {
-            TaurusNamespaceNode* xml_ns = TAURUS_ALLOC(TaurusNamespaceNode);
+            /* Single allocation for xml namespace node */
+            TaurusNamespaceNode* xml_ns = alloc_namespace_node_single(
+                "xml", "http://www.w3.org/XML/1998/namespace", node);
             if (xml_ns) {
-                xml_ns->node_type = TAURUS_NODE_NAMESPACE;
-                xml_ns->prefix = taurus_strdup("xml");
-                xml_ns->uri = taurus_strdup("http://www.w3.org/XML/1998/namespace");
-                xml_ns->owner = node;
                 xpath_nodeset_add(result, (void*)xml_ns);
             }
         }
     }
 
-    /* Cleanup seen prefixes */
-    for (size_t i = 0; i < seen_count; i++) {
-        if (seen_prefixes[i]) free(seen_prefixes[i]);
-    }
-    free(seen_prefixes);
+    /* Cleanup */
+    if (dyn_prefixes) free(dyn_prefixes);
 
     /* Mark that result owns namespace nodes for cleanup */
     result->owns_namespaces = 1;
@@ -644,5 +668,5 @@ XPathNodeSet* apply_axis(XPathContext* ctx, TaurusElement node,
     if (strcmp(axis_name, "attribute") == 0) return axis_attribute(ctx, node, test);
     if (strcmp(axis_name, "namespace") == 0) return axis_namespace(ctx, node, test);
 
-    return xpath_nodeset_new();  /* Unknown axis */
+    return xpath_nodeset_new_pooled(ctx);  /* Unknown axis */
 }
