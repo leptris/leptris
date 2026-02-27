@@ -104,9 +104,14 @@ struct taurus_document {
     void* allocator;                /* TaurusAllocator* - document-specific memory allocator */
     /* Compact mode support (two-pass parsing optimization) */
     void* compact_alloc;            /* CompactSingleAllocator* - single-block allocator */
+    int is_compact;                 /* 1 if document uses compact DOM format */
+    int compact_v2;                 /* 1 if using 16-byte elements (v2), 0 if 36-byte (v1) */
+    int compact_v3;                 /* 1 if using 20-byte elements (v3), separate attrs */
+    void* ultra_fast_alloc;         /* UltraFastAlloc* - zero-check bump allocator for v3 */
     void* compact_base;            /* Base pointer for compact element resolution */
     uint32_t compact_root_offset;   /* Offset to root element in compact block */
-    int is_compact;                 /* 1 if document uses compact DOM format */
+    /* Compact wrapper cache - maps offsets to wrapper elements */
+    void* wrapper_cache;            /* WrapperCache* - hash table for offset->wrapper mapping */
 };
 
 /* Parse options structure */
