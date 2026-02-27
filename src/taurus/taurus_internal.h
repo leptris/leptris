@@ -107,7 +107,9 @@ struct taurus_document {
     int is_compact;                 /* 1 if document uses compact DOM format */
     int compact_v2;                 /* 1 if using 16-byte elements (v2), 0 if 36-byte (v1) */
     int compact_v3;                 /* 1 if using 20-byte elements (v3), separate attrs */
+    int compact_v4;                 /* 1 if using v4 parser (deferred null-term) */
     void* ultra_fast_alloc;         /* UltraFastAlloc* - zero-check bump allocator for v3 */
+    void* zero_check_alloc;         /* ZeroCheckAlloc* - zero-check bump allocator for v4 */
     void* compact_base;            /* Base pointer for compact element resolution */
     uint32_t compact_root_offset;   /* Offset to root element in compact block */
     /* Compact wrapper cache - maps offsets to wrapper elements */

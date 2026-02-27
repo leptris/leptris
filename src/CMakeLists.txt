@@ -52,6 +52,7 @@ set(TAURUS_SOURCES
     taurus/parse/parser_two_pass.c
     taurus/parse/parser_v2.c
     taurus/parse/parser_v2_iterative.c
+    taurus/parse/parser_v5.c
     # NOTE: compact_parser.c removed - uses incompatible CompactElement structure.
     # Use parser_two_pass.c instead which uses compact_element.h structures.
     taurus/serialize/serialize.c
