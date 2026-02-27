@@ -50,7 +50,10 @@ set(TAURUS_SOURCES
     taurus/parse/parser.c
     taurus/parse/parser_size.c
     taurus/parse/parser_two_pass.c
-    taurus/parse/compact_parser.c
+    taurus/parse/parser_v2.c
+    taurus/parse/parser_v2_iterative.c
+    # NOTE: compact_parser.c removed - uses incompatible CompactElement structure.
+    # Use parser_two_pass.c instead which uses compact_element.h structures.
     taurus/serialize/serialize.c
 
     # XPath
@@ -131,7 +134,16 @@ target_compile_options(taurus_objects PRIVATE
     -Wextra
     -Wno-unused-parameter
     $<$<CONFIG:Release>:-O3>
+    $<$<CONFIG:Release>:-flto>
+    $<$<CONFIG:Release>:-mcpu=apple-m1>
+    $<$<CONFIG:Release>:-ffast-math>
+    $<$<CONFIG:Release>:-funroll-loops>
     $<$<CONFIG:Debug>:-g -O0>
+)
+
+# Link-time optimization for release builds
+target_link_options(taurus_objects PRIVATE
+    $<$<CONFIG:Release>:-flto>
 )
 
 # ============================================================================
