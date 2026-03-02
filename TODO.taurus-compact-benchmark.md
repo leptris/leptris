@@ -13,40 +13,43 @@
 
 ## Current Status (2026-03-02)
 
-### Performance - Parsing (VERIFIED)
+### Performance - Parsing (Benchmark Results)
 
 | Parser | File Size | Time | Ratio vs pugixml | Status |
 |--------|-----------|------|------------------|--------|
-| pugixml | 2 KB | 1.26 us | 1.00x (baseline) | ✅ |
-| **Taurus (pointer)** | 2 KB | **0.87 us** | **0.69x (1.45x faster)** | ✅ **EXCEEDS TARGET!** |
-| pugixml | 656 KB | 345.04 us | 1.00x (baseline) | ✅ |
-| **Taurus (pointer)** | 656 KB | **267.99 us** | **0.78x (1.29x faster)** | ✅ **EXCEEDS TARGET!** |
+| pugixml | 150 B | 0.17 µs | 1.00x (baseline) | |
+| **Taurus** | 150 B | **0.25 µs** | **1.51x (slower)** | ⚠️ |
+| pugixml | 99 KB | 52 µs | 1.00x (baseline) | |
+| **Taurus** | 99 KB | **100 µs** | **1.92x (slower)** | ⚠️ |
+| pugixml | 1.5 MB | 837 µs | 1.00x (baseline) | |
+| **Taurus** | 1.5 MB | **1600 µs** | **1.91x (slower)** | ⚠️ |
 
-### Key Finding
+### Key Findings
 
-**Pointer-based parsing is 1.29-1.45x FASTER than pugixml!**
-This EXCEEDS our target of 1.0-1.2x faster.
+**Current benchmarks show Taurus is 1.5-1.9x slower than pugixml for parsing.**
+This does NOT meet the target of being at least as fast as pugixml.
+
+**Previous benchmarks (from TODO) showed different results:**
+- Pointer-based: 1.29-1.45x faster than pugixml
+
+**Discrepancy needs investigation:**
+- Different test files being used
+- Different code paths
+- Possible measurement issues
 
 ### Test Status
 
 **100% tests passing (9/9)** - All tests pass!
-- ✅ `test_dom` - PASSING
-- ✅ `test_parser` - PASSING
-- ✅ `test_xpath` - PASSING
-- ✅ `test_lexer` - PASSING
-- ✅ `test_serialization` - PASSING (12/12 sub-tests)
-- ✅ `test_file_io` - PASSING (12/12 sub-tests)
-- ✅ `test_sax_basic` - PASSING
-- ✅ `test_unicode` - PASSING
-- ✅ `test_xpath_variables` - PASSING
-- ✅ `test_libxml2_errors_comprehensive` - PASSING
-- ✅ `test_libxml2_errors` - PASSING (39/39 sub-tests) **COMPLETE!**
+- ✅ All core tests passing
+- ✅ All 39 strict mode tests passing
 
 ### Current Codebase State
 
 - ✅ Build: PASSING
-- ✅ Tests: 100% (9/9) - All strict mode validations implemented
-- ✅ Strict Mode: Complete with full XML 1.0 validation
+- ✅ Tests: 100% (9/9)
+- ✅ Strict Mode: Complete
+- ✅ Legacy Code: Removed (compact-only architecture)
+- ⚠️ Performance: Below target for parsing
 
 ---
 
