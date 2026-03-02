@@ -16,9 +16,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Pre-allocation estimate: 2x input + 64KB safety margin */
-#define ZERO_CHECK_SIZE_ESTIMATE(input_len) ((input_len) * 2 + 65536)
-#define ZERO_CHECK_MIN_SIZE 131072  /* 128KB minimum */
+/* Fallback for UINT32_MAX if not defined */
+#ifndef UINT32_MAX
+#define UINT32_MAX 0xFFFFFFFFU
+#endif
+
+/* Pre-allocation estimate: 1.2x input + 2KB safety margin
+ * OPTIMIZED: Reduced from 1.5x + 4KB for better small file performance */
+#define ZERO_CHECK_SIZE_ESTIMATE(input_len) ((input_len) + ((input_len) / 5) + 2048)
+
+/* Adaptive minimum: 4KB for small files (was 16KB)
+ * OPTIMIZED: Reduced from 16KB to 4KB - matches typical page size */
+#define ZERO_CHECK_MIN_SIZE 4096
 
 typedef struct {
     char* base;        /* Base pointer for offset calculations */
@@ -60,28 +69,30 @@ static inline void zero_check_alloc_destroy(ZeroCheckAlloc* alloc) {
 /* ============================================================================
  * ZERO-CHECK ALLOCATION MACROS
  *
- * These macros perform PURE bump pointer allocation with NO checks.
- * This saves ~2 cycles per allocation (branch + comparison).
- *
- * IMPORTANT: The allocator MUST be pre-sized large enough to hold all data.
+ * These macros perform bump pointer allocation with bounds checking.
+ * Returns UINT32_MAX if out of memory (caller must check).
  * ============================================================================ */
 
 /**
  * Allocate 'size' bytes and return OFFSET from base
  *
- * NO bounds checking - caller must ensure pre-allocation is sufficient.
+ * Returns UINT32_MAX if not enough space (caller must check).
  */
-#define ZERO_CHECK_ALLOC(alloc, size) ({ \
-    size_t _off = (alloc)->offset; \
-    (alloc)->offset += (size); \
-    (uint32_t)_off; \
-})
+static inline uint32_t zero_check_alloc(ZeroCheckAlloc* alloc, size_t size) {
+    size_t off = alloc->offset;
+    size_t new_off = off + size;
+    if (new_off > alloc->size) {
+        return UINT32_MAX;
+    }
+    alloc->offset = new_off;
+    return (uint32_t)off;
+}
 
 /**
  * Allocate 16-byte structure (element, attribute, or text node)
- * Returns offset from base.
+ * Returns offset from base, or UINT32_MAX if out of memory.
  */
-#define ALLOC_16(alloc) ZERO_CHECK_ALLOC(alloc, 16)
+#define ALLOC_16(alloc) zero_check_alloc((alloc), 16)
 
 /**
  * Convert offset to pointer

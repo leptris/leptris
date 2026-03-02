@@ -102,18 +102,18 @@ struct taurus_document {
     void* observer_list;            /* ObserverList* - for document change events */
     /* Per-document allocator (NULL = use global allocator) */
     void* allocator;                /* TaurusAllocator* - document-specific memory allocator */
-    /* Compact mode support (two-pass parsing optimization) */
-    void* compact_alloc;            /* CompactSingleAllocator* - single-block allocator */
-    int is_compact;                 /* 1 if document uses compact DOM format */
-    int compact_v2;                 /* 1 if using 16-byte elements (v2), 0 if 36-byte (v1) */
-    int compact_v3;                 /* 1 if using 20-byte elements (v3), separate attrs */
-    int compact_v4;                 /* 1 if using v4 parser (deferred null-term) */
-    void* ultra_fast_alloc;         /* UltraFastAlloc* - zero-check bump allocator for v3 */
-    void* zero_check_alloc;         /* ZeroCheckAlloc* - zero-check bump allocator for v4 */
-    void* compact_base;            /* Base pointer for compact element resolution */
+    /* Compact-only mode support (v5 parser with 16-byte elements) */
+    void* compact_alloc;            /* ZeroCheckAlloc* - zero-check bump allocator */
+    void* compact_base;             /* Base pointer for compact element resolution */
     uint32_t compact_root_offset;   /* Offset to root element in compact block */
     /* Compact wrapper cache - maps offsets to wrapper elements */
     void* wrapper_cache;            /* WrapperCache* - hash table for offset->wrapper mapping */
+    /* Pointer-based mode support (v6 parser - 1.28-1.46x faster than pugixml!) */
+    int is_ptr_mode;                /* 1 if using pointer-based structures */
+    void* ptr_root;                 /* ptr_element* - root element in pointer mode */
+    void* ptr_elem_pool;            /* Element pool for pointer mode */
+    void* ptr_attr_pool;            /* Attribute pool for pointer mode */
+    void* ptr_text_pool;            /* Text node pool for pointer mode */
 };
 
 /* Parse options structure */

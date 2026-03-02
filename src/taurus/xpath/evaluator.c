@@ -222,10 +222,14 @@ const char* xpath_context_resolve_prefix(XPathContext* context,
     return NULL; /* Prefix not found */
 }
 
-/* Helper: Collect namespaces from element and all descendants recursively */
-static void collect_namespaces_recursive(XPathContext* context,
-                                         TaurusElement element) {
-    if (!element) return;
+/* Helper: Collect namespaces from element and all descendants recursively
+ * MAX_DEPTH prevents infinite recursion due to malformed data or bugs */
+#define NAMESPACE_COLLECT_MAX_DEPTH 1000
+
+static void collect_namespaces_recursive_impl(XPathContext* context,
+                                         TaurusElement element,
+                                         int depth) {
+    if (!element || depth > NAMESPACE_COLLECT_MAX_DEPTH) return;
 
     /* Register namespace from this element (inline in compact mode) */
     const char* ns_uri = taurus_element_get_namespace_uri(element);
@@ -318,9 +322,15 @@ static void collect_namespaces_recursive(XPathContext* context,
     /* Recursively collect from children - use compact accessor functions */
     TaurusElement child_elem = taurus_element_get_first_child(element);
     while (child_elem) {
-        collect_namespaces_recursive(context, child_elem);
+        collect_namespaces_recursive_impl(context, child_elem, depth + 1);
         child_elem = taurus_element_get_next_sibling(child_elem);
     }
+}
+
+/* Public wrapper for collect_namespaces_recursive */
+static void collect_namespaces_recursive(XPathContext* context,
+                                         TaurusElement element) {
+    collect_namespaces_recursive_impl(context, element, 0);
 }
 
 /**
@@ -330,7 +340,8 @@ static void collect_namespaces_recursive(XPathContext* context,
 void xpath_context_init_from_document(XPathContext* context) {
     if (!context || !context->document) return;
 
-    TaurusElement root = (TaurusElement)context->document->new_dom_root;
+    /* Use taurus_document_root() to properly handle compact mode */
+    TaurusElement root = taurus_document_root(context->document);
     if (root) {
         collect_namespaces_recursive(context, root);
     }

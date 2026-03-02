@@ -39,6 +39,17 @@ utf16_encoding_t utf16_detect_encoding(const unsigned char* data, size_t len) {
         return UTF16_UNKNOWN;
     }
 
+    /* Safety check: if the buffer contains a null terminator before len,
+     * use the actual string length to avoid reading past valid data.
+     * This handles cases where caller provides incorrect length. */
+    size_t actual_len = strnlen((const char*)data, len);
+    if (actual_len < len) {
+        len = actual_len;
+    }
+    if (len < 4) {
+        return UTF16_UNKNOWN;
+    }
+
     /* Check for UTF-16 LE pattern: ASCII followed by null byte
      * Example: "H" (0x48) followed by 0x00 */
     size_t le_score = 0;
@@ -47,13 +58,13 @@ utf16_encoding_t utf16_detect_encoding(const unsigned char* data, size_t len) {
     /* Sample first 100 bytes or entire string if shorter */
     size_t sample_len = (len > 100) ? 100 : len;
 
-    for (size_t i = 0; i < sample_len - 1; i += 2) {
+    for (size_t i = 0; i + 1 < sample_len; i += 2) {
         if (data[i] >= 0x20 && data[i] < 0x7F && data[i + 1] == 0x00) {
             le_score++;
         }
     }
 
-    for (size_t i = 1; i < sample_len - 1; i += 2) {
+    for (size_t i = 1; i + 1 < sample_len; i += 2) {
         if (data[i] >= 0x20 && data[i] < 0x7F && data[i - 1] == 0x00) {
             be_score++;
         }

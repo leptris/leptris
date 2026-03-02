@@ -289,6 +289,21 @@ TAURUS_API void taurus_document_free(TaurusDocument doc);
 TAURUS_API TaurusElement taurus_document_root(TaurusDocument doc);
 
 /**
+ * Check if element is null/empty
+ *
+ * @param elem Element to check
+ * @return 1 if element is null, 0 otherwise
+ */
+TAURUS_API int taurus_element_is_null(TaurusElement elem);
+
+/**
+ * Get a null element handle
+ *
+ * @return A null element handle that can be used for comparisons
+ */
+TAURUS_API TaurusElement taurus_element_handle_null(void);
+
+/**
  * Eagerly convert all StringViews to NULL-terminated strings
  *
  * PERFORMANCE OPTIMIZATION: Call this after parsing to optimize for

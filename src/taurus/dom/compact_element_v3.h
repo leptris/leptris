@@ -1,23 +1,21 @@
-/* compact_element_v3.h - 20-Byte Compact DOM Element Structure (v3)
+/* compact_element_v3.h - 20-Byte Compact DOM Element Structure
  * Copyright (c) 2026, Ribose Inc.
  *
- * 20-BYTE ELEMENT ARCHITECTURE (v3):
+ * 20-BYTE ELEMENT ARCHITECTURE WITH SEPARATE ATTRIBUTE STORAGE:
  *
- * KEY INSIGHT: The v2 16-byte structure mixed attributes with children
- * in first_child chain, requiring a high-bit type check on every child
- * traversal. This added 1-2 cycles of overhead per child access.
+ * KEY DESIGN CHANGE FROM v2:
+ * - v2 (16 bytes): Mixed attribute/child storage in first_child
+ * - v3 (20 bytes): Separate first_attr field for attributes
  *
- * v3 SOLUTION: Separate attribute storage with dedicated first_attr field.
- * - No type checks needed during child traversal
- * - 20 bytes still beats pugixml's ~28 bytes
- * - Better cache efficiency for traversal-heavy workloads
+ * WHY THIS MATTERS FOR PERFORMANCE:
+ * - v2 requires O(n) attribute chain walking for every element
+ * - v3 gives O(1) access to both children AND attributes
+ * - Eliminates high-bit checking on every first_child access
+ * - Simpler parser code = faster execution
  *
  * Memory comparison:
- * - Legacy taurus_element: ~168 bytes
- * - compact_element (v1): 36 bytes
- * - compact_element_v2: 16 bytes (but mixed attrs/children)
- * - compact_element_v3: 20 bytes (separate attrs)
- * - pugixml node: ~28 bytes
+ * - pugixml: ~28 bytes per element
+ * - v3: 20 bytes per element (28% smaller)
  */
 
 #ifndef TAURUS_COMPACT_ELEMENT_V3_H
@@ -25,62 +23,43 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <string.h>
 
 /* ============================================================================
- * 20-Byte Compact Element Structure (v3)
+ * 20-Byte Compact Element Structure v3
  * ============================================================================ */
 
 /**
- * Compact element v3 - 20 bytes, separate attribute storage
+ * Compact element v3 - 20 bytes with separate attribute storage
  *
  * Design principles:
  * 1. Tree navigation uses 4-byte offsets (12 bytes)
- * 2. Name reference uses single offset (4 bytes)
- * 3. Attribute chain is SEPARATE from children (4 bytes)
- * 4. No type checks needed for child traversal
- *
- * Memory layout:
- * - first_child: offset to first child (elements and text only, NO attributes)
- * - next_sibling: offset to next sibling
- * - parent: offset to parent
- * - name_offset: offset to null-terminated name
- * - first_attr: offset to first attribute (separate chain)
+ * 2. Separate attribute pointer (4 bytes) - KEY CHANGE FROM v2
+ * 3. Name reference uses single offset (4 bytes)
+ * 4. All offsets use UINT32_MAX for null (0 is valid offset)
  */
 struct compact_element_v3 {
-    uint32_t first_child;    /* Offset to first child (elements/text only) */
-    uint32_t next_sibling;   /* Offset to next sibling, 0 if none */
-    uint32_t parent;         /* Offset to parent, 0 if root */
-    uint32_t name_offset;    /* Offset to null-terminated name */
-    uint32_t first_attr;     /* Offset to first attribute, 0 if none (SEPARATE!) */
+    uint32_t first_child;    /* Offset to first CHILD element (or UINT32_MAX) */
+    uint32_t next_sibling;   /* Offset to next sibling element */
+    uint32_t parent;         /* Offset to parent element */
+    uint32_t first_attr;     /* Offset to first attribute (or UINT32_MAX) */
+    uint32_t name_offset;    /* Offset to null-terminated name in string table */
 };
 
 /* ============================================================================
- * 16-Byte Compact Attribute Structure (v3)
+ * 16-Byte Compact Attribute Structure (unchanged from v2)
  * ============================================================================ */
 
-/**
- * Compact attribute v3 - 16 bytes
- *
- * Attributes are in a SEPARATE chain from children.
- * Linked via first_attr in element, not first_child.
- */
 struct compact_attribute_v3 {
-    uint32_t name_offset;    /* Offset to null-terminated name */
+    uint32_t name_offset;    /* Offset to null-terminated name (NO high bit) */
     uint32_t value_offset;   /* Offset to null-terminated value */
-    uint32_t next_attr;      /* Offset to next attribute, 0 if none */
-    uint32_t reserved;       /* Reserved for future use (namespace info) */
+    uint32_t next_attr;      /* Offset to next attribute (or UINT32_MAX) */
+    uint32_t flags;          /* Namespace info in upper 16 bits */
 };
 
 /* ============================================================================
- * 16-Byte Compact Text Node Structure (v3)
+ * 16-Byte Compact Text Node Structure (unchanged from v2)
  * ============================================================================ */
 
-/**
- * Compact text node v3 - 16 bytes
- *
- * Layout unchanged from v2. next_sibling at offset 4 for fast linking.
- */
 struct compact_text_v3 {
     uint32_t text_offset;    /* Offset to null-terminated text content */
     uint32_t next_sibling;   /* Offset to next sibling node */
@@ -89,14 +68,19 @@ struct compact_text_v3 {
 };
 
 /* ============================================================================
- * Node Type Flags
+ * Node Type Detection (unchanged from v2)
  * ============================================================================ */
 
+#define COMPACT_V3_TYPE_MASK      0x0000000F
 #define COMPACT_V3_TYPE_ELEMENT   0x00000000
 #define COMPACT_V3_TYPE_TEXT      0x00000001
 #define COMPACT_V3_TYPE_CDATA     0x00000002
 #define COMPACT_V3_TYPE_COMMENT   0x00000003
 #define COMPACT_V3_TYPE_PI        0x00000004
+#define COMPACT_V3_TYPE_DOCTYPE   0x00000005
+
+/* Text node marker - set HIGH BIT on flags field to distinguish from elements */
+#define COMPACT_V3_TEXT_MARKER    0x80000000
 
 /* ============================================================================
  * Accessor Macros for v3
@@ -104,15 +88,17 @@ struct compact_text_v3 {
 
 /**
  * Convert offset to pointer
+ * NOTE: offset 0 is valid (first element in buffer)
+ * Use UINT32_MAX for "null" offset
  */
 #define COMPACT_V3_OFFSET_TO_PTR(base, offset) \
-    ((offset) ? (void*)((char*)(base) + (offset)) : NULL)
+    ((offset) != UINT32_MAX ? (void*)((char*)(base) + (offset)) : NULL)
 
 /**
  * Convert pointer to offset
  */
 #define COMPACT_V3_PTR_TO_OFFSET(base, ptr) \
-    ((ptr) ? (uint32_t)((char*)(ptr) - (char*)(base)) : 0)
+    ((ptr) ? (uint32_t)((char*)(ptr) - (char*)(base)) : UINT32_MAX)
 
 /**
  * Get element name from v3 element
@@ -121,7 +107,7 @@ struct compact_text_v3 {
     ((const char*)(base) + (elem)->name_offset)
 
 /**
- * Get first child of v3 element (elements/text only, NO attributes)
+ * Get first child of v3 element - SIMPLE, no high-bit checking!
  */
 #define COMPACT_V3_FIRST_CHILD(base, elem) \
     ((struct compact_element_v3*)COMPACT_V3_OFFSET_TO_PTR(base, (elem)->first_child))
@@ -139,24 +125,68 @@ struct compact_text_v3 {
     ((struct compact_element_v3*)COMPACT_V3_OFFSET_TO_PTR(base, (elem)->parent))
 
 /**
- * Get first attribute of v3 element
+ * Get first attribute of v3 element - SIMPLE, direct access!
  */
 #define COMPACT_V3_FIRST_ATTR(base, elem) \
     ((struct compact_attribute_v3*)COMPACT_V3_OFFSET_TO_PTR(base, (elem)->first_attr))
 
 /**
+ * Check if element has attributes
+ */
+#define COMPACT_V3_HAS_ATTRS(elem) ((elem)->first_attr != UINT32_MAX)
+
+/**
+ * Check if element has children
+ */
+#define COMPACT_V3_HAS_CHILDREN(elem) ((elem)->first_child != UINT32_MAX)
+
+/* ============================================================================
+ * Inline Helper Functions
+ * ============================================================================ */
+
+/**
+ * Get first attribute of v3 element
+ * O(1) - no chain walking, no high-bit checking!
+ */
+static inline const struct compact_attribute_v3* compact_v3_first_attr(
+    const struct compact_element_v3* elem, const void* base) {
+    return COMPACT_V3_FIRST_ATTR(base, elem);
+}
+
+/**
+ * Get next attribute in the chain
+ */
+static inline const struct compact_attribute_v3* compact_v3_next_attr(
+    const struct compact_attribute_v3* attr, const void* base) {
+    if (!attr || attr->next_attr == UINT32_MAX) return NULL;
+    return (const struct compact_attribute_v3*)((const char*)base + attr->next_attr);
+}
+
+/**
  * Calculate child count by walking the list
- * NOTE: v3 does NOT include attributes in child count (unlike v2)
+ * Simpler now - no attribute checking needed!
  */
 static inline uint16_t compact_v3_child_count(const struct compact_element_v3* elem,
                                                const void* base) {
     uint16_t count = 0;
     uint32_t child_off = elem->first_child;
 
-    while (child_off != 0) {
+    while (child_off != UINT32_MAX) {
+        const char* child_ptr = (const char*)base + child_off;
+
+        /* Check for text node using TEXT_MARKER at offset 12 */
+        uint32_t offset12_field = *(const uint32_t*)(child_ptr + 12);
+        if (offset12_field & COMPACT_V3_TEXT_MARKER) {
+            /* Text node - skip using next_sibling at offset 4 */
+            child_off = *(const uint32_t*)(child_ptr + 4);
+            continue;
+        }
+
+        /* Element child - count it */
         count++;
-        const struct compact_element_v3* child =
-            (const struct compact_element_v3*)((const char*)base + child_off);
+
+        /* Move to next sibling */
+        const struct compact_element_v3* child = (const struct compact_element_v3*)child_ptr;
         child_off = child->next_sibling;
     }
 
@@ -164,14 +194,14 @@ static inline uint16_t compact_v3_child_count(const struct compact_element_v3* e
 }
 
 /**
- * Calculate attribute count by walking the list
+ * Calculate attribute count
  */
 static inline uint16_t compact_v3_attr_count(const struct compact_element_v3* elem,
                                               const void* base) {
     uint16_t count = 0;
     uint32_t attr_off = elem->first_attr;
 
-    while (attr_off != 0) {
+    while (attr_off != UINT32_MAX) {
         count++;
         const struct compact_attribute_v3* attr =
             (const struct compact_attribute_v3*)((const char*)base + attr_off);
@@ -180,39 +210,5 @@ static inline uint16_t compact_v3_attr_count(const struct compact_element_v3* el
 
     return count;
 }
-
-/**
- * Get attribute by name (linear search)
- * For O(1) attribute access, use hash table in higher-level API
- */
-static inline const struct compact_attribute_v3* compact_v3_get_attr_by_name(
-    const struct compact_element_v3* elem,
-    const void* base,
-    const char* name) {
-
-    uint32_t attr_off = elem->first_attr;
-
-    while (attr_off != 0) {
-        const struct compact_attribute_v3* attr =
-            (const struct compact_attribute_v3*)((const char*)base + attr_off);
-
-        const char* attr_name = (const char*)base + attr->name_offset;
-        if (strcmp(attr_name, name) == 0) {
-            return attr;
-        }
-
-        attr_off = attr->next_attr;
-    }
-
-    return NULL;
-}
-
-/* ============================================================================
- * Size Constants
- * ============================================================================ */
-
-#define COMPACT_V3_ELEMENT_SIZE  20
-#define COMPACT_V3_ATTR_SIZE     16
-#define COMPACT_V3_TEXT_SIZE     16
 
 #endif /* TAURUS_COMPACT_ELEMENT_V3_H */

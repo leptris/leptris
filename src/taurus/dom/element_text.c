@@ -15,13 +15,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Maximum recursion depth to prevent stack overflow */
+#define MAX_TEXT_RECURSION_DEPTH 256
+
 /* ============================================================================
  * Text Content Extraction Helpers
  * ============================================================================ */
 
-/* Helper function to calculate text length recursively */
-static size_t calculate_text_length_recursive(TaurusNode* node) {
-    if (!node) return 0;
+/* Helper function to calculate text length recursively with depth limit */
+static size_t calculate_text_length_recursive_impl(TaurusNode* node, int depth) {
+    if (!node || depth > MAX_TEXT_RECURSION_DEPTH) return 0;
 
     size_t len = 0;
     TaurusNode* child = taurus_node_first_child_internal(node);
@@ -38,7 +41,7 @@ static size_t calculate_text_length_recursive(TaurusNode* node) {
             }
         } else if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             /* Recursively include text from child elements */
-            len += calculate_text_length_recursive(child);
+            len += calculate_text_length_recursive_impl(child, depth + 1);
         }
 
         child = taurus_node_get_next_sibling(child);
@@ -47,9 +50,14 @@ static size_t calculate_text_length_recursive(TaurusNode* node) {
     return len;
 }
 
-/* Helper function to copy text content recursively */
-static void copy_text_content_recursive(TaurusNode* node, char* result, size_t* offset) {
-    if (!node || !result || !offset) return;
+/* Wrapper function for backward compatibility */
+static size_t calculate_text_length_recursive(TaurusNode* node) {
+    return calculate_text_length_recursive_impl(node, 0);
+}
+
+/* Helper function to copy text content recursively with depth limit */
+static void copy_text_content_recursive_impl(TaurusNode* node, char* result, size_t* offset, int depth) {
+    if (!node || !result || !offset || depth > MAX_TEXT_RECURSION_DEPTH) return;
 
     TaurusNode* child = taurus_node_first_child_internal(node);
     while (child) {
@@ -69,11 +77,16 @@ static void copy_text_content_recursive(TaurusNode* node, char* result, size_t* 
             }
         } else if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             /* Recursively include text from child elements */
-            copy_text_content_recursive(child, result, offset);
+            copy_text_content_recursive_impl(child, result, offset, depth + 1);
         }
 
         child = taurus_node_get_next_sibling(child);
     }
+}
+
+/* Wrapper function for backward compatibility */
+static void copy_text_content_recursive(TaurusNode* node, char* result, size_t* offset) {
+    copy_text_content_recursive_impl(node, result, offset, 0);
 }
 
 /* ============================================================================

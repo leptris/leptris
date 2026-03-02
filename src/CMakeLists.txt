@@ -49,12 +49,10 @@ set(TAURUS_SOURCES
     # Parser and Serializer
     taurus/parse/parser.c
     taurus/parse/parser_size.c
-    taurus/parse/parser_two_pass.c
-    taurus/parse/parser_v2.c
-    taurus/parse/parser_v2_iterative.c
-    taurus/parse/parser_v5.c
-    # NOTE: compact_parser.c removed - uses incompatible CompactElement structure.
-    # Use parser_two_pass.c instead which uses compact_element.h structures.
+    taurus/parse/ptr_parser.c
+    # NOTE: Legacy parsers archived in archive/parser_versions/
+    # parser.c is the v5 compact-only parser (1.18x vs pugixml)
+    # ptr_parser.c is the pointer-based parser (1.29-1.45x vs pugixml)
     taurus/serialize/serialize.c
 
     # XPath

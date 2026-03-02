@@ -11,6 +11,9 @@
 #include "serialize.h"
 #include "../taurus_internal.h"
 #include "../../include/taurus.h"  /* For taurus_element_attribute() and TaurusSerializeOptions */
+#include "../dom/compact_element.h"  /* For v2 structures (16-byte) and COMPACT_V2_TYPE_* constants */
+#include "../dom/compact_accessor.h" /* For compact_get_or_create_wrapper() */
+#include "../common/entities.h" /* For taurus_decode_entities() */
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -200,7 +203,7 @@ static size_t calc_element_size(TaurusElement elem, int indent_spaces, int inden
         TaurusNode* child = elem->first_child;
         while (child) {
             size += calc_node_size(child, indent_spaces, indent_level + 1);
-            child = taurus_node_get_next_sibling(child);
+            child = child->next_sibling;
         }
 
         /* Indentation before closing tag */
@@ -565,21 +568,13 @@ void serialize_doctype_internal(TaurusDoctypeNode* doctype, SerializeBuffer* buf
 void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is_root) {
     if (!elem) return;
 
-    /* Get element name - use cached string if available, otherwise use StringView directly */
-    const char* elem_name;
-    size_t elem_name_len;
+    /* Get document for compact mode - COMPACT-ONLY */
+    struct taurus_document* doc = elem->document;
 
-    if (elem->name) {
-        /* Use cached NULL-terminated string */
-        elem_name = elem->name;
-        elem_name_len = strlen(elem->name);
-    } else if (!taurus_sv_is_empty(&elem->name_view)) {
-        /* Use StringView directly */
-        elem_name = elem->name_view.data;
-        elem_name_len = elem->name_view.length;
-    } else {
-        return;  /* No name available */
-    }
+    /* Get element name using public API which handles compact mode */
+    const char* elem_name = taurus_element_name(elem);
+    if (!elem_name || !*elem_name) return;  /* No name available */
+    size_t elem_name_len = strlen(elem_name);
 
     /* Add indentation before opening tag (not for root element) */
     if (!is_root && buf->indent_spaces > 0) {
@@ -590,48 +585,39 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
     buffer_append_char(buf, '<');
     buffer_append_len(buf, elem_name, elem_name_len);
 
-    /* Attributes - iterate through linked list */
-    for (struct taurus_attribute* attr = elem->first_attribute; attr != NULL; attr = attr->next) {
-        if (!attr || !attr->name) continue;
+    /* Attributes - use wrapper's attributes (POINTER-ONLY) */
+    if (elem->first_attribute) {
+        /* Use wrapper's attribute list */
+        for (struct taurus_attribute* attr = elem->first_attribute; attr != NULL; attr = attr->next) {
+            /* Get name - may need lazy conversion from view */
+            const char* attr_name = attr->name;
+            if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
+                attr_name = taurus_sv_to_cstr(&attr->name_view);
+                if (attr_name) attr->name = (char*)attr_name;  /* Cache for future */
+            }
 
-        buffer_append_char(buf, ' ');
-        buffer_append(buf, attr->name);
-        buffer_append(buf, "=\"");
-        buffer_append_attribute_value(buf, attr->value ? attr->value : "");
-        buffer_append_char(buf, '"');
+            /* Get value - may need lazy conversion from view */
+            const char* attr_value = attr->value;
+            if (!attr_value && !taurus_sv_is_empty(&attr->value_view)) {
+                if (attr->has_entities) {
+                    attr_value = taurus_decode_entities_view(&attr->value_view, doc ? doc->pool : NULL);
+                } else {
+                    attr_value = taurus_sv_to_cstr(&attr->value_view);
+                }
+                if (attr_value) attr->value = (char*)attr_value;  /* Cache for future */
+            }
+
+            if (attr_name && *attr_name) {
+                buffer_append_char(buf, ' ');
+                buffer_append(buf, attr_name);
+                buffer_append(buf, "=\"");
+                buffer_append_attribute_value(buf, attr_value ? attr_value : "");
+                buffer_append_char(buf, '"');
+            }
+        }
     }
 
-    /* Namespaces - serialize as xmlns attributes */
-    for (struct taurus_namespace* ns = elem->namespaces; ns != NULL; ns = ns->next) {
-        if (!ns) continue;
-
-        buffer_append_char(buf, ' ');
-        buffer_append(buf, "xmlns");
-
-        /* Add prefix if not default namespace
-         * OPTIMIZATION (Phase B): Check both prefix C string and prefix_view
-         * After Phase B optimization, prefix may be NULL while prefix_view has data */
-        if (ns->prefix) {
-            buffer_append_char(buf, ':');
-            buffer_append(buf, ns->prefix);
-        } else if (!taurus_sv_is_empty(&ns->prefix_view)) {
-            buffer_append_char(buf, ':');
-            buffer_append_len(buf, ns->prefix_view.data, ns->prefix_view.length);
-        }
-
-        buffer_append(buf, "=\"");
-        /* OPTIMIZATION (Phase B): Check both uri C string and uri_view */
-        if (ns->uri) {
-            buffer_append(buf, ns->uri);
-        } else if (!taurus_sv_is_empty(&ns->uri_view)) {
-            buffer_append_len(buf, ns->uri_view.data, ns->uri_view.length);
-        }
-        buffer_append_char(buf, '"');
-    }
-
-    /* Handle xml:space attribute for whitespace preservation
-     * xml:space="preserve" means preserve all whitespace in this element
-     * xml:space="default" resets to default whitespace handling */
+    /* Handle xml:space attribute for whitespace preservation */
     int old_preserve_whitespace = buf->preserve_whitespace;
     const char* space_attr = taurus_element_attribute(elem, "xml:space");
     if (space_attr) {
@@ -642,79 +628,36 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         }
     }
 
-    /* Check if element has children */
-    if (elem->first_child) {
-        /* Check if this is a text-only element (single text child, no element children) */
-        int is_text_only = 1;
-        TaurusNode* child = elem->first_child;
+    /* Check if element has children (POINTER-ONLY) */
+    int has_children = (elem->first_child != NULL);
 
-        /* Check if there's only one child and it's a text node */
-        if (child && child->type == TAURUS_NODE_TYPE_TEXT) {
-            /* Check if there are any siblings (more children) */
-            if (taurus_node_get_next_sibling(child) != NULL) {
-                is_text_only = 0;
-            }
-        } else {
-            /* Not a single text node */
-            is_text_only = 0;
-        }
+    if (has_children) {
+        /* Close opening tag */
+        buffer_append_char(buf, '>');
 
-        if (is_text_only && buf->indent_spaces == 0) {
-            /* Text-only element in compact mode - serialize inline */
-            /* Close opening tag */
-            buffer_append_char(buf, '>');
-
-            /* Serialize the single text child */
-            serialize_node_internal(elem->first_child, buf);
-
-            /* Closing tag */
-            buffer_append(buf, "</");
-            buffer_append_len(buf, elem_name, elem_name_len);
-            buffer_append_char(buf, '>');
-        } else if (is_text_only && buf->indent_spaces > 0) {
-            /* Text-only element with indenting - serialize with newlines */
-            /* Close opening tag */
-            buffer_append_char(buf, '>');
-
-            /* Serialize the single text child */
-            serialize_node_internal(elem->first_child, buf);
-
-            /* Closing tag */
-            buffer_append(buf, "</");
-            buffer_append_len(buf, elem_name, elem_name_len);
-            buffer_append_char(buf, '>');
-
-            /* Add newline after closing tag when indenting */
-            buffer_append_newline(buf);
-        } else {
-            /* Element has element children or multiple children - use pretty formatting */
-            /* Close opening tag */
-            buffer_append_char(buf, '>');
-
+        /* Check if element has wrapper children (newly created elements) */
+        if (elem->first_child) {
+            /* Serialize wrapper's children (for newly created/modified elements) */
             /* Add newline after opening tag if indenting */
             if (buf->indent_spaces > 0) {
                 buffer_append_newline(buf);
             }
 
-            /* Increase indent level for children */
+            /* Increase indent level */
             buf->indent++;
 
-            /* Serialize children */
+            /* Serialize all children from wrapper's linked list */
             TaurusNode* child = elem->first_child;
             while (child) {
-                /* Pass is_root=0 for all children */
-                if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-                    serialize_element_internal((TaurusElement)child, buf, 0);
-                } else {
-                    serialize_node_internal(child, buf);
-                }
-                child = taurus_node_get_next_sibling(child);
+                serialize_node_internal(child, buf);
+                /* Get next sibling - use base.next_sibling which is set during wrapper creation */
+                child = child->next_sibling;
             }
 
-            /* Decrease indent level after children */
+            /* Decrease indent level */
             buf->indent--;
 
-            /* Add indentation before closing tag */
+            /* Indentation before closing tag */
             if (buf->indent_spaces > 0) {
                 buffer_append_indent(buf);
             }
@@ -900,8 +843,8 @@ char* taurus_document_serialize(struct taurus_document* doc,
                                  TaurusSerializeOptions* options) {
     if (!doc) return NULL;
 
-    /* Get root element from new_dom_root field */
-    TaurusElement root = (TaurusElement)doc->new_dom_root;
+    /* Get root element - use public API which handles compact mode */
+    TaurusElement root = taurus_document_root(doc);
     if (!root) return NULL;
 
     /* Use default options if NULL */

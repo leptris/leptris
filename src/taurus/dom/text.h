@@ -15,6 +15,10 @@ typedef struct taurus_text_node {
     TaurusNode base;                   /* MUST be first */
     char* content;                    /* Text content - NEVER trim! */
     void* next_sibling;               /* Next sibling in linked list (mixed content) */
+
+    /* COMPACT MODE fields - used when parent element is in compact mode */
+    struct taurus_document* document;  /* Document for compact base access */
+    uint32_t next_sibling_offset;      /* Sibling offset for compact mode navigation */
 } TaurusTextNode;
 
 /* Text node creation and destruction */

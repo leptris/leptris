@@ -120,6 +120,23 @@ TaurusNode* parser_parse_node(Parser* p);
  */
 struct taurus_document* taurus_parse_two_pass(const char* xml, size_t len, int* error_out);
 
+/**
+ * Fast mode compact parser - skips validation for maximum performance
+ *
+ * Same as taurus_parse_two_pass but skips non-essential validation:
+ * - Closing tag name matching
+ * - Attribute separator whitespace checking
+ * - Unclosed element detection
+ *
+ * Use when you trust the input source and need maximum performance.
+ *
+ * @param xml XML string
+ * @param len Length of XML string
+ * @param error_out Error output (0=success, 1=error)
+ * @return TaurusDocument or NULL on error
+ */
+struct taurus_document* taurus_parse_two_pass_fast(const char* xml, size_t len, int* error_out);
+
 /* ============================================================================
  * Specific Node Type Parsers
  * ============================================================================ */

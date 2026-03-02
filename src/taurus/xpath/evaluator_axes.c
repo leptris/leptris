@@ -24,12 +24,15 @@
  * Axis Implementations (All 13 XPath Axes)
  * ============================================================================ */
 
-/* Helper: Collect descendants recursively */
-static void collect_descendants(XPathContext* ctx,
+/* Helper: Collect descendants recursively - with depth limit */
+#define COLLECT_DESCENDANTS_MAX_DEPTH 1000
+
+static void collect_descendants_impl(XPathContext* ctx,
                                TaurusElement node,
                                XPathNodeSet* result,
-                               XPathASTNode* node_test) {
-    if (!node) return;
+                               XPathASTNode* node_test,
+                               int depth) {
+    if (!node || depth > COLLECT_DESCENDANTS_MAX_DEPTH) return;
 
     /* Iterate through children using compact accessor functions */
     TaurusElement child_elem = taurus_element_get_first_child(node);
@@ -40,18 +43,26 @@ static void collect_descendants(XPathContext* ctx,
             if (matches_node_test(ctx, child, node_test)) {
                 xpath_nodeset_add(result, child);
             }
-            collect_descendants(ctx, child, result, node_test);
+            collect_descendants_impl(ctx, child, result, node_test, depth + 1);
         }
         child_elem = taurus_element_get_next_sibling(child_elem);
     }
 }
 
-/* Helper: Collect descendants or self */
-static void collect_descendants_or_self(XPathContext* ctx,
+static void collect_descendants(XPathContext* ctx,
+                               TaurusElement node,
+                               XPathNodeSet* result,
+                               XPathASTNode* node_test) {
+    collect_descendants_impl(ctx, node, result, node_test, 0);
+}
+
+/* Helper: Collect descendants or self - with depth limit */
+static void collect_descendants_or_self_impl(XPathContext* ctx,
                                        TaurusElement node,
                                        XPathNodeSet* result,
-                                       XPathASTNode* node_test) {
-    if (!node) return;
+                                       XPathASTNode* node_test,
+                                       int depth) {
+    if (!node || depth > COLLECT_DESCENDANTS_MAX_DEPTH) return;
 
     if (matches_node_test(ctx, node, node_test)) {
         xpath_nodeset_add(result, node);
@@ -62,10 +73,17 @@ static void collect_descendants_or_self(XPathContext* ctx,
     while (child_elem) {
         TaurusNode* child_node = (TaurusNode*)child_elem;
         if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            collect_descendants_or_self(ctx, child_elem, result, node_test);
+            collect_descendants_or_self_impl(ctx, child_elem, result, node_test, depth + 1);
         }
         child_elem = taurus_element_get_next_sibling(child_elem);
     }
+}
+
+static void collect_descendants_or_self(XPathContext* ctx,
+                                       TaurusElement node,
+                                       XPathNodeSet* result,
+                                       XPathASTNode* node_test) {
+    collect_descendants_or_self_impl(ctx, node, result, node_test, 0);
 }
 
 /* Helper: Create attribute node from taurus_attribute */
@@ -422,6 +440,26 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
         /* Sanity check: attribute should point to valid memory */
         if ((uintptr_t)attr < 0x1000) {
             DEBUG_LOG("        SKIPPED: attr has invalid pointer %p", (void*)attr);
+            attr = attr->next;
+            continue;
+        }
+
+        /* SKIP namespace declarations (xmlns, xmlns:*) - per XPath spec they are NOT attributes */
+        const char* attr_name = attr->name;
+        TaurusStringView* attr_name_view = &attr->name_view;
+        int is_ns_decl = 0;
+        if (attr_name) {
+            if (strcmp(attr_name, "xmlns") == 0 || strncmp(attr_name, "xmlns:", 6) == 0) {
+                is_ns_decl = 1;
+            }
+        } else if (!taurus_sv_is_empty(attr_name_view)) {
+            if ((attr_name_view->length == 5 && memcmp(attr_name_view->data, "xmlns", 5) == 0) ||
+                (attr_name_view->length > 6 && memcmp(attr_name_view->data, "xmlns:", 6) == 0)) {
+                is_ns_decl = 1;
+            }
+        }
+        if (is_ns_decl) {
+            DEBUG_LOG("        SKIPPED: namespace declaration");
             attr = attr->next;
             continue;
         }

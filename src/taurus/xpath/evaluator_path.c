@@ -7,6 +7,7 @@
 #include "evaluator_internal.h"
 #include "../taurus_internal.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
+#include "../../include/taurus.h"  /* For taurus_document_root() */
 #include <string.h>
 #include <stdio.h>
 
@@ -126,8 +127,17 @@ int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test)
                 return 0;  /* Prefix mismatch or node prefix longer */
             }
 
+            /* Get node local name (part after colon) */
+            const char* node_local = strchr(node_name, ':');
+            if (!node_local) {
+                /* No colon in node name - use full name as local name */
+                node_local = node_name;
+            } else {
+                node_local++;  /* Skip colon */
+            }
+
             /* Match local name */
-            return (strcmp(node_name, test_local) == 0);
+            return (strcmp(node_local, test_local) == 0);
         }
 
         case XPATH_AST_NODE_TEST_ALL: {
@@ -477,7 +487,8 @@ struct taurus_xpath_result* evaluate_location_path(XPathContext* ctx,
          * XPath "/root" means "child of document node named root"
          * Since we don't have a document node, check if root matches and use it */
         int is_root_match = 0;
-        TaurusElement root = (TaurusElement)ctx->document->new_dom_root;
+        /* Use taurus_document_root() to handle compact mode correctly */
+        TaurusElement root = taurus_document_root(ctx->document);
 
         DEBUG_LOG("  Checking for special case: child_count=%zu, root=%p",
                  (size_t)path->child_count, (void*)root);
@@ -559,6 +570,11 @@ normal_absolute_path:
 
             /* Get the RELATIVE_PATH (first child of ABSOLUTE_PATH) */
             XPathASTNode* rel_path = path->children[0];
+            DEBUG_LOG("  rel_path=%p, type=%d, child_count=%zu",
+                     (void*)rel_path,
+                     rel_path ? rel_path->type : -1,
+                     rel_path ? (size_t)rel_path->child_count : 0);
+
             if (rel_path && rel_path->type == XPATH_AST_RELATIVE_PATH && rel_path->child_count > 1) {
                 /* Process steps starting from index 1 (skip first step which matched root) */
                 for (size_t j = 1; j < rel_path->child_count; j++) {
@@ -597,8 +613,9 @@ normal_absolute_path:
                             XPathASTNode* node_test =step->children[0];
                             if (node_test->type == XPATH_AST_NODE_TEST_ALL) {
                                 /* This is /* - just return root element */
+                                TaurusElement doc_root = taurus_document_root(ctx->document);
                                 DEBUG_LOG("  Special case: /* returns document root element");
-                                xpath_nodeset_add(current, (TaurusElement)ctx->document->new_dom_root);
+                                xpath_nodeset_add(current, doc_root);
                                 goto done_evaluating;
                             }
                         }
@@ -606,7 +623,8 @@ normal_absolute_path:
                 }
             }
 
-            xpath_nodeset_add(current, (TaurusElement)ctx->document->new_dom_root);
+            TaurusElement doc_root = taurus_document_root(ctx->document);
+            xpath_nodeset_add(current, doc_root);
             DEBUG_LOG("  Nodeset count after adding root: %zu", xpath_nodeset_count(current));
 
             /* Process steps - handle both direct steps and those in RELATIVE_PATH */

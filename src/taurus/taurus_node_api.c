@@ -30,11 +30,8 @@ TAURUS_API int taurus_node_get_type(TaurusNodeRef node) {
  */
 TAURUS_API TaurusNodeRef taurus_node_first_child(TaurusNodeRef node) {
     if (!node) return NULL;
-    if (node->type == 0) { /* TAURUS_NODE_TYPE_ELEMENT */
-        TaurusElement elem = (TaurusElement)node;
-        return (TaurusNodeRef)elem->first_child;
-    }
-    return NULL;
+    /* Use internal function which handles compact mode */
+    return taurus_node_first_child_internal(node);
 }
 
 /**
@@ -42,11 +39,8 @@ TAURUS_API TaurusNodeRef taurus_node_first_child(TaurusNodeRef node) {
  */
 TAURUS_API TaurusNodeRef taurus_node_last_child(TaurusNodeRef node) {
     if (!node) return NULL;
-    if (node->type == 0) { /* TAURUS_NODE_TYPE_ELEMENT */
-        TaurusElement elem = (TaurusElement)node;
-        return (TaurusNodeRef)elem->last_child;
-    }
-    return NULL;
+    /* Use internal function which handles compact mode */
+    return taurus_node_last_child_internal(node);
 }
 
 /**

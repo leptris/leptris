@@ -104,16 +104,16 @@ static void copy_element_attributes(TaurusElement dst, TaurusElement src, int is
  * @param src Source element
  */
 static void copy_element_children(TaurusElement dst, TaurusElement src) {
-    TaurusElement child = src->first_child;
+    struct taurus_node* child = src->first_child;
     while (child) {
-        TaurusNode* child_node = (TaurusNode*)child;
+        TaurusNode* child_node = child;
 
         if ((uintptr_t)child < 0x1000) break;
         if (child_node->type < TAURUS_NODE_TYPE_ELEMENT ||
             child_node->type > TAURUS_NODE_TYPE_DOCTYPE) break;
 
         if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            taurus_element_append_copy(dst, child);
+            taurus_element_append_copy(dst, (TaurusElement)child);
         } else if (child_node->type == TAURUS_NODE_TYPE_TEXT) {
             TaurusTextNode* text = (TaurusTextNode*)child;
             if ((uintptr_t)text > 0x1000) {
@@ -134,7 +134,7 @@ static void copy_element_children(TaurusElement dst, TaurusElement src) {
 
         TaurusNode* next = taurus_node_get_next_sibling(child_node);
         if (!next) break;
-        child = (TaurusElement)next;
+        child = next;
     }
 }
 
@@ -223,8 +223,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
         if (src_attr->namespace_uri) dst_attr->namespace_uri = taurus_pool_strdup(pool, src_attr->namespace_uri);
 
         if (!prev_dst_attr) {
-            void* page_base = (char*)copy - (copy->header.page_offset * TAURUS_COMPACT_ALIGNMENT);
-            taurus_compact_ptr8_encode(&copy->first_attribute, dst_attr, page_base);
+            copy->first_attribute = dst_attr;
         } else {
             prev_dst_attr->next = dst_attr;
         }
@@ -233,9 +232,9 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     }
 
     /* Copy children */
-    TaurusElement first_child = NULL;
-    TaurusElement last_child = NULL;
-    TaurusElement child = source->first_child;
+    struct taurus_node* first_child = NULL;
+    struct taurus_node* last_child = NULL;
+    struct taurus_node* child = source->first_child;
 
     while (child) {
         TaurusNode* child_node = (TaurusNode*)child;
@@ -253,15 +252,15 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
             TaurusTextNode* text_copy = taurus_text_create(text->content);
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
-                if (!first_child) first_child = (TaurusElement)text_copy;
-                if (last_child) last_child->next_sibling = (TaurusElement)text_copy;
-                last_child = (TaurusElement)text_copy;
+                if (!first_child) first_child = (TaurusNode*)text_copy;
+                if (last_child) last_child->next_sibling = (TaurusNode*)text_copy;
+                last_child = (TaurusNode*)text_copy;
             }
         }
 
         TaurusNode* next = taurus_node_get_next_sibling(child_node);
         if (!next) break;
-        child = (TaurusElement)next;
+        child = next;
     }
 
     copy->first_child = first_child;

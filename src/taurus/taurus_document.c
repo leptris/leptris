@@ -7,7 +7,8 @@
 #include "../include/taurus.h"
 #include "taurus_internal.h"
 #include "dom/element.h"
-#include "dom/compact_element.h"  /* For compact_element structure in taurus_document_root */
+#include "dom/compact_element.h"  /* For compact_element_v2 (16-byte) */
+#include "dom/compact_accessor.h"  /* For compact_get_or_create_wrapper */
 #include "dom/pi.h"
 #include "dom/doctype.h"
 #include "dtd/model.h"
@@ -96,11 +97,16 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         taurus_compact_cleanup_document(doc);
     }
 
-    /* Compact mode: Free single compact block instead of pool pages */
-    if (doc->is_compact && doc->compact_alloc) {
+    /* Free wrapper cache if present */
+    if (doc->wrapper_cache) {
+        free(doc->wrapper_cache);
+        doc->wrapper_cache = NULL;
+    }
+
+    /* COMPACT-ONLY: Free single compact block */
+    if (doc->compact_alloc) {
         compact_single_alloc_destroy((CompactSingleAllocator*)doc->compact_alloc);
         doc->compact_alloc = NULL;
-        /* Pool may still exist for wrapper element - destroy it too */
     }
 
     /* Destroy memory pool (frees all DOM nodes allocated from it) */
@@ -113,56 +119,48 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
 }
 
 /**
- * Get root element of document
+ * Get root element of document (COMPACT-ONLY)
+ * V2: Uses 16-byte compact_element_v2 structures
+ *
+ * NOTE: compact_root_offset uses UINT32_MAX for "no root" (0 is valid offset)
  */
 TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
     if (!doc) return NULL;
 
-    /* COMPACT MODE: Create minimal wrapper on demand */
-    if (doc->is_compact && doc->compact_root_offset != 0) {
+    /* COMPACT-ONLY: Check if root exists (UINT32_MAX means no root) */
+    if (doc->compact_root_offset != UINT32_MAX) {
         /* Check if we already have a wrapper */
         if (doc->new_dom_root) {
             return (TaurusElement)doc->new_dom_root;
         }
 
-        /* Create minimal 48-byte wrapper for the compact root
-         * This wrapper contains only offset fields + document pointer */
-        TaurusElement wrapper = (TaurusElement)taurus_pool_alloc(doc->pool, sizeof(struct taurus_element));
-        if (!wrapper) return NULL;
-
-        memset(wrapper, 0, sizeof(struct taurus_element));
-        wrapper->document = doc;
-
-        /* Copy offsets from compact element */
-        struct compact_element* compact_root =
-            (struct compact_element*)((char*)doc->compact_base + doc->compact_root_offset);
-        if (compact_root) {
-            wrapper->parent_offset = compact_root->parent;
-            wrapper->first_child_offset = compact_root->first_child;
-            wrapper->last_child_offset = 0;  /* Compact elements don't have this */
-            wrapper->next_sibling_offset = compact_root->next_sibling;
-            wrapper->name_offset = compact_root->name_offset;
-            wrapper->namespace_uri_offset = compact_root->namespace_offset;
-            wrapper->prefix_offset = 0;  /* Compact elements store prefix in namespace */
-            wrapper->first_attr_offset = compact_root->first_attr;
-            wrapper->child_count = compact_root->child_count;
-            /* Note: compact element attr_count is in the flags field */
+        /* Use compact_accessor to create a pointer-only wrapper */
+        TaurusElement wrapper = compact_get_or_create_wrapper(doc, doc->compact_root_offset);
+        if (wrapper) {
+            doc->new_dom_root = wrapper;
+            return wrapper;
         }
-
-        /* Set compact_offset to 0 to indicate this is the root wrapper */
-        wrapper->compact_offset = 0;
-
-        /* Cache the wrapper */
-        doc->new_dom_root = wrapper;
-
-        return wrapper;
     }
 
-    /* Check new_dom_root first (new parser), then fall back to root (old parser) */
+    /* No compact root offset - document may be empty or not parsed */
     if (doc->new_dom_root) {
         return (TaurusElement)doc->new_dom_root;
     }
     return (TaurusElement)doc->root;
+}
+
+/**
+ * Check if element is null/empty
+ */
+TAURUS_API int taurus_element_is_null(TaurusElement elem) {
+    return elem == NULL;
+}
+
+/**
+ * Get a null element handle
+ */
+TAURUS_API TaurusElement taurus_element_handle_null(void) {
+    return NULL;
 }
 
 /**
@@ -199,7 +197,7 @@ TAURUS_API int taurus_document_get_strict(struct taurus_document* doc) {
  * Get compact base pointer for compact element resolution
  *
  * @param doc Document to get compact base for
- * @return Compact base pointer, or NULL if not in compact mode
+ * @return Compact base pointer
  */
 void* taurus_document_get_compact_base(struct taurus_document* doc) {
     if (!doc) return NULL;

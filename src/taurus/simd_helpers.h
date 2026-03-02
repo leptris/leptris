@@ -124,6 +124,84 @@ inline static const char* simd_skip_whitespace(const char* pos, const char* end)
     return p;
 }
 
+/**
+ * Check if a range contains only whitespace characters.
+ * Returns 1 if all whitespace, 0 if any non-whitespace found.
+ * This is optimized for the common case where we need to skip whitespace-only text nodes.
+ */
+inline static int simd_is_whitespace_only(const char* start, const char* end) {
+    const char* p = start;
+
+#if defined(TAURUS_SIMD_SSE2)
+    /* SSE2 path - x86_64 */
+    __m128i space = _mm_set1_epi8(' ');
+    __m128i tab = _mm_set1_epi8('\t');
+    __m128i newline = _mm_set1_epi8('\n');
+    __m128i carriage = _mm_set1_epi8('\r');
+
+    while (p + SIMD_VEC_SIZE <= end) {
+        __m128i chunk = _mm_loadu_si128((__m128i*)p);
+
+        __m128i is_space = _mm_cmpeq_epi8(chunk, space);
+        __m128i is_tab = _mm_cmpeq_epi8(chunk, tab);
+        __m128i is_newline = _mm_cmpeq_epi8(chunk, newline);
+        __m128i is_carriage = _mm_cmpeq_epi8(chunk, carriage);
+
+        __m128i is_ws = _mm_or_si128(
+            _mm_or_si128(is_space, is_tab),
+            _mm_or_si128(is_newline, is_carriage)
+        );
+
+        /* If any byte is NOT whitespace, return 0 */
+        int mask = _mm_movemask_epi8(is_ws);
+        if (mask != 0xFFFF) {
+            return 0;
+        }
+
+        p += SIMD_VEC_SIZE;
+    }
+
+#elif defined(TAURUS_SIMD_NEON)
+    /* NEON path - ARM64 */
+    uint8x16_t space = vdupq_n_u8(' ');
+    uint8x16_t tab = vdupq_n_u8('\t');
+    uint8x16_t newline = vdupq_n_u8('\n');
+    uint8x16_t carriage = vdupq_n_u8('\r');
+
+    while (p + SIMD_VEC_SIZE <= end) {
+        uint8x16_t chunk = vld1q_u8((uint8_t*)p);
+
+        uint8x16_t is_space = vceqq_u8(chunk, space);
+        uint8x16_t is_tab = vceqq_u8(chunk, tab);
+        uint8x16_t is_newline = vceqq_u8(chunk, newline);
+        uint8x16_t is_carriage = vceqq_u8(chunk, carriage);
+
+        uint8x16_t is_ws = vorrq_u8(
+            vorrq_u8(is_space, is_tab),
+            vorrq_u8(is_newline, is_carriage)
+        );
+
+        /* If any byte is NOT whitespace (0xFF), vminvq will be < 0xFF */
+        uint8_t min_val = vminvq_u8(is_ws);
+        if (min_val != 0xFF) {
+            return 0;
+        }
+
+        p += SIMD_VEC_SIZE;
+    }
+#endif
+
+    /* Scalar fallback for remaining bytes */
+    while (p < end) {
+        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+            return 0;
+        }
+        p++;
+    }
+
+    return 1;
+}
+
 /* ==================================================================
  * SIMD NAME CHARACTER CLASSIFICATION
  * =================================================================
@@ -445,16 +523,19 @@ inline static const char* simd_find_xml_special(const char* s, const char* end, 
         uint64_t low = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 0);
         uint64_t high = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 1);
 
-        if (low || high) {
-            /* Found - use scalar to find exact position */
-            while (p < end) {
-                if (*p == '<' || *p == '>' || *p == '&') {
-                    if (found_char) *found_char = *p;
-                    return p;
-                }
-                p++;
+        if (low | high) {
+            /* Find position of Check low half first */
+            if (low) {
+                int pos = (__builtin_ctzll(low) >> 3);
+                char found = *(p + pos);
+                if (found_char) *found_char = p[pos];
+                return p + pos;
+            } else {
+                int pos = (__builtin_ctzll(high) >> 3) + 8;
+                char found = *(p + pos);
+                if (found_char) *found_char = p[pos];
+                return p + pos;
             }
-            return end;
         }
 
         p += SIMD_VEC_SIZE;
@@ -516,15 +597,18 @@ inline static const char* simd_find_tag_end(const char* s, const char* end) {
 
         uint8x16_t any_match = vorrq_u8(is_gt, is_slash);
 
-        uint64_t low = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 0);
-        uint64_t high = vgetq_lane_u64(vreinterpretq_u64_u8(any_match), 1);
+        uint64x2_t cmp_u64 = vreinterpretq_u64_u8(any_match);
+        uint64_t low = vgetq_lane_u64(cmp_u64, 0);
+        uint64_t high = vgetq_lane_u64(cmp_u64, 1);
 
-        if (low || high) {
-            while (p < end) {
-                if (*p == '>' || *p == '/') return p;
-                p++;
+        if (low | high) {
+            if (low) {
+                int pos = (__builtin_ctzll(low) >> 3);
+                return p + pos;
+            } else {
+                int pos = (__builtin_ctzll(high) >> 3) + 8;
+                return p + pos;
             }
-            return end;
         }
 
         p += SIMD_VEC_SIZE;
@@ -607,16 +691,24 @@ inline static const char* simd_find_char(const char* s, const char* end, char ta
         uint8x16_t chunk = vld1q_u8((uint8_t*)p);
         uint8x16_t cmp = vceqq_u8(chunk, target_vec);
 
-        /* Check if we found the target */
-        uint64_t low = vgetq_lane_u64(vreinterpretq_u64_u8(cmp), 0);
-        uint64_t high = vgetq_lane_u64(vreinterpretq_u64_u8(cmp), 1);
+        /* NEON optimized: Check both 64-bit halves for matches
+         * vceqq returns 0xFF for match, 0x00 for no match */
+        uint64x2_t cmp_u64 = vreinterpretq_u64_u8(cmp);
+        uint64_t low = vgetq_lane_u64(cmp_u64, 0);
+        uint64_t high = vgetq_lane_u64(cmp_u64, 1);
 
-        if (low || high) {  /* Found target somewhere */
-            /* Fall back to scalar for exact position */
-            while (p < end && *p != target) {
-                p++;
+        if (low | high) {
+            /* Find first match - check low half first */
+            if (low) {
+                /* Each byte is 0xFF (match) or 0x00 (no match)
+                 * Find first 0xFF byte by looking for first set bit */
+                int pos = (__builtin_ctzll(low) >> 3);
+                return p + pos;
+            } else {
+                /* Match in high half - add 8 for high half offset */
+                int pos = (__builtin_ctzll(high) >> 3) + 8;
+                return p + pos;
             }
-            return (p < end) ? p : NULL;
         }
 
         p += SIMD_VEC_SIZE;

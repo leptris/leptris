@@ -158,7 +158,8 @@ size_t taurus_utf8_to_utf16(const char* utf8_str, uint16_t** out_utf16) {
         size_t consumed = utf8_decode(utf8_str + i, utf8_len - i, &code_point);
 
         if (consumed == 0) {
-            /* Invalid UTF-8, skip byte */
+            /* Invalid UTF-8, skip byte - but count replacement character */
+            utf16_count++;  /* Count the replacement character we'll add */
             i++;
             continue;
         }

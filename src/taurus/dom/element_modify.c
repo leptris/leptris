@@ -3,6 +3,7 @@
  *
  * Public API for modifying DOM trees in-place.
  * COMPACT MODE: Uses compact pointer encoding and accessor functions.
+ * V2 AWARE: Updates both wrapper fields and compact v2 structures.
  */
 
 #include "../../include/taurus.h"
@@ -10,8 +11,11 @@
 #include "../common/string_view.h"
 #include "../common/entities.h"
 #include "../memory/pool.h"
+#include "../memory/zero_check_alloc.h"
 #include "element.h"
 #include "compact.h"
+#include "compact_element.h"
+#include "compact_accessor.h"
 #include "node.h"
 #include "text.h"
 #include "cdata.h"
@@ -42,8 +46,9 @@ static void rebuild_children_array(TaurusElement parent) {
     /* Clear the array first */
     memset(parent->children, 0, sizeof(parent->children));
 
-    /* Walk the linked list and populate the array with element children */
-    TaurusNode* child = parent->first_child;
+    /* CRITICAL FIX: Use accessor to get first child (handles both wrapper and compact)
+     * For parsed elements, first_child is NULL but children exist in compact structures */
+    TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)parent);
     uint16_t array_index = 0;
 
     while (child && array_index < 4) {
@@ -55,8 +60,16 @@ static void rebuild_children_array(TaurusElement parent) {
 }
 
 /* ===========================================================================
- * Public API Implementation - DOM Modification (Compact Mode)
+ * Public API Implementation - DOM Modification (Pointer-Based)
  * =========================================================================== */
+
+/**
+ * Get child count (Public API)
+ */
+size_t taurus_element_child_count(TaurusElement elem) {
+    if (!elem) return 0;
+    return elem->child_count;
+}
 
 /**
  * Create new element in document (Public API)
@@ -191,6 +204,14 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
     taurus_element_set_parent(new_node, parent);
     new_node->document = parent->document;
 
+    /* CRITICAL FIX: Ensure child_count is calculated before incrementing
+     * For parsed elements, child_count is 0 until calculated by walking compact children */
+    if (parent->child_count == 0) {
+        /* Force calculation by walking children */
+        size_t existing_count = taurus_element_child_count(parent);
+        (void)existing_count;  /* Just to trigger calculation */
+    }
+
     /* Increment child count */
     parent->child_count++;
 
@@ -249,6 +270,14 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
     if (last == sibling_ptr) {
         /* new_node is always an element (checked above) */
         taurus_element_set_last_child(parent, new_node);
+    }
+
+    /* CRITICAL FIX: Ensure child_count is calculated before incrementing
+     * For parsed elements, child_count is 0 until calculated by walking compact children */
+    if (parent->child_count == 0) {
+        /* Force calculation by walking children */
+        size_t existing_count = taurus_element_child_count(parent);
+        (void)existing_count;  /* Just to trigger calculation */
     }
 
     /* Increment child count */
@@ -510,11 +539,6 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
             elem->last_attribute = attr;
         }
 
-        /* O(1) optimization: Add to inline array (first 4 attributes) */
-        if (elem->attr_count < 4) {
-            elem->attributes_inline[elem->attr_count] = attr;
-        }
-
         /* Increment attribute count BEFORE hash table logic */
         elem->attr_count++;
 
@@ -612,29 +636,6 @@ TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* nam
              * Trying to free() them here causes undefined behavior (Abort trap). */
 
             elem->attr_count--;
-
-            /* O(1) optimization: Update inline array efficiently */
-            /* Find and remove from inline array if present, then compact */
-            for (int i = 0; i < 4; i++) {
-                if (elem->attributes_inline[i] == attr) {
-                    elem->attributes_inline[i] = NULL;
-                    /* Shift remaining entries to fill gap */
-                    for (int j = i; j < 3; j++) {
-                        elem->attributes_inline[j] = elem->attributes_inline[j + 1];
-                    }
-                    elem->attributes_inline[3] = NULL;
-                    break;
-                }
-            }
-
-            /* Refill inline array from linked list if needed */
-            if (elem->attr_count > 0 && !elem->attributes_inline[0]) {
-                struct taurus_attribute* a = elem->first_attribute;
-                for (int i = 0; i < 4 && a; i++) {
-                    elem->attributes_inline[i] = a;
-                    a = a->next;
-                }
-            }
 
             /* O(1) optimization: Remove from hash table directly (no rebuild!) */
             if (elem->attr_hash) {

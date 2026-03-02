@@ -14,6 +14,9 @@
 #include <string.h>
 #include <ctype.h>
 
+/* Maximum depth for recursive tree traversal to prevent stack overflow */
+#define XPATH_FAST_PATH_MAX_DEPTH 1000
+
 /* ============================================================================
  * Pattern Detection
  * ============================================================================ */
@@ -64,17 +67,17 @@ static inline int is_end_of_expr(const char* s, const char* end) {
 
 /* Forward declarations for recursive helper functions */
 static void collect_descendants_fast(TaurusElement elem, XPathNodeSet* result,
-                                    const char* name, size_t name_len, int star);
+                                    const char* name, size_t name_len, int star, int depth);
 static void collect_descendants_filter(TaurusElement elem, XPathNodeSet* result,
-                                     const char* name, size_t name_len, int star);
+                                     const char* name, size_t name_len, int star, int depth);
 static void collect_descendants_attrs(TaurusElement elem, XPathNodeSet* result,
                                      const char* elem_name, size_t elem_name_len,
-                                     const char* attr_name, size_t attr_name_len, int star);
+                                     const char* attr_name, size_t attr_name_len, int star, int depth);
 static void collect_descendants_children(TaurusElement elem, XPathNodeSet* result,
-                                         const char* name, size_t name_len, int star);
+                                         const char* name, size_t name_len, int star, int depth);
 static void collect_descendants_children_name(TaurusElement elem, XPathNodeSet* result,
                                               const char* elem_name, size_t elem_name_len,
-                                              const char* child_name, size_t child_name_len);
+                                              const char* child_name, size_t child_name_len, int depth);
 
 /**
  * Detect fast path pattern from expression string
@@ -848,7 +851,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
             /* Use a simple recursive collection */
             void collect_descendants_fast(TaurusElement elem, XPathNodeSet* result,
-                                          const char* name, size_t name_len, int star);
+                                          const char* name, size_t name_len, int star, int depth);
 
             /* For absolute paths (//), include the context element itself first */
             if (pattern->is_absolute) {
@@ -860,7 +863,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
             collect_descendants_fast(ctx, result->value.nodeset_value,
                                      pattern->name, pattern->name_len,
-                                     pattern->type == XPATH_FAST_PATH_DESCENDANT_STAR);
+                                     pattern->type == XPATH_FAST_PATH_DESCENDANT_STAR, 0);
             return result;
         }
 
@@ -906,7 +909,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
             if (!result) return NULL;
 
             void collect_descendants_filter(TaurusElement elem, XPathNodeSet* result,
-                                            const char* name, size_t name_len, int star);
+                                            const char* name, size_t name_len, int star, int depth);
 
             /* For absolute paths, include context if it matches */
             if (pattern->is_absolute) {
@@ -918,7 +921,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
             collect_descendants_filter(ctx, result->value.nodeset_value,
                                        pattern->name, pattern->name_len,
-                                       pattern->name == NULL);
+                                       pattern->name == NULL, 0);
             return result;
         }
 
@@ -929,7 +932,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
             void collect_descendants_attrs(TaurusElement elem, XPathNodeSet* result,
                                            const char* elem_name, size_t elem_name_len,
-                                           const char* attr_name, size_t attr_name_len, int star);
+                                           const char* attr_name, size_t attr_name_len, int star, int depth);
 
             /* For absolute paths, check context first */
             if (pattern->is_absolute) {
@@ -976,7 +979,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
             collect_descendants_attrs(ctx, result->value.nodeset_value,
                                       pattern->name, pattern->name_len,
                                       pattern->second_name, pattern->second_name_len,
-                                      pattern->second_name == NULL);
+                                      pattern->second_name == NULL, 0);
             return result;
         }
 
@@ -986,7 +989,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
             if (!result) return NULL;
 
             void collect_descendants_children(TaurusElement elem, XPathNodeSet* result,
-                                              const char* name, size_t name_len, int star);
+                                              const char* name, size_t name_len, int star, int depth);
 
             /* For absolute paths, check context first */
             if (pattern->is_absolute) {
@@ -1002,7 +1005,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
             collect_descendants_children(ctx, result->value.nodeset_value,
                                          pattern->name, pattern->name_len,
-                                         pattern->name == NULL);
+                                         pattern->name == NULL, 0);
             return result;
         }
 
@@ -1013,7 +1016,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
             void collect_descendants_children_name(TaurusElement elem, XPathNodeSet* result,
                                                    const char* elem_name, size_t elem_name_len,
-                                                   const char* child_name, size_t child_name_len);
+                                                   const char* child_name, size_t child_name_len, int depth);
 
             /* For absolute paths, check context first */
             if (pattern->is_absolute) {
@@ -1031,7 +1034,7 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
             collect_descendants_children_name(ctx, result->value.nodeset_value,
                                               pattern->name, pattern->name_len,
-                                              pattern->second_name, pattern->second_name_len);
+                                              pattern->second_name, pattern->second_name_len, 0);
             return result;
         }
 
@@ -1042,8 +1045,8 @@ struct taurus_xpath_result* xpath_fast_path_eval(
 
 /* Helper for descendant collection */
 static void collect_descendants_fast(TaurusElement elem, XPathNodeSet* result,
-                                    const char* name, size_t name_len, int star) {
-    if (!elem) return;
+                                    const char* name, size_t name_len, int star, int depth) {
+    if (!elem || depth > XPATH_FAST_PATH_MAX_DEPTH) return;
 
     TaurusElement child = taurus_element_get_first_child(elem);
     while (child) {
@@ -1053,7 +1056,7 @@ static void collect_descendants_fast(TaurusElement elem, XPathNodeSet* result,
                 xpath_nodeset_add(result, child);
             }
             /* Recurse into children */
-            collect_descendants_fast(child, result, name, name_len, star);
+            collect_descendants_fast(child, result, name, name_len, star, depth + 1);
         }
         child = taurus_element_get_next_sibling(child);
     }
@@ -1061,8 +1064,8 @@ static void collect_descendants_fast(TaurusElement elem, XPathNodeSet* result,
 
 /* Helper for descendant collection with filter */
 static void collect_descendants_filter(TaurusElement elem, XPathNodeSet* result,
-                                      const char* name, size_t name_len, int star) {
-    if (!elem) return;
+                                      const char* name, size_t name_len, int star, int depth) {
+    if (!elem || depth > XPATH_FAST_PATH_MAX_DEPTH) return;
 
     TaurusElement child = taurus_element_get_first_child(elem);
     while (child) {
@@ -1072,7 +1075,7 @@ static void collect_descendants_filter(TaurusElement elem, XPathNodeSet* result,
                 xpath_nodeset_add(result, child);
             }
             /* Recurse into children */
-            collect_descendants_filter(child, result, name, name_len, star);
+            collect_descendants_filter(child, result, name, name_len, star, depth + 1);
         }
         child = taurus_element_get_next_sibling(child);
     }
@@ -1081,8 +1084,8 @@ static void collect_descendants_filter(TaurusElement elem, XPathNodeSet* result,
 /* Helper for descendant attribute collection */
 static void collect_descendants_attrs(TaurusElement elem, XPathNodeSet* result,
                                      const char* elem_name, size_t elem_name_len,
-                                     const char* attr_name, size_t attr_name_len, int star) {
-    if (!elem) return;
+                                     const char* attr_name, size_t attr_name_len, int star, int depth) {
+    if (!elem || depth > XPATH_FAST_PATH_MAX_DEPTH) return;
 
     TaurusElement child = taurus_element_get_first_child(elem);
     while (child) {
@@ -1126,7 +1129,7 @@ static void collect_descendants_attrs(TaurusElement elem, XPathNodeSet* result,
                 }
             }
             /* Recurse into children */
-            collect_descendants_attrs(child, result, elem_name, elem_name_len, attr_name, attr_name_len, star);
+            collect_descendants_attrs(child, result, elem_name, elem_name_len, attr_name, attr_name_len, star, depth + 1);
         }
         child = taurus_element_get_next_sibling(child);
     }
@@ -1134,8 +1137,8 @@ static void collect_descendants_attrs(TaurusElement elem, XPathNodeSet* result,
 
 /* Helper for descendant children collection */
 static void collect_descendants_children(TaurusElement elem, XPathNodeSet* result,
-                                        const char* name, size_t name_len, int star) {
-    if (!elem) return;
+                                        const char* name, size_t name_len, int star, int depth) {
+    if (!elem || depth > XPATH_FAST_PATH_MAX_DEPTH) return;
 
     TaurusElement child = taurus_element_get_first_child(elem);
     while (child) {
@@ -1150,7 +1153,7 @@ static void collect_descendants_children(TaurusElement elem, XPathNodeSet* resul
                 }
             }
             /* Recurse into children */
-            collect_descendants_children(child, result, name, name_len, star);
+            collect_descendants_children(child, result, name, name_len, star, depth + 1);
         }
         child = taurus_element_get_next_sibling(child);
     }
@@ -1159,8 +1162,8 @@ static void collect_descendants_children(TaurusElement elem, XPathNodeSet* resul
 /* Helper for descendant named children collection */
 static void collect_descendants_children_name(TaurusElement elem, XPathNodeSet* result,
                                              const char* elem_name, size_t elem_name_len,
-                                             const char* child_name, size_t child_name_len) {
-    if (!elem) return;
+                                             const char* child_name, size_t child_name_len, int depth) {
+    if (!elem || depth > XPATH_FAST_PATH_MAX_DEPTH) return;
 
     TaurusElement child = taurus_element_get_first_child(elem);
     while (child) {
@@ -1177,7 +1180,7 @@ static void collect_descendants_children_name(TaurusElement elem, XPathNodeSet* 
                 }
             }
             /* Recurse into children */
-            collect_descendants_children_name(child, result, elem_name, elem_name_len, child_name, child_name_len);
+            collect_descendants_children_name(child, result, elem_name, elem_name_len, child_name, child_name_len, depth + 1);
         }
         child = taurus_element_get_next_sibling(child);
     }

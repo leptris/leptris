@@ -30,11 +30,13 @@ CompactSingleAllocator* compact_single_alloc_create(size_t size) {
         return NULL;
     }
 
-    /* Initialize allocator */
-    memset(block, 0, size);
+    /* Initialize allocator - skip memset for performance
+     * First 8 bytes will be zero by offset 8 anyway.
+     * Structures allocated will initialize their own fields explicitly.
+     */
     alloc->base = block;
     alloc->size = size;
-    alloc->offset = 0;
+    alloc->offset = 8;  /* Start at offset 8 to reserve offset 0 as "null" sentinel */
     alloc->string_table_offset = 0;
     alloc->string_hash = NULL;
     alloc->string_hash_size = 0;
@@ -58,6 +60,7 @@ void compact_single_alloc_destroy(CompactSingleAllocator* alloc) {
 
 /**
  * Allocate memory from block (O(1) bump pointer)
+ * With automatic growth support for single-pass parsing
  */
 void* compact_single_alloc(CompactSingleAllocator* alloc, size_t size) {
     if (!alloc || size == 0 || alloc->error) return NULL;
@@ -65,16 +68,63 @@ void* compact_single_alloc(CompactSingleAllocator* alloc, size_t size) {
     /* Align to 8-byte boundary for proper pointer alignment */
     size = (size + 7) & ~7;
 
-    /* Check if we have space */
+    /* Check if we have space - grow if needed */
     if (alloc->offset + size > alloc->size) {
-        alloc->error = 1;
-        return NULL;
+        if (compact_single_alloc_grow(alloc, size) != 0) {
+            alloc->error = 1;
+            return NULL;
+        }
     }
 
     void* ptr = alloc->base + alloc->offset;
     alloc->offset += size;
 
     return ptr;
+}
+
+/**
+ * Grow the allocator's memory block
+ * Enables single-pass parsing without size estimation
+ */
+int compact_single_alloc_grow(CompactSingleAllocator* alloc, size_t min_needed) {
+    if (!alloc) return -1;
+
+    /* Calculate new size: at least 50% growth or enough for min_needed */
+    size_t growth = alloc->size / 2;
+    size_t needed = alloc->offset + min_needed;
+    size_t new_size = alloc->size + (growth > min_needed ? growth : min_needed);
+
+    /* Round up to next 4KB boundary for efficiency */
+    new_size = (new_size + 4095) & ~4095;
+
+    /* Reallocate */
+    char* new_block = (char*)realloc(alloc->base, new_size);
+    if (!new_block) return -1;
+
+    /* NOTE: Skip memset on growth for performance.
+     * Structures allocated will initialize their own fields explicitly.
+     * This matches the optimization in compact_single_alloc_create(). */
+
+    alloc->base = new_block;
+    alloc->size = new_size;
+
+    /* Note: string_hash pointers need updating if they point into the block,
+     * but we store offsets not pointers, so this is safe */
+
+    return 0;
+}
+
+/**
+ * Ensure allocator has at least 'needed' bytes remaining
+ */
+int compact_single_alloc_ensure(CompactSingleAllocator* alloc, size_t needed) {
+    if (!alloc) return -1;
+
+    if (alloc->offset + needed <= alloc->size) {
+        return 0;  /* Already have enough space */
+    }
+
+    return compact_single_alloc_grow(alloc, needed);
 }
 
 /**

@@ -4,11 +4,10 @@
  * All DOM nodes inherit from TaurusNode base structure.
  * MECE Principle: Every XML construct maps to exactly one node type.
  *
- * COMPACT ARCHITECTURE:
- * Uses compressed pointer encoding for minimal memory footprint.
- * - 4-byte base node (vs 32 bytes in legacy design)
- * - Parent/sibling pointers stored in compressed form in node types
- * - No reference counting (simplifies ownership model)
+ * POINTER-BASED ARCHITECTURE:
+ * Uses direct pointers for tree navigation.
+ * - 20-byte base node with direct sibling pointers
+ * - O(1) navigation without offset calculations
  */
 
 #ifndef TAURUS_DOM_NODE_H
@@ -16,29 +15,29 @@
 
 #include "../taurus_internal.h"
 
-/* Node type enumeration - extended from taurus_internal.h */
+/* Node type enumeration */
 typedef enum {
     TAURUS_NODE_TYPE_ELEMENT = 0,
     TAURUS_NODE_TYPE_TEXT = 1,
     TAURUS_NODE_TYPE_COMMENT = 2,
     TAURUS_NODE_TYPE_CDATA = 3,
-    TAURUS_NODE_TYPE_PI = 4,           /* Processing Instruction */
+    TAURUS_NODE_TYPE_PI = 4,
     TAURUS_NODE_TYPE_DOCTYPE = 5,
-    TAURUS_NODE_TYPE_ATTRIBUTE = 6     /* For XPath attribute nodes */
+    TAURUS_NODE_TYPE_ATTRIBUTE = 6
 } TaurusNodeTypeEnum;
 
 /* Base node - all nodes start with this structure
  * CRITICAL: All node types MUST have this as their first member
  * This allows safe casting between node types
  *
- * Size: 4 bytes (vs 32 bytes in legacy design)
- * - No parent/sibling pointers (stored in compressed form in node types)
- * - No reference counting (simpler ownership model) */
+ * Size: 20 bytes (pointer-based)
+ */
 typedef struct taurus_node {
     TaurusNodeTypeEnum type;           /* Node type discriminator (4 bytes) */
-    unsigned int frozen : 1;           /* COW: 0 = mutable, 1 = frozen (immutable) */
-    unsigned int version : 31;         /* COW 2.2: Node version for tracking modifications */
-    /* NOTE: Parent/sibling pointers stored in compressed form in specific node types */
+    unsigned int frozen : 1;           /* COW: 0 = mutable, 1 = frozen */
+    unsigned int version : 31;         /* COW: Node version tracking */
+    struct taurus_node* next_sibling;  /* Next sibling (8 bytes) */
+    struct taurus_node* prev_sibling;  /* Previous sibling (8 bytes) */
 } TaurusNode;
 
 /* Node creation and destruction */
