@@ -19,6 +19,12 @@ extern "C" {
 long benchmark_time_us(void);
 
 /**
+ * Get current time in nanoseconds
+ * Uses high-resolution monotonic clock
+ */
+long long benchmark_time_ns(void);
+
+/**
  * Statistical results from benchmark measurements
  */
 typedef struct {
@@ -33,7 +39,7 @@ typedef struct {
 /**
  * Analyze array of timing samples
  * Computes all statistical measures
- * 
+ *
  * @param samples Array of timing measurements (microseconds)
  * @param count Number of samples
  * @return Statistical analysis results
@@ -42,7 +48,7 @@ benchmark_stats benchmark_analyze(const double* samples, size_t count);
 
 /**
  * Print comparison results between Taurus and competitor
- * 
+ *
  * @param name Test name
  * @param taurus Taurus statistics
  * @param competitor Competitor statistics

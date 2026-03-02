@@ -192,13 +192,8 @@ const char* compact_element_get_namespace(
 struct compact_element_v2* compact_document_get_root(struct taurus_document* doc);
 
 /* ============================================================================
- * Dispatch Layer Helpers - V2
+ * Pointer-Only Helpers
  * ============================================================================ */
-
-/**
- * Check if document is in compact mode - COMPACT-ONLY (always returns 1)
- */
-int compact_is_compact_mode(struct taurus_document* doc);
 
 /**
  * Get the compact element v2 from a TaurusElement handle - COMPACT-ONLY

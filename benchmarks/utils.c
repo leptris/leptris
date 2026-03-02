@@ -27,12 +27,31 @@ long benchmark_time_us(void) {
     uint64_t now = mach_absolute_time();
     /* Convert to nanoseconds, then to microseconds */
     return (long)((now * timebase.numer / timebase.denom) / 1000);
-    
+
 #elif defined(__linux__)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long)(ts.tv_sec * 1000000L + ts.tv_nsec / 1000);
-    
+
+#endif
+}
+
+/* Get current time in nanoseconds */
+long long benchmark_time_ns(void) {
+#if defined(__APPLE__)
+    static mach_timebase_info_data_t timebase = {0};
+    if (timebase.denom == 0) {
+        mach_timebase_info(&timebase);
+    }
+    uint64_t now = mach_absolute_time();
+    /* Convert to nanoseconds */
+    return (long long)(now * timebase.numer / timebase.denom);
+
+#elif defined(__linux__)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)(ts.tv_sec * 1000000000LL + ts.tv_nsec);
+
 #endif
 }
 
