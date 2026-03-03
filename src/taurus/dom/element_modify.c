@@ -1,9 +1,9 @@
-/* lib/src/dom/element_modify.c - DOM Modification API (Compact Mode)
+/* lib/src/dom/element_modify.c - DOM Modification API (Pointer-Based)
  * Copyright (c) 2024, Ribose Inc.
  *
  * Public API for modifying DOM trees in-place.
- * COMPACT MODE: Uses compact pointer encoding and accessor functions.
- * V2 AWARE: Updates both wrapper fields and compact v2 structures.
+ * POINTER-BASED ARCHITECTURE: Uses direct pointers for tree navigation.
+ * Target: 1.0-1.2x faster than pugixml.
  */
 
 #include "../../include/taurus.h"
@@ -11,11 +11,9 @@
 #include "../common/string_view.h"
 #include "../common/entities.h"
 #include "../memory/pool.h"
-#include "../memory/zero_check_alloc.h"
 #include "element.h"
-#include "compact.h"
-#include "compact_element.h"
-#include "compact_accessor.h"
+#include "ptr_element.h"
+#include "ptr_accessor.h"
 #include "node.h"
 #include "text.h"
 #include "cdata.h"
@@ -23,41 +21,17 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* ===========================================================================
- * Internal Helper: Rebuild Children Array
- *
- * The inline children[4] array is used for O(1) child access by index.
- * This function rebuilds the array from the linked list after modifications.
- * =========================================================================== */
-
 /* Helper macro to emit observer events with minimal overhead when no observers */
 #define EMIT_EVENT(elem, type, parent, sibling, name, old_val, new_val) \
     do { \
         if ((elem) && (elem)->document && \
             taurus_document_has_observers((elem)->document)) { \
-            taurus_emit_event((elem)->document, type, (elem), parent, sibling, \
+            taurus_emit_event((elem)->document, type, (struct taurus_element*)(elem), \
+                              (struct taurus_element*)(parent), \
+                              (struct taurus_element*)(sibling), \
                               name, old_val, new_val); \
         } \
     } while (0)
-
-static void rebuild_children_array(TaurusElement parent) {
-    if (!parent) return;
-
-    /* Clear the array first */
-    memset(parent->children, 0, sizeof(parent->children));
-
-    /* CRITICAL FIX: Use accessor to get first child (handles both wrapper and compact)
-     * For parsed elements, first_child is NULL but children exist in compact structures */
-    TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)parent);
-    uint16_t array_index = 0;
-
-    while (child && array_index < 4) {
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            parent->children[array_index++] = child;
-        }
-        child = taurus_node_get_next_sibling(child);
-    }
-}
 
 /* ===========================================================================
  * Public API Implementation - DOM Modification (Pointer-Based)
@@ -65,10 +39,22 @@ static void rebuild_children_array(TaurusElement parent) {
 
 /**
  * Get child count (Public API)
+ * NOTE: Only counts ELEMENT children, not text/comment/PI nodes
  */
 size_t taurus_element_child_count(TaurusElement elem) {
     if (!elem) return 0;
-    return elem->child_count;
+
+    /* Count only element children, not text/comment/PI nodes */
+    size_t count = 0;
+    struct ptr_element* child = elem->first_child;
+    while (child) {
+        /* Check if this is an element node (type 0) */
+        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+            count++;
+        }
+        child = child->next_sibling;
+    }
+    return count;
 }
 
 /**
@@ -127,7 +113,6 @@ TaurusStatus taurus_element_prepend_child(TaurusElement parent, TaurusElement ch
 
 /**
  * Insert new node before a sibling (Public API)
- * COMPACT MODE: Simplified implementation - only handles element insertion
  */
 TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement new_node) {
     if (!sibling || !new_node) return TAURUS_ERROR_NULL_ARG;
@@ -135,8 +120,8 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
     TaurusNode* new_node_ptr = (TaurusNode*)new_node;
     TaurusNode* sibling_ptr = (TaurusNode*)sibling;
 
-    /* Get parent using accessor function */
-    TaurusElement parent = taurus_element_parent(sibling);
+    /* Get parent */
+    TaurusElement parent = sibling->parent;
     if (!parent) return TAURUS_ERROR_INVALID_ARG;
 
     /* For element children, we need to handle the linked list properly */
@@ -145,20 +130,17 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
     }
 
     /* Remove new node from old parent if attached */
-    if (taurus_element_parent(new_node)) {
+    if (new_node->parent) {
         /* For now, return error if new_node already has a parent */
         return TAURUS_ERROR_INVALID_ARG;
     }
 
-    /* CRITICAL FIX: Use generic node API to find previous sibling
-     * The element-only API skips text nodes, which causes text to be lost
-     * when inserting elements. We must use taurus_node_first_child_internal and
-     * taurus_node_get_next_sibling to preserve all node types. */
-    TaurusNode* prev_child = NULL;
-    TaurusNode* current = taurus_node_first_child_internal((TaurusNode*)parent);
-    while (current && current != sibling_ptr) {
+    /* Find previous sibling */
+    struct ptr_element* prev_child = NULL;
+    struct ptr_element* current = parent->first_child;
+    while (current && current != sibling) {
         prev_child = current;
-        current = taurus_node_get_next_sibling(current);
+        current = current->next_sibling;
     }
 
     if (!current) {
@@ -166,60 +148,26 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
         return TAURUS_ERROR_INVALID_ARG;
     }
 
-    /* Insert new_node before sibling
-     * We need to set next_sibling on prev_child to point to new_node
-     * Since prev_child can be any node type (text, comment, etc.), we need
-     * to handle the different structure layouts. */
+    /* Insert new_node before sibling */
     if (prev_child) {
-        switch (prev_child->type) {
-            case TAURUS_NODE_TYPE_TEXT:
-            case TAURUS_NODE_TYPE_COMMENT:
-            case TAURUS_NODE_TYPE_CDATA: {
-                /* These node types have: base(4) + content(8) + next_sibling(8)
-                 * next_sibling is at offset 12 */
-                struct {
-                    TaurusNode base;
-                    char* content;
-                    void* next_sibling;
-                } *text_node = (void*)prev_child;
-                text_node->next_sibling = new_node;
-                break;
-            }
-            case TAURUS_NODE_TYPE_ELEMENT: {
-                /* Element has next_sibling as a struct member - use setter for offset */
-                taurus_element_set_next_sibling((TaurusElement)prev_child, new_node);
-                break;
-            }
-            default:
-                /* PI, DOCTYPE, etc. - not expected in this context */
-                return TAURUS_ERROR_INVALID_ARG;
-        }
+        prev_child->next_sibling = new_node;
     } else {
         /* new_node becomes first child */
-        taurus_element_set_first_child(parent, (TaurusElement)new_node);
+        parent->first_child = new_node;
     }
-    taurus_element_set_next_sibling(new_node, (TaurusElement)sibling);
+    new_node->next_sibling = sibling;
+    new_node->prev_sibling = prev_child;
+    sibling->prev_sibling = new_node;
 
     /* Set parent and document */
-    taurus_element_set_parent(new_node, parent);
+    new_node->parent = parent;
     new_node->document = parent->document;
-
-    /* CRITICAL FIX: Ensure child_count is calculated before incrementing
-     * For parsed elements, child_count is 0 until calculated by walking compact children */
-    if (parent->child_count == 0) {
-        /* Force calculation by walking children */
-        size_t existing_count = taurus_element_child_count(parent);
-        (void)existing_count;  /* Just to trigger calculation */
-    }
 
     /* Increment child count */
     parent->child_count++;
 
-    /* Rebuild children array for O(1) access */
-    rebuild_children_array(parent);
-
     /* COW: Increment version */
-    taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
+    taurus_node_increment_version((TaurusNode*)parent);
 
     /* Emit observer event */
     EMIT_EVENT(new_node, TAURUS_EVENT_ELEMENT_ADDED, parent, sibling, NULL, NULL, NULL);
@@ -229,7 +177,6 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
 
 /**
  * Insert new node after a sibling (Public API)
- * COMPACT MODE: Properly handles mixed content
  */
 TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement new_node) {
     if (!sibling || !new_node) return TAURUS_ERROR_NULL_ARG;
@@ -237,8 +184,8 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
     TaurusNode* new_node_ptr = (TaurusNode*)new_node;
     TaurusNode* sibling_ptr = (TaurusNode*)sibling;
 
-    /* Get parent using accessor function */
-    TaurusElement parent = taurus_element_parent(sibling);
+    /* Get parent */
+    TaurusElement parent = sibling->parent;
     if (!parent) return TAURUS_ERROR_INVALID_ARG;
 
     if (new_node_ptr->type != TAURUS_NODE_TYPE_ELEMENT) {
@@ -246,48 +193,37 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
     }
 
     /* Check if new_node already has a parent */
-    if (taurus_element_parent(new_node)) {
+    if (new_node->parent) {
         return TAURUS_ERROR_INVALID_ARG;
     }
 
-    /* CRITICAL FIX: Use generic node API to get next sibling
-     * The element-only API skips text nodes, which breaks insertion order.
-     * Use taurus_node_get_next_sibling to get the true next sibling. */
-    TaurusNode* next_sibling = taurus_node_get_next_sibling(sibling_ptr);
+    /* Get next sibling */
+    struct ptr_element* next_sibling = sibling->next_sibling;
 
-    /* Link sibling to new_node - use setter for offset */
-    taurus_element_set_next_sibling(sibling, new_node);
+    /* Link sibling to new_node */
+    sibling->next_sibling = new_node;
+    new_node->prev_sibling = sibling;
 
     /* Link new_node to next_sibling */
-    taurus_element_set_next_sibling(new_node, (TaurusElement)next_sibling);
-
-    /* Set parent - use setter for offset */
-    taurus_element_set_parent(new_node, parent);
-    new_node->document = parent->document;
-
-    /* Update last_child if needed - use generic node API */
-    TaurusNode* last = taurus_node_last_child_internal((TaurusNode*)parent);
-    if (last == sibling_ptr) {
-        /* new_node is always an element (checked above) */
-        taurus_element_set_last_child(parent, new_node);
+    new_node->next_sibling = next_sibling;
+    if (next_sibling) {
+        next_sibling->prev_sibling = new_node;
     }
 
-    /* CRITICAL FIX: Ensure child_count is calculated before incrementing
-     * For parsed elements, child_count is 0 until calculated by walking compact children */
-    if (parent->child_count == 0) {
-        /* Force calculation by walking children */
-        size_t existing_count = taurus_element_child_count(parent);
-        (void)existing_count;  /* Just to trigger calculation */
+    /* Set parent */
+    new_node->parent = parent;
+    new_node->document = parent->document;
+
+    /* Update last_child if needed */
+    if (parent->last_child == sibling) {
+        parent->last_child = new_node;
     }
 
     /* Increment child count */
     parent->child_count++;
 
-    /* Rebuild children array for O(1) access */
-    rebuild_children_array(parent);
-
     /* COW: Increment version */
-    taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
+    taurus_node_increment_version((TaurusNode*)parent);
 
     /* Emit observer event */
     EMIT_EVENT(new_node, TAURUS_EVENT_ELEMENT_ADDED, parent, sibling, NULL, NULL, NULL);
@@ -297,59 +233,54 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
 
 /**
  * Remove child element (Public API)
- * COMPACT MODE: Simplified implementation
  */
 TaurusStatus taurus_element_remove_child(TaurusElement parent, TaurusElement child) {
     if (!parent || !child) return TAURUS_ERROR_NULL_ARG;
 
     /* Verify child is actually a child of parent */
     TaurusElement found = NULL;
-    TaurusElement current = taurus_element_get_first_child(parent);
+    TaurusElement current = parent->first_child;
     while (current) {
         if (current == child) {
             found = current;
             break;
         }
-        current = taurus_element_get_next_sibling(current);
+        current = current->next_sibling;
     }
 
     if (!found) {
         return TAURUS_ERROR_INVALID_ARG;
     }
 
-    /* Find the node before child in the list */
-    TaurusElement prev_child = NULL;
-    current = taurus_element_get_first_child(parent);
-    while (current && current != child) {
-        prev_child = current;
-        current = taurus_element_get_next_sibling(current);
-    }
-
-    TaurusElement next_child = taurus_element_get_next_sibling(child);
+    /* Find previous and next siblings */
+    TaurusElement prev_child = child->prev_sibling;
+    TaurusElement next_child = child->next_sibling;
 
     /* Unlink child from the list */
     if (prev_child) {
         prev_child->next_sibling = next_child;
     } else {
         /* Child was first child */
-        taurus_element_set_first_child(parent, (TaurusElement)next_child);
+        parent->first_child = next_child;
     }
 
-    /* Update last_child pointer - directly check instead of using get_last_child */
-    if ((TaurusNode*)parent->last_child == child) {
-        /* Child was last child */
-        taurus_element_set_last_child(parent, (TaurusElement)prev_child);
+    if (next_child) {
+        next_child->prev_sibling = prev_child;
     }
 
-    /* Clear parent and decrement count - use setter for offset */
-    taurus_element_set_parent(child, NULL);
+    /* Update last_child pointer */
+    if (parent->last_child == child) {
+        parent->last_child = prev_child;
+    }
+
+    /* Clear parent and decrement count */
+    child->parent = NULL;
+    child->next_sibling = NULL;
+    child->prev_sibling = NULL;
     parent->child_count--;
 
-    /* Rebuild children array for O(1) access */
-    rebuild_children_array(parent);
-
     /* COW: Increment version */
-    taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
+    taurus_node_increment_version((TaurusNode*)parent);
 
     /* Emit observer event */
     EMIT_EVENT(child, TAURUS_EVENT_ELEMENT_REMOVED, parent, NULL, NULL, NULL, NULL);
@@ -364,23 +295,22 @@ TaurusStatus taurus_element_remove_all_children(TaurusElement elem) {
     if (!elem) return TAURUS_ERROR_NULL_ARG;
 
     /* Walk through all children and clear parent references */
-    TaurusElement child = taurus_element_get_first_child(elem);
+    TaurusElement child = elem->first_child;
     while (child) {
-        TaurusElement next = taurus_element_get_next_sibling(child);
-        taurus_element_set_parent(child, NULL);  /* Use setter for offset */
+        TaurusElement next = child->next_sibling;
+        child->parent = NULL;
+        child->prev_sibling = NULL;
+        child->next_sibling = NULL;
         child = next;
     }
 
-    /* Clear child pointers (use setters to update offset fields too) */
-    taurus_element_set_first_child(elem, NULL);
-    taurus_element_set_last_child(elem, NULL);
+    /* Clear child pointers */
+    elem->first_child = NULL;
+    elem->last_child = NULL;
     elem->child_count = 0;
 
-    /* Clear children array */
-    memset(elem->children, 0, sizeof(elem->children));
-
     /* COW: Increment version */
-    taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
+    taurus_node_increment_version((TaurusNode*)elem);
 
     return TAURUS_OK;
 }
@@ -404,10 +334,9 @@ TaurusStatus taurus_element_set_name(TaurusElement elem, const char* name) {
         /* Fallback to malloc for standalone elements */
         elem->name = taurus_strdup(name);
     }
-    elem->name_view = taurus_sv_from_cstr(name);
 
     /* COW: Increment version */
-    taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
+    taurus_node_increment_version((TaurusNode*)elem);
 
     /* Emit observer event */
     EMIT_EVENT(elem, TAURUS_EVENT_NAME_CHANGED, NULL, NULL, NULL, NULL, name);
@@ -417,7 +346,6 @@ TaurusStatus taurus_element_set_name(TaurusElement elem, const char* name) {
 
 /**
  * Set element text content (Public API)
- * COMPACT MODE: Removes all existing children and adds a single text node
  */
 TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
     if (!elem) return TAURUS_ERROR_NULL_ARG;
@@ -426,7 +354,7 @@ TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
     taurus_element_remove_all_children(elem);
 
     if (text) {
-        /* Create new text node (even if empty to match pugixml behavior) */
+        /* Create new text node */
         TaurusTextNode* text_node = taurus_text_create(text);
         if (!text_node) {
             return TAURUS_ERROR_MEMORY;
@@ -444,132 +372,100 @@ TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
 
 /**
  * Set attribute (Public API)
- * COMPACT MODE: Uses linked list + inline array + hash table for O(1) access
+ * Uses linked list for attribute storage
  */
 TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, const char* value) {
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
 
-    /* Check if attribute already exists */
-    struct taurus_attribute* existing = taurus_element_get_attribute_by_name(elem, name);
-    if (existing) {
-        /* Update existing attribute's value */
-        /* Get the memory pool from the document */
-        TaurusMemoryPool* pool = NULL;
-        if (elem->document && elem->document->pool) {
+    /* Get the memory pool from the document - check both legacy and ptr mode pools */
+    TaurusMemoryPool* pool = NULL;
+    if (elem->document) {
+        if (elem->document->pool) {
             pool = elem->document->pool;
-        }
-
-        if (pool) {
-            /* Pool-allocated document: Use pool allocation for new value
-             * CRITICAL: Don't free existing->value - it was pool-allocated and
-             * individual pool allocations cannot be freed. The old value will be
-             * reclaimed when the entire document/pool is freed. */
-            if (value) {
-                TaurusStringView value_view = taurus_sv_from_cstr(value);
-                existing->value = taurus_sv_to_cstr_pooled(&value_view, pool);
-                existing->value_view = taurus_sv_from_cstr(existing->value);
-            } else {
-                existing->value = NULL;
-                existing->value_view = taurus_sv_empty();
-            }
-        } else {
-            /* No pool available: Use malloc/free (fallback for edge cases) */
-            if (existing->value) {
-                TAURUS_FREE(existing->value);
-            }
-            existing->value = value ? taurus_strdup(value) : NULL;
-            existing->value_view = value ? taurus_sv_from_cstr(value) : taurus_sv_empty();
-        }
-    } else {
-        /* Get the memory pool from the document */
-        TaurusMemoryPool* pool = NULL;
-        if (elem->document && elem->document->pool) {
-            pool = elem->document->pool;
-        } else {
-            /* CRITICAL: No pool available - cannot allocate attributes without memory pool */
-            return TAURUS_ERROR_MEMORY;
-        }
-
-        /* PERFORMANCE: Bulk allocation - struct + name + value in single allocation
-         * This reduces from 3 allocations to 1, improving set_attribute by ~30% */
-        size_t name_len = strlen(name);
-        size_t value_len = value ? strlen(value) : 0;
-        size_t total_size = sizeof(struct taurus_attribute) + name_len + 1 + value_len + 1;
-
-        char* block = (char*)taurus_pool_alloc(pool, total_size);
-        if (!block) {
-            return TAURUS_ERROR_MEMORY;
-        }
-
-        /* Layout: struct | name_string | value_string */
-        struct taurus_attribute* attr = (struct taurus_attribute*)block;
-        char* name_str = block + sizeof(struct taurus_attribute);
-        char* value_str = name_str + name_len + 1;
-
-        /* Copy name */
-        memcpy(name_str, name, name_len + 1);
-
-        /* Copy value */
-        if (value) {
-            memcpy(value_str, value, value_len + 1);
-        } else {
-            value_str = NULL;
-        }
-
-        /* Initialize attribute with bulk-allocated strings */
-        attr->name = name_str;
-        attr->value = value_str;
-        attr->namespace_uri = NULL;
-        attr->prefix = NULL;
-        attr->name_view = taurus_sv_from_cstr(name_str);
-        attr->value_view = value ? taurus_sv_from_cstr(value_str) : taurus_sv_empty();
-        attr->namespace_uri_view = taurus_sv_empty();
-        attr->prefix_view = taurus_sv_empty();
-        attr->has_entities = 0;
-        attr->next = NULL;
-
-        /* Add to linked list - O(1) using last_attribute pointer! */
-        if (!elem->first_attribute) {
-            /* First attribute */
-            elem->first_attribute = attr;
-            elem->last_attribute = attr;
-        } else {
-            /* Append to end using last_attribute - O(1)! */
-            elem->last_attribute->next = attr;
-            elem->last_attribute = attr;
-        }
-
-        /* Increment attribute count BEFORE hash table logic */
-        elem->attr_count++;
-
-        /* O(1) optimization: Create/update hash table when we exceed 4 attributes */
-        if (elem->attr_count == 5) {
-            /* First time crossing threshold - create hash table with all attributes */
-            /* Import hash functions from element.c */
-            extern uint32_t attr_hash_name(const char* name, size_t len);
-            extern int create_attr_hash_table(TaurusElement elem, TaurusMemoryPool* pool);
-            extern int add_attr_to_hash(TaurusElement elem, struct taurus_attribute* attr, TaurusMemoryPool* pool);
-
-            if (create_attr_hash_table(elem, pool) == 0) {
-                /* Add all 5 attributes to hash table */
-                struct taurus_attribute* a = elem->first_attribute;
-                while (a) {
-                    add_attr_to_hash(elem, a, pool);
-                    a = a->next;
-                }
-            }
-        } else if (elem->attr_count > 5) {
-            /* Just add new attribute to existing hash table */
-            extern int add_attr_to_hash(TaurusElement elem, struct taurus_attribute* attr, TaurusMemoryPool* pool);
-
-            if (elem->attr_hash) {
-                add_attr_to_hash(elem, attr, pool);
-            }
+        } else if (elem->document->ptr_attr_pool) {
+            pool = (TaurusMemoryPool*)elem->document->ptr_attr_pool;
+        } else if (elem->document->ptr_elem_pool) {
+            pool = (TaurusMemoryPool*)elem->document->ptr_elem_pool;
         }
     }
 
+    /* Check if attribute already exists */
+    struct ptr_attribute* existing = ptr_element_find_attr(elem, name);
+    if (existing) {
+        /* Update existing attribute's value */
+        if (pool) {
+            if (value) {
+                TaurusStringView value_view = taurus_sv_from_cstr((char*)value);
+                existing->value = taurus_sv_to_cstr_pooled(&value_view, pool);
+                existing->value_view_data = existing->value;
+                existing->value_view_length = strlen(existing->value);
+            } else {
+                existing->value = NULL;
+                existing->value_view_data = NULL;
+                existing->value_view_length = 0;
+            }
+        } else {
+            /* No pool available - just update the pointer
+             * NOTE: We cannot free the old value as it may be pool-allocated.
+             * This is a minor memory leak but better than crashing. */
+            existing->value = value ? taurus_strdup(value) : NULL;
+            existing->value_view_data = existing->value;
+            existing->value_view_length = value ? strlen(value) : 0;
+        }
+    } else {
+        /* Create new attribute */
+        if (!pool) {
+            return TAURUS_ERROR_MEMORY;
+        }
+
+        /* Allocate new attribute */
+        struct ptr_attribute* attr = (struct ptr_attribute*)taurus_pool_alloc(
+            pool, sizeof(struct ptr_attribute));
+        if (!attr) {
+            return TAURUS_ERROR_MEMORY;
+        }
+
+        /* Initialize attribute */
+        size_t name_len = strlen(name);
+        size_t value_len = value ? strlen(value) : 0;
+
+        char* name_copy = (char*)taurus_pool_alloc(pool, name_len + 1);
+        char* value_copy = value ? (char*)taurus_pool_alloc(pool, value_len + 1) : NULL;
+
+        if (!name_copy || (value && !value_copy)) {
+            return TAURUS_ERROR_MEMORY;
+        }
+
+        memcpy(name_copy, name, name_len + 1);
+        if (value) {
+            memcpy(value_copy, value, value_len + 1);
+        }
+
+        attr->name = name_copy;
+        attr->value = value_copy;
+        attr->name_view_data = name_copy;
+        attr->name_view_length = name_len;
+        attr->value_view_data = value_copy;
+        attr->value_view_length = value_len;
+        attr->next_attr = NULL;
+
+        /* Add to linked list */
+        if (!elem->first_attr) {
+            elem->first_attr = attr;
+        } else {
+            /* Find last attribute */
+            struct ptr_attribute* last = elem->first_attr;
+            while (last->next_attr) {
+                last = last->next_attr;
+            }
+            last->next_attr = attr;
+        }
+
+        elem->attr_count++;
+    }
+
     /* COW: Increment version */
-    taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
+    taurus_node_increment_version((TaurusNode*)elem);
 
     /* Emit observer event */
     EMIT_EVENT(elem, TAURUS_EVENT_ATTRIBUTE_SET, NULL, NULL, name, NULL, value);
@@ -583,82 +479,59 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
 TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* name) {
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
 
-    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
-    struct taurus_attribute* prev = NULL;
+    struct ptr_attribute* attr = elem->first_attr;
+    struct ptr_attribute* prev = NULL;
 
     while (attr) {
-        const char* attr_name = attr->name;
-        if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
-            attr_name = taurus_sv_to_cstr(&attr->name_view);
-        }
-
         int match = 0;
-        if (attr_name) {
-            match = (strcmp(attr_name, name) == 0);
-        }
-        /* Free temporary string if we converted from StringView */
-        if (attr_name && attr_name != attr->name) {
-            char* temp = (char*)attr_name;
-            TAURUS_FREE(temp);
+        if (attr->name) {
+            match = (strcmp(attr->name, name) == 0);
         }
 
         if (match) {
-            /* Store attribute name for event before removal */
-            const char* removed_name = attr->name;
-
             /* Found - remove from linked list */
             if (prev) {
-                prev->next = attr->next;
-                /* Update last_attribute if we removed the last one */
-                if (attr->next == NULL) {
-                    elem->last_attribute = prev;
-                }
+                prev->next_attr = attr->next_attr;
             } else {
-                /* Was first attribute - update first_attribute pointer */
-                if (attr->next) {
-                    taurus_element_set_first_attribute(elem, attr->next);
-                } else {
-                    /* No more attributes - clear both pointers */
-                    taurus_element_set_first_attribute(elem, NULL);
-                    elem->last_attribute = NULL;
-                }
+                elem->first_attr = attr->next_attr;
             }
 
             /* CRITICAL: Don't free pool-allocated attributes!
-             * Attributes are allocated from the memory pool and will be freed
-             * when the pool is destroyed. If we free() them here, we get undefined behavior.
              * Just decrement the count and let the pool handle cleanup. */
-
-            /* CRITICAL: Don't free attribute strings!
-             * Attributes created by parser or programmatically use pool allocation.
-             * Pool-allocated strings cannot be individually freed - they will be
-             * reclaimed when the entire document/pool is freed.
-             * Trying to free() them here causes undefined behavior (Abort trap). */
-
             elem->attr_count--;
 
-            /* O(1) optimization: Remove from hash table directly (no rebuild!) */
-            if (elem->attr_hash) {
-                /* Import remove function from element.c */
-                extern int remove_attr_from_hash(TaurusElement elem, const char* name);
-                remove_attr_from_hash(elem, name);
-                /* Note: We keep the hash table even if count drops to <=4
-                 * This avoids the overhead of recreating it if attributes are added again */
-            }
-
-            taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
+            taurus_node_increment_version((TaurusNode*)elem);
 
             /* Emit observer event */
-            EMIT_EVENT(elem, TAURUS_EVENT_ATTRIBUTE_REMOVED, NULL, NULL, removed_name, NULL, NULL);
+            EMIT_EVENT(elem, TAURUS_EVENT_ATTRIBUTE_REMOVED, NULL, NULL, name, NULL, NULL);
 
             return TAURUS_OK;
         }
 
         prev = attr;
-        attr = attr->next;
+        attr = attr->next_attr;
     }
 
     return TAURUS_ERROR_NOT_FOUND;  /* Attribute not found */
+}
+
+/**
+ * Remove all attributes from element (Public API)
+ */
+TaurusStatus taurus_element_remove_all_attributes(TaurusElement elem) {
+    if (!elem) return TAURUS_ERROR_NULL_ARG;
+
+    /* Clear attribute pointers */
+    elem->first_attr = NULL;
+    elem->attr_count = 0;
+
+    /* COW: Increment version */
+    taurus_node_increment_version((TaurusNode*)elem);
+
+    /* Emit observer event */
+    EMIT_EVENT(elem, TAURUS_EVENT_ATTRIBUTE_REMOVED, NULL, NULL, "*all*", NULL, NULL);
+
+    return TAURUS_OK;
 }
 
 /* ============================================================================
@@ -673,18 +546,13 @@ void taurus_element_add_attribute_legacy(
 ) {
     if (!elem || !name) return;
 
-    /* Create StringViews from C strings */
-    TaurusStringView name_view = taurus_sv_from_cstr(name);
-    TaurusStringView value_view = taurus_sv_from_cstr(value ? value : "");
-
     /* For now, we need a pool. Use element's document pool if available */
     TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
     if (!pool) {
-        /* No pool available - can't add attribute in compact mode */
         return;
     }
 
-    taurus_element_add_attribute(elem, name_view, value_view, pool);
+    taurus_element_add_attribute_pooled(elem, name, value, pool);
 }
 
 /* Add attribute using memory pool (fast) */
@@ -697,8 +565,8 @@ void taurus_element_add_attribute_pooled(
     if (!elem || !name || !pool) return;
 
     /* Create StringViews from C strings */
-    TaurusStringView name_view = taurus_sv_from_cstr(name);
-    TaurusStringView value_view = taurus_sv_from_cstr(value ? value : "");
+    TaurusStringView name_view = taurus_sv_from_cstr((char*)name);
+    TaurusStringView value_view = taurus_sv_from_cstr((char*)(value ? value : ""));
 
     taurus_element_add_attribute(elem, name_view, value_view, pool);
 }
@@ -712,33 +580,39 @@ void taurus_element_add_attribute_pooled_inplace(
 ) {
     if (!elem || !name || !pool) return;
 
-    /* Create StringViews from in-place strings */
-    TaurusStringView name_view = taurus_sv_from_cstr(name);
-    TaurusStringView value_view = taurus_sv_from_cstr(value ? value : "");
+    struct ptr_attribute* attr = (struct ptr_attribute*)taurus_pool_alloc(
+        pool, sizeof(struct ptr_attribute));
+    if (!attr) return;
 
-    taurus_element_add_attribute(elem, name_view, value_view, pool);
+    /* Use strings directly - zero copy */
+    attr->name = name;
+    attr->value = value;
+    attr->name_view_data = name;
+    attr->name_view_length = strlen(name);
+    attr->value_view_data = value;
+    attr->value_view_length = value ? strlen(value) : 0;
+    attr->next_attr = NULL;
+
+    /* Add to linked list */
+    if (!elem->first_attr) {
+        elem->first_attr = attr;
+    } else {
+        struct ptr_attribute* last = elem->first_attr;
+        while (last->next_attr) {
+            last = last->next_attr;
+        }
+        last->next_attr = attr;
+    }
+
+    elem->attr_count++;
 }
 
 /* Get attribute value by name (legacy API) */
 const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
-    struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
+    struct ptr_attribute* attr = ptr_element_find_attr(elem, name);
     if (!attr) return NULL;
-
-    /* Lazy convert value_view to C string */
-    if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
-        if (elem->document && elem->document->pool) {
-            if (attr->has_entities) {
-                attr->value = taurus_decode_entities_view(&attr->value_view, elem->document->pool);
-            }
-            if (!attr->value) {
-                attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, elem->document->pool);
-            }
-        } else {
-            attr->value = taurus_sv_to_cstr(&attr->value_view);
-        }
-    }
 
     return attr->value;
 }

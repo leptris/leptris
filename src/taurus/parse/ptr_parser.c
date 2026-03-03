@@ -12,6 +12,8 @@
  * Benchmark results (verified with 1000 iterations):
  * - Small (2KB): 0.87 us vs pugixml 1.26 us = 1.45x FASTER
  * - Large (656KB): 267.99 us vs pugixml 345.04 us = 1.29x FASTER
+ *
+ * V2: Added strict mode validation for XML 1.0 compliance
  */
 
 #include "../dom/ptr_element.h"
@@ -45,9 +47,151 @@ typedef struct {
     PtrStackEntry stack[MAX_STACK_DEPTH];
     size_t stack_size;
 
+    /* Strict mode validation */
+    int strict_mode;
+
     /* Error tracking */
     int has_error;
 } PtrParser;
+
+/* ============================================================================
+ * Strict Mode Validation Functions
+ * ============================================================================ */
+
+/* Check if character is valid for starting an XML name */
+static int ptr_validate_name_start(char c) {
+    if (c >= 'a' && c <= 'z') return 1;
+    if (c >= 'A' && c <= 'Z') return 1;
+    if (c == '_' || c == ':') return 1;
+    return 0;
+}
+
+/* Validate attribute value - check for invalid characters */
+static int ptr_validate_attr_value(const char* value, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (value[i] == '<') return 0;  /* Less-than not allowed */
+    }
+    return 1;
+}
+
+/* Check for predefined entity */
+static int ptr_is_predefined_entity(const char* name, size_t len) {
+    if (len == 2 && strncmp(name, "lt", 2) == 0) return 1;
+    if (len == 2 && strncmp(name, "gt", 2) == 0) return 1;
+    if (len == 3 && strncmp(name, "amp", 3) == 0) return 1;
+    if (len == 4 && strncmp(name, "apos", 4) == 0) return 1;
+    if (len == 4 && strncmp(name, "quot", 4) == 0) return 1;
+    return 0;
+}
+
+/* Validate character reference */
+static int ptr_validate_charref(const char* p, const char* end, uint32_t* out_code) {
+    if (p >= end) return 0;
+
+    int is_hex = 0;
+    if (*p == 'x' || *p == 'X') {
+        is_hex = 1;
+        p++;
+    }
+
+    if (p >= end) return 0;
+
+    uint32_t value = 0;
+    int has_digits = 0;
+
+    while (p < end && *p != ';') {
+        char c = *p;
+        int digit;
+
+        if (c >= '0' && c <= '9') {
+            digit = c - '0';
+        } else if (is_hex && c >= 'a' && c <= 'f') {
+            digit = 10 + c - 'a';
+        } else if (is_hex && c >= 'A' && c <= 'F') {
+            digit = 10 + c - 'A';
+        } else {
+            return 0;  /* Invalid digit */
+        }
+
+        value = is_hex ? (value * 16 + digit) : (value * 10 + digit);
+        has_digits = 1;
+        p++;
+    }
+
+    if (!has_digits) return 0;
+    if (p >= end || *p != ';') return 0;
+
+    /* Check valid Unicode range */
+    if (value > 0x10FFFF) return 0;
+    if (value >= 0xD800 && value <= 0xDFFF) return 0;
+
+    if (out_code) *out_code = value;
+    return 1;
+}
+
+/* Validate text content for entity references and UTF-8 */
+static int ptr_validate_text_content(const char* p, const char* end) {
+    while (p < end) {
+        unsigned char c = (unsigned char)*p;
+
+        /* Check for invalid UTF-8 bytes */
+        if (c == 0xFF || c == 0xFE) return 0;
+        if (c == 0xC0 || c == 0xC1) return 0;  /* Overlong */
+
+        /* Check UTF-8 sequence validity */
+        if (c >= 0x80) {
+            int expected_bytes;
+            if ((c & 0xE0) == 0xC0) expected_bytes = 2;
+            else if ((c & 0xF0) == 0xE0) expected_bytes = 3;
+            else if ((c & 0xF8) == 0xF0) expected_bytes = 4;
+            else return 0;
+
+            for (int i = 1; i < expected_bytes; i++) {
+                if (p + i >= end) return 0;
+                unsigned char cont = (unsigned char)p[i];
+                if ((cont & 0xC0) != 0x80) return 0;
+            }
+            p += expected_bytes;
+            continue;
+        }
+
+        if (*p == '&') {
+            p++;
+            if (p >= end) return 0;
+
+            if (*p == '#') {
+                p++;
+                if (!ptr_validate_charref(p, end, NULL)) return 0;
+                while (p < end && *p != ';') p++;
+                if (p >= end || *p != ';') return 0;
+                p++;
+            } else {
+                const char* name_start = p;
+                while (p < end && *p != ';' && *p != ' ' && *p != '<' && *p != '&') p++;
+                size_t name_len = p - name_start;
+
+                if (name_len == 0) return 0;
+                if (p >= end || *p != ';') return 0;
+                if (!ptr_is_predefined_entity(name_start, name_len)) return 0;
+                p++;
+            }
+        } else {
+            p++;
+        }
+    }
+    return 1;
+}
+
+/* Validate comment content */
+static int ptr_validate_comment(const char* p, const char* end) {
+    if (p < end && *(end - 1) == '-') return 0;  /* Ends with dash */
+
+    while (p + 1 < end) {
+        if (p[0] == '-' && p[1] == '-') return 0;  /* "--" inside */
+        p++;
+    }
+    return 1;
+}
 
 /* ============================================================================
  * Inline Character Classification
@@ -116,6 +260,12 @@ static struct ptr_attribute* parse_ptr_attr(PtrParser* p) {
     size_t name_len = p->pos - name_start;
     if (name_len == 0) return NULL;
 
+    /* Strict mode: validate name start character */
+    if (p->strict_mode && !ptr_validate_name_start(*name_start)) {
+        p->has_error = 1;
+        return NULL;
+    }
+
     p->pos = ptr_skip_ws(p->pos, p->end);
     if (p->pos >= p->end || *p->pos != '=') { p->has_error = 1; return NULL; }
     p->pos++;
@@ -131,6 +281,13 @@ static struct ptr_attribute* parse_ptr_attr(PtrParser* p) {
     if (p->pos >= p->end) { p->has_error = 1; return NULL; }
 
     size_t value_len = p->pos - value_start;
+
+    /* Strict mode: validate attribute value */
+    if (p->strict_mode && !ptr_validate_attr_value(value_start, value_len)) {
+        p->has_error = 1;
+        return NULL;
+    }
+
     p->pos++;
 
     /* Null-terminate in place */
@@ -170,27 +327,57 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
             const char* text_start = p->pos;
             while (p->pos < p->end && *p->pos != '<') p->pos++;
 
-            if (ptr_is_ws_only(text_start, p->pos)) continue;
-
-            size_t text_len = p->pos - text_start;
-            ((char*)text_start)[text_len] = '\0';
-
-            struct ptr_text* text = alloc_ptr_text(p);
-            if (!text) continue;
-
-            text->text = text_start;
-            text->next_sibling = NULL;
-            text->length = (uint32_t)text_len;
-            text->node_type = PTR_NODE_TYPE_TEXT;
-
-            if (ctx->last_child == NULL) {
-                ctx->elem->first_child = (struct ptr_element*)text;
+            if (ptr_is_ws_only(text_start, p->pos)) {
+                /* Whitespace only - the '<' at pos will be processed below */
             } else {
-                struct ptr_text* last = (struct ptr_text*)ctx->last_child;
-                last->next_sibling = (struct ptr_node*)text;
+                /* Strict mode: validate text content */
+                if (p->strict_mode && !ptr_validate_text_content(text_start, p->pos)) {
+                    p->has_error = 1;
+                } else {
+                    size_t text_len = p->pos - text_start;
+
+                    /* Copy text to pool memory - don't modify original buffer.
+                     * This preserves the '<' character for tag parsing. */
+                    char* text_copy = (char*)taurus_pool_alloc(p->pool, text_len + 1);
+                    if (text_copy) {
+                        memcpy(text_copy, text_start, text_len);
+                        text_copy[text_len] = '\0';
+
+                        struct ptr_text* text = alloc_ptr_text(p);
+                        if (text) {
+                            text->type = PTR_NODE_TYPE_TEXT;
+                            text->frozen_version = 0;
+                            text->text = text_copy;
+                            text->next_sibling = NULL;
+                            text->prev_sibling = NULL;
+
+                            if (ctx->last_child == NULL) {
+                                ctx->elem->first_child = (struct ptr_element*)text;
+                                text->prev_sibling = NULL;  /* First child has no previous sibling */
+                            } else {
+                                /* Check type of last child to set next_sibling correctly */
+                                struct ptr_text* last = (struct ptr_text*)ctx->last_child;
+                                if (last->type >= PTR_NODE_TYPE_TEXT) {
+                                    last->next_sibling = (struct ptr_node*)text;
+                                } else {
+                                    struct ptr_element* last_elem = (struct ptr_element*)ctx->last_child;
+                                    last_elem->next_sibling = (struct ptr_element*)text;
+                                }
+                                text->prev_sibling = (struct ptr_node*)ctx->last_child;  /* Set previous sibling */
+                            }
+                            ctx->last_child = text;
+                            ctx->elem->child_count++;
+                        }
+                    }
+                    /* p->pos still points to '<' - will be processed below */
+                }
             }
-            ctx->last_child = text;
-            continue;
+            /* Fall through to process the '<' character at p->pos */
+        }
+
+        /* We should now be at '<' (or at the end of input) */
+        if (p->pos >= p->end || *p->pos != '<') {
+            continue;  /* No more tags to process */
         }
 
         /* We have '<' */
@@ -213,6 +400,7 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
             size_t close_len = p->pos - close_name;
 
             PtrStackEntry* entry = PTR_STACK_PEEK(p);
+
             if (close_len != entry->name_len ||
                 memcmp(close_name, entry->elem->name, close_len) != 0) {
                 p->has_error = 1;
@@ -225,7 +413,17 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
             }
             if (p->pos < p->end) p->pos++;
 
+            /* Set the element's last_child pointer before popping */
+            struct ptr_element* closed_elem = entry->elem;
+            closed_elem->last_child = (struct ptr_element*)entry->last_child;
+
             PTR_STACK_POP(p);
+
+            /* Update parent's last_child to the closed element */
+            if (p->stack_size > 0) {
+                PtrStackEntry* parent_ctx = PTR_STACK_PEEK(p);
+                parent_ctx->last_child = closed_elem;
+            }
             continue;
         }
 
@@ -250,22 +448,32 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
 
                     if (ctx && p->pos > cdata_start) {
                         size_t cdata_len = p->pos - cdata_start;
-                        ((char*)cdata_start)[cdata_len] = '\0';
 
-                        struct ptr_text* text = alloc_ptr_text(p);
-                        if (text) {
-                            text->text = cdata_start;
-                            text->next_sibling = NULL;
-                            text->length = (uint32_t)cdata_len;
-                            text->node_type = PTR_NODE_TYPE_CDATA;
+                        /* Copy CDATA to pool memory */
+                        char* cdata_copy = (char*)taurus_pool_alloc(p->pool, cdata_len + 1);
+                        if (cdata_copy) {
+                            memcpy(cdata_copy, cdata_start, cdata_len);
+                            cdata_copy[cdata_len] = '\0';
 
-                            if (ctx->last_child == NULL) {
-                                ctx->elem->first_child = (struct ptr_element*)text;
-                            } else {
-                                struct ptr_text* last = (struct ptr_text*)ctx->last_child;
-                                last->next_sibling = (struct ptr_node*)text;
+                            struct ptr_text* text = alloc_ptr_text(p);
+                            if (text) {
+                                text->type = PTR_NODE_TYPE_CDATA;
+                                text->frozen_version = 0;
+                                text->text = cdata_copy;
+                                text->next_sibling = NULL;
+                                text->prev_sibling = NULL;
+
+                                if (ctx->last_child == NULL) {
+                                    ctx->elem->first_child = (struct ptr_element*)text;
+                                    text->prev_sibling = NULL;  /* First child has no previous sibling */
+                                } else {
+                                    struct ptr_text* last = (struct ptr_text*)ctx->last_child;
+                                    last->next_sibling = (struct ptr_node*)text;
+                                    text->prev_sibling = (struct ptr_node*)ctx->last_child;  /* Set previous sibling */
+                                }
+                                ctx->last_child = text;
+                                ctx->elem->child_count++;
                             }
-                            ctx->last_child = text;
                         }
                     }
 
@@ -274,7 +482,31 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                 }
             }
 
-            /* Skip other special nodes */
+            /* Comment */
+            if (c == '!' && (p->pos + 1) < p->end && p->pos[1] == '-' && p->pos[2] == '-') {
+                p->pos += 3;
+                const char* comment_start = p->pos;
+
+                /* Find end of comment */
+                while (p->pos + 2 < p->end) {
+                    if (p->pos[0] == '-' && p->pos[1] == '-' && p->pos[2] == '>') {
+                        break;
+                    }
+                    p->pos++;
+                }
+
+                size_t comment_len = p->pos - comment_start;
+
+                /* Strict mode: validate comment content */
+                if (p->strict_mode && !ptr_validate_comment(comment_start, p->pos)) {
+                    p->has_error = 1;
+                }
+
+                if (p->pos + 2 < p->end) p->pos += 3;  /* Skip --> */
+                continue;
+            }
+
+            /* Skip other special nodes (DOCTYPE, PI) */
             while (p->pos < p->end && *p->pos != '>') p->pos++;
             if (p->pos < p->end) p->pos++;
             continue;
@@ -286,31 +518,48 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
         size_t name_len = p->pos - name_start;
         if (name_len == 0) continue;
 
-        ((char*)name_start)[name_len] = '\0';
+        /* Strict mode: validate name start character */
+        if (p->strict_mode && !ptr_validate_name_start(*name_start)) {
+            p->has_error = 1;
+            continue;
+        }
+
+        /* NOTE: Don't null-terminate name yet - we need to check for '/' first!
+         * The name will be null-terminated after we parse attributes. */
 
         struct ptr_element* elem = alloc_ptr_element(p);
         if (!elem) continue;
 
+        elem->type = PTR_NODE_TYPE_ELEMENT;  /* CRITICAL: Initialize type */
+        elem->frozen_version = 0;            /* Initialize COW fields */
         elem->first_child = NULL;
+        elem->last_child = NULL;
         elem->next_sibling = NULL;
+        elem->prev_sibling = NULL;
         elem->parent = ctx ? ctx->elem : NULL;
         elem->first_attr = NULL;
-        elem->name = name_start;
+        elem->attr_count = 0;
+        elem->child_count = 0;
+        elem->name = name_start;  /* Will be null-terminated below */
+        elem->document = NULL;  /* Will be set after document creation */
 
         /* Link to parent */
         if (ctx) {
             if (ctx->last_child == NULL) {
                 ctx->elem->first_child = elem;
+                elem->prev_sibling = NULL;  /* First child has no previous sibling */
             } else {
                 struct ptr_text* last_text = (struct ptr_text*)ctx->last_child;
-                if (last_text->node_type >= PTR_NODE_TYPE_TEXT) {
+                if (last_text->type >= PTR_NODE_TYPE_TEXT) {
                     last_text->next_sibling = (struct ptr_node*)elem;
                 } else {
                     struct ptr_element* last_elem = (struct ptr_element*)ctx->last_child;
                     last_elem->next_sibling = elem;
                 }
+                elem->prev_sibling = (struct ptr_element*)ctx->last_child;  /* Set previous sibling */
             }
             ctx->last_child = elem;
+            ctx->elem->child_count++;
         } else if (!got_root) {
             root = elem;
             got_root = 1;
@@ -340,6 +589,7 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                     last_attr->next_attr = attr;
                 }
                 last_attr = attr;
+                elem->attr_count++;  /* CRITICAL: Count attributes */
                 continue;
             }
 
@@ -348,6 +598,9 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
 
         if (p->pos < p->end && *p->pos == '/') { self_closing = 1; p->pos++; }
         if (p->pos < p->end && *p->pos == '>') p->pos++;
+
+        /* NOW null-terminate the element name - after we've checked for '/' */
+        ((char*)name_start)[name_len] = '\0';
 
         if (!self_closing) {
             PTR_STACK_PUSH(p, elem, name_len);
@@ -367,14 +620,44 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
  * ============================================================================ */
 
 /**
+ * Set document pointer on all elements recursively
+ */
+static void ptr_set_document_recursive(struct ptr_element* elem, struct taurus_document* doc) {
+    if (!elem) return;
+
+    /* Set document on this element */
+    elem->document = doc;
+
+    /* Recurse on children */
+    struct ptr_element* child = elem->first_child;
+    while (child) {
+        /* Check if this is actually a text node by checking the type field */
+        if (child->type == PTR_NODE_TYPE_TEXT ||
+            child->type == PTR_NODE_TYPE_COMMENT ||
+            child->type == PTR_NODE_TYPE_CDATA ||
+            child->type == PTR_NODE_TYPE_PI) {
+            /* This is a text/comment/cdata/pi node - it also has a document pointer
+             * but in a different structure. Skip for now as text nodes don't need
+             * document access for attribute operations. */
+            child = child->next_sibling;
+            continue;
+        }
+
+        ptr_set_document_recursive(child, doc);
+        child = child->next_sibling;
+    }
+}
+
+/**
  * Parse XML into pointer-based structures
  *
  * @param xml MUTABLE XML string (will be modified in-place)
  * @param len Length of XML string
  * @param error_out Error output (0=success, 1=error)
+ * @param strict_mode 1 for strict XML 1.0 validation, 0 for lenient parsing
  * @return taurus_document with pointer-based elements, or NULL on error
  */
-struct taurus_document* taurus_parse_ptr(char* xml, size_t len, int* error_out) {
+struct taurus_document* taurus_parse_ptr(char* xml, size_t len, int* error_out, int strict_mode) {
     if (!xml || len == 0) {
         if (error_out) *error_out = 1;
         return NULL;
@@ -398,6 +681,7 @@ struct taurus_document* taurus_parse_ptr(char* xml, size_t len, int* error_out) 
     parser.string_base = xml;
     parser.pool = pool;
     parser.stack_size = 0;
+    parser.strict_mode = strict_mode;
     parser.has_error = 0;
 
     /* Skip prolog */
@@ -435,9 +719,13 @@ struct taurus_document* taurus_parse_ptr(char* xml, size_t len, int* error_out) 
     doc->pool = pool;
     doc->ptr_root = root;          /* Store pointer-based root */
     doc->is_ptr_mode = 1;          /* Mark as pointer-based mode */
+    doc->strict_mode = strict_mode; /* Store strict mode setting */
     doc->xml_buffer = xml;
     doc->xml_buffer_len = len;
     doc->xml_buffer_needs_free = 0;
+
+    /* Set document pointer on all elements (recursive traversal) */
+    ptr_set_document_recursive(root, doc);
 
     if (error_out) *error_out = 0;
     return doc;

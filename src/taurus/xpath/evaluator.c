@@ -11,6 +11,7 @@
 #include "functions_internal.h"
 #include "xpath_variables.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
+#include "../dom/ptr_element.h"  /* For struct ptr_attribute */
 #include "lexer.h"
 #include "parser.h"
 #include "../include/taurus.h"
@@ -241,58 +242,66 @@ static void collect_namespaces_recursive_impl(XPathContext* context,
     /* Also check attributes for xmlns declarations */
     size_t attr_count = taurus_element_attribute_count(element);
     for (size_t i = 0; i < attr_count; i++) {
-        /* Walk the attribute linked list */
-        struct taurus_attribute* attr = taurus_element_get_first_attribute(element);
-        for (size_t j = 0; j < i && attr; j++) {
-            attr = attr->next;
+        /* Walk the attribute linked list
+         * CRITICAL: The actual structure is ptr_attribute, NOT taurus_attribute!
+         * They have completely different layouts:
+         * - ptr_attribute: name, value, next_attr at offsets 0, 8, 16
+         * - taurus_attribute: name_view, value_view... then name, value at offsets 64, 72
+         * We MUST use ptr_attribute directly to avoid memory corruption.
+         */
+        struct ptr_attribute* ptr_attr = (struct ptr_attribute*)taurus_element_get_first_attribute(element);
+        for (size_t j = 0; j < i && ptr_attr; j++) {
+            ptr_attr = ptr_attr->next_attr;
         }
-        if (!attr) continue;
+        if (!ptr_attr) continue;
 
-        /* Check for xmlns:prefix or xmlns using StringView directly
-         * SAFETY: Do NOT modify attribute structures during namespace collection!
-         * Modifying attr->name or attr->value here would cause memory leaks because:
-         * 1. This code might use taurus_sv_to_cstr() (malloc) instead of pool allocation
-         * 2. When the document is freed, the pool is freed (including attr structure)
-         * 3. But the malloc-allocated strings would leak and corrupt the heap
-         *
-         * Solution: Use StringView operations directly without lazy conversion */
-        TaurusStringView attr_name_view = attr->name_view;
+        /* Get attribute name - use ptr_attr fields directly */
+        const char* attr_name = ptr_attr->name;
+        size_t attr_name_len = 0;
 
-        /* Check for xmlns:prefix using StringView prefix match */
-        if (attr_name_view.length >= 6 &&
-            attr_name_view.data[0] == 'x' &&
-            attr_name_view.data[1] == 'm' &&
-            attr_name_view.data[2] == 'l' &&
-            attr_name_view.data[3] == 'n' &&
-            attr_name_view.data[4] == 's' &&
-            attr_name_view.data[5] == ':') {
+        if (attr_name) {
+            attr_name_len = strlen(attr_name);
+        } else if (ptr_attr->name_view_data && ptr_attr->name_view_length > 0) {
+            /* Use name_view fields - NOT null-terminated! Use length. */
+            attr_name = ptr_attr->name_view_data;
+            attr_name_len = ptr_attr->name_view_length;
+        } else {
+            continue;
+        }
+
+        /* Check for xmlns:prefix using direct string comparison */
+        if (attr_name_len >= 6 && strncmp(attr_name, "xmlns:", 6) == 0) {
             /* Found xmlns:prefix declaration */
-            TaurusStringView prefix_view = {
-                .data = attr_name_view.data + 6,
-                .length = attr_name_view.length - 6
-            };
+            const char* prefix_str = attr_name + 6;
+            size_t prefix_len = attr_name_len - 6;
 
-            /* Convert prefix StringView to C string for namespace mapping
-             * Note: This is stored in XPathContext and freed with context */
-            char* prefix = taurus_sv_to_cstr(&prefix_view);
-            if (!prefix) continue;
+            /* Get value - use ptr_attr->value directly */
+            const char* uri_str = ptr_attr->value;
+            char* uri_copy = NULL;
 
-            /* Get value - convert attr value StringView to C string */
-            char* uri = taurus_sv_to_cstr(&attr->value_view);
-            if (!uri) {
-                TAURUS_FREE(prefix);
+            if (!uri_str && ptr_attr->value_view_data && ptr_attr->value_view_length > 0) {
+                /* Need to make a null-terminated copy for registration */
+                uri_copy = TAURUS_ALLOC_N(char, ptr_attr->value_view_length + 1);
+                if (!uri_copy) continue;
+                memcpy(uri_copy, ptr_attr->value_view_data, ptr_attr->value_view_length);
+                uri_copy[ptr_attr->value_view_length] = '\0';
+                uri_str = uri_copy;
+            }
+            if (!uri_str) continue;
+
+            /* Make null-terminated copy of prefix */
+            char* prefix_copy = TAURUS_ALLOC_N(char, prefix_len + 1);
+            if (!prefix_copy) {
+                TAURUS_FREE(uri_copy);
                 continue;
             }
+            memcpy(prefix_copy, prefix_str, prefix_len);
+            prefix_copy[prefix_len] = '\0';
 
-            xpath_context_register_namespace(context, prefix, uri);
-            TAURUS_FREE(prefix);  /* Context makes its own copy */
-            TAURUS_FREE(uri);     /* Context makes its own copy */
-        } else if (attr_name_view.length == 5 &&
-                   attr_name_view.data[0] == 'x' &&
-                   attr_name_view.data[1] == 'm' &&
-                   attr_name_view.data[2] == 'l' &&
-                   attr_name_view.data[3] == 'n' &&
-                   attr_name_view.data[4] == 's') {
+            xpath_context_register_namespace(context, prefix_copy, uri_str);
+            TAURUS_FREE(prefix_copy);
+            TAURUS_FREE(uri_copy);
+        } else if (attr_name_len == 5 && strncmp(attr_name, "xmlns", 5) == 0) {
             /* Found xmlns (default namespace) declaration
              *
              * CRITICAL: In XPath 1.0, the default namespace declared in XML does NOT apply

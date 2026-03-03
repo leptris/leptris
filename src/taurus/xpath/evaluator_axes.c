@@ -7,6 +7,7 @@
 #include "evaluator_internal.h"
 #include "../taurus_internal.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
+#include "../dom/ptr_element.h"  /* For struct ptr_attribute */
 #include "../memory/pool.h"  /* For pool allocation optimization */
 #include <string.h>
 #include <stdio.h>
@@ -86,8 +87,9 @@ static void collect_descendants_or_self(XPathContext* ctx,
     collect_descendants_or_self_impl(ctx, node, result, node_test, 0);
 }
 
-/* Helper: Create attribute node from taurus_attribute */
-static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
+/* Helper: Create attribute node from ptr_attribute
+ * CRITICAL: Must use ptr_attribute, not taurus_attribute, due to layout differences */
+static TaurusAttributeNode* create_attribute_node(struct ptr_attribute* attr,
                                                    TaurusElement owner) {
     if (!attr) return NULL;
 
@@ -100,12 +102,12 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
     if (attr->name) {
         /* Use cached name if available */
         attr_node->name = taurus_strdup(attr->name);
-    } else if (!taurus_sv_is_empty(&attr->name_view)) {
+    } else if (attr->name_view_data && attr->name_view_length > 0) {
         /* Convert StringView to C string */
-        size_t len = attr->name_view.length;
+        size_t len = attr->name_view_length;
         char* name_copy = TAURUS_ALLOC_N(char, len + 1);
         if (name_copy) {
-            memcpy(name_copy, attr->name_view.data, len);
+            memcpy(name_copy, attr->name_view_data, len);
             name_copy[len] = '\0';
             attr_node->name = name_copy;
         } else {
@@ -119,12 +121,12 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
     if (attr->value) {
         /* Use cached value if available */
         attr_node->value = taurus_strdup(attr->value);
-    } else if (!taurus_sv_is_empty(&attr->value_view)) {
+    } else if (attr->value_view_data && attr->value_view_length > 0) {
         /* Convert StringView to C string */
-        size_t len = attr->value_view.length;
+        size_t len = attr->value_view_length;
         char* value_copy = TAURUS_ALLOC_N(char, len + 1);
         if (value_copy) {
-            memcpy(value_copy, attr->value_view.data, len);
+            memcpy(value_copy, attr->value_view_data, len);
             value_copy[len] = '\0';
             attr_node->value = value_copy;
         } else {
@@ -134,7 +136,8 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
         attr_node->value = NULL;
     }
 
-    attr_node->namespace_uri = attr->namespace_uri ? taurus_strdup(attr->namespace_uri) : NULL;
+    /* ptr_attribute doesn't have namespace_uri field - set to NULL for now */
+    attr_node->namespace_uri = NULL;
     attr_node->owner = owner;
 
     return attr_node;
@@ -433,34 +436,43 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
         return result;
     }
 
-    /* OPTIMIZED: Iterate through attributes directly instead of O(n²) linked list walk
-     * This changes from O(n²) to O(n) where n is attribute count */
-    struct taurus_attribute* attr = taurus_element_get_first_attribute(node);
+    /* CRITICAL: Use ptr_attribute directly, not taurus_attribute!
+     * They have completely different memory layouts:
+     * - ptr_attribute: name at offset 0, value at 8, next_attr at 16
+     * - taurus_attribute: name_view at offset 0, name at offset 64
+     * Using taurus_attribute* would read from wrong memory offsets!
+     */
+    struct ptr_attribute* attr = (struct ptr_attribute*)taurus_element_get_first_attribute(node);
     while (attr) {
         /* Sanity check: attribute should point to valid memory */
         if ((uintptr_t)attr < 0x1000) {
             DEBUG_LOG("        SKIPPED: attr has invalid pointer %p", (void*)attr);
-            attr = attr->next;
+            attr = attr->next_attr;
             continue;
         }
 
-        /* SKIP namespace declarations (xmlns, xmlns:*) - per XPath spec they are NOT attributes */
+        /* Get attribute name from ptr_attribute fields */
         const char* attr_name = attr->name;
-        TaurusStringView* attr_name_view = &attr->name_view;
+        size_t attr_name_len = 0;
         int is_ns_decl = 0;
+
         if (attr_name) {
+            attr_name_len = strlen(attr_name);
             if (strcmp(attr_name, "xmlns") == 0 || strncmp(attr_name, "xmlns:", 6) == 0) {
                 is_ns_decl = 1;
             }
-        } else if (!taurus_sv_is_empty(attr_name_view)) {
-            if ((attr_name_view->length == 5 && memcmp(attr_name_view->data, "xmlns", 5) == 0) ||
-                (attr_name_view->length > 6 && memcmp(attr_name_view->data, "xmlns:", 6) == 0)) {
+        } else if (attr->name_view_data && attr->name_view_length > 0) {
+            attr_name = attr->name_view_data;
+            attr_name_len = attr->name_view_length;
+            if ((attr_name_len == 5 && memcmp(attr_name, "xmlns", 5) == 0) ||
+                (attr_name_len > 6 && memcmp(attr_name, "xmlns:", 6) == 0)) {
                 is_ns_decl = 1;
             }
         }
+
         if (is_ns_decl) {
             DEBUG_LOG("        SKIPPED: namespace declaration");
-            attr = attr->next;
+            attr = attr->next_attr;
             continue;
         }
 
@@ -475,9 +487,11 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
             if (attr->name) {
                 /* Use cached name if available */
                 name_matches = (test->value && strcmp(test->value, attr->name) == 0);
-            } else if (!taurus_sv_is_empty(&attr->name_view)) {
-                /* Compare with StringView */
-                name_matches = taurus_sv_equals_cstr(&attr->name_view, test->value);
+            } else if (attr->name_view_data && attr->name_view_length > 0) {
+                /* Compare with StringView - need length-limited comparison */
+                size_t test_len = test->value ? strlen(test->value) : 0;
+                name_matches = (test_len == attr->name_view_length &&
+                               memcmp(attr->name_view_data, test->value, test_len) == 0);
             }
             matches = name_matches;
             DEBUG_LOG("        NAME test: looking for '%s', matches=%d",
@@ -513,7 +527,7 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
             }
         }
 
-        attr = attr->next;
+        attr = attr->next_attr;
     }
 
     DEBUG_LOG("        Final nodeset count: %zu", xpath_nodeset_count(result));
