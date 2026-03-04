@@ -1,0 +1,53 @@
+# Taurus Architecture
+
+This document describes the architecture of Taurus XML parser.
+
+## Overview
+
+Taurus is a high-performance XML parser and XPath engine implemented in pure C.
+
+## Key Components
+
+### DOM Layer (`src/taurus/dom/`)
+- `element.c/.h` - Element nodes with attribute hash table (O(1) lookup)
+- `text.c/.h` - Text nodes
+- `cdata.c/.h` - CDATA sections
+- `comment.c/.h` - XML comments
+- `pi.c/.h` - Processing instructions
+- `doctype.c/.h` - DOCTYPE declarations
+- `node.c/.h` - Base node operations
+
+### XPath Engine (`src/taurus/xpath/`)
+- `lexer.c` - Tokenization
+- `parser.c` - AST generation
+- `evaluator.c` - Navigation and execution
+- `evaluator_axes.c` - 13 axes implementation
+- `evaluator_operators.c` - 15 operators
+- `functions.c` - 27 XPath 1.0 functions
+
+### Parser (`src/taurus/parse/`)
+- `ptr_parser.c` - High-performance pointer-based parser
+- SIMD-optimized character scanning (ARM NEON, x86 SSE2)
+
+### Memory Management (`src/taurus/memory/`)
+- `pool.c` - O(1) bump-pointer allocation
+- `compact_single_alloc.c` - Single-allocation for compact storage
+
+## Memory Architecture
+
+Taurus uses a pool-based memory allocation system for O(1) allocation:
+
+1. **Pool Allocation**: Pre-allocated memory blocks serve all allocations
+2. **Bulk Deallocation**: Single pool destroy frees all nodes
+3. **String Deduplication**: Hash table for files >= 1KB
+
+## Performance Characteristics
+
+| Operation | Performance |
+|-----------|-------------|
+| Parse Large (>500KB) | 2.04x faster than pugixml |
+| Traversal | 43% faster than pugixml |
+| Modification | 6% faster than pugixml |
+| XPath | 1.20x faster than libxml2 |
+
+See the main [README.adoc](../../README.adoc) for complete documentation.

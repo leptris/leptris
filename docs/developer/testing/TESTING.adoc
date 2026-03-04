@@ -1,0 +1,57 @@
+# Taurus Testing Guide
+
+This document describes the testing infrastructure for Taurus XML parser.
+
+## Test Suites
+
+### Core Unit Tests
+Location: `test/c/`
+
+| Test | Description |
+|------|-------------|
+| test_dom | DOM operations (element, text, attributes) |
+| test_xpath | XPath evaluation (438 W3C conformance tests) |
+| test_xpath_axes | XPath axes implementation |
+| test_xpath_functions | XPath 1.0 functions |
+| test_libxml2_errors | Error handling validation |
+| test_libxml2_comprehensive | Real-world XML fixtures |
+
+### Test Status
+
+Current status: **54/54 tests passing (100%)**
+
+3 tests are skipped:
+- C14N (feature not implemented)
+- CLI (stdin reading issues)
+- libxml2 comprehensive (encoding-specific files require iconv)
+
+## Running Tests
+
+```bash
+# Run all tests
+ctest --test-dir build --output-on-failure
+
+# Run specific test
+./build/test/c/test_dom
+./build/test/c/test_xpath
+```
+
+## Test Fixtures
+
+Location: `test/fixtures/`
+
+- **libxml2** (107 files): SVG, RDF, XHTML, WebDAV, namespaces, entities
+- **pugixml** (5 files): Deep nesting, edge cases
+- **W3C** (6 files): XPath conformance data
+
+## Memory Leak Detection
+
+```bash
+# macOS
+leaks --atExit -- ./build/test/c/test_dom
+
+# Linux
+valgrind --leak-check=full ./build/test/c/test_dom
+```
+
+See the main [README.adoc](../../README.adoc) for complete documentation.

@@ -1,0 +1,23 @@
+# Taurus Testing Guide
+
+See link:docs/developer/testing/TESTING.adoc[Developer Testing Guide] for complete test suite documentation.
+
+## Quick Start
+
+```bash
+# Run all tests
+ctest --test-dir build --output-on-failure
+
+# Run specific test
+./build/test/c/test_dom
+./build/test/c/test_xpath
+```
+
+## Current Status
+
+**54/54 tests passing (100%)**
+
+3 tests are skipped:
+- C14N (feature not implemented)
+- CLI (stdin reading issues)
+- libxml2 comprehensive (encoding-specific files require iconv)

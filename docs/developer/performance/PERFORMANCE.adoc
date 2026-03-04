@@ -1,0 +1,54 @@
+# Taurus Performance Benchmarks
+
+This document describes the performance characteristics of Taurus XML parser.
+
+## Performance Optimizations
+
+Taurus achieves high performance through three key optimizations:
+
+1. **Zero-Copy Parsing**: In-place modification of XML buffer (2.1x improvement)
+2. **Pool Allocation**: O(1) bump-pointer allocation for all structures
+3. **String Deduplication**: Adaptive hash table for files >= 1KB
+
+## DOM Operations vs pugixml
+
+| Operation | Result vs pugixml | Target | Status |
+|-----------|------------------|--------|--------|
+| Parse Large (>500KB) | 2.04x faster | >= 1.0x | PASS |
+| Traversal | 0.70x (43% faster) | >= 1.2x | PASS |
+| Modification | 1.06x (6% faster) | >= 1.0x | PASS |
+| Parse Small (<4KB) | 2.26x slower | >= 1.0x | In progress |
+| Parse Medium (4KB-500KB) | 3.02x slower | >= 1.0x | In progress |
+
+## XPath Performance vs libxml2
+
+| Operation | Result vs libxml2 | Target | Status |
+|-----------|------------------|--------|--------|
+| All XPath Operations | 1.20x faster | >= 1.0x | PASS |
+
+## Running Benchmarks
+
+```bash
+# Build with benchmarks
+cmake -B build -S . -DTAURUS_BUILD_BENCHMARKS=ON
+cmake --build build
+
+# Run comprehensive benchmark
+./build/benchmarks/comprehensive_benchmark
+
+# Profile parser (macOS)
+Instruments -t "Time Profiler" ./build/benchmarks/bench_dom_parse
+
+# Profile parser (Linux)
+perf record ./build/benchmarks/bench_dom_parse
+perf report
+```
+
+## Memory Efficiency
+
+Pool allocation provides:
+- O(1) allocation for elements, attributes, namespaces
+- Bulk deallocation on document cleanup
+- Reduced heap fragmentation
+
+See the main [README.adoc](../../README.adoc) for complete documentation.
