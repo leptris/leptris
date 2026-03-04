@@ -280,23 +280,17 @@ TAURUS_API int taurus_element_set_attribute_uint(TaurusElement elem, const char*
 TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index) {
     if (!elem) return NULL;
 
-    /* Walk the linked list of children */
+    /* Walk the linked list of children, counting only element nodes */
     struct ptr_element* child = elem->first_child;
     size_t i = 0;
-    while (child && i < index) {
-        /* Check if this is an element node */
+    while (child) {
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+            if (i == index) return child;
             i++;
         }
-        if (i < index) {
-            child = child->next_sibling;
-        }
-    }
-    /* Skip non-element nodes */
-    while (child && child->type != TAURUS_NODE_TYPE_ELEMENT) {
         child = child->next_sibling;
     }
-    return child;
+    return NULL;
 }
 
 /**
