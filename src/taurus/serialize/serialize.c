@@ -638,9 +638,19 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
 
         /* Check if element has wrapper children (newly created elements) */
         if (elem->first_child) {
-            /* Serialize wrapper's children (for newly created/modified elements) */
-            /* Add newline after opening tag if indenting */
-            if (buf->indent_spaces > 0) {
+            /* Check if we should add indentation (only if has element children) */
+            int has_element_children = 0;
+            TaurusNode* child = elem->first_child;
+            while (child) {
+                if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+                    has_element_children = 1;
+                    break;
+                }
+                child = child->next_sibling;
+            }
+
+            /* Add newline after opening tag only if has element children */
+            if (buf->indent_spaces > 0 && has_element_children) {
                 buffer_append_newline(buf);
             }
 
@@ -648,7 +658,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             buf->indent++;
 
             /* Serialize all children from wrapper's linked list */
-            TaurusNode* child = elem->first_child;
+            child = elem->first_child;
             while (child) {
                 serialize_node_internal(child, buf);
                 /* Get next sibling - use base.next_sibling which is set during wrapper creation */
@@ -658,8 +668,8 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             /* Decrease indent level */
             buf->indent--;
 
-            /* Indentation before closing tag */
-            if (buf->indent_spaces > 0) {
+            /* Indentation before closing tag only if has element children */
+            if (buf->indent_spaces > 0 && has_element_children) {
                 buffer_append_indent(buf);
             }
 
@@ -668,9 +678,15 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             buffer_append_len(buf, elem_name, elem_name_len);
             buffer_append_char(buf, '>');
 
-            /* Add newline after closing tag if not root */
-            if (!is_root && buf->indent_spaces > 0) {
-                buffer_append_newline(buf);
+            /* Add newline after closing tag if not root and has element children */
+            /* Also add newline for root if indenting (trailing newline for document) */
+            if (buf->indent_spaces > 0) {
+                if (!is_root && has_element_children) {
+                    buffer_append_newline(buf);
+                } else if (is_root) {
+                    /* Always add trailing newline for root when pretty-printing */
+                    buffer_append_newline(buf);
+                }
             }
         }
     } else {

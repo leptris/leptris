@@ -64,7 +64,9 @@ TAURUS_API const char* taurus_element_text(TaurusElement elem) {
 }
 
 /**
- * Get child element text value (first text node only, not recursive) - POINTER-ONLY
+ * Get child element text value (pugixml-compatible) - POINTER-ONLY
+ * Returns text of first child if it's text/cdata, otherwise recursively
+ * returns child_value of first element child.
  */
 TAURUS_API const char* taurus_element_child_value(TaurusElement elem) {
     if (!elem) return NULL;
@@ -77,6 +79,10 @@ TAURUS_API const char* taurus_element_child_value(TaurusElement elem) {
                 /* Cast directly to ptr_text to avoid union offset issues */
                 struct ptr_text* text = (struct ptr_text*)child;
                 return strdup(text->text ? text->text : "");
+            }
+            else if (child->type == PTR_NODE_TYPE_ELEMENT) {
+                /* pugixml behavior: if first child is element, get its child_value */
+                return taurus_element_child_value(child);
             }
             child = child->next_sibling;
         }
