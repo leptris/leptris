@@ -4,11 +4,17 @@
  * Provides namespace manipulation for elements:
  * - Adding namespace declarations
  * - Namespace URI lookup by prefix
+ *
+ * POINTER-BASED ARCHITECTURE:
+ * Namespaces are stored as xmlns:prefix attributes on elements.
  */
 
 #include "element.h"
+#include "ptr_element.h"
+#include "ptr_accessor.h"
 #include "node.h"
 #include "../common/string_view.h"
+#include "../memory/pool.h"
 #include "../taurus_memory.h"
 #include <stdlib.h>
 #include <string.h>
@@ -22,76 +28,66 @@ void taurus_element_add_namespace_inplace(TaurusElement elem,
                                            char* prefix,
                                            char* uri,
                                            TaurusMemoryPool* pool) {
-    (void)pool;  /* Unused in compact mode */
-    if (!elem || !uri) return;
+    if (!elem || !uri || !pool) return;
 
-    /* Store namespace in element's prefix/namespace_uri fields for now */
-    /* TODO: Implement proper namespace list */
+    /* Create xmlns:prefix attribute name */
+    size_t prefix_len = prefix ? strlen(prefix) : 0;
+    char* attr_name;
 
-    /* CRITICAL: Do NOT clear prefix_view when setting namespace prefix */
-    if (prefix) {
-        elem->prefix = prefix;
+    if (prefix && prefix_len > 0) {
+        /* Create "xmlns:prefix" */
+        attr_name = (char*)taurus_pool_alloc(pool, prefix_len + 7);  /* "xmlns:" + prefix + NUL */
+        if (!attr_name) return;
+        memcpy(attr_name, "xmlns:", 6);
+        memcpy(attr_name + 6, prefix, prefix_len + 1);
+    } else {
+        /* Default namespace - just "xmlns" */
+        attr_name = (char*)taurus_pool_alloc(pool, 6);
+        if (!attr_name) return;
+        memcpy(attr_name, "xmlns", 6);
     }
-    elem->namespace_uri = uri;
-    /* Clear StringView for namespace_uri (but NOT prefix_view!) */
-    elem->namespace_uri_view = taurus_sv_empty();
+
+    /* Add attribute using the pooled inplace function */
+    taurus_element_add_attribute_pooled_inplace(elem, attr_name, uri, pool);
 }
 
 /* ============================================================================
  * Namespace Lookup
  * ============================================================================ */
 
-/* Lookup namespace URI by prefix */
+/* Lookup namespace URI by prefix
+ *
+ * In ptr_element architecture, namespaces are stored as xmlns:prefix attributes.
+ * We search the current element and then parent elements.
+ */
 const char* taurus_element_lookup_namespace(TaurusElement elem,
                                              const char* prefix) {
     if (!elem) return NULL;
 
-    /* Search namespaces linked list on current element
-     * OPTIMIZATION (Phase B): Check both C strings and StringViews
-     * After Phase B optimization, prefix/uri may be NULL while prefix_view/uri_view have data */
-    struct taurus_namespace* ns = elem->namespaces;
-    while (ns) {
-        /* Get prefix - check C string first, then StringView */
-        const char* ns_prefix = ns->prefix;
-        char* ns_prefix_alloc = NULL;
-        if (!ns_prefix && !taurus_sv_is_empty(&ns->prefix_view)) {
-            ns_prefix_alloc = taurus_sv_to_cstr(&ns->prefix_view);
-            ns_prefix = ns_prefix_alloc;
-        }
-
-        int prefix_matches = 0;
-        if ((prefix == NULL && ns_prefix == NULL) ||
-            (prefix && ns_prefix && strcmp(prefix, ns_prefix) == 0)) {
-            prefix_matches = 1;
-        }
-
-        if (prefix_matches) {
-            /* Get URI - check C string first, then StringView */
-            const char* uri = ns->uri;
-            char* uri_alloc = NULL;
-            if (!uri && !taurus_sv_is_empty(&ns->uri_view)) {
-                uri_alloc = taurus_sv_to_cstr(&ns->uri_view);
-                uri = uri_alloc;
-            }
-
-            /* If we found a URI, we need to return it (caller's responsibility to free if needed) */
-            if (uri) {
-                /* Cache it in the namespace struct for future lookups */
-                if (!ns->uri && uri_alloc) {
-                    ns->uri = uri_alloc;  /* Take ownership */
-                    uri_alloc = NULL;  /* Don't free below */
+    /* Search xmlns:prefix attributes on current element */
+    struct ptr_attribute* attr = elem->first_attr;
+    while (attr) {
+        if (attr->name) {
+            if (prefix && strlen(prefix) > 0) {
+                /* Look for xmlns:prefix */
+                size_t prefix_len = strlen(prefix);
+                if (strncmp(attr->name, "xmlns:", 6) == 0 &&
+                    strlen(attr->name) == 6 + prefix_len &&
+                    memcmp(attr->name + 6, prefix, prefix_len) == 0) {
+                    return attr->value;
                 }
-                if (ns_prefix_alloc) free(ns_prefix_alloc);
-                return uri;
+            } else {
+                /* Look for default namespace xmlns */
+                if (strcmp(attr->name, "xmlns") == 0) {
+                    return attr->value;
+                }
             }
         }
-
-        if (ns_prefix_alloc) free(ns_prefix_alloc);
-        ns = ns->next;
+        attr = attr->next_attr;
     }
 
     /* Search parent */
-    TaurusElement parent = taurus_element_get_parent(elem);
+    TaurusElement parent = elem->parent;
     if (parent) {
         return taurus_element_lookup_namespace(parent, prefix);
     }

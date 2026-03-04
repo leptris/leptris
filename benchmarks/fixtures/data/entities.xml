@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE root [
+  <!ENTITY lt "&#60;">
+  <!ENTITY gt "&#62;">
+  <!ENTITY amp "&#38;">
+  <!ENTITY quot "&#34;">
+  <!ENTITY apos "&#39;">
+]>
+<root>
+  <item>Less than: &lt;</item>
+  <item>Greater than: &gt;</item>
+  <item>Ampersand: &amp;</item>
+  <item>Quote: &quot;</item>
+  <item>Apostrophe: &apos;</item>
+  <item>All: &lt; &gt; &amp; &quot; &apos;</item>
+  <item attr="&lt;escaped&;">Attribute with entities</item>
+</root>

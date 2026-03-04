@@ -2,19 +2,19 @@
  * Copyright (c) 2024, Ribose Inc.
  *
  * Pure C XML parser and XPath evaluator - Document API.
+ * POINTER-BASED ARCHITECTURE: Uses ptr_element directly.
  */
 
 #include "../include/taurus.h"
 #include "taurus_internal.h"
 #include "dom/element.h"
-#include "dom/compact_element.h"  /* For compact_element_v2 (16-byte) */
-#include "dom/compact_accessor.h"  /* For compact_get_or_create_wrapper */
+#include "dom/ptr_element.h"
+#include "dom/ptr_accessor.h"
 #include "dom/pi.h"
 #include "dom/doctype.h"
 #include "dtd/model.h"
 #include "serialize/serialize.h"
 #include "common/entities.h"
-#include "memory/compact_single_alloc.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -103,10 +103,18 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         doc->wrapper_cache = NULL;
     }
 
-    /* COMPACT-ONLY: Free single compact block */
-    if (doc->compact_alloc) {
-        compact_single_alloc_destroy((CompactSingleAllocator*)doc->compact_alloc);
-        doc->compact_alloc = NULL;
+    /* POINTER-BASED: Free pointer mode pools */
+    if (doc->ptr_elem_pool) {
+        taurus_pool_destroy(doc->ptr_elem_pool);
+        doc->ptr_elem_pool = NULL;
+    }
+    if (doc->ptr_attr_pool) {
+        taurus_pool_destroy(doc->ptr_attr_pool);
+        doc->ptr_attr_pool = NULL;
+    }
+    if (doc->ptr_text_pool) {
+        taurus_pool_destroy(doc->ptr_text_pool);
+        doc->ptr_text_pool = NULL;
     }
 
     /* Destroy memory pool (frees all DOM nodes allocated from it) */
@@ -119,34 +127,19 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
 }
 
 /**
- * Get root element of document (COMPACT-ONLY)
- * V2: Uses 16-byte compact_element_v2 structures
- *
- * NOTE: compact_root_offset uses UINT32_MAX for "no root" (0 is valid offset)
+ * Get root element of document (POINTER-BASED)
+ * V2: Uses ptr_element structures directly
  */
 TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
     if (!doc) return NULL;
 
-    /* COMPACT-ONLY: Check if root exists (UINT32_MAX means no root) */
-    if (doc->compact_root_offset != UINT32_MAX) {
-        /* Check if we already have a wrapper */
-        if (doc->new_dom_root) {
-            return (TaurusElement)doc->new_dom_root;
-        }
-
-        /* Use compact_accessor to create a pointer-only wrapper */
-        TaurusElement wrapper = compact_get_or_create_wrapper(doc, doc->compact_root_offset);
-        if (wrapper) {
-            doc->new_dom_root = wrapper;
-            return wrapper;
-        }
+    /* POINTER-BASED: Use ptr_root directly */
+    if (doc->ptr_root) {
+        return doc->ptr_root;
     }
 
-    /* No compact root offset - document may be empty or not parsed */
-    if (doc->new_dom_root) {
-        return (TaurusElement)doc->new_dom_root;
-    }
-    return (TaurusElement)doc->root;
+    /* No root - document may be empty or not parsed */
+    return NULL;
 }
 
 /**
@@ -342,63 +335,22 @@ static void finalize_element_strings(TaurusElement elem);
 
 /* Helper: Finalize strings for a single element
  *
- * OPTIMIZATION (Phase C): Check if StringView is already null-terminated
- * before allocating. After in-place null termination during parsing,
- * many strings are already valid C strings and don't need copying.
+ * POINTER-BASED ARCHITECTURE:
+ * In ptr_element, strings are already null-terminated during parsing.
+ * This function primarily exists for API compatibility and to handle
+ * any edge cases where lazy conversion might be needed.
+ *
+ * For ptr_element:
+ * - elem->name is already null-terminated
+ * - No prefix/namespace_uri fields (extracted from name or xmlns attributes)
+ * - No namespaces linked list (namespaces are xmlns:prefix attributes)
+ * - ptr_attribute name/value are already null-terminated
  */
 static void finalize_element_strings(TaurusElement elem) {
     if (!elem) return;
 
-    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
-
-    /* Finalize element name */
-    if (!elem->name && !taurus_sv_is_empty(&elem->name_view)) {
-        elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, pool);
-    }
-
-    /* Finalize element prefix */
-    if (!elem->prefix && !taurus_sv_is_empty(&elem->prefix_view)) {
-        elem->prefix = taurus_sv_to_cstr_pooled(&elem->prefix_view, pool);
-    }
-
-    /* Finalize element namespace URI */
-    if (!elem->namespace_uri && !taurus_sv_is_empty(&elem->namespace_uri_view)) {
-        elem->namespace_uri = taurus_sv_to_cstr_pooled(&elem->namespace_uri_view, pool);
-    }
-
-    /* Finalize attributes using accessor functions */
-    uint8_t attr_count = taurus_element_attribute_count(elem);
-    for (uint8_t i = 0; i < attr_count; i++) {
-        struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
-        if (!attr) continue;
-
-        /* Finalize attribute name */
-        if (!attr->name && !taurus_sv_is_empty(&attr->name_view)) {
-            attr->name = taurus_sv_to_cstr_pooled(&attr->name_view, pool);
-        }
-
-        /* Finalize attribute value (resolve entities if present) */
-        if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
-            if (attr->has_entities) {
-                attr->value = taurus_decode_entities_view(&attr->value_view, pool);
-            }
-            if (!attr->value) {
-                attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
-            }
-        }
-    }
-
-    /* Finalize namespace declarations */
-    struct taurus_namespace* ns = elem->namespaces;
-    while (ns) {
-        if (!ns->prefix && !taurus_sv_is_empty(&ns->prefix_view)) {
-            ns->prefix = taurus_sv_to_cstr_pooled(&ns->prefix_view, pool);
-        }
-        if (!ns->uri && !taurus_sv_is_empty(&ns->uri_view)) {
-            ns->uri = taurus_sv_to_cstr_pooled(&ns->uri_view, pool);
-        }
-        ns = ns->next;
-    }
+    /* In ptr_element, strings are already finalized during parsing.
+     * Just recursively process children. */
 
     /* Recursively finalize children */
     TaurusElement child = taurus_element_get_first_child(elem);

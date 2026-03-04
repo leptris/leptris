@@ -1,0 +1,1603 @@
+<?xml version="1.0"?>
+<root>
+  <item>Text content 0</item>
+  <item>
+    <child>Nested 1</child>
+  </item>
+  <!-- Comment 2 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 3 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 4
+  <item>Text content 5</item>
+  <item>
+    <child>Nested 6</child>
+  </item>
+  <!-- Comment 7 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 8 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 9
+  <item>Text content 10</item>
+  <item>
+    <child>Nested 11</child>
+  </item>
+  <!-- Comment 12 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 13 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 14
+  <item>Text content 15</item>
+  <item>
+    <child>Nested 16</child>
+  </item>
+  <!-- Comment 17 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 18 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 19
+  <item>Text content 20</item>
+  <item>
+    <child>Nested 21</child>
+  </item>
+  <!-- Comment 22 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 23 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 24
+  <item>Text content 25</item>
+  <item>
+    <child>Nested 26</child>
+  </item>
+  <!-- Comment 27 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 28 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 29
+  <item>Text content 30</item>
+  <item>
+    <child>Nested 31</child>
+  </item>
+  <!-- Comment 32 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 33 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 34
+  <item>Text content 35</item>
+  <item>
+    <child>Nested 36</child>
+  </item>
+  <!-- Comment 37 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 38 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 39
+  <item>Text content 40</item>
+  <item>
+    <child>Nested 41</child>
+  </item>
+  <!-- Comment 42 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 43 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 44
+  <item>Text content 45</item>
+  <item>
+    <child>Nested 46</child>
+  </item>
+  <!-- Comment 47 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 48 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 49
+  <item>Text content 50</item>
+  <item>
+    <child>Nested 51</child>
+  </item>
+  <!-- Comment 52 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 53 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 54
+  <item>Text content 55</item>
+  <item>
+    <child>Nested 56</child>
+  </item>
+  <!-- Comment 57 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 58 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 59
+  <item>Text content 60</item>
+  <item>
+    <child>Nested 61</child>
+  </item>
+  <!-- Comment 62 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 63 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 64
+  <item>Text content 65</item>
+  <item>
+    <child>Nested 66</child>
+  </item>
+  <!-- Comment 67 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 68 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 69
+  <item>Text content 70</item>
+  <item>
+    <child>Nested 71</child>
+  </item>
+  <!-- Comment 72 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 73 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 74
+  <item>Text content 75</item>
+  <item>
+    <child>Nested 76</child>
+  </item>
+  <!-- Comment 77 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 78 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 79
+  <item>Text content 80</item>
+  <item>
+    <child>Nested 81</child>
+  </item>
+  <!-- Comment 82 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 83 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 84
+  <item>Text content 85</item>
+  <item>
+    <child>Nested 86</child>
+  </item>
+  <!-- Comment 87 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 88 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 89
+  <item>Text content 90</item>
+  <item>
+    <child>Nested 91</child>
+  </item>
+  <!-- Comment 92 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 93 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 94
+  <item>Text content 95</item>
+  <item>
+    <child>Nested 96</child>
+  </item>
+  <!-- Comment 97 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 98 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 99
+  <item>Text content 100</item>
+  <item>
+    <child>Nested 101</child>
+  </item>
+  <!-- Comment 102 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 103 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 104
+  <item>Text content 105</item>
+  <item>
+    <child>Nested 106</child>
+  </item>
+  <!-- Comment 107 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 108 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 109
+  <item>Text content 110</item>
+  <item>
+    <child>Nested 111</child>
+  </item>
+  <!-- Comment 112 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 113 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 114
+  <item>Text content 115</item>
+  <item>
+    <child>Nested 116</child>
+  </item>
+  <!-- Comment 117 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 118 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 119
+  <item>Text content 120</item>
+  <item>
+    <child>Nested 121</child>
+  </item>
+  <!-- Comment 122 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 123 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 124
+  <item>Text content 125</item>
+  <item>
+    <child>Nested 126</child>
+  </item>
+  <!-- Comment 127 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 128 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 129
+  <item>Text content 130</item>
+  <item>
+    <child>Nested 131</child>
+  </item>
+  <!-- Comment 132 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 133 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 134
+  <item>Text content 135</item>
+  <item>
+    <child>Nested 136</child>
+  </item>
+  <!-- Comment 137 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 138 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 139
+  <item>Text content 140</item>
+  <item>
+    <child>Nested 141</child>
+  </item>
+  <!-- Comment 142 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 143 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 144
+  <item>Text content 145</item>
+  <item>
+    <child>Nested 146</child>
+  </item>
+  <!-- Comment 147 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 148 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 149
+  <item>Text content 150</item>
+  <item>
+    <child>Nested 151</child>
+  </item>
+  <!-- Comment 152 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 153 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 154
+  <item>Text content 155</item>
+  <item>
+    <child>Nested 156</child>
+  </item>
+  <!-- Comment 157 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 158 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 159
+  <item>Text content 160</item>
+  <item>
+    <child>Nested 161</child>
+  </item>
+  <!-- Comment 162 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 163 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 164
+  <item>Text content 165</item>
+  <item>
+    <child>Nested 166</child>
+  </item>
+  <!-- Comment 167 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 168 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 169
+  <item>Text content 170</item>
+  <item>
+    <child>Nested 171</child>
+  </item>
+  <!-- Comment 172 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 173 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 174
+  <item>Text content 175</item>
+  <item>
+    <child>Nested 176</child>
+  </item>
+  <!-- Comment 177 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 178 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 179
+  <item>Text content 180</item>
+  <item>
+    <child>Nested 181</child>
+  </item>
+  <!-- Comment 182 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 183 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 184
+  <item>Text content 185</item>
+  <item>
+    <child>Nested 186</child>
+  </item>
+  <!-- Comment 187 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 188 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 189
+  <item>Text content 190</item>
+  <item>
+    <child>Nested 191</child>
+  </item>
+  <!-- Comment 192 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 193 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 194
+  <item>Text content 195</item>
+  <item>
+    <child>Nested 196</child>
+  </item>
+  <!-- Comment 197 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 198 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 199
+  <item>Text content 200</item>
+  <item>
+    <child>Nested 201</child>
+  </item>
+  <!-- Comment 202 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 203 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 204
+  <item>Text content 205</item>
+  <item>
+    <child>Nested 206</child>
+  </item>
+  <!-- Comment 207 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 208 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 209
+  <item>Text content 210</item>
+  <item>
+    <child>Nested 211</child>
+  </item>
+  <!-- Comment 212 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 213 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 214
+  <item>Text content 215</item>
+  <item>
+    <child>Nested 216</child>
+  </item>
+  <!-- Comment 217 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 218 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 219
+  <item>Text content 220</item>
+  <item>
+    <child>Nested 221</child>
+  </item>
+  <!-- Comment 222 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 223 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 224
+  <item>Text content 225</item>
+  <item>
+    <child>Nested 226</child>
+  </item>
+  <!-- Comment 227 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 228 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 229
+  <item>Text content 230</item>
+  <item>
+    <child>Nested 231</child>
+  </item>
+  <!-- Comment 232 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 233 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 234
+  <item>Text content 235</item>
+  <item>
+    <child>Nested 236</child>
+  </item>
+  <!-- Comment 237 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 238 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 239
+  <item>Text content 240</item>
+  <item>
+    <child>Nested 241</child>
+  </item>
+  <!-- Comment 242 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 243 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 244
+  <item>Text content 245</item>
+  <item>
+    <child>Nested 246</child>
+  </item>
+  <!-- Comment 247 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 248 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 249
+  <item>Text content 250</item>
+  <item>
+    <child>Nested 251</child>
+  </item>
+  <!-- Comment 252 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 253 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 254
+  <item>Text content 255</item>
+  <item>
+    <child>Nested 256</child>
+  </item>
+  <!-- Comment 257 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 258 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 259
+  <item>Text content 260</item>
+  <item>
+    <child>Nested 261</child>
+  </item>
+  <!-- Comment 262 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 263 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 264
+  <item>Text content 265</item>
+  <item>
+    <child>Nested 266</child>
+  </item>
+  <!-- Comment 267 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 268 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 269
+  <item>Text content 270</item>
+  <item>
+    <child>Nested 271</child>
+  </item>
+  <!-- Comment 272 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 273 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 274
+  <item>Text content 275</item>
+  <item>
+    <child>Nested 276</child>
+  </item>
+  <!-- Comment 277 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 278 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 279
+  <item>Text content 280</item>
+  <item>
+    <child>Nested 281</child>
+  </item>
+  <!-- Comment 282 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 283 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 284
+  <item>Text content 285</item>
+  <item>
+    <child>Nested 286</child>
+  </item>
+  <!-- Comment 287 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 288 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 289
+  <item>Text content 290</item>
+  <item>
+    <child>Nested 291</child>
+  </item>
+  <!-- Comment 292 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 293 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 294
+  <item>Text content 295</item>
+  <item>
+    <child>Nested 296</child>
+  </item>
+  <!-- Comment 297 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 298 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 299
+  <item>Text content 300</item>
+  <item>
+    <child>Nested 301</child>
+  </item>
+  <!-- Comment 302 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 303 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 304
+  <item>Text content 305</item>
+  <item>
+    <child>Nested 306</child>
+  </item>
+  <!-- Comment 307 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 308 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 309
+  <item>Text content 310</item>
+  <item>
+    <child>Nested 311</child>
+  </item>
+  <!-- Comment 312 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 313 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 314
+  <item>Text content 315</item>
+  <item>
+    <child>Nested 316</child>
+  </item>
+  <!-- Comment 317 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 318 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 319
+  <item>Text content 320</item>
+  <item>
+    <child>Nested 321</child>
+  </item>
+  <!-- Comment 322 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 323 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 324
+  <item>Text content 325</item>
+  <item>
+    <child>Nested 326</child>
+  </item>
+  <!-- Comment 327 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 328 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 329
+  <item>Text content 330</item>
+  <item>
+    <child>Nested 331</child>
+  </item>
+  <!-- Comment 332 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 333 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 334
+  <item>Text content 335</item>
+  <item>
+    <child>Nested 336</child>
+  </item>
+  <!-- Comment 337 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 338 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 339
+  <item>Text content 340</item>
+  <item>
+    <child>Nested 341</child>
+  </item>
+  <!-- Comment 342 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 343 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 344
+  <item>Text content 345</item>
+  <item>
+    <child>Nested 346</child>
+  </item>
+  <!-- Comment 347 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 348 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 349
+  <item>Text content 350</item>
+  <item>
+    <child>Nested 351</child>
+  </item>
+  <!-- Comment 352 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 353 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 354
+  <item>Text content 355</item>
+  <item>
+    <child>Nested 356</child>
+  </item>
+  <!-- Comment 357 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 358 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 359
+  <item>Text content 360</item>
+  <item>
+    <child>Nested 361</child>
+  </item>
+  <!-- Comment 362 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 363 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 364
+  <item>Text content 365</item>
+  <item>
+    <child>Nested 366</child>
+  </item>
+  <!-- Comment 367 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 368 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 369
+  <item>Text content 370</item>
+  <item>
+    <child>Nested 371</child>
+  </item>
+  <!-- Comment 372 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 373 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 374
+  <item>Text content 375</item>
+  <item>
+    <child>Nested 376</child>
+  </item>
+  <!-- Comment 377 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 378 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 379
+  <item>Text content 380</item>
+  <item>
+    <child>Nested 381</child>
+  </item>
+  <!-- Comment 382 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 383 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 384
+  <item>Text content 385</item>
+  <item>
+    <child>Nested 386</child>
+  </item>
+  <!-- Comment 387 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 388 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 389
+  <item>Text content 390</item>
+  <item>
+    <child>Nested 391</child>
+  </item>
+  <!-- Comment 392 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 393 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 394
+  <item>Text content 395</item>
+  <item>
+    <child>Nested 396</child>
+  </item>
+  <!-- Comment 397 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 398 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 399
+  <item>Text content 400</item>
+  <item>
+    <child>Nested 401</child>
+  </item>
+  <!-- Comment 402 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 403 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 404
+  <item>Text content 405</item>
+  <item>
+    <child>Nested 406</child>
+  </item>
+  <!-- Comment 407 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 408 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 409
+  <item>Text content 410</item>
+  <item>
+    <child>Nested 411</child>
+  </item>
+  <!-- Comment 412 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 413 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 414
+  <item>Text content 415</item>
+  <item>
+    <child>Nested 416</child>
+  </item>
+  <!-- Comment 417 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 418 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 419
+  <item>Text content 420</item>
+  <item>
+    <child>Nested 421</child>
+  </item>
+  <!-- Comment 422 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 423 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 424
+  <item>Text content 425</item>
+  <item>
+    <child>Nested 426</child>
+  </item>
+  <!-- Comment 427 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 428 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 429
+  <item>Text content 430</item>
+  <item>
+    <child>Nested 431</child>
+  </item>
+  <!-- Comment 432 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 433 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 434
+  <item>Text content 435</item>
+  <item>
+    <child>Nested 436</child>
+  </item>
+  <!-- Comment 437 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 438 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 439
+  <item>Text content 440</item>
+  <item>
+    <child>Nested 441</child>
+  </item>
+  <!-- Comment 442 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 443 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 444
+  <item>Text content 445</item>
+  <item>
+    <child>Nested 446</child>
+  </item>
+  <!-- Comment 447 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 448 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 449
+  <item>Text content 450</item>
+  <item>
+    <child>Nested 451</child>
+  </item>
+  <!-- Comment 452 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 453 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 454
+  <item>Text content 455</item>
+  <item>
+    <child>Nested 456</child>
+  </item>
+  <!-- Comment 457 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 458 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 459
+  <item>Text content 460</item>
+  <item>
+    <child>Nested 461</child>
+  </item>
+  <!-- Comment 462 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 463 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 464
+  <item>Text content 465</item>
+  <item>
+    <child>Nested 466</child>
+  </item>
+  <!-- Comment 467 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 468 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 469
+  <item>Text content 470</item>
+  <item>
+    <child>Nested 471</child>
+  </item>
+  <!-- Comment 472 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 473 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 474
+  <item>Text content 475</item>
+  <item>
+    <child>Nested 476</child>
+  </item>
+  <!-- Comment 477 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 478 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 479
+  <item>Text content 480</item>
+  <item>
+    <child>Nested 481</child>
+  </item>
+  <!-- Comment 482 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 483 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 484
+  <item>Text content 485</item>
+  <item>
+    <child>Nested 486</child>
+  </item>
+  <!-- Comment 487 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 488 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 489
+  <item>Text content 490</item>
+  <item>
+    <child>Nested 491</child>
+  </item>
+  <!-- Comment 492 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 493 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 494
+  <item>Text content 495</item>
+  <item>
+    <child>Nested 496</child>
+  </item>
+  <!-- Comment 497 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 498 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 499
+  <item>Text content 500</item>
+  <item>
+    <child>Nested 501</child>
+  </item>
+  <!-- Comment 502 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 503 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 504
+  <item>Text content 505</item>
+  <item>
+    <child>Nested 506</child>
+  </item>
+  <!-- Comment 507 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 508 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 509
+  <item>Text content 510</item>
+  <item>
+    <child>Nested 511</child>
+  </item>
+  <!-- Comment 512 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 513 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 514
+  <item>Text content 515</item>
+  <item>
+    <child>Nested 516</child>
+  </item>
+  <!-- Comment 517 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 518 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 519
+  <item>Text content 520</item>
+  <item>
+    <child>Nested 521</child>
+  </item>
+  <!-- Comment 522 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 523 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 524
+  <item>Text content 525</item>
+  <item>
+    <child>Nested 526</child>
+  </item>
+  <!-- Comment 527 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 528 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 529
+  <item>Text content 530</item>
+  <item>
+    <child>Nested 531</child>
+  </item>
+  <!-- Comment 532 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 533 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 534
+  <item>Text content 535</item>
+  <item>
+    <child>Nested 536</child>
+  </item>
+  <!-- Comment 537 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 538 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 539
+  <item>Text content 540</item>
+  <item>
+    <child>Nested 541</child>
+  </item>
+  <!-- Comment 542 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 543 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 544
+  <item>Text content 545</item>
+  <item>
+    <child>Nested 546</child>
+  </item>
+  <!-- Comment 547 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 548 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 549
+  <item>Text content 550</item>
+  <item>
+    <child>Nested 551</child>
+  </item>
+  <!-- Comment 552 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 553 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 554
+  <item>Text content 555</item>
+  <item>
+    <child>Nested 556</child>
+  </item>
+  <!-- Comment 557 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 558 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 559
+  <item>Text content 560</item>
+  <item>
+    <child>Nested 561</child>
+  </item>
+  <!-- Comment 562 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 563 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 564
+  <item>Text content 565</item>
+  <item>
+    <child>Nested 566</child>
+  </item>
+  <!-- Comment 567 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 568 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 569
+  <item>Text content 570</item>
+  <item>
+    <child>Nested 571</child>
+  </item>
+  <!-- Comment 572 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 573 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 574
+  <item>Text content 575</item>
+  <item>
+    <child>Nested 576</child>
+  </item>
+  <!-- Comment 577 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 578 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 579
+  <item>Text content 580</item>
+  <item>
+    <child>Nested 581</child>
+  </item>
+  <!-- Comment 582 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 583 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 584
+  <item>Text content 585</item>
+  <item>
+    <child>Nested 586</child>
+  </item>
+  <!-- Comment 587 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 588 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 589
+  <item>Text content 590</item>
+  <item>
+    <child>Nested 591</child>
+  </item>
+  <!-- Comment 592 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 593 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 594
+  <item>Text content 595</item>
+  <item>
+    <child>Nested 596</child>
+  </item>
+  <!-- Comment 597 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 598 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 599
+  <item>Text content 600</item>
+  <item>
+    <child>Nested 601</child>
+  </item>
+  <!-- Comment 602 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 603 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 604
+  <item>Text content 605</item>
+  <item>
+    <child>Nested 606</child>
+  </item>
+  <!-- Comment 607 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 608 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 609
+  <item>Text content 610</item>
+  <item>
+    <child>Nested 611</child>
+  </item>
+  <!-- Comment 612 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 613 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 614
+  <item>Text content 615</item>
+  <item>
+    <child>Nested 616</child>
+  </item>
+  <!-- Comment 617 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 618 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 619
+  <item>Text content 620</item>
+  <item>
+    <child>Nested 621</child>
+  </item>
+  <!-- Comment 622 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 623 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 624
+  <item>Text content 625</item>
+  <item>
+    <child>Nested 626</child>
+  </item>
+  <!-- Comment 627 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 628 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 629
+  <item>Text content 630</item>
+  <item>
+    <child>Nested 631</child>
+  </item>
+  <!-- Comment 632 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 633 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 634
+  <item>Text content 635</item>
+  <item>
+    <child>Nested 636</child>
+  </item>
+  <!-- Comment 637 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 638 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 639
+  <item>Text content 640</item>
+  <item>
+    <child>Nested 641</child>
+  </item>
+  <!-- Comment 642 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 643 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 644
+  <item>Text content 645</item>
+  <item>
+    <child>Nested 646</child>
+  </item>
+  <!-- Comment 647 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 648 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 649
+  <item>Text content 650</item>
+  <item>
+    <child>Nested 651</child>
+  </item>
+  <!-- Comment 652 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 653 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 654
+  <item>Text content 655</item>
+  <item>
+    <child>Nested 656</child>
+  </item>
+  <!-- Comment 657 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 658 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 659
+  <item>Text content 660</item>
+  <item>
+    <child>Nested 661</child>
+  </item>
+  <!-- Comment 662 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 663 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 664
+  <item>Text content 665</item>
+  <item>
+    <child>Nested 666</child>
+  </item>
+  <!-- Comment 667 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 668 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 669
+  <item>Text content 670</item>
+  <item>
+    <child>Nested 671</child>
+  </item>
+  <!-- Comment 672 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 673 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 674
+  <item>Text content 675</item>
+  <item>
+    <child>Nested 676</child>
+  </item>
+  <!-- Comment 677 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 678 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 679
+  <item>Text content 680</item>
+  <item>
+    <child>Nested 681</child>
+  </item>
+  <!-- Comment 682 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 683 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 684
+  <item>Text content 685</item>
+  <item>
+    <child>Nested 686</child>
+  </item>
+  <!-- Comment 687 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 688 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 689
+  <item>Text content 690</item>
+  <item>
+    <child>Nested 691</child>
+  </item>
+  <!-- Comment 692 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 693 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 694
+  <item>Text content 695</item>
+  <item>
+    <child>Nested 696</child>
+  </item>
+  <!-- Comment 697 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 698 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 699
+  <item>Text content 700</item>
+  <item>
+    <child>Nested 701</child>
+  </item>
+  <!-- Comment 702 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 703 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 704
+  <item>Text content 705</item>
+  <item>
+    <child>Nested 706</child>
+  </item>
+  <!-- Comment 707 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 708 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 709
+  <item>Text content 710</item>
+  <item>
+    <child>Nested 711</child>
+  </item>
+  <!-- Comment 712 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 713 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 714
+  <item>Text content 715</item>
+  <item>
+    <child>Nested 716</child>
+  </item>
+  <!-- Comment 717 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 718 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 719
+  <item>Text content 720</item>
+  <item>
+    <child>Nested 721</child>
+  </item>
+  <!-- Comment 722 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 723 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 724
+  <item>Text content 725</item>
+  <item>
+    <child>Nested 726</child>
+  </item>
+  <!-- Comment 727 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 728 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 729
+  <item>Text content 730</item>
+  <item>
+    <child>Nested 731</child>
+  </item>
+  <!-- Comment 732 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 733 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 734
+  <item>Text content 735</item>
+  <item>
+    <child>Nested 736</child>
+  </item>
+  <!-- Comment 737 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 738 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 739
+  <item>Text content 740</item>
+  <item>
+    <child>Nested 741</child>
+  </item>
+  <!-- Comment 742 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 743 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 744
+  <item>Text content 745</item>
+  <item>
+    <child>Nested 746</child>
+  </item>
+  <!-- Comment 747 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 748 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 749
+  <item>Text content 750</item>
+  <item>
+    <child>Nested 751</child>
+  </item>
+  <!-- Comment 752 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 753 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 754
+  <item>Text content 755</item>
+  <item>
+    <child>Nested 756</child>
+  </item>
+  <!-- Comment 757 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 758 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 759
+  <item>Text content 760</item>
+  <item>
+    <child>Nested 761</child>
+  </item>
+  <!-- Comment 762 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 763 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 764
+  <item>Text content 765</item>
+  <item>
+    <child>Nested 766</child>
+  </item>
+  <!-- Comment 767 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 768 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 769
+  <item>Text content 770</item>
+  <item>
+    <child>Nested 771</child>
+  </item>
+  <!-- Comment 772 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 773 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 774
+  <item>Text content 775</item>
+  <item>
+    <child>Nested 776</child>
+  </item>
+  <!-- Comment 777 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 778 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 779
+  <item>Text content 780</item>
+  <item>
+    <child>Nested 781</child>
+  </item>
+  <!-- Comment 782 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 783 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 784
+  <item>Text content 785</item>
+  <item>
+    <child>Nested 786</child>
+  </item>
+  <!-- Comment 787 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 788 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 789
+  <item>Text content 790</item>
+  <item>
+    <child>Nested 791</child>
+  </item>
+  <!-- Comment 792 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 793 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 794
+  <item>Text content 795</item>
+  <item>
+    <child>Nested 796</child>
+  </item>
+  <!-- Comment 797 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 798 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 799
+  <item>Text content 800</item>
+  <item>
+    <child>Nested 801</child>
+  </item>
+  <!-- Comment 802 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 803 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 804
+  <item>Text content 805</item>
+  <item>
+    <child>Nested 806</child>
+  </item>
+  <!-- Comment 807 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 808 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 809
+  <item>Text content 810</item>
+  <item>
+    <child>Nested 811</child>
+  </item>
+  <!-- Comment 812 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 813 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 814
+  <item>Text content 815</item>
+  <item>
+    <child>Nested 816</child>
+  </item>
+  <!-- Comment 817 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 818 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 819
+  <item>Text content 820</item>
+  <item>
+    <child>Nested 821</child>
+  </item>
+  <!-- Comment 822 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 823 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 824
+  <item>Text content 825</item>
+  <item>
+    <child>Nested 826</child>
+  </item>
+  <!-- Comment 827 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 828 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 829
+  <item>Text content 830</item>
+  <item>
+    <child>Nested 831</child>
+  </item>
+  <!-- Comment 832 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 833 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 834
+  <item>Text content 835</item>
+  <item>
+    <child>Nested 836</child>
+  </item>
+  <!-- Comment 837 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 838 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 839
+  <item>Text content 840</item>
+  <item>
+    <child>Nested 841</child>
+  </item>
+  <!-- Comment 842 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 843 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 844
+  <item>Text content 845</item>
+  <item>
+    <child>Nested 846</child>
+  </item>
+  <!-- Comment 847 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 848 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 849
+  <item>Text content 850</item>
+  <item>
+    <child>Nested 851</child>
+  </item>
+  <!-- Comment 852 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 853 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 854
+  <item>Text content 855</item>
+  <item>
+    <child>Nested 856</child>
+  </item>
+  <!-- Comment 857 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 858 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 859
+  <item>Text content 860</item>
+  <item>
+    <child>Nested 861</child>
+  </item>
+  <!-- Comment 862 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 863 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 864
+  <item>Text content 865</item>
+  <item>
+    <child>Nested 866</child>
+  </item>
+  <!-- Comment 867 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 868 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 869
+  <item>Text content 870</item>
+  <item>
+    <child>Nested 871</child>
+  </item>
+  <!-- Comment 872 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 873 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 874
+  <item>Text content 875</item>
+  <item>
+    <child>Nested 876</child>
+  </item>
+  <!-- Comment 877 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 878 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 879
+  <item>Text content 880</item>
+  <item>
+    <child>Nested 881</child>
+  </item>
+  <!-- Comment 882 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 883 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 884
+  <item>Text content 885</item>
+  <item>
+    <child>Nested 886</child>
+  </item>
+  <!-- Comment 887 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 888 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 889
+  <item>Text content 890</item>
+  <item>
+    <child>Nested 891</child>
+  </item>
+  <!-- Comment 892 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 893 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 894
+  <item>Text content 895</item>
+  <item>
+    <child>Nested 896</child>
+  </item>
+  <!-- Comment 897 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 898 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 899
+  <item>Text content 900</item>
+  <item>
+    <child>Nested 901</child>
+  </item>
+  <!-- Comment 902 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 903 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 904
+  <item>Text content 905</item>
+  <item>
+    <child>Nested 906</child>
+  </item>
+  <!-- Comment 907 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 908 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 909
+  <item>Text content 910</item>
+  <item>
+    <child>Nested 911</child>
+  </item>
+  <!-- Comment 912 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 913 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 914
+  <item>Text content 915</item>
+  <item>
+    <child>Nested 916</child>
+  </item>
+  <!-- Comment 917 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 918 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 919
+  <item>Text content 920</item>
+  <item>
+    <child>Nested 921</child>
+  </item>
+  <!-- Comment 922 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 923 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 924
+  <item>Text content 925</item>
+  <item>
+    <child>Nested 926</child>
+  </item>
+  <!-- Comment 927 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 928 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 929
+  <item>Text content 930</item>
+  <item>
+    <child>Nested 931</child>
+  </item>
+  <!-- Comment 932 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 933 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 934
+  <item>Text content 935</item>
+  <item>
+    <child>Nested 936</child>
+  </item>
+  <!-- Comment 937 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 938 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 939
+  <item>Text content 940</item>
+  <item>
+    <child>Nested 941</child>
+  </item>
+  <!-- Comment 942 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 943 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 944
+  <item>Text content 945</item>
+  <item>
+    <child>Nested 946</child>
+  </item>
+  <!-- Comment 947 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 948 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 949
+  <item>Text content 950</item>
+  <item>
+    <child>Nested 951</child>
+  </item>
+  <!-- Comment 952 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 953 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 954
+  <item>Text content 955</item>
+  <item>
+    <child>Nested 956</child>
+  </item>
+  <!-- Comment 957 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 958 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 959
+  <item>Text content 960</item>
+  <item>
+    <child>Nested 961</child>
+  </item>
+  <!-- Comment 962 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 963 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 964
+  <item>Text content 965</item>
+  <item>
+    <child>Nested 966</child>
+  </item>
+  <!-- Comment 967 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 968 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 969
+  <item>Text content 970</item>
+  <item>
+    <child>Nested 971</child>
+  </item>
+  <!-- Comment 972 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 973 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 974
+  <item>Text content 975</item>
+  <item>
+    <child>Nested 976</child>
+  </item>
+  <!-- Comment 977 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 978 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 979
+  <item>Text content 980</item>
+  <item>
+    <child>Nested 981</child>
+  </item>
+  <!-- Comment 982 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 983 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 984
+  <item>Text content 985</item>
+  <item>
+    <child>Nested 986</child>
+  </item>
+  <!-- Comment 987 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 988 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 989
+  <item>Text content 990</item>
+  <item>
+    <child>Nested 991</child>
+  </item>
+  <!-- Comment 992 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 993 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 994
+  <item>Text content 995</item>
+  <item>
+    <child>Nested 996</child>
+  </item>
+  <!-- Comment 997 -->
+  <item>After comment</item>
+  <item><![CDATA[CDATA content 998 with <special> & characters]]></item>
+  Mixed text <b>bold</b> and <i>italic</i> content 999
+</root>

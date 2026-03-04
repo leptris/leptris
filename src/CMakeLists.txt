@@ -35,7 +35,7 @@ set(TAURUS_SOURCES
     taurus/memory/compact_allocator.c
     taurus/memory/compact_single_alloc.c
     taurus/dom/compact.c
-    taurus/dom/compact_accessor.c
+    taurus/dom/ptr_accessor.c
     taurus/taurus_memory.c
 
     # Common utilities

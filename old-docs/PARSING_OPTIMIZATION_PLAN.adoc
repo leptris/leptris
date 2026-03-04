@@ -1,0 +1,348 @@
+= Taurus Parsing Optimization Plan - Achieving Parity with pugixml
+
+:toc:
+:toclevels: 3
+
+== Executive Summary
+
+**PROBLEM:** Taurus parsing is **10x slower** than pugixml (731µs vs 75µs for 186KB file).
+
+**ROOT CAUSE:** Excessive memory allocations during parsing and string conversion.
+
+**SOLUTION:** Implement in-place null termination (pugixml's secret sauce) to eliminate ALL string copies.
+
+**TARGET:** Achieve parsing parity with pugixml (≥75µs for large.xml).
+
+== Root Cause Analysis
+
+=== Current Performance Gap
+
+[cols="1,1,1,1"]
+|===
+| File | Taurus | pugixml | Gap
+| small.xml (1KB) | 6.0 µs | 1.0 µs | 6x slower
+| medium.xml (18KB) | 71.0 µs | 7.0 µs | 10x slower
+| large.xml (186KB) | 731.0 µs | 75.0 µs | 10x slower
+|===
+
+=== Identified Bottlenecks
+
+==== 1. finalize_strings() - Massive malloc Storm
+
+**Location:** `src/taurus/taurus.c:2595-2662`
+
+**Problem:** After parsing, `taurus_document_finalize_strings()` converts ALL StringViews to null-terminated C strings using `taurus_sv_to_cstr()` which calls **malloc** for every string.
+
+[cols="1,1"]
+|===
+| Data Type | Allocations
+| Element names | 1 per element
+| Element namespace URIs | 1 per element
+| Element prefixes | 1 per element
+| Attribute names | 1 per attribute
+| Attribute values | 1 per attribute
+| Attribute namespace URIs | 1 per attribute
+| Attribute prefixes | 1 per attribute
+|===
+
+**For 186KB file (1000 elements, 5000 attributes): ~15,000 malloc calls!**
+
+==== 2. Namespace Handling - Triple Allocation
+
+**Location:** `src/taurus/parse/parser_new.c:1431-1436, 1476-1483`
+
+**Problem:** Each namespace declaration involves:
+1. `taurus_sv_to_cstr()` - malloc temp string
+2. `taurus_namespace_new_pooled()` - pool alloc struct + `taurus_pool_strdup()` copies strings
+3. `free()` - frees temp string
+
+```c
+// Current code (BAD):
+char* uri = taurus_sv_to_cstr(&attr_value_view);  // MALLOC
+struct taurus_namespace* ns = taurus_namespace_new_pooled(NULL, uri, p->pool);
+free(uri);  // Then freed - WASTEFUL!
+```
+
+==== 3. Not Using In-Place Null Termination
+
+**The KEY INSIGHT:** pugixml modifies the XML buffer IN PLACE to add null terminators. Then element names, attribute names, and values are just pointers into the buffer - **NO COPYING NEEDED**.
+
+Taurus ALREADY has writable mode (`parser_create_writable`) but doesn't utilize it for null termination.
+
+=== pugixml's Secret Sauce
+
+pugixml achieves fast parsing through:
+
+1. **In-place null termination:** Modify buffer to add '\0' at end of names/values
+2. **Zero-copy strings:** Names/values are pointers into buffer
+3. **4x manual unrolling:** Process 4 characters per iteration
+4. **Pool allocation:** O(1) bump-pointer allocation
+5. **No post-parse conversion:** Strings are already C strings
+
+== Optimization Plan
+
+=== Phase C: In-Place Null Termination (HIGHEST IMPACT)
+
+**Expected Speedup:** 5-7x
+
+**Concept:** After parsing a name or value, replace the character after it with '\0' in the buffer. Then `StringView.data` IS a valid null-terminated C string.
+
+**Implementation:**
+
+1. Modify `parse_name_view()` to null-terminate in place:
+```c
+// In parse_name_view(), after extracting the name:
+if (p->writable && p->pos < p->end) {
+    char next_char = *p->pos;
+    if (next_char != '\0') {
+        p->saved_char = next_char;  // Save for potential restoration
+        *(char*)p->pos = '\0';      // In-place null termination!
+    }
+}
+```
+
+2. Modify `parse_attribute_value_view()` similarly
+
+3. Add `is_null_terminated` flag to StringView or check if `data[len] == '\0'`
+
+**Files to Modify:**
+
+| File | Changes
+| `src/taurus/parse/parser_new.c` | Add null-termination in parse_name_view(), parse_attribute_value_view()
+| `src/taurus/common/string_view.h` | Add helper to check if view is null-terminated
+| `src/taurus/taurus.c` | Update finalize_strings to skip already-terminated strings
+
+=== Phase A: Pool-Allocated finalize_strings
+
+**Expected Speedup:** 2x (after Phase C, for remaining strings)
+
+**Concept:** Use pool allocation instead of malloc for any strings that still need conversion.
+
+**Implementation:**
+
+Change `taurus_sv_to_cstr()` to `taurus_sv_to_cstr_pooled()` in finalize_strings:
+
+```c
+// Current (BAD):
+attr->name = taurus_sv_to_cstr(&attr->name_view);  // MALLOC
+
+// Fixed (GOOD):
+attr->name = taurus_sv_to_cstr_pooled(&attr->name_view, elem->document->pool);  // POOL
+```
+
+**Files to Modify:**
+
+| File | Changes
+| `src/taurus/taurus.c` | Replace taurus_sv_to_cstr with taurus_sv_to_cstr_pooled
+
+=== Phase B: StringView Namespace Storage
+
+**Expected Speedup:** 1.3x
+
+**Concept:** Store StringViews directly in namespace struct instead of copying strings.
+
+**Implementation:**
+
+Create new function that takes StringViews:
+
+```c
+struct taurus_namespace* taurus_namespace_new_with_views(
+    TaurusStringView* prefix_view,
+    TaurusStringView* uri_view,
+    TaurusMemoryPool* pool
+) {
+    struct taurus_namespace* ns = taurus_pool_alloc(pool, sizeof(*ns));
+    ns->prefix_view = *prefix_view;  // Just copy the view (16 bytes)
+    ns->uri_view = *uri_view;        // Just copy the view (16 bytes)
+    ns->prefix = NULL;  // Lazy conversion if ever needed
+    ns->uri = NULL;     // Lazy conversion if ever needed
+    return ns;
+}
+```
+
+Update namespace struct to include StringView fields (if not already present).
+
+**Files to Modify:**
+
+| File | Changes
+| `src/taurus/dom/element.h` | Add prefix_view, uri_view to taurus_namespace struct
+| `src/taurus/taurus_memory.c` | Implement taurus_namespace_new_with_views()
+| `src/taurus/parse/parser_new.c` | Use new function instead of malloc-based approach
+
+=== Phase D: Loop Unrolling
+
+**Expected Speedup:** 1.2x
+
+**Concept:** Process 4 characters per iteration instead of 1.
+
+**Implementation:**
+
+Add unrolled versions of hot path functions:
+
+```c
+// In simd_helpers.h or new file
+#define SCAN_WHILE_UNROLL(p, end, condition) \
+    while (p + 3 < end && condition(p[0]) && condition(p[1]) && \
+           condition(p[2]) && condition(p[3])) { \
+        p += 4; \
+    } \
+    while (p < end && condition(*p)) p++
+
+static inline void skip_whitespace_unroll(const char** p, const char* end) {
+    const char* s = *p;
+    SCAN_WHILE_UNROLL(s, end, IS_WHITESPACE);
+    *p = s;
+}
+```
+
+**Files to Modify:**
+
+| File | Changes
+| `src/taurus/common/simd_helpers.h` | Add unrolled macros
+| `src/taurus/parse/parser_new.c` | Use unrolled versions in hot paths
+
+=== Phase E: StringView Comparisons in Validation
+
+**Expected Speedup:** 1.1x (strict mode only)
+
+**Concept:** Use StringView comparison instead of converting to C string.
+
+**Implementation:**
+
+Replace temp string allocations with StringView comparisons:
+
+```c
+// Current (BAD):
+char* prefix_str = taurus_sv_to_cstr(&elem->prefix_view);  // MALLOC
+if (strcmp(prefix_str, "xml") == 0) { ... }
+free(prefix_str);
+
+// Fixed (GOOD):
+static const TaurusStringView xml_sv = TAURUS_SV_FROM_LITERAL("xml");
+if (taurus_sv_equals(&elem->prefix_view, &xml_sv)) { ... }
+// No allocation needed!
+```
+
+**Files to Modify:**
+
+| File | Changes
+| `src/taurus/parse/parser_new.c` | Replace taurus_sv_to_cstr + strcmp with taurus_sv_equals
+
+== Implementation Order
+
+[cols="1,1,1,1,1"]
+|===
+| Order | Phase | Expected Impact | Risk | Effort
+| 1 | C: In-place null termination | 5-7x | Medium | 2-3 hours
+| 2 | A: Pool-allocated finalize | 2x | Low | 1 hour
+| 3 | B: StringView namespace | 1.3x | Low | 1-2 hours
+| 4 | D: Loop unrolling | 1.2x | Low | 1 hour
+| 5 | E: StringView comparisons | 1.1x | Low | 30 min
+|===
+
+**Total Estimated Effort:** 1-2 days
+
+== Expected Results
+
+=== Speedup Calculation
+
+[cols="1,1,1"]
+|===
+| Phase | Speedup Factor | Cumulative Time
+| Baseline | 1.0x | 731 µs
+| After Phase C | 6x | ~122 µs
+| After Phase A | 2x | ~61 µs
+| After Phase B | 1.3x | ~47 µs
+| After Phase D | 1.2x | ~39 µs
+| After Phase E | 1.1x | ~36 µs
+|===
+
+**Target: 36 µs (2x FASTER than pugixml's 75µs!)**
+
+Conservative estimate: Even with 50% overhead, we should achieve ~70µs (parity).
+
+=== Success Criteria
+
+- [ ] **Parsing time:** ≤75µs for large.xml (pugixml parity)
+- [ ] **All tests pass:** `ctest --test-dir build --output-on-failure`
+- [ ] **No memory leaks:** `valgrind --leak-check=full ./build/test/c/test_dom`
+- [ ] **No regressions:** DOM and XPath benchmarks unchanged or improved
+
+== Verification Plan
+
+After each phase:
+
+1. **Run parsing benchmark:**
+```bash
+./build/benchmarks/bench_dom_parse
+```
+
+2. **Run all tests:**
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+3. **Check for memory leaks:**
+```bash
+valgrind --leak-check=full ./build/test/c/test_dom
+```
+
+4. **Record results in this file**
+
+== Files Summary
+
+=== Files to Modify
+
+| File | Phases | Changes
+| `src/taurus/parse/parser_new.c` | C, B, D, E | Null termination, namespace, unrolling, comparisons
+| `src/taurus/taurus.c` | A | Pool allocation in finalize_strings
+| `src/taurus/dom/element.h` | B | Add StringView fields to namespace struct
+| `src/taurus/taurus_memory.c` | B | New namespace constructor
+| `src/taurus/common/string_view.h` | C | Null-termination helpers
+| `src/taurus/common/simd_helpers.h` | D | Unrolled macros
+
+=== Related Files (Read-Only Reference)
+
+| File | Purpose
+| `benchmarks/src/bench_dom_parse.cc` | Parsing benchmark
+| `REMAINING_WORK.adoc` | Overall project tracking
+| `PERFORMANCE_PLAN.adoc` | Performance optimization plan
+
+== Risk Assessment
+
+=== Phase C Risks
+
+**Risk:** Buffer modification could cause issues if buffer is not writable.
+
+**Mitigation:**
+- All parsing already uses `parser_create_writable()` internally
+- Buffer is copied at `taurus.c:101-103` for safety
+- We OWN the buffer, modification is safe
+- Add `assert(p->writable)` before modifications
+
+=== Backward Compatibility
+
+**Impact:** None - this is purely an internal implementation change.
+
+- No API changes required
+- StringView already stores pointer + length
+- External users see no difference
+- `taurus_element_name()`, `taurus_element_get_attribute_value()` work identically
+
+== Notes
+
+**Why pugixml is fast:**
+
+1. In-place buffer modification (zero-copy strings)
+2. No string allocations during parsing
+3. Manual loop unrolling
+4. Template-based parser specialization (C++ only)
+
+**What Taurus already does well:**
+
+1. Pool allocation for structures
+2. StringView for zero-copy parsing
+3. Character lookup tables
+4. SIMD helpers for some operations
+
+**The gap is primarily in string handling after parsing.**

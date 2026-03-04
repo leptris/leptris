@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <script><![CDATA[
+    if (x < 10 && y > 5) {
+      console.log("Hello & goodbye");
+    }
+  ]]></script>
+  <style><![CDATA[
+    .class { color: red; }
+    @media (max-width: 768px) { }
+  ]]></style>
+  <code><![CDATA[
+    <html><body>Raw HTML</body></html>
+  ]]></code>
+  <mixed>Text before <![CDATA[CDATA content]]> text after</mixed>
+</root>

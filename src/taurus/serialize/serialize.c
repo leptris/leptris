@@ -6,13 +6,15 @@
  * 2. No escaping in CDATA - CDATA content is literal
  * 3. Proper escaping elsewhere - text needs <>&"' escaped
  * 4. Document order - traverse children in correct order
+ *
+ * POINTER-BASED ARCHITECTURE: Uses ptr_element directly.
  */
 
 #include "serialize.h"
 #include "../taurus_internal.h"
 #include "../../include/taurus.h"  /* For taurus_element_attribute() and TaurusSerializeOptions */
-#include "../dom/compact_element.h"  /* For v2 structures (16-byte) and COMPACT_V2_TYPE_* constants */
-#include "../dom/compact_accessor.h" /* For compact_get_or_create_wrapper() */
+#include "../dom/ptr_element.h"   /* For ptr_element and ptr_attribute structures */
+#include "../dom/ptr_accessor.h"  /* For ptr_element accessors */
 #include "../common/entities.h" /* For taurus_decode_entities() */
 #include <string.h>
 #include <stdio.h>
@@ -159,10 +161,10 @@ static size_t calc_element_size(TaurusElement elem, int indent_spaces, int inden
     }
 
     /* Opening tag: <name */
-    size += 1 + (elem->name ? strlen(elem->name) : elem->name_view.length);
+    size += 1 + (elem->name ? strlen(elem->name) : 0);
 
     /* Attributes */
-    for (struct taurus_attribute* attr = elem->first_attribute; attr != NULL; attr = attr->next) {
+    for (struct ptr_attribute* attr = elem->first_attr; attr != NULL; attr = attr->next_attr) {
         if (!attr || !attr->name) continue;
         size += 1;  /* space */
         size += strlen(attr->name);
@@ -171,23 +173,13 @@ static size_t calc_element_size(TaurusElement elem, int indent_spaces, int inden
         size += 1;  /* " */
     }
 
-    /* Namespaces */
-    for (struct taurus_namespace* ns = elem->namespaces; ns != NULL; ns = ns->next) {
-        if (!ns) continue;
-        size += 1;  /* space */
-        size += 5;  /* xmlns */
-        if (ns->prefix) {
-            size += 1 + strlen(ns->prefix);  /* :prefix */
-        } else if (!taurus_sv_is_empty(&ns->prefix_view)) {
-            size += 1 + ns->prefix_view.length;
+    /* Namespaces - stored as xmlns:prefix attributes */
+    for (struct ptr_attribute* attr = elem->first_attr; attr != NULL; attr = attr->next_attr) {
+        if (!attr || !attr->name) continue;
+        /* Check if this is a namespace declaration */
+        if (strcmp(attr->name, "xmlns") == 0 || strncmp(attr->name, "xmlns:", 6) == 0) {
+            /* Already counted as attribute above */
         }
-        size += 2;  /* =" */
-        if (ns->uri) {
-            size += strlen(ns->uri);
-        } else if (!taurus_sv_is_empty(&ns->uri_view)) {
-            size += ns->uri_view.length;
-        }
-        size += 1;  /* " */
     }
 
     /* Children or self-closing */
@@ -212,7 +204,7 @@ static size_t calc_element_size(TaurusElement elem, int indent_spaces, int inden
         }
 
         /* Closing tag: </name> */
-        size += 2 + (elem->name ? strlen(elem->name) : elem->name_view.length) + 1;
+        size += 2 + (elem->name ? strlen(elem->name) : 0) + 1;
 
         /* Newline after closing tag if not root */
         if (!is_root && indent_spaces > 0) {
@@ -585,27 +577,15 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
     buffer_append_char(buf, '<');
     buffer_append_len(buf, elem_name, elem_name_len);
 
-    /* Attributes - use wrapper's attributes (POINTER-ONLY) */
-    if (elem->first_attribute) {
-        /* Use wrapper's attribute list */
-        for (struct taurus_attribute* attr = elem->first_attribute; attr != NULL; attr = attr->next) {
-            /* Get name - may need lazy conversion from view */
+    /* Attributes - use ptr_attribute list */
+    if (elem->first_attr) {
+        /* Use ptr_attribute list */
+        for (struct ptr_attribute* attr = elem->first_attr; attr != NULL; attr = attr->next_attr) {
+            /* Get name */
             const char* attr_name = attr->name;
-            if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
-                attr_name = taurus_sv_to_cstr(&attr->name_view);
-                if (attr_name) attr->name = (char*)attr_name;  /* Cache for future */
-            }
 
-            /* Get value - may need lazy conversion from view */
+            /* Get value */
             const char* attr_value = attr->value;
-            if (!attr_value && !taurus_sv_is_empty(&attr->value_view)) {
-                if (attr->has_entities) {
-                    attr_value = taurus_decode_entities_view(&attr->value_view, doc ? doc->pool : NULL);
-                } else {
-                    attr_value = taurus_sv_to_cstr(&attr->value_view);
-                }
-                if (attr_value) attr->value = (char*)attr_value;  /* Cache for future */
-            }
 
             if (attr_name && *attr_name) {
                 buffer_append_char(buf, ' ');

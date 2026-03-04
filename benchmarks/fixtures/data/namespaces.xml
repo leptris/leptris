@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns="http://default.namespace.org"
+      xmlns:ns1="http://namespace1.org"
+      xmlns:ns2="http://namespace2.org"
+      xmlns:ns3="http://namespace3.org"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ns1:element ns1:attr="value1">Content 1</ns1:element>
+  <ns2:element ns2:attr="value2">Content 2</ns2:element>
+  <ns3:element ns3:attr="value3">Content 3</ns3:element>
+  <mixed ns1:attr1="v1" ns2:attr2="v2" attr3="v3">Mixed</mixed>
+  <nested>
+    <ns1:child ns1:id="1">Child 1</ns1:child>
+    <ns2:child ns2:id="2">Child 2</ns2:child>
+  </nested>
+</root>

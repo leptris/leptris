@@ -92,10 +92,17 @@ static void parse_node_test_name(const char* test_name,
 int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test) {
     if (!node || !test) return 1;  /* No test means match all */
 
+    DEBUG_LOG("matches_node_test: node=%p, test=%p", (void*)node, (void*)test);
+
     switch (test->type) {
         case XPATH_AST_NODE_TEST_NAME: {
             /* Match specific name - namespace-aware */
+            DEBUG_LOG("  NODE_TEST_NAME, test->value=%s", test->value ? test->value : "(null)");
+
+            DEBUG_LOG("  Getting node name...");
             const char* node_name = taurus_element_get_name(node);
+            DEBUG_LOG("  node_name=%s", node_name ? node_name : "(null)");
+
             if (!test->value || !node_name) return 0;
 
             /* Fast path: No colon means no namespace prefix */

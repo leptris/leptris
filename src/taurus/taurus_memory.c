@@ -1,10 +1,16 @@
 /* libtaurus - Memory management implementation
  * Copyright (c) 2024, Ribose Inc.
  * All rights reserved.
+ *
+ * POINTER-BASED ARCHITECTURE:
+ * Uses ptr_element directly for namespace operations.
+ * Namespaces are stored as xmlns:prefix attributes.
  */
 
 #include "taurus_memory.h"
 #include "dom/element.h"
+#include "dom/ptr_element.h"
+#include "dom/ptr_accessor.h"
 #include "memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
@@ -148,37 +154,73 @@ void taurus_namespace_free_chain(struct taurus_namespace* ns) {
     }
 }
 
-struct taurus_namespace* taurus_namespace_find(struct taurus_element* elem, const char* prefix) {
-    struct taurus_namespace* ns;
-
+/* Find namespace on element
+ *
+ * In ptr_element architecture, namespaces are stored as xmlns:prefix attributes.
+ * This function searches for the namespace in the attribute list.
+ */
+struct taurus_namespace* taurus_namespace_find(TaurusElement elem, const char* prefix) {
     if (!elem) return NULL;
 
-    /* Check current element */
-    ns = elem->namespaces;
-    while (ns) {
-        if ((prefix == NULL && ns->prefix == NULL) ||
-            (prefix && ns->prefix && strcmp(prefix, ns->prefix) == 0)) {
-            return ns;
-        }
-        ns = ns->next;
-    }
+    /* In ptr_element architecture, namespaces are stored as attributes.
+     * Use taurus_element_lookup_namespace which searches xmlns:prefix attributes.
+     * This returns a static string, so we create a taurus_namespace structure
+     * to maintain API compatibility.
+     *
+     * NOTE: The returned namespace structure is allocated and should be freed
+     * by the caller. For better performance, use taurus_element_lookup_namespace
+     * directly.
+     */
+    const char* uri = taurus_element_lookup_namespace(elem, prefix);
+    if (!uri) return NULL;
 
-    /* Search parent */
-    struct taurus_element* parent = taurus_element_get_parent(elem);
-    if (parent) {
-        return taurus_namespace_find(parent, prefix);
-    }
-
-    return NULL;
+    /* Create a temporary namespace structure for API compatibility */
+    /* Note: Caller should free this */
+    return taurus_namespace_new(prefix, uri);
 }
 
-/* Add namespace to element's namespace linked list */
-int taurus_element_add_namespace(struct taurus_element* elem, struct taurus_namespace* ns) {
+/* Add namespace to element
+ *
+ * In ptr_element architecture, namespaces are stored as xmlns:prefix attributes.
+ * This function adds the namespace as an attribute.
+ */
+int taurus_element_add_namespace(TaurusElement elem, struct taurus_namespace* ns) {
     if (!elem || !ns) return -1;
 
-    /* Add to front of linked list */
-    ns->next = elem->namespaces;
-    elem->namespaces = ns;
+    /* Get the document pool */
+    struct taurus_document* doc = elem->document;
+    if (!doc || !doc->pool) return -1;
 
-    return 0;
+    /* Add as xmlns:prefix attribute */
+    const char* prefix = ns->prefix;
+    const char* uri = ns->uri;
+
+    /* Use StringViews if C strings not available */
+    if (!uri && !taurus_sv_is_empty(&ns->uri_view)) {
+        uri = taurus_sv_to_cstr_pooled(&ns->uri_view, doc->pool);
+    }
+    if (!prefix && !taurus_sv_is_empty(&ns->prefix_view)) {
+        prefix = taurus_sv_to_cstr_pooled(&ns->prefix_view, doc->pool);
+    }
+
+    /* Create attribute name */
+    size_t prefix_len = prefix ? strlen(prefix) : 0;
+    char* attr_name;
+
+    if (prefix && prefix_len > 0) {
+        attr_name = (char*)taurus_pool_alloc(doc->pool, prefix_len + 7);
+        if (!attr_name) return -1;
+        memcpy(attr_name, "xmlns:", 6);
+        memcpy(attr_name + 6, prefix, prefix_len + 1);
+    } else {
+        attr_name = (char*)taurus_pool_alloc(doc->pool, 6);
+        if (!attr_name) return -1;
+        memcpy(attr_name, "xmlns", 6);
+    }
+
+    /* Add attribute */
+    TaurusStringView name_view = taurus_sv_from_cstr(attr_name);
+    TaurusStringView uri_view = uri ? taurus_sv_from_cstr((char*)uri) : taurus_sv_empty();
+
+    return taurus_element_add_attribute(elem, name_view, uri_view, doc->pool);
 }

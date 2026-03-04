@@ -11,6 +11,7 @@
 #include "text.h"
 #include "cdata.h"
 #include "node.h"
+#include "ptr_element.h"
 #include "../taurus_memory.h"
 #include <stdlib.h>
 #include <string.h>
@@ -30,14 +31,16 @@ static size_t calculate_text_length_recursive_impl(TaurusNode* node, int depth) 
     TaurusNode* child = taurus_node_first_child_internal(node);
     while (child) {
         if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            TaurusTextNode* text = (TaurusTextNode*)child;
-            if (text->content) {
-                len += strlen(text->content);
+            /* Use ptr_text structure which has 'text' field */
+            struct ptr_text* text = (struct ptr_text*)child;
+            if (text->text) {
+                len += strlen(text->text);
             }
         } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)child;
-            if (cdata->content) {
-                len += strlen(cdata->content);
+            /* CDATA also uses ptr_text structure */
+            struct ptr_text* cdata = (struct ptr_text*)child;
+            if (cdata->text) {
+                len += strlen(cdata->text);
             }
         } else if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             /* Recursively include text from child elements */
@@ -62,17 +65,19 @@ static void copy_text_content_recursive_impl(TaurusNode* node, char* result, siz
     TaurusNode* child = taurus_node_first_child_internal(node);
     while (child) {
         if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            TaurusTextNode* text = (TaurusTextNode*)child;
-            if (text->content) {
-                size_t len = strlen(text->content);
-                memcpy(result + *offset, text->content, len);
+            /* Use ptr_text structure which has 'text' field */
+            struct ptr_text* text = (struct ptr_text*)child;
+            if (text->text) {
+                size_t len = strlen(text->text);
+                memcpy(result + *offset, text->text, len);
                 *offset += len;
             }
         } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)child;
-            if (cdata->content) {
-                size_t len = strlen(cdata->content);
-                memcpy(result + *offset, cdata->content, len);
+            /* CDATA also uses ptr_text structure */
+            struct ptr_text* cdata = (struct ptr_text*)child;
+            if (cdata->text) {
+                size_t len = strlen(cdata->text);
+                memcpy(result + *offset, cdata->text, len);
                 *offset += len;
             }
         } else if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
@@ -93,28 +98,10 @@ static void copy_text_content_recursive(TaurusNode* node, char* result, size_t* 
  * Text Content Public API
  * ============================================================================ */
 
-/* Text content extraction (concatenates ALL text nodes recursively) */
-char* taurus_element_get_text_content(TaurusElement elem) {
-    if (!elem) return NULL;
-
-    /* First pass: calculate total length needed recursively */
-    size_t total_len = calculate_text_length_recursive((TaurusNode*)elem);
-
-    if (total_len == 0) {
-        return taurus_strdup("");
-    }
-
-    /* Allocate buffer for concatenated text */
-    char* result = (char*)taurus_malloc(total_len + 1);
-    if (!result) return NULL;
-
-    /* Second pass: copy text content recursively */
-    size_t offset = 0;
-    copy_text_content_recursive((TaurusNode*)elem, result, &offset);
-
-    result[offset] = '\0';
-    return result;
-}
+/* Text content extraction (concatenates ALL text nodes recursively)
+ * NOTE: Implementation moved to element.c to avoid offset issues with ptr_node union.
+ * The implementation in element.c correctly casts to ptr_text directly.
+ */
 
 /* ============================================================================
  * Subtree Analysis (for bulk allocation planning)

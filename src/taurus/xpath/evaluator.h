@@ -9,10 +9,8 @@
 #define XPATH_EVALUATOR_H
 
 #include "../taurus_internal.h"
+#include "../../include/taurus/types.h"  /* For TaurusElement */
 #include "parser.h"
-
-/* Forward declaration for TaurusElement */
-typedef struct taurus_element* TaurusElement;
 
 /* ============================================================================
  * Types from taurus_internal.h

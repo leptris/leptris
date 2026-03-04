@@ -33,7 +33,7 @@ extern int parser_get_standalone(Parser* p);
 extern struct taurus_document* taurus_parse_v5(char* xml, size_t len, int* error_out, int strict_mode);
 
 /* Pointer-based parser - ULTRA FAST (1.29-1.45x vs pugixml!) */
-extern struct taurus_document* taurus_parse_ptr(char* xml, size_t len, int* error_out);
+extern struct taurus_document* taurus_parse_ptr(char* xml, size_t len, int* error_out, int strict_mode);
 
 extern int parser_had_declaration(Parser* p);
 extern int parser_has_bom(Parser* p);
@@ -108,12 +108,13 @@ static struct taurus_document* taurus_parse_internal(const char* xml, size_t len
     xml_copy[len] = '\0';
 
     int error = 0;
-    struct taurus_document* compact_doc = taurus_parse_v5(xml_copy, len, &error, strict_mode);
-    if (compact_doc) {
-        return compact_doc;
+    /* POINTER-ONLY: Use pointer-based parser for 1.29-1.45x faster than pugixml */
+    struct taurus_document* doc = taurus_parse_ptr(xml_copy, len, &error, strict_mode);
+    if (doc) {
+        return doc;
     }
 
-    /* If v5 parser fails, free copy and return NULL - no legacy fallback */
+    /* If ptr parser fails, free copy and return NULL */
     TAURUS_FREE(xml_copy);
     return NULL;
 }
@@ -146,7 +147,8 @@ struct taurus_document* taurus_parse(const char* xml, size_t len) {
     xml_copy[len] = '\0';
 
     int error = 0;
-    struct taurus_document* doc = taurus_parse_v5(xml_copy, len, &error, taurus_get_strict_mode());
+    /* POINTER-ONLY: Use pointer-based parser for 1.29-1.45x faster than pugixml */
+    struct taurus_document* doc = taurus_parse_ptr(xml_copy, len, &error, taurus_get_strict_mode());
     if (doc) {
         return doc;
     }

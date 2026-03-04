@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <ascii>ASCII text: Hello World</ascii>
+  <latin1>Latin-1: café résumé naïve</latin1>
+  <greek>Greek: ΑΒΓΔ ΕΖΗΘ</greek>
+  <cyrillic>Cyrillic: Абвгд</cyrillic>
+  <chinese>Chinese: 中文测试</chinese>
+  <japanese>Japanese: 日本語テスト</japanese>
+  <korean>Korean: 한국어 테스트</korean>
+  <emoji>Emoji: 😀🎉🚀💻</emoji>
+  <mixed>Mix: Hello 世界 🌍</mixed>
+  <arabic>Arabic: مرحبا</arabic>
+  <hebrew>Hebrew: שלום</hebrew>
+</root>

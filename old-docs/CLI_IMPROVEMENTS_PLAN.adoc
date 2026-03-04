@@ -1,0 +1,91 @@
+= CLI Improvements Implementation Plan
+
+== Overview
+
+Three improvements to make Taurus CLI best-in-class:
+
+1. **C14N Command** - Canonical XML for digital signatures
+2. **Indent Character Option** - Tabs vs spaces for indentation
+3. **Line Ending Control** - CRLF vs LF for cross-platform support
+
+== Implementation Checklist
+
+=== Phase 1: C14N Command
+
+- [x] 1.1 Create `cli/commands/c14n.c` file
+- [x] 1.2 Implement command options parsing (--version, --output, etc.)
+- [x] 1.3 Wire up to existing `taurus_c14n_canonicalize()` API
+- [x] 1.4 Add command to CLI dispatcher in `cli/main.c`
+- [x] 1.5 Update CLI help text
+- [x] 1.6 Test C14N command
+- [x] 1.7 Verify all existing tests still pass
+
+=== Phase 2: Indent Character Option
+
+- [x] 2.1 Add `indent_char` field to SerializeBuffer struct
+- [x] 2.2 Update `buffer_append_indent()` to use indent_char
+- [x] 2.3 Add `--indent-char` option to format command
+- [x] 2.4 Add `use_tabs` field to xml_format_options_t
+- [x] 2.5 Update serialization API (taurus_serialize_element_with_options)
+- [x] 2.6 Test with tabs and spaces
+- [x] 2.7 Verify all existing tests still pass
+
+=== Phase 3: Line Ending Control
+
+- [x] 3.1 Add `line_ending` field to SerializeBuffer struct
+- [x] 3.2 Update `buffer_append_newline()` to use line_ending
+- [x] 3.3 Add `--crlf` option (Windows line endings)
+- [x] 3.4 Add `--lf` option (Unix line endings, default)
+- [x] 3.5 Add options to format command
+- [x] 3.6 Test with both line endings
+- [x] 3.7 Verify all existing tests still pass
+
+=== Phase 4: Final Verification
+
+- [x] 4.1 Run all 55 tests - ALL PASS
+- [x] 4.2 Test CLI manually with various options
+- [x] 4.3 Update documentation with new options
+- [x] 4.4 Fix help option handling (--help returns success, errors return error code)
+
+== File Changes Summary
+
+| File | Changes |
+|------|---------|
+| `cli/commands/c14n.c` | NEW - C14N command implementation |
+| `cli/main.c` | Add c14n command to registry |
+| `cli/cli.h` | Add c14n command declaration, add CLI_HELP enum |
+| `cli/CMakeLists.txt` | Add c14n.c to build |
+| `cli/commands/format.c` | Add --indent-char, --crlf, --lf options |
+| `cli/commands/parse.c` | Fix help handling |
+| `cli/commands/xpath.c` | Fix help handling |
+| `cli/output.c` | Add use_tabs, use_crlf to xml_format_options_t |
+| `cli/output.h` | Update xml_format_options_t struct |
+| `cli/options.c` | Fix --version and --help handling for commands |
+| `src/taurus/serialize/serialize.h` | Add IndentChar, LineEnding enums |
+| `src/taurus/serialize/serialize.c` | Update buffer functions |
+
+== Completed Features
+
+All three improvements have been successfully implemented:
+
+1. **C14N Command** (`taurus c14n`):
+   - Canonical XML 1.0 and 1.1 support
+   - `-o, --output FILE` for output redirection
+   - `--version VERSION` for C14N version selection
+   - Proper exit codes
+
+2. **Indent Character Option** (`--indent-char`):
+   - `--indent-char spaces` (default)
+   - `--indent-char tabs` - uses 1 tab per level
+
+3. **Line Ending Control**:
+   - `--crlf` for Windows line endings (CRLF)
+   - `--lf` for Unix line endings (LF, default)
+
+== Additional Fixes
+
+During implementation, the following issues were also fixed:
+
+- **Command help handling**: `taurus COMMAND --help` now correctly shows command-specific help
+- **Version option conflict**: `taurus c14n --version 1.1` no longer triggers global `--version`
+- **Exit codes**: `--help` returns exit code 0, actual errors return appropriate codes

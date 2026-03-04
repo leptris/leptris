@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  Text before element
+  <element>Element content</element>
+  Text between elements
+  <nested>
+    Nested text
+    <child>Child content</child>
+    More nested text
+  </nested>
+  Final text
+</root>

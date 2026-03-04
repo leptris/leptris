@@ -2,19 +2,19 @@
  * Copyright (c) 2024, Ribose Inc.
  *
  * Pure C XML parser and XPath evaluator - Element API.
+ * POINTER-BASED ARCHITECTURE: Uses ptr_element directly.
  */
 
 #include "../include/taurus.h"
 #include "taurus_internal.h"
 #include "dom/element.h"
+#include "dom/ptr_element.h"
+#include "dom/ptr_accessor.h"
 #include "dom/node.h"
 #include "dom/text.h"
 #include "dom/comment.h"
 #include "dom/cdata.h"
 #include "dom/pi.h"
-#include "dom/compact_accessor.h"
-#include "dom/compact_element.h"  /* V2: 16-byte structures */
-#include "memory/zero_check_alloc.h"  /* For ZeroCheckAlloc */
 #include "common/entities.h"
 #include <string.h>
 #include <stdlib.h>
@@ -23,25 +23,23 @@
 #include <strings.h>
 
 /* ============================================================================
- * Element Getters - POINTER-ONLY
+ * Element Getters - POINTER-BASED
  * ============================================================================ */
 
 /**
- * Get element name (POINTER-ONLY)
- * Returns a null-terminated string.
+ * Get element name (POINTER-BASED)
+ * Returns a null-terminated string with just the local name (prefix stripped).
+ * This matches pugixml behavior where name() returns local name only.
  */
 TAURUS_API const char* taurus_element_name(TaurusElement elem) {
     if (!elem) return "";
 
-    /* Use wrapper's name directly (always set for pointer-only) */
+    /* ptr_element stores full QName as null-terminated string */
     if (elem->name) {
-        return strdup(elem->name);
-    }
-
-    /* Convert name_view if name not yet cached */
-    if (!taurus_sv_is_empty(&elem->name_view)) {
-        elem->name = taurus_sv_to_cstr(&elem->name_view);
-        return elem->name ? strdup(elem->name) : "";
+        /* Strip prefix if present (return local name only) */
+        const char* colon = strchr(elem->name, ':');
+        const char* local_name = colon ? colon + 1 : elem->name;
+        return strdup(local_name);
     }
 
     return "";
@@ -73,13 +71,12 @@ TAURUS_API const char* taurus_element_child_value(TaurusElement elem) {
 
     /* Use wrapper's first child */
     if (elem->first_child) {
-        TaurusNode* child = elem->first_child;
+        struct ptr_element* child = elem->first_child;
         while (child) {
-            if (child->type == TAURUS_NODE_TYPE_TEXT) {
-                TaurusTextNode* text = (TaurusTextNode*)child;
-                if (text->content) {
-                    return strdup(text->content);
-                }
+            if (child->type == PTR_NODE_TYPE_TEXT || child->type == PTR_NODE_TYPE_CDATA) {
+                /* Cast directly to ptr_text to avoid union offset issues */
+                struct ptr_text* text = (struct ptr_text*)child;
+                return strdup(text->text ? text->text : "");
             }
             child = child->next_sibling;
         }
@@ -101,38 +98,14 @@ TAURUS_API const char* taurus_element_child_value(TaurusElement elem) {
 TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
-    /* First check wrapper's attribute list (may have modifications) */
-    if (elem->first_attribute) {
-        struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
+    /* ptr_element: use first_attr linked list */
+    if (elem->first_attr) {
+        struct ptr_attribute* attr = ptr_element_find_attr(elem, name);
         if (attr) {
-            /* Lazy convert value_view to C string if needed */
-            if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
-                struct taurus_document* doc = elem->document;
-                if (doc && doc->pool) {
-                    if (attr->has_entities) {
-                        attr->value = taurus_decode_entities_view(&attr->value_view, doc->pool);
-                    }
-                    if (!attr->value) {
-                        attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, doc->pool);
-                    }
-                } else {
-                    attr->value = taurus_sv_to_cstr(&attr->value_view);
-                }
-            }
             return attr->value;
         }
     }
 
-    /* COMPACT-ONLY: Fall back to compact element access for parsed attributes */
-    struct taurus_document* doc = elem->document;
-    if (doc) {
-        struct compact_element_v2* compact = compact_from_element(elem, doc);
-        if (compact) {
-            return compact_element_get_attr_value(compact, doc, name);
-        }
-    }
-
-    /* Fallback for wrapper elements without compact backing */
     return NULL;
 }
 
@@ -302,49 +275,28 @@ TAURUS_API int taurus_element_set_attribute_uint(TaurusElement elem, const char*
  * ============================================================================ */
 
 /**
- * Get child element by index (Public API) - COMPACT-ONLY
+ * Get child element by index (Public API) - POINTER-BASED
  */
 TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index) {
     if (!elem) return NULL;
 
-    /* First check wrapper's children array for newly created children */
-    if (index < 4 && elem->children[index]) {
-        return (TaurusElement)elem->children[index];
-    }
-
-    /* CRITICAL FIX: If element has wrapper children (first_child set), walk that linked list
-     * This handles the case where we've prepended/appended children to a parsed element */
-    if (elem->first_child) {
-        TaurusNode* child = (TaurusNode*)elem->first_child;
-        size_t i = 0;
-        while (child && i <= index) {
-            if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-                if (i == index) {
-                    return (TaurusElement)child;
-                }
-                i++;
-            }
-            child = taurus_node_get_next_sibling(child);
-        }
-        return NULL;  /* Index out of bounds */
-    }
-
-    /* POINTER-ONLY: Walk the linked list */
-    TaurusNode* child = elem->first_child;
+    /* Walk the linked list of children */
+    struct ptr_element* child = elem->first_child;
     size_t i = 0;
     while (child && i < index) {
+        /* Check if this is an element node */
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             i++;
         }
         if (i < index) {
-            child = taurus_node_get_next_sibling(child);
+            child = child->next_sibling;
         }
     }
-    /* Return the element at index */
+    /* Skip non-element nodes */
     while (child && child->type != TAURUS_NODE_TYPE_ELEMENT) {
-        child = taurus_node_get_next_sibling(child);
+        child = child->next_sibling;
     }
-    return (TaurusElement)child;
+    return child;
 }
 
 /**
@@ -376,19 +328,23 @@ TAURUS_API TaurusElement taurus_element_root(TaurusElement elem) {
 }
 
 /**
- * Get first child element regardless of name (Public API) - COMPACT-ONLY
+ * Get first child element regardless of name (Public API) - POINTER-BASED
+ * Returns any child (element or text), not just elements
  */
 TAURUS_API TaurusElement taurus_element_first_child_any(TaurusElement elem) {
     if (!elem) return NULL;
-    return taurus_element_get_first_child(elem);
+    /* Return first child directly - it may be element or text */
+    return (TaurusElement)elem->first_child;
 }
 
 /**
- * Get last child element regardless of name (Public API) - COMPACT-ONLY
+ * Get last child element regardless of name (Public API) - POINTER-BASED
+ * Returns any child (element or text), not just elements
  */
 TAURUS_API TaurusElement taurus_element_last_child_any(TaurusElement elem) {
     if (!elem) return NULL;
-    return taurus_element_get_last_child(elem);
+    /* Return last child directly - it may be element or text */
+    return (TaurusElement)elem->last_child;
 }
 
 /**
@@ -460,7 +416,11 @@ TAURUS_API TaurusElement taurus_element_first_child(TaurusElement elem, const ch
 TAURUS_API TaurusElement taurus_element_last_child(TaurusElement elem, const char* name) {
     if (!elem) return NULL;
 
-    TaurusElement last = taurus_element_get_last_child(elem);
+    /* Get last element child */
+    struct ptr_element* last = elem->last_child;
+    while (last && last->type != TAURUS_NODE_TYPE_ELEMENT) {
+        last = last->prev_sibling;
+    }
     if (!name || !last) return last;
 
     TaurusElement found = NULL;

@@ -15,15 +15,20 @@
 
 #include "../taurus_internal.h"
 
-/* Node type enumeration */
+/* Node type enumeration
+ * IMPORTANT: These values MUST match:
+ *   - TaurusNodeType in taurus_internal.h
+ *   - PTR_NODE_TYPE_* macros in ptr_element.h
+ */
 typedef enum {
-    TAURUS_NODE_TYPE_ELEMENT = 0,
-    TAURUS_NODE_TYPE_TEXT = 1,
-    TAURUS_NODE_TYPE_COMMENT = 2,
-    TAURUS_NODE_TYPE_CDATA = 3,
-    TAURUS_NODE_TYPE_PI = 4,
-    TAURUS_NODE_TYPE_DOCTYPE = 5,
-    TAURUS_NODE_TYPE_ATTRIBUTE = 6
+    TAURUS_NODE_TYPE_ELEMENT = 0,   /* TAURUS_NODE_ELEMENT / PTR_NODE_TYPE_ELEMENT */
+    TAURUS_NODE_TYPE_ATTRIBUTE = 1, /* TAURUS_NODE_ATTRIBUTE */
+    TAURUS_NODE_TYPE_TEXT = 2,      /* TAURUS_NODE_TEXT / PTR_NODE_TYPE_TEXT */
+    TAURUS_NODE_TYPE_COMMENT = 3,   /* TAURUS_NODE_COMMENT / PTR_NODE_TYPE_COMMENT */
+    TAURUS_NODE_TYPE_CDATA = 7,     /* Unique value for CDATA (different from COMMENT) */
+    TAURUS_NODE_TYPE_PI = 4,        /* TAURUS_NODE_PI / PTR_NODE_TYPE_PI */
+    TAURUS_NODE_TYPE_DOCTYPE = 5,   /* TAURUS_NODE_DOCTYPE / PTR_NODE_TYPE_DOCTYPE */
+    TAURUS_NODE_TYPE_NAMESPACE = 6  /* TAURUS_NODE_NAMESPACE */
 } TaurusNodeTypeEnum;
 
 /* Base node - all nodes start with this structure

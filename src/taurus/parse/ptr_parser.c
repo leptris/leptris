@@ -20,6 +20,7 @@
 #include "../memory/pool.h"
 #include "../simd_helpers.h"
 #include "../taurus_internal.h"
+#include "../common/entities.h"  /* For entity expansion */
 #include <stdlib.h>
 #include <string.h>
 
@@ -290,18 +291,36 @@ static struct ptr_attribute* parse_ptr_attr(PtrParser* p) {
 
     p->pos++;
 
-    /* Null-terminate in place */
+    /* Null-terminate name in place */
     ((char*)name_start)[name_len] = '\0';
-    ((char*)value_start)[value_len] = '\0';
+
+    /* Allocate buffer for decoded attribute value */
+    char* decoded_value = (char*)taurus_pool_alloc(p->pool, value_len + 1);
+    if (!decoded_value) return NULL;
+
+    /* First copy the value to make it null-terminated */
+    memcpy(decoded_value, value_start, value_len);
+    decoded_value[value_len] = '\0';
+
+    /* Decode entities in place - decoded text is always shorter or equal */
+    size_t decoded_len = decode_entity_with_options(
+        decoded_value, decoded_value, value_len + 1, p->strict_mode);
+
+    /* If decode failed (returned 0 but input wasn't empty), keep original */
+    if (decoded_len == 0 && value_len > 0) {
+        /* Restore original text (already there, just ensure null termination) */
+        decoded_value[value_len] = '\0';
+    }
+    /* decoded_value is already null-terminated by decode_entity_with_options */
 
     struct ptr_attribute* attr = alloc_ptr_attribute(p);
     if (!attr) return NULL;
 
     attr->name = name_start;
-    attr->value = value_start;
+    attr->value = decoded_value;
     attr->next_attr = NULL;
 
-    p->pos = ptr_skip_ws(p->pos, p->end);
+    /* Don't skip whitespace here - let the main loop handle it */
     return attr;
 }
 
@@ -336,12 +355,23 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                 } else {
                     size_t text_len = p->pos - text_start;
 
-                    /* Copy text to pool memory - don't modify original buffer.
-                     * This preserves the '<' character for tag parsing. */
+                    /* Allocate buffer for decoded text (same size as input is always enough) */
                     char* text_copy = (char*)taurus_pool_alloc(p->pool, text_len + 1);
                     if (text_copy) {
+                        /* First copy the text to make it null-terminated */
                         memcpy(text_copy, text_start, text_len);
                         text_copy[text_len] = '\0';
+
+                        /* Decode entities in place - decoded text is always shorter or equal */
+                        size_t decoded_len = decode_entity_with_options(
+                            text_copy, text_copy, text_len + 1, p->strict_mode);
+
+                        /* If decode failed (returned 0 but input wasn't empty), keep original */
+                        if (decoded_len == 0 && text_len > 0) {
+                            /* Restore original text (already there, just ensure null termination) */
+                            text_copy[text_len] = '\0';
+                        }
+                        /* text_copy is already null-terminated by decode_entity_with_options */
 
                         struct ptr_text* text = alloc_ptr_text(p);
                         if (text) {
@@ -569,14 +599,23 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
         p->pos = ptr_skip_ws(p->pos, p->end);
         int self_closing = 0;
         struct ptr_attribute* last_attr = NULL;
+        int need_whitespace = 0;  /* Track if we need whitespace before next attribute */
 
         while (p->pos < p->end && *p->pos != '>' && *p->pos != '/') {
             if (IS_SPACE(*p->pos)) {
                 p->pos = ptr_skip_ws(p->pos, p->end);
+                need_whitespace = 0;  /* Whitespace seen, reset flag */
                 continue;
             }
 
             if (IS_NAME_START(*p->pos)) {
+                /* Require whitespace between attributes (XML spec requirement) */
+                if (need_whitespace) {
+                    /* Previous attribute was parsed but no whitespace before this one */
+                    p->has_error = 1;
+                    return NULL;
+                }
+
                 struct ptr_attribute* attr = parse_ptr_attr(p);
                 if (!attr) {
                     if (p->has_error) return NULL;
@@ -590,6 +629,7 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                 }
                 last_attr = attr;
                 elem->attr_count++;  /* CRITICAL: Count attributes */
+                need_whitespace = 1;  /* Next attribute needs whitespace separator */
                 continue;
             }
 

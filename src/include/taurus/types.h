@@ -5,6 +5,10 @@
  * This file contains opaque type definitions and enums used throughout
  * the libtaurus API. Include this file when you need type definitions
  * without pulling in the entire API.
+ *
+ * POINTER-BASED ARCHITECTURE:
+ * TaurusElement points directly to ptr_element for maximum performance.
+ * No offset calculations - direct pointer access only.
  */
 
 #ifndef TAURUS_TYPES_H
@@ -23,10 +27,18 @@ extern "C" {
  * ============================================================================ */
 
 typedef struct taurus_document*     TaurusDocument;
-typedef struct taurus_element*      TaurusElement;
+
+/* POINTER-BASED: Direct pointer to ptr_element for maximum performance
+ * The ptr_element structure is defined in ptr_element.h which is included
+ * via taurus_internal.h in implementation files. */
+typedef struct ptr_element*         TaurusElement;
+
+/* Attribute type - opaque pointer */
 typedef struct taurus_attribute*    TaurusAttribute;
-/* In compact mode, TaurusNamespace is just the namespace URI string (inline storage) */
+
+/* Namespace is just the URI string */
 typedef const char*                 TaurusNamespace;
+
 typedef struct taurus_xpath_result* TaurusXPathResult;
 
 /* Compiled XPath expression - pre-parsed for faster repeated evaluation */

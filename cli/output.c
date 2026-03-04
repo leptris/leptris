@@ -12,6 +12,7 @@
 /* Need access to internal structures for formatters */
 #include "../src/taurus/taurus_internal.h"
 #include "../src/taurus/dom/element.h"  /* For TaurusElement and API */
+#include "../src/taurus/dom/ptr_element.h"  /* For ptr_attribute */
 #include "../src/taurus/dom/text.h"    /* For TaurusTextNode */
 #include "../src/taurus/dom/cdata.h"   /* For TaurusCDATANode */
 #include "../src/taurus/dom/comment.h" /* For TaurusCommentNode */
@@ -155,15 +156,14 @@ static void xml_print_element_recursive(
         fprintf(out, "=\"%s\"", ns_uri);
     }
 
-    /* Namespace declarations stored on this element (xmlns:prefix="uri") */
-    struct taurus_namespace* ns = elem->namespaces;
-    while (ns) {
-        fprintf(out, " xmlns");
-        if (ns->prefix) {
-            fprintf(out, ":%s", ns->prefix);
+    /* POINTER-BASED: Namespace declarations are stored as xmlns:prefix attributes */
+    struct ptr_attribute* attr = elem->first_attr;
+    while (attr) {
+        if (attr->name && (strcmp(attr->name, "xmlns") == 0 || strncmp(attr->name, "xmlns:", 6) == 0)) {
+            /* This is a namespace declaration */
+            fprintf(out, " %s=\"%s\"", attr->name, attr->value ? attr->value : "");
         }
-        fprintf(out, "=\"%s\"", ns->uri);
-        ns = ns->next;
+        attr = attr->next_attr;
     }
 
     /* Check if element has children (including text nodes) */

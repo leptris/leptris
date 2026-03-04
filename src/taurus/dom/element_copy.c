@@ -2,7 +2,7 @@
  * Copyright (c) 2024, Ribose Inc.
  *
  * Public API for copying DOM elements and subtrees.
- * COMPACT MODE: Uses compact pointer encoding and accessor functions.
+ * POINTER-BASED ARCHITECTURE: Uses direct pointers for tree navigation.
  */
 
 #include "../../include/taurus.h"
@@ -10,7 +10,8 @@
 #include "../common/string_view.h"
 #include "../memory/pool.h"
 #include "element.h"
-#include "compact.h"
+#include "ptr_element.h"
+#include "ptr_accessor.h"
 #include "node.h"
 #include "text.h"
 #include "cdata.h"
@@ -25,139 +26,113 @@ TaurusStatus taurus_element_remove_all_children(TaurusElement elem);
 
 /**
  * Internal: Validate and prepare for element copy
- *
- * Checks that parent and source are valid, returns prepared name view for copy.
- *
- * @param parent Target parent element
- * @param source Source element to copy
- * @param name_view Output: prepared name view for the copy
- * @return 1 on success, 0 on error
  */
 static int prepare_element_copy(
     TaurusElement parent,
     TaurusElement source,
-    TaurusStringView* name_view
+    const char** name_out
 ) {
-    if (!parent || !source || !name_view) return 0;
+    if (!parent || !source || !name_out) return 0;
 
     volatile struct taurus_document* parent_doc = parent->document;
     if (!parent_doc || !parent_doc->pool) return 0;
 
     if (!source->document) return 0;
 
-    *name_view = taurus_element_name_view(source);
-    if (taurus_sv_is_empty(name_view)) return 0;
-
-    /* Check if cross-document copy needed */
-    int is_cross_doc = (source->document != parent->document);
-    if (is_cross_doc) {
-        char* name_copy = taurus_sv_to_cstr_pooled(name_view, parent_doc->pool);
-        if (!name_copy) return 0;
-        *name_view = taurus_sv_from_cstr(name_copy);
-    }
+    *name_out = source->name;
+    if (!*name_out) return 0;
 
     return 1;
 }
 
 /**
  * Internal: Copy attributes from source to destination element
- *
- * @param dst Destination element
- * @param src Source element
- * @param is_cross_doc Whether this is a cross-document copy
  */
 static void copy_element_attributes(TaurusElement dst, TaurusElement src, int is_cross_doc) {
-    uint8_t attr_count = taurus_element_attribute_count(src);
-    for (uint8_t i = 0; i < attr_count; i++) {
-        struct taurus_attribute* attr = taurus_element_get_attribute_by_index(src, i);
-        if (!attr || taurus_sv_is_empty(&attr->name_view)) continue;
+    struct ptr_attribute* attr = src->first_attr;
+    while (attr) {
+        const char* name = attr->name;
+        const char* value = attr->value;
 
-        TaurusStringView name_view = attr->name_view;
-        TaurusStringView value_view = attr->value_view;
-
-        if (is_cross_doc) {
-            char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, dst->document->pool);
-            char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, dst->document->pool);
-            if (!name_copy || !value_copy) continue;
-            name_view = taurus_sv_from_cstr(name_copy);
-            value_view = taurus_sv_from_cstr(value_copy);
+        if (!name) {
+            attr = attr->next_attr;
+            continue;
         }
 
-        if (dst->document->pool) {
+        if (dst->document && dst->document->pool) {
+            TaurusStringView name_view = taurus_sv_from_cstr((char*)name);
+            TaurusStringView value_view = value ? taurus_sv_from_cstr((char*)value) : taurus_sv_empty();
+
+            if (is_cross_doc) {
+                /* Copy strings for cross-document */
+                char* name_copy = taurus_sv_to_cstr_pooled(&name_view, dst->document->pool);
+                char* value_copy = value ? taurus_sv_to_cstr_pooled(&value_view, dst->document->pool) : NULL;
+                if (name_copy) {
+                    name_view = taurus_sv_from_cstr(name_copy);
+                }
+                if (value && value_copy) {
+                    value_view = taurus_sv_from_cstr(value_copy);
+                }
+            }
+
             taurus_element_add_attribute(dst, name_view, value_view, dst->document->pool);
         } else {
-            const char* name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
-            const char* value = attr->value ? attr->value : taurus_sv_to_cstr(&attr->value_view);
-            if (name && value) {
-                taurus_element_set_attribute(dst, name, value);
-                if (!attr->name) free((char*)name);
-                if (!attr->value) free((char*)value);
-            }
+            taurus_element_set_attribute(dst, name, value);
         }
+
+        attr = attr->next_attr;
     }
 }
 
 /**
  * Internal: Copy child nodes from source to destination element
- *
- * @param dst Destination element
- * @param src Source element
  */
 static void copy_element_children(TaurusElement dst, TaurusElement src) {
-    struct taurus_node* child = src->first_child;
+    struct ptr_element* child = src->first_child;
     while (child) {
-        TaurusNode* child_node = child;
+        /* Check node type via first field */
+        uint32_t node_type = child->type;
 
-        if ((uintptr_t)child < 0x1000) break;
-        if (child_node->type < TAURUS_NODE_TYPE_ELEMENT ||
-            child_node->type > TAURUS_NODE_TYPE_DOCTYPE) break;
-
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            taurus_element_append_copy(dst, (TaurusElement)child);
-        } else if (child_node->type == TAURUS_NODE_TYPE_TEXT) {
-            TaurusTextNode* text = (TaurusTextNode*)child;
-            if ((uintptr_t)text > 0x1000) {
-                TaurusTextNode* text_copy = taurus_text_create(text->content);
+        if (node_type == TAURUS_NODE_TYPE_ELEMENT) {
+            taurus_element_append_copy(dst, child);
+        } else if (node_type == TAURUS_NODE_TYPE_TEXT) {
+            struct ptr_text* text = (struct ptr_text*)child;
+            if (text->text) {
+                TaurusTextNode* text_copy = taurus_text_create(text->text);
                 if (text_copy) {
                     taurus_element_append_child_internal(dst, (TaurusNode*)text_copy);
                 }
             }
-        } else if (child_node->type == TAURUS_NODE_TYPE_CDATA) {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)child;
-            if ((uintptr_t)cdata > 0x1000) {
-                TaurusCDATANode* cdata_copy = taurus_cdata_create(cdata->content);
+        } else if (node_type == TAURUS_NODE_TYPE_CDATA) {
+            struct ptr_text* cdata = (struct ptr_text*)child;
+            if (cdata->text) {
+                TaurusCDATANode* cdata_copy = taurus_cdata_create(cdata->text);
                 if (cdata_copy) {
                     taurus_element_append_child_internal(dst, (TaurusNode*)cdata_copy);
                 }
             }
         }
 
-        TaurusNode* next = taurus_node_get_next_sibling(child_node);
-        if (!next) break;
-        child = next;
+        child = child->next_sibling;
     }
 }
 
 /**
  * Internal: Complete element copy after preparation
- *
- * @param parent Target parent element
- * @param source Source element
- * @param name_view Prepared name view for the copy
- * @return Copy of the element, or NULL on error
  */
 static TaurusElement complete_element_copy(
     TaurusElement parent,
     TaurusElement source,
-    TaurusStringView name_view
+    const char* name
 ) {
+    TaurusStringView name_view = taurus_sv_from_cstr((char*)name);
     TaurusElement copy = taurus_element_create_with_view(name_view, parent->document->pool);
     if (!copy) return NULL;
 
     copy->document = parent->document;
 
     /* Fast path for simple elements */
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!source->first_attr && !source->first_child) {
         if (taurus_element_append_child(parent, copy) != TAURUS_OK) return NULL;
         return copy;
     }
@@ -194,73 +169,67 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     TaurusElement copy = copy_map[this_index];
     if (!copy) return NULL;
 
-    memset(copy, 0, sizeof(struct taurus_element));
-    copy->base.type = TAURUS_NODE_TYPE_ELEMENT;
-    copy->name_view = source->name_view;
-    copy->prefix_view = source->prefix_view;
-    copy->namespace_uri_view = source->namespace_uri_view;
+    /* Initialize copy using ptr_element */
+    memset(copy, 0, sizeof(struct ptr_element));
+    copy->type = TAURUS_NODE_TYPE_ELEMENT;
+    copy->name = source->name;  /* Will be duplicated if needed */
     copy->parent = parent_copy;
     copy->attr_count = source->attr_count;
+    copy->document = parent_copy ? parent_copy->document : NULL;
 
     /* Copy attributes */
-    struct taurus_attribute* src_attr = taurus_element_get_first_attribute(source);
-    struct taurus_attribute* prev_dst_attr = NULL;
+    struct ptr_attribute* src_attr = source->first_attr;
+    struct ptr_attribute* prev_dst_attr = NULL;
 
     while (src_attr) {
-        struct taurus_attribute* dst_attr = (struct taurus_attribute*)taurus_pool_alloc(pool, sizeof(struct taurus_attribute));
+        struct ptr_attribute* dst_attr = (struct ptr_attribute*)taurus_pool_alloc(
+            pool, sizeof(struct ptr_attribute));
         if (!dst_attr) break;
 
-        memset(dst_attr, 0, sizeof(struct taurus_attribute));
-        dst_attr->name_view = src_attr->name_view;
-        dst_attr->value_view = src_attr->value_view;
-        dst_attr->prefix_view = src_attr->prefix_view;
-        dst_attr->namespace_uri_view = src_attr->namespace_uri_view;
-        dst_attr->has_entities = src_attr->has_entities;
-
-        if (src_attr->name) dst_attr->name = taurus_pool_strdup(pool, src_attr->name);
-        if (src_attr->value) dst_attr->value = taurus_pool_strdup(pool, src_attr->value);
-        if (src_attr->prefix) dst_attr->prefix = taurus_pool_strdup(pool, src_attr->prefix);
-        if (src_attr->namespace_uri) dst_attr->namespace_uri = taurus_pool_strdup(pool, src_attr->namespace_uri);
+        memset(dst_attr, 0, sizeof(struct ptr_attribute));
+        dst_attr->name = src_attr->name ? taurus_pool_strdup(pool, src_attr->name) : NULL;
+        dst_attr->value = src_attr->value ? taurus_pool_strdup(pool, src_attr->value) : NULL;
+        dst_attr->name_view_data = dst_attr->name;
+        dst_attr->name_view_length = dst_attr->name ? strlen(dst_attr->name) : 0;
+        dst_attr->value_view_data = dst_attr->value;
+        dst_attr->value_view_length = dst_attr->value ? strlen(dst_attr->value) : 0;
 
         if (!prev_dst_attr) {
-            copy->first_attribute = dst_attr;
+            copy->first_attr = dst_attr;
         } else {
-            prev_dst_attr->next = dst_attr;
+            prev_dst_attr->next_attr = dst_attr;
         }
         prev_dst_attr = dst_attr;
-        src_attr = src_attr->next;
+        src_attr = src_attr->next_attr;
     }
 
     /* Copy children */
-    struct taurus_node* first_child = NULL;
-    struct taurus_node* last_child = NULL;
-    struct taurus_node* child = source->first_child;
+    struct ptr_element* first_child = NULL;
+    struct ptr_element* last_child = NULL;
+    struct ptr_element* child = source->first_child;
 
     while (child) {
-        TaurusNode* child_node = (TaurusNode*)child;
+        uint32_t node_type = child->type;
 
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
+        if (node_type == TAURUS_NODE_TYPE_ELEMENT) {
             TaurusElement child_copy = taurus_element_copy_subtree_bulk_internal(
                 copy, child, copy_map, copy_index, pool
             );
             if (child_copy) {
                 if (!first_child) first_child = child_copy;
+                if (last_child) last_child->next_sibling = child_copy;
+                child_copy->prev_sibling = last_child;
                 last_child = child_copy;
             }
-        } else if (child_node->type == TAURUS_NODE_TYPE_TEXT) {
-            TaurusTextNode* text = (TaurusTextNode*)child;
-            TaurusTextNode* text_copy = taurus_text_create(text->content);
+        } else if (node_type == TAURUS_NODE_TYPE_TEXT) {
+            struct ptr_text* text = (struct ptr_text*)child;
+            TaurusTextNode* text_copy = taurus_text_create(text->text);
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
-                if (!first_child) first_child = (TaurusNode*)text_copy;
-                if (last_child) last_child->next_sibling = (TaurusNode*)text_copy;
-                last_child = (TaurusNode*)text_copy;
             }
         }
 
-        TaurusNode* next = taurus_node_get_next_sibling(child_node);
-        if (!next) break;
-        child = next;
+        child = child->next_sibling;
     }
 
     copy->first_child = first_child;
@@ -275,21 +244,22 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
  * ============================================================================ */
 
 TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement source) {
-    TaurusStringView name_view;
-    if (prepare_element_copy(parent, source, &name_view) == 0) return NULL;
-    return complete_element_copy(parent, source, name_view);
+    const char* name;
+    if (prepare_element_copy(parent, source, &name) == 0) return NULL;
+    return complete_element_copy(parent, source, name);
 }
 
 TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement source) {
-    TaurusStringView name_view;
-    if (prepare_element_copy(parent, source, &name_view) == 0) return NULL;
+    const char* name;
+    if (prepare_element_copy(parent, source, &name) == 0) return NULL;
 
+    TaurusStringView name_view = taurus_sv_from_cstr((char*)name);
     TaurusElement copy = taurus_element_create_with_view(name_view, parent->document->pool);
     if (!copy) return NULL;
 
     copy->document = parent->document;
 
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!source->first_attr && !source->first_child) {
         if (taurus_element_prepend_child(parent, copy) != TAURUS_OK) return NULL;
         return copy;
     }
@@ -302,18 +272,19 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
 }
 
 TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElement source) {
-    TaurusElement parent = taurus_element_parent(sibling);
+    TaurusElement parent = sibling->parent;
     if (!parent) return NULL;
 
-    TaurusStringView name_view;
-    if (prepare_element_copy(parent, source, &name_view) == 0) return NULL;
+    const char* name;
+    if (prepare_element_copy(parent, source, &name) == 0) return NULL;
 
+    TaurusStringView name_view = taurus_sv_from_cstr((char*)name);
     TaurusElement copy = taurus_element_create_with_view(name_view, parent->document->pool);
     if (!copy) return NULL;
 
     copy->document = parent->document;
 
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!source->first_attr && !source->first_child) {
         if (taurus_element_insert_after(sibling, copy) != TAURUS_OK) return NULL;
         return copy;
     }
@@ -326,18 +297,19 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
 }
 
 TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusElement source) {
-    TaurusElement parent = taurus_element_parent(sibling);
+    TaurusElement parent = sibling->parent;
     if (!parent) return NULL;
 
-    TaurusStringView name_view;
-    if (prepare_element_copy(parent, source, &name_view) == 0) return NULL;
+    const char* name;
+    if (prepare_element_copy(parent, source, &name) == 0) return NULL;
 
+    TaurusStringView name_view = taurus_sv_from_cstr((char*)name);
     TaurusElement copy = taurus_element_create_with_view(name_view, parent->document->pool);
     if (!copy) return NULL;
 
     copy->document = parent->document;
 
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!source->first_attr && !source->first_child) {
         if (taurus_element_insert_before(sibling, copy) != TAURUS_OK) return NULL;
         return copy;
     }
@@ -368,6 +340,14 @@ TaurusElement taurus_element_append_copy_bulk(TaurusElement parent, TaurusElemen
 
     TaurusElement* copy_map = taurus_element_create_copy_map(pool, total_elements);
     if (!copy_map) return taurus_element_append_copy(parent, source);
+
+    /* Pre-allocate all elements */
+    for (size_t i = 0; i < total_elements; i++) {
+        copy_map[i] = (TaurusElement)taurus_pool_alloc(pool, sizeof(struct ptr_element));
+        if (!copy_map[i]) {
+            return taurus_element_append_copy(parent, source);
+        }
+    }
 
     size_t copy_index = 0;
     TaurusElement copy = taurus_element_copy_subtree_bulk_internal(

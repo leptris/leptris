@@ -1,0 +1,149 @@
+=== Benchmark Results ===
+Date: Thu Feb 12 15:33:42 HKT 2026
+Platform: Darwin arm64
+
+
+--- DOM Benchmarks ---
+
+=== DOM Parse ===
+╔════════════════════════════════════════════════════════════╗
+║        DOM Parsing Benchmark - Taurus vs pugixml          ║
+║        (1000 iterations per test)                            ║
+╚════════════════════════════════════════════════════════════╝
+┌────────────────────────────────┬──────────┬──────────┬──────────┐
+│ Operation                      │ Taurus   │ pugixml  │ Speedup  │
+├────────────────────────────────┼──────────┼──────────┼──────────┤
+
+=== Parsing Benchmark: /Users/mulgogi/src/lutaml/taurus/benchmarks/fixtures/small.xml (1.0 KB) ===
+│ Parse                          │  6.0 µs │  1.0 µs │ 0.17x ⚠️ │
+
+=== Parsing Benchmark: /Users/mulgogi/src/lutaml/taurus/benchmarks/fixtures/medium.xml (18.5 KB) ===
+│ Parse                          │ 72.0 µs │  9.0 µs │ 0.12x ⚠️ │
+
+=== Parsing Benchmark: /Users/mulgogi/src/lutaml/taurus/benchmarks/fixtures/large.xml (186.3 KB) ===
+│ Parse                          │ 737.0 µs │ 76.0 µs │ 0.10x ⚠️ │
+└────────────────────────────────┴──────────┴──────────┴──────────┘
+
+Target: >=1.2x faster than pugixml for parsing
+Legend: ✅ = Target met, ⚠️ = Below target
+
+=== DOM Traverse (medium) ===
+
+╔════════════════════════════════════════════════════════════╗
+║     DOM Benchmark v2 - Isolated Operation Measurement         ║
+║     (parse once, measure 100000 iterations)                       ║
+╚════════════════════════════════════════════════════════════╝
+
+File: /Users/mulgogi/src/lutaml/taurus/benchmarks/fixtures/medium.xml (18.5 KB)
+
+=== Child Access (isolated) ===
+│ Child Access (isolated)        │ 20.31 ms │  0.00 ns │ 0.00x ⚠️ │
+│ Child Access (isolated)        │ 19.59 ms │  0.00 ns │ 0.00x ⚠️ │
+Taurus:  22315.00 µs (100000 iterations)
+pugixml:  21515.00 µs (100000 iterations)
+Speedup: 0.96x (~ PARITY)
+
+=== Attribute Access (isolated) ===
+│ Attribute Access (isolated)    │ 72.02 ms │  0.00 ns │ 0.00x ⚠️ │
+│ Attribute Access (isolated)    │ 63.71 ms │  0.00 ns │ 0.00x ⚠️ │
+Taurus:  79439.00 µs (100000 iterations)
+pugixml:  70254.00 µs (100000 iterations)
+Speedup: 0.88x (~ PARITY)
+
+=== Tree Walking (isolated) ===
+│ Tree Walk (isolated)           │ 201.25 ms │  0.00 ns │ 0.00x ⚠️ │
+│ Tree Walk (isolated)           │ 471.01 ms │  0.00 ns │ 0.00x ⚠️ │
+Taurus:  221778.00 µs (100000 iterations)
+pugixml:  518326.00 µs (100000 iterations)
+Speedup: 2.34x (✅ AHEAD)
+
+Target: ≥1.2x faster than pugixml for DOM operations
+
+
+=== DOM Traverse (large) ===
+
+╔════════════════════════════════════════════════════════════╗
+║     DOM Benchmark v2 - Isolated Operation Measurement         ║
+║     (parse once, measure 100000 iterations)                       ║
+╚════════════════════════════════════════════════════════════╝
+
+File: /Users/mulgogi/src/lutaml/taurus/benchmarks/fixtures/large.xml (186.3 KB)
+
+=== Child Access (isolated) ===
+│ Child Access (isolated)        │ 215.39 ms │  0.00 ns │ 0.00x ⚠️ │
+│ Child Access (isolated)        │ 183.90 ms │  0.00 ns │ 0.00x ⚠️ │
+Taurus:  232317.00 µs (100000 iterations)
+pugixml:  202352.00 µs (100000 iterations)
+Speedup: 0.87x (~ PARITY)
+
+=== Attribute Access (isolated) ===
+│ Attribute Access (isolated)    │ 698.57 ms │  0.00 ns │ 0.00x ⚠️ │
+│ Attribute Access (isolated)    │ 632.98 ms │  0.00 ns │ 0.00x ⚠️ │
+Taurus:  773957.00 µs (100000 iterations)
+pugixml:  695691.00 µs (100000 iterations)
+Speedup: 0.90x (~ PARITY)
+
+=== Tree Walking (isolated) ===
+│ Tree Walk (isolated)           │   2.14 s │  0.00 ns │ 0.00x ⚠️ │
+│ Tree Walk (isolated)           │   4.71 s │  0.00 ns │ 0.00x ⚠️ │
+Taurus:  2354459.00 µs (100000 iterations)
+pugixml:  5181055.00 µs (100000 iterations)
+Speedup: 2.20x (✅ AHEAD)
+
+Target: ≥1.2x faster than pugixml for DOM operations
+
+
+=== DOM Modification ===
+╔══════════════════════════════════════════════════════════╗
+║   TAURUS vs PUGIXML DOM MODIFICATION BENCHMARK          ║
+╚══════════════════════════════════════════════════════════╝
+
+Running 10000 iterations per test...
+
+[1/10] dom_node_append_child... Done (2.70x)
+[2/10] dom_node_prepend_child... Done (1.77x)
+[3/10] dom_node_insert_child_after... Done (1.78x)
+[4/10] dom_node_insert_child_before... Done (1.51x)
+[5/10] dom_node_set_name... Done (4.47x)
+[6/10] dom_node_append_copy... Done (1.73x)
+[7/10] dom_node_prepend_copy... Done (1.66x)
+[8/10] dom_node_insert_copy_after... Done (4.22x)
+[9/10] dom_node_insert_copy_before... Done (1.72x)
+[10/10] dom_node_remove_child... Done (1.90x)
+
+╔══════════════════════════════════════════════════════════╗
+║                     BENCHMARK RESULTS                    ║
+╚══════════════════════════════════════════════════════════╝
+
+Test                               pugixml      Taurus     Ratio  Status
+------------------------------------------------------------------------
+dom_node_append_child               0.06 μs      0.15 μs     2.70x     ✓
+dom_node_prepend_child              0.05 μs      0.09 μs     1.77x     ✓
+dom_node_insert_child_after         0.06 μs      0.11 μs     1.78x     ✓
+dom_node_insert_child_before        0.06 μs      0.09 μs     1.51x     ✓
+dom_node_set_name                   0.05 μs      0.22 μs     4.47x     ✓
+dom_node_append_copy                0.06 μs      0.10 μs     1.73x     ✓
+dom_node_prepend_copy               0.06 μs      0.10 μs     1.66x     ✓
+dom_node_insert_copy_after          0.07 μs      0.31 μs     4.22x     ✓
+dom_node_insert_copy_before         0.07 μs      0.13 μs     1.72x     ✓
+dom_node_remove_child               0.07 μs      0.13 μs     1.90x     ✓
+------------------------------------------------------------------------
+
+╔══════════════════════════════════════════════════════════╗
+║                         SUMMARY                          ║
+╚══════════════════════════════════════════════════════════╝
+
+  Tests Run:          10
+  Tests Passed:       10/10
+  Average Ratio:      2.35x
+
+  Performance:        NEEDS IMPROVEMENT (>50% slower)
+
+  Interpretation:
+    - Ratio < 1.0:  Taurus is faster
+    - Ratio = 1.0:  Equal performance
+    - Ratio > 1.0:  pugixml is faster
+
+
+
+=== Comprehensive ===

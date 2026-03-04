@@ -3,12 +3,16 @@
  * All rights reserved.
  *
  * Internal memory management functions
+ *
+ * POINTER-BASED ARCHITECTURE:
+ * Uses TaurusElement (ptr_element*) directly.
  */
 
 #ifndef TAURUS_MEMORY_H
 #define TAURUS_MEMORY_H
 
 #include "taurus_internal.h"
+#include "../include/taurus/types.h"  /* For TaurusElement */
 
 /* ============================================================================
  * Document Management
@@ -35,19 +39,19 @@ void taurus_document_free_internal(struct taurus_document* doc);
  * @param name Element name (will be copied)
  * @return Element or NULL on allocation failure
  */
-struct taurus_element* taurus_element_new(const char* name);
+TaurusElement taurus_element_new(const char* name);
 
 /**
  * Free element (non-recursive, doesn't free children)
  * @param elem Element to free
  */
-void taurus_element_free_shallow(struct taurus_element* elem);
+void taurus_element_free_shallow(TaurusElement elem);
 
 /**
  * Free element and entire subtree recursively
  * @param elem Element to free
  */
-void taurus_element_free_tree(struct taurus_element* elem);
+void taurus_element_free_tree(TaurusElement elem);
 
 /**
  * Add child element to parent
@@ -55,7 +59,7 @@ void taurus_element_free_tree(struct taurus_element* elem);
  * @param child Child element
  * @return 0 on success, -1 on allocation failure
  */
-int taurus_element_add_child(struct taurus_element* parent, struct taurus_element* child);
+int taurus_element_add_child(TaurusElement parent, TaurusElement child);
 
 /**
  * Add namespace declaration to element
@@ -63,7 +67,7 @@ int taurus_element_add_child(struct taurus_element* parent, struct taurus_elemen
  * @param ns Namespace (ownership transferred to element)
  * @return 0 on success, -1 on allocation failure
  */
-int taurus_element_add_namespace(struct taurus_element* elem, struct taurus_namespace* ns);
+int taurus_element_add_namespace(TaurusElement elem, struct taurus_namespace* ns);
 
 /* ============================================================================
  * Attribute Management
@@ -113,7 +117,7 @@ void taurus_namespace_free_chain(struct taurus_namespace* ns);
  * @param prefix Prefix to find (NULL for default namespace)
  * @return Namespace or NULL if not found
  */
-struct taurus_namespace* taurus_namespace_find(struct taurus_element* elem, const char* prefix);
+struct taurus_namespace* taurus_namespace_find(TaurusElement elem, const char* prefix);
 
 /* ============================================================================
  * XPath Memory Management
@@ -138,7 +142,7 @@ XPathNodeSet* taurus_xpath_nodeset_new_with_capacity(size_t capacity);
  * @param node Element to add
  * @return 0 on success, -1 on allocation failure
  */
-int taurus_xpath_nodeset_add(XPathNodeSet* nodeset, struct taurus_element* node);
+int taurus_xpath_nodeset_add(XPathNodeSet* nodeset, TaurusElement node);
 
 /**
  * Free nodeset (doesn't free the elements themselves)

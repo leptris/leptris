@@ -183,33 +183,21 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
     len = snprintf(temp, sizeof(temp), "<%s", name ? name : "element");
     APPEND_STRING(temp, len);
 
-    struct taurus_namespace* ns = elem->namespaces;
-    while (ns) {
-        const char* prefix = ns->prefix;
-        char* prefix_alloc = NULL;
-        if (!prefix && !taurus_sv_is_empty(&ns->prefix_view)) {
-            prefix_alloc = taurus_sv_to_cstr(&ns->prefix_view);
-            prefix = prefix_alloc;
+    /* POINTER-BASED: Namespaces are stored as xmlns:prefix attributes */
+    struct ptr_attribute* attr = elem->first_attr;
+    while (attr) {
+        if (attr->name && (strcmp(attr->name, "xmlns") == 0 || strncmp(attr->name, "xmlns:", 6) == 0)) {
+            /* This is a namespace declaration */
+            if (strncmp(attr->name, "xmlns:", 6) == 0) {
+                /* Prefixed namespace */
+                len = snprintf(temp, sizeof(temp), " %s=\"%s\"", attr->name, attr->value ? attr->value : "");
+            } else {
+                /* Default namespace */
+                len = snprintf(temp, sizeof(temp), " xmlns=\"%s\"", attr->value ? attr->value : "");
+            }
+            APPEND_STRING(temp, len);
         }
-
-        const char* uri = ns->uri;
-        char* uri_alloc = NULL;
-        if (!uri && !taurus_sv_is_empty(&ns->uri_view)) {
-            uri_alloc = taurus_sv_to_cstr(&ns->uri_view);
-            uri = uri_alloc;
-        }
-
-        if (prefix) {
-            len = snprintf(temp, sizeof(temp), " xmlns:%s=\"%s\"", prefix, uri ? uri : "");
-        } else {
-            len = snprintf(temp, sizeof(temp), " xmlns=\"%s\"", uri ? uri : "");
-        }
-        APPEND_STRING(temp, len);
-
-        if (prefix_alloc) free(prefix_alloc);
-        if (uri_alloc) free(uri_alloc);
-
-        ns = ns->next;
+        attr = attr->next_attr;
     }
 
     if (sorted_attrs) {

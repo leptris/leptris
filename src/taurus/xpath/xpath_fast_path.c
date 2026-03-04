@@ -941,36 +941,36 @@ struct taurus_xpath_result* xpath_fast_path_eval(
                     /* Get the requested attribute(s) from context */
                     if (pattern->second_name == NULL) {
                         /* @* - all attributes */
-                        struct taurus_attribute* attr = ctx->first_attribute;
+                        struct ptr_attribute* attr = ctx->first_attr;
                         while (attr) {
                             TaurusAttributeNode* attr_node = TAURUS_ALLOC(TaurusAttributeNode);
                             if (attr_node) {
                                 attr_node->node_type = TAURUS_NODE_ATTRIBUTE;
-                                attr_node->name = taurus_strdup(attr_name_cstr(attr));
-                                attr_node->value = taurus_strdup(attr_value_cstr(attr));
+                                attr_node->name = taurus_strdup(attr->name);
+                                attr_node->value = taurus_strdup(attr->value);
                                 attr_node->namespace_uri = NULL;
                                 attr_node->owner = ctx;
                                 xpath_nodeset_add(result->value.nodeset_value, attr_node);
                             }
-                            attr = attr->next;
+                            attr = attr->next_attr;
                         }
                     } else {
                         /* @name - specific attribute */
-                        struct taurus_attribute* attr = ctx->first_attribute;
+                        struct ptr_attribute* attr = ctx->first_attr;
                         while (attr) {
-                            if (attr_name_matches(attr, pattern->second_name, pattern->second_name_len)) {
+                            if (attr->name && strncmp(attr->name, pattern->second_name, pattern->second_name_len) == 0 && attr->name[pattern->second_name_len] == '\0') {
                                 TaurusAttributeNode* attr_node = TAURUS_ALLOC(TaurusAttributeNode);
                                 if (attr_node) {
                                     attr_node->node_type = TAURUS_NODE_ATTRIBUTE;
-                                    attr_node->name = taurus_strdup(attr_name_cstr(attr));
-                                    attr_node->value = taurus_strdup(attr_value_cstr(attr));
+                                    attr_node->name = taurus_strdup(attr->name);
+                                    attr_node->value = taurus_strdup(attr->value);
                                     attr_node->namespace_uri = NULL;
                                     attr_node->owner = ctx;
                                     xpath_nodeset_add(result->value.nodeset_value, attr_node);
                                 }
                                 break;
                             }
-                            attr = attr->next;
+                            attr = attr->next_attr;
                         }
                     }
                 }
@@ -1095,36 +1095,36 @@ static void collect_descendants_attrs(TaurusElement elem, XPathNodeSet* result,
                 /* Get the requested attribute(s) from this element */
                 if (attr_name == NULL) {
                     /* @* - all attributes */
-                    struct taurus_attribute* attr = child->first_attribute;
+                    struct ptr_attribute* attr = child->first_attr;
                     while (attr) {
                         TaurusAttributeNode* attr_node = TAURUS_ALLOC(TaurusAttributeNode);
                         if (attr_node) {
                             attr_node->node_type = TAURUS_NODE_ATTRIBUTE;
-                            attr_node->name = taurus_strdup(attr_name_cstr(attr));
-                            attr_node->value = taurus_strdup(attr_value_cstr(attr));
+                            attr_node->name = taurus_strdup(attr->name);
+                            attr_node->value = taurus_strdup(attr->value);
                             attr_node->namespace_uri = NULL;
                             attr_node->owner = child;
                             xpath_nodeset_add(result, attr_node);
                         }
-                        attr = attr->next;
+                        attr = attr->next_attr;
                     }
                 } else {
                     /* @name - specific attribute */
-                    struct taurus_attribute* attr = child->first_attribute;
+                    struct ptr_attribute* attr = child->first_attr;
                     while (attr) {
-                        if (attr_name_matches(attr, attr_name, attr_name_len)) {
+                        if (attr->name && strncmp(attr->name, attr_name, attr_name_len) == 0 && attr->name[attr_name_len] == '\0') {
                             TaurusAttributeNode* attr_node = TAURUS_ALLOC(TaurusAttributeNode);
                             if (attr_node) {
                                 attr_node->node_type = TAURUS_NODE_ATTRIBUTE;
-                                attr_node->name = taurus_strdup(attr_name_cstr(attr));
-                                attr_node->value = taurus_strdup(attr_value_cstr(attr));
+                                attr_node->name = taurus_strdup(attr->name);
+                                attr_node->value = taurus_strdup(attr->value);
                                 attr_node->namespace_uri = NULL;
                                 attr_node->owner = child;
                                 xpath_nodeset_add(result, attr_node);
                             }
                             break;
                         }
-                        attr = attr->next;
+                        attr = attr->next_attr;
                     }
                 }
             }
