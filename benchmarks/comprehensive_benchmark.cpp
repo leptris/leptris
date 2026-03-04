@@ -133,6 +133,40 @@ static ParseOnlyResult bench_taurus_parse_only(const char* xml, size_t len, int 
     return result;
 }
 
+// NEW: Zero-copy (inplace) parsing benchmark
+static ParseOnlyResult bench_taurus_parse_only_inplace(const char* xml, size_t len, int iterations) {
+    std::vector<double> parse_times;
+    std::vector<double> free_times;
+    parse_times.reserve(iterations);
+    free_times.reserve(iterations);
+
+    for (int i = 0; i < iterations; i++) {
+        // Make a mutable copy for inplace parsing
+        char* xml_copy = (char*)malloc(len + 1);
+        memcpy(xml_copy, xml, len);
+        xml_copy[len] = '\0';
+
+        long long start = benchmark_time_ns();
+        TaurusDocument doc = taurus_parse_string_inplace(xml_copy, len, NULL);
+        long long after_parse = benchmark_time_ns();
+        taurus_document_free(doc);  // This also frees xml_copy
+        long long end = benchmark_time_ns();
+
+        parse_times.push_back((double)(after_parse - start) / 1000.0);  /* Convert ns to µs */
+        free_times.push_back((double)(end - after_parse) / 1000.0);
+    }
+
+    benchmark_stats parse_stats = benchmark_analyze(parse_times.data(), parse_times.size());
+    benchmark_stats free_stats = benchmark_analyze(free_times.data(), free_times.size());
+
+    ParseOnlyResult result = {
+        .parse_us = parse_stats.median,
+        .free_us = free_stats.median,
+        .total_us = parse_stats.median + free_stats.median
+    };
+    return result;
+}
+
 static ParseOnlyResult bench_pugixml_parse_only(const char* xml, size_t len, int iterations) {
     std::vector<double> parse_times;
     std::vector<double> free_times;
@@ -659,18 +693,22 @@ int main(int argc, char** argv) {
         {
             printf("┌─ 1. Parse-Only (%d iterations) ─────────────────────────────┐\n", files[f].parse_iterations);
             ParseOnlyResult taurus = bench_taurus_parse_only(xml, len, files[f].parse_iterations);
+            ParseOnlyResult taurus_inplace = bench_taurus_parse_only_inplace(xml, len, files[f].parse_iterations);
             ParseOnlyResult pugixml = bench_pugixml_parse_only(xml, len, files[f].parse_iterations);
 
-            printf("│ Component │ Taurus   │ pugixml  │ Ratio  │           │\n");
-            printf("├───────────┼──────────┼─────────┼───────┼───────────┤\n");
-            printf("│ Parse     │ %7.2f µs │ %7.2f µs │ %5.2fx │           │\n",
-                   taurus.parse_us, pugixml.parse_us, taurus.parse_us / pugixml.parse_us);
-            printf("│ Free      │ %7.2f µs │ %7.2f µs │ %5.2fx │           │\n",
-                   taurus.free_us, pugixml.free_us, taurus.free_us / pugixml.free_us);
-            printf("├───────────┼──────────┼─────────┼───────┼───────────┤\n");
-            printf("│ TOTAL     │ %7.2f µs │ %7.2f µs │ %5.2fx │           │\n",
-                   taurus.total_us, pugixml.total_us, taurus.total_us / pugixml.total_us);
-            printf("└───────────┴──────────┴─────────┴───────┴───────────┘\n");
+            printf("│ Component │ Taurus   │ Inplace  │ pugixml  │ Ratio  │           │\n");
+            printf("├───────────┼──────────┼──────────┼─────────┼───────┼───────────┤\n");
+            printf("│ Parse     │ %7.2f µs │ %7.2f µs │ %7.2f µs │ %5.2fx │           │\n",
+                   taurus.parse_us, taurus_inplace.parse_us, pugixml.parse_us,
+                   taurus_inplace.parse_us / pugixml.parse_us);
+            printf("│ Free      │ %7.2f µs │ %7.2f µs │ %7.2f µs │ %5.2fx │           │\n",
+                   taurus.free_us, taurus_inplace.free_us, pugixml.free_us,
+                   taurus_inplace.free_us / pugixml.free_us);
+            printf("├───────────┼──────────┼──────────┼─────────┼───────┼───────────┤\n");
+            printf("│ TOTAL     │ %7.2f µs │ %7.2f µs │ %7.2f µs │ %5.2fx │           │\n",
+                   taurus.total_us, taurus_inplace.total_us, pugixml.total_us,
+                   taurus_inplace.total_us / pugixml.total_us);
+            printf("└───────────┴──────────┴──────────┴─────────┴───────┴───────────┘\n");
             printf("\n");
         }
 

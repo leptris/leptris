@@ -21,13 +21,23 @@
 #define UINT32_MAX 0xFFFFFFFFU
 #endif
 
-/* Pre-allocation estimate: 1.2x input + 2KB safety margin
- * OPTIMIZED: Reduced from 1.5x + 4KB for better small file performance */
-#define ZERO_CHECK_SIZE_ESTIMATE(input_len) ((input_len) + ((input_len) / 5) + 2048)
+/* Adaptive pre-allocation estimate:
+ * - For small files (< 4KB): 1.5x + 512B safety margin
+ * - For medium files (4KB-64KB): 1.2x + 1KB safety margin
+ * - For large files (> 64KB): 1.2x + 2KB safety margin
+ *
+ * OPTIMIZED: Adaptive margins reduce overhead for small files
+ * while maintaining adequate headroom for large files.
+ */
+#define ZERO_CHECK_SIZE_ESTIMATE(input_len) \
+    ((input_len) < 4096 ? ((input_len) + ((input_len) / 2) + 512) : \
+     (input_len) < 65536 ? ((input_len) + ((input_len) / 5) + 1024) : \
+     ((input_len) + ((input_len) / 5) + 2048))
 
-/* Adaptive minimum: 4KB for small files (was 16KB)
- * OPTIMIZED: Reduced from 16KB to 4KB - matches typical page size */
-#define ZERO_CHECK_MIN_SIZE 4096
+/* Minimum allocation: 1KB for small files
+ * OPTIMIZED: Reduced from 4KB to 1KB - cuts allocation overhead by 4x for tiny XML
+ * Most small XML docs (< 1KB) need < 2KB of node storage */
+#define ZERO_CHECK_MIN_SIZE 1024
 
 typedef struct {
     char* base;        /* Base pointer for offset calculations */
@@ -40,8 +50,24 @@ typedef struct {
  *
  * Pre-allocates enough memory to guarantee no growth needed during parsing.
  * The caller must ensure total allocations don't exceed 'size'.
+ *
+ * OPTIMIZED: For small allocations (< 8KB), uses single malloc to reduce overhead.
  */
 static inline ZeroCheckAlloc* zero_check_alloc_create(size_t size) {
+    /* For small sizes, use single allocation (struct + buffer together)
+     * This reduces malloc overhead from 2 calls to 1 call for small files */
+    if (size < 8192) {
+        char* block = (char*)malloc(sizeof(ZeroCheckAlloc) + size);
+        if (!block) return NULL;
+
+        ZeroCheckAlloc* alloc = (ZeroCheckAlloc*)block;
+        alloc->base = block + sizeof(ZeroCheckAlloc);
+        alloc->size = size;
+        alloc->offset = 0;
+        return alloc;
+    }
+
+    /* For large sizes, use separate allocations */
     ZeroCheckAlloc* alloc = (ZeroCheckAlloc*)malloc(sizeof(ZeroCheckAlloc));
     if (!alloc) return NULL;
 
@@ -58,11 +84,22 @@ static inline ZeroCheckAlloc* zero_check_alloc_create(size_t size) {
 
 /**
  * Destroy a zero-check allocator
+ *
+ * OPTIMIZED: Handles both single-allocation and dual-allocation modes
  */
 static inline void zero_check_alloc_destroy(ZeroCheckAlloc* alloc) {
     if (alloc) {
-        if (alloc->base) free(alloc->base);
-        free(alloc);
+        /* Check if this was a small allocation (single block) or large (separate blocks)
+         * For single block: base points right after the struct
+         * For separate blocks: base was allocated separately */
+        if (alloc->size < 8192) {
+            /* Single allocation - just free the block */
+            free(alloc);
+        } else {
+            /* Separate allocations */
+            if (alloc->base) free(alloc->base);
+            free(alloc);
+        }
     }
 }
 
