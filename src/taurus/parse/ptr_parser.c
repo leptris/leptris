@@ -201,10 +201,12 @@ static int ptr_validate_comment(const char* p, const char* end) {
 #define IS_SPACE(c) ((c) == ' ' || (c) == '\t' || (c) == '\n' || (c) == '\r')
 #define IS_NAME_START(c) (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_' || (c) == ':')
 #define IS_NAME_CHAR(c) (IS_NAME_START(c) || ((c) >= '0' && (c) <= '9') || (c) == '-' || (c) == '.')
+/* High bytes (>= 0x80) are part of UTF-8 sequences, accept them in names */
+#define IS_UTF8_BYTE(c) (((unsigned char)(c)) >= 0x80)
 
 /* Optimized scalar scanning */
 static inline const char* ptr_scan_name(const char* p, const char* end) {
-    while (p < end && IS_NAME_CHAR(*p)) p++;
+    while (p < end && (IS_NAME_CHAR(*p) || IS_UTF8_BYTE(*p))) p++;
     return p;
 }
 
@@ -346,60 +348,59 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
             const char* text_start = p->pos;
             while (p->pos < p->end && *p->pos != '<') p->pos++;
 
-            if (ptr_is_ws_only(text_start, p->pos)) {
-                /* Whitespace only - the '<' at pos will be processed below */
-            } else {
-                /* Strict mode: validate text content */
-                if (p->strict_mode && !ptr_validate_text_content(text_start, p->pos)) {
-                    p->has_error = 1;
-                } else {
-                    size_t text_len = p->pos - text_start;
+            /* Store text content (including whitespace-only) */
+            size_t text_len = p->pos - text_start;
 
-                    /* Allocate buffer for decoded text (same size as input is always enough) */
-                    char* text_copy = (char*)taurus_pool_alloc(p->pool, text_len + 1);
-                    if (text_copy) {
-                        /* First copy the text to make it null-terminated */
-                        memcpy(text_copy, text_start, text_len);
+            /* Strict mode: validate text content */
+            int is_ws_only = ptr_is_ws_only(text_start, p->pos);
+            if (p->strict_mode && !is_ws_only && !ptr_validate_text_content(text_start, p->pos)) {
+                p->has_error = 1;
+            }
+
+            if (text_len > 0) {
+                /* Allocate buffer for decoded text (same size as input is always enough) */
+                char* text_copy = (char*)taurus_pool_alloc(p->pool, text_len + 1);
+                if (text_copy) {
+                    /* First copy the text to make it null-terminated */
+                    memcpy(text_copy, text_start, text_len);
+                    text_copy[text_len] = '\0';
+
+                    /* Decode entities in place - decoded text is always shorter or equal */
+                    size_t decoded_len = decode_entity_with_options(
+                        text_copy, text_copy, text_len + 1, p->strict_mode);
+
+                    /* If decode failed (returned 0 but input wasn't empty), keep original */
+                    if (decoded_len == 0 && text_len > 0) {
+                        /* Restore original text (already there, just ensure null termination) */
                         text_copy[text_len] = '\0';
-
-                        /* Decode entities in place - decoded text is always shorter or equal */
-                        size_t decoded_len = decode_entity_with_options(
-                            text_copy, text_copy, text_len + 1, p->strict_mode);
-
-                        /* If decode failed (returned 0 but input wasn't empty), keep original */
-                        if (decoded_len == 0 && text_len > 0) {
-                            /* Restore original text (already there, just ensure null termination) */
-                            text_copy[text_len] = '\0';
-                        }
-                        /* text_copy is already null-terminated by decode_entity_with_options */
-
-                        struct ptr_text* text = alloc_ptr_text(p);
-                        if (text) {
-                            text->type = PTR_NODE_TYPE_TEXT;
-                            text->frozen_version = 0;
-                            text->text = text_copy;
-                            text->next_sibling = NULL;
-                            text->prev_sibling = NULL;
-
-                            if (ctx->last_child == NULL) {
-                                ctx->elem->first_child = (struct ptr_element*)text;
-                                text->prev_sibling = NULL;  /* First child has no previous sibling */
-                            } else {
-                                /* Check type of last child to set next_sibling correctly */
-                                struct ptr_text* last = (struct ptr_text*)ctx->last_child;
-                                if (last->type >= PTR_NODE_TYPE_TEXT) {
-                                    last->next_sibling = (struct ptr_node*)text;
-                                } else {
-                                    struct ptr_element* last_elem = (struct ptr_element*)ctx->last_child;
-                                    last_elem->next_sibling = (struct ptr_element*)text;
-                                }
-                                text->prev_sibling = (struct ptr_node*)ctx->last_child;  /* Set previous sibling */
-                            }
-                            ctx->last_child = text;
-                            ctx->elem->child_count++;
-                        }
                     }
-                    /* p->pos still points to '<' - will be processed below */
+                    /* text_copy is already null-terminated by decode_entity_with_options */
+
+                    struct ptr_text* text = alloc_ptr_text(p);
+                    if (text) {
+                        text->type = PTR_NODE_TYPE_TEXT;
+                        text->frozen_version = 0;
+                        text->text = text_copy;
+                        text->next_sibling = NULL;
+                        text->prev_sibling = NULL;
+
+                        if (ctx->last_child == NULL) {
+                            ctx->elem->first_child = (struct ptr_element*)text;
+                            text->prev_sibling = NULL;  /* First child has no previous sibling */
+                        } else {
+                            /* Check type of last child to set next_sibling correctly */
+                            struct ptr_text* last = (struct ptr_text*)ctx->last_child;
+                            if (last->type >= PTR_NODE_TYPE_TEXT) {
+                                last->next_sibling = (struct ptr_node*)text;
+                            } else {
+                                struct ptr_element* last_elem = (struct ptr_element*)ctx->last_child;
+                                last_elem->next_sibling = (struct ptr_element*)text;
+                            }
+                            text->prev_sibling = (struct ptr_node*)ctx->last_child;  /* Set previous sibling */
+                        }
+                        ctx->last_child = text;
+                        ctx->elem->child_count++;
+                    }
                 }
             }
             /* Fall through to process the '<' character at p->pos */
@@ -476,7 +477,7 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                         p->pos++;
                     }
 
-                    if (ctx && p->pos > cdata_start) {
+                    if (ctx && p->pos >= cdata_start) {
                         size_t cdata_len = p->pos - cdata_start;
 
                         /* Copy CDATA to pool memory */
@@ -512,6 +513,63 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                 }
             }
 
+            /* Processing Instruction (PI) - <?target data?> */
+            if (c == '?') {
+                p->pos++;  /* Skip ? */
+
+                /* Parse PI target (name) */
+                const char* target_start = p->pos;
+                p->pos = ptr_scan_name(p->pos, p->end);
+                size_t target_len = p->pos - target_start;
+
+                if (target_len > 0 && ctx) {
+                    /* Skip whitespace between target and data */
+                    p->pos = ptr_skip_ws(p->pos, p->end);
+
+                    /* Parse PI data until ?> */
+                    const char* data_start = p->pos;
+                    while (p->pos + 1 < p->end) {
+                        if (p->pos[0] == '?' && p->pos[1] == '>') {
+                            break;
+                        }
+                        p->pos++;
+                    }
+                    size_t data_len = p->pos - data_start;
+
+                    /* Store PI as text-like node with format: "target data" */
+                    size_t total_len = target_len + 1 + data_len;  /* target + space + data */
+                    char* pi_content = (char*)taurus_pool_alloc(p->pool, total_len + 1);
+                    if (pi_content) {
+                        memcpy(pi_content, target_start, target_len);
+                        pi_content[target_len] = ' ';
+                        memcpy(pi_content + target_len + 1, data_start, data_len);
+                        pi_content[total_len] = '\0';
+
+                        struct ptr_text* pi_node = alloc_ptr_text(p);
+                        if (pi_node) {
+                            pi_node->type = PTR_NODE_TYPE_PI;
+                            pi_node->frozen_version = 0;
+                            pi_node->text = pi_content;
+                            pi_node->next_sibling = NULL;
+                            pi_node->prev_sibling = (struct ptr_node*)ctx->last_child;
+
+                            /* Link to parent */
+                            if (ctx->last_child == NULL) {
+                                ctx->elem->first_child = (struct ptr_element*)pi_node;
+                            } else {
+                                struct ptr_text* last = (struct ptr_text*)ctx->last_child;
+                                last->next_sibling = (struct ptr_node*)pi_node;
+                            }
+                            ctx->last_child = pi_node;
+                            ctx->elem->child_count++;
+                        }
+                    }
+                }
+
+                if (p->pos + 1 < p->end) p->pos += 2;  /* Skip ?> */
+                continue;
+            }
+
             /* Comment */
             if (c == '!' && (p->pos + 1) < p->end && p->pos[1] == '-' && p->pos[2] == '-') {
                 p->pos += 3;
@@ -530,6 +588,37 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                 /* Strict mode: validate comment content */
                 if (p->strict_mode && !ptr_validate_comment(comment_start, p->pos)) {
                     p->has_error = 1;
+                }
+
+                /* Store comment as a text-like node */
+                if (ctx) {
+                    /* Allocate buffer for comment content (allow empty comments) */
+                    char* comment_copy = (char*)taurus_pool_alloc(p->pool, comment_len + 1);
+                    if (comment_copy) {
+                        memcpy(comment_copy, comment_start, comment_len);
+                        comment_copy[comment_len] = '\0';
+
+                        /* Create comment node using ptr_text structure */
+                        struct ptr_text* comment_node = alloc_ptr_text(p);
+                        if (comment_node) {
+                            comment_node->type = PTR_NODE_TYPE_COMMENT;
+                            comment_node->frozen_version = 0;
+                            comment_node->text = comment_copy;
+                            comment_node->next_sibling = NULL;
+                            comment_node->prev_sibling = (struct ptr_node*)ctx->last_child;
+
+                            /* Link to parent */
+                            if (ctx->last_child == NULL) {
+                                ctx->elem->first_child = (struct ptr_element*)comment_node;
+                            } else {
+                                /* Both ptr_element and ptr_text have next_sibling at same offset */
+                                struct ptr_text* last = (struct ptr_text*)ctx->last_child;
+                                last->next_sibling = (struct ptr_node*)comment_node;
+                            }
+                            ctx->last_child = comment_node;
+                            ctx->elem->child_count++;
+                        }
+                    }
                 }
 
                 if (p->pos + 2 < p->end) p->pos += 3;  /* Skip --> */

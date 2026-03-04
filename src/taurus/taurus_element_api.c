@@ -323,22 +323,34 @@ TAURUS_API TaurusElement taurus_element_root(TaurusElement elem) {
 
 /**
  * Get first child element regardless of name (Public API) - POINTER-BASED
- * Returns any child (element or text), not just elements
+ * Returns first ELEMENT child, skipping text nodes
  */
 TAURUS_API TaurusElement taurus_element_first_child_any(TaurusElement elem) {
     if (!elem) return NULL;
-    /* Return first child directly - it may be element or text */
-    return (TaurusElement)elem->first_child;
+    /* Skip non-element nodes */
+    struct ptr_element* child = elem->first_child;
+    while (child && child->type != TAURUS_NODE_TYPE_ELEMENT) {
+        child = child->next_sibling;
+    }
+    return child;
 }
 
 /**
  * Get last child element regardless of name (Public API) - POINTER-BASED
- * Returns any child (element or text), not just elements
+ * Returns last ELEMENT child, skipping text nodes
  */
 TAURUS_API TaurusElement taurus_element_last_child_any(TaurusElement elem) {
     if (!elem) return NULL;
-    /* Return last child directly - it may be element or text */
-    return (TaurusElement)elem->last_child;
+    /* Skip non-element nodes by walking from first child */
+    struct ptr_element* child = elem->first_child;
+    struct ptr_element* last_elem = NULL;
+    while (child) {
+        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+            last_elem = child;
+        }
+        child = child->next_sibling;
+    }
+    return last_elem;
 }
 
 /**
@@ -358,27 +370,16 @@ TAURUS_API TaurusElement taurus_element_previous_sibling_any(TaurusElement elem)
     TaurusElement parent = taurus_element_get_parent(elem);
     if (!parent) return NULL;
 
-    TaurusNode* child = (TaurusNode*)taurus_element_get_first_child(parent);
-    TaurusElement prev = NULL;
+    /* Walk through all children, tracking the previous element sibling */
+    struct ptr_element* child = parent->first_child;
+    struct ptr_element* prev = NULL;
 
-    while (child && child != (TaurusNode*)elem) {
+    while (child && child != (struct ptr_element*)elem) {
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            prev = (TaurusElement)child;
+            prev = child;
         }
-
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            child = taurus_node_get_next_sibling(child);
-        } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            child = (TaurusNode*)(((TaurusTextNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            child = (TaurusNode*)(((TaurusCDATANode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-            child = (TaurusNode*)(((TaurusCommentNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_PI) {
-            child = (TaurusNode*)(((TaurusPINode*)child)->next_sibling);
-        } else {
-            child = NULL;
-        }
+        /* All node types (ptr_element, ptr_text, etc.) have next_sibling at same offset */
+        child = child->next_sibling;
     }
 
     return prev;

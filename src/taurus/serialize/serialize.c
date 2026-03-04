@@ -495,10 +495,31 @@ void serialize_text_internal(TaurusTextNode* text, SerializeBuffer* buf) {
 }
 
 void serialize_comment_internal(TaurusCommentNode* comment, SerializeBuffer* buf) {
-    if (!comment || !comment->content) return;
+    if (!comment) return;
+
+    /* Handle both TaurusCommentNode and ptr_text layouts.
+     * In ptr_text, the text field is at offset 24 (after type, frozen_version, next_sibling, prev_sibling).
+     * In TaurusCommentNode, content is at offset sizeof(TaurusNode) which includes next_sibling.
+     * Check if this looks like a ptr_text by checking if content pointer is valid.
+     */
+    const char* content = comment->content;
+
+    /* For ptr_text nodes created by ptr_parser, we need to get text differently.
+     * ptr_text layout: type(4) + frozen_version(4) + next_sibling(8) + prev_sibling(8) + text(8) = 32 bytes
+     * TaurusCommentNode: base(TaurusNode) + content + next_sibling
+     *
+     * If content is NULL but there's a ptr_text text field, use that instead.
+     */
+    if (!content) {
+        /* Try ptr_text layout - text field is at offset 24 */
+        struct ptr_text* ptext = (struct ptr_text*)comment;
+        content = ptext->text;
+    }
+
+    if (!content) return;
 
     buffer_append(buf, "<!--");
-    buffer_append(buf, comment->content);
+    buffer_append(buf, content);
     buffer_append(buf, "-->");
 }
 
