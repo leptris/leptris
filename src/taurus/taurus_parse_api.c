@@ -79,21 +79,12 @@ static struct taurus_document* taurus_parse_internal(const char* xml, size_t len
                                                      int strict_mode, int skip_namespace_resolution) {
     if (!xml || len == 0) return NULL;
 
-    /* COMPACT-ONLY: Use v5 parser with zero-check allocator
-     * This creates 16-byte elements with offset-based navigation.
-     *
-     * NOTE: Pointer-based parser (taurus_parse_ptr) is available and is
-     * 1.29-1.45x faster than pugixml, but requires accessor function updates.
-     * See TODO.taurus-compact-benchmark.md for integration status.
-     */
     (void)skip_namespace_resolution;  /* Compact parser handles all cases */
-    (void)strict_mode;
 
-    /* OPTIMIZATION: Skip strnlen() for large files - trust the provided length.
-     * strnlen() is O(n) and scans the entire buffer looking for null bytes.
-     * For small files (< 64KB), we still check for safety.
-     * For large files, the overhead is too high and caller should provide correct length. */
-    if (len < 65536) {
+    /* OPTIMIZATION: Only call strnlen for very small files (< 4KB)
+     * For larger files, trust the provided length - the caller knows what they're doing.
+     * This avoids O(n) scan for typical use cases. */
+    if (len < 4096) {
         size_t actual_len = strnlen(xml, len);
         if (actual_len < len) {
             len = actual_len;
@@ -125,14 +116,10 @@ static struct taurus_document* taurus_parse_internal(const char* xml, size_t len
  * Uses global strict mode and enables namespace resolution by default.
  */
 struct taurus_document* taurus_parse(const char* xml, size_t len) {
-    /* COMPACT-ONLY: Use v5 parser with zero-check allocator */
     if (!xml || len == 0) return NULL;
 
-    /* OPTIMIZATION: Skip strnlen() for large files - trust the provided length.
-     * strnlen() is O(n) and scans the entire buffer looking for null bytes.
-     * For small files (< 64KB), we still check for safety.
-     * For large files, the overhead is too high and caller should provide correct length. */
-    if (len < 65536) {
+    /* OPTIMIZATION: Only call strnlen for very small files (< 4KB) */
+    if (len < 4096) {
         size_t actual_len = strnlen(xml, len);
         if (actual_len < len) {
             len = actual_len;
