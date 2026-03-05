@@ -61,15 +61,19 @@ typedef struct {
 
 #ifdef _MSC_VER
 #define FORCE_INLINE __forceinline
+#define LIKELY(x) (x)
+#define UNLIKELY(x) (x)
 #else
 #define FORCE_INLINE __attribute__((always_inline)) inline
+#define LIKELY(x) __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #endif
 
 /* Optimized scalar scanning - faster than SIMD for short XML names */
 static FORCE_INLINE const char* scan_name_v5(const char* p, const char* end) {
     size_t remaining = end - p;
     /* Use SIMD for names > 8 chars (avoids setup overhead for short names) */
-    if (remaining > 8) {
+    if (LIKELY(remaining > 8)) {
         return simd_scan_name(p, end);
     }
     while (p < end && IS_NAME_CHAR(*p)) p++;
@@ -448,9 +452,9 @@ static uint32_t parse_v5_main(ParserV5* p) {
             if (p->pos >= p->end) break;
         }
 
-        /* Text content */
-        if (*p->pos != '<') {
-            if (!ctx) { p->pos++; continue; }
+        /* Text content - LIKELY path since most chars are text */
+        if (LIKELY(*p->pos != '<')) {
+            if (UNLIKELY(!ctx)) { p->pos++; continue; }
 
             const char* text_start = p->pos;
 
@@ -458,12 +462,13 @@ static uint32_t parse_v5_main(ParserV5* p) {
             const char* found = simd_find_char(p->pos, p->end, '<');
             p->pos = found ? found : p->end;
 
-            if (is_ws_only_v5(text_start, p->pos)) continue;
+            /* Whitespace-only text is UNLIKELY - skip it */
+            if (UNLIKELY(is_ws_only_v5(text_start, p->pos))) continue;
 
             size_t text_len = p->pos - text_start;
 
             /* STRICT MODE: Validate text content (entities and UTF-8) */
-            if (p->strict_mode && !validate_text_content_strict(text_start, p->pos)) {
+            if (UNLIKELY(p->strict_mode) && !validate_text_content_strict(text_start, p->pos)) {
                 p->has_error = 1;
                 /* Skip to next tag */
                 continue;
@@ -477,7 +482,7 @@ static uint32_t parse_v5_main(ParserV5* p) {
 
             /* Allocate text node - check for out of memory */
             uint32_t text_off = ALLOC_TEXT_V5(p);
-            if (text_off == UINT32_MAX) continue;  /* Out of memory, skip this node */
+            if (UNLIKELY(text_off == UINT32_MAX)) continue;  /* Out of memory, skip this node */
 
             struct compact_text_v2* text = OFFSET_TO_TYPED(p->node_base, text_off, struct compact_text_v2);
 
