@@ -67,6 +67,11 @@ typedef struct {
 
 /* Optimized scalar scanning - faster than SIMD for short XML names */
 static FORCE_INLINE const char* scan_name_v5(const char* p, const char* end) {
+    size_t remaining = end - p;
+    /* Use SIMD for names > 8 chars (avoids setup overhead for short names) */
+    if (remaining > 8) {
+        return simd_scan_name(p, end);
+    }
     while (p < end && IS_NAME_CHAR(*p)) p++;
     return p;
 }
@@ -79,8 +84,8 @@ static FORCE_INLINE const char* skip_ws_v5(const char* p, const char* end) {
 
 /* Check if range is whitespace only - uses SIMD for long ranges */
 static FORCE_INLINE int is_ws_only_v5(const char* p, const char* end) {
-    /* Use SIMD for ranges > 64 bytes, scalar for shorter */
-    if (end - p > 64) {
+    /* Use SIMD for ranges > 8 bytes (lowered threshold for indentation) */
+    if (end - p > 8) {
         return simd_is_whitespace_only(p, end);
     }
     while (p < end) {
@@ -448,7 +453,10 @@ static uint32_t parse_v5_main(ParserV5* p) {
             if (!ctx) { p->pos++; continue; }
 
             const char* text_start = p->pos;
-            while (p->pos < p->end && *p->pos != '<') p->pos++;
+
+            /* SIMD-optimized text scanning - find '<' at 16 bytes/iteration */
+            const char* found = simd_find_char(p->pos, p->end, '<');
+            p->pos = found ? found : p->end;
 
             if (is_ws_only_v5(text_start, p->pos)) continue;
 
