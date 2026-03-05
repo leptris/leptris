@@ -180,4 +180,45 @@ if(PUGIXML_AVAILABLE)
         CXX_STANDARD 11
         CXX_STANDARD_REQUIRED ON
     )
+
+    # ============================================================================
+    # Ultimate Benchmark - Taurus vs pugixml vs libxml2
+    # ============================================================================
+    find_package(LibXml2 QUIET)
+
+    if(LibXml2_FOUND)
+        message(STATUS "libxml2 found: ${LIBXML2_INCLUDE_DIR}")
+
+        add_executable(ultimate_benchmark
+            workflows/bench_ultimate.cpp
+            utils.c
+        )
+
+        target_include_directories(ultimate_benchmark PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/include
+            ${PUGIXML_INCLUDE_DIR}
+            ${LIBXML2_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        target_link_libraries(ultimate_benchmark PRIVATE
+            taurus
+            ${PUGIXML_LIBRARY}
+            ${LIBXML2_LIBRARIES}
+        )
+
+        target_compile_definitions(ultimate_benchmark PRIVATE
+            ${LIBXML2_DEFINITIONS}
+        )
+
+        set_target_properties(ultimate_benchmark PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+        )
+
+        message(STATUS "Ultimate benchmark (Taurus vs pugixml vs libxml2) configured")
+    else()
+        message(WARNING "libxml2 not found. Ultimate benchmark will not be built.")
+    endif()
+
 endif()
