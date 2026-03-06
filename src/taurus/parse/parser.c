@@ -16,6 +16,7 @@
 #include "../memory/zero_check_alloc.h"
 #include "../simd_helpers.h"  /* SIMD optimization functions */
 #include "xml_scanner.h"      /* Shared XML scanning primitives */
+#include "xml_validation.h"   /* Shared validation functions */
 #include "../taurus_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -85,191 +86,10 @@ static FORCE_INLINE int is_ws_only_v5(const char* p, const char* end) {
 }
 
 /* ============================================================================
- * Strict Mode Validation Functions
+ * Validation functions are provided by xml_validation.h
+ * Use: xml_validate_name_start(), xml_validate_attr_value(),
+ *      xml_validate_text_content(), xml_validate_comment()
  * ============================================================================ */
-
-/* Check if character is valid for starting an XML name */
-static int validate_name_start_strict(char c) {
-    /* XML 1.0 NameStartChar: ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | ...
-     * For simplicity, we check basic ASCII - extended chars would need full Unicode support */
-    if (c >= 'a' && c <= 'z') return 1;
-    if (c >= 'A' && c <= 'Z') return 1;
-    if (c == '_' || c == ':') return 1;
-    /* Reject digits, dot, hyphen at start */
-    return 0;
-}
-
-/* Validate attribute value - check for invalid characters in strict mode */
-static int validate_attr_value_strict(const char* value, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        /* Less-than is not allowed in attribute values */
-        if (value[i] == '<') return 0;
-    }
-    return 1;
-}
-
-/* Validate character reference and return code point */
-static int validate_charref_strict(const char* p, const char* end, uint32_t* out_code) {
-    if (p >= end) return 0;
-
-    int is_hex = 0;
-    if (*p == 'x' || *p == 'X') {
-        is_hex = 1;
-        p++;
-    }
-
-    if (p >= end) return 0;
-
-    uint32_t value = 0;
-    int has_digits = 0;
-
-    while (p < end && *p != ';') {
-        char c = *p;
-        int digit;
-
-        if (c >= '0' && c <= '9') {
-            digit = c - '0';
-        } else if (is_hex && c >= 'a' && c <= 'f') {
-            digit = 10 + c - 'a';
-        } else if (is_hex && c >= 'A' && c <= 'F') {
-            digit = 10 + c - 'A';
-        } else {
-            return 0;  /* Invalid digit */
-        }
-
-        value = is_hex ? (value * 16 + digit) : (value * 10 + digit);
-        has_digits = 1;
-        p++;
-    }
-
-    if (!has_digits) return 0;  /* Empty reference */
-    if (p >= end || *p != ';') return 0;  /* Missing semicolon */
-
-    /* Check valid Unicode range (0x0-0x10FFFF, excluding surrogates) */
-    if (value > 0x10FFFF) return 0;
-    if (value >= 0xD800 && value <= 0xDFFF) return 0;  /* Surrogate range */
-
-    *out_code = value;
-    return 1;
-}
-
-/* Check for predefined entity */
-static int is_predefined_entity(const char* name, size_t len) {
-    if (len == 2 && strncmp(name, "lt", 2) == 0) return 1;
-    if (len == 2 && strncmp(name, "gt", 2) == 0) return 1;
-    if (len == 3 && strncmp(name, "amp", 3) == 0) return 1;
-    if (len == 4 && strncmp(name, "apos", 4) == 0) return 1;
-    if (len == 4 && strncmp(name, "quot", 4) == 0) return 1;
-    return 0;
-}
-
-/* Validate text content for entity references
- * Returns 1 if valid, 0 if invalid
- *
- * Checks:
- * 1. Character references (&#NN; and &#xHH;) must be well-formed
- * 2. Entity references must be predefined (lt, gt, amp, apos, quot)
- * 3. All references must end with semicolon
- * 4. UTF-8 sequences must be valid (in strict mode)
- */
-static int validate_text_content_strict(const char* p, const char* end) {
-    while (p < end) {
-        unsigned char c = (unsigned char)*p;
-
-        /* Check for invalid bytes in UTF-8 */
-        /* 0xFF and 0xFE are never valid in UTF-8 */
-        if (c == 0xFF || c == 0xFE) {
-            return 0;
-        }
-
-        /* Check for overlong encodings (C0, C1 lead to overlong 2-byte) */
-        if (c == 0xC0 || c == 0xC1) {
-            return 0;
-        }
-
-        /* Check UTF-8 sequence validity */
-        if (c >= 0x80) {
-            /* Multi-byte sequence */
-            int expected_bytes;
-            if ((c & 0xE0) == 0xC0) expected_bytes = 2;
-            else if ((c & 0xF0) == 0xE0) expected_bytes = 3;
-            else if ((c & 0xF8) == 0xF0) expected_bytes = 4;
-            else return 0;  /* Invalid UTF-8 start byte */
-
-            /* Check continuation bytes */
-            for (int i = 1; i < expected_bytes; i++) {
-                if (p + i >= end) return 0;  /* Incomplete sequence */
-                unsigned char cont = (unsigned char)p[i];
-                if ((cont & 0xC0) != 0x80) return 0;  /* Invalid continuation */
-            }
-
-            /* Skip the multi-byte sequence */
-            p += expected_bytes;
-            continue;
-        }
-
-        if (*p == '&') {
-            const char* ref_start = p;
-            p++;
-
-            if (p >= end) return 0;  /* & at end */
-
-            if (*p == '#') {
-                /* Character reference */
-                p++;
-                uint32_t code;
-                if (!validate_charref_strict(p, end, &code)) {
-                    return 0;
-                }
-                /* Skip to semicolon */
-                while (p < end && *p != ';') p++;
-                if (p >= end || *p != ';') return 0;
-                p++;  /* Skip semicolon */
-            } else {
-                /* Entity reference - scan name */
-                const char* name_start = p;
-                while (p < end && *p != ';' && *p != ' ' && *p != '<' && *p != '&') {
-                    p++;
-                }
-                size_t name_len = p - name_start;
-
-                if (name_len == 0) return 0;  /* Empty entity name */
-                if (p >= end || *p != ';') return 0;  /* Missing semicolon */
-
-                /* Check if predefined entity */
-                if (!is_predefined_entity(name_start, name_len)) {
-                    return 0;  /* Undefined entity */
-                }
-                p++;  /* Skip semicolon */
-            }
-        } else {
-            p++;
-        }
-    }
-    return 1;
-}
-
-/* Validate comment content
- * XML 1.0 rules:
- * 1. Comment content must not contain "--"
- * 2. Comment content must not end with "-"
- * 3. Comment must end with "-->"
- */
-static int validate_comment_strict(const char* p, const char* end) {
-    /* Check if content ends with "-" (which would make "--->" or similar invalid) */
-    if (p < end && *(end - 1) == '-') {
-        return 0;  /* Content ends with dash - invalid */
-    }
-
-    /* Check for "--" inside the content */
-    while (p + 1 < end) {
-        if (p[0] == '-' && p[1] == '-') {
-            return 0;  /* "--" inside comment is invalid */
-        }
-        p++;
-    }
-    return 1;
-}
 
 /* ============================================================================
  * Stack Operations - Inline
@@ -350,7 +170,7 @@ static uint32_t parse_attr_v5(ParserV5* p) {
     }
 
     /* STRICT MODE: Check for invalid characters in attribute value */
-    if (p->strict_mode && !validate_attr_value_strict(value_start, value_len)) {
+    if (p->strict_mode && !xml_validate_attr_value(value_start, value_len)) {
         p->has_error = 1;
         p->pos = orig_pos;
         return 0;
@@ -453,7 +273,7 @@ static uint32_t parse_v5_main(ParserV5* p) {
             size_t text_len = p->pos - text_start;
 
             /* STRICT MODE: Validate text content (entities and UTF-8) */
-            if (UNLIKELY(p->strict_mode) && !validate_text_content_strict(text_start, p->pos)) {
+            if (UNLIKELY(p->strict_mode) && !xml_validate_text_content(text_start, p->pos)) {
                 p->has_error = 1;
                 /* Skip to next tag */
                 continue;
@@ -676,7 +496,7 @@ static uint32_t parse_v5_main(ParserV5* p) {
                 }
 
                 /* STRICT MODE: Validate comment content */
-                if (p->strict_mode && !validate_comment_strict(comment_start, p->pos)) {
+                if (p->strict_mode && !xml_validate_comment(comment_start, p->pos)) {
                     p->has_error = 1;
                     continue;
                 }
@@ -706,7 +526,7 @@ static uint32_t parse_v5_main(ParserV5* p) {
         if (name_len == 0) continue;
 
         /* STRICT MODE: Validate name start character */
-        if (p->strict_mode && !validate_name_start_strict(*name_start)) {
+        if (p->strict_mode && !xml_validate_name_start(*name_start)) {
             p->has_error = 1;
             /* Skip to end of tag */
             while (p->pos < p->end && *p->pos != '>') p->pos++;

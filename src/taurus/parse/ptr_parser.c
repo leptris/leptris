@@ -20,6 +20,7 @@
 #include "../memory/pool.h"
 #include "../simd_helpers.h"
 #include "xml_scanner.h"
+#include "xml_validation.h"  /* Shared validation functions */
 #include "../taurus_internal.h"
 #include "../common/entities.h"  /* For entity expansion */
 #include <stdlib.h>
@@ -57,143 +58,10 @@ typedef struct {
 } PtrParser;
 
 /* ============================================================================
- * Strict Mode Validation Functions
+ * Validation functions are provided by xml_validation.h
+ * Use: xml_validate_name_start(), xml_validate_attr_value(),
+ *      xml_validate_text_content(), xml_validate_comment()
  * ============================================================================ */
-
-/* Check if character is valid for starting an XML name */
-static int ptr_validate_name_start(char c) {
-    if (c >= 'a' && c <= 'z') return 1;
-    if (c >= 'A' && c <= 'Z') return 1;
-    if (c == '_' || c == ':') return 1;
-    return 0;
-}
-
-/* Validate attribute value - check for invalid characters */
-static int ptr_validate_attr_value(const char* value, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        if (value[i] == '<') return 0;  /* Less-than not allowed */
-    }
-    return 1;
-}
-
-/* Check for predefined entity */
-static int ptr_is_predefined_entity(const char* name, size_t len) {
-    if (len == 2 && strncmp(name, "lt", 2) == 0) return 1;
-    if (len == 2 && strncmp(name, "gt", 2) == 0) return 1;
-    if (len == 3 && strncmp(name, "amp", 3) == 0) return 1;
-    if (len == 4 && strncmp(name, "apos", 4) == 0) return 1;
-    if (len == 4 && strncmp(name, "quot", 4) == 0) return 1;
-    return 0;
-}
-
-/* Validate character reference */
-static int ptr_validate_charref(const char* p, const char* end, uint32_t* out_code) {
-    if (p >= end) return 0;
-
-    int is_hex = 0;
-    if (*p == 'x' || *p == 'X') {
-        is_hex = 1;
-        p++;
-    }
-
-    if (p >= end) return 0;
-
-    uint32_t value = 0;
-    int has_digits = 0;
-
-    while (p < end && *p != ';') {
-        char c = *p;
-        int digit;
-
-        if (c >= '0' && c <= '9') {
-            digit = c - '0';
-        } else if (is_hex && c >= 'a' && c <= 'f') {
-            digit = 10 + c - 'a';
-        } else if (is_hex && c >= 'A' && c <= 'F') {
-            digit = 10 + c - 'A';
-        } else {
-            return 0;  /* Invalid digit */
-        }
-
-        value = is_hex ? (value * 16 + digit) : (value * 10 + digit);
-        has_digits = 1;
-        p++;
-    }
-
-    if (!has_digits) return 0;
-    if (p >= end || *p != ';') return 0;
-
-    /* Check valid Unicode range */
-    if (value > 0x10FFFF) return 0;
-    if (value >= 0xD800 && value <= 0xDFFF) return 0;
-
-    if (out_code) *out_code = value;
-    return 1;
-}
-
-/* Validate text content for entity references and UTF-8 */
-static int ptr_validate_text_content(const char* p, const char* end) {
-    while (p < end) {
-        unsigned char c = (unsigned char)*p;
-
-        /* Check for invalid UTF-8 bytes */
-        if (c == 0xFF || c == 0xFE) return 0;
-        if (c == 0xC0 || c == 0xC1) return 0;  /* Overlong */
-
-        /* Check UTF-8 sequence validity */
-        if (c >= 0x80) {
-            int expected_bytes;
-            if ((c & 0xE0) == 0xC0) expected_bytes = 2;
-            else if ((c & 0xF0) == 0xE0) expected_bytes = 3;
-            else if ((c & 0xF8) == 0xF0) expected_bytes = 4;
-            else return 0;
-
-            for (int i = 1; i < expected_bytes; i++) {
-                if (p + i >= end) return 0;
-                unsigned char cont = (unsigned char)p[i];
-                if ((cont & 0xC0) != 0x80) return 0;
-            }
-            p += expected_bytes;
-            continue;
-        }
-
-        if (*p == '&') {
-            p++;
-            if (p >= end) return 0;
-
-            if (*p == '#') {
-                p++;
-                if (!ptr_validate_charref(p, end, NULL)) return 0;
-                while (p < end && *p != ';') p++;
-                if (p >= end || *p != ';') return 0;
-                p++;
-            } else {
-                const char* name_start = p;
-                while (p < end && *p != ';' && *p != ' ' && *p != '<' && *p != '&') p++;
-                size_t name_len = p - name_start;
-
-                if (name_len == 0) return 0;
-                if (p >= end || *p != ';') return 0;
-                if (!ptr_is_predefined_entity(name_start, name_len)) return 0;
-                p++;
-            }
-        } else {
-            p++;
-        }
-    }
-    return 1;
-}
-
-/* Validate comment content */
-static int ptr_validate_comment(const char* p, const char* end) {
-    if (p < end && *(end - 1) == '-') return 0;  /* Ends with dash */
-
-    while (p + 1 < end) {
-        if (p[0] == '-' && p[1] == '-') return 0;  /* "--" inside */
-        p++;
-    }
-    return 1;
-}
 
 /* ============================================================================
  * Inline Character Classification
@@ -269,7 +137,7 @@ static struct ptr_attribute* parse_ptr_attr(PtrParser* p) {
     if (name_len == 0) return NULL;
 
     /* Strict mode: validate name start character */
-    if (p->strict_mode && !ptr_validate_name_start(*name_start)) {
+    if (p->strict_mode && !xml_validate_name_start(*name_start)) {
         p->has_error = 1;
         return NULL;
     }
@@ -291,7 +159,7 @@ static struct ptr_attribute* parse_ptr_attr(PtrParser* p) {
     size_t value_len = p->pos - value_start;
 
     /* Strict mode: validate attribute value */
-    if (p->strict_mode && !ptr_validate_attr_value(value_start, value_len)) {
+    if (p->strict_mode && !xml_validate_attr_value(value_start, value_len)) {
         p->has_error = 1;
         return NULL;
     }
@@ -358,7 +226,7 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
 
             /* Strict mode: validate text content */
             int is_ws_only = ptr_is_ws_only(text_start, p->pos);
-            if (p->strict_mode && !is_ws_only && !ptr_validate_text_content(text_start, p->pos)) {
+            if (p->strict_mode && !is_ws_only && !xml_validate_text_content(text_start, p->pos)) {
                 p->has_error = 1;
             }
 
@@ -591,7 +459,7 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
                 size_t comment_len = p->pos - comment_start;
 
                 /* Strict mode: validate comment content */
-                if (p->strict_mode && !ptr_validate_comment(comment_start, p->pos)) {
+                if (p->strict_mode && !xml_validate_comment(comment_start, p->pos)) {
                     p->has_error = 1;
                 }
 
@@ -643,7 +511,7 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
         if (name_len == 0) continue;
 
         /* Strict mode: validate name start character */
-        if (p->strict_mode && !ptr_validate_name_start(*name_start)) {
+        if (p->strict_mode && !xml_validate_name_start(*name_start)) {
             p->has_error = 1;
             continue;
         }
