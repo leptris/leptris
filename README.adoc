@@ -32,6 +32,55 @@ image:https://img.shields.io/github/license/lutaml/taurus.svg[License,link=https
 * **UTF-8 validation** via utf8proc
 * **Multi-encoding support** via iconv (automatic conversion to UTF-8)
 
+==== Two Parsing Modes
+
+Taurus provides two parsing APIs optimized for different use cases:
+
+[cols="2,^1,^1",options="header"]
+|===
+| Feature | Copy Mode | Inplace Mode
+
+| API
+| `taurus_parse_string()`
+| `taurus_parse_string_inplace()`
+
+| Internal Storage
+| `ptr_element` (72 bytes each)
+| `compact_element_v2` (16 bytes each)
+
+| Memory/Element
+| ~100 bytes
+| ~32 bytes
+
+| Input Buffer
+| Copied internally
+| Modified in-place (user-owned)
+
+| Best For
+| General use, const input
+| Maximum performance, large files
+
+| Performance
+| Baseline
+| 2x faster, 3x less memory
+|===
+
+.Choosing a Parsing Mode
+[source,c]
+----
+// Copy Mode: Best for general use
+const char* xml = "<root><item>data</item></root>";
+TaurusDocument doc = taurus_parse_string(xml, strlen(xml), NULL);
+// Safe to free xml immediately if dynamically allocated
+// Document owns its own copy of the data
+
+// Inplace Mode: Best for maximum performance
+char* xml_buf = strdup("<root><item>data</item></root>");  // Must be mutable!
+TaurusDocument doc = taurus_parse_string_inplace(xml_buf, strlen(xml_buf), NULL);
+// Document OWNS xml_buf - don't free it yourself
+// xml_buf is freed automatically when document is freed
+----
+
 === DOCTYPE Support
 
 * **Internal subset preservation** - Entity declarations fully supported

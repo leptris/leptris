@@ -377,16 +377,10 @@ TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
 TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, const char* value) {
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
 
-    /* Get the memory pool from the document - check both legacy and ptr mode pools */
+    /* Get the memory pool from the document */
     TaurusMemoryPool* pool = NULL;
-    if (elem->document) {
-        if (elem->document->pool) {
-            pool = elem->document->pool;
-        } else if (elem->document->ptr_attr_pool) {
-            pool = (TaurusMemoryPool*)elem->document->ptr_attr_pool;
-        } else if (elem->document->ptr_elem_pool) {
-            pool = (TaurusMemoryPool*)elem->document->ptr_elem_pool;
-        }
+    if (elem->document && elem->document->pool) {
+        pool = elem->document->pool;
     }
 
     /* Check if attribute already exists */

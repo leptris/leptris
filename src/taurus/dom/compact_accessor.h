@@ -223,14 +223,14 @@ const char* compact_element_get_text(
  * Get or create a wrapper element for a compact element
  *
  * This function returns a cached wrapper if one exists, or creates a new
- * wrapper and caches it. The wrapper is a taurus_element struct that
+ * wrapper and caches it. The wrapper is a ptr_element struct that
  * references the compact element's data via offsets.
  *
  * @param doc Document containing the compact element
  * @param offset Offset of the compact element in the compact block
  * @return Wrapper element, or NULL on error
  */
-struct taurus_element* compact_get_or_create_wrapper(
+struct ptr_element* compact_get_or_create_wrapper(
     struct taurus_document* doc,
     uint32_t offset
 );

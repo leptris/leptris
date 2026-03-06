@@ -188,15 +188,26 @@ void taurus_element_set_namespace_uri(TaurusElement elem, const char* uri);
 
 /* ============================================================================
  * Legacy Public API Functions
+ *
+ * DEPRECATED: These functions are kept for backward compatibility only.
+ * Use the standard functions (taurus_element_set_attribute, etc.) instead.
  * ============================================================================ */
 
-void taurus_element_add_attribute_legacy(TaurusElement elem, const char* name, const char* value);
-void taurus_element_add_attribute_pooled(TaurusElement elem, const char* name, const char* value, TaurusMemoryPool* pool);
-void taurus_element_add_attribute_pooled_inplace(TaurusElement elem, char* name, char* value, TaurusMemoryPool* pool);
-const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* name);
+#if defined(__GNUC__) || defined(__clang__)
+#define TAURUS_DEPRECATED __attribute__((deprecated))
+#elif defined(_MSC_VER)
+#define TAURUS_DEPRECATED __declspec(deprecated)
+#else
+#define TAURUS_DEPRECATED
+#endif
 
-void taurus_element_add_namespace_deprecated(TaurusElement elem, const char* prefix, const char* uri);
-void taurus_element_add_namespace_inplace(TaurusElement elem, char* prefix, char* uri, TaurusMemoryPool* pool);
+TAURUS_DEPRECATED void taurus_element_add_attribute_legacy(TaurusElement elem, const char* name, const char* value);
+TAURUS_DEPRECATED void taurus_element_add_attribute_pooled(TaurusElement elem, const char* name, const char* value, TaurusMemoryPool* pool);
+TAURUS_DEPRECATED void taurus_element_add_attribute_pooled_inplace(TaurusElement elem, char* name, char* value, TaurusMemoryPool* pool);
+TAURUS_DEPRECATED const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* name);
+
+TAURUS_DEPRECATED void taurus_element_add_namespace_deprecated(TaurusElement elem, const char* prefix, const char* uri);
+TAURUS_DEPRECATED void taurus_element_add_namespace_inplace(TaurusElement elem, char* prefix, char* uri, TaurusMemoryPool* pool);
 
 struct taurus_namespace* taurus_namespace_new_pooled(const char* prefix, const char* uri, TaurusMemoryPool* pool);
 struct taurus_namespace* taurus_namespace_new_with_views(TaurusStringView* prefix_view, TaurusStringView* uri_view, TaurusMemoryPool* pool);

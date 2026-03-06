@@ -251,7 +251,7 @@ static int consume_token(XPathParser* parser, XPathTokenType type, const char* e
                  xpath_token_type_to_string(tok->type));
 
         taurus_set_error_with_context(
-            TAURUS_ERROR_XPATH_SYNTAX,
+            TAURUS_ERROR_XPATH,
             detailed_msg,
             parser->lexer->input,
             byte_offset,
@@ -270,7 +270,7 @@ static int consume_token(XPathParser* parser, XPathTokenType type, const char* e
             : 0;
 
         taurus_set_error_with_context(
-            TAURUS_ERROR_XPATH_SYNTAX,
+            TAURUS_ERROR_XPATH,
             error_msg,
             parser->lexer->input,
             byte_offset,
@@ -344,7 +344,7 @@ XPathASTNode* xpath_parse(XPathParser* parser) {
                      xpath_token_type_to_string(tok->type));
 
             taurus_set_error_with_context(
-                TAURUS_ERROR_XPATH_SYNTAX,
+                TAURUS_ERROR_XPATH,
                 msg,
                 parser->lexer->input,
                 byte_offset,
@@ -696,7 +696,7 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
                 ? parser->lexer->end - parser->lexer->input
                 : 0;
             taurus_set_error_with_context(
-                TAURUS_ERROR_XPATH_SYNTAX,
+                TAURUS_ERROR_XPATH,
                 "Unexpected end of XPath expression",
                 parser->lexer->input,
                 byte_offset,
@@ -814,7 +814,7 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
                  xpath_token_type_to_string(tok->type));
 
         taurus_set_error_with_context(
-            TAURUS_ERROR_XPATH_SYNTAX,
+            TAURUS_ERROR_XPATH,
             msg,
             parser->lexer->input,
             byte_offset,
@@ -1481,7 +1481,7 @@ static XPathASTNode* parse_node_test(XPathParser* parser) {
                 ? parser->lexer->end - parser->lexer->input
                 : 0;
             taurus_set_error_with_context(
-                TAURUS_ERROR_XPATH_SYNTAX,
+                TAURUS_ERROR_XPATH,
                 "Expected node test, got end of expression",
                 parser->lexer->input,
                 byte_offset,
@@ -1617,7 +1617,7 @@ static XPathASTNode* parse_node_test(XPathParser* parser) {
             : 0;
 
         taurus_set_error_with_context(
-            TAURUS_ERROR_XPATH_SYNTAX,
+            TAURUS_ERROR_XPATH,
             "Expected node test",
             parser->lexer->input,
             byte_offset,

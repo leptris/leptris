@@ -22,17 +22,18 @@
 #endif
 
 /* Adaptive pre-allocation estimate:
- * - For small files (< 4KB): 1.5x + 512B safety margin
- * - For medium files (4KB-64KB): 1.2x + 1KB safety margin
- * - For large files (> 64KB): 1.2x + 2KB safety margin
+ * - For small files (< 16KB): 2.5x + 1KB safety margin
+ * - For medium files (16KB-256KB): 2x + 4KB safety margin
+ * - For large files (> 256KB): 1.5x + 8KB safety margin
  *
- * OPTIMIZED: Adaptive margins reduce overhead for small files
- * while maintaining adequate headroom for large files.
+ * FIXED: Previous formula underestimated DOM node storage.
+ * Each XML element creates multiple 16-byte structures (element + attributes + text),
+ * so we need generous headroom for documents with many small elements.
  */
 #define ZERO_CHECK_SIZE_ESTIMATE(input_len) \
-    ((input_len) < 4096 ? ((input_len) + ((input_len) / 2) + 512) : \
-     (input_len) < 65536 ? ((input_len) + ((input_len) / 5) + 1024) : \
-     ((input_len) + ((input_len) / 5) + 2048))
+    ((input_len) < 16384 ? ((input_len) * 2 + ((input_len) / 2) + 1024) : \
+     (input_len) < 262144 ? ((input_len) * 2 + 4096) : \
+     ((input_len) + ((input_len) / 2) + 8192))
 
 /* Minimum allocation: 1KB for small files
  * OPTIMIZED: Reduced from 4KB to 1KB - cuts allocation overhead by 4x for tiny XML

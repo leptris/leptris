@@ -10,11 +10,14 @@
 #include "dom/element.h"
 #include "dom/ptr_element.h"
 #include "dom/ptr_accessor.h"
+#include "dom/compact_element.h"
+#include "dom/text.h"
 #include "dom/pi.h"
 #include "dom/doctype.h"
 #include "dtd/model.h"
 #include "serialize/serialize.h"
 #include "common/entities.h"
+#include "memory/pool.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -22,6 +25,252 @@
 /* Forward declarations */
 extern void taurus_doctype_free(TaurusDoctypeNode* doctype);
 extern void ttdtd_free(TaurusDTD* dtd);
+
+/* Forward declaration for recursive wrapper creation */
+static struct ptr_element* create_compact_wrapper_full(
+    struct taurus_document* doc,
+    uint32_t offset,
+    struct ptr_element* parent
+);
+
+/* ============================================================================
+ * Compact Element Wrapper Creation (Full)
+ * ============================================================================ */
+
+/**
+ * Create a TaurusTextNode from compact text v2
+ * NOTE: Uses TaurusTextNode (not ptr_text) for serialization compatibility
+ */
+static TaurusTextNode* create_text_wrapper(
+    struct taurus_document* doc,
+    struct compact_text_v2* compact_text
+) {
+    if (!doc || !compact_text) return NULL;
+
+    /* Allocate text node using TaurusTextNode structure for serialization compatibility */
+    TaurusTextNode* text = (TaurusTextNode*)taurus_pool_alloc(
+        doc->pool, sizeof(TaurusTextNode));
+    if (!text) return NULL;
+
+    memset(text, 0, sizeof(TaurusTextNode));
+
+    /* Set node type based on compact flags
+     * NOTE: Compact type values don't match Taurus type values!
+     * COMPACT: TEXT=1, CDATA=2, COMMENT=3, PI=4
+     * TAURUS:  TEXT=2, CDATA=7, COMMENT=3, PI=4 */
+    uint32_t flags = compact_text->flags;
+    uint32_t compact_type = flags & COMPACT_NODE_TYPE_MASK;
+
+    switch (compact_type) {
+        case COMPACT_NODE_TYPE_TEXT:
+            text->base.type = TAURUS_NODE_TYPE_TEXT;  /* 1 -> 2 */
+            break;
+        case COMPACT_NODE_TYPE_CDATA:
+            text->base.type = TAURUS_NODE_TYPE_CDATA; /* 2 -> 7 */
+            break;
+        case COMPACT_NODE_TYPE_COMMENT:
+            text->base.type = TAURUS_NODE_TYPE_COMMENT; /* 3 -> 3 */
+            break;
+        case COMPACT_NODE_TYPE_PI:
+            text->base.type = TAURUS_NODE_TYPE_PI; /* 4 -> 4 */
+            break;
+        default:
+            text->base.type = TAURUS_NODE_TYPE_TEXT;
+    }
+
+    /* Get text content - COMPACT TEXT IS NOT NULL-TERMINATED!
+     * Must copy and add null terminator */
+    if (compact_text->text_offset != UINT32_MAX && doc->xml_buffer) {
+        const char* src = doc->xml_buffer + compact_text->text_offset;
+        uint32_t len = compact_text->text_length;
+
+        /* Allocate space for copy with null terminator */
+        char* copy = (char*)taurus_pool_alloc(doc->pool, len + 1);
+        if (copy) {
+            memcpy(copy, src, len);
+            copy[len] = '\0';
+            text->content = copy;
+        }
+    }
+
+    return text;
+}
+
+/**
+ * Create a ptr_attribute from compact attribute v2
+ */
+static struct ptr_attribute* create_attr_wrapper(
+    struct taurus_document* doc,
+    struct compact_attribute_v2* compact_attr
+) {
+    if (!doc || !compact_attr) return NULL;
+
+    /* Allocate attribute */
+    struct ptr_attribute* attr = (struct ptr_attribute*)taurus_pool_alloc(
+        doc->pool, sizeof(struct ptr_attribute));
+    if (!attr) return NULL;
+
+    memset(attr, 0, sizeof(struct ptr_attribute));
+
+    /* Get name (lower 31 bits of name_offset) */
+    uint32_t name_off = compact_attr->name_offset & 0x7FFFFFFF;
+    if (name_off != UINT32_MAX && doc->xml_buffer) {
+        attr->name = (const char*)(doc->xml_buffer + name_off);
+    }
+
+    /* Get value */
+    if (compact_attr->value_offset != UINT32_MAX && doc->xml_buffer) {
+        attr->value = (const char*)(doc->xml_buffer + compact_attr->value_offset);
+    }
+
+    return attr;
+}
+
+/**
+ * Create a full ptr_element wrapper for a compact element (recursive)
+ * This populates ALL children, attributes, and text nodes for complete DOM access
+ * NOTE: Offset 0 is VALID (first element in buffer)
+ */
+static struct ptr_element* create_compact_wrapper_full(
+    struct taurus_document* doc,
+    uint32_t offset,
+    struct ptr_element* parent
+) {
+    /* Offset 0 is VALID (first element in buffer), only UINT32_MAX is invalid */
+    if (!doc || offset == UINT32_MAX || !doc->compact_base) {
+        return NULL;
+    }
+
+    /* Create pool if needed */
+    if (!doc->pool) {
+        doc->pool = taurus_pool_create();
+        if (!doc->pool) return NULL;
+    }
+
+    /* Get compact element */
+    struct compact_element_v2* compact = (struct compact_element_v2*)
+        ((char*)doc->compact_base + offset);
+    if (!compact) return NULL;
+
+    /* Allocate wrapper element */
+    struct ptr_element* wrapper = (struct ptr_element*)taurus_pool_alloc(
+        doc->pool, sizeof(struct ptr_element));
+    if (!wrapper) return NULL;
+
+    memset(wrapper, 0, sizeof(struct ptr_element));
+
+    /* Fill in essential fields */
+    wrapper->type = PTR_NODE_TYPE_ELEMENT;
+    wrapper->document = doc;
+    wrapper->parent = parent;
+
+    /* Get name from offset */
+    if (compact->name_offset != UINT32_MAX && doc->xml_buffer) {
+        wrapper->name = (const char*)(doc->xml_buffer + compact->name_offset);
+    }
+
+    /* Process children (attributes, elements, text nodes) */
+    uint32_t child_off = compact->first_child;
+    struct ptr_element* last_child_elem = NULL;
+    struct ptr_attribute* last_attr = NULL;
+    struct ptr_text* last_text = NULL;
+    void* last_child_node = NULL;  /* Generic pointer for next_sibling linking */
+
+    while (child_off != UINT32_MAX && child_off != 0) {
+        char* child_ptr = (char*)doc->compact_base + child_off;
+
+        /* Check first field for attribute marker
+         * For element: first field is first_child (offset 0 or UINT32_MAX)
+         * For attribute: first field is name_offset with high bit set */
+        uint32_t first_field = *(uint32_t*)child_ptr;
+        if ((first_field & 0x80000000) && (first_field != UINT32_MAX)) {
+            /* Attribute node */
+            struct compact_attribute_v2* compact_attr = (struct compact_attribute_v2*)child_ptr;
+
+            struct ptr_attribute* attr = create_attr_wrapper(doc, compact_attr);
+            if (attr) {
+                if (!wrapper->first_attr) {
+                    wrapper->first_attr = attr;
+                } else if (last_attr) {
+                    last_attr->next_attr = attr;
+                }
+                last_attr = attr;
+                wrapper->attr_count++;
+            }
+
+            /* Move to next attribute */
+            child_off = compact_attr->next_attr;
+        } else {
+            /* Check for text node using TEXT_MARKER at offset 12 (flags field)
+             * For element: offset 12 is name_offset (string offset, no high bit)
+             * For text: offset 12 is flags with COMPACT_V2_TEXT_MARKER set */
+            uint32_t offset12_field = *(uint32_t*)(child_ptr + 12);
+            if (offset12_field & COMPACT_V2_TEXT_MARKER) {
+                /* Text-like node */
+                struct compact_text_v2* compact_text = (struct compact_text_v2*)child_ptr;
+
+                TaurusTextNode* text = create_text_wrapper(doc, compact_text);
+                if (text) {
+                    /* Link as child - text nodes use base.next_sibling for linking */
+                    if (last_child_node) {
+                        /* Set next_sibling of previous node */
+                        TaurusTextNode* prev = (TaurusTextNode*)last_child_node;
+                        prev->base.next_sibling = (TaurusNode*)text;
+                        text->base.prev_sibling = (TaurusNode*)prev;
+                    } else {
+                        /* First child */
+                        wrapper->first_child = (struct ptr_element*)text;
+                    }
+                    last_child_node = text;
+                    wrapper->child_count++;
+                }
+
+                /* Move to next sibling */
+                child_off = compact_text->next_sibling;
+            } else {
+                /* Element child - create wrapper recursively */
+                struct compact_element_v2* child_compact = (struct compact_element_v2*)child_ptr;
+
+                struct ptr_element* child_wrapper = create_compact_wrapper_full(doc, child_off, wrapper);
+                if (child_wrapper) {
+                    /* Link as child */
+                    if (last_child_node) {
+                        /* Set next_sibling of previous node */
+                        struct ptr_element* prev = (struct ptr_element*)last_child_node;
+                        prev->next_sibling = child_wrapper;
+                        child_wrapper->prev_sibling = prev;
+                    } else {
+                        /* First child */
+                        wrapper->first_child = child_wrapper;
+                    }
+                    last_child_node = child_wrapper;
+                    last_child_elem = child_wrapper;
+                    wrapper->child_count++;
+                }
+
+                /* Move to next sibling */
+                child_off = child_compact->next_sibling;
+            }
+        }
+    }
+
+    /* Set last_child pointer for O(1) append */
+    wrapper->last_child = last_child_elem;
+
+    return wrapper;
+}
+
+/**
+ * Create a minimal ptr_element wrapper for a compact element
+ * This provides basic element access for compact mode documents
+ * NOTE: Offset 0 is VALID (first element in buffer)
+ */
+static struct ptr_element* create_compact_wrapper(
+    struct taurus_document* doc,
+    uint32_t offset
+) {
+    return create_compact_wrapper_full(doc, offset, NULL);
+}
 
 /* ============================================================================
  * Document Lifecycle
@@ -103,20 +352,6 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         doc->wrapper_cache = NULL;
     }
 
-    /* POINTER-BASED: Free pointer mode pools */
-    if (doc->ptr_elem_pool) {
-        taurus_pool_destroy(doc->ptr_elem_pool);
-        doc->ptr_elem_pool = NULL;
-    }
-    if (doc->ptr_attr_pool) {
-        taurus_pool_destroy(doc->ptr_attr_pool);
-        doc->ptr_attr_pool = NULL;
-    }
-    if (doc->ptr_text_pool) {
-        taurus_pool_destroy(doc->ptr_text_pool);
-        doc->ptr_text_pool = NULL;
-    }
-
     /* Destroy memory pool (frees all DOM nodes allocated from it) */
     if (doc->pool) {
         taurus_pool_destroy(doc->pool);
@@ -129,6 +364,7 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
 /**
  * Get root element of document (POINTER-BASED)
  * V2: Uses ptr_element structures directly
+ * Also supports compact mode (v5 parser)
  */
 TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
     if (!doc) return NULL;
@@ -136,6 +372,22 @@ TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
     /* POINTER-BASED: Use ptr_root directly */
     if (doc->ptr_root) {
         return doc->ptr_root;
+    }
+
+    /* COMPACT MODE: Check for compact root offset
+     * NOTE: Offset 0 is VALID (first element in buffer), UINT32_MAX means no root */
+    if (doc->compact_root_offset != UINT32_MAX && doc->compact_base) {
+        /* Check if we already created a wrapper and cached it in new_dom_root */
+        if (doc->new_dom_root) {
+            return (TaurusElement)doc->new_dom_root;
+        }
+        /* Create a minimal wrapper for the compact element */
+        struct ptr_element* wrapper = create_compact_wrapper(doc, doc->compact_root_offset);
+        if (wrapper) {
+            /* Cache it in new_dom_root for future access */
+            doc->new_dom_root = wrapper;
+            return wrapper;
+        }
     }
 
     /* No root - document may be empty or not parsed */

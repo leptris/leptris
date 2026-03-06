@@ -328,7 +328,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             size_t byte_offset = lexer->pos - lexer->input;
             
             taurus_set_error_with_context(
-                TAURUS_ERROR_XPATH_SYNTAX,
+                TAURUS_ERROR_XPATH,
                 "Unexpected ':' character in XPath expression",
                 lexer->input,
                 byte_offset,
@@ -369,7 +369,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             size_t byte_offset = lexer->pos - lexer->input;
             
             taurus_set_error_with_context(
-                TAURUS_ERROR_XPATH_SYNTAX,
+                TAURUS_ERROR_XPATH,
                 "Unexpected '!' character (did you mean '!='?)",
                 lexer->input,
                 byte_offset,
@@ -443,7 +443,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
                 size_t byte_offset = start - lexer->input;
                 
                 taurus_set_error_with_context(
-                    TAURUS_ERROR_XPATH_SYNTAX,
+                    TAURUS_ERROR_XPATH,
                     "Unterminated string literal",
                     lexer->input,
                     byte_offset,
@@ -533,7 +533,7 @@ parse_number:
                 c);
         
         taurus_set_error_with_context(
-            TAURUS_ERROR_XPATH_SYNTAX,
+            TAURUS_ERROR_XPATH,
             msg,
             lexer->input,
             byte_offset,

@@ -26,30 +26,11 @@ struct taurus_compact_overflow_entry;  /* typedef in dom/compact.h */
 /* ============================================================================
  * Error Codes (Internal)
  *
- * These map to public TaurusStatus codes in taurus/types.h.
- * Kept for backward compatibility with internal code.
+ * Use public TaurusStatus codes from taurus/error.h directly.
  * ============================================================================ */
 
 /* Include public error types */
 #include "../include/taurus/error.h"
-
-/* Internal error codes - map to public TaurusStatus */
-/* DEPRECATED: Use TaurusStatus directly in new code */
-#define TAURUS_ERROR_NONE            TAURUS_OK
-#define TAURUS_ERROR_MEMORY_ALLOCATION TAURUS_ERROR_MEMORY
-#define TAURUS_ERROR_PARSE_FAILED    TAURUS_ERROR_PARSE
-#define TAURUS_ERROR_XPATH_EVALUATION TAURUS_ERROR_XPATH
-#define TAURUS_ERROR_XPATH_SYNTAX    TAURUS_ERROR_XPATH
-#define TAURUS_ERROR_XPATH_FUNCTION  TAURUS_ERROR_XPATH
-#define TAURUS_ERROR_EVAL_CONTEXT    TAURUS_ERROR_XPATH
-#define TAURUS_ERROR_INVALID_ARGUMENT TAURUS_ERROR_INVALID_ARG
-#define TAURUS_ERROR_NULL_INPUT      TAURUS_ERROR_NULL_ARG
-#define TAURUS_ERROR_EMPTY_INPUT     TAURUS_ERROR_INVALID_ARG
-#define TAURUS_ERROR_OUT_OF_MEMORY   TAURUS_ERROR_MEMORY
-#define TAURUS_ERROR_INVALID_XML     TAURUS_ERROR_PARSE
-
-/* Legacy typedef - DEPRECATED: Use TaurusStatus */
-typedef TaurusStatus taurus_error_code;
 
 /* ============================================================================
  * Internal Structures - Match ext/taurus/taurus.h but without Ruby
@@ -74,46 +55,54 @@ struct taurus_processing_instruction {
 
 /* Document structure */
 struct taurus_document {
-    struct taurus_element* root;             /* Root element (legacy API) */
+    /* Memory pool for fast DOM node allocation */
+    TaurusMemoryPool* pool;         /* Pool allocator (owns all DOM nodes) */
+
+    /* Document metadata */
     char* encoding;                 /* UTF-8 assumed, but store if specified */
     struct taurus_processing_instruction* pis;  /* Processing instructions */
     size_t ref_count;               /* Reference counting for memory management */
     void* new_dom_root;             /* New DOM tree root (TaurusElement) for serialization */
+
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */
     int had_declaration;            /* 1 if input had <?xml?>, 0 otherwise */
     int has_bom;                    /* 1 if UTF-8 BOM was present, 0 otherwise */
+
     /* DOCTYPE support */
     void* doctype;                  /* TaurusDoctypeNode* or NULL */
     void* dtd;                      /* TaurusDTD* - Parsed DTD declarations */
-    /* Memory pool for fast DOM node allocation */
-    TaurusMemoryPool* pool;         /* Pool allocator (owns all DOM nodes) */
+
     /* Compact pointer support */
     void* page_base;                /* Base pointer for compact pointer decoding */
     struct taurus_compact_overflow_entry* overflow_entries; /* Per-document overflow entry list head */
+
     /* In-place parsing support (zero-copy optimization) */
     char* xml_buffer;               /* Owned writable XML buffer (NULL if not in-place) */
     size_t xml_buffer_len;       /* Length of xml_buffer */
     int xml_buffer_needs_free;   /* 1 if xml_buffer needs free(), 0 if stack/const */
+
     /* Per-document strict mode (thread-safe, no global state) */
     int strict_mode;                /* 1=strict XML 1.0, 0=lenient (pugixml compat) */
+
     /* Observer list for change tracking (lazy initialization) */
     void* observer_list;            /* ObserverList* - for document change events */
+
     /* Per-document allocator (NULL = use global allocator) */
     void* allocator;                /* TaurusAllocator* - document-specific memory allocator */
+
     /* Compact-only mode support (v5 parser with 16-byte elements) */
     void* compact_alloc;            /* ZeroCheckAlloc* - zero-check bump allocator */
     void* compact_base;             /* Base pointer for compact element resolution */
     uint32_t compact_root_offset;   /* Offset to root element in compact block */
+
     /* Compact wrapper cache - maps offsets to wrapper elements */
     void* wrapper_cache;            /* WrapperCache* - hash table for offset->wrapper mapping */
+
     /* Pointer-based mode support (v6 parser - 1.28-1.46x faster than pugixml!) */
     int is_ptr_mode;                /* 1 if using pointer-based structures */
     void* ptr_root;                 /* ptr_element* - root element in pointer mode */
-    void* ptr_elem_pool;            /* Element pool for pointer mode */
-    void* ptr_attr_pool;            /* Attribute pool for pointer mode */
-    void* ptr_text_pool;            /* Text node pool for pointer mode */
 };
 
 /* Parse options structure */

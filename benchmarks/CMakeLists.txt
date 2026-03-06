@@ -81,6 +81,32 @@ else()
     endif()
 endif()
 
+# Add unified vs duplication benchmark
+add_executable(bench_unified_vs_duplication
+    bench_unified_vs_duplication.c
+    utils.c
+)
+
+target_include_directories(bench_unified_vs_duplication PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/include
+)
+
+target_link_libraries(bench_unified_vs_duplication PRIVATE
+    taurus
+)
+
+set_target_properties(bench_unified_vs_duplication PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED on
+)
+
+add_custom_target(run_bench_unified_vs_duplication
+    COMMAND bench_unified_vs_duplication
+    DEPENDS bench_unified_vs_duplication
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Compare unified (compact+wrappers) vs duplicated (direct pointers) architecture"
+)
+
 if(PUGIXML_AVAILABLE)
     message(STATUS "pugixml include: ${PUGIXML_INCLUDE_DIR}")
     message(STATUS "pugixml library: ${PUGIXML_LIBRARY}")
