@@ -7,6 +7,7 @@
 #include "evaluator_internal.h"
 #include "../taurus_internal.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
+#include "../dom/ptr_element.h"  /* For direct attribute access in fast path */
 #include "../../include/taurus.h"  /* For taurus_document_root() */
 #include <string.h>
 #include <stdio.h>
@@ -247,9 +248,29 @@ static int fast_path_attr_string_predicate(XPathContext* ctx,
 
     if (!attr_name || !lit_value || !elem) return -1;
 
-    /* FAST PATH: Direct attribute lookup and comparison */
-    const char* attr_value = taurus_element_attribute(elem, attr_name);
+    /* PERFORMANCE: INLINE attribute lookup to avoid function call overhead
+     * This is the HOT PATH for predicates. Directly access the attribute
+     * linked list with two-char filtering for fast rejection. */
+    struct ptr_element* element = (struct ptr_element*)elem;
+    struct ptr_attribute* attr = element->first_attr;
 
+    /* Precompute first two chars for quick filter */
+    char c0 = attr_name[0];
+    char c1 = attr_name[1];
+
+    const char* attr_value = NULL;
+    while (attr) {
+        /* Two-char filter before strcmp */
+        if (attr->name && attr->name[0] == c0 &&
+            (c1 == '\0' || attr->name[1] == c1) &&
+            strcmp(attr->name, attr_name) == 0) {
+            attr_value = attr->value;
+            break;
+        }
+        attr = attr->next_attr;
+    }
+
+    /* Compare attribute value with literal */
     int cmp_result;
     if (attr_value == NULL) {
         /* Attribute doesn't exist - compare with empty string */
