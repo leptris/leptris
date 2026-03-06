@@ -6,6 +6,15 @@
 
 ---
 
+## Current Status
+
+| Category | Taurus vs libxml2 | Status |
+|----------|-------------------|--------|
+| XPath Predicates | 1.6x SLOWER | 🔴 Needs work |
+| XPath Simple | 2-3x FASTER | ✅ Good |
+
+---
+
 ## Root Cause Analysis
 
 ### Why libxml2 is Faster (Discovered from Source Analysis)
@@ -30,68 +39,47 @@ for (i = 0; i < ns->nodeNr; i++) {
 - Eliminates most non-matches without allocation
 - Only does full string extraction when hash matches
 
-### Why Our Optimization Didn't Help Much
+### Implemented Optimizations
 
-Our fast path (`fast_path_attr_string_predicate`) does direct string comparison:
-1. Get attribute value (O(n) linked list traversal)
-2. Do full `strcmp()` comparison
+1. **Hash-based comparison** ✅
+   - Added `xpath_fast_hash()` and `xpath_node_val_hash()`
+   - Added `xpath_nodeset_equals_string_hash()` with early exit
+   - Updated comparison operators to use hash-based comparison
 
-libxml2's approach:
-1. Compute hash of target string (O(1))
-2. For each node, compute node's hash (O(1))
-3. Only do full comparison if hashes match (rare)
+2. **Fast path for attribute predicates** ✅
+   - Direct attribute access without nodeset creation
+   - Pattern: `[@attr='value']`
 
----
+### Why Hash Optimization Didn't Help Much
 
-## Implementation Plan
-
-### Phase 1: Add Fast Hash Functions
-
-**File:** `src/taurus/xpath/evaluator_types.c`
-
-Add functions:
-- `xpath_fast_hash(const char* str)` - Returns hash of first two chars
-- `xpath_node_val_hash(void* node)` - Returns hash of node's text content
-
-### Phase 2: Optimize Nodeset-String Comparison
-
-**File:** `src/taurus/xpath/evaluator_operators.c`
-
-Update `evaluate_operator()` for EQUAL/NOT_EQUAL:
-- Compute hash of string literal ONCE
-- For each node in nodeset, compare hashes first
-- Only do full string comparison if hashes match
-
-### Phase 3: Optimize Predicate Fast Path
-
-**File:** `src/taurus/xpath/evaluator_path.c`
-
-Update `fast_path_attr_string_predicate()`:
-- Add hash-based early exit
-- Compute hash of literal string once
-- Get attribute value and compare hash before full strcmp
+The hash comparison is fast, but the REAL bottleneck is:
+1. **O(n) attribute lookup** via `ptr_element_find_attr()` - linked list traversal
+2. This happens for EVERY element being tested in the predicate
 
 ---
 
-## Expected Impact
+## Next Steps
 
-- **Hash comparison:** O(1) vs O(n) for string comparison
-- **Early exit:** Eliminates 90%+ of full string comparisons
-- **Memory:** No allocation needed for hash computation
+### Option 1: Add Attribute Hash Table (RECOMMENDED)
 
-**Target:** >= 1.0x vs libxml2 (currently 1.6x slower)
+**File:** `src/taurus/dom/ptr_element.h`, `element_modify.c`
 
----
+Add hash table for O(1) attribute lookup:
+- Create hash table when element has >= 3 attributes
+- Use simple hash like first character
+- Fall back to linked list for small attribute counts
 
-## Tasks
+### Option 2: Optimize Attribute Linked List
 
-| # | Task | Status | File |
-|---|------|--------|------|
-| 1 | Add `xpath_fast_hash()` function | 🔴 Pending | evaluator_types.c |
-| 2 | Add `xpath_node_val_hash()` function | 🔴 Pending | evaluator_types.c |
-| 3 | Update comparison operators with hash early exit | 🔴 Pending | evaluator_operators.c |
-| 4 | Update predicate fast path with hash | 🔴 Pending | evaluator_path.c |
-| 5 | Run benchmarks to verify improvement | 🔴 Pending | - |
+**File:** `src/taurus/dom/ptr_accessor.c`
+
+Keep frequently accessed attributes at head of list:
+- Move matched attribute to head on successful lookup
+- Cache last accessed attribute
+
+### Option 3: Profile to Find Other Bottlenecks
+
+Use profiler to identify hot paths we haven't optimized.
 
 ---
 
@@ -103,4 +91,5 @@ ctest --test-dir build --output-on-failure
 ./build/benchmarks/ultimate_benchmark
 
 # Target: XPath predicates >= 1.0x vs libxml2
+# Current: ~1.6x slower
 ```
