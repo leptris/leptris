@@ -22,23 +22,28 @@
 
 | Category | Taurus vs libxml2 | Gap | Priority |
 |----------|-------------------|-----|----------|
-| XPath Predicates | 1.5-3.5x SLOWER | 🔴 Critical | HIGH |
+| XPath Predicates | 1.6-1.7x SLOWER | 🔴 Critical | HIGH |
 | XPath Complex (functions) | 1.3-1.6x SLOWER | 🟡 Medium | MEDIUM |
 
 ---
 
-## Current Work
-
-| Task | Status | Assignee | Target |
-|------|--------|----------|--------|
-| Task #8: Profile XPath predicates | 🔴 Not Started | - | Week 1 |
-| Task #9: Add attribute lookup cache | 🔴 Not Started | - | Week 1 |
-| Task #10: Optimize get_node_text | 🔴 Not Started | - | Week 2 |
-| Task #11: Optimize nodeset comparison | 🔴 Not Started | - | Week 2 |
-
----
-
 ## Completed Work
+
+### 2026-03-06: XPath Predicate Optimization (Partial)
+
+| Task | Status | Commit |
+|------|--------|--------|
+| Add get_node_text_direct() | ✅ Complete | a809ecf |
+| Add xpath_nodeset_equals_string() | ✅ Complete | a809ecf |
+| Add fast path for [@attr='value'] | ✅ Complete | a809ecf |
+| Optimize comparison operators | ✅ Complete | a809ecf |
+
+**Impact:** Reduced allocation in predicate hot path, but still 1.6x slower due to O(n) attribute lookup.
+
+**Root Cause Identified:**
+- `ptr_element_find_attr()` uses linear search through attribute linked list
+- libxml2 also uses linked lists but may have different optimization strategies
+- Need attribute hash table for O(1) lookup
 
 ### 2026-03-06: Parser Code Streamlining
 
@@ -55,35 +60,11 @@
 
 ---
 
-## Performance Analysis Details
-
-### Benchmark Summary (from ultimate_benchmark)
-
-```
-╔══════════════════╦═════════╦═════════════════════════════╗
-║ Library            ║ Wins    ║ Assessment                  ║
-╠══════════════════╬═════════╬═════════════════════════════╣
-║ Taurus             ║ 19       ║☆☆☆ NEEDS WORK        ║
-║ pugixml            ║ 32       ║★☆☆ ACCEPTABLE        ║
-║ libxml2            ║ 13       ║☆☆☆ NEEDS WORK        ║
-╚══════════════════╩═════════╩═════════════════════════════╝
-```
-
-### Areas Where Taurus Loses to libxml2
-
-| Test | Taurus | libxml2 | Gap |
-|------|--------|---------|-----|
-| XPath pred (medium_catalog) | 279 µs | 171 µs | 1.63x |
-| XPath pred (large_catalog) | 1700 µs | 1026 µs | 1.66x |
-| XPath pred (vlarge_catalog) | 8929 µs | 7030 µs | 1.27x |
-
-### Root Cause Analysis
+## Root Cause Analysis
 
 **Identified Bottlenecks:**
-1. **O(n*m) nodeset comparison** - evaluator_operators.c compares nodesets with nested loops
-2. **Repeated memory allocation** - `get_node_text()` allocates strings on every call
-3. **No attribute lookup cache** - Attribute predicates do full lookups each time
-4. **Position recalculation** - Position is recalculated during predicate evaluation
+1. **O(n) Attribute Lookup** - `ptr_element_find_attr()` uses linear search
+2. **No attribute hash table** - Each predicate lookup iterates through linked list
 
 ---
 
@@ -94,6 +75,16 @@
 | Unit Tests | 56 | 100% ✅ |
 | Scanner Tests | 21 | 100% ✅ |
 | XPath W3C | 438 | 100% ✅ |
+
+---
+
+## Next Steps
+
+| Task | Priority | Notes |
+|------|----------|-------|
+| Add attribute hash table | HIGH | Would provide O(1) lookup |
+| Optimize axis_attribute for single attr | MEDIUM | Skip nodeset creation for simple cases |
+| Profile to understand libxml2 advantage | MEDIUM | May reveal other optimizations |
 
 ---
 
@@ -112,4 +103,3 @@ ctest --test-dir build --output-on-failure
 # Memory check
 leaks --atExit -- ./build/test/c/test_dom
 ```
-

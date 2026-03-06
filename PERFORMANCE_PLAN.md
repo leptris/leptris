@@ -3,6 +3,7 @@
 **Created:** 2026-03-06
 **Goal:** Achieve >= 1.0x (parity or faster) vs libxml2 in ALL XPath predicate benchmarks
 **Deadline:** ASAP
+**Last Updated:** 2026-03-06
 
 ---
 
@@ -22,7 +23,7 @@
 
 | Category | Taurus vs libxml2 | Gap |
 |----------|-------------------|-----|
-| XPath Predicates | 1.5-3.5x SLOWER | Target: >= 1.0x |
+| XPath Predicates | 1.6-1.7x SLOWER | Target: >= 1.0x |
 | XPath Functions | 1.3-1.6x SLOWER | Target: >= 1.0x |
 
 ---
@@ -31,48 +32,14 @@
 
 ### Identified Bottlenecks
 
-1. **O(n*m) Nodeset Comparison** (`evaluator_operators.c`)
-   - Compares every node in left nodeset with every node in right nodeset
-   - This is O(n*m) complexity
+1. **O(n) Attribute Lookup** (`ptr_accessor.c:95-106`)
+   - `ptr_element_find_attr()` uses linear search through linked list
+   - Called for EVERY predicate evaluation like `[@id='x']`
+   - libxml2 also uses linked lists but may have different optimization
 
-2. **Repeated Memory Allocation** (`evaluator_types.c:20-41`)
-   - `get_node_text()` allocates a new string every call
-   - Called during every predicate evaluation
-   - Causes heap pressure
-
-3. **No Attribute Lookup Cache**
-   - Attribute predicates like `[@id='x']` do full lookup each time
-   - Hash table lookup is O(1), but repeated lookups during iteration
-
----
-
-## Optimization Strategy
-
-### Phase 1: Optimize Nodeset Comparison
-
-**Target:** O(n) instead of O(n*m)
-
-**Approach:**
-- Add fast path for single-node nodeset comparison
-- Use direct string comparison for attributes
-- Early exit when attribute doesn't exist
-
-### Phase 2: Eliminate Memory Allocation
-
-**Target:** Zero allocation in predicate comparison hot path
-
-**Approach:**
-- Add `get_node_text_direct()` - returns pointer to internal string
-- Update comparison operators to use direct comparison
-- Avoid `taurus_strdup()` in hot paths
-
-### Phase 3: Add Comparison Cache
-
-**Target:** O(1) attribute access with caching
-
-**Approach:**
-- Cache attribute lookups during predicate evaluation
-- Invalidate cache when predicate evaluation completes
+2. **AST-based Optimizations Needed**
+   - Fast path for `[@attr='value']` pattern implemented but needs better matching
+   - Currently not triggering due to AST structure differences
 
 ---
 
@@ -80,9 +47,22 @@
 
 | Task | Status | Files |
 |------|--------|-------|
-| Add `get_node_text_direct()` | 🔴 Pending | evaluator_types.c |
-| Optimize single-node equality comparison | 🔴 Pending | evaluator_operators.c |
-| Add comparison cache | 🔴 Pending | evaluator_operators.c |
+| Add `get_node_text_direct()` | ✅ Complete | evaluator_types.c |
+| Optimize single-node equality comparison | ✅ Complete | evaluator_operators.c |
+| Add fast path for `[@attr='value']` | ✅ Complete | evaluator_path.c |
+| Add attribute hash table | 🔴 Pending | ptr_element.h, element_modify.c |
+
+---
+
+## Next Steps
+
+1. **Add attribute hash table** (Major optimization)
+   - Add O(1) attribute lookup via hash table
+   - Would reduce predicate evaluation from O(n) to O(1)
+
+2. **Optimize attribute axis evaluation**
+   - Short-circuit attribute lookup for simple predicates
+   - Avoid nodeset creation for single attribute access
 
 ---
 
@@ -97,6 +77,4 @@ ctest --test-dir build --output-on-failure
 
 # Run benchmarks
 ./build/benchmarks/ultimate_benchmark
-
-# Target: All XPath tests >= 1.0x vs libxml2
 ```
