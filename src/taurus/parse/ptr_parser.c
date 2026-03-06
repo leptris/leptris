@@ -19,6 +19,7 @@
 #include "../dom/ptr_element.h"
 #include "../memory/pool.h"
 #include "../simd_helpers.h"
+#include "xml_scanner.h"
 #include "../taurus_internal.h"
 #include "../common/entities.h"  /* For entity expansion */
 #include <stdlib.h>
