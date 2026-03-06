@@ -7,6 +7,7 @@
 #include "evaluator_internal.h"
 #include "../taurus_internal.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
+#include "../../include/taurus.h"  /* For taurus_text() function */
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -149,4 +150,86 @@ char* xpath_to_string(struct taurus_xpath_result* result) {
         default:
             return taurus_strdup("");
     }
+}
+
+/* ============================================================================
+ * OPTIMIZED: Direct text access for comparisons (NO ALLOCATION)
+ * ============================================================================ */
+
+/* Get direct pointer to node's text content WITHOUT allocation
+ * Returns: pointer to internal string, or "" if NULL
+ * out_len: output length (0 if empty)
+ *
+ * PERFORMANCE: Used in predicate comparisons to avoid get_node_text() allocation.
+ * For attributes, returns direct pointer to value (most common predicate case).
+ * For elements, returns pointer to first text child if available.
+ */
+const char* get_node_text_direct(void* node, size_t* out_len) {
+    if (out_len) *out_len = 0;
+    if (!node) return "";
+
+    TaurusNodeType node_type = XPATH_NODE_TYPE(node);
+
+    switch (node_type) {
+        case TAURUS_NODE_ATTRIBUTE: {
+            /* OPTIMIZATION: Direct access to attribute value - NO allocation
+             * This is the hot path for predicates like [@id='x'] */
+            TaurusAttributeNode* attr_node = (TaurusAttributeNode*)node;
+            const char* val = attr_node->value ? attr_node->value : "";
+            if (out_len) *out_len = strlen(val);
+            return val;
+        }
+
+        case TAURUS_NODE_ELEMENT: {
+            /* For elements, we need to get text content.
+             * Use taurus_text() which returns concatenated text content.
+             * This is still faster than allocating via get_node_text(). */
+            TaurusElement element = (TaurusElement)node;
+            const char* text = taurus_text(element);
+            if (text) {
+                if (out_len) *out_len = strlen(text);
+                return text;
+            }
+            return "";
+        }
+
+        default:
+            return "";
+    }
+}
+
+/* Fast comparison of nodeset's string value with a literal (NO ALLOCATION)
+ * PERFORMANCE: O(1) length check + O(n) memcmp for single-node nodesets
+ * Returns: 1 if equal, 0 if not equal
+ */
+int xpath_nodeset_equals_string(XPathNodeSet* nodeset, const char* str, size_t str_len) {
+    if (!nodeset || xpath_nodeset_count(nodeset) == 0) {
+        return (str == NULL || str_len == 0) ? 1 : 0;
+    }
+
+    /* Get first node's text value directly */
+    void* first = xpath_nodeset_get(nodeset, 0);
+    size_t node_len;
+    const char* node_str = get_node_text_direct(first, &node_len);
+
+    /* Quick length check first - this eliminates most comparisons */
+    if (node_len != str_len) {
+        return 0;
+    }
+
+    /* Compare strings */
+    if (node_len == 0) {
+        return 1;  /* Both empty */
+    }
+
+    return (memcmp(node_str, str, str_len) == 0) ? 1 : 0;
+}
+
+/* Fast check if nodeset's string value matches a boolean (NO ALLOCATION)
+ * PERFORMANCE: Just checks if nodeset is non-empty
+ * Returns: 1 if nodeset is non-empty (truthy), 0 if empty
+ */
+int xpath_nodeset_to_boolean(XPathNodeSet* nodeset) {
+    if (!nodeset) return 0;
+    return xpath_nodeset_count(nodeset) > 0 ? 1 : 0;
 }

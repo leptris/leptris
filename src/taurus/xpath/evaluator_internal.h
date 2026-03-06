@@ -18,6 +18,17 @@ double xpath_to_number(struct taurus_xpath_result* result);
 char* xpath_to_string(struct taurus_xpath_result* result);
 char* get_node_text(void* node);
 
+/* Optimized text access for comparisons - returns pointer to internal data
+ * DOES NOT allocate memory. Returns pointer to internal string or NULL.
+ * For elements, returns first text child's content if available.
+ * For attributes, returns the attribute value directly.
+ * IMPORTANT: Result is NOT null-terminated if it's element text content.
+ * Use get_node_text_len() to get the length. */
+const char* get_node_text_direct(void* node, size_t* out_len);
+
+/* Quick length check for node text - avoids full text extraction */
+size_t get_node_text_len(void* node);
+
 /* From evaluator_axes.c */
 XPathNodeSet* apply_axis(XPathContext* ctx, TaurusElement node,
                          const char* axis_name, XPathASTNode* test);
