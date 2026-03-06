@@ -723,4 +723,102 @@ inline static const char* simd_find_char(const char* s, const char* end, char ta
     return (p < end) ? p : NULL;
 }
 
+/**
+ * Find first occurrence of any character from a set using SIMD
+ *
+ * @param s Start of search range
+ * @param end End of search range (exclusive)
+ * @param chars Null-terminated string of characters to search for
+ * @return Pointer to first match, or NULL if not found
+ *
+ * Performance: ~8 bytes/cycle with SIMD, ~1 byte/cycle scalar
+ */
+inline static const char* simd_find_char_any(const char* s, const char* end, const char* chars) {
+    if (!s || !end || s >= end || !chars || !*chars) {
+        return NULL;
+    }
+
+    /* Count chars to search for */
+    size_t char_count = strlen(chars);
+    if (char_count == 1) {
+        return simd_find_char(s, end, chars[0]);
+    }
+
+    const char* p = s;
+
+#if defined(TAURUS_SIMD_SSE2)
+    /* For up to 16 different chars, we can use SIMD efficiently */
+    if (char_count <= 16) {
+        /* Load search chars into SIMD register */
+        __m128i search_vec = _mm_loadu_si128((__m128i*)chars);
+
+        while (p + SIMD_VEC_SIZE <= end) {
+            __m128i chunk = _mm_loadu_si128((__m128i*)p);
+
+            /* For each position, check if byte matches any of the search chars
+             * This is done by comparing against each search char position */
+            int mask = 0;
+            for (size_t i = 0; i < char_count; i++) {
+                __m128i cmp = _mm_cmpeq_epi8(chunk, _mm_set1_epi8(chars[i]));
+                mask |= _mm_movemask_epi8(cmp);
+                if (mask == 0xFFFF) break;  /* All positions match something - take first */
+            }
+
+            if (mask != 0) {
+                int pos = __builtin_ctz(mask);
+                return p + pos;
+            }
+
+            p += SIMD_VEC_SIZE;
+        }
+    }
+
+#elif defined(TAURUS_SIMD_NEON)
+    /* NEON path for ARM64 */
+    if (char_count <= 16) {
+        uint8x16_t search_vec = vld1q_u8((uint8_t*)chars);
+
+        while (p + SIMD_VEC_SIZE <= end) {
+            uint8x16_t chunk = vld1q_u8((uint8_t*)p);
+
+            /* Check each search char */
+            uint8x16_t result = vdupq_n_u8(0);
+            for (size_t i = 0; i < char_count; i++) {
+                uint8x16_t cmp = vceqq_u8(chunk, vdupq_n_u8(chars[i]));
+                result = vorrq_u8(result, cmp);
+            }
+
+            /* Check if any byte matched (0xFF = match) */
+            uint64_t low = vgetq_lane_u64(vreinterpretq_u64_u8(result), 0);
+            uint64_t high = vgetq_lane_u64(vreinterpretq_u64_u8(result), 1);
+
+            if (low | high) {
+                /* Find first match */
+                if (low) {
+                    int pos = (__builtin_ctzll(low) >> 3);
+                    return p + pos;
+                } else {
+                    int pos = (__builtin_ctzll(high) >> 3) + 8;
+                    return p + pos;
+                }
+            }
+
+            p += SIMD_VEC_SIZE;
+        }
+    }
+#endif
+
+    /* Scalar fallback for remaining bytes or many chars */
+    while (p < end) {
+        for (size_t i = 0; i < char_count; i++) {
+            if (*p == chars[i]) {
+                return p;
+            }
+        }
+        p++;
+    }
+
+    return NULL;
+}
+
 #endif /* TAURUS_SIMD_HELPERS_H */
