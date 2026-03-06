@@ -197,29 +197,33 @@ static int ptr_validate_comment(const char* p, const char* end) {
 
 /* ============================================================================
  * Inline Character Classification
+ *
+ * Note: Uses shared scanner from xml_scanner.h for ASCII character handling.
+ * IS_UTF8_BYTE is kept locally for UTF-8 name support.
  * ============================================================================ */
 
-#define IS_SPACE(c) ((c) == ' ' || (c) == '\t' || (c) == '\n' || (c) == '\r')
-#define IS_NAME_START(c) (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_' || (c) == ':')
-#define IS_NAME_CHAR(c) (IS_NAME_START(c) || ((c) >= '0' && (c) <= '9') || (c) == '-' || (c) == '.')
 /* High bytes (>= 0x80) are part of UTF-8 sequences, accept them in names */
 #define IS_UTF8_BYTE(c) (((unsigned char)(c)) >= 0x80)
 
-/* Optimized scalar scanning */
+/* Optimized name scanning - uses shared scanner with UTF-8 support */
 static inline const char* ptr_scan_name(const char* p, const char* end) {
-    while (p < end && (IS_NAME_CHAR(*p) || IS_UTF8_BYTE(*p))) p++;
-    return p;
+    /* Use shared scanner for first part, then continue for UTF-8 */
+    const char* result = xml_scan_name(p, end);
+    if (result == p) return p;  /* No valid name start */
+
+    /* Continue scanning for any remaining UTF-8 bytes */
+    while (result < end && IS_UTF8_BYTE(*result)) result++;
+    return result;
 }
 
+/* Optimized whitespace scanning - delegates to shared scanner */
 static inline const char* ptr_skip_ws(const char* p, const char* end) {
-    while (p < end && IS_SPACE(*p)) p++;
-    return p;
+    return xml_scan_whitespace(p, end);
 }
 
+/* Optimized whitespace-only check - delegates to shared scanner */
 static inline int ptr_is_ws_only(const char* p, const char* end) {
-    if (end - p > 64) return simd_is_whitespace_only(p, end);
-    while (p < end) { if (!IS_SPACE(*p)) return 0; p++; }
-    return 1;
+    return xml_is_whitespace_only(p, end);
 }
 
 /* ============================================================================
@@ -692,13 +696,13 @@ static struct ptr_element* parse_ptr_main(PtrParser* p) {
         int need_whitespace = 0;  /* Track if we need whitespace before next attribute */
 
         while (p->pos < p->end && *p->pos != '>' && *p->pos != '/') {
-            if (IS_SPACE(*p->pos)) {
+            if (xml_is_space(*p->pos)) {
                 p->pos = ptr_skip_ws(p->pos, p->end);
                 need_whitespace = 0;  /* Whitespace seen, reset flag */
                 continue;
             }
 
-            if (IS_NAME_START(*p->pos)) {
+            if (xml_is_name_start(*p->pos)) {
                 /* Require whitespace between attributes (XML spec requirement) */
                 if (need_whitespace) {
                     /* Previous attribute was parsed but no whitespace before this one */
