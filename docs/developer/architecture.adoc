@@ -24,6 +24,27 @@ Taurus provides two parsing modes with different performance characteristics:
 * 4.5x smaller memory footprint per element
 * Best for: Maximum performance, large documents, streaming scenarios
 
+== Shared Parser Foundation
+
+Both parsing modes share common infrastructure for consistent behavior and reduced code duplication:
+
+### Shared Scanning (`src/taurus/parse/xml_scanner.h`)
+
+Character classification and scanning primitives used by all parsers:
+
+* `xml_is_space()`, `xml_is_name_start()`, `xml_is_name_char()` - Character classification
+* `xml_scan_name()`, `xml_scan_whitespace()` - SIMD-optimized scanning
+* `xml_is_whitespace_only()` - Whitespace detection
+
+### Shared Validation (`src/taurus/parse/xml_validation.h`)
+
+XML 1.0 compliance validation for strict mode parsing:
+
+* `xml_validate_name_start()` - Name start character validation
+* `xml_validate_attr_value()` - Attribute value validation
+* `xml_validate_text_content()` - Entity and UTF-8 validation
+* `xml_validate_comment()` - Comment content validation
+
 == Key Components
 
 ### DOM Layer (`src/taurus/dom/`)
@@ -49,8 +70,12 @@ Taurus provides two parsing modes with different performance characteristics:
 
 ### Parsers (`src/taurus/parse/`)
 
-* `ptr_parser.c` - High-performance pointer-based parser (copy mode)
-* SIMD-optimized character scanning (ARM NEON, x86 SSE2)
+* `ptr_parser.c` - Pointer-based parser for copy mode (734 lines)
+* `parser.c` - Offset-based parser for inplace mode (891 lines)
+* `xml_scanner.h` - Shared scanning primitives (~350 lines)
+* `xml_validation.h` - Shared validation functions (~344 lines)
+
+All parsers use SIMD-optimized character scanning (ARM NEON, x86 SSE2).
 
 ### Memory Management (`src/taurus/memory/`)
 
@@ -82,6 +107,32 @@ Taurus uses two different memory allocation strategies:
 // Large files (> 256KB): 1.5x + 8KB safety margin
 ----
 
+== Parser Code Organization
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PUBLIC API                                    │
+├─────────────────────────────────────────────────────────────────┤
+│ taurus_parse_string()       → ptr_element tree (copy input)     │
+│ taurus_parse_string_inplace() → compact_element + wrappers      │
+├─────────────────────────────────────────────────────────────────┤
+│                    SHARED FOUNDATION                             │
+├─────────────────────────────────────────────────────────────────┤
+│ xml_scanner.h    - Character classification, SIMD scanning      │
+│ xml_validation.h - XML 1.0 compliance validation                │
+├─────────────────────────────────────────────────────────────────┤
+│                    PARSER IMPLEMENTATIONS                        │
+├─────────────────────────────────────────────────────────────────┤
+│ ptr_parser.c     - Copy mode (72-byte ptr_element, pointers)    │
+│ parser.c         - Inplace mode (16-byte compact, offsets)      │
+├─────────────────────────────────────────────────────────────────┤
+│                    MEMORY ALLOCATORS                             │
+├─────────────────────────────────────────────────────────────────┤
+│ pool.c           - Pool allocator for copy mode                  │
+│ zero_check_alloc - Bump allocator for inplace mode              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 == Performance Characteristics
 
 | Operation | Copy Mode | Inplace Mode | Notes
@@ -92,5 +143,11 @@ Taurus uses two different memory allocation strategies:
 | Memory/Element | ~100 bytes | ~32 bytes | 3x less
 | XPath | 1.20x vs libxml2 | Full parity | All features work
 | Traversal | 43% faster vs pugixml | Within 5-10% | Similar performance
+
+== Test Coverage
+
+* **Total tests**: 56 (100% pass rate)
+* **Scanner tests**: 21 comprehensive unit tests
+* **XPath conformance**: 438/438 W3C tests (100%)
 
 See the main link:../../README.adoc[README.adoc] for complete documentation and usage examples.
