@@ -29,6 +29,16 @@ const char* get_node_text_direct(void* node, size_t* out_len);
 /* Quick length check for node text - avoids full text extraction */
 size_t get_node_text_len(void* node);
 
+/* Fast comparison of nodeset's string value with a literal (NO ALLOCATION)
+ * PERFORMANCE: O(1) length check + O(n) memcmp for single-node nodesets
+ * Returns: 1 if equal, 0 if not equal */
+int xpath_nodeset_equals_string(XPathNodeSet* nodeset, const char* str, size_t str_len);
+
+/* Fast check if nodeset's string value matches a boolean (NO ALLOCATION)
+ * PERFORMANCE: Just checks if nodeset is non-empty
+ * Returns: 1 if nodeset is non-empty (truthy), 0 if empty */
+int xpath_nodeset_to_boolean(XPathNodeSet* nodeset);
+
 /* From evaluator_axes.c */
 XPathNodeSet* apply_axis(XPathContext* ctx, TaurusElement node,
                          const char* axis_name, XPathASTNode* test);

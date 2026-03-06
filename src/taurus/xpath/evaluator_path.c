@@ -192,6 +192,80 @@ int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test)
  * Predicate Evaluation
  * ============================================================================ */
 
+/* PERFORMANCE: Fast path for simple attribute predicates like [@id='x']
+ * This is the MOST COMMON predicate pattern in XPath queries.
+ * Directly access attribute value without creating nodesets.
+ *
+ * Pattern: XPATH_AST_OPERATOR with XPATH_OP_EQUAL/NOT_EQUAL
+ *          where one child is @attr step, other is string literal
+ *
+ * Returns: 1 if matches, 0 if doesn't match, -1 if not applicable (use slow path)
+ */
+static int fast_path_attr_string_predicate(XPathContext* ctx,
+                                           TaurusElement elem,
+                                           XPathASTNode* predicate) {
+    /* Must be an operator */
+    if (predicate->type != XPATH_AST_OPERATOR) return -1;
+    if (predicate->child_count != 2) return -1;
+
+    XPathOperatorType op = (XPathOperatorType)predicate->number_value;
+    if (op != XPATH_OP_EQUAL && op != XPATH_OP_NOT_EQUAL) return -1;
+
+    XPathASTNode* left = predicate->children[0];
+    XPathASTNode* right = predicate->children[1];
+
+    /* Find which is the step and which is the string literal */
+    XPathASTNode* step = NULL;
+    XPathASTNode* str_lit = NULL;
+
+    if (left->type == XPATH_AST_STEP && right->type == XPATH_AST_STRING) {
+        step = left;
+        str_lit = right;
+    } else if (right->type == XPATH_AST_STEP && left->type == XPATH_AST_STRING) {
+        step = right;
+        str_lit = left;
+    } else {
+        return -1;  /* Not the pattern we're optimizing */
+    }
+
+    /* Step must have attribute axis and name test, no additional predicates */
+    if (step->child_count < 1) return -1;
+
+    /* Check if it's an attribute axis step - axis is stored in step->value */
+    if (!step->value || strcmp(step->value, "attribute") != 0) return -1;
+
+    /* Check for name test (not wildcard) - first child is the node test */
+    XPathASTNode* test_node = step->children[0];
+    if (!test_node || test_node->type != XPATH_AST_NODE_TEST_NAME) return -1;
+
+    /* Check no additional predicates on the step (only the node test) */
+    if (step->child_count > 1) return -1;
+
+    /* Get the attribute name and string literal value */
+    const char* attr_name = test_node->value;
+    const char* lit_value = str_lit->value;
+
+    if (!attr_name || !lit_value || !elem) return -1;
+
+    /* FAST PATH: Direct attribute lookup and comparison */
+    const char* attr_value = taurus_element_attribute(elem, attr_name);
+
+    int cmp_result;
+    if (attr_value == NULL) {
+        /* Attribute doesn't exist - compare with empty string */
+        cmp_result = (lit_value[0] == '\0') ? 0 : 1;
+    } else {
+        cmp_result = strcmp(attr_value, lit_value);
+    }
+
+    /* Return result based on operator type */
+    if (op == XPATH_OP_EQUAL) {
+        return (cmp_result == 0) ? 1 : 0;
+    } else {  /* XPATH_OP_NOT_EQUAL */
+        return (cmp_result != 0) ? 1 : 0;
+    }
+}
+
 /* Helper: Evaluate a single predicate for a node in-place
  * Returns 1 if node matches predicate, 0 otherwise
  */
@@ -212,6 +286,18 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
     if (!context_elem) {
         return 0; /* Skip if no valid context */
     }
+
+    /* PERFORMANCE: Fast path for [@attr='value'] predicates
+     * This is the most common predicate pattern and avoids:
+     * - Nodeset creation
+     * - Attribute node creation
+     * - Full expression evaluation
+     */
+    int fast_result = fast_path_attr_string_predicate(ctx, context_elem, predicate);
+    if (fast_result >= 0) {
+        return fast_result;  /* Fast path handled it */
+    }
+    /* Fall through to slow path */
 
     /* Save context */
     TaurusElement old_node = ctx->context_node;

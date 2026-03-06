@@ -134,22 +134,51 @@ struct taurus_xpath_result* evaluate_operator(XPathContext* ctx,
 
             /* Handle nodeset comparisons */
             if (left->type == XPATH_RESULT_NODESET || right->type == XPATH_RESULT_NODESET) {
-                /* For nodesets, convert to string and compare */
-                char* lstr = xpath_to_string(left);
-                char* rstr = xpath_to_string(right);
-
+                /* PERFORMANCE: Fast path for nodeset == string literal comparison
+                 * This is the HOT PATH for predicates like [@id='x']
+                 * Uses direct comparison with NO memory allocation */
                 if (is_equality_op) {
-                    /* String comparison for equality ops */
-                    const char* ls = lstr ? lstr : "";
-                    const char* rs = rstr ? rstr : "";
-                    int cmp = strcmp(ls, rs);
-                    switch (op) {
-                        case XPATH_OP_EQUAL: result->value.boolean_value = (cmp == 0); break;
-                        case XPATH_OP_NOT_EQUAL: result->value.boolean_value = (cmp != 0); break;
-                        default: break;
+                    /* Case 1: nodeset (left) == string literal (right) */
+                    if (left->type == XPATH_RESULT_NODESET &&
+                        right->type == XPATH_RESULT_STRING && right->value.string_value) {
+                        size_t str_len = strlen(right->value.string_value);
+                        int cmp = xpath_nodeset_equals_string(left->value.nodeset_value,
+                                                              right->value.string_value, str_len);
+                        switch (op) {
+                            case XPATH_OP_EQUAL: result->value.boolean_value = cmp; break;
+                            case XPATH_OP_NOT_EQUAL: result->value.boolean_value = !cmp; break;
+                            default: break;
+                        }
+                    }
+                    /* Case 2: string literal (left) == nodeset (right) */
+                    else if (right->type == XPATH_RESULT_NODESET &&
+                             left->type == XPATH_RESULT_STRING && left->value.string_value) {
+                        size_t str_len = strlen(left->value.string_value);
+                        int cmp = xpath_nodeset_equals_string(right->value.nodeset_value,
+                                                              left->value.string_value, str_len);
+                        switch (op) {
+                            case XPATH_OP_EQUAL: result->value.boolean_value = cmp; break;
+                            case XPATH_OP_NOT_EQUAL: result->value.boolean_value = !cmp; break;
+                            default: break;
+                        }
+                    }
+                    /* Case 3: nodeset == nodeset - need full conversion (less common) */
+                    else {
+                        char* lstr = xpath_to_string(left);
+                        char* rstr = xpath_to_string(right);
+                        const char* ls = lstr ? lstr : "";
+                        const char* rs = rstr ? rstr : "";
+                        int cmp = strcmp(ls, rs);
+                        switch (op) {
+                            case XPATH_OP_EQUAL: result->value.boolean_value = (cmp == 0); break;
+                            case XPATH_OP_NOT_EQUAL: result->value.boolean_value = (cmp != 0); break;
+                            default: break;
+                        }
+                        if (lstr) TAURUS_FREE(lstr);
+                        if (rstr) TAURUS_FREE(rstr);
                     }
                 } else {
-                    /* Numeric comparison for relational ops */
+                    /* Numeric comparison for relational ops - less common for predicates */
                     double lval = xpath_to_number(left);
                     double rval = xpath_to_number(right);
                     switch (op) {
@@ -160,9 +189,6 @@ struct taurus_xpath_result* evaluate_operator(XPathContext* ctx,
                         default: break;
                     }
                 }
-
-                if (lstr) TAURUS_FREE(lstr);
-                if (rstr) TAURUS_FREE(rstr);
             }
             /* String comparison for equality operators when both are strings */
             else if (is_equality_op &&
