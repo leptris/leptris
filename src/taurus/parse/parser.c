@@ -15,6 +15,7 @@
 #include "compact_element.h"
 #include "../memory/zero_check_alloc.h"
 #include "../simd_helpers.h"  /* SIMD optimization functions */
+#include "xml_scanner.h"      /* Shared XML scanning primitives */
 #include "../taurus_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -52,12 +53,10 @@ typedef struct {
 } ParserV5;
 
 /* ============================================================================
- * Inline Character Classification - NO function calls
+ * Inline Scanning Functions
+ *
+ * Uses shared scanner from xml_scanner.h for consistent behavior.
  * ============================================================================ */
-
-#define IS_SPACE(c) ((c) == ' ' || (c) == '\t' || (c) == '\n' || (c) == '\r')
-#define IS_NAME_START(c) (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_' || (c) == ':')
-#define IS_NAME_CHAR(c) (IS_NAME_START(c) || ((c) >= '0' && (c) <= '9') || (c) == '-' || (c) == '.')
 
 #ifdef _MSC_VER
 #define FORCE_INLINE __forceinline
@@ -69,34 +68,20 @@ typedef struct {
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #endif
 
-/* Optimized scalar scanning - faster than SIMD for short XML names */
+/* Optimized name scanning - uses shared scanner with SIMD */
 static FORCE_INLINE const char* scan_name_v5(const char* p, const char* end) {
-    size_t remaining = end - p;
-    /* Use SIMD for names > 8 chars (avoids setup overhead for short names) */
-    if (LIKELY(remaining > 8)) {
-        return simd_scan_name(p, end);
-    }
-    while (p < end && IS_NAME_CHAR(*p)) p++;
-    return p;
+    /* Use shared scanner - it handles SIMD threshold internally */
+    return xml_scan_name(p, end);
 }
 
-/* Optimized scalar whitespace skip */
+/* Optimized whitespace skip - uses shared scanner with SIMD */
 static FORCE_INLINE const char* skip_ws_v5(const char* p, const char* end) {
-    while (p < end && IS_SPACE(*p)) p++;
-    return p;
+    return xml_scan_whitespace(p, end);
 }
 
-/* Check if range is whitespace only - uses SIMD for long ranges */
+/* Check if range is whitespace only - uses shared scanner with SIMD */
 static FORCE_INLINE int is_ws_only_v5(const char* p, const char* end) {
-    /* Use SIMD for ranges > 8 bytes (lowered threshold for indentation) */
-    if (end - p > 8) {
-        return simd_is_whitespace_only(p, end);
-    }
-    while (p < end) {
-        if (!IS_SPACE(*p)) return 0;
-        p++;
-    }
-    return 1;
+    return xml_is_whitespace_only(p, end);
 }
 
 /* ============================================================================
@@ -423,7 +408,7 @@ static uint32_t parse_attr_v5(ParserV5* p) {
 
     /* After attribute value, we MUST see whitespace, '>', or '/'
      * If we see a name character directly after the quote, it's an error */
-    if (p->pos < p->end && IS_NAME_START(*p->pos)) {
+    if (p->pos < p->end && xml_is_name_start(*p->pos)) {
         /* Missing separator between attributes */
         p->has_error = 1;
         return 0;
@@ -809,12 +794,12 @@ static uint32_t parse_v5_main(ParserV5* p) {
         int self_closing = 0;  /* Will be set after attribute parsing */
 
         while (p->pos < p->end && *p->pos != '>' && *p->pos != '/') {
-            if (IS_SPACE(*p->pos)) {
+            if (xml_is_space(*p->pos)) {
                 p->pos = skip_ws_v5(p->pos, p->end);
                 continue;
             }
 
-            if (IS_NAME_START(*p->pos)) {
+            if (xml_is_name_start(*p->pos)) {
                 uint32_t attr_off = parse_attr_v5(p);
                 if (attr_off == 0) {
                     /* Check if it was a parse error vs just no more attributes */
