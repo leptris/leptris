@@ -1,146 +1,101 @@
-# Taurus ptr_element Migration - Implementation Status
+# Implementation Status
 
-**Last Updated:** 2026-03-04
-**Current Test Status:** 17/56 passing (30%)
-**Goal:** 56/56 tests passing, 1.0-1.2x faster than pugixml
-
----
-
-## Summary
-
-Migrating Taurus XML parser from offset-based `compact_element` to pointer-based `ptr_element` architecture. Breaking API changes are accepted. No legacy code should remain.
+**Last Updated:** 2026-03-06
+**Goal:** Beat libxml2 in ALL benchmark categories
 
 ---
 
-## Recent Progress (2026-03-04)
+## Completed Work
 
-### Major Fixes Applied:
-1. **Type Constants Aligned** - All PTR_NODE_TYPE_* values match TaurusNodeTypeEnum
-2. **Duplicate Case Errors Fixed** - CDATA now has unique value 7
-3. **Text Node Linking Fixed** - first_child pointer now correctly points to text nodes
-4. **Union Offset Issue Fixed** - Direct casting to ptr_text instead of using ptr_node union
-5. **Recursive Text Concatenation** - taurus_element_text now works recursively
-6. **Namespace Collection Fixed** - Updated to use ptr_attribute field names
-7. **test_dom_traverse** - All 23 tests passing
-8. **test_file_io** - Now passing
+### 2026-03-06: Parser Code Streamlining
 
-### Test Progress:
-- Before: 12/56 (21%)
-- After: 17/56 (30%)
-- Improvement: +5 tests
+| Task | Status | Commit |
+|------|--------|--------|
+| Create xml_scanner.h | ✅ Complete | 2f33447 |
+| Create xml_validation.h | ✅ Complete | b19b7af |
+| Create test_xml_scanner.c (21 tests) | ✅ Complete | ee00530 |
+| Refactor ptr_parser.c | ✅ Complete | 952f130 |
+| Refactor parser.c (compact) | ✅ Complete | f90910d |
+| Update architecture docs | ✅ Complete | a35d4f9 |
+
+**Impact:** ~700 lines of shared code, ~330 lines of duplication removed
 
 ---
 
-## Phase 1: Type System Fixes (COMPLETE)
+## In Progress
 
-### 1.1 Type Constants Aligned
-- [x] Fixed `PTR_NODE_TYPE_TEXT` from 1 to 2 in `ptr_element.h`
-- [x] Fixed `PTR_NODE_TYPE_COMMENT` = 3 in `ptr_element.h`
-- [x] Set `PTR_NODE_TYPE_CDATA` = 7 (unique value, not 3)
-- [x] Updated `node.h` TaurusNodeTypeEnum to match
-- [x] All type constants now match between files
-
-### 1.2 Duplicate Case Values Fixed
-- [x] Fixed duplicate case value error in `element.c`
-- [x] Fixed duplicate case value error in `element_text.c`
-- [x] Fixed duplicate case value error in `serialize.c`
-
-### 1.3 Debug Logging Disabled
-- [x] Set `XPATH_DEBUG = 0` in `evaluator_path.c`
-- [x] Set `XPATH_DEBUG = 0` in `evaluator_axes.c`
+| Task | Status | Assignee | Target Date |
+|------|--------|----------|-------------|
+| Profile XPath predicates | 🔴 Not Started | - | - |
+| Optimize attribute access in predicates | 🔴 Not Started | - | - |
+| Optimize position tracking | 🔴 Not Started | - | - |
 
 ---
 
-## Phase 2: Parser Fixes (COMPLETE)
+## Pending
 
-### 2.1 Text Node Linking
-- [x] Text nodes now correctly linked as children
-- [x] `first_child` pointer set correctly
-- [x] `last_child` pointer updated when element closes
+### Phase 1: XPath Predicate Optimization
 
-### 2.2 Pool Memory
-- [x] Text content copied to pool memory
-- [x] Attribute name/value copied to pool memory
+| Task | Priority | Estimated Effort |
+|------|----------|------------------|
+| Profile hot paths | HIGH | 2 hours |
+| Optimize attribute lookup | HIGH | 4 hours |
+| Optimize node set operations | HIGH | 4 hours |
+| Optimize position caching | MEDIUM | 2 hours |
 
----
+### Phase 2: XPath Function Optimization
 
-## Phase 3: DOM API Fixes (PARTIAL)
+| Task | Priority | Estimated Effort |
+|------|----------|------------------|
+| String function optimization | MEDIUM | 3 hours |
+| Numeric function optimization | MEDIUM | 2 hours |
+| Boolean function optimization | LOW | 2 hours |
 
-### 3.1 Element Accessors
-- [x] `taurus_element_first_child_any()` returns text nodes
-- [x] `taurus_element_text()` returns concatenated text
-- [x] `taurus_element_child_value()` returns first text node
+### Phase 3: DOM Operations
 
-### 3.2 Union Offset Issue
-- [x] Fixed casting in element.c - use `ptr_text*` directly
-- [x] Fixed casting in taurus_element_api.c
-
-### 3.3 Namespace Collection
-- [x] Fixed attribute access in evaluator.c to use ptr_attribute fields
-- [x] Added ptr_element.h include for struct ptr_attribute
+| Task | Priority | Estimated Effort |
+|------|----------|------------------|
+| Verify attribute hash O(1) | MEDIUM | 1 hour |
+| Profile attribute iteration | LOW | 1 hour |
 
 ---
 
-## Phase 4: Remaining Issues (BLOCKING)
+## Benchmark Results Summary
 
-### 4.1 XPath Crashes (SEGFAULT)
-- [ ] test_xpath_functions_boolean
-- [ ] test_xpath_functions_nodeset
-- [ ] test_xpath_axes
-- [ ] test_xpath_operators
-- [ ] test_custom_functions
+### Last Run: 2026-03-06
 
-### 4.2 DOM Crashes (SIGTRAP/Subprocess aborted)
-- [ ] test_dom_pugixml_write
-- [ ] test_dom_operations
-- [ ] test_tree_operations
-- [ ] test_memory_safety
-- [ ] test_attribute_conversion
-
-### Root Cause Analysis
-The crashes appear to be in:
-1. XPath evaluation - possibly in nodeset handling or context operations
-2. DOM operations - possibly in element creation/modification
-
----
-
-## Phase 5: Legacy Code Removal (PENDING)
-
-### 5.1 Files to Delete
-- [ ] `src/taurus/dom/compact_element.h`
-- [ ] `src/taurus/dom/compact_accessor.c`
-- [ ] `src/taurus/dom/compact_accessor.h`
-- [ ] `src/taurus/memory/compact_single_alloc.c`
-- [ ] `src/taurus/memory/compact_single_alloc.h`
-
----
-
-## Phase 6: Benchmark Suite (PENDING)
-
-### 6.1 Test Fixtures
-- [ ] Generate test fixtures (small, medium, large, deep, wide)
-
-### 6.2 Performance Targets
-| Operation | Target vs pugixml |
-|-----------|------------------|
-| Parse Small | >= 1.0x |
-| Parse Medium | >= 0.8x |
-| Traversal | >= 1.2x |
-
----
-
-## Commands
-
-```bash
-# Build
-cmake --build build
-
-# Run tests
-ctest --test-dir build --output-on-failure
-
-# Run specific test
-./build/test/test_dom_traverse
-
-# Memory check (macOS)
-leaks --atExit -- ./build/test/c/test_dom
 ```
+╔══════════════════╦═════════╦═════════════════════════════╗
+║ Library            ║ Wins    ║ Assessment                  ║
+╠══════════════════╬═════════╬═════════════════════════════╣
+║ Taurus             ║19       ║☆☆☆ NEEDS WORK        ║
+║ pugixml            ║32       ║★☆☆ ACCEPTABLE        ║
+║ libxml2            ║13       ║☆☆☆ NEEDS WORK        ║
+╚══════════════════╩═════════╩═════════════════════════════╝
+```
+
+### Areas Where Taurus Loses to libxml2
+
+| Test | Taurus | libxml2 | Gap |
+|------|--------|---------|-----|
+| XPath pred (medium_catalog) | 279 µs | 171 µs | 1.63x |
+| XPath pred (large_catalog) | 1700 µs | 1026 µs | 1.66x |
+| XPath pred (vlarge_catalog) | 8929 µs | 7030 µs | 1.27x |
+
+---
+
+## Test Coverage
+
+| Category | Tests | Pass Rate |
+|----------|-------|-----------|
+| Unit Tests | 56 | 100% ✅ |
+| Scanner Tests | 21 | 100% ✅ |
+| XPath W3C | 438 | 100% ✅ |
+
+---
+
+## Next Actions
+
+1. **IMMEDIATE:** Profile XPath predicate evaluation
+2. **THIS WEEK:** Optimize attribute access in predicates
+3. **NEXT WEEK:** Optimize node set operations
