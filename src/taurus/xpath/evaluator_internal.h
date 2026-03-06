@@ -39,6 +39,16 @@ int xpath_nodeset_equals_string(XPathNodeSet* nodeset, const char* str, size_t s
  * Returns: 1 if nodeset is non-empty (truthy), 0 if empty */
 int xpath_nodeset_to_boolean(XPathNodeSet* nodeset);
 
+/* Hash-based nodeset-string comparison with early exit (libxml2 strategy)
+ * PERFORMANCE: O(1) hash comparison before O(n) string comparison
+ * neq: 0 for equals (=), 1 for not-equals (!=)
+ * Returns: 1 if match, 0 if no match */
+int xpath_nodeset_equals_string_hash(XPathNodeSet* nodeset, const char* str, int neq);
+
+/* Fast hash of node's text content - NO ALLOCATION
+ * Returns hash based on first two characters of node's string value */
+unsigned int xpath_node_val_hash(void* node);
+
 /* From evaluator_axes.c */
 XPathNodeSet* apply_axis(XPathContext* ctx, TaurusElement node,
                          const char* axis_name, XPathASTNode* test);

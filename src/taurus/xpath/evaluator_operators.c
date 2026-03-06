@@ -134,33 +134,23 @@ struct taurus_xpath_result* evaluate_operator(XPathContext* ctx,
 
             /* Handle nodeset comparisons */
             if (left->type == XPATH_RESULT_NODESET || right->type == XPATH_RESULT_NODESET) {
-                /* PERFORMANCE: Fast path for nodeset == string literal comparison
+                /* PERFORMANCE: Hash-based comparison for nodeset == string (libxml2 strategy)
                  * This is the HOT PATH for predicates like [@id='x']
-                 * Uses direct comparison with NO memory allocation */
+                 * Uses O(1) hash comparison to eliminate most non-matches */
                 if (is_equality_op) {
+                    int neq = (op == XPATH_OP_NOT_EQUAL) ? 1 : 0;
+
                     /* Case 1: nodeset (left) == string literal (right) */
                     if (left->type == XPATH_RESULT_NODESET &&
                         right->type == XPATH_RESULT_STRING && right->value.string_value) {
-                        size_t str_len = strlen(right->value.string_value);
-                        int cmp = xpath_nodeset_equals_string(left->value.nodeset_value,
-                                                              right->value.string_value, str_len);
-                        switch (op) {
-                            case XPATH_OP_EQUAL: result->value.boolean_value = cmp; break;
-                            case XPATH_OP_NOT_EQUAL: result->value.boolean_value = !cmp; break;
-                            default: break;
-                        }
+                        result->value.boolean_value = xpath_nodeset_equals_string_hash(
+                            left->value.nodeset_value, right->value.string_value, neq);
                     }
                     /* Case 2: string literal (left) == nodeset (right) */
                     else if (right->type == XPATH_RESULT_NODESET &&
                              left->type == XPATH_RESULT_STRING && left->value.string_value) {
-                        size_t str_len = strlen(left->value.string_value);
-                        int cmp = xpath_nodeset_equals_string(right->value.nodeset_value,
-                                                              left->value.string_value, str_len);
-                        switch (op) {
-                            case XPATH_OP_EQUAL: result->value.boolean_value = cmp; break;
-                            case XPATH_OP_NOT_EQUAL: result->value.boolean_value = !cmp; break;
-                            default: break;
-                        }
+                        result->value.boolean_value = xpath_nodeset_equals_string_hash(
+                            right->value.nodeset_value, left->value.string_value, neq);
                     }
                     /* Case 3: nodeset == nodeset - need full conversion (less common) */
                     else {
