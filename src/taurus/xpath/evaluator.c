@@ -63,6 +63,7 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     context->to_boolean = 0;
     context->max_results = 0;
     context->enable_early_exit = 1;
+    context->enable_integrated_eval = 1;  /* Enable integrated predicate evaluation by default */
 
     /* Initialize namespace support (v0.8.0) */
     context->namespace_mappings = NULL;
@@ -905,6 +906,43 @@ static int evaluate_operator_to_boolean(XPathContext* ctx, XPathASTNode* ast, in
             case XPATH_OP_LESS_EQUAL: result = (lval <= rval); break;
             case XPATH_OP_GREATER: result = (lval > rval); break;
             case XPATH_OP_GREATER_EQUAL: result = (lval >= rval); break;
+            /* Arithmetic operators - in predicate context, result is treated as position test
+             * Example: [last() - 1] computes 5-1=4, matches only position 4 */
+            case XPATH_OP_PLUS:
+                if (is_predicate && ctx->context_size > 0) {
+                    result = ((lval + rval) == (double)ctx->context_position) ? 1 : 0;
+                } else {
+                    result = ((lval + rval) != 0.0) ? 1 : 0;  /* Non-zero is true */
+                }
+                break;
+            case XPATH_OP_MINUS:
+                if (is_predicate && ctx->context_size > 0) {
+                    result = ((lval - rval) == (double)ctx->context_position) ? 1 : 0;
+                } else {
+                    result = ((lval - rval) != 0.0) ? 1 : 0;  /* Non-zero is true */
+                }
+                break;
+            case XPATH_OP_MULTIPLY:
+                if (is_predicate && ctx->context_size > 0) {
+                    result = ((lval * rval) == (double)ctx->context_position) ? 1 : 0;
+                } else {
+                    result = ((lval * rval) != 0.0) ? 1 : 0;  /* Non-zero is true */
+                }
+                break;
+            case XPATH_OP_DIV:
+                if (is_predicate && ctx->context_size > 0) {
+                    result = (rval != 0.0 && (lval / rval) == (double)ctx->context_position) ? 1 : 0;
+                } else {
+                    result = (rval != 0.0 && (lval / rval) != 0.0) ? 1 : 0;
+                }
+                break;
+            case XPATH_OP_MOD:
+                if (is_predicate && ctx->context_size > 0) {
+                    result = (rval != 0.0 && fmod(lval, rval) == (double)ctx->context_position) ? 1 : 0;
+                } else {
+                    result = (rval != 0.0 && fmod(lval, rval) != 0.0) ? 1 : 0;
+                }
+                break;
             default: break;
         }
     }
@@ -985,7 +1023,22 @@ int evaluate_expr_to_boolean(XPathContext* ctx, XPathASTNode* ast, int is_predic
             /* Functions need full evaluation */
             struct taurus_xpath_result* result = evaluate_function_call(ctx, ast);
             if (!result) return -1;
-            int bool_result = xpath_to_boolean(result);
+
+            int bool_result;
+            /* In predicate context, a NUMBER result should be treated as position test
+             * Example: [last()] returns number 3, should match only position 3
+             * This matches XPath 1.0 spec: "If the result is a number, the result will be
+             * converted to true if the number is equal to the context position"
+             *
+             * NOTE: When context_size is 0 (unknown in integrated mode), fall back to
+             * boolean conversion. This handles the case where we can't determine the
+             * total nodeset size during single-pass traversal. */
+            if (is_predicate && result->type == XPATH_RESULT_NUMBER && ctx->context_size > 0) {
+                double num = result->value.number_value;
+                bool_result = (num == (double)ctx->context_position) ? 1 : 0;
+            } else {
+                bool_result = xpath_to_boolean(result);
+            }
             xpath_result_free(result);
             return bool_result;
         }
@@ -995,7 +1048,18 @@ int evaluate_expr_to_boolean(XPathContext* ctx, XPathASTNode* ast, int is_predic
             {
                 struct taurus_xpath_result* result = evaluate_expr(ctx, ast);
                 if (!result) return -1;
-                int bool_result = xpath_to_boolean(result);
+
+                int bool_result;
+                /* In predicate context, a NUMBER result should be treated as position test
+                 * This handles expressions like [last() - 1], [position() + 1], etc.
+                 * NOTE: When context_size is 0 (unknown in integrated mode), fall back to
+                 * boolean conversion. */
+                if (is_predicate && result->type == XPATH_RESULT_NUMBER && ctx->context_size > 0) {
+                    double num = result->value.number_value;
+                    bool_result = (num == (double)ctx->context_position) ? 1 : 0;
+                } else {
+                    bool_result = xpath_to_boolean(result);
+                }
                 xpath_result_free(result);
                 return bool_result;
             }

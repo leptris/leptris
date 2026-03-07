@@ -225,6 +225,16 @@ typedef enum {
     XPATH_AST_NODE_TEST_ALL_IN_NS
 } XPathASTType;
 
+/* XPath predicate types - for integrated predicate evaluation optimization
+ * Classifies predicates during parsing to enable single-pass axis traversal.
+ */
+typedef enum {
+    XPATH_PRED_SIMPLE_POSITIONAL,    /* [1], [2], [$var] - numeric position */
+    XPATH_PRED_SIMPLE_ATTR_EXISTS,   /* [@attr] - attribute existence check */
+    XPATH_PRED_SIMPLE_ATTR_COMPARE,  /* [@attr='value'], [@attr!="value"] - attribute comparison */
+    XPATH_PRED_COMPLEX               /* Requires full expression evaluation */
+} XPathPredicateType;
+
 /* XPath AST node - Matches ext/taurus/xpath.h _xpath_ast_node */
 typedef struct xpath_ast_node {
     XPathASTType type;
@@ -237,6 +247,10 @@ typedef struct xpath_ast_node {
     /* Namespace support for node tests (v0.8.0) */
     char* prefix;                /* Namespace prefix (NULL if no prefix) */
     char* local_name;            /* Local name part (NULL if not applicable) */
+
+    /* Predicate classification for integrated evaluation optimization */
+    XPathPredicateType pred_type;    /* Classification (only valid for XPATH_AST_PREDICATE) */
+    int pred_position;               /* For XPATH_PRED_SIMPLE_POSITIONAL: the position value */
 } XPathASTNode;
 
 /* XPath parser - Matches ext/taurus/xpath.h _xpath_parser */
@@ -315,6 +329,7 @@ typedef struct xpath_context {
     int to_boolean;              /* Only checking existence */
     int max_results;             /* Stop after N results (0 = unlimited) */
     int enable_early_exit;       /* Master switch for early termination */
+    int enable_integrated_eval;  /* Use single-pass predicate evaluation */
 
     /* PERFORMANCE: Nodeset pool for O(1) allocation */
     struct xpath_nodeset* nodeset_pool;  /* Free list of reusable nodesets */

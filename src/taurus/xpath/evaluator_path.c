@@ -5,6 +5,7 @@
  */
 
 #include "evaluator_internal.h"
+#include "evaluator_integrated.h"  /* Integrated predicate evaluation */
 #include "../taurus_internal.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
 #include "../dom/ptr_element.h"  /* For direct attribute access in fast path */
@@ -452,6 +453,42 @@ struct taurus_xpath_result* evaluate_step(XPathContext* ctx,
         DEBUG_LOG("    node_test->value = %s", node_test->value);
     }
     DEBUG_LOG("    input nodeset count = %zu", xpath_nodeset_count(input));
+
+    /* PERFORMANCE: Try integrated single-pass evaluation first
+     * This matches libxml2's xmlXPathNodeCollectAndTest() pattern
+     * and eliminates intermediate nodeset allocation for simple predicates.
+     */
+    if (ctx->enable_integrated_eval) {
+        /* Extract predicates (all children after the first which is the node test) */
+        XPathASTNode** predicates = NULL;
+        size_t pred_count = 0;
+
+        if (step->child_count > 1) {
+            pred_count = step->child_count - 1;
+            predicates = &step->children[1];
+        }
+
+        /* Check if all predicates are simple enough for integrated evaluation */
+        if (can_use_integrated_evaluation(predicates, pred_count)) {
+            DEBUG_LOG("    Using integrated evaluation path");
+            XPathNodeSet* integrated_result = evaluate_step_integrated(
+                ctx, step, input, ctx->to_boolean);
+
+            if (integrated_result) {
+                /* Success! Wrap and return */
+                struct taurus_xpath_result* res = xpath_result_new(XPATH_RESULT_NODESET);
+                if (res) res->value.nodeset_value = integrated_result;
+                DEBUG_LOG("    Integrated evaluation returned %zu nodes",
+                         integrated_result ? integrated_result->count : 0);
+                return res;
+            }
+            /* If NULL returned, predicates were too complex - fall through */
+            DEBUG_LOG("    Integrated evaluation fell back to traditional path");
+        }
+    }
+
+    /* TRADITIONAL TWO-PASS EVALUATION (fallback) */
+    DEBUG_LOG("    Using traditional two-pass evaluation");
 
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result) {

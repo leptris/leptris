@@ -63,6 +63,7 @@ set(TAURUS_SOURCES
     taurus/xpath/evaluator_axes.c
     taurus/xpath/evaluator_operators.c
     taurus/xpath/evaluator_path.c
+    taurus/xpath/evaluator_integrated.c
     taurus/xpath/functions.c
     taurus/xpath/functions_registry.c
     taurus/xpath/functions_core.c
