@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns="http://example.org/default" xmlns:ex="http://example.com/extra">
+  <item>default namespace content</item>
+  <ex:item>example namespace content</ex:item>
+  <nested>
+    <ex:deep>
+      <ex:value>deeply nested</ex:value>
+    </ex:deep>
+  </nested>
+</root>

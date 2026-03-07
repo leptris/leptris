@@ -1,0 +1,39 @@
+= libxml2 Test Fixtures
+:toc:
+
+== Overview
+
+This directory contains XML test files copied from the **libxml2** project's test suite to ensure Taurus can handle real-world XML documents and edge cases validated by the libxml2 project.
+
+== Source
+
+These fixtures are copied from:
+
+* **Project**: libxml2 - The XML C parser and toolkit of Gnome
+* **License**: MIT License
+* **Copyright**: 1998-2012 Daniel Veillard
+* **URL**: https://gitlab.gnome.org/GNOME/libxml2
+* **Test Suite**: https://gitlab.gnome.org/GNOME/libxml2/-/tree/master/test
+
+== Acknowledgment
+
+We acknowledge and thank the libxml2 project and its contributors, particularly Daniel Veillard, for creating and maintaining this comprehensive test suite. These test files help ensure XML parser compatibility and correctness across implementations.
+
+The libxml2 project is licensed under the MIT License. See the original project repository for full license terms.
+
+== Files Included
+
+The fixtures include test files for:
+
+* Basic XML parsing (elements, attributes, text)
+* Namespaces
+* DTD validation
+* XML Schema (XSD)
+* RelaxNG
+* XPath
+* XInclude
+* Canonical XML (C14N)
+* Character encoding (UTF-8, UTF-16, ISO-8859-5)
+* Error handling
+* Large files
+* Complex documents (SVG, XHTML, etc.)

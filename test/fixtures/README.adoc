@@ -1,0 +1,468 @@
+= Taurus Test Fixtures
+:toc:
+:toclevels: 3
+
+== Overview
+
+Comprehensive XML test fixtures from multiple sources for validating Taurus parser correctness, DOM operations, XPath evaluation, and namespace handling.
+
+**Total Fixtures**: 100+ files across 4 sources +
+**Coverage**: Basic XML, Namespaces, DOM operations, Real-world documents, Edge cases +
+**Purpose**: Production-ready validation against industry-standard parsers
+
+== Fixture Sources
+
+[cols="1,1,2,1",options="header"]
+|===
+|Source |Count |Purpose |License
+
+|<<libxml2-fixtures,libxml2>>
+|107 files
+|Namespace, entity, encoding, real-world documents
+|MIT
+
+|<<pugixml-fixtures,pugixml>>
+|5 files
+|DOM validation, stress testing, edge cases
+|MIT
+
+|<<w3c-fixtures,W3C XPath>>
+|6 files
+|XPath 1.0 conformance testing
+|Public Domain
+
+|<<custom-fixtures,Custom>>
+|5 files
+|Taurus-specific scenarios, performance tests
+|MIT
+|===
+
+**Total**: 123 fixtures (~1.5MB) covering comprehensive XML scenarios
+
+---
+
+[[libxml2-fixtures]]
+== libxml2 Test Fixtures
+
+**Location**: `test/fixtures/libxml2/` +
+**Source**: https://gitlab.gnome.org/GNOME/libxml2 +
+**Documentation**: link:libxml2/README.adoc[libxml2/README.adoc] ✅
+
+=== Categories (107 files)
+
+[horizontal]
+Namespace Tests:: 8 files (`ns`, `ns2`-`ns7`, `nsclean.xml`)
+Attribute Tests:: 12 files (`att1`-`att11`, `attrib.xml`)
+Entity Tests:: 16 files (`ent1`-`ent13`, `ent_*.xml`)
+CDATA Tests:: 7 files (`cdata`, `cdata2`, `cdata-*-UTF-8.xml`, etc.)
+Comment Tests:: 7 files (`comment.xml`-`comment6.xml`, `badcomment.xml`)
+Processing Instructions:: 2 files (`pi.xml`, `pi2.xml`)
+DTD Tests:: 15 files (`dtd1`-`dtd13`, `intsubset.xml`, `intsubset2.xml`)
+Encoding Tests:: 5 files (`isolat1`-`isolat3`, `iso-8859-5.xml`, `utf8bom.xml`)
+WebDAV Documents:: 18 files (`dav1`-`dav13`, `dav15`-`dav19`)
+Diagram Documents:: 2 files (`dia1`, `dia2`)
+Default Attributes:: 3 files (`def-xml-attr.xml`, `defattr.xml`, `defattr2.xml`)
+Edge Cases:: 3 files (`bigname.xml`, `bigname2.xml`, `eve.xml`)
+Real Documents:: 9 files (`svg1`, `rdf1`, `xhtml1`, `slashdot.xml`, etc.)
+
+=== Key Test Scenarios
+
+[cols="2,3,3",options="header"]
+|===
+|Fixture |DOM Tests |XPath Tests
+
+|`ns`
+|Element name, namespace prefix/URI, text content
+|`//foo:a`, `//foo:a/text()`, `namespace::foo`
+
+|`ns2`-`ns7`
+|Multiple namespaces, inheritance, override
+|Namespace-aware queries across prefixes
+
+|`svg1` (21KB)
+|SVG elements, attributes (width, height), navigation
+|`//svg:rect`, `//svg:path/@d`, `count(//svg:*)`
+
+|`rdf1`
+|RDF metadata, `rdf:Description` elements
+|`//rdf:Description`, `//dc:title/text()`
+
+|`xhtml1`
+|XHTML structure, `<head>`, `<body>`, `<p>` elements
+|`//xhtml:title`, `//xhtml:a/@href`
+
+|`att1`-`att11`
+|Attribute access, iteration, normalization
+|`//@id`, `//@class`
+
+|`cdata`
+|CDATA content with `<`, `>`, `&` preserved
+|Text extraction from CDATA sections
+
+|`ent1`-`ent4`
+|Entity expansion (`&lt;` → `<`), numeric refs
+|Text content after entity resolution
+|===
+
+---
+
+[[pugixml-fixtures]]
+== pugixml Test Fixtures
+
+**Location**: `test/fixtures/pugixml/` +
+**Source**: https://github.com/zeux/pugixml +
+**Documentation**: link:pugixml/README.adoc[pugixml/README.adoc] ✅
+
+=== Files (5 total)
+
+[horizontal]
+`small.xml`:: Minimal XML (`<node/>`), 7 bytes
+`multiline.xml`:: Multiple self-closing elements, 30 bytes
+`empty.xml`:: Empty file (error handling test), 0 bytes
+`large.xml`:: Deep nesting stress test (1000+ elements), 68KB
+`truncation.xml`:: Incomplete document (error recovery), 474 bytes
+
+=== Test Scenarios
+
+**DOM Validation**:
+- Parse `small.xml` → verify single self-closing element
+- Parse `multiline.xml` → verify 3 elements with whitespace
+- Parse `empty.xml` → expect error, validate error message
+- Parse `large.xml` → stress test (1000+ nested elements, 68KB)
+- Parse `truncation.xml` → expect parse failure with line/column
+
+**Performance Tests**:
+- Parse time for `large.xml`
+- Memory usage during `large.xml` parsing
+- Deep recursion handling (stack depth)
+
+---
+
+[[w3c-fixtures]]
+== W3C XPath Test Fixtures
+
+**Location**: `test/fixtures/w3c/xpath/` +
+**Purpose**: XPath 1.0 conformance validation +
+**Documentation**: link:w3c/README.md[w3c/README.md]
+
+=== Files (6 total)
+
+[horizontal]
+`axes/axis_tests.xml`:: Test document for all 13 XPath axes
+`functions/string_tests.xml`:: String function test cases
+`functions/number_tests.xml`:: Number function test cases
+`functions/boolean_tests.xml`:: Boolean function test cases
+`functions/nodeset_tests.xml`:: Node-set function test cases
+`operators/operator_tests.xml`:: All XPath 1.0 operators
+
+=== Test Coverage
+
+**438 W3C Conformance Tests** (100% passing ✅):
+- 69 String function tests
+- 64 Number function tests
+- 57 Boolean function tests
+- 55 Node-set function tests
+- 84 Axis tests
+- 109 Operator tests
+
+**Test Execution**:
+- `test/c/xpath/w3c/test_xpath_functions_string.cc`
+- `test/c/xpath/w3c/test_xpath_functions_number.cc`
+- `test/c/xpath/w3c/test_xpath_functions_boolean.cc`
+- `test/c/xpath/w3c/test_xpath_functions_nodeset.cc`
+- `test/c/xpath/w3c/test_xpath_axes.cc`
+- `test/c/xpath/w3c/test_xpath_operators.cc`
+
+---
+
+[[custom-fixtures]]
+== Custom Taurus Fixtures
+
+**Location**: `test/fixtures/` (root level) +
+**Purpose**: Taurus-specific test scenarios and performance benchmarks
+
+=== Files (5 total)
+
+[horizontal]
+`small.xml`:: Minimal test (595 bytes)
+`medium.xml`:: Medium-sized document (5.7KB)
+`large.xml`:: Large document for performance testing (77KB)
+`example.xml`:: Standard example document
+`namespaced.xml`:: Namespace testing
+
+=== Additional CLI Fixtures
+
+**Location**: `test/cli/fixtures/` +
+**Count**: 5 files
+
+[horizontal]
+`simple.xml`:: Simple XML for CLI testing
+`books.xml`:: Book catalog example
+`large.xml`:: CLI performance test
+`malformed.xml`:: Error handling test
+`namespaces.xml`:: CLI namespace queries
+
+---
+
+== Usage Guide
+
+=== Loading Fixtures in Tests
+
+[source,c]
+----
+// C API - Load and parse fixture
+const char* xml = load_fixture("test/fixtures/libxml2/ns");
+TaurusDocument doc = taurus_parse_string(xml, strlen(xml), NULL);
+
+// Or load directly as document
+TaurusDocument doc = load_fixture_doc("test/fixtures/libxml2/svg1");
+----
+
+[source,cpp]
+----
+// C++ API (Google Test)
+class MyTest : public XPathTestBase {
+protected:
+    void SetUp() override {
+        load_fixture("libxml2/rdf1"); // Relative to fixtures dir
+    }
+};
+----
+
+=== CLI Commands
+
+[source,bash]
+----
+# Parse and validate
+taurus parse test/fixtures/libxml2/ns
+taurus parse test/fixtures/pugixml/large.xml
+
+# XPath queries
+taurus xpath test/fixtures/libxml2/svg1 "//svg:rect"
+taurus xpath test/fixtures/libxml2/rdf1 "//rdf:Description"
+
+# Format output
+taurus format --indent 4 test/fixtures/libxml2/ns2
+
+# Performance testing
+time taurus parse test/fixtures/pugixml/large.xml
+time taurus xpath test/fixtures/large.xml "//node"
+----
+
+---
+
+== Test Scenario Matrix
+
+[cols="2,1,1,1,1",options="header"]
+|===
+|Test Type |libxml2 |pugixml |W3C |Custom
+
+|Basic Parsing
+|✅
+|✅
+|✅
+|✅
+
+|Namespaces
+|✅ (8 files)
+|
+|✅
+|✅
+
+|Attributes
+|✅ (12 files)
+|
+|
+|
+
+|CDATA
+|✅ (7 files)
+|
+|
+|
+
+|Entities
+|✅ (16 files)
+|
+|
+|
+
+|Real Documents
+|✅ (SVG, RDF, XHTML)
+|
+|
+|
+
+|Stress Tests
+|✅ (svg1 - 21KB)
+|✅ (large.xml - 68KB)
+|
+|✅ (77KB)
+
+|Error Handling
+|✅
+|✅ (empty, trunc)
+|
+|✅ (malformed)
+
+|XPath Functions
+|
+|
+|✅ (69+64+57)
+|
+
+|XPath Axes
+|
+|
+|✅ (84 tests)
+|
+
+|XPath Operators
+|
+|
+|✅ (109 tests)
+|
+|===
+
+---
+
+== Test Execution
+
+=== Running Tests
+
+[source,bash]
+----
+# Build tests
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+
+# Run all tests
+cd build && ctest
+
+# Run specific test suite
+./build/test_xpath_functions_string
+./build/test_libxml2_fixtures
+
+# Run with valgrind (memory leak check)
+valgrind --leak-check=full ./build/test_libxml2_fixtures
+----
+
+=== Test Organization
+
+[source]
+----
+test/
+├── fixtures/                      # This directory
+│   ├── README.adoc               # This file
+│   ├── libxml2/                  # 107 files (MIT)
+│   │   └── README.adoc
+│   ├── pugixml/                  # 5 files (MIT)
+│   │   └── README.adoc
+│   ├── w3c/                      # 6 files (Public Domain)
+│   │   └── README.md
+│   ├── small.xml                 # Custom fixtures
+│   ├── medium.xml
+│   ├── large.xml
+│   ├── example.xml
+│   └── namespaced.xml
+├── c/
+│   ├── test_libxml2_fixtures.cc  # libxml2 parsing tests
+│   └── xpath/w3c/                # W3C XPath tests
+│       ├── test_xpath_functions_string.cc
+│       ├── test_xpath_functions_number.cc
+│       └── ...
+└── cli/
+    └── fixtures/                 # CLI-specific fixtures
+        ├── simple.xml
+        ├── books.xml
+        └── ...
+----
+
+---
+
+== Fixture Quality Standards
+
+All fixtures in this directory meet these quality standards:
+
+1. **Well-Formed XML**: All valid fixtures parse correctly
+2. **Documented Purpose**: Each fixture has clear use case
+3. **Test Scenarios**: Documented DOM/XPath test expectations
+4. **Attribution**: Proper license & copyright attribution
+5. **Validation**: Tested against Taurus, libxml2, pugixml
+
+---
+
+== Attribution & Licensing
+
+=== libxml2 Fixtures
+- **Copyright**: 1998-2012 Daniel Veillard
+- **License**: MIT License
+- **Source**: https://gitlab.gnome.org/GNOME/libxml2
+- **Attribution**: See link:libxml2/README.adoc[libxml2/README.adoc]
+
+=== pugixml Fixtures
+- **Copyright**: 2006-2024 Arseny Kapoulkine
+- **License**: MIT License
+- **Source**: https://github.com/zeux/pugixml
+- **Attribution**: See link:pugixml/README.adoc[pugixml/README.adoc]
+
+=== W3C XPath Fixtures
+- **Source**: W3C XPath 1.0 Test Suite
+- **License**: Public Domain / W3C Document License
+- **Usage**: XPath 1.0 conformance validation
+
+=== Custom Taurus Fixtures
+- **Copyright**: 2024 Ribose Inc.
+- **License**: MIT License
+- **Source**: Created for Taurus project
+
+---
+
+== Contributing New Fixtures
+
+### Adding External Fixtures
+
+1. Create subdirectory: `test/fixtures/{source}/`
+2. Copy relevant files
+3. Create `README.adoc` with:
+   - Source attribution
+   - License information
+   - File descriptions
+   - Test scenarios
+4. Update this index
+5. Add tests that use fixtures
+
+### Creating Custom Fixtures
+
+1. Place in `test/fixtures/` (root) or appropriate subdirectory
+2. Document in this README
+3. Add test cases
+4. Ensure proper licensing (MIT for Taurus files)
+
+---
+
+== Future Additions
+
+Potential fixture sources to consider:
+
+* **Apache Xalan**: XPath test suite (if needed beyond W3C)
+* **Saxon**: XSLT/XPath test cases
+* **Additional Real Documents**: More SVG, MathML, DocBook examples
+* **Encoding Tests**: If UTF-16, UTF-32 support added
+* **Performance Suite**: Dedicated large-file benchmarks
+
+---
+
+== References
+
+* Taurus Project: https://github.com/lutaml/taurus
+* libxml2: https://gitlab.gnome.org/GNOME/libxml2
+* pugixml: https://github.com/zeux/pugixml
+* XML 1.0 Spec: https://www.w3.org/TR/xml/
+* XML Namespaces 1.0: https://www.w3.org/TR/xml-names/
+* XPath 1.0 Spec: https://www.w3.org/TR/xpath-10/
+
+---
+
+**Last Updated**: 2024-12-23 +
+**Phase**: Phase 11 Session 1 - Test Infrastructure

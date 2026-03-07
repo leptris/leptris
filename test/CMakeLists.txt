@@ -20,6 +20,7 @@ set(TEST_SOURCES
     c/test_unicode.c
     c/test_file_io.c
     c/test_libxml2_errors.c
+    c/test_writer.c
     # c/test_memory.c  # TODO: Update element_modify.c for compact architecture
     c/test_libxml2_errors_comprehensive.c
     # c/dtd/test_dtd_validation.c  # TODO: Phase 5/6 - Validation layer not implemented yet

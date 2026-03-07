@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <numbers>
+    <value id="v1">5</value>
+    <value id="v2">10</value>
+    <value id="v3">-3</value>
+    <value id="v4">0</value>
+    <value id="v5">2.5</value>
+    <value id="v6">7.5</value>
+  </numbers>
+  <strings>
+    <text id="t1">hello</text>
+    <text id="t2">world</text>
+    <text id="t3">test</text>
+    <text id="t4">hello</text>
+  </strings>
+  <booleans>
+    <true id="b1">yes</true>
+    <false id="b2">no</false>
+    <empty id="b3"></empty>
+  </booleans>
+  <mixed>
+    <item id="m1" attr="value1">Item 1</item>
+    <item id="m2" attr="value2">Item 2</item>
+    <item id="m3" attr="value1">Item 3</item>
+  </mixed>
+</root>

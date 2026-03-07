@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:ns1="http://example.com/ns1" id="root">
+  <level1 id="l1">
+    <level2a id="l2a" class="first">
+      <level3 id="l3a">Text A</level3>
+    </level2a>
+    <level2b id="l2b" attr="value" class="middle">
+      <level3 id="l3b">Text B</level3>
+      <level3 id="l3c">Text C</level3>
+    </level2b>
+    <ns1:level2c id="l2c" class="last">
+      <ns1:level3 id="l3d">Text D</ns1:level3>
+    </ns1:level2c>
+  </level1>
+  <sibling1 id="s1">Content 1</sibling1>
+  <sibling2 id="s2">Content 2</sibling2>
+  <sibling3 id="s3">
+    <nested id="n1">Nested Content</nested>
+  </sibling3>
+</root>

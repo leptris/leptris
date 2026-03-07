@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<inventory>
+  <items>
+    <item id="1" sku="PROD001" quantity="100" price="29.99">
+      <name>Widget Alpha</name>
+      <category>Electronics</category>
+      <description>High-quality widget for professional use</description>
+    </item>
+    <item id="2" sku="PROD002" quantity="250" price="19.99">
+      <name>Widget Beta</name>
+      <category>Electronics</category>
+      <description>Standard widget for everyday use</description>
+    </item>
+    <item id="3" sku="PROD003" quantity="75" price="49.99">
+      <name>Gadget Pro</name>
+      <category>Tools</category>
+      <description>Professional-grade gadget with advanced features</description>
+    </item>
+    <item id="4" sku="PROD004" quantity="150" price="34.99">
+      <name>Tool Set Standard</name>
+      <category>Tools</category>
+      <description>Complete tool set for home use</description>
+    </item>
+    <item id="5" sku="PROD005" quantity="500" price="9.99">
+      <name>Basic Accessory</name>
+      <category>Accessories</category>
+      <description>Essential accessory for daily tasks</description>
+    </item>
+    <item id="6" sku="PROD006" quantity="200" price="24.99">
+      <name>Premium Cable</name>
+      <category>Electronics</category>
+      <description>High-speed data cable with gold-plated connectors</description>
+    </item>
+    <item id="7" sku="PROD007" quantity="300" price="14.99">
+      <name>Standard Cable</name>
+      <category>Electronics</category>
+      <description>Reliable cable for everyday connections</description>
+    </item>
+    <item id="8" sku="PROD008" quantity="50" price="89.99">
+      <name>Power Tool Deluxe</name>
+      <category>Tools</category>
+      <description>Heavy-duty power tool for professional contractors</description>
+    </item>
+    <item id="9" sku="PROD009" quantity="400" price="12.99">
+      <name>Storage Box</name>
+      <category>Accessories</category>
+      <description>Durable storage solution with multiple compartments</description>
+    </item>
+    <item id="10" sku="PROD010" quantity="125" price="39.99">
+      <name>Measuring Device</name>
+      <category>Tools</category>
+      <description>Precision measuring device with digital display</description>
+    </item>
+  </items>
+</inventory>

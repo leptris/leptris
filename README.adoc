@@ -649,6 +649,286 @@ Text: !
 * `4` = Processing Instruction
 * `5` = DOCTYPE
 
+=== StAX Writer (Streaming XML Generation)
+
+Taurus provides a StAX-style streaming XML writer for memory-efficient generation of XML documents. This is the complementary API to the SAX parser - SAX reads streaming XML, StAX writes streaming XML.
+
+==== Features
+
+* **Streaming output** - No DOM tree built, memory-efficient for large documents
+* **Configurable buffering** - 8KB output buffer with small-write coalescing
+* **Entity escaping** - Pre-computed lookup tables for branch-free escaping
+* **SIMD optimization** - ARM NEON / x86 SSE2 for escape detection
+* **Pretty-printing** - Configurable indentation
+* **Namespace support** - Namespace-aware element/attribute writing
+* **Multiple output targets** - File, FILE*, or custom callback
+
+==== Performance vs libxml2
+
+Benchmark results show Taurus is **3.8x - 6.4x faster** than libxml2's xmlTextWriter:
+
+[cols="2,^1,^1,^1",options="header"]
+|===
+| Operation | Taurus | libxml2 | Speedup
+
+| Simple Elements
+| 172.8 µs
+| 1.10 ms
+| 6.36x
+
+| With Attributes
+| 801.2 µs
+| 3.45 ms
+| 4.30x
+
+| Escaped Text
+| 865.1 µs
+| 3.30 ms
+| 3.82x
+
+| Raw Text
+| 657.6 µs
+| 3.54 ms
+| 5.38x
+
+| Deep Nesting
+| 128.1 µs
+| 780.9 µs
+| 6.10x
+
+| Large Document
+| 9.78 ms
+| 51.53 ms
+| 5.27x
+|===
+
+==== Basic Usage
+
+[source,c]
+----
+#include <taurus/writer.h>
+
+int main() {
+    // Create writer for file
+    TaurusXMLWriter* w = taurus_writer_create_file("output.xml", "UTF-8");
+
+    // Write document
+    taurus_writer_start_document(w, "1.0", "UTF-8", -1);
+
+    taurus_writer_start_element(w, "root");
+    taurus_writer_attribute(w, "version", "1.0");
+
+    taurus_writer_start_element(w, "item");
+    taurus_writer_attribute(w, "id", "123");
+    taurus_writer_characters(w, "Hello, World!");
+    taurus_writer_end_element(w);
+
+    taurus_writer_end_element(w);
+    taurus_writer_end_document(w);
+
+    taurus_writer_free(w);
+    return 0;
+}
+----
+
+Output:
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<root version="1.0"><item id="123">Hello, World!</item></root>
+----
+
+==== Writer Options
+
+Configure output using `TaurusWriterOptions`:
+
+[source,c]
+----
+typedef struct {
+    int indent;                 /* Spaces per indent level (0 = compact) */
+    int pretty_print;           /* Add newlines and indentation */
+    int xml_declaration;        /* Write XML declaration */
+    const char* encoding;       /* Output encoding (default: UTF-8) */
+    int validate_names;         /* Check XML name validity */
+    int escape_cr;              /* Escape \r as &#xD; */
+} TaurusWriterOptions;
+----
+
+==== Pretty-Printing Example
+
+[source,c]
+----
+#include <taurus/writer.h>
+
+int main() {
+    TaurusWriterOptions opts = {
+        .indent = 2,
+        .pretty_print = 1,
+        .xml_declaration = 1
+    };
+
+    TaurusXMLWriter* w = taurus_writer_create_file_ex("pretty.xml", &opts);
+
+    taurus_writer_start_document(w, NULL, NULL, -1);
+    taurus_writer_start_element(w, "catalog");
+
+    for (int i = 0; i < 3; i++) {
+        taurus_writer_start_element(w, "book");
+        taurus_writer_attribute(w, "id", "book-1");
+        taurus_writer_start_element(w, "title");
+        taurus_writer_characters(w, "XML Programming");
+        taurus_writer_end_element(w);
+        taurus_writer_end_element(w);
+    }
+
+    taurus_writer_end_element(w);
+    taurus_writer_end_document(w);
+    taurus_writer_free(w);
+    return 0;
+}
+----
+
+Output:
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog>
+  <book id="book-1">
+    <title>XML Programming</title>
+  </book>
+  <book id="book-1">
+    <title>XML Programming</title>
+  </book>
+  <book id="book-1">
+    <title>XML Programming</title>
+  </book>
+</catalog>
+----
+
+==== Output Targets
+
+**File Path:**
+
+[source,c]
+----
+TaurusXMLWriter* w = taurus_writer_create_file("output.xml", "UTF-8");
+// Writer owns the file handle, closes on free
+----
+
+**FILE* Stream:**
+
+[source,c]
+----
+FILE* f = fopen("output.xml", "wb");
+TaurusXMLWriter* w = taurus_writer_create_stream(f, "UTF-8");
+// Caller owns FILE*, must close after writer_free
+taurus_writer_free(w);
+fclose(f);
+----
+
+**Custom Callback:**
+
+[source,c]
+----
+size_t my_callback(void* ctx, const char* data, size_t len) {
+    // Write to network, memory, etc.
+    return write_to_socket((int)(intptr_t)ctx, data, len);
+}
+
+TaurusXMLWriter* w = taurus_writer_create_callback(my_callback, (void*)sock, "UTF-8");
+----
+
+==== Namespaces
+
+[source,c]
+----
+taurus_writer_start_element(w, "schema");
+taurus_writer_namespace(w, "xs", "http://www.w3.org/2001/XMLSchema");
+// Output: <schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+taurus_writer_start_element_ns(w, "xs", NULL, "element");
+// Output: <xs:element>
+----
+
+==== Other Node Types
+
+**Comments:**
+
+[source,c]
+----
+taurus_writer_comment(w, " This is a comment ");
+// Output: <!-- This is a comment -->
+----
+
+**Processing Instructions:**
+
+[source,c]
+----
+taurus_writer_processing_instruction(w, "xml-stylesheet", "type=\"text/xsl\" href=\"style.xsl\"");
+// Output: <?xml-stylesheet type="text/xsl" href="style.xsl"?>
+----
+
+**CDATA Sections:**
+
+[source,c]
+----
+taurus_writer_cdata(w, "<script>alert('hello');</script>");
+// Output: <![CDATA[<script>alert('hello');</script>]]>
+----
+
+==== API Reference
+
+[horizontal]
+`taurus_writer_create_file(path, encoding)`:: Create writer for file path
+`taurus_writer_create_stream(fp, encoding)`:: Create writer for FILE*
+`taurus_writer_create_callback(cb, ctx, encoding)`:: Create writer for custom output
+`taurus_writer_create_file_ex(path, opts)`:: Create writer with options
+`taurus_writer_create_stream_ex(fp, opts)`:: Create stream writer with options
+`taurus_writer_create_callback_ex(cb, ctx, opts)`:: Create callback writer with options
+`taurus_writer_free(w)`:: Free writer and flush remaining data
+
+`taurus_writer_start_document(w, version, encoding, standalone)`:: Write XML declaration
+`taurus_writer_end_document(w)`:: End document (closes all elements)
+`taurus_writer_start_element(w, name)`:: Write start element
+`taurus_writer_start_element_ns(w, prefix, uri, localname)`:: Write namespaced element
+`taurus_writer_end_element(w)`:: Write end element
+`taurus_writer_empty_element(w, name)`:: Write self-closing element
+`taurus_writer_attribute(w, name, value)`:: Write attribute (after start_element)
+`taurus_writer_attribute_ns(w, prefix, uri, localname, value)`:: Write namespaced attribute
+`taurus_writer_characters(w, text)`:: Write text content (escaped)
+`taurus_writer_characters_len(w, text, len)`:: Write text with explicit length
+`taurus_writer_cdata(w, data)`:: Write CDATA section
+`taurus_writer_comment(w, text)`:: Write comment
+`taurus_writer_processing_instruction(w, target, data)`:: Write processing instruction
+`taurus_writer_namespace(w, prefix, uri)`:: Write namespace declaration
+`taurus_writer_flush(w)`:: Flush buffer to output
+`taurus_writer_get_error(w)`:: Get last error code
+`taurus_writer_get_error_message(w)`:: Get error message string
+
+==== Error Handling
+
+[source,c]
+----
+int result = taurus_writer_start_element(w, "123-invalid");
+if (result != 0) {
+    printf("Error: %s\n", taurus_writer_get_error_message(w));
+}
+----
+
+Error Codes:
+
+* `TAURUS_WRITER_OK` (0) - Success
+* `TAURUS_WRITER_ERROR_MEMORY` (-1) - Memory allocation failed
+* `TAURUS_WRITER_ERROR_IO` (-2) - I/O error
+* `TAURUS_WRITER_ERROR_INVALID_ARG` (-3) - Invalid argument
+* `TAURUS_WRITER_ERROR_INVALID_STATE` (-4) - Invalid state for operation
+* `TAURUS_WRITER_ERROR_INVALID_NAME` (-5) - Invalid XML name
+* `TAURUS_WRITER_ERROR_NESTING` (-6) - Element nesting error
+* `TAURUS_WRITER_ERROR_CDATA` (-7) - Invalid CDATA content (contains ]] >)
+* `TAURUS_WRITER_ERROR_COMMENT` (-8) - Invalid comment content
+
 === DTD Validation
 
 Taurus supports DTD (Document Type Definition) validation for XML documents.

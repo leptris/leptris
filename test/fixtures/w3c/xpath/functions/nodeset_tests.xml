@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:ns1="http://example.com/ns1" xmlns:ns2="http://example.com/ns2">
+    <!-- Elements for count() testing -->
+    <items>
+        <item id="item1">First</item>
+        <item id="item2">Second</item>
+        <item id="item3">Third</item>
+        <item id="item4">Fourth</item>
+        <item id="item5">Fifth</item>
+    </items>
+
+    <!-- Empty nodeset test -->
+    <empty-parent></empty-parent>
+
+    <!-- Single element test -->
+    <single>
+        <child>Only child</child>
+    </single>
+
+    <!-- For position() and last() testing -->
+    <ordered>
+        <first>1</first>
+        <second>2</second>
+        <third>3</third>
+        <fourth>4</fourth>
+        <fifth>5</fifth>
+    </ordered>
+
+    <!-- ID attribute tests -->
+    <catalog>
+        <book id="book1">Book One</book>
+        <book id="book2">Book Two</book>
+        <book id="book3">Book Three</book>
+    </catalog>
+
+    <!-- Namespace tests -->
+    <ns1:element>Element in ns1</ns1:element>
+    <ns2:element>Element in ns2</ns2:element>
+    <no-namespace>No namespace</no-namespace>
+
+    <!-- QName tests -->
+    <ns1:qualified name="test1">Qualified in ns1</ns1:qualified>
+    <ns2:qualified name="test2">Qualified in ns2</ns2:qualified>
+    <unqualified name="test3">Unqualified</unqualified>
+
+    <!-- Nested namespaces -->
+    <ns1:parent>
+        <ns1:child>Same namespace</ns1:child>
+        <ns2:child>Different namespace</ns2:child>
+        <child>No namespace child</child>
+    </ns1:parent>
+
+    <!-- Multiple ID references -->
+    <refs>
+        <ref idref="book1">Reference to book1</ref>
+        <ref idref="book2">Reference to book2</ref>
+        <ref idref="book3">Reference to book3</ref>
+    </refs>
+
+    <!-- Default namespace test -->
+    <default-ns xmlns="http://example.com/default">
+        <element>In default namespace</element>
+    </default-ns>
+
+    <!-- Mixed content for name() tests -->
+    <names>
+        <simple>Simple</simple>
+        <ns1:prefixed>Prefixed</ns1:prefixed>
+        <another>Another</another>
+    </names>
+</root>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library>
+  <book id="1" category="fiction" price="12.99">
+    <title>The Great Gatsby</title>
+    <author>F. Scott Fitzgerald</author>
+    <year>1925</year>
+  </book>
+  <book id="2" category="science" price="18.99">
+    <title>A Brief History of Time</title>
+    <author>Stephen Hawking</author>
+    <year>1988</year>
+  </book>
+  <book id="3" category="fiction" price="14.99">
+    <title>1984</title>
+    <author>George Orwell</author>
+    <year>1949</year>
+  </book>
+  <book id="4" category="science" price="16.99">
+    <title>The Selfish Gene</title>
+    <author>Richard Dawkins</author>
+    <year>1976</year>
+  </book>
+</library>

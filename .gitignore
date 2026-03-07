@@ -39,6 +39,10 @@ bench_*
 profile_*
 element_layout
 
+# Allow benchmark source files
+!benchmarks/suite/*.cpp
+!benchmarks/**/*.c
+
 # ============================================================================
 # Test and Source Files (only allow in proper directories)
 # ============================================================================
@@ -150,7 +154,10 @@ docs/_build/
 # Test build artifacts in test/ directory
 test/cmake_install.cmake
 test/CTestTestfile.cmake
-test/*[!.]*
+
+# Allow test source files
+!test/c/
+!test/cli/
 
 # ============================================================================
 # XML Files (only allow in proper directories)
@@ -170,3 +177,18 @@ test/*[!.]*
 benchmarks/fixtures/libxml2_repo/
 benchmarks/fixtures/pugixml_repo/
 benchmarks/BENCHMARK_REPORT.md
+
+# ============================================================================
+# Reference Documentation (for AI prompts, not for release)
+# ============================================================================
+reference-docs/
+
+# ============================================================================
+# Benchmark Results (generated locally)
+# ============================================================================
+benchmark_results/
+
+# ============================================================================
+# Archive (old code versions, not for release)
+# ============================================================================
+archive/

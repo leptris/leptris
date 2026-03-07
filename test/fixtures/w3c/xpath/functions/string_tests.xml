@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <!-- Basic text content -->
+    <text>Hello World</text>
+    <empty></empty>
+    <number>123</number>
+    <decimal>456.789</decimal>
+
+    <!-- Whitespace tests -->
+    <whitespace>  lots   of   spaces  </whitespace>
+    <leading>   leading spaces</leading>
+    <trailing>trailing spaces   </trailing>
+    <mixed>  mixed   whitespace  </mixed>
+    <tabs>	tabs	and	spaces	</tabs>
+    <newlines>line1
+line2
+line3</newlines>
+
+    <!-- Substring tests -->
+    <substring>ABCDEFGHIJKLMNOP</substring>
+    <delimiter>Hello-World-Test</delimiter>
+    <separator>one:two:three</separator>
+    <path>/usr/local/bin</path>
+
+    <!-- Translation tests -->
+    <lowercase>abcdefghijklmnopqrstuvwxyz</lowercase>
+    <uppercase>ABCDEFGHIJKLMNOPQRSTUVWXYZ</uppercase>
+    <mixed-case>AbCdEfGhIjKlMnOpQrStUvWxYz</mixed-case>
+    <digits>0123456789</digits>
+
+    <!-- Unicode and special characters -->
+    <unicode>Hello 世界</unicode>
+    <special>&lt;tag&gt; &amp; "quotes" 'apostrophe'</special>
+    <entities>&amp;lt;&amp;gt;&amp;amp;</entities>
+
+    <!-- Nested elements for string value -->
+    <nested>
+        outer text
+        <child1>child 1 text</child1>
+        more outer
+        <child2>child 2 text</child2>
+        final outer
+    </nested>
+
+    <!-- Attributes -->
+    <element attr1="value1" attr2="value2" name="test">element text</element>
+
+    <!-- Empty strings and edge cases -->
+    <empty-string></empty-string>
+    <only-whitespace>   </only-whitespace>
+    <single-char>A</single-char>
+    <single-space> </single-space>
+
+    <!-- Long strings -->
+    <long>The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.</long>
+
+    <!-- Multi-byte UTF-8 -->
+    <japanese>こんにちは</japanese>
+    <emoji>Hello 😀 World 🌍</emoji>
+    <chinese>你好世界</chinese>
+</root>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <!-- Boolean-like text content -->
+    <true>true</true>
+    <false>false</false>
+    <one>1</one>
+    <zero>0</zero>
+
+    <!-- Numeric values for boolean conversion -->
+    <positive>42</positive>
+    <negative>-1</negative>
+    <decimal>3.14</decimal>
+
+    <!-- String values for boolean conversion -->
+    <non-empty>test</non-empty>
+    <empty></empty>
+    <whitespace>   </whitespace>
+
+    <!-- Elements for nodeset boolean tests -->
+    <items>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </items>
+
+    <single>
+        <element>value</element>
+    </single>
+
+    <!-- Language attribute tests for lang() -->
+    <en lang="en">English</en>
+    <en-us lang="en-US">American English</en-us>
+    <en-gb lang="en-GB">British English</en-gb>
+    <fr lang="fr">French</fr>
+    <de lang="de">German</de>
+    <zh lang="zh">Chinese</zh>
+    <no-lang>No language attribute</no-lang>
+
+    <!-- Nested language attributes -->
+    <parent lang="en">
+        <child>Inherits en</child>
+        <child lang="en-US">Overrides to en-US</child>
+    </parent>
+
+    <!-- Mixed content -->
+    <mixed lang="fr">
+        French text
+        <nested lang="de">German nested</nested>
+        More French
+    </mixed>
+</root>

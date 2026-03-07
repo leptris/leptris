@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <!-- Numeric values -->
+    <integer>42</integer>
+    <negative>-17</negative>
+    <decimal>3.14159</decimal>
+    <zero>0</zero>
+    <positive>123.456</positive>
+
+    <!-- Large numbers -->
+    <large>999999999</large>
+    <small>0.000001</small>
+
+    <!-- Special cases -->
+    <leading-zero>007</leading-zero>
+    <trailing-zero>100</trailing-zero>
+
+    <!-- For sum() testing -->
+    <numbers>
+        <num>1</num>
+        <num>2</num>
+        <num>3</num>
+        <num>4</num>
+        <num>5</num>
+    </numbers>
+
+    <decimals>
+        <val>1.5</val>
+        <val>2.5</val>
+        <val>3.5</val>
+    </decimals>
+
+    <mixed>
+        <val>10</val>
+        <val>-5</val>
+        <val>3.7</val>
+    </mixed>
+
+    <!-- Empty and non-numeric -->
+    <empty></empty>
+    <non-numeric>abc</non-numeric>
+    <whitespace>  123  </whitespace>
+
+    <!-- Edge cases for floor/ceiling/round -->
+    <floor-test>
+        <pos>3.9</pos>
+        <neg>-3.9</neg>
+        <half>2.5</half>
+    </floor-test>
+
+    <ceiling-test>
+        <pos>3.1</pos>
+        <neg>-3.1</neg>
+        <half>2.5</half>
+    </ceiling-test>
+
+    <round-test>
+        <pos-low>3.4</pos-low>
+        <pos-high>3.6</pos-high>
+        <neg-low>-3.4</neg-low>
+        <neg-high>-3.6</neg-high>
+        <half>3.5</half>
+        <neg-half>-3.5</neg-half>
+    </round-test>
+</root>

@@ -1,0 +1,34 @@
+= pugixml Test Fixtures
+:toc:
+
+== Overview
+
+This directory contains XML test files copied from the **pugixml** project's test suite to ensure Taurus can handle various XML scenarios and edge cases.
+
+== Source
+
+These fixtures are copied from:
+
+* **Project**: pugixml - Light-weight, simple and fast XML parser for C++
+* **License**: MIT License
+* **Copyright**: 2006-2025 Arseny Kapoulkine
+* **URL**: https://pugixml.org/
+* **Repository**: https://github.com/zeux/pugixml
+
+== Acknowledgment
+
+We acknowledge and thank the pugixml project and its contributors, particularly Arseny Kapoulkine, for creating and maintaining this lightweight and fast XML parser. These test files help ensure XML parser compatibility and correctness.
+
+The pugixml project is licensed under the MIT License. See the original project repository for full license terms.
+
+== Files Included
+
+The fixtures include test files for:
+
+* Basic XML parsing (elements, attributes, text)
+* Character encoding (UTF-8, UTF-16, UTF-32)
+* Byte order marks (BOM)
+* Multiline text
+* Large documents
+* Truncation handling
+* Various language character sets (including Cyrillic)

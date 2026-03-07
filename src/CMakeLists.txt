@@ -78,6 +78,11 @@ set(TAURUS_SOURCES
     # SAX
     taurus/sax/parser.c
 
+    # StAX Writer
+    taurus/writer/writer.c
+    taurus/writer/buffer.c
+    taurus/writer/escape.c
+
     # DTD
     taurus/dtd/model.c
     taurus/dtd/parser.c
@@ -125,6 +130,7 @@ target_include_directories(taurus_objects
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/xpath
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
+        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/writer
 )
 
 target_link_libraries(taurus_objects PRIVATE m)

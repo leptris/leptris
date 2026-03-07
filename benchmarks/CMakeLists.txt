@@ -242,9 +242,43 @@ if(PUGIXML_AVAILABLE)
             CXX_STANDARD_REQUIRED ON
         )
 
+        # Writer Benchmark - Taurus StAX vs libxml2 xmlTextWriter
+        add_executable(writer_benchmark
+            suite/bench_writer.cpp
+            utils.c
+        )
+
+        target_include_directories(writer_benchmark PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/include
+            ${LIBXML2_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        target_link_libraries(writer_benchmark PRIVATE
+            taurus
+            ${LIBXML2_LIBRARIES}
+        )
+
+        target_compile_definitions(writer_benchmark PRIVATE
+            ${LIBXML2_DEFINITIONS}
+        )
+
+        set_target_properties(writer_benchmark PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+        )
+
+        add_custom_target(run_writer_benchmark
+            COMMAND writer_benchmark
+            DEPENDS writer_benchmark
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running Taurus StAX Writer vs libxml2 xmlTextWriter benchmark"
+        )
+
         message(STATUS "Ultimate benchmark (Taurus vs pugixml vs libxml2) configured")
+        message(STATUS "Writer benchmark (Taurus StAX vs libxml2 xmlTextWriter) configured")
     else()
-        message(WARNING "libxml2 not found. Ultimate benchmark will not be built.")
+        message(WARNING "libxml2 not found. Ultimate benchmark and Writer benchmark will not be built.")
     endif()
 
 endif()
