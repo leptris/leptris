@@ -318,7 +318,7 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
     if (fast_result >= 0) {
         return fast_result;  /* Fast path handled it */
     }
-    /* Fall through to slow path */
+    /* Fall through to optimized path */
 
     /* Save context */
     TaurusElement old_node = ctx->context_node;
@@ -334,23 +334,10 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
     ctx->context_size = context_size;
     ctx->current_predicate_node = node;  /* The actual node (can be attribute) */
 
-    /* Evaluate predicate */
-    struct taurus_xpath_result* pred_result = evaluate_expr(ctx, predicate);
-    int matches = 0;
-
-    if (pred_result) {
-        /* Numeric predicate: matches position */
-        if (pred_result->type == XPATH_RESULT_NUMBER) {
-            if ((size_t)pred_result->value.number_value == proximity_position) {
-                matches = 1;
-            }
-        }
-        /* Boolean predicate */
-        else if (xpath_to_boolean(pred_result)) {
-            matches = 1;
-        }
-        xpath_result_free(pred_result);
-    }
+    /* PERFORMANCE: Use direct boolean evaluation (libxml2 strategy)
+     * This eliminates allocation of taurus_xpath_result objects.
+     * For predicates evaluated N times, this saves N allocations. */
+    int matches = evaluate_expr_to_boolean(ctx, predicate, 1);
 
     /* Restore context */
     ctx->context_node = old_node;
@@ -358,7 +345,7 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
     ctx->context_size = old_size;
     ctx->current_predicate_node = old_predicate_node;
 
-    return matches;
+    return (matches > 0) ? 1 : 0;
 }
 
 /* Apply predicates using in-place filtering (libxml2 algorithm)

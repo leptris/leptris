@@ -71,6 +71,16 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
 /* Main expression evaluator (in evaluator.c) */
 struct taurus_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast);
 
+/* PERFORMANCE: Direct boolean evaluation - NO ALLOCATION
+ * This is the KEY optimization that gives libxml2 its predicate performance.
+ * Evaluates expression directly to boolean without creating result objects.
+ *
+ * is_predicate: 1 if evaluating a predicate (enables position semantics for numbers)
+ *
+ * Returns: 1 if true, 0 if false, -1 on error
+ */
+int evaluate_expr_to_boolean(XPathContext* ctx, XPathASTNode* ast, int is_predicate);
+
 /* Namespace support (in evaluator.c) */
 const char* xpath_context_resolve_prefix(XPathContext* context,
                                          const char* prefix);

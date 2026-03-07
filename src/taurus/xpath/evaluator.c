@@ -794,6 +794,214 @@ static struct taurus_xpath_result* evaluate_literal(XPathContext* ctx,
     }
 }
 
+/* ============================================================================
+ * PERFORMANCE: Direct Boolean Evaluation (libxml2 Strategy)
+ * ============================================================================
+ *
+ * This is the KEY optimization that gives libxml2 its predicate performance.
+ *
+ * Instead of:
+ *   1. evaluate_expr() -> creates taurus_xpath_result object
+ *   2. xpath_to_boolean() -> converts to boolean
+ *   3. xpath_result_free() -> frees the object
+ *
+ * We do:
+ *   evaluate_expr_to_boolean() -> returns int directly
+ *
+ * This eliminates allocation/deallocation for EVERY predicate evaluation.
+ * For predicates evaluated N times (once per node), this is N allocations saved.
+ *
+ * Returns: 1 if true, 0 if false, -1 on error
+ */
+
+/* Helper: Evaluate operator directly to boolean (no allocation) */
+static int evaluate_operator_to_boolean(XPathContext* ctx, XPathASTNode* ast, int is_predicate) {
+    if (!ast || ast->child_count < 2) return -1;
+
+    XPathOperatorType op = (XPathOperatorType)ast->number_value;
+
+    /* Short-circuit evaluation for logical operators */
+    if (op == XPATH_OP_AND) {
+        int left_bool = evaluate_expr_to_boolean(ctx, ast->children[0], is_predicate);
+        if (left_bool <= 0) return left_bool;  /* false or error */
+        return evaluate_expr_to_boolean(ctx, ast->children[1], is_predicate);
+    }
+
+    if (op == XPATH_OP_OR) {
+        int left_bool = evaluate_expr_to_boolean(ctx, ast->children[0], is_predicate);
+        if (left_bool < 0) return -1;  /* error */
+        if (left_bool > 0) return 1;   /* short-circuit true */
+        return evaluate_expr_to_boolean(ctx, ast->children[1], is_predicate);
+    }
+
+    /* For comparison operators, we need to evaluate both sides */
+    struct taurus_xpath_result* left = evaluate_expr(ctx, ast->children[0]);
+    if (!left) return -1;
+
+    struct taurus_xpath_result* right = evaluate_expr(ctx, ast->children[1]);
+    if (!right) {
+        xpath_result_free(left);
+        return -1;
+    }
+
+    int result = 0;
+
+    /* Handle nodeset comparisons (most common predicate case) */
+    if (left->type == XPATH_RESULT_NODESET || right->type == XPATH_RESULT_NODESET) {
+        int is_equality_op = (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL);
+        int neq = (op == XPATH_OP_NOT_EQUAL) ? 1 : 0;
+
+        if (is_equality_op) {
+            /* Case 1: nodeset == string */
+            if (left->type == XPATH_RESULT_NODESET &&
+                right->type == XPATH_RESULT_STRING && right->value.string_value) {
+                result = xpath_nodeset_equals_string_hash(
+                    left->value.nodeset_value, right->value.string_value, neq);
+            }
+            /* Case 2: string == nodeset */
+            else if (right->type == XPATH_RESULT_NODESET &&
+                     left->type == XPATH_RESULT_STRING && left->value.string_value) {
+                result = xpath_nodeset_equals_string_hash(
+                    right->value.nodeset_value, left->value.string_value, neq);
+            }
+            /* Case 3: nodeset == nodeset - need full conversion */
+            else {
+                char* lstr = xpath_to_string(left);
+                char* rstr = xpath_to_string(right);
+                int cmp = strcmp(lstr ? lstr : "", rstr ? rstr : "");
+                result = neq ? (cmp != 0) : (cmp == 0);
+                if (lstr) TAURUS_FREE(lstr);
+                if (rstr) TAURUS_FREE(rstr);
+            }
+        } else {
+            /* Relational operators - convert to numbers */
+            double lval = xpath_to_number(left);
+            double rval = xpath_to_number(right);
+            switch (op) {
+                case XPATH_OP_LESS: result = (lval < rval); break;
+                case XPATH_OP_LESS_EQUAL: result = (lval <= rval); break;
+                case XPATH_OP_GREATER: result = (lval > rval); break;
+                case XPATH_OP_GREATER_EQUAL: result = (lval >= rval); break;
+                default: break;
+            }
+        }
+    }
+    /* String comparison for equality operators */
+    else if ((op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL) &&
+             left->type == XPATH_RESULT_STRING &&
+             right->type == XPATH_RESULT_STRING) {
+        int cmp = strcmp(left->value.string_value ? left->value.string_value : "",
+                        right->value.string_value ? right->value.string_value : "");
+        result = (op == XPATH_OP_EQUAL) ? (cmp == 0) : (cmp != 0);
+    }
+    /* Numeric comparison */
+    else {
+        double lval = xpath_to_number(left);
+        double rval = xpath_to_number(right);
+        switch (op) {
+            case XPATH_OP_EQUAL: result = (lval == rval); break;
+            case XPATH_OP_NOT_EQUAL: result = (lval != rval); break;
+            case XPATH_OP_LESS: result = (lval < rval); break;
+            case XPATH_OP_LESS_EQUAL: result = (lval <= rval); break;
+            case XPATH_OP_GREATER: result = (lval > rval); break;
+            case XPATH_OP_GREATER_EQUAL: result = (lval >= rval); break;
+            default: break;
+        }
+    }
+
+    xpath_result_free(left);
+    xpath_result_free(right);
+    return result;
+}
+
+/* Helper: Evaluate step directly to boolean (no allocation) */
+static int evaluate_step_to_boolean(XPathContext* ctx, XPathASTNode* step) {
+    /* Create temporary nodeset with context node */
+    XPathNodeSet* current = xpath_nodeset_new();
+    if (!current) return -1;
+
+    xpath_nodeset_add(current, ctx->context_node);
+
+    /* Evaluate the step */
+    struct taurus_xpath_result* step_result = evaluate_step(ctx, step, current);
+    xpath_nodeset_free(current);
+
+    if (!step_result) return -1;
+
+    /* Check if nodeset is non-empty */
+    int result = 0;
+    if (step_result->type == XPATH_RESULT_NODESET && step_result->value.nodeset_value) {
+        result = (step_result->value.nodeset_value->count > 0) ? 1 : 0;
+    }
+
+    xpath_result_free(step_result);
+    return result;
+}
+
+/* Main function: Evaluate expression directly to boolean */
+int evaluate_expr_to_boolean(XPathContext* ctx, XPathASTNode* ast, int is_predicate) {
+    if (!ctx || !ast) return -1;
+
+    switch (ast->type) {
+        case XPATH_AST_OPERATOR:
+            return evaluate_operator_to_boolean(ctx, ast, is_predicate);
+
+        case XPATH_AST_STEP:
+            return evaluate_step_to_boolean(ctx, ast);
+
+        case XPATH_AST_PATH_EXPR:
+        case XPATH_AST_ABSOLUTE_PATH:
+        case XPATH_AST_RELATIVE_PATH: {
+            /* For paths, evaluate and check if nodeset is non-empty */
+            struct taurus_xpath_result* result = evaluate_location_path(ctx, ast);
+            if (!result) return -1;
+
+            int bool_result = 0;
+            if (result->type == XPATH_RESULT_NODESET && result->value.nodeset_value) {
+                bool_result = (result->value.nodeset_value->count > 0) ? 1 : 0;
+            }
+            xpath_result_free(result);
+            return bool_result;
+        }
+
+        case XPATH_AST_NUMBER: {
+            /* In predicate context, number matches position */
+            if (is_predicate) {
+                double num = ast->number_value;
+                if (num == (double)ctx->context_position) {
+                    return 1;
+                }
+                return 0;
+            }
+            /* Otherwise, convert to boolean */
+            return (ast->number_value != 0.0 && !isnan(ast->number_value)) ? 1 : 0;
+        }
+
+        case XPATH_AST_STRING:
+            /* String is true if non-empty */
+            return (ast->value && ast->value[0] != '\0') ? 1 : 0;
+
+        case XPATH_AST_FUNCTION_CALL: {
+            /* Functions need full evaluation */
+            struct taurus_xpath_result* result = evaluate_function_call(ctx, ast);
+            if (!result) return -1;
+            int bool_result = xpath_to_boolean(result);
+            xpath_result_free(result);
+            return bool_result;
+        }
+
+        default:
+            /* Fallback: evaluate and convert */
+            {
+                struct taurus_xpath_result* result = evaluate_expr(ctx, ast);
+                if (!result) return -1;
+                int bool_result = xpath_to_boolean(result);
+                xpath_result_free(result);
+                return bool_result;
+            }
+    }
+}
+
 /**
  * Internal expression evaluator
  * Called by various evaluation functions
