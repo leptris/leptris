@@ -185,28 +185,6 @@ if(PUGIXML_AVAILABLE)
         COMMENT "Running Taurus vs pugixml DOM modification benchmark"
     )
 
-    # Parsing Benchmark (measure parse time only)
-    add_executable(bench_dom_parse
-        src/bench_dom_parse.cc
-        utils.c
-    )
-
-    target_include_directories(bench_dom_parse PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/include
-        ${PUGIXML_INCLUDE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    target_link_libraries(bench_dom_parse PRIVATE
-        taurus
-        ${PUGIXML_LIBRARY}
-    )
-
-    set_target_properties(bench_dom_parse PROPERTIES
-        CXX_STANDARD 11
-        CXX_STANDARD_REQUIRED ON
-    )
-
     # ============================================================================
     # Ultimate Benchmark - Taurus vs pugixml vs libxml2
     # ============================================================================
@@ -240,39 +218,6 @@ if(PUGIXML_AVAILABLE)
         set_target_properties(ultimate_benchmark PROPERTIES
             CXX_STANDARD 17
             CXX_STANDARD_REQUIRED ON
-        )
-
-        # Writer Benchmark - Taurus StAX vs libxml2 xmlTextWriter
-        add_executable(writer_benchmark
-            suite/bench_writer.cpp
-            utils.c
-        )
-
-        target_include_directories(writer_benchmark PRIVATE
-            ${CMAKE_SOURCE_DIR}/src/include
-            ${LIBXML2_INCLUDE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}
-        )
-
-        target_link_libraries(writer_benchmark PRIVATE
-            taurus
-            ${LIBXML2_LIBRARIES}
-        )
-
-        target_compile_definitions(writer_benchmark PRIVATE
-            ${LIBXML2_DEFINITIONS}
-        )
-
-        set_target_properties(writer_benchmark PROPERTIES
-            CXX_STANDARD 17
-            CXX_STANDARD_REQUIRED ON
-        )
-
-        add_custom_target(run_writer_benchmark
-            COMMAND writer_benchmark
-            DEPENDS writer_benchmark
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Running Taurus StAX Writer vs libxml2 xmlTextWriter benchmark"
         )
 
         # Reader Modes Benchmark - Compare parsing modes across libraries
