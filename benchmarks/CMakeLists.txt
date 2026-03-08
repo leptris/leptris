@@ -220,82 +220,42 @@ if(PUGIXML_AVAILABLE)
             CXX_STANDARD_REQUIRED ON
         )
 
-        # Reader Modes Benchmark - Compare parsing modes across libraries
-        add_executable(reader_modes_benchmark
-            suite/bench_reader_modes.cpp
-            utils.c
+        # Master Benchmark - Unified benchmark with JSON output support
+        add_executable(master_benchmark
+            suite/master_benchmark.cpp
         )
 
-        target_include_directories(reader_modes_benchmark PRIVATE
+        target_include_directories(master_benchmark PRIVATE
             ${CMAKE_SOURCE_DIR}/src/include
             ${PUGIXML_INCLUDE_DIR}
             ${LIBXML2_INCLUDE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}
         )
 
-        target_link_libraries(reader_modes_benchmark PRIVATE
+        target_link_libraries(master_benchmark PRIVATE
             taurus
             ${PUGIXML_LIBRARY}
             ${LIBXML2_LIBRARIES}
         )
 
-        target_compile_definitions(reader_modes_benchmark PRIVATE
+        target_compile_definitions(master_benchmark PRIVATE
             ${LIBXML2_DEFINITIONS}
         )
 
-        set_target_properties(reader_modes_benchmark PROPERTIES
+        set_target_properties(master_benchmark PROPERTIES
             CXX_STANDARD 17
             CXX_STANDARD_REQUIRED ON
         )
 
-        add_custom_target(run_reader_modes_benchmark
-            COMMAND reader_modes_benchmark
-            DEPENDS reader_modes_benchmark
+        add_custom_target(run_master_benchmark
+            COMMAND master_benchmark
+            DEPENDS master_benchmark
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Running reader modes benchmark (Taurus vs pugixml vs libxml2 parsing modes)"
+            COMMENT "Running master benchmark suite (all operations, JSON output available)"
         )
 
-        # Writer Modes Benchmark - Compare writing modes across libraries
-        add_executable(writer_modes_benchmark
-            suite/bench_writer_modes.cpp
-            utils.c
-        )
-
-        target_include_directories(writer_modes_benchmark PRIVATE
-            ${CMAKE_SOURCE_DIR}/src/include
-            ${PUGIXML_INCLUDE_DIR}
-            ${LIBXML2_INCLUDE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}
-        )
-
-        target_link_libraries(writer_modes_benchmark PRIVATE
-            taurus
-            ${PUGIXML_LIBRARY}
-            ${LIBXML2_LIBRARIES}
-        )
-
-        target_compile_definitions(writer_modes_benchmark PRIVATE
-            ${LIBXML2_DEFINITIONS}
-        )
-
-        set_target_properties(writer_modes_benchmark PROPERTIES
-            CXX_STANDARD 17
-            CXX_STANDARD_REQUIRED ON
-        )
-
-        add_custom_target(run_writer_modes_benchmark
-            COMMAND writer_modes_benchmark
-            DEPENDS writer_modes_benchmark
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Running writer modes benchmark (Taurus vs pugixml vs libxml2 writing modes)"
-        )
-
-        message(STATUS "Ultimate benchmark (Taurus vs pugixml vs libxml2) configured")
-        message(STATUS "Writer benchmark (Taurus StAX vs libxml2 xmlTextWriter) configured")
-        message(STATUS "Reader modes benchmark configured")
-        message(STATUS "Writer modes benchmark configured")
+        message(STATUS "Master benchmark configured (run: ./master_benchmark or ./master_benchmark --json)")
     else()
-        message(WARNING "libxml2 not found. Ultimate benchmark and Writer benchmark will not be built.")
+        message(WARNING "libxml2 not found. Master benchmark will not be built.")
     endif()
 
 endif()
