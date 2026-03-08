@@ -275,8 +275,80 @@ if(PUGIXML_AVAILABLE)
             COMMENT "Running Taurus StAX Writer vs libxml2 xmlTextWriter benchmark"
         )
 
+        # Reader Modes Benchmark - Compare parsing modes across libraries
+        add_executable(reader_modes_benchmark
+            suite/bench_reader_modes.cpp
+            utils.c
+        )
+
+        target_include_directories(reader_modes_benchmark PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/include
+            ${PUGIXML_INCLUDE_DIR}
+            ${LIBXML2_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        target_link_libraries(reader_modes_benchmark PRIVATE
+            taurus
+            ${PUGIXML_LIBRARY}
+            ${LIBXML2_LIBRARIES}
+        )
+
+        target_compile_definitions(reader_modes_benchmark PRIVATE
+            ${LIBXML2_DEFINITIONS}
+        )
+
+        set_target_properties(reader_modes_benchmark PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+        )
+
+        add_custom_target(run_reader_modes_benchmark
+            COMMAND reader_modes_benchmark
+            DEPENDS reader_modes_benchmark
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running reader modes benchmark (Taurus vs pugixml vs libxml2 parsing modes)"
+        )
+
+        # Writer Modes Benchmark - Compare writing modes across libraries
+        add_executable(writer_modes_benchmark
+            suite/bench_writer_modes.cpp
+            utils.c
+        )
+
+        target_include_directories(writer_modes_benchmark PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/include
+            ${PUGIXML_INCLUDE_DIR}
+            ${LIBXML2_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+
+        target_link_libraries(writer_modes_benchmark PRIVATE
+            taurus
+            ${PUGIXML_LIBRARY}
+            ${LIBXML2_LIBRARIES}
+        )
+
+        target_compile_definitions(writer_modes_benchmark PRIVATE
+            ${LIBXML2_DEFINITIONS}
+        )
+
+        set_target_properties(writer_modes_benchmark PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+        )
+
+        add_custom_target(run_writer_modes_benchmark
+            COMMAND writer_modes_benchmark
+            DEPENDS writer_modes_benchmark
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running writer modes benchmark (Taurus vs pugixml vs libxml2 writing modes)"
+        )
+
         message(STATUS "Ultimate benchmark (Taurus vs pugixml vs libxml2) configured")
         message(STATUS "Writer benchmark (Taurus StAX vs libxml2 xmlTextWriter) configured")
+        message(STATUS "Reader modes benchmark configured")
+        message(STATUS "Writer modes benchmark configured")
     else()
         message(WARNING "libxml2 not found. Ultimate benchmark and Writer benchmark will not be built.")
     endif()
