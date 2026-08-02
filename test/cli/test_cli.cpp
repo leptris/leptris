@@ -5,7 +5,7 @@
 // parsing, stdin handling, and file I/O.
 
 #include <gtest/gtest.h>
-
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
