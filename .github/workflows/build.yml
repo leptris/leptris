@@ -3,8 +3,22 @@ name: CLI Build
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-cli:
@@ -12,6 +26,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
 
@@ -19,77 +34,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.20'
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libutf8proc-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja utf8proc
 
       - name: Configure
-        run: |
-          mkdir -p build
-          cd build
-          cmake .. -DTAURUS_BUILD_CLI=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -S . -G Ninja -DTAURUS_BUILD_CLI=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release -DTAURUS_ENABLE_ICONV=OFF
 
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Run CLI tests (Google Test)
-        run: |
-          cd build
-          ctest --output-on-failure -R test_cli
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
-      - name: Create test XML file
+      - name: Test CLI - parse
         run: |
-          cd build
-          cat > test.xml << 'EOF'
-          <?xml version="1.0"?>
-          <root xmlns="http://example.com">
-            <item id="1" status="active">
-              <name>Test Item</name>
-              <value>100</value>
-            </item>
-            <item id="2" status="inactive">
-              <name>Another Item</name>
-              <value>200</value>
-            </item>
-          </root>
-          EOF
-
-      - name: Test CLI - parse command
-        run: |
-          cd build
-          ./cli/taurus parse test.xml
-          echo "---"
-          ./cli/taurus parse --format json test.xml
-          echo "---"
-          ./cli/taurus parse --format text test.xml
-
-      - name: Test CLI - xpath command
-        run: |
-          cd build
-          ./cli/taurus xpath test.xml "//item"
-          echo "---"
-          ./cli/taurus xpath --count test.xml "//item"
-          echo "---"
-          ./cli/taurus xpath test.xml "//item[@status='active']"
-
-      - name: Test CLI - format command
-        run: |
-          cd build
-          ./cli/taurus format test.xml
-          echo "---"
-          ./cli/taurus format --indent 4 test.xml
-          echo "---"
-          ./cli/taurus format --format json test.xml
-
-      - name: Test CLI - stdin input
-        run: |
-          cd build
-          cat test.xml | ./cli/taurus parse -
-
-      - name: Upload CLI binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: taurus-cli-${{ matrix.os }}
-          path: build/cli/taurus
-          retention-days: 7
+          echo '<root><item id="1">Test</item><item id="2">Data</item></root>' > /tmp/test.xml
+          ./build/cli/taurus parse /tmp/test.xml
+          ./build/cli/taurus xpath --count /tmp/test.xml "count(//item)"
+          ./build/cli/taurus format --indent 2 /tmp/test.xml

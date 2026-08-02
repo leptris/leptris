@@ -1765,7 +1765,7 @@ TAURUS_API int taurus_xpath_result_boolean(TaurusXPathResult result) {
  * Get number value (Public API wrapper)
  */
 TAURUS_API double taurus_xpath_result_number(TaurusXPathResult result) {
-    if (!result) return 0.0 / 0.0;  /* NaN */
+    if (!result) return NAN;  /* NaN */
 
     switch (result->type) {
         case XPATH_RESULT_NUMBER:
@@ -1774,14 +1774,14 @@ TAURUS_API double taurus_xpath_result_number(TaurusXPathResult result) {
             return result->value.boolean_value ? 1.0 : 0.0;
         case XPATH_RESULT_STRING:
             if (!result->value.string_value || result->value.string_value[0] == '\0') {
-                return 0.0 / 0.0;  /* NaN for empty string */
+                return NAN;  /* NaN for empty string */
             }
             /* Parse string to number */
             {
                 char* endptr;
                 double val = strtod(result->value.string_value, &endptr);
                 /* Return NaN if not fully parsed */
-                return (endptr == result->value.string_value || *endptr != '\0') ? (0.0 / 0.0) : val;
+                return (endptr == result->value.string_value || *endptr != '\0') ? (NAN) : val;
             }
         case XPATH_RESULT_NODESET:
             /* Convert first node to string, then to number */
@@ -1791,12 +1791,12 @@ TAURUS_API double taurus_xpath_result_number(TaurusXPathResult result) {
                 if (text && text[0] != '\0') {
                     char* endptr;
                     double val = strtod(text, &endptr);
-                    return (endptr == text || *endptr != '\0') ? (0.0 / 0.0) : val;
+                    return (endptr == text || *endptr != '\0') ? (NAN) : val;
                 }
             }
-            return 0.0 / 0.0;  /* NaN */
+            return NAN;  /* NaN */
         default:
-            return 0.0 / 0.0;  /* NaN */
+            return NAN;  /* NaN */
     }
 }
 

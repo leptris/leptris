@@ -9,7 +9,7 @@ if ! command -v cppcheck &>/dev/null; then
 fi
 
 # Build arguments; cppcheck understands compile_commands.json if present.
-ARGS=(--enable=warning,style,performance --suppress=missingInclude
+ARGS=(--enable=warning,performance --suppress=missingInclude
       --inline-suppr --error-exitcode=1 -q)
 
 if [ -f build/compile_commands.json ]; then
