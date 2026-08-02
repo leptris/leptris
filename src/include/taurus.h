@@ -9,12 +9,20 @@
 #define LIBTAURUS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Export macro for Windows DLL support
+/* Export macro for Windows DLL support and binding generators.
+ *
+ * When TAURUS_FOR_BINDGEN is defined (by bindgen/cffi/ctypes),
+ * the macro expands to nothing so the header parses cleanly.
+ * See TODO 84. */
+#ifdef TAURUS_FOR_BINDGEN
+#define TAURUS_API
+#else
 #ifndef TAURUS_API
 #  ifdef _WIN32
 #    ifdef TAURUS_BUILD_SHARED
@@ -28,6 +36,7 @@ extern "C" {
 #    define TAURUS_API
 #  endif
 #endif
+#endif  /* TAURUS_FOR_BINDGEN */
 
 /* ============================================================================
  * Opaque Types - Hide implementation details
@@ -47,6 +56,13 @@ typedef struct taurus_attribute*       TaurusAttribute;
 typedef const char*                    TaurusNamespace;
 typedef struct taurus_xpath_result*    TaurusXPathResult;
 #endif
+
+/* ABI sanity asserts — catches accidental struct-field exposure
+ * that would change opaque-handle sizes.  See TODO 84. */
+_Static_assert(sizeof(TaurusDocument)  == sizeof(void*), "TaurusDocument must be a pointer");
+_Static_assert(sizeof(TaurusElement)   == sizeof(void*), "TaurusElement must be a pointer");
+_Static_assert(sizeof(TaurusAttribute) == sizeof(void*), "TaurusAttribute must be a pointer");
+_Static_assert(sizeof(TaurusXPathResult) == sizeof(void*), "TaurusXPathResult must be a pointer");
 
 /* ============================================================================
  * Status Codes
