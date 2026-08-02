@@ -3,43 +3,23 @@
  */
 
 #include "text.h"
+#include "../memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
 
-/* Create text node with content
- * CRITICAL: Content is NEVER trimmed */
-TaurusTextNode* taurus_text_create(const char* content) {
-    TaurusTextNode* text = (TaurusTextNode*)taurus_node_create(
-        TAURUS_NODE_TYPE_TEXT,
-        sizeof(TaurusTextNode)
-    );
-
-    if (!text) return NULL;
-
-    text->content = content ? taurus_strdup(content) : NULL;
-    text->next_sibling = NULL;  /* Initialize sibling pointer */
-
-    return text;
-}
-
-/**
- * Create text node with bulk allocation (OPTIMIZED)
+/* Create text node: single pool-routed entry point.
  *
- * Allocates node structure and content string in single pool allocation.
+ * Allocates struct + content contiguously in one pool bump (TODO 18
+ * consolidated the legacy calloc-backed create with the pool-backed
+ * _create_fast — both now flow through here).
  *
- * @param content      Text content
- * @param content_len  Length of content
- * @param pool         Memory pool for allocation
- * @return New text node, or NULL on failure
- */
-TaurusTextNode* taurus_text_create_fast(
-    const char* content,
-    size_t content_len,
-    TaurusMemoryPool* pool
-) {
-    if (!content || !pool) return NULL;
+ * CRITICAL: Content is NEVER trimmed — preserved exactly as given. */
+TaurusTextNode* taurus_text_create(const char* content,
+                                    size_t content_len,
+                                    TaurusMemoryPool* pool) {
+    if (!pool) return NULL;
 
-    /* Single allocation: node + content */
+    /* Single allocation: node struct + content + NUL */
     size_t total_size = sizeof(TaurusTextNode) + content_len + 1;
     char* memory = (char*)taurus_pool_alloc(pool, total_size);
     if (!memory) return NULL;
@@ -47,26 +27,28 @@ TaurusTextNode* taurus_text_create_fast(
     TaurusTextNode* node = (TaurusTextNode*)memory;
     char* content_storage = memory + sizeof(TaurusTextNode);
 
-    /* Initialize base - note: parent/sibling pointers removed in compact architecture */
     node->base.type = TAURUS_NODE_TYPE_TEXT;
     node->base.frozen = 0;
     node->base.version = 0;
-    node->next_sibling = NULL;  /* Initialize sibling pointer */
+    node->next_sibling = NULL;
 
-    /* Copy content to adjacent storage */
-    memcpy(content_storage, content, content_len);
+    if (content && content_len > 0) {
+        memcpy(content_storage, content, content_len);
+    }
     content_storage[content_len] = '\0';
     node->content = content_storage;
 
     return node;
 }
 
-/* Free text node */
+/* Free text node.
+ *
+ * As of TODO 17, individual node freeing is forbidden — the pool owns
+ * all node lifetime.  This function is kept only for backwards source
+ * compatibility with callers that explicitly call it; it's a no-op. */
 void taurus_text_free(TaurusTextNode* text) {
-    if (!text) return;
-
-    if (text->content) free(text->content);
-    free(text);
+    (void)text;
+    /* Pool-owned; nothing to do. */
 }
 
 /* Get text content */

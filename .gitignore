@@ -79,6 +79,8 @@ Testing/
 compile_commands.json
 Makefile
 *.cmake.in
+# Exception: taurus-config.cmake.in IS source (TODO 01).
+!cmake/taurus-config.cmake.in
 
 # Generated binaries in test directories
 test/Makefile

@@ -17,16 +17,12 @@ typedef struct taurus_cdata_node {
     void* next_sibling;               /* Next sibling in linked list (mixed content) */
 } TaurusCDATANode;
 
-/* CDATA node creation and destruction */
-TaurusCDATANode* taurus_cdata_create(const char* content);
+/* CDATA node creation.  Pool-allocated with contiguous content
+ * storage (TODO 18 + TODO 26: single entry point, no _fast variant). */
+TaurusCDATANode* taurus_cdata_create(const char* content,
+                                      size_t content_len,
+                                      struct taurus_memory_pool* pool);
 void taurus_cdata_free(TaurusCDATANode* cdata);
-
-/* Create CDATA node with bulk allocation (optimized) */
-TaurusCDATANode* taurus_cdata_create_fast(
-    const char* content,
-    size_t content_len,
-    struct taurus_memory_pool* pool
-);
 
 /* Content access */
 const char* taurus_cdata_get_content(TaurusCDATANode* cdata);

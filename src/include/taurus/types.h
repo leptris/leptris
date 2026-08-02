@@ -18,14 +18,19 @@ extern "C" {
 
 /* ============================================================================
  * Opaque Types - Hide implementation details
+ *
+ * Guarded so re-including this header alongside taurus.h doesn't
+ * produce a typedef-redefinition warning.  See TODO 12.
  * ============================================================================ */
 
+#ifndef TAURUS_INTERNAL_TYPES_DEFINED
+#define TAURUS_INTERNAL_TYPES_DEFINED
 typedef struct taurus_document*     TaurusDocument;
 typedef struct taurus_element*      TaurusElement;
 typedef struct taurus_attribute*    TaurusAttribute;
-/* In compact mode, TaurusNamespace is just the namespace URI string (inline storage) */
 typedef const char*                 TaurusNamespace;
 typedef struct taurus_xpath_result* TaurusXPathResult;
+#endif
 
 /* ============================================================================
  * Status Codes

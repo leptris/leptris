@@ -1,0 +1,77 @@
+name: ASAN + Leak Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  asan:
+    name: AddressSanitizer (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.20.x'
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 'cd5e746ec203c8c3c61647e0886a8df8c1e78e41'
+
+      - name: Configure (ASAN)
+        run: |
+          cmake -B build -S . \
+            -DBUILD_TESTING=ON \
+            -DTAURUS_BUILD_CLI=ON \
+            -DTAURUS_ENABLE_ASAN=ON \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test under ASAN
+        run: ctest --test-dir build --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+
+  leaks-macos:
+    name: leaks (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.20.x'
+
+      - name: Install utf8proc
+        run: brew install utf8proc
+
+      - name: Configure
+        run: |
+          cmake -B build -S . \
+            -DBUILD_TESTING=ON \
+            -DTAURUS_BUILD_CLI=ON \
+            -DTAURUS_ENABLE_UTF8PROC=ON \
+            -DTAURUS_ENABLE_ICONV=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Leak check on fixtures
+        run: |
+          set -e
+          for f in basic.xml small.xml full.xml; do
+            echo "=== $f ==="
+            leaks --atExit -- build/cli/taurus parse test/fixtures/$f \
+              | tee /tmp/leak_$f.log
+            grep -q "0 leaks for 0 total" /tmp/leak_$f.log \
+              || { echo "FAIL: leaks on $f"; exit 1; }
+          done

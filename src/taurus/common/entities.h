@@ -7,10 +7,7 @@
 
 #include <stddef.h>
 #include "string_view.h"
-
-/* Forward declaration */
-typedef struct taurus_memory_pool TaurusMemoryPool;
-typedef struct TaurusDTD TaurusDTD;
+#include "types_internal.h"   /* Single source for TaurusMemoryPool / TaurusDTD */
 
 /**
  * Decode XML entities and character references in-place.

@@ -31,15 +31,22 @@ extern "C" {
 
 /* ============================================================================
  * Opaque Types - Hide implementation details
+ *
+ * These mirror the definitions in taurus/types.h.  When both headers
+ * are included in the same TU, C99's typedef-redefinition rule fires.
+ * Guard each typedef so only the first definition wins (the definitions
+ * are intentionally identical).  See TODO 12.
  * ============================================================================ */
 
+#ifndef TAURUS_INTERNAL_TYPES_DEFINED
+#define TAURUS_INTERNAL_TYPES_DEFINED
 typedef struct taurus_node*            TaurusNodeRef;
 typedef struct taurus_document*        TaurusDocument;
 typedef struct taurus_element*         TaurusElement;
 typedef struct taurus_attribute*       TaurusAttribute;
-/* In compact mode, TaurusNamespace is just the namespace URI string (inline storage) */
 typedef const char*                    TaurusNamespace;
 typedef struct taurus_xpath_result*    TaurusXPathResult;
+#endif
 
 /* ============================================================================
  * Status Codes
@@ -136,6 +143,19 @@ TAURUS_API size_t taurus_node_child_count(TaurusNodeRef node);
  * Memory: Element is owned by document. Do not free.
  */
 TAURUS_API TaurusElement taurus_node_as_element(TaurusNodeRef node);
+
+/**
+ * Cast element to its base node handle (for traversal with the
+ * taurus_node_* family of operations).
+ *
+ * Every element IS-A node (the element struct begins with a TaurusNode
+ * header), so this cast is always safe.  The reverse direction is
+ * taurus_node_as_element(), which returns NULL for non-element nodes.
+ *
+ * @param elem Element handle
+ * @return Node handle, or NULL if elem is NULL
+ */
+TAURUS_API TaurusNodeRef taurus_element_as_node(TaurusElement elem);
 
 /**
  * Get text content from text node
@@ -343,10 +363,47 @@ TAURUS_API int taurus_document_finalize_strings(TaurusDocument doc);
  *
  * @param strict 1 for strict mode, 0 for lenient mode
  *
- * Thread safety: Not thread-safe. Affects all subsequent parsing operations.
- * Note: This is a global setting. Use with caution in multi-threaded environments.
+ * Thread safety: __thread (TODO 27 phase 1) — each thread has its
+ * own default.  Documents created after this call inherit the value
+ * at creation time.  Per-document override: taurus_document_set_strict.
  */
 TAURUS_API void taurus_set_strict_mode(int strict);
+
+/**
+ * Set strict mode on a specific document (TODO 38).
+ *
+ * Overrides the thread-default for this document only.  Useful when
+ * an application wants to mix strict and lenient parsing in the same
+ * thread.
+ *
+ * @param doc Document to modify.
+ * @param strict 1 for strict mode, 0 for lenient mode.
+ * @return TAURUS_OK on success, TAURUS_ERROR_NULL_ARG if doc is NULL.
+ *
+ * Memory: No allocation.
+ */
+TAURUS_API TaurusStatus taurus_document_set_strict(TaurusDocument doc, int strict);
+
+/**
+ * Get strict mode for a specific document.
+ *
+ * Returns the per-document setting (set via taurus_document_set_strict)
+ * or the thread-default if never explicitly set.
+ *
+ * @param doc Document to query.
+ * @return 1 if strict, 0 if lenient, 0 if doc is NULL.
+ */
+TAURUS_API int taurus_document_get_strict(TaurusDocument doc);
+
+/**
+ * Get the thread-default strict mode.
+ *
+ * Documents inherit this value at creation time unless
+ * taurus_document_set_strict overrides it.
+ *
+ * @return 1 if strict default, 0 if lenient.
+ */
+TAURUS_API int taurus_get_strict_mode(void);
 
 /* ============================================================================
  * Element Operations

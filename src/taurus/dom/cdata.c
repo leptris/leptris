@@ -3,73 +3,41 @@
  */
 
 #include "cdata.h"
+#include "../memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
 
-/* Create CDATA node */
-TaurusCDATANode* taurus_cdata_create(const char* content) {
-    TaurusCDATANode* cdata = (TaurusCDATANode*)taurus_node_create(
-        TAURUS_NODE_TYPE_CDATA,
-        sizeof(TaurusCDATANode)
-    );
+/* Create CDATA node.  Single pool-routed entry point: struct + content
+ * contiguous (TODO 18 consolidated _create and _create_fast). */
+TaurusCDATANode* taurus_cdata_create(const char* content,
+                                      size_t content_len,
+                                      TaurusMemoryPool* pool) {
+    if (!pool) return NULL;
 
-    if (!cdata) return NULL;
-
-    cdata->content = content ? taurus_strdup(content) : NULL;
-    cdata->next_sibling = NULL;  /* Initialize sibling pointer */
-
-    return cdata;
-}
-
-/**
- * Create CDATA node with bulk allocation (OPTIMIZED)
- *
- * Allocates node structure and content string in single pool allocation
- * for better performance and cache locality.
- *
- * @param content      CDATA content
- * @param content_len  Length of content (avoid strlen call)
- * @param pool         Memory pool for allocation
- * @return New CDATA node, or NULL on failure
- */
-TaurusCDATANode* taurus_cdata_create_fast(
-    const char* content,
-    size_t content_len,
-    TaurusMemoryPool* pool
-) {
-    if (!content || !pool) return NULL;
-
-    /* Single allocation: node + content */
     size_t total_size = sizeof(TaurusCDATANode) + content_len + 1;
     char* memory = (char*)taurus_pool_alloc(pool, total_size);
     if (!memory) return NULL;
 
-    /* CDATA structure at start of memory */
     TaurusCDATANode* node = (TaurusCDATANode*)memory;
-
-    /* Content string immediately after structure */
     char* content_storage = memory + sizeof(TaurusCDATANode);
-    memcpy(content_storage, content, content_len);
-    content_storage[content_len] = '\0';
 
-    /* Initialize base node - note: parent/sibling pointers removed in compact architecture */
     node->base.type = TAURUS_NODE_TYPE_CDATA;
     node->base.frozen = 0;
     node->base.version = 0;
-    node->next_sibling = NULL;  /* Initialize sibling pointer */
+    node->next_sibling = NULL;
 
-    /* Set content pointer to adjacent storage */
+    if (content && content_len > 0) {
+        memcpy(content_storage, content, content_len);
+    }
+    content_storage[content_len] = '\0';
     node->content = content_storage;
 
     return node;
 }
 
-/* Free CDATA node */
+/* Free CDATA node — pool-owned (TODO 17); no-op. */
 void taurus_cdata_free(TaurusCDATANode* cdata) {
-    if (!cdata) return;
-
-    if (cdata->content) free(cdata->content);
-    free(cdata);
+    (void)cdata;
 }
 
 /* Get CDATA content */

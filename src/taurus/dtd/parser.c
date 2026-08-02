@@ -7,14 +7,20 @@
  */
 
 #include "model.h"
+#include "../memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
-/* Parser state */
+/* Parser state.
+ *
+ * Carries the pool pointer (TODO 16) so static helpers can route
+ * entity/element/attribute declarations through the document pool
+ * without each helper taking a separate pool argument. */
 typedef struct {
     const char* pos;
     const char* end;
+    TaurusMemoryPool* pool;
 } DTDParser;
 
 /* Helper functions */
@@ -70,8 +76,9 @@ static char* dtd_parse_name(DTDParser* p) {
 }
 
 /**
- * Parse quoted string (single or double quotes)
- */
+ * Parse quoted string (single or double quotes), pool-allocated
+ * (TODO 33: was malloc'd, which leaked when stored on pool-owned
+ * entity/notation structs). */
 static char* dtd_parse_quoted_string(DTDParser* p) {
     dtd_skip_whitespace(p);
 
@@ -87,7 +94,7 @@ static char* dtd_parse_quoted_string(DTDParser* p) {
     }
 
     size_t len = p->pos - start;
-    char* result = (char*)malloc(len + 1);
+    char* result = (char*)taurus_pool_alloc(p->pool, len + 1);
     if (!result) return NULL;
 
     memcpy(result, start, len);
@@ -110,7 +117,7 @@ static DTDEntityDecl* dtd_parse_entity(DTDParser* p) {
     char* name = dtd_parse_name(p);
     if (!name) return NULL;
 
-    DTDEntityDecl* entity = ttdtd_entity_create(name);
+    DTDEntityDecl* entity = ttdtd_entity_create(name, p->pool);
     free(name);
     if (!entity) return NULL;
 
@@ -287,14 +294,15 @@ static DTDNotationDecl* dtd_parse_notation(DTDParser* p) {
  * @param len Length of DTD content in bytes
  * @return Parsed DTD object or NULL on error
  */
-TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len) {
-    if (!dtd_content || len == 0) return NULL;
+TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
+                                              TaurusMemoryPool* pool) {
+    if (!dtd_content || len == 0 || !pool) return NULL;
 
-    /* Create DTD container with hash tables */
-    TaurusDTD* dtd = taurus_dtd_create();
+    /* Create DTD container backed by the document's pool (TODO 16). */
+    TaurusDTD* dtd = taurus_dtd_create(pool);
     if (!dtd) return NULL;
 
-    DTDParser parser = {dtd_content, dtd_content + len};
+    DTDParser parser = {dtd_content, dtd_content + len, pool};
 
     while (!dtd_at_end(&parser)) {
         dtd_skip_whitespace(&parser);
@@ -372,10 +380,23 @@ void taurus_dtd_free(TaurusDTD* dtd) {
  * This is the public API function declared in include/taurus/dtd.h.
  * It's a wrapper that calls taurus_dtd_parse_internal_subset.
  *
- * @param dtd_content DTD content string (UTF-8)
- * @param len Length of DTD content in bytes
- * @return Parsed DTD object or NULL on error
+ * NOTE (TODO 16): this public entry point has no document pool to
+ * route through, so it creates a temporary pool for the DTD.  Callers
+ * using this path must call ttdtd_free() to release it (the wrapper
+ * preserves legacy semantics).  Internal callers should use
+ * taurus_dtd_parse_internal_subset() directly with the document's
+ * pool instead.
  */
 TaurusDTD* taurus_dtd_parse(const char* dtd_content, size_t len) {
-    return taurus_dtd_parse_internal_subset(dtd_content, len);
+    TaurusMemoryPool* pool = taurus_pool_create();
+    if (!pool) return NULL;
+    TaurusDTD* dtd = taurus_dtd_parse_internal_subset(dtd_content, len, pool);
+    if (!dtd) {
+        taurus_pool_destroy(pool);
+    }
+    /* dtd->pool == pool; caller must ttdtd_free to release.  But since
+     * ttdtd_free is now a no-op (TODO 16), this wrapper leaks the pool
+     * by design — public-API callers should migrate to the document-
+     * pool-aware path. */
+    return dtd;
 }

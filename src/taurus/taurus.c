@@ -25,6 +25,10 @@
 #include <stdio.h>
 #include <ctype.h>
 
+/* Forward decl — g_taurus_strict_mode is defined later in this file.
+ * Documents inherit its value at creation time (TODO 38). */
+static __thread int g_taurus_strict_mode;
+
 /* ============================================================================
  * Utility Macros
  * ============================================================================ */
@@ -144,6 +148,8 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
 
     /* Initialize all fields to prevent stale data from recycled memory */
     memset(doc, 0, sizeof(struct taurus_document));
+    /* TODO 38: inherit strict mode from the thread-default at creation. */
+    doc->strict_mode = g_taurus_strict_mode;
 
     /* Transfer pool ownership to document */
     doc->pool = pool;
@@ -213,7 +219,7 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
         TaurusDoctypeNode* doctype = (TaurusDoctypeNode*)doc->doctype;
         const char* internal_subset = doctype->internal_subset;
         if (internal_subset && strlen(internal_subset) > 0) {
-            doc->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset));
+            doc->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset), doc->pool);
         }
     }
 
@@ -351,7 +357,7 @@ static struct taurus_document* taurus_parse_inplace(char* xml, size_t len) {
         TaurusDoctypeNode* doctype = (TaurusDoctypeNode*)doc->doctype;
         const char* internal_subset = doctype->internal_subset;
         if (internal_subset && strlen(internal_subset) > 0) {
-            doc->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset));
+            doc->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset), doc->pool);
         }
     }
 
@@ -454,21 +460,18 @@ TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, Ta
 
         struct taurus_document* doc = taurus_parse(utf8_buffer, utf8_len);
 
-        if (doc) {
-            /* Store the UTF-8 buffer in document so it's freed when document is freed
-             * CRITICAL: StringViews in parsed document point to this buffer!
-             * We cannot free it immediately - it must live as long as the document. */
-            doc->xml_buffer = utf8_buffer;
-            doc->xml_buffer_len = utf8_len;
-            doc->xml_buffer_needs_free = 1;
+        /* taurus_parse() heap-copies its input into doc->xml_buffer and
+         * parses in-place from there; the document's StringViews point
+         * into that inner copy, NOT into utf8_buffer.  Free our
+         * intermediate conversion buffer — its contents are already
+         * preserved inside the document. */
+        free(utf8_buffer);
 
+        if (doc) {
             if (doc->encoding) {
                 TAURUS_FREE(doc->encoding);
             }
             doc->encoding = taurus_strdup((encoding == UTF16_LE) ? "UTF-16LE" : "UTF-16BE");
-        } else {
-            /* Parse failed, free the buffer */
-            free(utf8_buffer);
         }
 
         if (!doc && status) {
@@ -494,21 +497,15 @@ TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, Ta
 
         struct taurus_document* doc = taurus_parse(utf8_buffer, utf8_len);
 
-        if (doc) {
-            /* Store the UTF-8 buffer in document so it's freed when document is freed
-             * CRITICAL: StringViews in parsed document point to this buffer!
-             * We cannot free it immediately - it must live as long as the document. */
-            doc->xml_buffer = utf8_buffer;
-            doc->xml_buffer_len = utf8_len;
-            doc->xml_buffer_needs_free = 1;
+        /* See UTF-16-with-BOM comment above: taurus_parse already copied
+         * the buffer; ours is now redundant. */
+        free(utf8_buffer);
 
+        if (doc) {
             if (doc->encoding) {
                 TAURUS_FREE(doc->encoding);
             }
             doc->encoding = taurus_strdup((detected == UTF16_LE) ? "UTF-16LE" : "UTF-16BE");
-        } else {
-            /* Parse failed, free the buffer */
-            free(utf8_buffer);
         }
 
         if (!doc && status) {
@@ -544,14 +541,10 @@ TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, Ta
         doc->encoding = taurus_strdup(detected_encoding);
     }
 
-    /* CRITICAL FIX: StringViews in parsed document point to utf8_xml buffer!
-     * We cannot free it immediately - store it in document for later cleanup. */
-    if (doc && utf8_xml != xml) {
-        doc->xml_buffer = utf8_xml;
-        doc->xml_buffer_len = utf8_len;
-        doc->xml_buffer_needs_free = 1;
-    } else if (utf8_xml != xml) {
-        /* Parse failed, free the buffer */
+    /* taurus_parse() already heap-copied utf8_xml into doc->xml_buffer;
+     * the document's StringViews point into that inner copy.  Our
+     * conversion buffer is redundant — free it. */
+    if (utf8_xml != xml) {
         free(utf8_xml);
     }
 
@@ -619,21 +612,18 @@ TAURUS_API TaurusDocument taurus_parse_string_with_encoding(const char* xml, siz
 
         struct taurus_document* doc = taurus_parse(utf8_buffer, utf8_len);
 
-        if (doc) {
-            /* Store the UTF-8 buffer in document so it's freed when document is freed
-             * CRITICAL: StringViews in parsed document point to this buffer!
-             * We cannot free it immediately - it must live as long as the document. */
-            doc->xml_buffer = utf8_buffer;
-            doc->xml_buffer_len = utf8_len;
-            doc->xml_buffer_needs_free = 1;
+        /* taurus_parse() heap-copies its input into doc->xml_buffer and
+         * parses in-place from there; the document's StringViews point
+         * into that inner copy, NOT into utf8_buffer.  Free our
+         * intermediate conversion buffer — its contents are already
+         * preserved inside the document. */
+        free(utf8_buffer);
 
+        if (doc) {
             if (doc->encoding) {
                 TAURUS_FREE(doc->encoding);
             }
             doc->encoding = taurus_strdup((encoding == UTF16_LE) ? "UTF-16LE" : "UTF-16BE");
-        } else {
-            /* Parse failed, free the buffer */
-            free(utf8_buffer);
         }
 
         if (!doc && status) {
@@ -659,21 +649,15 @@ TAURUS_API TaurusDocument taurus_parse_string_with_encoding(const char* xml, siz
 
         struct taurus_document* doc = taurus_parse(utf8_buffer, utf8_len);
 
-        if (doc) {
-            /* Store the UTF-8 buffer in document so it's freed when document is freed
-             * CRITICAL: StringViews in parsed document point to this buffer!
-             * We cannot free it immediately - it must live as long as the document. */
-            doc->xml_buffer = utf8_buffer;
-            doc->xml_buffer_len = utf8_len;
-            doc->xml_buffer_needs_free = 1;
+        /* See UTF-16-with-BOM comment above: taurus_parse already copied
+         * the buffer; ours is now redundant. */
+        free(utf8_buffer);
 
+        if (doc) {
             if (doc->encoding) {
                 TAURUS_FREE(doc->encoding);
             }
             doc->encoding = taurus_strdup((detected == UTF16_LE) ? "UTF-16LE" : "UTF-16BE");
-        } else {
-            /* Parse failed, free the buffer */
-            free(utf8_buffer);
         }
 
         if (!doc && status) {
@@ -709,14 +693,10 @@ TAURUS_API TaurusDocument taurus_parse_string_with_encoding(const char* xml, siz
         doc->encoding = taurus_strdup(detected_encoding);
     }
 
-    /* CRITICAL FIX: StringViews in parsed document point to utf8_xml buffer!
-     * We cannot free it immediately - store it in document for later cleanup. */
-    if (doc && utf8_xml != xml) {
-        doc->xml_buffer = utf8_xml;
-        doc->xml_buffer_len = utf8_len;
-        doc->xml_buffer_needs_free = 1;
-    } else if (utf8_xml != xml) {
-        /* Parse failed, free the buffer */
+    /* taurus_parse() already heap-copied utf8_xml into doc->xml_buffer;
+     * the document's StringViews point into that inner copy.  Our
+     * conversion buffer is redundant — free it. */
+    if (utf8_xml != xml) {
         free(utf8_xml);
     }
 
@@ -917,21 +897,39 @@ TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
     return (TaurusElement)doc->root;
 }
 
-/* Global strict parsing mode flag (default: lenient mode for pugixml compatibility) */
-static int g_taurus_strict_mode = 0;
+/* Global strict parsing mode flag (default: lenient mode for pugixml compatibility).
+ *
+ * TODO 27 phase 1: made thread-local so concurrent parses in
+ * different threads don't race on this flag.  Phase 2 (deferred)
+ * moves this to the document so different documents in the same
+ * thread can have different modes. */
+static __thread int g_taurus_strict_mode = 0;
 
 /**
- * Set strict parsing mode
+ * Set strict parsing mode (thread-default).
+ *
+ * TODO 27 phase 2: per-document overrides via taurus_document_set_strict.
  */
 TAURUS_API void taurus_set_strict_mode(int strict) {
     g_taurus_strict_mode = (strict != 0);
 }
 
 /**
- * Get current strict parsing mode (internal function)
+ * Get current strict parsing mode (thread-default — internal function).
+ * Per-document code should call taurus_document_get_strict instead.
  */
-int taurus_get_strict_mode(void) {
+TAURUS_API int taurus_get_strict_mode(void) {
     return g_taurus_strict_mode;
+}
+
+TAURUS_API TaurusStatus taurus_document_set_strict(TaurusDocument doc, int strict) {
+    if (!doc) return TAURUS_ERROR_NULL_ARG;
+    doc->strict_mode = (strict != 0);
+    return TAURUS_OK;
+}
+
+TAURUS_API int taurus_document_get_strict(TaurusDocument doc) {
+    return doc ? doc->strict_mode : g_taurus_strict_mode;
 }
 
 /**
@@ -2481,8 +2479,14 @@ TAURUS_API void taurus_free_string(char* str) {
  * ============================================================================ */
 
 /* Global custom allocation functions (NULL = use malloc/free) */
-static taurus_allocation_function g_alloc_function = NULL;
-static taurus_deallocation_function g_dealloc_function = NULL;
+/* Custom allocator hooks.
+ *
+ * TODO 27 phase 1: thread-local, so each thread can have its own
+ * allocator without cross-contamination.  Phase 2 will move these
+ * to per-document scope (set at parse time, propagated via the
+ * document struct). */
+static __thread taurus_allocation_function g_alloc_function = NULL;
+static __thread taurus_deallocation_function g_dealloc_function = NULL;
 
 /**
  * Set custom memory management functions
@@ -2654,22 +2658,35 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars(
  * ============================================================================ */
 
 /* Forward declaration for recursive helper */
-static void finalize_element_strings(TaurusElement elem);
+static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool);
 
-/* Helper: Finalize strings for a single element */
-static void finalize_element_strings(TaurusElement elem) {
+/* Helper: Finalize strings for a single element.
+ *
+ * `pool` is passed explicitly (rather than read from elem->document)
+ * because child elements may not have their document back-pointer set
+ * yet during this recursion — TODO 25.
+ *
+ * We bypass the lazy-conversion accessors (taurus_element_get_name etc.)
+ * and route directly through taurus_sv_to_cstr_pooled so the resulting
+ * strings are pool-owned.  The accessors would otherwise fall back to
+ * calloc when elem->document is NULL, leaking. */
+static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool) {
     if (!elem) return;
 
-    /* Convert element name StringView to NULL-terminated string */
-    /* This triggers lazy conversion via accessor function */
-    const char* name = taurus_element_get_name(elem);
-    (void)name; /* Suppress unused warning */
-
-    /* Convert namespace/prefix StringViews */
-    const char* ns_uri = taurus_element_get_namespace_uri(elem);
-    (void)ns_uri; /* Suppress unused warning */
-    const char* ns_prefix = taurus_element_get_prefix(elem);
-    (void)ns_prefix; /* Suppress unused warning */
+    /* Convert element name StringView to NULL-terminated string.
+     *
+     * TODO 25: pool is always non-NULL when called from
+     * taurus_document_finalize_strings; force the pooled path so we
+     * never calloc. */
+    if (!elem->name && !taurus_sv_is_empty(&elem->name_view)) {
+        elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, pool);
+    }
+    if (!elem->namespace_uri && !taurus_sv_is_empty(&elem->namespace_uri_view)) {
+        elem->namespace_uri = taurus_sv_to_cstr_pooled(&elem->namespace_uri_view, pool);
+    }
+    if (!elem->prefix && !taurus_sv_is_empty(&elem->prefix_view)) {
+        elem->prefix = taurus_sv_to_cstr_pooled(&elem->prefix_view, pool);
+    }
 
     /* Convert all attribute StringViews */
     size_t attr_count = taurus_element_attribute_count(elem);
@@ -2680,35 +2697,32 @@ static void finalize_element_strings(TaurusElement elem) {
         /* Validate attribute pointer before accessing */
         if ((uintptr_t)attr < 0x1000) continue;  /* Invalid pointer */
 
-        /* Convert attribute name and value StringViews */
+        /* Convert attribute name and value StringViews.
+         *
+         * TODO 25: pool is always non-NULL here; force pooled path. */
         if (!attr->name && !taurus_sv_is_empty(&attr->name_view)) {
-            /* Validate StringView data pointer before conversion */
             if ((uintptr_t)attr->name_view.data >= 0x1000) {
-                attr->name = taurus_sv_to_cstr(&attr->name_view);
+                attr->name = taurus_sv_to_cstr_pooled(&attr->name_view, pool);
             }
         }
         if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
             if ((uintptr_t)attr->value_view.data >= 0x1000) {
-                /* Check if attribute has entities and decode them */
                 if (attr->has_entities) {
-                    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
                     attr->value = taurus_decode_entities_view(&attr->value_view, pool);
                 }
-                /* Fallback to regular conversion if entity decoding failed or no entities */
                 if (!attr->value) {
-                    attr->value = taurus_sv_to_cstr(&attr->value_view);
+                    attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
                 }
             }
         }
-        /* Convert namespace/prefix StringViews for attribute */
         if (!attr->namespace_uri && !taurus_sv_is_empty(&attr->namespace_uri_view)) {
             if ((uintptr_t)attr->namespace_uri_view.data >= 0x1000) {
-                attr->namespace_uri = taurus_sv_to_cstr(&attr->namespace_uri_view);
+                attr->namespace_uri = taurus_sv_to_cstr_pooled(&attr->namespace_uri_view, pool);
             }
         }
         if (!attr->prefix && !taurus_sv_is_empty(&attr->prefix_view)) {
             if ((uintptr_t)attr->prefix_view.data >= 0x1000) {
-                attr->prefix = taurus_sv_to_cstr(&attr->prefix_view);
+                attr->prefix = taurus_sv_to_cstr_pooled(&attr->prefix_view, pool);
             }
         }
     }
@@ -2718,7 +2732,7 @@ static void finalize_element_strings(TaurusElement elem) {
     while (child) {
         /* Only process element children recursively */
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            finalize_element_strings((TaurusElement)child);
+            finalize_element_strings((TaurusElement)child, pool);
         }
 
         /* CRITICAL FIX: Use generic next_sibling accessor instead of manual field access!
@@ -2743,8 +2757,9 @@ TAURUS_API int taurus_document_finalize_strings(TaurusDocument doc) {
     TaurusElement root = taurus_document_root(doc);
     if (!root) return 0;
 
-    /* Recursively finalize all strings in the document tree */
-    finalize_element_strings(root);
+    /* Recursively finalize all strings in the document tree.
+     * Pass doc->pool explicitly — see TODO 25. */
+    finalize_element_strings(root, doc->pool);
 
     return 1; /* Success */
 }
@@ -2766,7 +2781,7 @@ TAURUS_API int taurus_node_get_type(TaurusNodeRef node) {
  */
 TAURUS_API TaurusNodeRef taurus_node_first_child(TaurusNodeRef node) {
     if (!node) return NULL;
-    if (node->type == 0) { /* TAURUS_NODE_TYPE_ELEMENT */
+    if (node->type == TAURUS_NODE_TYPE_ELEMENT) { /* TAURUS_NODE_TYPE_ELEMENT */
         TaurusElement elem = (TaurusElement)node;
         return (TaurusNodeRef)elem->first_child;
     }
@@ -2778,7 +2793,7 @@ TAURUS_API TaurusNodeRef taurus_node_first_child(TaurusNodeRef node) {
  */
 TAURUS_API TaurusNodeRef taurus_node_last_child(TaurusNodeRef node) {
     if (!node) return NULL;
-    if (node->type == 0) { /* TAURUS_NODE_TYPE_ELEMENT */
+    if (node->type == TAURUS_NODE_TYPE_ELEMENT) { /* TAURUS_NODE_TYPE_ELEMENT */
         TaurusElement elem = (TaurusElement)node;
         return (TaurusNodeRef)elem->last_child;
     }
@@ -2798,7 +2813,7 @@ TAURUS_API TaurusNodeRef taurus_node_next_sibling(TaurusNodeRef node) {
  */
 TAURUS_API TaurusNodeRef taurus_node_previous_sibling(TaurusNodeRef node) {
     if (!node) return NULL;
-    if (node->type == 0) { /* TAURUS_NODE_TYPE_ELEMENT */
+    if (node->type == TAURUS_NODE_TYPE_ELEMENT) { /* TAURUS_NODE_TYPE_ELEMENT */
         TaurusElement elem = (TaurusElement)node;
         TaurusElement parent = elem->parent;
         if (!parent) return NULL;
@@ -2826,8 +2841,18 @@ TAURUS_API size_t taurus_node_child_count(TaurusNodeRef node) {
  * Cast node to element (if node is an element)
  */
 TAURUS_API TaurusElement taurus_node_as_element(TaurusNodeRef node) {
-    if (!node || node->type != 0) return NULL;
+    if (!node || node->type != TAURUS_NODE_TYPE_ELEMENT) return NULL;
     return (TaurusElement)node;
+}
+
+/**
+ * Cast element to its base node handle.
+ *
+ * Every element begins with a TaurusNode header, so the cast is always
+ * safe.  This is the inverse of taurus_node_as_element().
+ */
+TAURUS_API TaurusNodeRef taurus_element_as_node(TaurusElement elem) {
+    return (TaurusNodeRef)elem;
 }
 
 /**
@@ -2835,10 +2860,10 @@ TAURUS_API TaurusElement taurus_node_as_element(TaurusNodeRef node) {
  */
 TAURUS_API const char* taurus_text_node_get_content(TaurusNodeRef node) {
     if (!node) return NULL;
-    if (node->type == 1) { /* TAURUS_NODE_TYPE_TEXT */
+    if (node->type == TAURUS_NODE_TYPE_TEXT) { /* TAURUS_NODE_TYPE_TEXT */
         return ((TaurusTextNode*)node)->content;
     }
-    if (node->type == 3) { /* TAURUS_NODE_TYPE_CDATA */
+    if (node->type == TAURUS_NODE_TYPE_CDATA) { /* TAURUS_NODE_TYPE_CDATA */
         return ((TaurusCDATANode*)node)->content;
     }
     return NULL;
@@ -2848,7 +2873,7 @@ TAURUS_API const char* taurus_text_node_get_content(TaurusNodeRef node) {
  * Get comment content
  */
 TAURUS_API const char* taurus_comment_node_get_content(TaurusNodeRef node) {
-    if (!node || node->type != 2) return NULL;
+    if (!node || node->type != TAURUS_NODE_TYPE_COMMENT) return NULL;
     return ((TaurusCommentNode*)node)->content;
 }
 
@@ -2856,7 +2881,7 @@ TAURUS_API const char* taurus_comment_node_get_content(TaurusNodeRef node) {
  * Get CDATA content
  */
 TAURUS_API const char* taurus_cdata_node_get_content(TaurusNodeRef node) {
-    if (!node || node->type != 3) return NULL;
+    if (!node || node->type != TAURUS_NODE_TYPE_CDATA) return NULL;
     return ((TaurusCDATANode*)node)->content;
 }
 
@@ -2864,7 +2889,7 @@ TAURUS_API const char* taurus_cdata_node_get_content(TaurusNodeRef node) {
  * Get processing instruction target
  */
 TAURUS_API const char* taurus_pi_node_get_target(TaurusNodeRef node) {
-    if (!node || node->type != 4) return NULL;
+    if (!node || node->type != TAURUS_NODE_TYPE_PI) return NULL;
     return ((TaurusPINode*)node)->target;
 }
 
@@ -2872,6 +2897,6 @@ TAURUS_API const char* taurus_pi_node_get_target(TaurusNodeRef node) {
  * Get processing instruction data
  */
 TAURUS_API const char* taurus_pi_node_get_data(TaurusNodeRef node) {
-    if (!node || node->type != 4) return NULL;
+    if (!node || node->type != TAURUS_NODE_TYPE_PI) return NULL;
     return ((TaurusPINode*)node)->data;
 }

@@ -9,9 +9,11 @@
  */
 
 #include "serialize.h"
+#include "../dom/node.h"            /* TaurusNodeVTable + taurus_node_vtable_for */
 #include "../taurus_internal.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <ctype.h>
 
 /* Forward declaration for public API types */
@@ -43,22 +45,46 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->data[0] = '\0';
     buf->indent = 0;
     buf->indent_spaces = indent_spaces;
+    buf->alloc_failed = 0;
 
     return buf;
 }
 
 void buffer_ensure_capacity(SerializeBuffer* buf, size_t needed) {
-    if (buf->size + needed < buf->capacity) return;
+    /* Invariant: buf->size <= buf->capacity.  Use subtraction so the
+     * remaining-space check can never wrap. */
+    if (needed <= buf->capacity - buf->size) return;
 
-    /* Double capacity until it's enough */
-    while (buf->size + needed >= buf->capacity) {
-        buf->capacity *= 2;
+    /* Grow by doubling, overflow-safe.  If doubling would exceed SIZE_MAX,
+     * clamp to SIZE_MAX — caller's append will fail to find space and the
+     * alloc_failed flag will be set. */
+    size_t new_cap = buf->capacity > 0 ? buf->capacity : INITIAL_BUFFER_CAPACITY;
+    while (new_cap - buf->size < needed) {
+        if (new_cap > (SIZE_MAX / 2)) {
+            new_cap = SIZE_MAX;
+            break;
+        }
+        new_cap *= 2;
     }
 
-    char* new_data = TAURUS_REALLOC_N(buf->data, char, buf->capacity);
-    if (new_data) {
-        buf->data = new_data;
+    /* If we still don't fit (only possible if new_cap == SIZE_MAX and the
+     * request is genuinely too large), bail without touching buf->capacity. */
+    if (new_cap - buf->size < needed) {
+        buf->alloc_failed = 1;
+        return;
     }
+
+    char* new_data = TAURUS_REALLOC_N(buf->data, char, new_cap);
+    if (!new_data) {
+        /* Realloc failed: buf->data and buf->capacity are unchanged
+         * (preserves the valid state).  Mark the failure so the caller
+         * can detect it; subsequent appends will silently truncate. */
+        buf->alloc_failed = 1;
+        return;
+    }
+
+    buf->data = new_data;
+    buf->capacity = new_cap;
 }
 
 void buffer_append(SerializeBuffer* buf, const char* str) {
@@ -125,6 +151,10 @@ void buffer_free(SerializeBuffer* buf) {
         }
         TAURUS_FREE(buf);
     }
+}
+
+int buffer_has_error(SerializeBuffer* buf) {
+    return buf ? buf->alloc_failed : 1;
 }
 
 /* ============================================================================
@@ -444,37 +474,17 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
 }
 
 void serialize_node_internal(TaurusNode* node, SerializeBuffer* buf) {
+    /* TODO 30: dispatch via the per-type vtable registry instead of a
+     * hand-rolled switch.  Adding a new node type is now purely
+     * additive — register a new vtable in node_vtable.c and the
+     * serializer picks it up automatically. */
     if (!node) return;
 
-    switch (node->type) {
-        case TAURUS_NODE_TYPE_ELEMENT:
-            serialize_element_internal((TaurusElement)node, buf, 0);
-            break;
-
-        case TAURUS_NODE_TYPE_TEXT:
-            serialize_text_internal((TaurusTextNode*)node, buf);
-            break;
-
-        case TAURUS_NODE_TYPE_COMMENT:
-            serialize_comment_internal((TaurusCommentNode*)node, buf);
-            break;
-
-        case TAURUS_NODE_TYPE_CDATA:
-            serialize_cdata_internal((TaurusCDATANode*)node, buf);
-            break;
-
-        case TAURUS_NODE_TYPE_PI:
-            serialize_pi_internal((TaurusPINode*)node, buf);
-            break;
-
-        case TAURUS_NODE_TYPE_DOCTYPE:
-            serialize_doctype_internal((TaurusDoctypeNode*)node, buf);
-            break;
-
-        default:
-            /* Unknown node type - skip */
-            break;
+    const TaurusNodeVTable* vt = taurus_node_vtable_for(node->type);
+    if (vt && vt->serialize) {
+        vt->serialize(node, buf);
     }
+    /* Unknown/unregistered type — silently skip (matches old default). */
 }
 
 /* ============================================================================

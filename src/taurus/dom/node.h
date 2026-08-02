@@ -27,6 +27,14 @@ typedef enum {
     TAURUS_NODE_TYPE_ATTRIBUTE = 6     /* For XPath attribute nodes */
 } TaurusNodeTypeEnum;
 
+/* ============================================================================
+ * Node vtable (TODO 23/29, phases 2-3) — see full design below.
+ * ============================================================================ */
+struct SerializeBuffer;  /* forward */
+
+/* Defined after TaurusNode below. */
+typedef struct taurus_node_vtable TaurusNodeVTable;
+
 /* Base node - all nodes start with this structure
  * CRITICAL: All node types MUST have this as their first member
  * This allows safe casting between node types
@@ -41,13 +49,48 @@ typedef struct taurus_node {
     /* NOTE: Parent/sibling pointers stored in compressed form in specific node types */
 } TaurusNode;
 
-/* Node creation and destruction */
-TaurusNode* taurus_node_create(TaurusNodeTypeEnum type, size_t size);
+/* ============================================================================
+ * Node vtable — full design
+ *
+ * Each node type registers a vtable holding per-type operations:
+ * serialize, type_name, type_enum.  Dispatch becomes data, not code —
+ * new node types register through a new vtable entry, no switch to edit.
+ *
+ * Lookup strategy: a global array indexed by TaurusNodeTypeEnum, so
+ * dispatch is `g_node_vtables[node->type].serialize(node, buf)` —
+ * no per-node vtable pointer (preserves the compact 4-byte TaurusNode
+ * layout that the compact-pointer system relies on).
+ * ============================================================================ */
+struct taurus_node_vtable {
+    /* Serialize this node to buf.  Required for every concrete type. */
+    void (*serialize)(TaurusNode* self, struct SerializeBuffer* buf);
 
-/* Create node using memory pool (fast O(1) allocation) */
-TaurusNode* taurus_node_create_pooled(TaurusNodeTypeEnum type, size_t size, TaurusMemoryPool* pool);
+    /* Diagnostic type name (e.g., "text", "element").  Used in error
+     * messages; never NULL for a registered vtable. */
+    const char* type_name;
 
-void taurus_node_free(TaurusNode* node);
+    /* The TaurusNodeTypeEnum value — lets generic code recover the
+     * type without a separate field on the node. */
+    TaurusNodeTypeEnum type_enum;
+};
+
+/* Global vtable registry — indexed by TaurusNodeTypeEnum.  Populated
+ * by node_vtable.c at link time; accessed via taurus_node_vtable_for.
+ * See TODO 29. */
+const TaurusNodeVTable* taurus_node_vtable_for(TaurusNodeTypeEnum type);
+
+/* Number of entries in the registry (one per TaurusNodeTypeEnum value). */
+#define TAURUS_NODE_TYPE_COUNT 7
+
+/* Node creation.
+ *
+ * Ownership invariant (TODO 05/17): every node is pool-allocated.
+ * There is no non-pool creation path.  Freeing is pool-scoped — call
+ * taurus_document_free, which destroys the pool.  taurus_node_free
+ * is forbidden (would double-free against the pool). */
+TaurusNode* taurus_node_create_pooled(TaurusNodeTypeEnum type,
+                                       size_t size,
+                                       TaurusMemoryPool* pool);
 
 /* Tree manipulation - maintain parent/sibling links */
 void taurus_node_append_child(TaurusNode* parent, TaurusNode* child);

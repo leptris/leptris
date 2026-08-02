@@ -1,53 +1,56 @@
-# FindUtf8proc.cmake - Find utf8proc library
-# This module finds the utf8proc library and defines:
-#   unofficial-utf8proc_FOUND - true if utf8proc was found
-#   unofficial-utf8proc_INCLUDE_DIRS - include directories
-#   unofficial-utf8proc_LIBRARIES - libraries to link
-#   unofficial-utf8proc_VERSION - version string
+# FindUtf8proc.cmake — modern module-mode finder for utf8proc
+#
+# Defines the imported target:
+#   Utf8proc::Utf8proc
+#
+# Result variables:
+#   Utf8proc_FOUND
+#   Utf8proc_VERSION
+#
+# Preferred over the legacy `unofficial-utf8proc` CONFIG package, which
+# is the vcpkg-specific name.  This module finds utf8proc on Homebrew,
+# Debian/Ubuntu (libutf8proc-dev), Fedora, and from-source installs.
 
-# Try to find utf8proc using common installation paths
-set(UTF8PROC_POSSIBLE_PATHS
-    /opt/homebrew/opt/utf8proc
-    /usr/local
-    /usr
-)
+include(FindPackageHandleStandardArgs)
 
-# Find include directory
-foreach(SEARCH_PATH ${UTF8PROC_POSSIBLE_PATHS})
-    if(EXISTS "${SEARCH_PATH}/include/utf8proc.h")
-        set(utf8proc_INCLUDE_DIR "${SEARCH_PATH}/include")
-        break()
-    endif()
-endforeach()
+find_path(Utf8proc_INCLUDE_DIR
+    NAMES utf8proc.h
+    PATH_SUFFIXES utf8proc)
 
-# Find library directory
-foreach(SEARCH_PATH ${UTF8PROC_POSSIBLE_PATHS})
-    if(EXISTS "${SEARCH_PATH}/lib/libutf8proc.dylib" OR
-       EXISTS "${SEARCH_PATH}/lib/libutf8proc.a" OR
-       EXISTS "${SEARCH_PATH}/lib64/libutf8proc.dylib")
-        set(utf8proc_LIBRARY_DIR "${SEARCH_PATH}/lib")
-        break()
-    endif()
-endforeach()
+find_library(Utf8proc_LIBRARY
+    NAMES utf8proc libutf8proc)
 
-# Set found flag
-if(utf8proc_INCLUDE_DIR AND utf8proc_LIBRARY_DIR)
-    set(unofficial-utf8proc_FOUND TRUE)
-    set(unofficial-utf8proc_INCLUDE_DIRS "${utf8proc_INCLUDE_DIR}")
-    set(unofficial-utf8proc_LIBRARY_DIRS "${utf8proc_LIBRARY_DIR}")
-
-    # Find the library file
-    find_library(UTF8PROC_LIBRARY
-        NAMES utf8proc
-        PATHS ${utf8proc_LIBRARY_DIR}
-    )
-
-    if(UTF8PROC_LIBRARY)
-        set(unofficial-utf8proc_LIBRARIES ${UTF8PROC_LIBRARY})
-    endif()
-
-    message(STATUS "utf8proc: Found at ${utf8proc_INCLUDE_DIR} and ${utf8proc_LIBRARY_DIR}")
-else()
-    set(unofficial-utf8proc_FOUND FALSE)
-    message(STATUS "utf8proc: NOT FOUND (try: brew install utf8proc)")
+# Best-effort version extraction. utf8proc.h exposes UTF8PROC_VERSION_*.
+set(Utf8proc_VERSION "")
+if(Utf8proc_INCLUDE_DIR AND EXISTS "${Utf8proc_INCLUDE_DIR}/utf8proc.h")
+    file(STRINGS "${Utf8proc_INCLUDE_DIR}/utf8proc.h" _utf8proc_version_lines
+        LIMIT_COUNT 8
+        REGEX "^#[ \t]*define[ \t]+UTF8PROC_VERSION_(MAJOR|MINOR|PATCH)")
+    set(_ver "")
+    foreach(_part MAJOR MINOR PATCH)
+        foreach(_line ${_utf8proc_version_lines})
+            if(_line MATCHES "UTF8PROC_VERSION_${_part}[ \t]+([0-9]+)")
+                if(_ver STREQUAL "")
+                    set(_ver "${CMAKE_MATCH_1}")
+                else()
+                    set(_ver "${_ver}.${CMAKE_MATCH_1}")
+                endif()
+                break()
+            endif()
+        endforeach()
+    endforeach()
+    set(Utf8proc_VERSION "${_ver}")
 endif()
+
+find_package_handle_standard_args(Utf8proc
+    REQUIRED_VARS Utf8proc_LIBRARY Utf8proc_INCLUDE_DIR
+    VERSION_VAR   Utf8proc_VERSION)
+
+if(Utf8proc_FOUND AND NOT TARGET Utf8proc::Utf8proc)
+    add_library(Utf8proc::Utf8proc UNKNOWN IMPORTED)
+    set_target_properties(Utf8proc::Utf8proc PROPERTIES
+        IMPORTED_LOCATION             "${Utf8proc_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Utf8proc_INCLUDE_DIR}")
+endif()
+
+mark_as_advanced(Utf8proc_INCLUDE_DIR Utf8proc_LIBRARY)

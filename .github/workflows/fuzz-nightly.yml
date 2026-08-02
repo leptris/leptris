@@ -1,0 +1,50 @@
+name: Nightly Fuzzing
+
+on:
+  schedule:
+    - cron: '0 4 * * *'   # 04:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  fuzz:
+    name: libFuzzer (5 minutes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+
+      - name: Configure (fuzzing)
+        run: |
+          CC=clang CXX=clang++ cmake -B build -S . \
+            -DTAURUS_ENABLE_FUZZING=ON \
+            -DTAURUS_ENABLE_UTF8PROC=OFF \
+            -DTAURUS_ENABLE_ICONV=OFF
+
+      - name: Build fuzzer
+        run: cmake --build build --target fuzz_parse
+
+      - name: Seed corpus
+        run: |
+          mkdir -p corpus
+          cp test/fixtures/*.xml corpus/ || true
+
+      - name: Fuzz (5 minutes)
+        run: |
+          ./build/fuzz_parse \
+            -max_total_time=300 \
+            -max_len=65536 \
+            -print_final_stats=1 \
+            corpus/
+
+      - name: Upload crashes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: crash-*
+          if-no-files-found: ignore
+          retention-days: 30

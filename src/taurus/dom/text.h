@@ -17,15 +17,20 @@ typedef struct taurus_text_node {
     void* next_sibling;               /* Next sibling in linked list (mixed content) */
 } TaurusTextNode;
 
-/* Text node creation and destruction */
-TaurusTextNode* taurus_text_create(const char* content);
-
-/* Create text node with bulk allocation (optimized) */
-TaurusTextNode* taurus_text_create_fast(
-    const char* content,
-    size_t content_len,
-    TaurusMemoryPool* pool
-);
+/* Text node creation.
+ *
+ * Single pool-routed entry point (TODO 18 consolidated the old
+ * _create / _create_fast pair).  The struct and content are allocated
+ * contiguously from the pool — one bump, one cache line.
+ *
+ * `content_len` is required (use strlen() at boundaries that don't
+ * have a length-bounded view).  Passing 0 with non-NULL content is
+ * treated as an empty string.
+ *
+ * Ownership: pool-allocated; taurus_document_free releases via pool. */
+TaurusTextNode* taurus_text_create(const char* content,
+                                    size_t content_len,
+                                    TaurusMemoryPool* pool);
 
 void taurus_text_free(TaurusTextNode* text);
 

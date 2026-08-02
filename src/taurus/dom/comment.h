@@ -17,16 +17,12 @@ typedef struct taurus_comment_node {
     void* next_sibling;               /* Next sibling in linked list (mixed content) */
 } TaurusCommentNode;
 
-/* Comment node creation and destruction */
-TaurusCommentNode* taurus_comment_create(const char* content);
+/* Comment node creation.  Pool-allocated with contiguous content
+ * storage (TODO 18 + TODO 26: single entry point, no _fast variant). */
+TaurusCommentNode* taurus_comment_create(const char* content,
+                                          size_t content_len,
+                                          struct taurus_memory_pool* pool);
 void taurus_comment_free(TaurusCommentNode* comment);
-
-/* Create comment node with bulk allocation (optimized) */
-TaurusCommentNode* taurus_comment_create_fast(
-    const char* content,
-    size_t content_len,
-    struct taurus_memory_pool* pool
-);
 
 /* Content access */
 const char* taurus_comment_get_content(TaurusCommentNode* comment);

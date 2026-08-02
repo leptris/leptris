@@ -20,17 +20,13 @@ typedef struct taurus_pi_node {
     void* next_sibling;               /* Next sibling in linked list (mixed content) */
 } TaurusPINode;
 
-/* PI node creation and destruction */
-TaurusPINode* taurus_pi_create(const char* target, const char* data);
-
-/* Create PI node with bulk allocation (optimized) */
-TaurusPINode* taurus_pi_create_fast(
-    const char* target,
-    size_t target_len,
-    const char* data,
-    size_t data_len,
-    struct taurus_memory_pool* pool
-);
+/* PI node creation.  Pool-allocated with contiguous target/data
+ * storage (TODO 18 + TODO 26: single entry point, no _fast variant). */
+TaurusPINode* taurus_pi_create(const char* target,
+                                size_t target_len,
+                                const char* data,
+                                size_t data_len,
+                                struct taurus_memory_pool* pool);
 
 void taurus_pi_free(TaurusPINode* pi);
 

@@ -18,29 +18,13 @@
 #include <string.h>
 #include <stdio.h>
 
-/* Create a new node of given type and size
- * The size parameter allows creating larger structures that inherit from TaurusNode */
-TaurusNode* taurus_node_create(TaurusNodeTypeEnum type, size_t size) {
-    if (size < sizeof(TaurusNode)) {
-        size = sizeof(TaurusNode);
-    }
-
-    TaurusNode* node = (TaurusNode*)calloc(1, size);
-    if (!node) return NULL;
-
-    node->type = type;
-    node->frozen = 0;        /* COW: Initially mutable */
-    node->version = 0;       /* COW 2.2: Initial version */
-
-    return node;
-}
-
-/* Create a new node using memory pool (FAST - no malloc!) */
+/* Create a new node of given type and size, pool-allocated.
+ *
+ * Ownership invariant (TODO 05/17): every node is pool-allocated.
+ * The size parameter allows creating larger structures that inherit
+ * from TaurusNode. */
 TaurusNode* taurus_node_create_pooled(TaurusNodeTypeEnum type, size_t size, TaurusMemoryPool* pool) {
-    if (!pool) {
-        /* Fall back to regular allocation if no pool */
-        return taurus_node_create(type, size);
-    }
+    if (!pool) return NULL;
 
     if (size < sizeof(TaurusNode)) {
         size = sizeof(TaurusNode);
@@ -55,12 +39,6 @@ TaurusNode* taurus_node_create_pooled(TaurusNodeTypeEnum type, size_t size, Taur
     node->version = 0;       /* COW 2.2: Initial version */
 
     return node;
-}
-
-/* Free a node (does not free children - caller's responsibility) */
-void taurus_node_free(TaurusNode* node) {
-    if (!node) return;
-    free(node);
 }
 
 /* Append child to parent's children list

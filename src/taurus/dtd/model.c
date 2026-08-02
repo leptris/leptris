@@ -86,34 +86,34 @@ void dtd_attribute_decl_free(DTDAttributeDecl* decl) {
  * ============================================================================*/
 
 /**
- * Create a DTD container
+ * Create a DTD container backed by the given document pool.
+ *
+ * As of TODO 16, the DTD no longer allocates a private pool — every
+ * byte (struct, hash tables, future entity declarations) comes from
+ * the document's pool, so taurus_document_free releases everything
+ * in one taurus_pool_destroy call.
  */
-TaurusDTD* taurus_dtd_create(void) {
-    /* Allocate DTD structure */
-    TaurusDTD* dtd = (TaurusDTD*)calloc(1, sizeof(TaurusDTD));
+TaurusDTD* taurus_dtd_create(TaurusMemoryPool* pool) {
+    if (!pool) return NULL;
+
+    TaurusDTD* dtd = (TaurusDTD*)taurus_pool_calloc(pool, sizeof(TaurusDTD));
     if (!dtd) return NULL;
 
-    /* Create memory pool for DTD allocations */
-    dtd->pool = taurus_pool_create();
-    if (!dtd->pool) {
-        free(dtd);
-        return NULL;
-    }
+    /* Remember the pool so callers that grow the DTD later (e.g.,
+     * ttdtd_entity_create) can route through it. */
+    dtd->pool = pool;
 
-    /* Create hash tables for O(1) lookup */
-    dtd->tables.entities = taurus_hash_table_create(dtd->pool, 128);
-    dtd->tables.elements = taurus_hash_table_create(dtd->pool, 64);
-    dtd->tables.notations = taurus_hash_table_create(dtd->pool, 32);
-    dtd->tables.attributes = taurus_hash_table_create(dtd->pool, 128);
+    /* Hash tables for O(1) lookup — pool-allocated. */
+    dtd->tables.entities   = taurus_hash_table_create(pool, 128);
+    dtd->tables.elements   = taurus_hash_table_create(pool, 64);
+    dtd->tables.notations  = taurus_hash_table_create(pool, 32);
+    dtd->tables.attributes = taurus_hash_table_create(pool, 128);
 
-    /* Check that all hash tables were created successfully */
     if (!dtd->tables.entities || !dtd->tables.elements ||
         !dtd->tables.notations || !dtd->tables.attributes) {
-        ttdtd_free(dtd);
-        return NULL;
+        return NULL;  /* Pool owns the partial allocation; nothing to free. */
     }
 
-    /* Initialize counts */
     dtd->entity_count = 0;
     dtd->element_count = 0;
     dtd->notation_count = 0;
@@ -123,18 +123,16 @@ TaurusDTD* taurus_dtd_create(void) {
 }
 
 /**
- * Free DTD container and all contained declarations
+ * Free DTD container.
+ *
+ * Pool-ownership model (TODO 16): the DTD struct, hash tables, and
+ * all declarations live in the document's pool.  They are released by
+ * taurus_pool_destroy when the document is freed.  This function is a
+ * no-op, kept for backwards source compatibility with callers that
+ * explicitly invoke it.
  */
 void ttdtd_free(TaurusDTD* dtd) {
-    if (!dtd) return;
-
-    /* Destroy the pool, which frees all hash tables and entries */
-    if (dtd->pool) {
-        taurus_pool_destroy(dtd->pool);
-    }
-
-    /* Free the DTD structure itself */
-    free(dtd);
+    (void)dtd;
 }
 
 /* ============================================================================
@@ -142,23 +140,24 @@ void ttdtd_free(TaurusDTD* dtd) {
  * ============================================================================*/
 
 /**
- * Create an entity declaration
+ * Create an entity declaration, pool-allocated (TODO 16).
  */
-DTDEntityDecl* ttdtd_entity_create(const char* name) {
-    if (!name) return NULL;
+DTDEntityDecl* ttdtd_entity_create(const char* name, TaurusMemoryPool* pool) {
+    if (!name || !pool) return NULL;
 
-    /* Allocate entity structure */
-    DTDEntityDecl* entity = (DTDEntityDecl*)calloc(1, sizeof(DTDEntityDecl));
-    if (!entity) return NULL;
+    size_t name_len = strlen(name);
 
-    /* Duplicate name */
-    entity->name = strdup(name);
-    if (!entity->name) {
-        free(entity);
-        return NULL;
-    }
+    /* Single pool allocation: struct + name + NUL (contiguous). */
+    size_t total = sizeof(DTDEntityDecl) + name_len + 1;
+    char* memory = (char*)taurus_pool_alloc(pool, total);
+    if (!memory) return NULL;
 
-    /* Initialize fields */
+    DTDEntityDecl* entity = (DTDEntityDecl*)memory;
+    char* name_storage = memory + sizeof(DTDEntityDecl);
+    memcpy(name_storage, name, name_len);
+    name_storage[name_len] = '\0';
+
+    entity->name = name_storage;
     entity->type = DTD_ENTITY_INTERNAL;
     entity->value = NULL;
     entity->system_id = NULL;
@@ -169,17 +168,14 @@ DTDEntityDecl* ttdtd_entity_create(const char* name) {
 }
 
 /**
- * Free an entity declaration
+ * Free an entity declaration.
+ *
+ * Pool-ownership (TODO 16): the entity struct is pool-allocated;
+ * taurus_pool_destroy releases it.  This function is a no-op kept
+ * for backwards source compatibility.
  */
 void ttdtd_entity_free(DTDEntityDecl* entity) {
-    if (!entity) return;
-
-    free(entity->name);
-    free(entity->value);
-    free(entity->system_id);
-    free(entity->public_id);
-    free(entity->notation_name);
-    free(entity);
+    (void)entity;
 }
 
 /**
