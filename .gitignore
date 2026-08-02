@@ -82,6 +82,11 @@ Makefile
 # Exception: taurus-config.cmake.in IS source (TODO 01).
 !cmake/taurus-config.cmake.in
 
+# Local TODO/plan scratchpad — not part of the project.
+TODO.fix/
+TODO.md
+TODO.txt
+
 # Generated binaries in test directories
 test/Makefile
 test/test/Makefile
