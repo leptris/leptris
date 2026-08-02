@@ -212,7 +212,8 @@ if(TAURUS_BUILD_STATIC)
     # taurus_objects.  CMake's $<TARGET_OBJECTS:...> aggregation does NOT
     # propagate OBJECT-library link deps to the static lib's consumers
     # (CMake issue #16093), so we re-state them here as PUBLIC to ensure
-    # `taurus::taurus` consumers link iconv/utf8proc automatically.
+    # `taurus::taurus` consumers link iconv/utf8proc/m automatically.
+    target_link_libraries(taurus_static PUBLIC m)
     if(TAURUS_ENABLE_UTF8PROC)
         target_link_libraries(taurus_static PUBLIC ${TAURUS_UTF8PROC_TARGET})
     endif()
@@ -264,6 +265,7 @@ if(TAURUS_BUILD_SHARED)
     )
 
     # See note on taurus_static above.
+    target_link_libraries(taurus_shared PUBLIC m)
     if(TAURUS_ENABLE_UTF8PROC)
         target_link_libraries(taurus_shared PUBLIC ${TAURUS_UTF8PROC_TARGET})
     endif()
