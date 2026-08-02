@@ -7,10 +7,6 @@
   "license": "MIT",
   "dependencies": [
     {
-      "name": "gtest",
-      "platform": "!windows"
-    },
-    {
       "name": "utf8proc",
       "default-features": true
     },

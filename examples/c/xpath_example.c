@@ -4,7 +4,7 @@
  * Demonstrates various XPath 1.0 queries and result types.
  */
 
-#include <taurus/taurus.h>
+#include <taurus.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +35,7 @@ int main(void) {
         "</bookstore>";
     
     printf("Parsing XML...\n");
-    taurus_document* doc = taurus_parse(xml, strlen(xml));
+    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
     if (!doc) {
         fprintf(stderr, "Parse failed: %s\n", taurus_last_error());
         return 1;
@@ -44,7 +44,7 @@ int main(void) {
     
     /* Example 1: Node-set query */
     printf("1. Node-set query: //book\n");
-    taurus_xpath_result* result = taurus_xpath_eval(doc, "//book", 6);
+    TaurusXPathResult result = taurus_xpath_eval(doc, "//book", 6);
     if (!result) {
         fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
     } else {
@@ -52,7 +52,7 @@ int main(void) {
         printf("   Found %zu book(s)\n", count);
         
         for (size_t i = 0; i < count; i++) {
-            taurus_element* book = taurus_xpath_result_nodeset_get(result, i);
+            TaurusElement book = taurus_xpath_result_nodeset_get(result, i);
             const char* title = taurus_element_get_attribute(book, "category");
             printf("   - Book %zu: category=%s\n", i + 1, 
                    title ? title : "(none)");

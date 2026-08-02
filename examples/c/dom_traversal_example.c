@@ -4,13 +4,13 @@
  * Demonstrates navigating and querying the DOM tree.
  */
 
-#include <taurus/taurus.h>
+#include <taurus.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* Helper function to print element with indentation */
-static void print_element(taurus_element* elem, int indent) {
+static void print_element(TaurusElement elem, int indent) {
     if (!elem) return;
     
     /* Print indentation */
@@ -45,7 +45,7 @@ static void print_element(taurus_element* elem, int indent) {
 }
 
 /* Recursive tree walker */
-static void walk_tree(taurus_element* elem, int depth) {
+static void walk_tree(TaurusElement elem, int depth) {
     if (!elem) return;
     
     print_element(elem, depth);
@@ -53,7 +53,7 @@ static void walk_tree(taurus_element* elem, int depth) {
     /* Recursively visit children */
     size_t child_count = taurus_element_child_count(elem);
     for (size_t i = 0; i < child_count; i++) {
-        taurus_element* child = taurus_element_child(elem, i);
+        TaurusElement child = taurus_element_child(elem, i);
         walk_tree(child, depth + 1);
     }
 }
@@ -90,14 +90,14 @@ int main(void) {
         "</library>";
     
     printf("Parsing XML...\n");
-    taurus_document* doc = taurus_parse(xml, strlen(xml));
+    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
     if (!doc) {
         fprintf(stderr, "Parse failed: %s\n", taurus_last_error());
         return 1;
     }
     printf("✓ Parse successful\n\n");
     
-    taurus_element* root = taurus_document_root(doc);
+    TaurusElement root = taurus_document_root(doc);
     if (!root) {
         fprintf(stderr, "No root element\n");
         taurus_document_free(doc);
@@ -127,7 +127,7 @@ int main(void) {
     printf("   Library has %zu section(s)\n", section_count);
     
     for (size_t i = 0; i < section_count; i++) {
-        taurus_element* section = taurus_element_child(root, i);
+        TaurusElement section = taurus_element_child(root, i);
         if (section) {
             const char* category = taurus_element_get_attribute(section, "category");
             size_t book_count = taurus_element_child_count(section);
@@ -140,19 +140,19 @@ int main(void) {
     /* Example 4: Parent navigation */
     printf("4. Parent navigation:\n");
     if (section_count > 0) {
-        taurus_element* first_section = taurus_element_child(root, 0);
+        TaurusElement first_section = taurus_element_child(root, 0);
         if (first_section && taurus_element_child_count(first_section) > 0) {
-            taurus_element* first_book = taurus_element_child(first_section, 0);
+            TaurusElement first_book = taurus_element_child(first_section, 0);
             if (first_book) {
                 printf("   Starting from first book...\n");
                 const char* book_id = taurus_element_get_attribute(first_book, "id");
                 printf("   Book id: %s\n", book_id ? book_id : "(none)");
                 
-                taurus_element* parent = taurus_element_parent(first_book);
+                TaurusElement parent = taurus_element_parent(first_book);
                 if (parent) {
                     printf("   Parent: %s\n", taurus_element_name(parent));
                     
-                    taurus_element* grandparent = taurus_element_parent(parent);
+                    TaurusElement grandparent = taurus_element_parent(parent);
                     if (grandparent) {
                         printf("   Grandparent: %s\n", taurus_element_name(grandparent));
                     }
@@ -165,9 +165,9 @@ int main(void) {
     /* Example 5: Attribute iteration */
     printf("5. Examining all attributes:\n");
     if (section_count > 0) {
-        taurus_element* first_section = taurus_element_child(root, 0);
+        TaurusElement first_section = taurus_element_child(root, 0);
         if (first_section && taurus_element_child_count(first_section) > 0) {
-            taurus_element* first_book = taurus_element_child(first_section, 0);
+            TaurusElement first_book = taurus_element_child(first_section, 0);
             if (first_book) {
                 size_t attr_count = taurus_element_attribute_count(first_book);
                 printf("   First book has %zu attribute(s):\n", attr_count);
@@ -189,18 +189,18 @@ int main(void) {
     printf("6. Finding elements by XPath:\n");
     
     /* Find all books */
-    taurus_xpath_result* result = taurus_xpath_eval(doc, "//book", 6);
+    TaurusXPathResult result = taurus_xpath_eval(doc, "//book", 6);
     if (result) {
         size_t count = taurus_xpath_result_nodeset_size(result);
         printf("   Found %zu book element(s)\n", count);
         
         for (size_t i = 0; i < count; i++) {
-            taurus_element* book = taurus_xpath_result_nodeset_get(result, i);
+            TaurusElement book = taurus_xpath_result_nodeset_get(result, i);
             if (book) {
                 const char* id = taurus_element_get_attribute(book, "id");
                 
                 /* Get title from child */
-                taurus_xpath_result* title_result = 
+                TaurusXPathResult title_result = 
                     taurus_xpath_eval_with_context(doc, book, "./title", 7);
                 char* title = NULL;
                 if (title_result) {
@@ -222,9 +222,9 @@ int main(void) {
     /* Example 7: Checking element properties */
     printf("7. Element property checks:\n");
     if (section_count > 0) {
-        taurus_element* first_section = taurus_element_child(root, 0);
+        TaurusElement first_section = taurus_element_child(root, 0);
         if (first_section && taurus_element_child_count(first_section) > 0) {
-            taurus_element* first_book = taurus_element_child(first_section, 0);
+            TaurusElement first_book = taurus_element_child(first_section, 0);
             if (first_book) {
                 printf("   Element: <%s>\n", taurus_element_name(first_book));
                 

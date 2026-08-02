@@ -4,7 +4,7 @@
  * Demonstrates parsing XML and evaluating XPath expressions.
  */
 
-#include <taurus/taurus.h>
+#include <taurus.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -25,18 +25,19 @@ int main(void) {
         "</library>";
     
     printf("1. Parsing XML...\n");
-    struct taurus_document* doc = taurus_parse(xml, strlen(xml));
+    TaurusStatus status = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
     if (!doc) {
-        fprintf(stderr, "   ✗ Parse failed\n");
+        fprintf(stderr, "   Parse failed\n");
         return 1;
     }
-    printf("   ✓ Parse successful\n\n");
-    
+    printf("   Parse successful\n\n");
+
     /* Get root element */
     printf("2. Getting root element...\n");
-    struct taurus_element* root = taurus_document_root(doc);
+    TaurusElement root = taurus_document_root(doc);
     if (!root) {
-        fprintf(stderr, "   ✗ No root element\n");
+        fprintf(stderr, "   No root element\n");
         taurus_document_free(doc);
         return 1;
     }
@@ -45,7 +46,7 @@ int main(void) {
     /* Evaluate XPath */
     printf("3. Evaluating XPath: //title\n");
     const char* xpath = "//title";
-    struct taurus_xpath_result* result = 
+    TaurusXPathResult result = 
         taurus_xpath_eval(doc, xpath, strlen(xpath));
     
     if (!result) {
