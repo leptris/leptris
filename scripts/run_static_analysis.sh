@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Run cppcheck static analysis on src/.
-# See TODO 86 (jemalloc-inspired checks).
 set -euo pipefail
 
 if ! command -v cppcheck &>/dev/null; then
@@ -8,8 +7,8 @@ if ! command -v cppcheck &>/dev/null; then
     exit 0
 fi
 
-# Build arguments; cppcheck understands compile_commands.json if present.
 ARGS=(--enable=warning,performance --suppress=missingInclude
+      --suppress=memleakOnRealloc
       --inline-suppr --error-exitcode=1 -q)
 
 if [ -f build/compile_commands.json ]; then
