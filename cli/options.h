@@ -1,15 +1,15 @@
 /**
  * @file options.h
  * @brief Option handling for Taurus CLI
- * 
+ *
  * This file defines the MECE (Mutually Exclusive, Collectively Exhaustive)
  * option handling system for the Taurus CLI.
- * 
+ *
  * Option Resolution Hierarchy (most specific wins):
  * 1. CLI arguments (--option value)
  * 2. Environment variables (TAURUS_OPTION)
  * 3. API defaults (hardcoded)
- * 
+ *
  * Design Principles:
  * - MECE: All option sources covered, no overlap
  * - Explicit precedence: Clear resolution order
@@ -34,7 +34,7 @@ extern "C" {
 
 /**
  * Option source enumeration
- * 
+ *
  * Used for debugging and error messages to show where an option value
  * came from. This helps users understand option precedence.
  */
@@ -46,7 +46,7 @@ typedef enum {
 
 /**
  * Convert option source to string
- * 
+ *
  * @param source Source to convert
  * @return String representation ("default", "env", "cli")
  */
@@ -58,10 +58,10 @@ const char* option_source_to_string(option_source_t source);
 
 /**
  * Global options structure
- * 
+ *
  * These options are available to all commands and are parsed before
  * the command is dispatched.
- * 
+ *
  * Example:
  *   taurus --verbose --format json parse file.xml
  *           ^^^^^^^^^ ^^^^^^^^^^^^ global options
@@ -72,15 +72,15 @@ typedef struct cli_global_options {
     int quiet;                  /**< -q, --quiet (suppress output) */
     option_source_t verbose_source;
     option_source_t quiet_source;
-    
+
     /* Output format */
     const char* format;         /**< --format xml|json|text */
     option_source_t format_source;
-    
+
     /* Color output */
     bool color;                 /**< --color, --no-color */
     option_source_t color_source;
-    
+
     /* Help/version flags */
     bool help;                  /**< -h, --help */
     bool version;               /**< --version */
@@ -88,14 +88,14 @@ typedef struct cli_global_options {
 
 /**
  * Create global options with defaults
- * 
+ *
  * @return Pointer to new options, or NULL on allocation failure
  */
 cli_global_options_t* cli_global_options_new(void);
 
 /**
  * Free global options
- * 
+ *
  * @param options Options to free
  */
 void cli_global_options_free(cli_global_options_t* options);
@@ -123,7 +123,7 @@ cli_result_t cli_global_options_parse(
 
 /**
  * Parse command options
- * 
+ *
  * Options for 'taurus parse' command
  */
 typedef struct cli_parse_options {
@@ -137,7 +137,7 @@ typedef struct cli_parse_options {
 
 /**
  * XPath command options
- * 
+ *
  * Options for 'taurus xpath' command
  */
 typedef struct cli_xpath_options {
@@ -152,7 +152,7 @@ typedef struct cli_xpath_options {
 
 /**
  * Format command options
- * 
+ *
  * Options for 'taurus format' command
  */
 typedef struct cli_format_options {
@@ -169,7 +169,7 @@ typedef struct cli_format_options {
 
 /**
  * Version command options
- * 
+ *
  * Options for 'taurus version' command (minimal)
  */
 typedef struct cli_version_options {
@@ -199,7 +199,7 @@ cli_result_t cli_version_options_parse(cli_version_options_t* options, int argc,
 
 /**
  * Generic option parser
- * 
+ *
  * State machine for parsing command-line arguments. Handles both
  * short options (-v) and long options (--verbose).
  */
@@ -211,7 +211,7 @@ typedef struct option_parser {
 
 /**
  * Create option parser
- * 
+ *
  * @param argc Argument count
  * @param argv Argument array
  * @return Parser instance
@@ -220,7 +220,7 @@ option_parser_t option_parser_new(int argc, char** argv);
 
 /**
  * Check if more arguments available
- * 
+ *
  * @param parser Parser instance
  * @return true if more arguments, false otherwise
  */
@@ -228,7 +228,7 @@ bool option_parser_has_more(option_parser_t* parser);
 
 /**
  * Get current argument
- * 
+ *
  * @param parser Parser instance
  * @return Current argument or NULL if at end
  */
@@ -236,14 +236,14 @@ const char* option_parser_current(option_parser_t* parser);
 
 /**
  * Advance to next argument
- * 
+ *
  * @param parser Parser instance
  */
 void option_parser_advance(option_parser_t* parser);
 
 /**
  * Check if current argument matches option
- * 
+ *
  * @param parser Parser instance
  * @param short_opt Short option (e.g., "-v") or NULL
  * @param long_opt Long option (e.g., "--verbose") or NULL
@@ -257,9 +257,9 @@ bool option_parser_match(
 
 /**
  * Get option value (for options with values)
- * 
+ *
  * Advances parser past the value.
- * 
+ *
  * @param parser Parser instance
  * @return Option value or NULL if no value
  */
@@ -267,9 +267,9 @@ const char* option_parser_get_value(option_parser_t* parser);
 
 /**
  * Get remaining positional arguments
- * 
+ *
  * Returns all arguments that don't start with '-'
- * 
+ *
  * @param parser Parser instance
  * @param count Output: number of arguments
  * @return Array of argument strings
@@ -282,11 +282,11 @@ char** option_parser_get_positional(option_parser_t* parser, int* count);
 
 /**
  * Get string option from environment
- * 
+ *
  * Checks TAURUS_{NAME} environment variable.
- * 
+ *
  * Example: get_env_string("FORMAT") checks TAURUS_FORMAT
- * 
+ *
  * @param name Option name (uppercase)
  * @param default_value Default if not set
  * @return Option value (env or default)
@@ -295,7 +295,7 @@ const char* get_env_string(const char* name, const char* default_value);
 
 /**
  * Get integer option from environment
- * 
+ *
  * @param name Option name (uppercase)
  * @param default_value Default if not set
  * @return Option value (env or default)
@@ -304,9 +304,9 @@ int get_env_int(const char* name, int default_value);
 
 /**
  * Get boolean option from environment
- * 
+ *
  * Accepts: 1, true, yes, on (case-insensitive)
- * 
+ *
  * @param name Option name (uppercase)
  * @param default_value Default if not set
  * @return Option value (env or default)
@@ -319,9 +319,9 @@ bool get_env_bool(const char* name, bool default_value);
 
 /**
  * Resolve integer option
- * 
+ *
  * Implements MECE hierarchy: CLI > ENV > Default
- * 
+ *
  * @param cli_value Value from CLI (or -1 if not specified)
  * @param cli_specified Whether CLI value was explicitly set
  * @param env_name Environment variable name
@@ -339,7 +339,7 @@ int resolve_int_option(
 
 /**
  * Resolve string option
- * 
+ *
  * @param cli_value Value from CLI (or NULL if not specified)
  * @param env_name Environment variable name
  * @param default_value Default value
@@ -355,7 +355,7 @@ const char* resolve_string_option(
 
 /**
  * Resolve boolean option
- * 
+ *
  * @param cli_value Value from CLI
  * @param cli_specified Whether CLI value was explicitly set
  * @param env_name Environment variable name

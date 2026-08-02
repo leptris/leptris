@@ -10,7 +10,7 @@ _taurus() {
         'format:Pretty-print XML documents'
         'version:Show version information'
     )
-    
+
     local -a global_opts
     global_opts=(
         '(-v --verbose)'{-v,--verbose}'[Increase verbosity]'
@@ -20,12 +20,12 @@ _taurus() {
         '(-h --help)'{-h,--help}'[Show help]'
         '--version[Show version]'
     )
-    
+
     _arguments -C \
         $global_opts \
         '1: :->command' \
         '*:: :->args'
-    
+
     case $state in
         command)
             _describe 'command' commands

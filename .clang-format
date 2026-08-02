@@ -1,0 +1,74 @@
+# libtaurus clang-format config (matches codebase conventions).
+# Targets clang-format 14+.
+
+Language:        C
+BasedOnStyle:    LLVM
+
+# 4-space indentation (matches existing code).
+IndentWidth:     4
+TabWidth:        4
+UseTab:          Never
+ContinuationIndentWidth: 4
+
+# Line length 100 (matches existing code).
+ColumnLimit:     100
+
+# Brace style: same line for functions, opens on same line for control.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction:   false
+  AfterControlStatement: false
+  AfterEnum:       false
+  AfterStruct:     false
+  AfterUnion:      false
+  BeforeElse:      false
+  BeforeWhile:     false
+  IndentBraces:    false
+  SplitEmptyFunction: false
+  SplitEmptyRecord:   false
+
+# Pointers bind to the name (TaurusElement* foo, not TaurusElement *foo).
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+# Argument alignment.
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignEscapedNewlines: Right
+AlignOperands:   true
+AlignTrailingComments: true
+
+# Short forms.
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# Include sorting.
+SortIncludes: true
+IncludeBlocks: Preserve
+
+# Misc.
+AlwaysBreakAfterReturnType: None
+AlwaysBreakBeforeMultilineStrings: false
+BinPackArguments: true
+BinPackParameters: true
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BreakStringLiterals: true
+CompactNamespaces: true
+ConstructorInitIndentWidth: 4
+Cpp11BracedListStyle: true
+FixNamespaceComments: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: None
+ReflowComments: true
+SpacesBeforeTrailingComments: 1
+SpacesInCStyleCastParentheses: false
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false

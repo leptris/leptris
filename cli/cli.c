@@ -15,13 +15,13 @@
 cli_registry_t* cli_registry_new(void) {
     cli_registry_t* registry = malloc(sizeof(cli_registry_t));
     if (!registry) return NULL;
-    
+
     registry->commands = malloc(sizeof(cli_command_t*) * 8);
     if (!registry->commands) {
         free(registry);
         return NULL;
     }
-    
+
     registry->count = 0;
     registry->capacity = 8;
     return registry;
@@ -29,8 +29,8 @@ cli_registry_t* cli_registry_new(void) {
 
 void cli_registry_free(cli_registry_t* registry) {
     if (!registry) return;
-    
-    /* Note: We don't free individual commands - they are typically 
+
+    /* Note: We don't free individual commands - they are typically
      * static or separately managed */
     free(registry->commands);
     free(registry);
@@ -43,7 +43,7 @@ cli_result_t cli_registry_register(
     if (!registry || !command) {
         return CLI_ERROR_ARGS;
     }
-    
+
     /* Check for duplicate names */
     for (size_t i = 0; i < registry->count; i++) {
         if (strcmp(registry->commands[i]->name, command->name) == 0) {
@@ -51,7 +51,7 @@ cli_result_t cli_registry_register(
             return CLI_ERROR_ARGS;
         }
     }
-    
+
     /* Grow if needed */
     if (registry->count >= registry->capacity) {
         size_t new_capacity = registry->capacity * 2;
@@ -62,11 +62,11 @@ cli_result_t cli_registry_register(
         if (!new_commands) {
             return CLI_ERROR_MEMORY;
         }
-        
+
         registry->commands = new_commands;
         registry->capacity = new_capacity;
     }
-    
+
     registry->commands[registry->count++] = command;
     return CLI_SUCCESS;
 }
@@ -76,19 +76,19 @@ cli_command_t* cli_registry_find(
     const char* name
 ) {
     if (!registry || !name) return NULL;
-    
+
     for (size_t i = 0; i < registry->count; i++) {
         if (strcmp(registry->commands[i]->name, name) == 0) {
             return registry->commands[i];
         }
     }
-    
+
     return NULL;
 }
 
 void cli_registry_print_all(const cli_registry_t* registry) {
     if (!registry) return;
-    
+
     printf("Available commands:\n");
     for (size_t i = 0; i < registry->count; i++) {
         printf("  %-12s  %s\n",

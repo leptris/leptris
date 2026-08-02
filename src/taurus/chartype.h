@@ -27,7 +27,7 @@ static const unsigned char chartype_table[256] = {
     /* 0-31 (control chars) */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,  /* \t=1, \n=1, \r=1 */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    
+
     /* 32-47 (space and punctuation) */
     1,    /* 32  ' '  - whitespace */
     24,   /* 33  '!'  - pcdata + attr */
@@ -45,10 +45,10 @@ static const unsigned char chartype_table[256] = {
     4,    /* 45  '-'  - name_char only */
     4,    /* 46  '.'  - name_char only */
     24,   /* 47  '/'  - pcdata + attr */
-    
+
     /* 48-57 (digits) */
     36, 36, 36, 36, 36, 36, 36, 36, 36, 36,  /* 0-9: digit + name_char */
-    
+
     /* 58-64 (punctuation) */
     6,    /* 58  ':'  - name_start + name_char */
     24,   /* 59  ';'  - pcdata + attr */
@@ -57,13 +57,13 @@ static const unsigned char chartype_table[256] = {
     24,   /* 62  '>'  - pcdata + attr */
     24,   /* 63  '?'  - pcdata + attr */
     24,   /* 64  '@'  - pcdata + attr */
-    
+
     /* 65-90 (A-Z) */
     198, 198, 198, 198, 198, 198, 198, 198, 198, 198,  /* A-J */
     198, 198, 198, 198, 198, 198, 198, 198, 198, 198,  /* K-T */
     198, 198, 198, 198, 198, 198,                      /* U-Z */
     /* 198 = name_start(2) + name_char(4) + start_symbol(64) + alpha(128) */
-    
+
     /* 91-96 (punctuation) */
     24,   /* 91  '['  - pcdata + attr */
     24,   /* 92  '\\' - pcdata + attr */
@@ -71,15 +71,15 @@ static const unsigned char chartype_table[256] = {
     24,   /* 94  '^'  - pcdata + attr */
     6,    /* 95  '_'  - name_start + name_char */
     24,   /* 96  '`'  - pcdata + attr */
-    
+
     /* 97-122 (a-z) */
     198, 198, 198, 198, 198, 198, 198, 198, 198, 198,  /* a-j */
     198, 198, 198, 198, 198, 198, 198, 198, 198, 198,  /* k-t */
     198, 198, 198, 198, 198, 198,                      /* u-z */
-    
+
     /* 123-127 (punctuation) */
     24, 24, 24, 24, 0,  /* { | } ~ DEL */
-    
+
     /* 128-255 (extended ASCII / UTF-8) */
     24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
     24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,

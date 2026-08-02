@@ -10,9 +10,9 @@
 
 int main(void) {
     printf("=== Taurus Basic Example ===\n\n");
-    
+
     /* Test XML document */
-    const char* xml = 
+    const char* xml =
         "<library>"
         "  <book>"
         "    <title>The C Programming Language</title>"
@@ -23,7 +23,7 @@ int main(void) {
         "    <author>Abelson and Sussman</author>"
         "  </book>"
         "</library>";
-    
+
     printf("1. Parsing XML...\n");
     TaurusStatus status = TAURUS_OK;
     TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
@@ -42,13 +42,13 @@ int main(void) {
         return 1;
     }
     printf("   Root element: <%s>\n\n", taurus_element_name(root));
-    
+
     /* Evaluate XPath */
     printf("3. Evaluating XPath: //title\n");
     const char* xpath = "//title";
-    TaurusXPathResult result = 
+    TaurusXPathResult result =
         taurus_xpath_eval(doc, xpath, strlen(xpath));
-    
+
     if (!result) {
         fprintf(stderr, "   ✗ XPath evaluation failed\n");
     } else {
@@ -56,12 +56,12 @@ int main(void) {
         taurus_xpath_result_free(result);
     }
     printf("\n");
-    
+
     /* Test another XPath */
     printf("4. Evaluating XPath: /library/book\n");
     xpath = "/library/book";
     result = taurus_xpath_eval(doc, xpath, strlen(xpath));
-    
+
     if (!result) {
         fprintf(stderr, "   ✗ XPath evaluation failed\n");
     } else {
@@ -69,12 +69,12 @@ int main(void) {
         taurus_xpath_result_free(result);
     }
     printf("\n");
-    
+
     /* Cleanup */
     printf("5. Cleaning up...\n");
     taurus_document_free(doc);
     printf("   ✓ Cleanup complete\n\n");
-    
+
     printf("=== All tests passed! ===\n");
     return 0;
 }

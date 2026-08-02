@@ -1,11 +1,11 @@
 /**
  * @file cli.h
  * @brief Command interface for Taurus CLI tool
- * 
+ *
  * This file defines the core command pattern infrastructure for the Taurus
  * CLI. It provides a registry-based, extensible architecture where each
  * command implements a common interface.
- * 
+ *
  * Design Principles:
  * - MECE: Each command has distinct responsibility
  * - Open/Closed: Add new commands without modifying core
@@ -28,7 +28,7 @@ extern "C" {
 
 /**
  * CLI result codes
- * 
+ *
  * These codes are compatible with xmllint for drop-in replacement:
  * - 0: Success
  * - 1: Parse error
@@ -52,12 +52,12 @@ typedef enum {
 
 /**
  * Command interface
- * 
+ *
  * Each command implements this interface. Commands are registered in a
  * global registry and dispatched based on the first CLI argument.
- * 
+ *
  * Example command structure:
- * 
+ *
  * ```c
  * cli_result_t parse_execute(int argc, char** argv) {
  *     // Parse options
@@ -65,12 +65,12 @@ typedef enum {
  *     // Format output
  *     return CLI_SUCCESS;
  * }
- * 
+ *
  * void parse_print_help(void) {
  *     printf("Usage: taurus parse [OPTIONS] FILE\n");
  *     // ... more help text
  * }
- * 
+ *
  * cli_command_t parse_command = {
  *     .name = "parse",
  *     .description = "Parse and validate XML",
@@ -82,19 +82,19 @@ typedef enum {
 typedef struct cli_command {
     const char* name;           /**< Command name (e.g., "parse") */
     const char* description;    /**< One-line description for --help */
-    
+
     /**
      * Execute the command
-     * 
+     *
      * @param argc Number of arguments (including command name)
      * @param argv Arguments array (argv[0] is command name)
      * @return CLI result code
      */
     cli_result_t (*execute)(int argc, char** argv);
-    
+
     /**
      * Print command-specific help
-     * 
+     *
      * Called when user runs: taurus help <command>
      * or: taurus <command> --help
      */
@@ -107,10 +107,10 @@ typedef struct cli_command {
 
 /**
  * Command registry
- * 
+ *
  * Central registry holding all available commands. Commands are registered
  * at startup, then dispatched based on user input.
- * 
+ *
  * Implementation uses a dynamic array that grows as needed.
  */
 typedef struct cli_registry {
@@ -121,27 +121,27 @@ typedef struct cli_registry {
 
 /**
  * Create a new command registry
- * 
+ *
  * @return Pointer to new registry, or NULL on allocation failure
  */
 cli_registry_t* cli_registry_new(void);
 
 /**
  * Free a command registry
- * 
+ *
  * Frees the registry structure but NOT the individual commands (they are
  * typically static or separately managed).
- * 
+ *
  * @param registry Registry to free
  */
 void cli_registry_free(cli_registry_t* registry);
 
 /**
  * Register a command
- * 
+ *
  * Adds a command to the registry. The command pointer must remain valid
  * for the lifetime of the registry.
- * 
+ *
  * @param registry Registry to add to
  * @param command Command to register
  * @return CLI_SUCCESS or error code
@@ -153,7 +153,7 @@ cli_result_t cli_registry_register(
 
 /**
  * Find a command by name
- * 
+ *
  * @param registry Registry to search
  * @param name Command name to find
  * @return Command pointer or NULL if not found
@@ -165,9 +165,9 @@ cli_command_t* cli_registry_find(
 
 /**
  * Print all registered commands
- * 
+ *
  * Used for global --help output.
- * 
+ *
  * @param registry Registry to print
  */
 void cli_registry_print_all(const cli_registry_t* registry);
@@ -178,7 +178,7 @@ void cli_registry_print_all(const cli_registry_t* registry);
 
 /**
  * Get the 'parse' command
- * 
+ *
  * Command: taurus parse [OPTIONS] FILE
  * Purpose: Parse and validate XML files
  */
@@ -186,7 +186,7 @@ extern cli_command_t* cli_command_parse(void);
 
 /**
  * Get the 'xpath' command
- * 
+ *
  * Command: taurus xpath [OPTIONS] FILE EXPR
  * Purpose: Execute XPath queries
  */
@@ -194,7 +194,7 @@ extern cli_command_t* cli_command_xpath(void);
 
 /**
  * Get the 'format' command
- * 
+ *
  * Command: taurus format [OPTIONS] FILE
  * Purpose: Pretty-print XML
  */
@@ -202,7 +202,7 @@ extern cli_command_t* cli_command_format(void);
 
 /**
  * Get the 'version' command
- * 
+ *
  * Command: taurus version
  * Purpose: Show version information
  */

@@ -10,34 +10,34 @@ jobs:
   build-cli:
     name: Build CLI on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    
+
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Install CMake
         uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '3.20'
-      
+
       - name: Configure
         run: |
           mkdir -p build
           cd build
           cmake .. -DTAURUS_BUILD_CLI=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
-      
+
       - name: Build
         run: cmake --build build --config Release
-      
+
       - name: Run CLI tests (Google Test)
         run: |
           cd build
           ctest --output-on-failure -R test_cli
-      
+
       - name: Create test XML file
         run: |
           cd build
@@ -54,7 +54,7 @@ jobs:
             </item>
           </root>
           EOF
-      
+
       - name: Test CLI - parse command
         run: |
           cd build
@@ -63,7 +63,7 @@ jobs:
           ./cli/taurus parse --format json test.xml
           echo "---"
           ./cli/taurus parse --format text test.xml
-      
+
       - name: Test CLI - xpath command
         run: |
           cd build
@@ -72,7 +72,7 @@ jobs:
           ./cli/taurus xpath --count test.xml "//item"
           echo "---"
           ./cli/taurus xpath test.xml "//item[@status='active']"
-      
+
       - name: Test CLI - format command
         run: |
           cd build
@@ -81,12 +81,12 @@ jobs:
           ./cli/taurus format --indent 4 test.xml
           echo "---"
           ./cli/taurus format --format json test.xml
-      
+
       - name: Test CLI - stdin input
         run: |
           cd build
           cat test.xml | ./cli/taurus parse -
-      
+
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:

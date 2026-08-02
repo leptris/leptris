@@ -5,16 +5,16 @@
 _taurus() {
     local cur prev words cword
     _init_completion || return
-    
+
     local commands="parse xpath format version"
     local global_opts="-v --verbose -q --quiet --color --no-color -h --help --version"
-    
+
     # Complete commands
     if [[ $cword -eq 1 ]]; then
         COMPREPLY=($(compgen -W "$commands" -- "$cur"))
         return
     fi
-    
+
     # Complete command-specific options
     local command="${words[1]}"
     case "$command" in

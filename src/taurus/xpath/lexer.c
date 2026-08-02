@@ -70,17 +70,17 @@ static XPathTokenType check_keyword(const char* str, size_t len, int peek_ahead,
 /* Create a new lexer */
 XPathLexer* xpath_lexer_new(const char* input, size_t len) {
     if (!input) return NULL;
-    
+
     XPathLexer* lexer = TAURUS_ALLOC(XPathLexer);
     if (!lexer) return NULL;
-    
+
     lexer->input = input;
     lexer->pos = input;
     lexer->end = input + len;
     lexer->line = 1;
     lexer->column = 1;
     lexer->error_msg[0] = '\0';
-    
+
     return lexer;
 }
 
@@ -133,7 +133,7 @@ static XPathTokenType check_keyword(const char* str, size_t len, int peek_ahead,
         if (len == 17 && strncmp(str, "preceding-sibling", 17) == 0) return TOK_PRECEDING_SIBLING;
         if (len == 4 && strncmp(str, "self", 4) == 0) return TOK_SELF;
     }
-    
+
     /* Check for node type tests (must be followed by '(') */
     if (peek_ahead && lexer->pos < lexer->end && *lexer->pos == '(') {
         if (len == 7 && strncmp(str, "comment", 7) == 0) return TOK_COMMENT;
@@ -142,20 +142,20 @@ static XPathTokenType check_keyword(const char* str, size_t len, int peek_ahead,
         if (len == 22 && strncmp(str, "processing-instruction", 22) == 0)
             return TOK_PROCESSING_INSTRUCTION;
     }
-    
+
     /* Check for operator keywords (can appear anywhere) */
     if (len == 3 && strncmp(str, "and", 3) == 0) return TOK_AND;
     if (len == 2 && strncmp(str, "or", 2) == 0) return TOK_OR;
     if (len == 3 && strncmp(str, "div", 3) == 0) return TOK_DIV;
     if (len == 3 && strncmp(str, "mod", 3) == 0) return TOK_MOD;
-    
+
     return TOK_NCNAME;
 }
 
 /* Get next token */
 XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
     XPathToken token;
-    
+
     if (!lexer) {
         token.type = TOK_EOF;
         token.value = NULL;
@@ -164,21 +164,21 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         token.column = 0;
         return token;
     }
-    
+
     skip_whitespace(lexer);
-    
+
     token.line = lexer->line;
     token.column = lexer->column;
-    
+
     if (lexer->pos >= lexer->end) {
         token.type = TOK_EOF;
         token.value = lexer->pos;
         token.value_len = 0;
         return token;
     }
-    
+
     char c = *lexer->pos;
-    
+
     /* Single character tokens */
     switch (c) {
         case '@':
@@ -188,7 +188,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case '(':
             token.type = TOK_LPAREN;
             token.value = lexer->pos;
@@ -196,7 +196,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case ')':
             token.type = TOK_RPAREN;
             token.value = lexer->pos;
@@ -204,7 +204,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case '[':
             token.type = TOK_LBRACKET;
             token.value = lexer->pos;
@@ -212,7 +212,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case ']':
             token.type = TOK_RBRACKET;
             token.value = lexer->pos;
@@ -220,7 +220,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case ',':
             token.type = TOK_COMMA;
             token.value = lexer->pos;
@@ -228,7 +228,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case '+':
             token.type = TOK_PLUS;
             token.value = lexer->pos;
@@ -236,7 +236,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case '-':
             token.type = TOK_MINUS;
             token.value = lexer->pos;
@@ -244,7 +244,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case '*':
             token.type = TOK_STAR;
             token.value = lexer->pos;
@@ -252,7 +252,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->pos++;
             lexer->column++;
             return token;
-            
+
         case '|':
             token.type = TOK_PIPE;
             token.value = lexer->pos;
@@ -270,9 +270,9 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->column++;
             return token;
     }
-    
+
     /* Multi-character tokens */
-    
+
     /* Slash and double slash */
     if (c == '/') {
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '/') {
@@ -290,7 +290,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         lexer->column++;
         return token;
     }
-    
+
     /* Dot and double dot */
     if (c == '.') {
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '.') {
@@ -312,7 +312,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         lexer->column++;
         return token;
     }
-    
+
     /* Colon (for :: and QNames) */
     if (c == ':') {
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == ':') {
@@ -326,7 +326,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         /* Single colon is handled as part of QName */
         if (lexer->input && lexer->pos >= lexer->input) {
             size_t byte_offset = lexer->pos - lexer->input;
-            
+
             taurus_set_error_with_context(
                 TAURUS_ERROR_XPATH_SYNTAX,
                 "Unexpected ':' character in XPath expression",
@@ -336,7 +336,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
                 lexer->column
             );
         }
-        
+
         snprintf(lexer->error_msg, sizeof(lexer->error_msg),
                 "Unexpected character ':' at line %d, column %d",
                 lexer->line, lexer->column);
@@ -345,7 +345,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         token.value_len = 0;
         return token;
     }
-    
+
     /* Comparison operators */
     if (c == '=') {
         token.type = TOK_EQUALS;
@@ -355,7 +355,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         lexer->column++;
         return token;
     }
-    
+
     if (c == '!') {
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '=') {
             token.type = TOK_NOT_EQUALS;
@@ -367,7 +367,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         }
         if (lexer->input && lexer->pos >= lexer->input) {
             size_t byte_offset = lexer->pos - lexer->input;
-            
+
             taurus_set_error_with_context(
                 TAURUS_ERROR_XPATH_SYNTAX,
                 "Unexpected '!' character (did you mean '!='?)",
@@ -377,7 +377,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
                 lexer->column
             );
         }
-        
+
         snprintf(lexer->error_msg, sizeof(lexer->error_msg),
                 "Unexpected character '!' at line %d, column %d",
                 lexer->line, lexer->column);
@@ -386,7 +386,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         token.value_len = 0;
         return token;
     }
-    
+
     if (c == '<') {
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '=') {
             token.type = TOK_LE;
@@ -403,7 +403,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         lexer->column++;
         return token;
     }
-    
+
     if (c == '>') {
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '=') {
             token.type = TOK_GE;
@@ -420,14 +420,14 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         lexer->column++;
         return token;
     }
-    
+
     /* String literals */
     if (c == '\'' || c == '"') {
         char quote = c;
         const char* start = lexer->pos;
         lexer->pos++;
         lexer->column++;
-        
+
         while (lexer->pos < lexer->end && *lexer->pos != quote) {
             if (*lexer->pos == '\n') {
                 lexer->line++;
@@ -437,11 +437,11 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             }
             lexer->pos++;
         }
-        
+
         if (lexer->pos >= lexer->end) {
             if (lexer->input && start >= lexer->input) {
                 size_t byte_offset = start - lexer->input;
-                
+
                 taurus_set_error_with_context(
                     TAURUS_ERROR_XPATH_SYNTAX,
                     "Unterminated string literal",
@@ -451,7 +451,7 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
                     token.column
                 );
             }
-            
+
             snprintf(lexer->error_msg, sizeof(lexer->error_msg),
                     "Unterminated string literal at line %d", token.line);
             token.type = TOK_EOF;  /* Error token */
@@ -459,71 +459,71 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             token.value_len = 0;
             return token;
         }
-        
+
         lexer->pos++;  /* Skip closing quote */
         lexer->column++;
-        
+
         token.type = TOK_STRING;
         token.value = start;
         token.value_len = lexer->pos - start;
         return token;
     }
-    
+
     /* Numbers */
 parse_number:
     if (isdigit((unsigned char)c) || c == '.') {
         const char* start = lexer->pos;
-        
+
         while (lexer->pos < lexer->end &&
                (isdigit((unsigned char)*lexer->pos) || *lexer->pos == '.')) {
             lexer->pos++;
             lexer->column++;
         }
-        
+
         token.type = TOK_NUMBER;
         token.value = start;
         token.value_len = lexer->pos - start;
         return token;
     }
-    
+
     /* NCNames and QNames (and keywords) */
     if (is_ncname_start(c)) {
         const char* start = lexer->pos;
-        
+
         while (lexer->pos < lexer->end && is_ncname_char(*lexer->pos)) {
             lexer->pos++;
             lexer->column++;
         }
-        
+
         size_t len = lexer->pos - start;
-        
+
         /* Check for QName (prefix:localname) */
         if (lexer->pos < lexer->end && *lexer->pos == ':' &&
             lexer->pos + 1 < lexer->end && lexer->pos[1] != ':') {  /* Not :: */
-            
+
             lexer->pos++;  /* Skip : */
             lexer->column++;
-            
+
             if (is_ncname_start(*lexer->pos)) {
                 while (lexer->pos < lexer->end && is_ncname_char(*lexer->pos)) {
                     lexer->pos++;
                     lexer->column++;
                 }
-                
+
                 token.type = TOK_QNAME;
                 token.value = start;
                 token.value_len = lexer->pos - start;
                 return token;
             }
         }
-        
+
         /* Check for keywords */
         token.type = check_keyword(start, len, 1, lexer);
         token.value = start;
         token.value_len = len;
         return token;
     }
-    
+
     /* Invalid character */
     if (lexer->input && lexer->pos >= lexer->input) {
         size_t byte_offset = lexer->pos - lexer->input;
@@ -531,7 +531,7 @@ parse_number:
         snprintf(msg, sizeof(msg),
                 "Invalid character '%c' in XPath expression",
                 c);
-        
+
         taurus_set_error_with_context(
             TAURUS_ERROR_XPATH_SYNTAX,
             msg,
@@ -541,7 +541,7 @@ parse_number:
             lexer->column
         );
     }
-    
+
     snprintf(lexer->error_msg, sizeof(lexer->error_msg),
             "Invalid character '%c' at line %d, column %d",
             c, lexer->line, lexer->column);
