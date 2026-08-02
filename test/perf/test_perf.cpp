@@ -7,7 +7,7 @@
 // attrs.xml 3.4x slowdown the validation pass found.
 
 #include <gtest/gtest.h>
-
+#include <cstring>
 #include "taurus.h"
 
 #include <chrono>

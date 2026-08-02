@@ -1,7 +1,7 @@
 // test/dom/test_vtable.cpp — Node vtable specs (TODO 23/29/30).
 
 #include <gtest/gtest.h>
-
+#include <cstring>
 #include "taurus.h"
 
 extern "C" {
