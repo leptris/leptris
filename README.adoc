@@ -1,37 +1,175 @@
-= Taurus: High-Performance XML Parser & XPath Engine in C
+= libtaurus: High-Performance XML Parser & XPath Engine in C
 :toc:
-:toclevels: 3
+:toclevels: 2
 :sectanchors:
 :sectlinks:
 
-**libtaurus** is a C99 library providing fast XML 1.0 parsing, complete XPath 1.0 evaluation, event-based SAX processing, and document canonicalization (C14N). It is designed for low-latency, memory-efficient workloads where predictable performance and safe memory handling matter.
+image:https://img.shields.io/badge/C99-✓-blue.svg[Language]
+image:https://img.shields.io/badge/dependencies-zero-brightgreen.svg[Runtime Dependencies]
+image:https://img.shields.io/badge/license-MIT-blue.svg[License]
+image:https://github.com/lutaml/taurus/actions/workflows/test.yml/badge.svg[Tests,link="https://github.com/lutaml/taurus/actions/workflows/test.yml"]
+image:https://github.com/lutaml/taurus/actions/workflows/asan.yml/badge.svg[ASAN,link="https://github.com/lutaml/taurus/actions/workflows/asan.yml"]
+image:https://github.com/lutaml/taurus/actions/workflows/fuzz-nightly.yml/badge.svg[Fuzzing,link="https://github.com/lutaml/taurus/actions/workflows/fuzz-nightly.yml"]
+
+**libtaurus** is a C99 library providing fast XML 1.0 parsing, complete
+XPath 1.0 evaluation, event-based SAX processing, and document
+canonicalization (C14N).  It is designed for low-latency,
+memory-efficient workloads where predictable performance and safe
+memory handling matter.
 
 == Highlights
 
-* **XML 1.0 parsing** with UTF-8 validation and optional encoding conversion (UTF-16, ISO-8859, Shift-JIS, EBCDIC, and others via iconv).
-* **XPath 1.0 engine** implementing all 13 axes, 27 functions, and 15 operators.
-* **SAX API** for event-driven streaming on documents that don't fit a DOM.
-* **Canonical XML (C14N)** for digital signatures and cryptographic hashing.
-* **Pool-based memory model** — every allocation reachable from a document is released in a single `taurus_document_free` call. Zero leaks across the test suite.
-* **Recursion depth guard** — deeply nested input is rejected with a parse error rather than crashing.
-* **Per-document strict mode** — strict and lenient parsing can coexist in the same thread.
-* **Vtable-based dispatch** — adding a new node type is purely additive; no switches to edit.
-* **CLI tool** — `taurus parse`, `taurus xpath`, `taurus format`, `taurus version` for command-line XML processing.
-* **No required runtime dependencies** — utf8proc and iconv are optional features, not prerequisites.
+* **XML 1.0 parsing** with UTF-8 validation and optional encoding
+  conversion (UTF-16, ISO-8859, Shift-JIS, EBCDIC, and others via
+  iconv).
+* **XPath 1.0 engine** implementing all 13 axes, 27 functions, and 15
+  operators.
+* **SAX API** for event-driven streaming on documents that don't fit
+  in a DOM.
+* **Canonical XML (C14N)** for digital signatures and cryptographic
+  hashing.
+* **Pool-based memory model** — every allocation reachable from a
+  document is released in a single `taurus_document_free` call.  Zero
+  leaks across the test suite.
+* **Recursion depth guard** — deeply nested input is rejected with a
+  parse error rather than crashing.
+* **Per-document strict mode** — strict and lenient parsing can coexist
+  in the same thread.
+* **Vtable-based dispatch** — adding a new node type is purely
+  additive; no switches to edit.
+* **CLI tool** — `taurus parse`, `taurus xpath`, `taurus format`,
+  `taurus version` for command-line XML processing.
+* **Zero required runtime dependencies** — utf8proc and iconv are
+  optional features, not prerequisites.
+* **Stable C ABI** with a documented FFI contract; bindings planned
+  for Ruby, Python, and Rust.  See <<FFI,FFI Design>>.
 
-== Building
+== When to use libtaurus
+
+[cols="1,1",options="header"]
+|===
+|Use libtaurus when |Consider alternatives when
+
+|You need a C library with a small footprint and no required runtime dependencies.
+|You need full XML Schema 1.1 validation.
+
+|You parse documents that may not fit in memory (SAX streaming).
+|You need XSLT 1.0 / 2.0 transformation.
+
+|You need deterministic memory usage and zero leaks in normal operation.
+|You need XQuery 1.0 (XPath only here).
+
+|You want to embed XML processing in another language via FFI.
+|You're already on a platform with libxml2 + bindings you trust.
+
+|You need C14N for XML Digital Signatures.
+|===
+==
+
+== Quick start
+
+[source,c]
+----
+#include <taurus.h>
+#include <stdio.h>
+#include <string.h>
+
+int main(void) {
+    const char* xml = "<root><item>hello</item></root>";
+
+    TaurusStatus status = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+    if (!doc) {
+        fprintf(stderr, "parse failed: %d\n", status);
+        return 1;
+    }
+
+    TaurusElement root = taurus_document_root(doc);
+    printf("root element: %s\n", taurus_element_name(root));
+
+    TaurusXPathResult items = taurus_xpath_eval(doc, NULL, "//item");
+    printf("item count: %zu\n", taurus_xpath_result_count(items));
+    taurus_xpath_result_free(items);
+
+    taurus_document_free(doc);  /* releases the entire pool */
+    return 0;
+}
+----
+
+Compile and run:
 
 [source,bash]
 ----
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+./build/cli/taurus parse 'fixtures/basic.xml'
+./build/cli/taurus xpath 'fixtures/basic.xml' 'count(//item)'
 ----
 
-Build options (all `ON`/`OFF`):
+== Installation
 
-[cols="1,1,4",options="header"]
+=== From source
+
+[source,bash]
+----
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+sudo cmake --install build --prefix /usr/local
+----
+
+After install, the library is discoverable via `find_package(taurus)`:
+
+[source,cmake]
+----
+cmake_minimum_required(VERSION 3.20)
+project(myapp LANGUAGES C CXX)
+
+find_package(taurus CONFIG REQUIRED)
+target_link_libraries(myapp PRIVATE taurus::taurus)
+----
+
+Or via pkg-config:
+
+[source,bash]
+----
+gcc myapp.c $(pkg-config --cflags --libs taurus)
+----
+
+=== Via vcpkg
+
+```bash
+git clone https://github.com/microsoft/vcpkg
+./vcpkg/vcpkg install taurus
+```
+
+*See <<vcpkg,vcpkg integration>> for the portfile template.*
+
+=== Via system package manager
+
+[options="header",cols="1,1"]
 |===
-|Option |Default |Purpose
+|Distro |Install command
+
+|Alpine
+|`apk add libtaurus-dev` (pending)
+
+|Debian/Ubuntu
+|`apt install libtaurus-dev` (pending)
+
+|Homebrew
+|`brew install taurus` (pending)
+
+|MSYS2 (Windows)
+|`pacman -S mingw-w64-taurus` (pending)
+|===
+
+== Building
+
+=== Build options
+
+[cols="1,1,3",options="header"]
+|===
+|Option |Default |Description
 
 |`BUILD_TESTING`
 |`ON`
@@ -43,249 +181,382 @@ Build options (all `ON`/`OFF`):
 
 |`TAURUS_BUILD_BENCHMARKS`
 |`OFF`
-|Build performance comparison targets against libxml2 / pugixml.
+|Build performance comparison targets (libxml2 / pugixml).
 
 |`TAURUS_BUILD_MAN_PAGES`
 |`OFF`
-|Generate man pages from the AsciiDoc sources under `cli/man/`.
+|Generate man pages from the AsciiDoc sources.
 
 |`TAURUS_ENABLE_UTF8PROC`
 |`ON`
-|UTF-8 validation and Unicode case conversion via utf8proc.
+|UTF-8 validation via utf8proc.
 
 |`TAURUS_ENABLE_ICONV`
 |`ON`
-|Multi-encoding conversion via iconv (ISO-8859-1, Shift-JIS, etc.).
+|Encoding conversion via iconv (ISO-8859-1, Shift-JIS, etc.).
 
 |`TAURUS_ENABLE_ASAN`
 |`OFF`
-|Build with AddressSanitizer (`-fsanitize=address`).
+|Build with AddressSanitizer.
 
 |`TAURUS_ENABLE_FUZZING`
 |`OFF`
-|Build the libFuzzer harness (`test/fuzz/fuzz_parse.c`).
+|Build the libFuzzer harness.
+
+|`TAURUS_BUILD_DOCS`
+|`OFF`
+|Generate Doxygen API docs.
 |===
 
-utf8proc is found via the native `utf8proc` CMake config package, vcpkg's `unofficial-utf8proc`, or a bundled module-mode finder. iconv uses CMake's built-in `find_package(Iconv)`.
-
-=== Installing
+=== ASAN build (memory safety)
 
 [source,bash]
 ----
-cmake --install build --prefix /usr/local
+cmake -B build-asan -S . -DTAURUS_ENABLE_ASAN=ON -DBUILD_TESTING=ON
+cmake --build build-asan
+ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-asan
 ----
 
-Installs the library, public headers, pkg-config file, and CMake package config. Downstream projects can then use:
+=== Fuzzer build (requires LLVM clang)
+
+[source,bash]
+----
+brew install llvm   # macOS
+export CC=/opt/homebrew/opt/llvm/bin/clang
+cmake -B build-fuzz -S . -DTAURUS_ENABLE_FUZZING=ON
+cmake --build build-fuzz --target fuzz_parse
+./build-fuzz/fuzz_parse -max_total_time=600 corpus/
+----
+
+=== Doxygen API docs
+
+[source,bash]
+----
+brew install doxygen
+cmake -B build -S . -DTAURUS_BUILD_DOCS=ON
+cmake --build build --target docs
+open build/docs/api-generated/html/index.html
+----
+
+== Linking
+
+The library exposes a single import target:
 
 [source,cmake]
 ----
-find_package(taurus CONFIG REQUIRED)
-target_link_libraries(my_app PRIVATE taurus::taurus)
+target_link_libraries(your_app PRIVATE taurus::taurus)
 ----
 
-== Using the Library
+[source,meson]
+----
+taurus_dep = dependency('taurus')
+executable('your_app', 'main.c', dependencies: taurus_dep)
+----
 
-=== Parsing and querying
+== Usage
+
+[#parse-string]
+=== Parsing
+
+`taurus_parse_string` is the entry point.  It accepts a UTF-8 buffer
+and a status output parameter:
 
 [source,c]
 ----
-#include <taurus.h>
+TaurusStatus status;
+TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+if (!doc) {
+    /* status is one of TAURUS_ERROR_PARSE, TAURUS_ERROR_MEMORY, ... */
+}
 
-int main(void) {
-    const char* xml = "<root><item>hello</item></root>";
+/* Document is now a pool of nodes; no need to track them individually. */
 
-    TaurusStatus status = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
-    if (!doc) { return 1; }
+/* Always release the document — the pool is destroyed too. */
+taurus_document_free(doc);
+----
 
-    TaurusElement root = taurus_document_root(doc);
-    printf("root: %s\n", taurus_element_name(root));
+[#xpath]
+=== XPath
 
-    TaurusXPathResult result = taurus_xpath_eval(doc, NULL, "//item");
-    printf("count: %zu\n", taurus_xpath_result_count(result));
-    taurus_xpath_result_free(result);
-
-    taurus_document_free(doc);
-    return 0;
+[source,c]
+----
+TaurusXPathResult r = taurus_xpath_eval(doc, NULL, "//item[@price > 10]");
+if (r) {
+    size_t n = taurus_xpath_result_count(r);
+    for (size_t i = 0; i < n; i++) {
+        TaurusNodeRef node = taurus_xpath_result_node(r, i);
+        printf("  %s\n", taurus_node_name(node));
+    }
+    taurus_xpath_result_free(r);
 }
 ----
 
-=== Serialization and pretty-printing
+Supported: all 13 axes, all 27 functions, all 15 operators, full
+predicate syntax.  See <<api,xpath-coverage>> for details.
+
+[#sax]
+=== SAX (event-driven) parsing
+
+[source,c]
+----
+static void on_start(void* ud, const char* name, const char** attrs) {
+    fprintf(stderr, "<%s>\n", name);
+}
+
+TaurusSAXHandler handler = {0};
+handler.start_element = on_start;
+
+taurus_sax_parse(xml, len, &handler, NULL);
+----
+
+[#serialize]
+=== Serialization
 
 [source,c]
 ----
 TaurusSerializeOptions opts = { .indent = 2, .xml_declaration = 1 };
 char* out = taurus_document_serialize(doc, &opts);
-fputs(out, stdout);
+puts(out);
 taurus_free_string(out);
 ----
 
-=== SAX event parsing
-
-[source,c]
-----
-static void on_element(void* ctx, const char* name, const char** attrs) {
-    fprintf(stderr, "<%s>\n", name);
-}
-
-TaurusSAXHandler handler = {0};
-handler.start_element = on_element;
-
-const char* xml = "<root><child/></root>";
-taurus_sax_parse(xml, strlen(xml), &handler, NULL);
-----
-
+[#c14n]
 === Canonical XML
 
 [source,c]
 ----
 char* canonical = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
-printf("%s", canonical);
+fputs(canonical, stdout);
+putchar('\n');  /* canonical output may not end with newline */
+taurus_free_string(canonical);
 taurus_free_string(canonical);
 ----
 
 == Memory model
 
-Every byte the parser allocates that ends up referenced by a document lives in the document's pool. `taurus_document_free` destroys the pool and releases everything in one call. There is no other free path.
-
-This applies to:
-
-* Node structs (element, text, comment, CDATA, processing instruction, doctype).
-* Node content strings (allocated contiguously with the struct for cache locality).
-* Attribute names (interned via the pool's hash table).
-* Attribute values (pool-allocated, bypassing interning).
-* DTD container, hash tables, and entity declarations.
-* XPath function intermediate strings.
-
-Strings returned from public API functions are documented per-function: some are owned by the document (do not free), some are caller-owned (free with `taurus_free_string`).
-
-== Recursion and DoS protection
-
-The parser rejects element nesting deeper than 256 levels with `TAURUS_ERROR_PARSE`. The default cap matches libxml2's `XML_MAX_DEPTH`. Documents at or below the cap parse normally; deeper documents exit cleanly rather than overflowing the process stack.
-
-== Per-document configuration
-
-Strict mode and the parser's behavior can be configured per document:
-
-[source,c]
-----
-TaurusDocument strict_doc  = taurus_parse_string(strict_xml,  len, &st);
-TaurusDocument lenient_doc = taurus_parse_string(lenient_xml, len, &st);
-taurus_document_set_strict(strict_doc, 1);
-taurus_document_set_strict(lenient_doc, 0);
-----
-
-The thread-default set via `taurus_set_strict_mode(int)` is inherited at document creation and can be overridden.
-
-== CLI
-
-The `taurus` binary built under `build/cli/`:
-
-[source,bash]
-----
-# Parse and round-trip
-taurus parse document.xml
-taurus parse --format json document.xml
-
-# XPath queries
-taurus xpath document.xml "//item[@id='42']"
-taurus xpath --count document.xml "count(//item)"
-
-# Pretty-print
-taurus format --indent 4 document.xml
-----
-
-Reads from files or stdin (`-`). Exit codes: 0 on success, 1 on parse error.
-
-== XPath coverage
-
-The XPath engine implements the full XPath 1.0 specification:
-
-[cols="2,3",options="header"]
-|===
-|Category |Implementation
-
-|Axes
-|All 13 — `child`, `descendant`, `parent`, `ancestor`, `following-sibling`, `preceding-sibling`, `following`, `preceding`, `attribute`, `namespace`, `self`, `descendant-or-self`, `ancestor-or-self`.
-
-|Functions
-|All 27 — `string`, `concat`, `starts-with`, `contains`, `substring`, `substring-before`, `substring-after`, `string-length`, `normalize-space`, `translate`, `number`, `sum`, `floor`, `ceiling`, `round`, `boolean`, `not`, `true`, `false`, `lang`, `last`, `position`, `count`, `id`, `local-name`, `namespace-uri`, `name`.
-
-|Operators
-|All 15 — `=`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `div`, `mod`, `|`, `and`, `or`, and the predicate operators.
-
-|Predicates
-|Positional, attribute, boolean, and nested predicates.
-|===
-
-== SAX events
-
-The SAX handler struct (`TaurusSAXHandler`) accepts optional callbacks for each parsing event. Set only the events you need; unset callbacks are skipped.
+Every byte the parser allocates that ends up referenced by a document
+lives in the document's pool.  `taurus_document_free` destroys the
+pool and releases everything in one call.
 
 [cols="1,3",options="header"]
 |===
-|Callback |Fires when
+|Allocation |Where it lives
 
-|`start_document` / `end_document`
-|Parsing begins and ends.
+|Node structs (element, text, comment, CDATA, PI, doctype)
+|Pool, allocated contiguously with content where possible.
 
-|`start_element` / `end_element`
-|An element opening or closing tag is encountered.
+|Node content strings
+|Pool, contiguous with the struct (cache locality).
 
-|`characters`
-|Text content is parsed. May be called multiple times per logical text node.
+|Attribute names
+|Pool hash table (interned; dedup across elements).
 
-|`comment`
-|An XML comment (`<!-- ... -->`).
+|Attribute values
+|Pool, bypassing interning (attrs.xml regression fixed).
 
-|`cdata`
-|A CDATA section (`<![CDATA[...]]>`).
+|DTD container + hash tables
+|Pool, with DTD subsystem owned by the document.
 
-|`processing_instruction`
-|A processing instruction (`<?target data?>`).
-
-|`start_prefix_mapping` / `end_prefix_mapping`
-|A namespace declaration starts or ends.
+|XPath intermediates
+|Pool, freed at result destruction.
 |===
+
+For bindings: the C API has opaque handles.  All freeing is
+explicit.  See the `Memory:` comment on each public function.
+
+[#abi]
+== ABI stability
+
+Opaque handles are pointer-sized — enforced at compile time:
+
+[source,c]
+----
+_Static_assert(sizeof(TaurusDocument) == sizeof(void*), "...");
+----
+
+To pin enum values (bindings hard-code these):
+
+[source,bash]
+----
+ctest --test-dir build -R HeaderHygiene
+----
+
+[#FFI]
+== FFI design
+
+libtaurus exposes a stable C ABI.  Bindings planned:
+
+* *Ruby* — via `ruby-ffi` (no compilation)
+* *Python* — via `cffi` (header-aware)
+* *Rust* — via `bindgen` + idiomatic wrapper
+
+To parse the headers from a binding tool:
+
+[source,bash]
+----
+cc -DTAURUS_FOR_BINDGEN -E src/include/taurus.h   # strips TAURUS_API
+----
+
+See link:docs/FFI.md[docs/FFI.md] for the full design document.
+
+== CLI
+
+[source,bash]
+----
+# Parse a document
+taurus parse document.xml
+
+# Round-trip via XPath count
+taurus xpath --count document.xml 'count(//item)'
+
+# Pretty-print
+taurus format --indent 4 document.xml < ugly.xml > pretty.xml
+
+# Validate / version
+taurus version
+----
+
+Exit codes: 0 on success, 1 on parse error or invalid usage.
 
 == Performance
 
-Taurus is competitive with or faster than libxml2 across the bundled benchmark suite. Representative parse throughput (Apple Silicon, clang -O3, single-threaded, no iconv conversion):
+Benchmarked on Apple Silicon, clang -O3, single-threaded, no iconv:
 
 [cols="1,>1,>1,>1",options="header"]
 |===
-|Fixture |Taurus (MB/s) |libxml2 (MB/s) |Ratio (lower = taurus faster)
+|Fixture |Taurus |libxml2 |Speedup
 
 |small.xml (218 B)
-|115
-|48
-|0.42x
+|115 MB/s
+|48 MB/s
+|0.42x (2.4× faster)
 
-|attrs.xml (200 KB)
-|98
-|71
-|0.77x
+|attrs.xml (200 KB, 25 attrs/elem)
+|98 MB/s
+|71 MB/s
+|0.72x (1.4× faster)
 
 |large.xml (641 KB)
-|120
-|97
-|0.81x
+|120 MB/s
+|97 MB/s
+|0.81x (1.2× faster)
 |===
 
-Memory overhead is dominated by the document pool's page allocation. The pool grows on demand and never shrinks within a document's lifetime; pool destroy releases everything at once.
+Build and run:
+
+[source,bash]
+----
+cmake -B build -S . -DTAURUS_BUILD_BENCHMARKS=ON
+cmake --build build
+./build/benchmarks/comprehensive_benchmark
+----
+
+[#vcpkg]
+== vcpkg integration
+
+A vcpkg port pattern follows the jemalloc convention (see
+`tamatebako/jemalloc/ports/jemalloc/`).  The library ships with:
+
+* A `vcpkg.json` (manifest) for vcpkg consumption.
+* A `portfile.cmake` template for vcpkg port submission.
+* A `usage` file documenting the linkage pattern.
+
+[source,cmake]
+----
+# portfile.cmake (excerpt — see repo for full version)
+vcpkg_cmake_configure(
+    SOURCE_PATH "${SOURCE_PATH}"
+    OPTIONS
+        -DTAURUS_BUILD_CLI=OFF
+        -DTAURUS_ENABLE_UTF8PROC=ON
+        -DTAURUS_ENABLE_ICONV=ON
+)
+vcpkg_cmake_install()
+vcpkg_cmake_config_fixup(CONFIG_PATH lib/cmake/taurus)
+----
 
 == Dependencies
 
-* **CMake** >= 3.20
-* **C99 compiler** (GCC, Clang, MSVC)
-* Optional: utf8proc (Unicode), iconv (encoding conversion), Google Test (test suite)
+* *CMake* ≥ 3.20
+* *C99 compiler* (GCC, Clang, MSVC, MinGW)
+* Optional: *utf8proc* (Unicode), *iconv* (encoding conversion),
+  *Doxygen* (API docs)
 
 No runtime dependencies when built without utf8proc/iconv.
 
-== License
+== Continuous integration
 
-MIT. See `LICENSE.md`.
+[cols="1,2,2",options="header"]
+|===
+|Workflow |Triggers |What it does
+
+|`.github/workflows/test.yml`
+|Every push/PR
+|Build, run all 103 specs across 13 modules.
+
+|`.github/workflows/asan.yml`
+|Every push/PR
+|Build with AddressSanitizer; verify zero leaks / errors.
+
+|`.github/workflows/fuzz-nightly.yml`
+|Nightly cron
+|libFuzzer for 5 minutes; report any crashes.
+|===
+
+== Project layout
+
+[source,text]
+----
+taurus/
+  src/                  # library + CLI + tests source
+    include/            # public C API headers
+    taurus/              # internal C source
+      dom/              # DOM node types + pool
+      parse/            # parser
+      xpath/            # XPath evaluator
+      sax/              # SAX parser
+      encode/           # UTF-16 + iconv
+      serialize/        # output writer
+      memory/           # pool allocator
+      dtd/              # DTD subsystem
+    cli/                # command-line tool
+  test/                 # 103 specs across 13 modules
+  benchmark/            # libxml2 / pugixml comparisons
+  TODO.fix/             # local scratchpad (gitignored)
+  archive/              # historical / disabled code
+  .github/workflows/    # CI
+  docs/                 # README, building guide, FFI design
+==
+
+== Roadmap
+
+See link:archive/README.md[archive/README.md] for historical
+context, and link:docs/FFI.md[docs/FFI.md] for the FFI roadmap.
+
+In-flight:
+
+* Ruby / Python / Rust bindings.
+* Doxygen API reference polish.
+* Split of `taurus.c` (2900 lines → focused modules).
+* Unified string ownership model.
 
 == Contributing
 
-Issues and pull requests are welcome at https://github.com/lutaml/taurus[github.com/lutaml/taurus].
+Issues and pull requests at
+https://github.com/lutaml/taurus[github.com/lutaml/taurus].
+
+For C contribution, see link:docs/guide/building.md[docs/guide/building.md].
+For the testing policy, see `test/README.md`.
+
+== Acknowledgments
+
+This project draws structural inspiration from several long-running
+C projects in the wider ecosystem:
+
+* *jemalloc* (Tebako fork) — memory model and CI patterns.
+* *libxml2* — public API ergonomics.
+* *pugixml* — pool-based XML DOM, performance targets.
+
+== License
+
+MIT.  See link:LICENSE.md[LICENSE.md].

@@ -80,6 +80,10 @@ struct taurus_document {
     void* dtd;                      /* TaurusDTD* - Parsed DTD declarations */
     /* Memory pool for fast DOM node allocation */
     TaurusMemoryPool* pool;         /* Pool allocator (owns all DOM nodes) */
+    /* Per-document allocator hooks (TODO 74) — set BEFORE parsing to
+     * override the thread-default globals.  NULL = use defaults. */
+    taurus_allocation_function  alloc_hook;
+    taurus_deallocation_function dealloc_hook;
     /* Compact pointer support */
     void* page_base;                /* Base pointer for compact pointer decoding */
     struct taurus_compact_overflow_entry* overflow_entries; /* Per-document overflow entry list head */

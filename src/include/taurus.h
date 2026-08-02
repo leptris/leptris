@@ -1507,6 +1507,25 @@ TAURUS_API taurus_allocation_function taurus_get_memory_allocation_function(void
 TAURUS_API taurus_deallocation_function taurus_get_memory_deallocation_function(void);
 
 /* ============================================================================
+ * Per-Document Allocator Hooks (TODO 74)
+ *
+ * Set allocator hooks on a specific document before parsing it.  Useful
+ * when an app needs different allocators for different documents in
+ * the same thread.
+ *
+ * Must be called BEFORE taurus_parse_string.  Changes after parse
+ * have no effect on already-allocated memory.
+ *
+ * To set thread-default hooks (applies to all documents in the
+ * current thread), use taurus_set_memory_management_functions().
+ * ============================================================================ */
+
+TAURUS_API TaurusStatus taurus_document_set_allocators(
+    TaurusDocument doc,
+    taurus_allocation_function alloc,
+    taurus_deallocation_function dealloc);
+
+/* ============================================================================
  * XInclude 1.0 Support
  * ============================================================================ */
 

@@ -70,6 +70,30 @@ TaurusMemoryPool* taurus_pool_create(void) {
     return taurus_pool_create_with_page_size(TAURUS_POOL_PAGE_SIZE_DEFAULT);
 }
 
+/* Helper to pick which alloc hook a pool uses for a given allocation.
+ * TODO 74: per-pool hooks override the thread-default globals. */
+static inline taurus_allocation_function
+pool_alloc_fn(const TaurusMemoryPool* pool) {
+    return pool->alloc_hook ? pool->alloc_hook : taurus_alloc_hook;
+}
+
+static inline taurus_deallocation_function
+pool_dealloc_fn(const TaurusMemoryPool* pool) {
+    return pool->dealloc_hook ? pool->dealloc_hook : taurus_free_hook;
+}
+
+TaurusMemoryPool* taurus_pool_create_with_hooks(
+    size_t page_size,
+    taurus_allocation_function alloc,
+    taurus_deallocation_function dealloc) {
+    TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
+    if (pool) {
+        pool->alloc_hook   = alloc;
+        pool->dealloc_hook = dealloc;
+    }
+    return pool;
+}
+
 TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
     /* Validate page size */
     if (page_size < TAURUS_POOL_PAGE_SIZE_MIN) {

@@ -1,156 +1,74 @@
-/* xpath_example.c - XPath API usage example
- * Copyright (c) 2024, Ribose Inc.
+/* xpath_example.c - XPath evaluation example.
  *
- * Demonstrates various XPath 1.0 queries and result types.
+ * Demonstrates the public XPath API: evaluate queries and access
+ * results of each type (nodeset, string, number, boolean).
  */
 
 #include <taurus.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <math.h>
+
+static const char* RESULT_TYPE_NAMES[] = {
+    "nodeset", "boolean", "number", "string"
+};
+
+static void show_result(TaurusDocument doc, const char* expr) {
+    printf("  %-50s => ", expr);
+    TaurusXPathResult r = taurus_xpath_eval(doc, NULL, expr);
+    if (!r) {
+        printf("(error)\n");
+        return;
+    }
+
+    TaurusXPathResultType t = taurus_xpath_result_type(r);
+    switch (t) {
+        case TAURUS_XPATH_NODESET: {
+            size_t n = taurus_xpath_result_count(r);
+            printf("nodeset[%zu]\n", n);
+            break;
+        }
+        case TAURUS_XPATH_BOOLEAN:
+            printf("boolean(%s)\n", taurus_xpath_result_boolean(r) ? "true" : "false");
+            break;
+        case TAURUS_XPATH_NUMBER:
+            printf("number(%g)\n", taurus_xpath_result_number(r));
+            break;
+        case TAURUS_XPATH_STRING: {
+            char* s = taurus_xpath_result_string(r);
+            printf("string(\"%s\")\n", s ? s : "");
+            if (s) taurus_free_string(s);
+            break;
+        }
+        default:
+            printf("unknown(%d)\n", (int)t);
+            break;
+    }
+    taurus_xpath_result_free(r);
+}
 
 int main(void) {
-    printf("=== Taurus XPath Example ===\n\n");
-    
-    /* Test XML with various content types */
-    const char* xml = 
-        "<bookstore>"
-        "  <book price=\"29.99\" category=\"programming\">"
-        "    <title>The C Programming Language</title>"
-        "    <author>Kernighan</author>"
-        "    <author>Ritchie</author>"
-        "    <year>1988</year>"
-        "  </book>"
-        "  <book price=\"39.95\" category=\"programming\">"
-        "    <title>SICP</title>"
-        "    <author>Abelson</author>"
-        "    <year>1996</year>"
-        "  </book>"
-        "  <book price=\"49.99\" category=\"fiction\">"
-        "    <title>The Art of Computer Programming</title>"
-        "    <author>Knuth</author>"
-        "    <year>1968</year>"
-        "  </book>"
-        "</bookstore>";
-    
-    printf("Parsing XML...\n");
+    const char* xml =
+        "<library>"
+        "  <book id='b1'><title>C</title><price>29</price></book>"
+        "  <book id='b2'><title>Lisp</title><price>39</price></book>"
+        "  <book id='b3'><title>Prolog</title><price>49</price></book>"
+        "</library>";
+
+    TaurusStatus status = TAURUS_OK;
     TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
     if (!doc) {
-        fprintf(stderr, "Parse failed: %s\n", taurus_last_error());
+        fprintf(stderr, "parse failed (status=%d)\n", status);
         return 1;
     }
-    printf("✓ Parse successful\n\n");
-    
-    /* Example 1: Node-set query */
-    printf("1. Node-set query: //book\n");
-    TaurusXPathResult result = taurus_xpath_eval(doc, "//book", 6);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        size_t count = taurus_xpath_result_nodeset_size(result);
-        printf("   Found %zu book(s)\n", count);
-        
-        for (size_t i = 0; i < count; i++) {
-            TaurusElement book = taurus_xpath_result_nodeset_get(result, i);
-            const char* title = taurus_element_get_attribute(book, "category");
-            printf("   - Book %zu: category=%s\n", i + 1, 
-                   title ? title : "(none)");
-        }
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Example 2: Predicate with position */
-    printf("2. Position predicate: //book[1]\n");
-    result = taurus_xpath_eval(doc, "//book[1]", 10);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        size_t count = taurus_xpath_result_nodeset_size(result);
-        printf("   Found %zu node(s) (first book)\n", count);
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Example 3: Attribute query */
-    printf("3. Attribute query: //book/@price\n");
-    result = taurus_xpath_eval(doc, "//book/@price", 14);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        size_t count = taurus_xpath_result_nodeset_size(result);
-        printf("   Found %zu price attribute(s)\n", count);
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Example 4: Boolean query */
-    printf("4. Boolean query: //book[@category='fiction']\n");
-    result = taurus_xpath_eval(doc, "//book[@category='fiction']", 28);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        int exists = taurus_xpath_result_as_boolean(result);
-        printf("   Fiction books exist: %s\n", exists ? "true" : "false");
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Example 5: Count function */
-    printf("5. Function query: count(//book)\n");
-    result = taurus_xpath_eval(doc, "count(//book)", 13);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        double count = taurus_xpath_result_as_number(result);
-        printf("   Total books: %.0f\n", count);
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Example 6: String query */
-    printf("6. String query: //book[1]/title\n");
-    result = taurus_xpath_eval(doc, "//book[1]/title", 15);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        char* title = taurus_xpath_result_as_string(result);
-        printf("   First book title: \"%s\"\n", title);
-        free(title);
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Example 7: Complex predicate */
-    printf("7. Complex predicate: //book[year > 1990]\n");
-    result = taurus_xpath_eval(doc, "//book[year > 1990]", 19);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        size_t count = taurus_xpath_result_nodeset_size(result);
-        printf("   Books published after 1990: %zu\n", count);
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Example 8: Multiple predicates */
-    printf("8. Multiple predicates: //book[@category='programming'][1]\n");
-    result = taurus_xpath_eval(doc, "//book[@category='programming'][1]", 35);
-    if (!result) {
-        fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
-    } else {
-        size_t count = taurus_xpath_result_nodeset_size(result);
-        printf("   First programming book: %zu node(s)\n", count);
-        taurus_xpath_result_free(result);
-    }
-    printf("\n");
-    
-    /* Cleanup */
-    printf("Cleaning up...\n");
+
+    printf("=== Taurus XPath Example ===\n\n");
+    show_result(doc, "count(//book)");
+    show_result(doc, "//book[@price > 35]/title");
+    show_result(doc, "string(//book[1]/title)");
+    show_result(doc, "//book[last()]/title");
+    show_result(doc, "sum(//price)");
+    show_result(doc, "//book[contains(title, 'C')]");
+
     taurus_document_free(doc);
-    printf("✓ Cleanup complete\n\n");
-    
-    printf("=== All XPath examples completed! ===\n");
     return 0;
 }
