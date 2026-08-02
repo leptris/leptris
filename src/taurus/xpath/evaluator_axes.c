@@ -569,8 +569,11 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElement node,
 
             /* Mark as seen */
             if (seen_count >= seen_capacity) {
-                seen_capacity = seen_capacity == 0 ? 4 : seen_capacity * 2;
-                seen_prefixes = (char**)realloc(seen_prefixes, seen_capacity * sizeof(char*));
+                size_t new_cap = seen_capacity == 0 ? 4 : seen_capacity * 2;
+                char** new_arr = (char**)realloc(seen_prefixes, new_cap * sizeof(char*));
+                if (!new_arr) { free(seen_prefixes); seen_prefixes = NULL; break; }
+                seen_prefixes = new_arr;
+                seen_capacity = new_cap;
             }
             seen_prefixes[seen_count++] = ns_prefix ? taurus_strdup(ns_prefix) : NULL;
         }
