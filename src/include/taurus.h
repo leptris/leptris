@@ -58,11 +58,23 @@ typedef struct taurus_xpath_result*    TaurusXPathResult;
 #endif
 
 /* ABI sanity asserts — catches accidental struct-field exposure
- * that would change opaque-handle sizes.  See TODO 84. */
-_Static_assert(sizeof(TaurusDocument)  == sizeof(void*), "TaurusDocument must be a pointer");
-_Static_assert(sizeof(TaurusElement)   == sizeof(void*), "TaurusElement must be a pointer");
-_Static_assert(sizeof(TaurusAttribute) == sizeof(void*), "TaurusAttribute must be a pointer");
-_Static_assert(sizeof(TaurusXPathResult) == sizeof(void*), "TaurusXPathResult must be a pointer");
+ * that would change opaque-handle sizes.  See TODO 84.
+ *
+ * Uses a portable macro that works in C99 (not just C11/C++).
+ * In C99, falls back to the array-size trick. */
+#if defined(__cplusplus)
+#  define TAURUS_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  define TAURUS_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#else
+#  define TAURUS_STATIC_ASSERT(cond, msg) \
+     typedef char taurus_static_assert_##__LINE__[(cond) ? 1 : -1]
+#endif
+
+TAURUS_STATIC_ASSERT(sizeof(TaurusDocument)  == sizeof(void*), "TaurusDocument must be a pointer");
+TAURUS_STATIC_ASSERT(sizeof(TaurusElement)   == sizeof(void*), "TaurusElement must be a pointer");
+TAURUS_STATIC_ASSERT(sizeof(TaurusAttribute) == sizeof(void*), "TaurusAttribute must be a pointer");
+TAURUS_STATIC_ASSERT(sizeof(TaurusXPathResult) == sizeof(void*), "TaurusXPathResult must be a pointer");
 
 /* ============================================================================
  * Status Codes
