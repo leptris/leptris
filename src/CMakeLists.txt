@@ -17,6 +17,8 @@ endif()
 # ============================================================================
 
 set(TAURUS_SOURCES
+    # Core: version + memory management (phase 2 extraction)
+    taurus/core.c
     # DOM nodes
     taurus/dom/node.c
     taurus/dom/node_vtable.c

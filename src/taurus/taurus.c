@@ -56,10 +56,6 @@ static __thread int g_taurus_strict_mode;
  * Version Constants
  * ============================================================================ */
 
-#define TAURUS_VERSION "0.1.0"
-#define TAURUS_VERSION_MAJOR 0
-#define TAURUS_VERSION_MINOR 1
-#define TAURUS_VERSION_PATCH 0
 
 /* ============================================================================
  * Forward Declarations
@@ -393,22 +389,6 @@ static struct taurus_document* taurus_parse_inplace(char* xml, size_t len) {
 /* ============================================================================
  * Version Information
  * ============================================================================ */
-
-/**
- * Get library version string
- */
-TAURUS_API const char* taurus_version(void) {
-    return TAURUS_VERSION;
-}
-
-/**
- * Get version components
- */
-TAURUS_API void taurus_version_components(int* major, int* minor, int* patch) {
-    if (major) *major = TAURUS_VERSION_MAJOR;
-    if (minor) *minor = TAURUS_VERSION_MINOR;
-    if (patch) *patch = TAURUS_VERSION_PATCH;
-}
 
 /* ============================================================================
  * Parse Options
@@ -2366,72 +2346,6 @@ TAURUS_API void taurus_free_string(char* str) {
 /* ============================================================================
  * Memory Allocation Hooks (for testing and custom allocators)
  * ============================================================================ */
-
-/* Global custom allocation functions (NULL = use malloc/free) */
-/* Custom allocator hooks.
- *
- * TODO 27 phase 1: thread-local, so each thread can have its own
- * allocator without cross-contamination.  Phase 2 will move these
- * to per-document scope (set at parse time, propagated via the
- * document struct). */
-static __thread taurus_allocation_function g_alloc_function = NULL;
-static __thread taurus_deallocation_function g_dealloc_function = NULL;
-
-/**
- * Set custom memory management functions
- */
-TAURUS_API void taurus_set_memory_management_functions(taurus_allocation_function alloc_function,
-                                                         taurus_deallocation_function dealloc_function) {
-    g_alloc_function = alloc_function;
-    g_dealloc_function = dealloc_function;
-}
-
-/**
- * Per-document allocator hooks (TODO 74).
- *
- * Set the allocator hooks for a specific document.  Must be called
- * before parsing.  The document's pool is created with these hooks
- * and uses them for all allocations within the document.
- */
-TAURUS_API TaurusStatus taurus_document_set_allocators(
-    TaurusDocument doc,
-    taurus_allocation_function alloc,
-    taurus_deallocation_function dealloc) {
-    if (!doc) return TAURUS_ERROR_NULL_ARG;
-    doc->alloc_hook = alloc;
-    doc->dealloc_hook = dealloc;
-    return TAURUS_OK;
-}
-
-/**
- * Get current memory allocation function
- */
-TAURUS_API taurus_allocation_function taurus_get_memory_allocation_function(void) {
-    return g_alloc_function;
-}
-
-/**
- * Get current memory deallocation function
- */
-TAURUS_API taurus_deallocation_function taurus_get_memory_deallocation_function(void) {
-    return g_dealloc_function;
-}
-
-/* Wrapper functions used internally for custom allocation */
-void* taurus_alloc_hook(size_t size) {
-    if (g_alloc_function) {
-        return g_alloc_function(size);
-    }
-    return malloc(size);
-}
-
-void taurus_free_hook(void* ptr) {
-    if (g_dealloc_function) {
-        g_dealloc_function(ptr);
-    } else {
-        free(ptr);
-    }
-}
 
 /**
  * Free XPath result
