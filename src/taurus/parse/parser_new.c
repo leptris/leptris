@@ -213,9 +213,16 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
     p->pi_list = NULL;
     p->pi_list_tail = NULL;
 
-    /* Depth guard: starts at 0; the cap is enforced in parser_parse_element. */
+    /* Depth guard: starts at 0; the cap is enforced in parser_parse_element.
+     *
+     * The cap can be overridden per-thread via taurus_set_max_depth (TODO 62).
+     * 0 means "use the compile-time default." */
     p->depth = 0;
-    p->max_depth = TAURUS_MAX_ELEMENT_DEPTH;
+    {
+        extern int taurus_get_max_depth_default(void);
+        int cfg = taurus_get_max_depth_default();
+        p->max_depth = (cfg > 0) ? cfg : TAURUS_MAX_ELEMENT_DEPTH;
+    }
 
     return p;
 }
@@ -298,7 +305,11 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
 
     /* Depth guard: see parser_create. */
     p->depth = 0;
-    p->max_depth = TAURUS_MAX_ELEMENT_DEPTH;
+    {
+        extern int taurus_get_max_depth_default(void);
+        int cfg = taurus_get_max_depth_default();
+        p->max_depth = (cfg > 0) ? cfg : TAURUS_MAX_ELEMENT_DEPTH;
+    }
 
     return p;
 }

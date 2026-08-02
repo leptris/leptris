@@ -905,6 +905,25 @@ TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
  * thread can have different modes. */
 static __thread int g_taurus_strict_mode = 0;
 
+/* Thread-default max element-nesting depth.  0 = use compile-time
+ * default of TAURUS_MAX_ELEMENT_DEPTH (256).  Set via
+ * taurus_set_max_depth (TODO 62). */
+static __thread int g_taurus_max_depth = 0;
+
+int taurus_get_max_depth_default(void) {
+    return g_taurus_max_depth;
+}
+
+TAURUS_API void taurus_set_max_depth(int max_depth) {
+    g_taurus_max_depth = max_depth;
+}
+
+TAURUS_API int taurus_get_max_depth(void) {
+    return g_taurus_max_depth > 0
+        ? g_taurus_max_depth
+        : 256;  /* TAURUS_MAX_ELEMENT_DEPTH */
+}
+
 /**
  * Set strict parsing mode (thread-default).
  *

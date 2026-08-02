@@ -405,6 +405,27 @@ TAURUS_API int taurus_document_get_strict(TaurusDocument doc);
  */
 TAURUS_API int taurus_get_strict_mode(void);
 
+/**
+ * Set the thread-default maximum element-nesting depth.
+ *
+ * Documents deeper than this are rejected with TAURUS_ERROR_PARSE to
+ * prevent stack-overflow crashes.  Default: 256 (matches libxml2).
+ *
+ * Set to 0 to restore the default.
+ *
+ * @param max_depth Maximum depth, or 0 for default.
+ *
+ * Thread safety: __thread — each thread has its own default.
+ */
+TAURUS_API void taurus_set_max_depth(int max_depth);
+
+/**
+ * Get the thread-default maximum element-nesting depth.
+ *
+ * @return The effective depth (always > 0; returns the default if unset).
+ */
+TAURUS_API int taurus_get_max_depth(void);
+
 /* ============================================================================
  * Element Operations
  * ============================================================================ */
