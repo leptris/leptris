@@ -38,7 +38,7 @@ function(taurus_add_test name)
         # DOM internals — used by vtable specs.
         ${PROJECT_SOURCE_DIR}/src/taurus/dom)
     target_compile_features(${name} PRIVATE cxx_std_11)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
     add_dependencies(check_all ${name})
 endfunction()
 
@@ -51,7 +51,7 @@ function(taurus_add_cli_test name)
     target_compile_definitions(${name} PRIVATE
         TAURUS_CLI_BIN="${CMAKE_BINARY_DIR}/cli/taurus"
         TAURUS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    gtest_discover_tests(${name}
+    gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
         PROPERTIES
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
