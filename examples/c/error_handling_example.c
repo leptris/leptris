@@ -4,7 +4,7 @@
  * Demonstrates proper error handling with the Taurus API.
  */
 
-#include <taurus/taurus.h>
+#include <taurus.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,7 +18,7 @@ int main(void) {
     /* Example 1: NULL input */
     print_separator();
     printf("Example 1: NULL input\n");
-    taurus_document* doc = taurus_parse(NULL, 0);
+    TaurusDocument doc = taurus_parse(NULL, 0);
     if (!doc) {
         printf("✓ Correctly rejected NULL input\n");
         const char* error = taurus_last_error();
@@ -105,7 +105,7 @@ int main(void) {
     
     /* Try invalid XPath */
     const char* bad_xpath = "//[invalid";
-    taurus_xpath_result* result = taurus_xpath_eval(doc, bad_xpath, strlen(bad_xpath));
+    TaurusXPathResult result = taurus_xpath_eval(doc, bad_xpath, strlen(bad_xpath));
     if (!result) {
         printf("✓ Correctly rejected invalid XPath\n");
         const char* error = taurus_last_error();

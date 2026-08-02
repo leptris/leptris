@@ -5,6 +5,52 @@ All notable changes to Taurus will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- All memory leaks across the test suite (was 43 leaks on basic.xml, now 0).
+- Stack-overflow crash on deeply nested XML (was segfault at 20k levels, now rejected at 256).
+- Memory pool oversized-allocation leak (was leaking allocations larger than page size).
+- Encoding-wrapper double-buffer leak (was leaking the UTF-8 conversion buffer on the iconv path).
+- DTD subsystem leak (was leaking 128 KB per DOCTYPE-bearing document).
+- Pool linked-list corruption that orphaned the pre-allocated second page.
+- Serializer buffer-overflow on realloc failure and size_t wrap.
+
+### Added
+
+- `taurus_document_set_strict` / `taurus_document_get_strict` — per-document strict mode.
+- `taurus_set_max_depth` / `taurus_get_max_depth` — configurable parser depth limit.
+- `taurus_element_as_node` — element-to-node cast helper.
+- `TAURUS_ENABLE_ASAN` CMake option — AddressSanitizer build.
+- `TAURUS_ENABLE_FUZZING` CMake option — libFuzzer harness.
+- `TAURUS_BUILD_DOCS` CMake option — Doxygen API reference.
+- Node vtable registry — adding a node type is now purely additive (no switch to edit).
+- Hash table dynamic growth past 75% load factor.
+- Pool oversized-allocation tracking via side list.
+- 97 specs across 12 modules (smoke, parser, encoding, dom, vtable, compact, memory, xpath, serializer, c14n, perf, sax, cli).
+- CI: ASAN + leak check on every PR; fuzzing nightly.
+
+### Changed
+
+- Every node allocation routes through the document pool — single ownership model.
+- Attribute values bypass string interning (3.4x perf improvement on attrs.xml; now 1.3x faster than libxml2).
+- `taurus_parse_string_with_encoding` frees the intermediate UTF-8 buffer after parse (was overwriting `doc->xml_buffer` and leaking the copy).
+- DTD container (`TaurusDTD`) is now pool-allocated; entity declarations pool-allocated.
+- All DOM node create functions consolidated to a single pool-routed entry point per type (no more `_create` / `_create_fast` split).
+- Magic-number node-type checks replaced with `TAURUS_NODE_TYPE_*` enum constants.
+- Single source of truth for internal typedefs (`common/types_internal.h`).
+- `SerializeBuffer` struct tagged for forward-declaration compatibility.
+
+### Removed
+
+- Dead `taurus_node_create` (non-pool variant) — pool owns all node lifetime.
+- Dead `taurus_element_add_namespace` static.
+- Legacy `_create_fast` wrappers per node type.
+- 50+ compile warnings (now zero).
+- Stray 0-byte `src/taurus/dom/compact_allocator.c`.
+- `gtest` from `vcpkg.json` (tests use CMake FetchContent).
+
 ## [0.1.0] - TBD
 
 ### Added

@@ -4,7 +4,7 @@
  * Demonstrates XML Namespaces 1.0 support.
  */
 
-#include <taurus/taurus.h>
+#include <taurus.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -23,7 +23,7 @@ int main(void) {
         "</root>";
     
     printf("Parsing XML with namespaces...\n");
-    taurus_document* doc = taurus_parse(xml, strlen(xml));
+    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
     if (!doc) {
         fprintf(stderr, "Parse failed: %s\n", taurus_last_error());
         return 1;
@@ -31,7 +31,7 @@ int main(void) {
     printf("✓ Parse successful\n\n");
     
     /* Get root element */
-    taurus_element* root = taurus_document_root(doc);
+    TaurusElement root = taurus_document_root(doc);
     if (!root) {
         fprintf(stderr, "No root element\n");
         taurus_document_free(doc);
@@ -91,7 +91,7 @@ int main(void) {
     printf("   Root has %zu children\n", child_count);
     
     for (size_t i = 0; i < child_count; i++) {
-        taurus_element* child = taurus_element_child(root, i);
+        TaurusElement child = taurus_element_child(root, i);
         if (child) {
             const char* name = taurus_element_name(child);
             const char* child_ns = taurus_element_namespace(child);
@@ -110,7 +110,7 @@ int main(void) {
     
     /* Example 5: Namespace inheritance */
     printf("5. Namespace inheritance:\n");
-    taurus_element* nested = taurus_element_child(root, 2);
+    TaurusElement nested = taurus_element_child(root, 2);
     if (nested) {
         printf("   Element: %s\n", taurus_element_name(nested));
         
@@ -128,7 +128,7 @@ int main(void) {
         
         /* Check nested element */
         if (taurus_element_child_count(nested) > 0) {
-            taurus_element* item = taurus_element_child(nested, 0);
+            TaurusElement item = taurus_element_child(nested, 0);
             if (item) {
                 const char* item_name = taurus_element_name(item);
                 const char* item_ns = taurus_element_namespace(item);
@@ -141,7 +141,7 @@ int main(void) {
     
     /* Example 6: XPath with default namespace */
     printf("6. XPath query with default namespace:\n");
-    taurus_xpath_result* result = taurus_xpath_eval(doc, "//element", 9);
+    TaurusXPathResult result = taurus_xpath_eval(doc, "//element", 9);
     if (!result) {
         fprintf(stderr, "   ✗ Query failed: %s\n", taurus_last_error());
     } else {
@@ -150,7 +150,7 @@ int main(void) {
         
         /* Note: This finds elements by local name, regardless of namespace */
         for (size_t i = 0; i < count; i++) {
-            taurus_element* elem = taurus_xpath_result_nodeset_get(result, i);
+            TaurusElement elem = taurus_xpath_result_nodeset_get(result, i);
             if (elem) {
                 const char* elem_ns = taurus_element_namespace(elem);
                 printf("   [%zu] Namespace: %s\n", i, 
