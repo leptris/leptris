@@ -25,9 +25,10 @@
 #include <stdio.h>
 #include <ctype.h>
 
-/* Forward decl — g_taurus_strict_mode is defined later in this file.
- * Documents inherit its value at creation time (TODO 38). */
-static __thread int g_taurus_strict_mode;
+/* Thread-local globals defined in core.c — extern so taurus_parse can
+ * read the strict-mode default at document creation time. */
+extern __thread int g_taurus_strict_mode;
+
 
 /* ============================================================================
  * Utility Macros
@@ -745,83 +746,6 @@ TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
         return (TaurusElement)doc->new_dom_root;
     }
     return (TaurusElement)doc->root;
-}
-
-/* Global strict parsing mode flag (default: lenient mode for pugixml compatibility).
- *
- * TODO 27 phase 1: made thread-local so concurrent parses in
- * different threads don't race on this flag.  Phase 2 (deferred)
- * moves this to the document so different documents in the same
- * thread can have different modes. */
-static __thread int g_taurus_strict_mode = 0;
-
-/* Thread-default max element-nesting depth.  0 = use compile-time
- * default of TAURUS_MAX_ELEMENT_DEPTH (256).  Set via
- * taurus_set_max_depth (TODO 62). */
-static __thread int g_taurus_max_depth = 0;
-
-int taurus_get_max_depth_default(void) {
-    return g_taurus_max_depth;
-}
-
-TAURUS_API void taurus_set_max_depth(int max_depth) {
-    g_taurus_max_depth = max_depth;
-}
-
-TAURUS_API int taurus_get_max_depth(void) {
-    return g_taurus_max_depth > 0
-        ? g_taurus_max_depth
-        : 256;  /* TAURUS_MAX_ELEMENT_DEPTH */
-}
-
-/**
- * Set strict parsing mode (thread-default).
- *
- * TODO 27 phase 2: per-document overrides via taurus_document_set_strict.
- */
-TAURUS_API void taurus_set_strict_mode(int strict) {
-    g_taurus_strict_mode = (strict != 0);
-}
-
-/**
- * Get current strict parsing mode (thread-default — internal function).
- * Per-document code should call taurus_document_get_strict instead.
- */
-TAURUS_API int taurus_get_strict_mode(void) {
-    return g_taurus_strict_mode;
-}
-
-TAURUS_API TaurusStatus taurus_document_set_strict(TaurusDocument doc, int strict) {
-    if (!doc) return TAURUS_ERROR_NULL_ARG;
-    doc->strict_mode = (strict != 0);
-    return TAURUS_OK;
-}
-
-TAURUS_API int taurus_document_get_strict(TaurusDocument doc) {
-    return doc ? doc->strict_mode : g_taurus_strict_mode;
-}
-
-/**
- * Explicit cleanup function (for testing)
- *
- * This function cleans up the compact pointer overflow table and other
- * thread-local structures that may accumulate stale entries across
- * multiple document operations.
- *
- * IMPORTANT: This should ONLY be called between test runs or when
- * you're certain no documents are active.
- */
-TAURUS_API void taurus_explicit_cleanup(void) {
-    extern void taurus_compact_cleanup(void);
-    taurus_compact_cleanup();
-}
-
-/**
- * Get document encoding
- */
-TAURUS_API const char* taurus_document_encoding(struct taurus_document* doc) {
-    if (!doc) return NULL;
-    return doc->encoding; /* May be NULL if not specified */
 }
 
 /**

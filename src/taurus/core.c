@@ -77,3 +77,50 @@ TAURUS_API TaurusStatus taurus_document_set_allocators(
     doc->dealloc_hook = dealloc;
     return TAURUS_OK;
 }
+
+/* ---- Parser configuration (TODO 38/62) ---- */
+
+/* Thread-local defaults for strict mode and max depth.
+ * Documents inherit these at creation; callers can override per-document. */
+__thread int g_taurus_strict_mode = 0;
+__thread int g_taurus_max_depth   = 0;
+
+/* Internal accessor — called from parser_new.c to read the thread-default. */
+int taurus_get_max_depth_default(void) {
+    return g_taurus_max_depth;
+}
+
+TAURUS_API void taurus_set_max_depth(int max_depth) {
+    g_taurus_max_depth = max_depth;
+}
+
+TAURUS_API int taurus_get_max_depth(void) {
+    return g_taurus_max_depth > 0 ? g_taurus_max_depth : 256;
+}
+
+TAURUS_API void taurus_set_strict_mode(int strict) {
+    g_taurus_strict_mode = (strict != 0);
+}
+
+TAURUS_API int taurus_get_strict_mode(void) {
+    return g_taurus_strict_mode;
+}
+
+TAURUS_API TaurusStatus taurus_document_set_strict(TaurusDocument doc, int strict) {
+    if (!doc) return TAURUS_ERROR_NULL_ARG;
+    doc->strict_mode = (strict != 0);
+    return TAURUS_OK;
+}
+
+TAURUS_API int taurus_document_get_strict(TaurusDocument doc) {
+    return doc ? doc->strict_mode : g_taurus_strict_mode;
+}
+
+TAURUS_API void taurus_explicit_cleanup(void) {
+    extern void taurus_compact_cleanup(void);
+    taurus_compact_cleanup();
+}
+
+TAURUS_API const char* taurus_document_encoding(struct taurus_document* doc) {
+    return doc ? doc->encoding : NULL;
+}
