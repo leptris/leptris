@@ -51,7 +51,8 @@ function(taurus_add_cli_test name)
     target_compile_definitions(${name} PRIVATE
         TAURUS_CLI_BIN="${CMAKE_BINARY_DIR}/cli/taurus"
         TAURUS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
+    gtest_discover_tests(${name}
+        DISCOVERY_MODE PRE_TEST
         PROPERTIES
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
