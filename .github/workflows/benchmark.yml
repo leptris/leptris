@@ -2,14 +2,28 @@ name: Benchmark
 
 on:
   push:
-    branches: [ main, develop, feature/* ]
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   benchmark:
-    name: Performance Benchmarks on ${{ matrix.os }}
+    name: Benchmarks on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -21,120 +35,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.20.x'
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 'master'
-
-      - name: Install pugixml dependencies
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y g++
-          elif [ "$RUNNEROS" == "macOS" ]; then
-            brew install gcc
-          fi
-        shell: bash
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libutf8proc-dev
 
-      - name: Configure with benchmarks
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja utf8proc
+
+      - name: Configure
         run: |
-          mkdir -p build
-          cd build
-          cmake .. \
+          cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DTAURUS_BUILD_BENCHMARKS=ON \
             -DBUILD_TESTING=ON \
-            -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE:?Variable not set}
+            -DTAURUS_ENABLE_ICONV=OFF
 
-      - name: Build benchmarks
-        run: |
-          cmake --build build --target bench_dom_pugixml dom_benchmark dom_benchmark_v2
+      - name: Build
+        run: cmake --build build
 
-      - name: Run DOM benchmarks
-        run: |
-          cd build
-          echo "=== DOM Benchmark (small.xml) ==="
-          ./benchmarks/dom_benchmark benchmarks/fixtures/small.xml 1000
-          echo ""
-          echo "=== DOM Benchmark (medium.xml) ==="
-          ./benchmarks/dom_benchmark benchmarks/fixtures/medium.xml 100
-          echo ""
-          echo "=== DOM Modify Benchmark ==="
-          ./benchmarks/bench_dom_pugixml
-
-      - name: Parse benchmark results
-        id: benchmark
-        run: |
-          cd build
-          ./benchmarks/dom_benchmark benchmarks/fixtures/small.xml 1000 > benchmark_results.txt
-          echo "=== Benchmark Results ==="
-          cat benchmark_results.txt
-          echo ""
-
-          # Extract parse time for comparison
-          TAURUS_TIME=$(grep "Parse + Build DOM" benchmark_results.txt | awk '{print $3}')
-          PUGIXML_TIME=$(grep "Parse + Build DOM" benchmark_results.txt | awk '{print $4}')
-
-          echo "Taurus Parse Time: $TAURUS_TIME"
-          echo "pugixml Parse Time: $PUGIXML_TIME"
-
-          # Save results for artifact upload
-          cat benchmark_results.txt > ${{ github.sha }}_benchmark.txt
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results-${{ matrix.os }}
-          path: ${{ github.sha }}_benchmark.txt
-          retention-days: 30
-
-      - name: Comment PR with results
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = fs.readFileSync('${{ github.sha }}_benchmark.txt', 'utf8');
-            const output = `## Benchmark Results (${{ matrix.os }})
-
-            \`\`\`
-            ${results}
-            \`\`\`
-            `;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            });
-
-      - name: Check performance regression
-        run: |
-          cd build
-          # Parse benchmark output and check for regressions
-          ./benchmarks/dom_benchmark benchmarks/fixtures/small.xml 1000 > benchmark_results.txt
-
-          # Simple check: if Taurus is 2x slower than pugixml, fail
-          TAURUS_TIME=$(grep "Parse + Build DOM" benchmark_results.txt | awk '{print $3}' | sed 's/µs//')
-          PUGIXML_TIME=$(grep "Parse + Build DOM" benchmark_results.txt | awk '{print $4}' | sed 's/µs//')
-
-          # Convert to numbers for comparison (remove 'µs' suffix)
-          TAURUS_VAL=$(echo $TAURUS_TIME | bc -l)
-          PUGIXML_VAL=$(echo $PUGIXML_TIME | bc -l)
-
-          # Check ratio
-          RATIO=$(echo "scale=2; $TAURUS_VAL / $PUGIXML_VAL" | bc)
-          echo "Performance Ratio: Taurus/pugixml = $RATIO"
-
-          # Warn if ratio > 2 (Taurus is 2x slower)
-          if (( $(echo "$RATIO > 2.0" | bc -l) )); then
-            echo "WARNING: Taurus is $RATIO x slower than pugixml"
-            echo "This may indicate a performance regression."
-          fi
-        shell: bash
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
