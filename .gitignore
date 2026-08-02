@@ -157,7 +157,11 @@ docs/_build/
 # Test build artifacts in test/ directory
 test/cmake_install.cmake
 test/CTestTestfile.cmake
-test/*[!.]*
+test/CMakeFiles/
+test/*.o
+test/*.discovery.cmake
+test/*.include.cmake
+test/*.tests.cmake
 
 # ============================================================================
 # XML Files (only allow in proper directories)

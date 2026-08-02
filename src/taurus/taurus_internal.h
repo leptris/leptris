@@ -109,6 +109,7 @@ typedef struct {
     int strict;                  /* Strict mode (1=enabled, 0=disabled) */
     int preserve_whitespace;     /* Preserve whitespace (1=enabled, 0=disabled) */
     int track_positions;         /* Track positions (1=enabled, 0=disabled) */
+    int max_depth;               /* Maximum element nesting depth (0 = default 256) */
 } taurus_parse_options;
 
 /* Internal parse function - implemented in parse_simple.c or parser_new.c */
