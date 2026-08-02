@@ -30,7 +30,7 @@ const char* option_source_to_string(option_source_t source) {
 cli_global_options_t* cli_global_options_new(void) {
     cli_global_options_t* opts = malloc(sizeof(cli_global_options_t));
     if (!opts) return NULL;
-    
+
     /* Initialize with defaults */
     opts->verbose = 0;
     opts->quiet = 0;
@@ -38,12 +38,12 @@ cli_global_options_t* cli_global_options_new(void) {
     opts->color = true;
     opts->help = false;
     opts->version = false;
-    
+
     opts->verbose_source = OPTION_SOURCE_DEFAULT;
     opts->quiet_source = OPTION_SOURCE_DEFAULT;
     opts->format_source = OPTION_SOURCE_DEFAULT;
     opts->color_source = OPTION_SOURCE_DEFAULT;
-    
+
     return opts;
 }
 
@@ -60,22 +60,22 @@ cli_result_t cli_global_options_parse(
     if (!options || !argc || !argv) {
         return CLI_ERROR_ARGS;
     }
-    
+
     option_parser_t parser = option_parser_new(*argc, *argv);
-    
+
     /* Skip program name */
     option_parser_advance(&parser);
-    
+
     /* Build new argv without global options */
     char** new_argv = malloc(sizeof(char*) * (*argc));
     if (!new_argv) return CLI_ERROR_MEMORY;
-    
+
     int new_argc = 0;
     new_argv[new_argc++] = (*argv)[0]; /* Keep program name */
-    
+
     while (option_parser_has_more(&parser)) {
         const char* arg = option_parser_current(&parser);
-        
+
         /* Note: --verbose and --quiet are passed through to commands, not consumed here */
         if (option_parser_match(&parser, "-v", "--verbose")) {
             options->verbose++;
@@ -115,12 +115,12 @@ cli_result_t cli_global_options_parse(
             option_parser_advance(&parser);
         }
     }
-    
+
     /* Update argc/argv */
     *argc = new_argc;
     memcpy(*argv, new_argv, sizeof(char*) * new_argc);
     free(new_argv);
-    
+
     return CLI_SUCCESS;
 }
 
@@ -160,15 +160,15 @@ bool option_parser_match(
 ) {
     const char* arg = option_parser_current(parser);
     if (!arg) return false;
-    
+
     if (short_opt && strcmp(arg, short_opt) == 0) {
         return true;
     }
-    
+
     if (long_opt && strcmp(arg, long_opt) == 0) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -181,26 +181,26 @@ const char* option_parser_get_value(option_parser_t* parser) {
 
 char** option_parser_get_positional(option_parser_t* parser, int* count) {
     if (!parser || !count) return NULL;
-    
+
     *count = 0;
     for (int i = parser->pos; i < parser->argc; i++) {
         if (parser->argv[i][0] != '-') {
             (*count)++;
         }
     }
-    
+
     if (*count == 0) return NULL;
-    
+
     char** result = malloc(sizeof(char*) * (*count));
     if (!result) return NULL;
-    
+
     int idx = 0;
     for (int i = parser->pos; i < parser->argc; i++) {
         if (parser->argv[i][0] != '-') {
             result[idx++] = parser->argv[i];
         }
     }
-    
+
     return result;
 }
 
@@ -210,11 +210,11 @@ char** option_parser_get_positional(option_parser_t* parser, int* count) {
 
 const char* get_env_string(const char* name, const char* default_value) {
     if (!name) return default_value;
-    
+
     /* Build TAURUS_NAME */
     char env_name[256];
     snprintf(env_name, sizeof(env_name), "TAURUS_%s", name);
-    
+
     const char* value = getenv(env_name);
     return value ? value : default_value;
 }
@@ -222,14 +222,14 @@ const char* get_env_string(const char* name, const char* default_value) {
 int get_env_int(const char* name, int default_value) {
     const char* str = get_env_string(name, NULL);
     if (!str) return default_value;
-    
+
     return atoi(str);
 }
 
 bool get_env_bool(const char* name, bool default_value) {
     const char* str = get_env_string(name, NULL);
     if (!str) return default_value;
-    
+
     /* Accept: 1, true, yes, on (case-insensitive) */
     if (strcmp(str, "1") == 0 ||
         strcasecmp(str, "true") == 0 ||
@@ -237,7 +237,7 @@ bool get_env_bool(const char* name, bool default_value) {
         strcasecmp(str, "on") == 0) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -253,18 +253,18 @@ int resolve_int_option(
     option_source_t* out_source
 ) {
     /* MECE hierarchy: CLI > ENV > Default */
-    
+
     if (cli_specified) {
         if (out_source) *out_source = OPTION_SOURCE_CLI;
         return cli_value;
     }
-    
+
     const char* env_str = get_env_string(env_name, NULL);
     if (env_str) {
         if (out_source) *out_source = OPTION_SOURCE_ENV;
         return atoi(env_str);
     }
-    
+
     if (out_source) *out_source = OPTION_SOURCE_DEFAULT;
     return default_value;
 }
@@ -276,18 +276,18 @@ const char* resolve_string_option(
     option_source_t* out_source
 ) {
     /* MECE hierarchy: CLI > ENV > Default */
-    
+
     if (cli_value) {
         if (out_source) *out_source = OPTION_SOURCE_CLI;
         return cli_value;
     }
-    
+
     const char* env_value = get_env_string(env_name, NULL);
     if (env_value) {
         if (out_source) *out_source = OPTION_SOURCE_ENV;
         return env_value;
     }
-    
+
     if (out_source) *out_source = OPTION_SOURCE_DEFAULT;
     return default_value;
 }
@@ -300,18 +300,18 @@ bool resolve_bool_option(
     option_source_t* out_source
 ) {
     /* MECE hierarchy: CLI > ENV > Default */
-    
+
     if (cli_specified) {
         if (out_source) *out_source = OPTION_SOURCE_CLI;
         return cli_value;
     }
-    
+
     const char* env_str = get_env_string(env_name, NULL);
     if (env_str) {
         if (out_source) *out_source = OPTION_SOURCE_ENV;
         return get_env_bool(env_name, default_value);
     }
-    
+
     if (out_source) *out_source = OPTION_SOURCE_DEFAULT;
     return default_value;
 }
@@ -323,14 +323,14 @@ bool resolve_bool_option(
 cli_parse_options_t* cli_parse_options_new(void) {
     cli_parse_options_t* opts = malloc(sizeof(cli_parse_options_t));
     if (!opts) return NULL;
-    
+
     opts->input_file = NULL;
     opts->validate = false;
     opts->recover = false;
     opts->noout = false;
     opts->validate_source = OPTION_SOURCE_DEFAULT;
     opts->recover_source = OPTION_SOURCE_DEFAULT;
-    
+
     return opts;
 }
 
@@ -353,7 +353,7 @@ cli_result_t cli_parse_options_parse(
 cli_xpath_options_t* cli_xpath_options_new(void) {
     cli_xpath_options_t* opts = malloc(sizeof(cli_xpath_options_t));
     if (!opts) return NULL;
-    
+
     opts->input_file = NULL;
     opts->expression = NULL;
     opts->count = false;
@@ -361,7 +361,7 @@ cli_xpath_options_t* cli_xpath_options_new(void) {
     opts->namespace_file = NULL;
     opts->count_source = OPTION_SOURCE_DEFAULT;
     opts->boolean_source = OPTION_SOURCE_DEFAULT;
-    
+
     return opts;
 }
 
@@ -384,7 +384,7 @@ cli_result_t cli_xpath_options_parse(
 cli_format_options_t* cli_format_options_new(void) {
     cli_format_options_t* opts = malloc(sizeof(cli_format_options_t));
     if (!opts) return NULL;
-    
+
     opts->input_file = NULL;
     opts->output_file = NULL;
     opts->indent = 2;
@@ -394,7 +394,7 @@ cli_format_options_t* cli_format_options_new(void) {
     opts->indent_source = OPTION_SOURCE_DEFAULT;
     opts->compact_source = OPTION_SOURCE_DEFAULT;
     opts->encoding_source = OPTION_SOURCE_DEFAULT;
-    
+
     return opts;
 }
 
@@ -417,9 +417,9 @@ cli_result_t cli_format_options_parse(
 cli_version_options_t* cli_version_options_new(void) {
     cli_version_options_t* opts = malloc(sizeof(cli_version_options_t));
     if (!opts) return NULL;
-    
+
     opts->short_form = false;
-    
+
     return opts;
 }
 
@@ -435,7 +435,7 @@ cli_result_t cli_version_options_parse(
     /* Simple parsing for version command */
     option_parser_t parser = option_parser_new(argc, argv);
     option_parser_advance(&parser); /* Skip command name */
-    
+
     while (option_parser_has_more(&parser)) {
         if (option_parser_match(&parser, "-s", "--short")) {
             options->short_form = true;
@@ -445,6 +445,6 @@ cli_result_t cli_version_options_parse(
             option_parser_advance(&parser);
         }
     }
-    
+
     return CLI_SUCCESS;
 }

@@ -366,7 +366,7 @@ configure_package_config_file(
     ${CMAKE_SOURCE_DIR}/cmake/taurus-config.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/taurus-config.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/taurus
-    
+
 )
 
 # Generate the version file

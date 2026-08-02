@@ -1,0 +1,77 @@
+name: Quality Checks
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'CHANGELOG.md'
+      - 'LICENSE.md'
+      - 'docs/**'
+      - 'archive/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'CHANGELOG.md'
+      - 'LICENSE.md'
+      - 'docs/**'
+      - 'archive/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trailing-whitespace:
+    name: Trailing whitespace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for trailing whitespace
+        run: ./scripts/check_trailing_whitespace.sh
+
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: ./scripts/check_formatting.sh
+
+  cppcheck:
+    name: cppcheck static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck + cmake + ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck cmake ninja-build
+
+      - name: Configure (generates compile_commands.json)
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBUILD_TESTING=OFF \
+            -DTAURUS_BUILD_CLI=OFF \
+            -DTAURUS_ENABLE_UTF8PROC=OFF \
+            -DTAURUS_ENABLE_ICONV=OFF
+
+      - name: Run cppcheck
+        run: ./scripts/run_static_analysis.sh

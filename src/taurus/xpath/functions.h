@@ -69,21 +69,21 @@ struct xpath_function_registry {
 
 /**
  * Create new function registry
- * 
+ *
  * @return New registry, or NULL on error
  */
 XPathFunctionRegistry* xpath_function_registry_new(void);
 
 /**
  * Free function registry
- * 
+ *
  * @param registry Registry to free
  */
 void xpath_function_registry_free(XPathFunctionRegistry* registry);
 
 /**
  * Register a function
- * 
+ *
  * @param registry Registry to register in
  * @param name Function name
  * @param handler Handler function
@@ -100,7 +100,7 @@ void xpath_function_registry_register(
 
 /**
  * Lookup function by name
- * 
+ *
  * @param registry Registry to search
  * @param name Function name
  * @return Handler function, or NULL if not found
@@ -112,7 +112,7 @@ XPathFunctionHandler xpath_function_registry_lookup(
 
 /**
  * Get function definition by name
- * 
+ *
  * @param registry Registry to search
  * @param name Function name
  * @return Function definition, or NULL if not found
@@ -129,7 +129,7 @@ XPathFunctionDef* xpath_function_registry_get(
 /**
  * Initialize standard XPath 1.0 functions
  * Registers all 27 XPath 1.0 functions
- * 
+ *
  * @param registry Registry to initialize
  */
 void xpath_function_registry_init_standard(XPathFunctionRegistry* registry);

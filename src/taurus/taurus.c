@@ -2853,7 +2853,7 @@ TAURUS_API TaurusNodeRef taurus_node_previous_sibling(TaurusNodeRef node) {
         TaurusElement elem = (TaurusElement)node;
         TaurusElement parent = elem->parent;
         if (!parent) return NULL;
-        
+
         TaurusNodeRef prev = NULL;
         TaurusNodeRef child = (TaurusNodeRef)parent->first_child;
         while (child && child != node) {

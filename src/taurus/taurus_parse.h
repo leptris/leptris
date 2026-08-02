@@ -46,16 +46,16 @@ typedef struct taurus_parse_context {
     const char *start;              /* Start of input (for error reporting) */
     const char *pos;                /* Current position */
     const char *end;                /* End of input */
-    
+
     /* Parse state */
     struct taurus_document *doc;    /* Document being built */
     struct taurus_element *current; /* Current element (for nesting) */
     TaurusAttrStack attr_stack;     /* Reusable attribute stack */
     StringInternTable intern_table; /* String interning for attributes */
-    
+
     /* Options */
     TaurusParseOptions opts;
-    
+
     /* Error tracking */
     int line;                       /* Current line number (1-based) */
     int column;                     /* Current column number (1-based) */
@@ -92,18 +92,18 @@ static inline void taurus_parse_context_set_error(TaurusParseContext *ctx,
  * ================================================================== */
 
 /* Parse XML string into document structure
- * 
+ *
  * Parameters:
  *   xml: XML string to parse (need not be null-terminated)
  *   len: Length of XML string
  *   opts: Parse options (NULL for defaults)
- * 
+ *
  * Returns:
  *   Document structure on success, NULL on error
  *   Caller owns returned document and must free with taurus_document_free_tree()
- * 
+ *
  * Thread safety: Each parse operation is independent (no shared state)
- * 
+ *
  * Example:
  *   const char *xml = "<root><child>text</child></root>";
  *   struct taurus_document *doc = taurus_parse(xml, strlen(xml), NULL);
@@ -119,18 +119,18 @@ struct taurus_document *taurus_parse(const char *xml,
                                       TaurusParseOptions *opts);
 
 /* Parse XML with error reporting
- * 
+ *
  * Parameters:
  *   xml: XML string to parse
  *   len: Length of XML string
  *   opts: Parse options (NULL for defaults)
  *   error_buf: Buffer for error message (can be NULL)
  *   error_len: Size of error buffer
- * 
+ *
  * Returns:
  *   Document structure on success, NULL on error
  *   If error_buf is provided, it will contain error message on failure
- * 
+ *
  * Example:
  *   char error[256];
  *   struct taurus_document *doc = taurus_parse_with_error(

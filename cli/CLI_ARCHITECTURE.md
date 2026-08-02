@@ -1,7 +1,7 @@
 # Taurus CLI Architecture
 
-**Version**: 0.5.0  
-**Last Updated**: 2024-12-01  
+**Version**: 0.5.0
+**Last Updated**: 2024-12-01
 **Status**: Design Phase Complete
 
 ---
@@ -256,16 +256,16 @@ Commands are registered at startup:
 ```c
 int main(int argc, char** argv) {
     cli_registry_t* registry = cli_registry_new();
-    
+
     cli_registry_register(registry, cli_command_parse());
     cli_registry_register(registry, cli_command_xpath());
     cli_registry_register(registry, cli_command_format());
     cli_registry_register(registry, cli_command_version());
-    
+
     // Dispatch based on argv[1]
     cli_command_t* cmd = cli_registry_find(registry, argv[1]);
     int result = cmd->execute(argc - 1, &argv[1]);
-    
+
     cli_registry_free(registry);
     return result;
 }
@@ -283,7 +283,7 @@ static cli_result_t mycommand_execute(int argc, char** argv) {
         cli_mycommand_options_free(opts);
         return CLI_ERROR_ARGS;
     }
-    
+
     // 2. Call API
     struct taurus_document* doc = taurus_parse(opts->input_file, &len);
     if (!doc) {
@@ -291,16 +291,16 @@ static cli_result_t mycommand_execute(int argc, char** argv) {
         cli_mycommand_options_free(opts);
         return CLI_ERROR_IO;
     }
-    
+
     // 3. Format output
     output_formatter_t* fmt = output_formatter_create(opts->format);
     fmt->print_document(doc, stdout, fmt->context);
-    
+
     // 4. Cleanup
     output_formatter_free(fmt);
     taurus_document_free(doc);
     cli_mycommand_options_free(opts);
-    
+
     return CLI_SUCCESS;
 }
 
@@ -385,7 +385,7 @@ typedef struct cli_parse_options {
 ```c
 int cli_parse_options_parse(cli_parse_options_t* opts, int argc, char** argv) {
     option_parser_t parser = option_parser_new(argc, argv);
-    
+
     while (option_parser_has_more(&parser)) {
         if (option_parser_match(&parser, "-v", "--validate")) {
             opts->validate = true;
@@ -403,7 +403,7 @@ int cli_parse_options_parse(cli_parse_options_t* opts, int argc, char** argv) {
             option_parser_advance(&parser);
         }
     }
-    
+
     // Resolve with MECE hierarchy
     opts->validate = resolve_bool_option(
         opts->validate,
@@ -412,7 +412,7 @@ int cli_parse_options_parse(cli_parse_options_t* opts, int argc, char** argv) {
         false,  // default
         &opts->validate_source
     );
-    
+
     return CLI_SUCCESS;
 }
 ```
@@ -450,7 +450,7 @@ Output formatting uses the Strategy pattern with interchangeable formatters:
 typedef struct output_formatter {
     output_format_t type;
     void* context;
-    
+
     void (*print_document)(...);
     void (*print_element)(...);
     void (*print_nodeset)(...);
@@ -783,15 +783,15 @@ cli_result_t cmd_execute(...) {
     options = NULL;
     doc = NULL;
     fmt = NULL;
-    
+
     options = cli_options_new();
     if (!options) {
         result = CLI_ERROR_MEMORY;
         goto cleanup;
     }
-    
+
     // ... more code
-    
+
 cleanup:
     if (fmt) output_formatter_free(fmt);
     if (doc) taurus_document_free(doc);
@@ -809,13 +809,13 @@ Each component should have:
 TEST(OptionsTest, ParseValidOptions) {
     char* argv[] = {"parse", "--validate", "file.xml"};
     cli_parse_options_t* opts = cli_parse_options_new();
-    
+
     int result = cli_parse_options_parse(opts, 3, argv);
-    
+
     EXPECT_EQ(result, CLI_SUCCESS);
     EXPECT_TRUE(opts->validate);
     EXPECT_STREQ(opts->input_file, "file.xml");
-    
+
     cli_parse_options_free(opts);
 }
 ```
