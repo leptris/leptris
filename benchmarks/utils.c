@@ -27,12 +27,12 @@ long benchmark_time_us(void) {
     uint64_t now = mach_absolute_time();
     /* Convert to nanoseconds, then to microseconds */
     return (long)((now * timebase.numer / timebase.denom) / 1000);
-    
+
 #elif defined(__linux__)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long)(ts.tv_sec * 1000000L + ts.tv_nsec / 1000);
-    
+
 #endif
 }
 
@@ -46,15 +46,15 @@ static int compare_double(const void* a, const void* b) {
 static double percentile(const double* sorted, size_t count, double p) {
     if (count == 0) return 0.0;
     if (count == 1) return sorted[0];
-    
+
     double rank = p * (count - 1);
     size_t lower = (size_t)floor(rank);
     size_t upper = (size_t)ceil(rank);
-    
+
     if (lower == upper) {
         return sorted[lower];
     }
-    
+
     double weight = rank - lower;
     return sorted[lower] * (1.0 - weight) + sorted[upper] * weight;
 }
@@ -62,11 +62,11 @@ static double percentile(const double* sorted, size_t count, double p) {
 /* Analyze benchmark samples */
 benchmark_stats benchmark_analyze(const double* samples, size_t count) {
     benchmark_stats stats = {0};
-    
+
     if (count == 0) {
         return stats;
     }
-    
+
     /* Copy and sort for percentile calculations */
     double* sorted = malloc(count * sizeof(double));
     if (!sorted) {
@@ -74,24 +74,24 @@ benchmark_stats benchmark_analyze(const double* samples, size_t count) {
     }
     memcpy(sorted, samples, count * sizeof(double));
     qsort(sorted, count, sizeof(double), compare_double);
-    
+
     /* Min and max */
     stats.min = sorted[0];
     stats.max = sorted[count - 1];
-    
+
     /* Median (50th percentile) */
     stats.median = percentile(sorted, count, 0.50);
-    
+
     /* 95th percentile */
     stats.p95 = percentile(sorted, count, 0.95);
-    
+
     /* Mean */
     double sum = 0.0;
     for (size_t i = 0; i < count; i++) {
         sum += samples[i];
     }
     stats.mean = sum / count;
-    
+
     /* Standard deviation */
     double variance = 0.0;
     for (size_t i = 0; i < count; i++) {
@@ -99,7 +99,7 @@ benchmark_stats benchmark_analyze(const double* samples, size_t count) {
         variance += diff * diff;
     }
     stats.stddev = sqrt(variance / count);
-    
+
     free(sorted);
     return stats;
 }
@@ -139,13 +139,13 @@ void benchmark_print_result(const char* name,
     char taurus_str[32];
     char competitor_str[32];
     char speedup_str[32];
-    
+
     (void)competitor_name; /* Unused, name is in header */
-    
+
     /* Use median for comparison (more robust than mean) */
     format_time(taurus_str, sizeof(taurus_str), taurus.median);
     format_time(competitor_str, sizeof(competitor_str), competitor.median);
-    
+
     /* Calculate speedup */
     double speedup = competitor.median / taurus.median;
     if (speedup >= 1.0) {
@@ -153,7 +153,7 @@ void benchmark_print_result(const char* name,
     } else {
         snprintf(speedup_str, sizeof(speedup_str), "%.2fx ⚠️", speedup);
     }
-    
+
     printf("│ %-30s │ %8s │ %8s │ %8s │\n",
            name, taurus_str, competitor_str, speedup_str);
 }
