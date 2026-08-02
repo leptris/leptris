@@ -43,14 +43,33 @@ char* taurus_serialize_document_with_declaration(TaurusElement root,
  * Internal Buffer Management
  * ============================================================================ */
 
-/* Dynamic string buffer for building output */
-typedef struct {
+/* Dynamic string buffer for building output.
+ *
+ * Tagged so the forward declaration `struct SerializeBuffer;` in
+ * dom/node.h resolves to the same type — TODO 43/29.
+ *
+ * Invariants:
+ *   size <= capacity
+ *   data != NULL (after buffer_create success)
+ *   alloc_failed is sticky — once set, subsequent appends become no-ops.
+ *     Callers that care can check buffer_has_error() before using the
+ *     result; callers that don't will silently truncate, which is the
+ *     historical behavior.
+ */
+typedef struct SerializeBuffer {
     char* data;
     size_t size;       /* Current string length */
     size_t capacity;   /* Allocated capacity */
     int indent;        /* Current indentation level (for pretty-printing) */
     int indent_spaces; /* Number of spaces per indent level (0 = compact) */
+    int alloc_failed;  /* Sticky realloc-failure flag (TODO 08) */
 } SerializeBuffer;
+
+/* The typedef name `SerializeBuffer` is already declared above as
+ * part of `typedef struct SerializeBuffer { ... } SerializeBuffer;`
+ * — the struct tag and the typedef share a name, which lets the
+ * forward declaration `struct SerializeBuffer;` in dom/node.h resolve
+ * to the same type.  No additional typedef needed (TODO 43). */
 
 /* Buffer operations */
 SerializeBuffer* buffer_create(int indent_spaces);
@@ -61,6 +80,7 @@ void buffer_append_indent(SerializeBuffer* buf);
 void buffer_append_newline(SerializeBuffer* buf);
 char* buffer_to_string(SerializeBuffer* buf);
 void buffer_free(SerializeBuffer* buf);
+int  buffer_has_error(SerializeBuffer* buf);
 
 /* ============================================================================
  * Internal Serialization Functions

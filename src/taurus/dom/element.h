@@ -16,6 +16,19 @@
 #ifndef TAURUS_DOM_ELEMENT_H
 #define TAURUS_DOM_ELEMENT_H
 
+/* These typedefs match the public taurus.h / taurus/types.h.  Guarded
+ * so internal headers can be included in any order without triggering
+ * C99's typedef-redefinition warning.  See TODO 12. */
+#ifndef TAURUS_INTERNAL_TYPES_DEFINED
+#define TAURUS_INTERNAL_TYPES_DEFINED
+typedef struct taurus_node*            TaurusNodeRef;
+typedef struct taurus_document*        TaurusDocument;
+typedef struct taurus_element*         TaurusElement;
+typedef struct taurus_attribute*       TaurusAttribute;
+typedef const char*                    TaurusNamespace;
+typedef struct taurus_xpath_result*    TaurusXPathResult;
+#endif
+
 #include "node.h"
 #include "../common/string_view.h"
 #include "compact.h"  /* Compressed pointer types */
@@ -111,8 +124,8 @@ struct taurus_element {
 
 };
 
-/* Public API type - opaque pointer typedef (matches taurus.h public API) */
-typedef struct taurus_element* TaurusElement;
+/* TaurusElement typedef comes from the public include/taurus/types.h
+ * (re-exported via taurus.h).  No local redefinition — see TODO 12. */
 
 /* ============================================================================
  * Element Creation
@@ -130,12 +143,10 @@ TaurusElement taurus_element_create_pooled_inplace(char* name, TaurusMemoryPool*
 /* Create element using memory pool (fast O(1) allocation) */
 TaurusElement taurus_element_create_pooled(const char* name, TaurusMemoryPool* pool);
 
-/* Create element with bulk allocation (optimized) */
-TaurusElement taurus_element_create_fast(
-    const char* name,
-    size_t name_len,
-    TaurusMemoryPool* pool
-);
+/* Create element using memory pool.  Single pool-routed entry point
+ * (TODO 26 removed the _fast wrapper; use this directly). */
+TaurusElement taurus_element_create_pooled(const char* name,
+                                            TaurusMemoryPool* pool);
 
 void taurus_element_free(TaurusElement elem);
 

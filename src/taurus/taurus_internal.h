@@ -87,6 +87,21 @@ struct taurus_document {
     char* xml_buffer;               /* Owned writable XML buffer (NULL if not in-place) */
     size_t xml_buffer_len;       /* Length of xml_buffer */
     int xml_buffer_needs_free;   /* 1 if xml_buffer needs free(), 0 if stack/const */
+
+    /* Document-scoped state (TODO 27/38 phase 2).
+     *
+     * Previously these were process-global (or __thread).  Moving
+     * them to the document lets two documents in the same thread
+     * have different settings — important for libraries that mix
+     * trusted and untrusted XML.
+     *
+     * `strict_mode` defaults to the value of g_taurus_strict_mode
+     * at document creation; callers can override via
+     * taurus_document_set_strict().
+     *
+     * `alloc_hook` / `dealloc_hook` default to the thread-local
+     * hooks; per-document overrides are TODO 38 phase 3. */
+    int strict_mode;
 };
 
 /* Parse options structure */

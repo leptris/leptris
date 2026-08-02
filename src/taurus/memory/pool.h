@@ -16,6 +16,8 @@
 #define TAURUS_MEMORY_POOL_H
 
 #include <stddef.h>
+#include "../common/types_internal.h"   /* Single source for TaurusMemoryPool */
+#include "../common/string_view.h"     /* Full TaurusStringView definition */
 
 /* ============================================================================
  * String Interning Structures (for deduplication)
@@ -52,6 +54,22 @@ typedef struct {
 typedef struct memory_page MemoryPage;
 
 /**
+ * Oversized-allocation tracking node
+ *
+ * When taurus_pool_alloc() is asked for more bytes than fit in a single
+ * page, the request is satisfied via taurus_alloc_hook() directly.  The
+ * result is recorded on a side list (first_big_alloc) so that
+ * taurus_pool_destroy() can free it.  Without this list, oversized
+ * allocations (e.g., a single 10 KB attribute value) would leak on every
+ * parse — see TODO 06.
+ */
+typedef struct taurus_big_alloc {
+    struct taurus_big_alloc* next;  /* Singly-linked list */
+    void* ptr;                      /* The oversized allocation */
+    size_t size;                    /* Byte count (for stats) */
+} TaurusBigAlloc;
+
+/**
  * Memory pool structure
  *
  * Manages pages and allocation. Now public so that string_view.c can access
@@ -65,10 +83,14 @@ struct taurus_memory_pool {
     int strict_mode;              /* Strict entity validation mode */
     size_t page_size;             /* Page size for this pool */
     void* page_base;              /* Base pointer for compact pointer decoding */
+
+    /* Oversized allocations — freed in taurus_pool_destroy alongside pages. */
+    TaurusBigAlloc* first_big_alloc;            /* Head of side list */
+    TaurusBigAlloc** last_big_alloc_link;       /* O(1) append target */
 };
 
-/* Opaque pool handle - now just a typedef */
-typedef struct taurus_memory_pool TaurusMemoryPool;
+/* TaurusMemoryPool typedef comes from common/types_internal.h
+ * (included above).  No local redefinition — see TODO 12. */
 
 /* ============================================================================
  * Pool Lifecycle
@@ -201,6 +223,17 @@ char* taurus_pool_strdup(TaurusMemoryPool* pool, const char* str);
  * @return Total bytes allocated (includes page overhead)
  */
 size_t taurus_pool_total_size(TaurusMemoryPool* pool);
+
+/**
+ * Get bytes currently in use (across pages + oversized allocs)
+ *
+ * Distinct from taurus_pool_total_size() which reports capacity; this
+ * reports actual usage.  Useful for waste-ratio reporting.
+ *
+ * @param pool Memory pool
+ * @return Bytes in use, or 0 if pool is NULL
+ */
+size_t taurus_pool_used_size(TaurusMemoryPool* pool);
 
 /**
  * Get number of pages in pool

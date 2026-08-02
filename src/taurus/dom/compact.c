@@ -231,7 +231,6 @@ void taurus_compact_ptr8_encode(TaurusCompactPtr8* compact,
     }
 
     /* Calculate offset in 4-byte units */
-    ptrdiff_t diff = (char*)target - (char*)base;
 
     /* Round down to alignment boundary for base calculation */
     uintptr_t base_aligned = (uintptr_t)base & ~(TAURUS_COMPACT_ALIGNMENT - 1);
@@ -294,7 +293,6 @@ void taurus_compact_ptr16_encode(TaurusCompactPtr16* compact,
     }
 
     /* Calculate offset in 4-byte units */
-    ptrdiff_t diff = (char*)target - (char*)base;
 
     /* Round down to alignment boundary for base calculation */
     uintptr_t base_aligned = (uintptr_t)base & ~(TAURUS_COMPACT_ALIGNMENT - 1);

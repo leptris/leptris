@@ -3,63 +3,84 @@
  */
 
 #include "doctype.h"
+#include "../memory/pool.h"
 #include <stdlib.h>
+#include <string.h>
 
-/* Create DOCTYPE node */
-TaurusDoctypeNode* taurus_doctype_create(const char* name) {
-    if (!name) return NULL;
+/* Create DOCTYPE node.  Pool-allocated with contiguous name storage
+ * (TODO 18).  Other string fields (public_id, system_id,
+ * internal_subset) are added later via the setter functions, which
+ * also route through the pool — see TODO 16. */
+TaurusDoctypeNode* taurus_doctype_create(const char* name,
+                                          size_t name_len,
+                                          TaurusMemoryPool* pool) {
+    if (!name || !pool) return NULL;
 
-    TaurusDoctypeNode* doctype = (TaurusDoctypeNode*)taurus_node_create(
-        TAURUS_NODE_TYPE_DOCTYPE,
-        sizeof(TaurusDoctypeNode)
-    );
+    size_t total_size = sizeof(TaurusDoctypeNode) + name_len + 1;
+    char* memory = (char*)taurus_pool_alloc(pool, total_size);
+    if (!memory) return NULL;
 
-    if (!doctype) return NULL;
+    TaurusDoctypeNode* doctype = (TaurusDoctypeNode*)memory;
+    char* name_storage = memory + sizeof(TaurusDoctypeNode);
 
-    doctype->name = taurus_strdup(name);
+    doctype->base.type = TAURUS_NODE_TYPE_DOCTYPE;
+    doctype->base.frozen = 0;
+    doctype->base.version = 0;
     doctype->public_id = NULL;
     doctype->system_id = NULL;
     doctype->internal_subset = NULL;
 
+    memcpy(name_storage, name, name_len);
+    name_storage[name_len] = '\0';
+    doctype->name = name_storage;
+
     return doctype;
 }
 
-/* Free DOCTYPE node */
+/* Free DOCTYPE node.
+ *
+ * Pool-ownership model (TODO 05/16/18):
+ *   - node struct: pool-owned, released by taurus_pool_destroy.
+ *   - name: pool-owned (stored contiguously after the struct).
+ *   - public_id, system_id, internal_subset: pool-allocated via the
+ *     setters below (TODO 16).
+ *
+ * This function is a no-op — kept only for backwards source
+ * compatibility with callers that explicitly invoke it. */
 void taurus_doctype_free(TaurusDoctypeNode* doctype) {
-    if (!doctype) return;
-
-    if (doctype->name) free(doctype->name);
-    if (doctype->public_id) free(doctype->public_id);
-    if (doctype->system_id) free(doctype->system_id);
-    if (doctype->internal_subset) free(doctype->internal_subset);
-    free(doctype);
+    (void)doctype;
 }
 
-/* Get DOCTYPE name */
 const char* taurus_doctype_get_name(TaurusDoctypeNode* doctype) {
     return doctype ? doctype->name : NULL;
 }
 
-/* Set public ID */
-void taurus_doctype_set_public_id(TaurusDoctypeNode* doctype, const char* public_id) {
+/* Set public ID.  Pool-routed (TODO 16): the string is copied into the
+ * document's pool so the caller's buffer can be freed/reused. */
+void taurus_doctype_set_public_id(TaurusDoctypeNode* doctype,
+                                   const char* public_id,
+                                   TaurusMemoryPool* pool) {
     if (!doctype) return;
-
-    if (doctype->public_id) free(doctype->public_id);
-    doctype->public_id = public_id ? taurus_strdup(public_id) : NULL;
+    /* Old value is pool-owned; we just overwrite the pointer.  No free. */
+    doctype->public_id = public_id && pool
+        ? taurus_pool_strdup(pool, public_id)
+        : NULL;
 }
 
-/* Set system ID */
-void taurus_doctype_set_system_id(TaurusDoctypeNode* doctype, const char* system_id) {
+void taurus_doctype_set_system_id(TaurusDoctypeNode* doctype,
+                                   const char* system_id,
+                                   TaurusMemoryPool* pool) {
     if (!doctype) return;
-
-    if (doctype->system_id) free(doctype->system_id);
-    doctype->system_id = system_id ? taurus_strdup(system_id) : NULL;
+    doctype->system_id = system_id && pool
+        ? taurus_pool_strdup(pool, system_id)
+        : NULL;
 }
 
-/* Set internal subset */
-void taurus_doctype_set_internal_subset(TaurusDoctypeNode* doctype, const char* subset) {
+void taurus_doctype_set_internal_subset(TaurusDoctypeNode* doctype,
+                                         const char* subset,
+                                         TaurusMemoryPool* pool) {
     if (!doctype) return;
-
-    if (doctype->internal_subset) free(doctype->internal_subset);
-    doctype->internal_subset = subset ? taurus_strdup(subset) : NULL;
+    doctype->internal_subset = subset && pool
+        ? taurus_pool_strdup(pool, subset)
+        : NULL;
 }

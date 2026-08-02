@@ -213,6 +213,10 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
     p->pi_list = NULL;
     p->pi_list_tail = NULL;
 
+    /* Depth guard: starts at 0; the cap is enforced in parser_parse_element. */
+    p->depth = 0;
+    p->max_depth = TAURUS_MAX_ELEMENT_DEPTH;
+
     return p;
 }
 
@@ -291,6 +295,10 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     /* Initialize PI list */
     p->pi_list = NULL;
     p->pi_list_tail = NULL;
+
+    /* Depth guard: see parser_create. */
+    p->depth = 0;
+    p->max_depth = TAURUS_MAX_ELEMENT_DEPTH;
 
     return p;
 }
@@ -790,7 +798,10 @@ TaurusTextNode* parser_parse_text(Parser* p) {
         }
 
         if (resolved) {
-            TaurusTextNode* node = taurus_text_create(resolved);
+            TaurusTextNode* node = taurus_text_create(resolved, strlen(resolved), p->pool);
+            /* text_create copies `resolved` into the pool; the calloc'd
+             * original is now redundant.  Free it (TODO 15). */
+            TAURUS_FREE(resolved);
             TAURUS_FREE(content);
             return node;
         } else {
@@ -801,8 +812,11 @@ TaurusTextNode* parser_parse_text(Parser* p) {
         }
     }
 
-    /* If no entities, use original content */
-    return taurus_text_create(content);
+    /* If no entities, use original content.  text_create copies the
+     * string into the pool, so our intermediate buffer is now redundant. */
+    TaurusTextNode* node = taurus_text_create(content, len, p->pool);
+    TAURUS_FREE(content);
+    return node;
 }
 
 /* ============================================================================
@@ -928,15 +942,18 @@ TaurusCommentNode* parser_parse_comment(Parser* p) {
 
     /* Fast path: Use pool-based bulk allocation if available */
     if (p->pool) {
-        return taurus_comment_create_fast(start, len, p->pool);
+        return taurus_comment_create(start, len, p->pool);
     }
 
-    /* Regular path: Allocate and copy */
+    /* Regular path: Allocate and copy.  comment_create copies into the
+     * pool, so our intermediate buffer is now redundant. */
     char* content = TAURUS_ALLOC_N(char, len + 1);
     memcpy(content, start, len);
     content[len] = '\0';
 
-    return taurus_comment_create(content);
+    TaurusCommentNode* node = taurus_comment_create(content, len, p->pool);
+    TAURUS_FREE(content);
+    return node;
 }
 
 /* ============================================================================
@@ -970,15 +987,18 @@ TaurusCDATANode* parser_parse_cdata(Parser* p) {
 
     /* Fast path: Use pool-based bulk allocation if available */
     if (p->pool) {
-        return taurus_cdata_create_fast(start, len, p->pool);
+        return taurus_cdata_create(start, len, p->pool);
     }
 
-    /* Regular path: Allocate and copy */
+    /* Regular path: Allocate and copy.  cdata_create copies into the
+     * pool, so our intermediate buffer is now redundant. */
     char* content = TAURUS_ALLOC_N(char, len + 1);
     memcpy(content, start, len);
     content[len] = '\0';
 
-    return taurus_cdata_create(content);
+    TaurusCDATANode* node = taurus_cdata_create(content, len, p->pool);
+    TAURUS_FREE(content);
+    return node;
 }
 
 /* ============================================================================
@@ -996,7 +1016,12 @@ TaurusPINode* parser_parse_pi(Parser* p) {
     parser_advance(p);
     parser_advance(p);
 
-    /* Parse target - capture position for fast path */
+    /* Parse target.
+     *
+     * TODO 25: parse_name returns a calloc'd buffer; the fast path
+     * below uses target_start (zero-copy view) and never reads `target`
+     * again.  Capture the length, do the strict-mode check, then free
+     * `target` immediately so it doesn't leak. */
     const char* target_start = p->pos;
     char* target = parse_name(p);
     if (!target) return NULL;
@@ -1038,30 +1063,24 @@ TaurusPINode* parser_parse_pi(Parser* p) {
         parser_advance(p);
     }
 
-    /* Fast path: Use pool-based bulk allocation if available */
+    /* Free the calloc'd target buffer — the fast path uses target_start
+     * (zero-copy view) instead.  See TODO 25 note above. */
+    TAURUS_FREE(target);
+
+    /* Pool-allocated: single contiguous struct + target + optional data. */
     if (p->pool && target_len > 0) {
-        TaurusPINode* node = taurus_pi_create_fast(
+        TaurusPINode* node = taurus_pi_create(
             target_start, target_len,
             data_len > 0 ? data_start : NULL, data_len,
             p->pool
         );
-        TAURUS_FREE(target);
         return node;
     }
 
-    /* Regular path: Allocate and copy */
-    char* data = NULL;
-    if (data_len > 0) {
-        data = TAURUS_ALLOC_N(char, data_len + 1);
-        memcpy(data, data_start, data_len);
-        data[data_len] = '\0';
-    }
-
-    TaurusPINode* node = taurus_pi_create(target, data);
-    TAURUS_FREE(target);
-    if (data) TAURUS_FREE(data);
-
-    return node;
+    /* No pool (shouldn't happen during parsing) — fail rather than
+     * leak via calloc fallback. */
+    parser_set_error(p, "PI creation requires a pool");
+    return NULL;
 }
 
 /* ============================================================================
@@ -1207,10 +1226,6 @@ TaurusDoctypeNode* parser_parse_doctype(Parser* p) {
             internal_subset[subset_len] = '\0';
         }
 
-        /* DEBUG: Print what we expect next */
-        char next_char = parser_peek(p);
-        char next_next_char = (p->pos + 1 <= p->end) ? p->pos[1] : '\0';
-
         /* Skip ']' */
         if (parser_peek(p) == ']') {
             parser_advance(p);
@@ -1227,16 +1242,16 @@ TaurusDoctypeNode* parser_parse_doctype(Parser* p) {
         parser_advance(p);
     }
 
-    TaurusDoctypeNode* node = taurus_doctype_create(name);
+    TaurusDoctypeNode* node = taurus_doctype_create(name, name ? strlen(name) : 0, p->pool);
     if (node) {
-        if (public_id) taurus_doctype_set_public_id(node, public_id);
-        if (system_id) taurus_doctype_set_system_id(node, system_id);
+        if (public_id) taurus_doctype_set_public_id(node, public_id, p->pool);
+        if (system_id) taurus_doctype_set_system_id(node, system_id, p->pool);
         if (internal_subset) {
-            taurus_doctype_set_internal_subset(node, internal_subset);
+            taurus_doctype_set_internal_subset(node, internal_subset, p->pool);
 
             /* CRITICAL: Parse DTD immediately for entity resolution during parsing */
             if (internal_subset && strlen(internal_subset) > 0) {
-                p->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset));
+                p->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset), p->pool);
             }
         }
     }
@@ -1253,7 +1268,12 @@ TaurusDoctypeNode* parser_parse_doctype(Parser* p) {
  * Element Parser
  * ============================================================================ */
 
-TaurusElement parser_parse_element(Parser* p) {
+/* Depth-guarded wrapper: bumps p->depth around the recursive body so
+ * the parser refuses pathological nesting instead of overflowing the
+ * process stack.  The body lives in parser_parse_element_impl. */
+TaurusElement parser_parse_element(Parser* p);
+
+static TaurusElement parser_parse_element_impl(Parser* p) {
     /* Expect '<' */
     if (parser_peek(p) != '<') {
         parser_set_error(p, "Expected '<'");
@@ -1286,15 +1306,13 @@ TaurusElement parser_parse_element(Parser* p) {
         return NULL;
     }
 
-    /* EAGER STRING CONVERSION: Convert name to NULL-terminated C-string immediately
-     * This eliminates the lazy conversion overhead on first access.
-     * The string is pool-allocated for O(1) access and proper cleanup. */
-    if (elem->document && elem->document->pool) {
-        elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, elem->document->pool);
-    } else {
-        /* Fallback to regular malloc (shouldn't happen for normal parsing) */
-        elem->name = taurus_sv_to_cstr(&elem->name_view);
-    }
+    /* EAGER STRING CONVERSION: Convert name to NULL-terminated C-string.
+     *
+     * TODO 25: use p->pool (always non-NULL during parsing) rather
+     * than elem->document->pool (NULL until parsing completes).
+     * Previously the calloc fallback fired for every element during
+     * parsing, leaking name strings. */
+    elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, p->pool);
 
     /* Set prefix if present */
     if (!taurus_sv_is_empty(&prefix_view)) {
@@ -1589,6 +1607,19 @@ TaurusElement parser_parse_element(Parser* p) {
     return elem;
 }
 
+/* Depth-guarded entry point.  Without this, a malicious document with
+ * deep nesting crashes the process via stack overflow — see TODO 07. */
+TaurusElement parser_parse_element(Parser* p) {
+    if (p->depth >= p->max_depth) {
+        parser_set_error(p, "Maximum element nesting depth exceeded");
+        return NULL;
+    }
+    p->depth++;
+    TaurusElement elem = parser_parse_element_impl(p);
+    p->depth--;
+    return elem;
+}
+
 /* ============================================================================
  * Node Parser (Dispatcher)
  * ============================================================================ */
@@ -1638,27 +1669,45 @@ TaurusNode* parser_parse_node(Parser* p) {
  * During parsing, elements don't have parent pointers yet, so they can't
  * look up namespace declarations from ancestors. This function does a
  * post-order traversal to resolve all namespace URIs after the tree is built.
+ *
+ * The traversal is depth-limited to TAURUS_MAX_ELEMENT_DEPTH, matching
+ * parser_parse_element — namespace resolution runs over a tree that
+ * already passed the parser's depth check, but a single guard is cheap
+ * insurance against future regressions.
  * ============================================================================ */
 
+static void resolve_namespaces_recursive_impl(TaurusElement elem, int depth);
+
 static void resolve_namespaces_recursive(TaurusElement elem) {
+    resolve_namespaces_recursive_impl(elem, 0);
+}
+
+static void resolve_namespaces_recursive_impl(TaurusElement elem, int depth) {
     if (!elem) return;
+    if (depth >= TAURUS_MAX_ELEMENT_DEPTH) return;
 
     /* First, recursively resolve children (linked list traversal) */
     struct taurus_element* child = taurus_element_get_first_child(elem);
     while (child) {
-        resolve_namespaces_recursive(child);
+        resolve_namespaces_recursive_impl(child, depth + 1);
         child = taurus_element_get_next_sibling(child);
     }
 
-    /* Now resolve this element's namespace URI if it has a prefix */
+    /* Now resolve this element's namespace URI if it has a prefix.
+     *
+     * TODO 15: route the prefix conversion through the document pool
+     * so we don't rely on manual free() (which previously leaked on
+     * early-return paths). */
     if (!taurus_sv_is_empty(&elem->prefix_view) && taurus_sv_is_empty(&elem->namespace_uri_view)) {
-        /* Convert prefix to C string for lookup */
-        char* prefix_cstr = taurus_sv_to_cstr(&elem->prefix_view);
+        TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+        char* prefix_cstr = pool
+            ? taurus_sv_to_cstr_pooled(&elem->prefix_view, pool)
+            : taurus_sv_to_cstr(&elem->prefix_view);
         const char* uri = taurus_element_lookup_namespace(elem, prefix_cstr);
         if (uri) {
             taurus_element_set_namespace_uri_view(elem, taurus_sv_from_cstr(uri));
         }
-        free(prefix_cstr);
+        if (!pool) free(prefix_cstr);  /* Pool-allocated: nothing to free. */
     }
 }
 

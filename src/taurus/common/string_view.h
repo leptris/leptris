@@ -11,11 +11,17 @@ struct taurus_memory_pool;
  *
  * Points to substring in a buffer. Does NOT own memory.
  * Perfect for zero-copy: strings live in XML buffer.
+ *
+ * Guarded so re-including this header doesn't trigger C99
+ * typedef-redefinition warnings.  See TODO 12.
  */
+#ifndef TAURUS_STRING_VIEW_DEFINED
+#define TAURUS_STRING_VIEW_DEFINED
 typedef struct taurus_string_view {
     const char* data;    /* Start of string (may not be NULL-terminated!) */
     size_t length;       /* Length in bytes */
 } TaurusStringView;
+#endif
 
 /* Creation */
 TaurusStringView taurus_sv_from_ptr(const char* data, size_t length);

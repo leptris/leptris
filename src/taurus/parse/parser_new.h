@@ -18,6 +18,12 @@
 #include "../dom/doctype.h"
 #include "../taurus_internal.h"
 
+/* Maximum element-nesting depth, matched to libxml2's XML_MAX_DEPTH.
+ * Documents deeper than this are rejected with TAURUS_ERROR_PARSE —
+ * without a depth limit, a malicious XML file with deep nesting
+ * crashes the process via stack overflow. */
+#define TAURUS_MAX_ELEMENT_DEPTH 256
+
 /* Parser state structure */
 typedef struct {
     const char* input;      /* Original input string (never modified) */
@@ -52,6 +58,10 @@ typedef struct {
     /* PERFORMANCE: Track if any namespace prefixes were found during parsing
      * This allows us to skip post-parse namespace resolution for documents without namespaces */
     int has_namespace_prefixes;  /* 1 if any element has a prefix (e.g., "foo:bar"), 0 otherwise */
+
+    /* Recursion depth guard (stack-overflow DoS protection, TODO 07). */
+    int depth;                   /* Current element-nesting depth (0 at top). */
+    int max_depth;               /* Hard cap; default TAURUS_MAX_ELEMENT_DEPTH. */
 } Parser;
 
 /* ============================================================================

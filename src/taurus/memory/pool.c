@@ -36,13 +36,15 @@
  * Internal Structures
  * ============================================================================ */
 
-/* Memory page - holds actual memory for allocations (dynamic size) */
-typedef struct memory_page {
+/* Memory page - holds actual memory for allocations (dynamic size).
+ * The typedef `MemoryPage` is forward-declared in pool.h; this is the
+ * struct body.  No redefinition here (TODO 12). */
+struct memory_page {
     struct memory_page* next;    /* Linked list of pages */
     size_t page_size;            /* Total size of this page */
     size_t busy_size;            /* Bytes used in this page */
     char data[1];                /* Flexible array member - actual memory */
-} MemoryPage;
+};
 
 /* Note: struct taurus_memory_pool is now defined in pool.h */
 
@@ -95,6 +97,10 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
     pool->page_size = page_size;
     pool->page_base = page->data;  /* Initialize page_base for compact pointer decoding */
 
+    /* No oversized allocations yet — list starts empty. */
+    pool->first_big_alloc = NULL;
+    pool->last_big_alloc_link = &pool->first_big_alloc;
+
     /* Pre-allocate additional pages for better cache locality
      * PERFORMANCE: Only pre-allocate for larger page sizes (>= 8KB)
      * to avoid wasting memory on small documents. For 4KB pages used with
@@ -104,6 +110,11 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
         if (next_page) {
             page->next = next_page;
             pool->page_count++;
+            /* current_page must always point at the LAST page in the
+             * chain so that add_new_page()'s `current_page->next = page`
+             * appends rather than overwrites an existing link (which
+             * would orphan the pre-allocated page). */
+            pool->current_page = next_page;
         }
     }
 
@@ -112,6 +123,19 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
 
 void taurus_pool_destroy(TaurusMemoryPool* pool) {
     if (!pool) return;
+
+    /* Oversized allocations come from taurus_alloc_hook directly and
+     * are tracked on the side list.  Free the user data, then the
+     * tracking node (which itself is pool-allocated and would be freed
+     * with the pages below — but freeing it explicitly here is harmless
+     * because double-free is avoided via the singly-linked walk). */
+    TaurusBigAlloc* big = pool->first_big_alloc;
+    while (big) {
+        TaurusBigAlloc* next = big->next;
+        taurus_free_hook(big->ptr);
+        /* big is pool-allocated; freed with the page walk below. */
+        big = next;
+    }
 
     /* Free all pages */
     MemoryPage* page = pool->first_page;
@@ -133,8 +157,7 @@ void* taurus_pool_get_base(TaurusMemoryPool* pool) {
  * Allocation - Fast Bump-Pointer Implementation
  * ============================================================================ */
 
-/**
- * Allocate new page and add to pool
+/* Allocate a new page and add to pool
  *
  * Called when current page is full. This is the "slow path" but still O(1).
  */
@@ -148,6 +171,30 @@ static MemoryPage* add_new_page(TaurusMemoryPool* pool, size_t page_size) {
     pool->page_count++;
 
     return page;
+}
+
+/* Allocate an oversized request that doesn't fit in a standard page.
+ * The bytes come from taurus_alloc_hook directly; we record the result
+ * on pool->first_big_alloc so taurus_pool_destroy can free it. */
+static void* pool_alloc_oversized(TaurusMemoryPool* pool, size_t size) {
+    void* ptr = taurus_alloc_hook(size);
+    if (!ptr) return NULL;
+
+    /* Tracking node: small, fits in a page.  Allocated from the pool
+     * so it is automatically accounted for in page_count and freed
+     * with the page walk. */
+    TaurusBigAlloc* node = (TaurusBigAlloc*)
+        taurus_pool_alloc(pool, sizeof(TaurusBigAlloc));
+    if (!node) {
+        taurus_free_hook(ptr);
+        return NULL;
+    }
+    node->ptr  = ptr;
+    node->size = size;
+    node->next = NULL;
+    *pool->last_big_alloc_link = node;
+    pool->last_big_alloc_link  = &node->next;
+    return ptr;
 }
 
 void* taurus_pool_alloc(TaurusMemoryPool* pool, size_t size) {
@@ -175,11 +222,9 @@ void* taurus_pool_alloc(TaurusMemoryPool* pool, size_t size) {
     /* Current page full - allocate new page (SLOW PATH, but still O(1)) */
     size_t page_size = page->page_size;  /* Use same page size as current page */
     if (size > page_size) {
-        /* Allocation too large for standard page
-         * Fall back to custom allocator for oversized allocations
-         * This is rare - typical elements/attributes are <100 bytes
-         */
-        return taurus_alloc_hook(size);
+        /* Allocation too large for standard page: record on the
+         * oversized list so the pool can free it later. */
+        return pool_alloc_oversized(pool, size);
     }
 
     page = add_new_page(pool, page_size);
@@ -229,9 +274,8 @@ void* taurus_pool_alloc_batch(TaurusMemoryPool* pool, size_t item_size, size_t c
      * Not ideal, but maintains correctness
      */
     if (total_size > page->page_size) {
-        /* Too large for single page, use fallback */
-        void* ptr = taurus_alloc_hook(total_size);
-        return ptr;
+        /* Too large for single page — track on oversized list. */
+        return pool_alloc_oversized(pool, total_size);
     }
 
     /* Allocate from new page */
@@ -277,28 +321,19 @@ char* taurus_pool_strdup(TaurusMemoryPool* pool, const char* str) {
  * String Interning - Hash Table Implementation
  * ============================================================================ */
 
+/* Forward declaration — defined below; both taurus_pool_intern_string
+ * and taurus_hash_table_set call it.  See TODO 36. */
+static int hash_table_maybe_grow(StringHashTable* table, TaurusMemoryPool* pool);
+
 /**
  * FNV-1a hash function for StringView
  *
- * Fast, simple, and well-distributed hash function.
- * FNV-1a is proven to work well for string hashing.
+ * Fast, simple, well-distributed.  See TODO 09 for why the previous
+ * "pointer looks like ASCII text" heuristic was removed — the only
+ * legitimate runtime check is NULL.
  */
 static uint32_t hash_string_view(const TaurusStringView* sv) {
-    if (!sv || !sv->data || sv->length == 0) return 0;
-
-    /* VALIDATE: Check for corrupted pointer before using it */
-    uintptr_t addr = (uintptr_t)sv->data;
-    if (addr < 0x1000) return 0;  /* Too small to be valid */
-    /* Check for ASCII text in pointer (sign of memory corruption) */
-    unsigned char* bytes = (unsigned char*)&addr;
-    int all_printable = 1;
-    for (size_t i = 0; i < sizeof(addr); i++) {
-        if (bytes[i] < 0x20 || bytes[i] > 0x7E) {
-            all_printable = 0;
-            break;
-        }
-    }
-    if (all_printable) return 0;  /* Contains ASCII text instead of address */
+    if (!sv || sv->length == 0 || sv->data == NULL) return 0;
 
     uint32_t hash = 2166136261u;  /* FNV offset basis */
     for (size_t i = 0; i < sv->length; i++) {
@@ -342,30 +377,7 @@ StringHashTable* taurus_hash_table_create(TaurusMemoryPool* pool, size_t bucket_
  * string before. If yes, return the cached version. If no, allocate and cache it.
  */
 char* taurus_pool_intern_string(TaurusMemoryPool* pool, const TaurusStringView* sv) {
-    if (!pool || !sv || sv->length == 0) {
-        return NULL;
-    }
-
-    /* VALIDATE: Check if sv->data is a valid pointer before using it */
-    if (!sv->data) {
-        return NULL;
-    }
-    uintptr_t addr = (uintptr_t)sv->data;
-    if (addr < 0x1000) {
-        /* Invalid pointer - too small */
-        return NULL;
-    }
-    /* Check for ASCII text in pointer (sign of memory corruption) */
-    unsigned char* bytes = (unsigned char*)&addr;
-    int all_printable = 1;
-    for (size_t i = 0; i < sizeof(addr); i++) {
-        if (bytes[i] < 0x20 || bytes[i] > 0x7E) {
-            all_printable = 0;
-            break;
-        }
-    }
-    if (all_printable) {
-        /* Corrupted pointer - contains ASCII text instead of address */
+    if (!pool || !sv || sv->length == 0 || sv->data == NULL) {
         return NULL;
     }
 
@@ -387,16 +399,13 @@ char* taurus_pool_intern_string(TaurusMemoryPool* pool, const TaurusStringView* 
     /* 2. Lookup in hash table */
     StringHashEntry* entry = table->buckets[bucket_index];
     while (entry) {
-        /* VALIDATE: Check entry->key_data before using it */
-        if ((uintptr_t)entry->key_data >= 0x1000) {
-            /* Compare key_length first (fast integer comparison) */
-            if (entry->key_length == sv->length) {
-                /* Compare key_data (memcmp - only if lengths match) */
-                if (memcmp(entry->key_data, sv->data, sv->length) == 0) {
-                    /* Cache hit! Return existing string */
-                    table->cache_hits++;
-                    return entry->cached_string;
-                }
+        /* Compare key_length first (fast integer comparison) */
+        if (entry->key_length == sv->length) {
+            /* Compare key_data (memcmp - only if lengths match) */
+            if (memcmp(entry->key_data, sv->data, sv->length) == 0) {
+                /* Cache hit! Return existing string */
+                table->cache_hits++;
+                return entry->cached_string;
             }
         }
         entry = entry->next;
@@ -431,6 +440,9 @@ char* taurus_pool_intern_string(TaurusMemoryPool* pool, const TaurusStringView* 
     new_entry->next = table->buckets[bucket_index];  /* Prepend to chain */
     table->buckets[bucket_index] = new_entry;
     table->entry_count++;
+
+    /* TODO 36: grow if load factor exceeds 75%. */
+    hash_table_maybe_grow(table, pool);
 
     return new_string;
 }
@@ -494,6 +506,41 @@ void* taurus_hash_table_get(StringHashTable* table, const char* key, size_t len)
     return NULL;
 }
 
+/* Maybe grow the hash table when load factor exceeds 75%.
+ * Old bucket array stays pool-allocated (reclaimed at pool destroy);
+ * we just point at a fresh, larger array and rehash.  See TODO 36. */
+static int hash_table_maybe_grow(StringHashTable* table, TaurusMemoryPool* pool) {
+    if (!table || !pool) return 0;
+    /* 75% load factor — standard for chained hash tables. */
+    if (table->entry_count < (table->bucket_count * 3) / 4) {
+        return 0;
+    }
+    /* Don't grow past 1<<24 buckets (16M entries) — sanity cap. */
+    if (table->bucket_count >= (1u << 24)) return 0;
+
+    size_t new_count = table->bucket_count * 2;
+    StringHashEntry** new_buckets =
+        (StringHashEntry**)taurus_pool_calloc(pool, sizeof(StringHashEntry*) * new_count);
+    if (!new_buckets) return -1;
+
+    /* Rehash: walk each existing chain, redistribute into new buckets. */
+    for (size_t i = 0; i < table->bucket_count; i++) {
+        StringHashEntry* e = table->buckets[i];
+        while (e) {
+            StringHashEntry* next = e->next;
+            size_t b = hash_cstring(e->key_data, e->key_length) % new_count;
+            e->next = new_buckets[b];
+            new_buckets[b] = e;
+            e = next;
+        }
+    }
+
+    /* Old bucket array is pool-owned; pool will reclaim it on destroy. */
+    table->buckets = new_buckets;
+    table->bucket_count = new_count;
+    return 0;
+}
+
 /**
  * Set value in hash table by string key
  *
@@ -554,6 +601,9 @@ int taurus_hash_table_set(StringHashTable* table, const char* key, size_t len, v
     table->buckets[bucket_index] = new_entry;
     table->entry_count++;
 
+    /* TODO 36: grow if load factor exceeds 75%.  Amortized O(1). */
+    hash_table_maybe_grow(table, pool);
+
     return 1;
 }
 
@@ -602,13 +652,35 @@ size_t taurus_pool_total_size(TaurusMemoryPool* pool) {
     if (!pool) return 0;
 
     size_t total = 0;
-    MemoryPage* page = pool->first_page;
-    while (page) {
-        total += sizeof(MemoryPage);  /* Include page overhead */
-        page = page->next;
+
+    /* Pages: header struct + data capacity, summed.  The header uses
+     * `char data[1]` as a flexible-array sentinel, so we subtract 1 to
+     * avoid double-counting that byte with page_size.  See TODO 10. */
+    for (MemoryPage* page = pool->first_page; page; page = page->next) {
+        total += sizeof(MemoryPage) - 1 + page->page_size;
+    }
+
+    /* Oversized allocations tracked on the side list. */
+    for (TaurusBigAlloc* big = pool->first_big_alloc; big; big = big->next) {
+        total += big->size;
     }
 
     return total;
+}
+
+size_t taurus_pool_used_size(TaurusMemoryPool* pool) {
+    /* Distinct from total_size: how many bytes are actually in use right
+     * now (busy_size + oversized bytes).  Useful for waste reporting. */
+    if (!pool) return 0;
+
+    size_t used = 0;
+    for (MemoryPage* page = pool->first_page; page; page = page->next) {
+        used += page->busy_size;
+    }
+    for (TaurusBigAlloc* big = pool->first_big_alloc; big; big = big->next) {
+        used += big->size;
+    }
+    return used;
 }
 
 size_t taurus_pool_page_count(TaurusMemoryPool* pool) {

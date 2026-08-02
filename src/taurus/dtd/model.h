@@ -10,9 +10,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
-
-/* Forward declarations */
-typedef struct taurus_memory_pool TaurusMemoryPool;
+#include "../common/types_internal.h"   /* Single source for TaurusMemoryPool / TaurusDTD */
 
 /**
  * DTD content type
@@ -92,7 +90,7 @@ typedef struct DTDNotationDecl {
  * for a document. Provides O(1) hash-based lookup for entities, elements,
  * and notations.
  */
-typedef struct TaurusDTD {
+struct TaurusDTD {
     /* Memory pool for all DTD allocations */
     void* pool;  /* TaurusMemoryPool* */
 
@@ -109,16 +107,23 @@ typedef struct TaurusDTD {
     size_t element_count;
     size_t notation_count;
     size_t attribute_count;
-} TaurusDTD;
+};
+
+/* TaurusDTD typedef comes from common/types_internal.h.
+ * The struct body above completes the forward declaration. */
 
 /* Creation/destruction functions */
 
 /**
- * Create a DTD container
+ * Create a DTD container backed by the given pool.
  *
- * @return New DTD, or NULL on failure
+ * As of TODO 16, the DTD no longer allocates a private pool — every
+ * byte comes from the caller's pool, released by taurus_pool_destroy.
+ *
+ * @param pool Memory pool that owns the DTD's allocations.
+ * @return New DTD, or NULL on failure / NULL pool.
  */
-TaurusDTD* taurus_dtd_create(void);
+TaurusDTD* taurus_dtd_create(TaurusMemoryPool* pool);
 
 /**
  * Free DTD container and all contained declarations
@@ -135,7 +140,7 @@ void ttdtd_free(TaurusDTD* dtd);
  * @param name Entity name (must not be NULL)
  * @return New entity declaration, or NULL on failure
  */
-DTDEntityDecl* ttdtd_entity_create(const char* name);
+DTDEntityDecl* ttdtd_entity_create(const char* name, TaurusMemoryPool* pool);
 
 /**
  * Free an entity declaration
@@ -250,11 +255,16 @@ void dtd_attribute_decl_free(DTDAttributeDecl* decl);
  *
  * @param dtd_content DTD content string (UTF-8)
  * @param len Length of DTD content in bytes
+ * @param pool Memory pool for all DTD allocations — must outlive the
+ *             returned DTD.  Passing NULL is an error.
  * @return Parsed DTD object, or NULL on error
  *
- * Note: Caller must free with ttdtd_free()
+ * Note (TODO 16): the returned DTD is pool-owned; taurus_pool_destroy
+ * releases everything.  Do not call ttdtd_free.
  */
-TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len);
+TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content,
+                                              size_t len,
+                                              TaurusMemoryPool* pool);
 
 /* Entity Resolver functions */
 

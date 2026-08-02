@@ -19,6 +19,7 @@ endif()
 set(TAURUS_SOURCES
     # DOM nodes
     taurus/dom/node.c
+    taurus/dom/node_vtable.c
     taurus/dom/element.c
     taurus/dom/element_modify.c
     taurus/dom/text.c
@@ -101,7 +102,7 @@ target_include_directories(taurus_objects
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
 )
 
-target_link_libraries(taurus_objects PRIVATE m)
+target_link_libraries(taurus_objects PUBLIC m)
 
 target_compile_options(taurus_objects PRIVATE
     -Wall
@@ -117,10 +118,27 @@ target_compile_options(taurus_objects PRIVATE
 
 # utf8proc for Unicode support
 if(TAURUS_ENABLE_UTF8PROC)
-    find_package(unofficial-utf8proc CONFIG REQUIRED)
+    # Three lookup strategies, in order of preference:
+    #   1. Native utf8proc CONFIG package (Homebrew, system packages, from-source).
+    #   2. vcpkg's unofficial-utf8proc CONFIG package.
+    #   3. Module-mode finder shipped in cmake/FindUtf8proc.cmake.
+    find_package(utf8proc CONFIG QUIET)
+    if(utf8proc_FOUND)
+        set(TAURUS_UTF8PROC_TARGET utf8proc::utf8proc)
+    else()
+        find_package(unofficial-utf8proc CONFIG QUIET)
+        if(unofficial-utf8proc_FOUND)
+            set(TAURUS_UTF8PROC_TARGET unofficial::utf8proc)
+        else()
+            find_package(Utf8proc REQUIRED)
+            set(TAURUS_UTF8PROC_TARGET Utf8proc::Utf8proc)
+        endif()
+    endif()
 
-    target_link_libraries(taurus_objects PRIVATE utf8proc)
-    target_compile_definitions(taurus_objects PRIVATE TAURUS_HAS_UTF8PROC=1)
+    # PUBLIC: the link dependency must propagate through $<TARGET_OBJECTS:...>
+    # aggregation into taurus_static / taurus_shared and onward to consumers.
+    target_link_libraries(taurus_objects PUBLIC ${TAURUS_UTF8PROC_TARGET})
+    target_compile_definitions(taurus_objects PUBLIC TAURUS_HAS_UTF8PROC=1)
 
     target_sources(taurus_objects PRIVATE
         taurus/unicode/unicode.c
@@ -130,7 +148,7 @@ if(TAURUS_ENABLE_UTF8PROC)
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/unicode
     )
 
-    message(STATUS "utf8proc: ENABLED")
+    message(STATUS "utf8proc: ENABLED via ${TAURUS_UTF8PROC_TARGET}")
 else()
     message(STATUS "utf8proc: DISABLED")
 endif()
@@ -139,22 +157,19 @@ endif()
 if(TAURUS_ENABLE_ICONV)
     find_package(Iconv REQUIRED)
 
-    if(Iconv_FOUND)
-        target_link_libraries(taurus_objects PRIVATE Iconv::Iconv)
-        target_compile_definitions(taurus_objects PRIVATE TAURUS_HAS_ICONV=1)
+    # PUBLIC: see utf8proc note above.
+    target_link_libraries(taurus_objects PUBLIC Iconv::Iconv)
+    target_compile_definitions(taurus_objects PUBLIC TAURUS_HAS_ICONV=1)
 
-        target_sources(taurus_objects PRIVATE
-            taurus/encoding/encoding.c
-        )
+    target_sources(taurus_objects PRIVATE
+        taurus/encoding/encoding.c
+    )
 
-        target_include_directories(taurus_objects PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
-        )
+    target_include_directories(taurus_objects PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
+    )
 
-        message(STATUS "iconv: ENABLED")
-    else()
-        message(FATAL_ERROR "iconv: NOT FOUND (required)")
-    endif()
+    message(STATUS "iconv: ENABLED")
 else()
     message(STATUS "iconv: DISABLED")
 endif()
@@ -189,6 +204,18 @@ if(TAURUS_BUILD_STATIC)
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
     )
+
+    # Pull in link dependencies (utf8proc, Iconv, m) declared on
+    # taurus_objects.  CMake's $<TARGET_OBJECTS:...> aggregation does NOT
+    # propagate OBJECT-library link deps to the static lib's consumers
+    # (CMake issue #16093), so we re-state them here as PUBLIC to ensure
+    # `taurus::taurus` consumers link iconv/utf8proc automatically.
+    if(TAURUS_ENABLE_UTF8PROC)
+        target_link_libraries(taurus_static PUBLIC ${TAURUS_UTF8PROC_TARGET})
+    endif()
+    if(TAURUS_ENABLE_ICONV)
+        target_link_libraries(taurus_static PUBLIC Iconv::Iconv)
+    endif()
 
     add_library(taurus::static ALIAS taurus_static)
     message(STATUS "Static library: ENABLED")
@@ -232,6 +259,14 @@ if(TAURUS_BUILD_SHARED)
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
     )
+
+    # See note on taurus_static above.
+    if(TAURUS_ENABLE_UTF8PROC)
+        target_link_libraries(taurus_shared PUBLIC ${TAURUS_UTF8PROC_TARGET})
+    endif()
+    if(TAURUS_ENABLE_ICONV)
+        target_link_libraries(taurus_shared PUBLIC Iconv::Iconv)
+    endif()
 
     add_library(taurus::shared ALIAS taurus_shared)
     message(STATUS "Shared library: ENABLED")

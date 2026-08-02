@@ -1688,21 +1688,30 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
         /* First try by namespace URI */
         const char* lang_attr = NULL;
 
-        /* Check attributes with namespace URI - walk linked list */
+        /* Check attributes with namespace URI - walk linked list.
+         *
+         * TODO 34: route StringView conversions through the document
+         * pool so we don't have to manually free() each one. */
         struct taurus_attribute* attr = taurus_element_get_first_attribute(node);
         while (attr && !lang_attr) {
             if (!attr) continue;
 
+            TaurusMemoryPool* pool = context->document ? context->document->pool : NULL;
+
             /* Get namespace URI */
             const char* ns_uri = attr->namespace_uri;
             if (!ns_uri && !taurus_sv_is_empty(&attr->namespace_uri_view)) {
-                ns_uri = taurus_sv_to_cstr(&attr->namespace_uri_view);
+                ns_uri = pool
+                    ? taurus_sv_to_cstr_pooled(&attr->namespace_uri_view, pool)
+                    : taurus_sv_to_cstr(&attr->namespace_uri_view);
             }
 
             /* Get attribute name */
             const char* attr_name = attr->name;
             if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
-                attr_name = taurus_sv_to_cstr(&attr->name_view);
+                attr_name = pool
+                    ? taurus_sv_to_cstr_pooled(&attr->name_view, pool)
+                    : taurus_sv_to_cstr(&attr->name_view);
             }
 
             /* Check if this is xml:lang (try by namespace URI, by prefixed name, or by prefix) */
@@ -1728,12 +1737,15 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
                 else {
                     const char* prefix = attr->prefix;
                     if (!prefix && !taurus_sv_is_empty(&attr->prefix_view)) {
-                        prefix = taurus_sv_to_cstr(&attr->prefix_view);
+                        TaurusMemoryPool* pool2 = context->document ? context->document->pool : NULL;
+                        prefix = pool2
+                            ? taurus_sv_to_cstr_pooled(&attr->prefix_view, pool2)
+                            : taurus_sv_to_cstr(&attr->prefix_view);
                     }
                     if (prefix && strcmp(prefix, "xml") == 0) {
                         is_xml_lang = 1;
                     }
-                    if (attr->prefix != prefix && prefix) free((char*)prefix);
+                    /* Pool-owned: nothing to free. */
                 }
 
                 /* Also check if there's no namespace URI at all (xml:lang might be stored without ns) */
@@ -1745,14 +1757,22 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
                 if (is_xml_lang) {
                     lang_attr = attr->value;
                     if (!lang_attr && !taurus_sv_is_empty(&attr->value_view)) {
-                        lang_attr = taurus_sv_to_cstr(&attr->value_view);
+                        TaurusMemoryPool* pool3 = context->document ? context->document->pool : NULL;
+                        lang_attr = pool3
+                            ? taurus_sv_to_cstr_pooled(&attr->value_view, pool3)
+                            : taurus_sv_to_cstr(&attr->value_view);
                     }
                 }
             }
 
-            /* Free temporary strings if we converted them */
-            if (attr->name != attr_name && attr_name) free((char*)attr_name);
-            if (attr->namespace_uri != ns_uri && ns_uri) free((char*)ns_uri);
+            /* Pool-routed conversions (TODO 34) don't need free.
+             * Only legacy calloc'd intermediates need explicit free. */
+            TaurusMemoryPool* free_pool = context->document ? context->document->pool : NULL;
+            if (!free_pool) {
+                if (attr->name != attr_name && attr_name) free((char*)attr_name);
+                if (attr->namespace_uri != ns_uri && ns_uri) free((char*)ns_uri);
+            }
+            /* Pool-allocated: pool will reclaim on document free. */
 
             attr = attr->next;
         }

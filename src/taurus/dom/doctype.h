@@ -18,15 +18,26 @@ typedef struct taurus_doctype_node {
     char* internal_subset;             /* Internal DTD subset (optional) */
 } TaurusDoctypeNode;
 
-/* DOCTYPE node creation and destruction */
-TaurusDoctypeNode* taurus_doctype_create(const char* name);
+/* DOCTYPE node creation.  Pool-allocated; struct + name contiguous
+ * (TODO 18 consolidated naming with other node types). */
+TaurusDoctypeNode* taurus_doctype_create(const char* name,
+                                          size_t name_len,
+                                          struct taurus_memory_pool* pool);
 void taurus_doctype_free(TaurusDoctypeNode* doctype);
 
-/* Content access */
+/* Content access.  Setters are pool-routed (TODO 16) — the input
+ * string is copied into the pool so the caller's buffer can be
+ * freed/reused immediately. */
 const char* taurus_doctype_get_name(TaurusDoctypeNode* doctype);
-void taurus_doctype_set_public_id(TaurusDoctypeNode* doctype, const char* public_id);
-void taurus_doctype_set_system_id(TaurusDoctypeNode* doctype, const char* system_id);
-void taurus_doctype_set_internal_subset(TaurusDoctypeNode* doctype, const char* subset);
+void taurus_doctype_set_public_id(TaurusDoctypeNode* doctype,
+                                   const char* public_id,
+                                   struct taurus_memory_pool* pool);
+void taurus_doctype_set_system_id(TaurusDoctypeNode* doctype,
+                                   const char* system_id,
+                                   struct taurus_memory_pool* pool);
+void taurus_doctype_set_internal_subset(TaurusDoctypeNode* doctype,
+                                         const char* subset,
+                                         struct taurus_memory_pool* pool);
 
 /* Casting helpers */
 #define TAURUS_NODE_AS_DOCTYPE(node) \

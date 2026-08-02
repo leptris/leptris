@@ -97,22 +97,6 @@ TaurusElement taurus_element_create_pooled(const char* name, TaurusMemoryPool* p
     return taurus_element_create_with_view(name_view, pool);
 }
 
-/* Create element with bulk allocation (optimized) */
-TaurusElement taurus_element_create_fast(
-    const char* name,
-    size_t name_len,
-    TaurusMemoryPool* pool
-) {
-    if (!name || name_len == 0 || !pool) return NULL;
-
-    /* Create StringView */
-    TaurusStringView name_view;
-    name_view.data = (char*)name;
-    name_view.length = name_len;
-
-    return taurus_element_create_with_view(name_view, pool);
-}
-
 /* Free element - pool allocated, so this is a no-op */
 void taurus_element_free(TaurusElement elem) {
     /* Pool-allocated elements don't need individual free */
@@ -132,17 +116,17 @@ void taurus_element_set_parent(TaurusElement elem, TaurusElement parent) {
 
 void taurus_element_set_first_child(TaurusElement elem, TaurusElement child) {
     if (!elem) return;
-    elem->first_child = child;
+    elem->first_child = (TaurusNode*)child;
 }
 
 void taurus_element_set_last_child(TaurusElement elem, TaurusElement child) {
     if (!elem) return;
-    elem->last_child = child;
+    elem->last_child = (TaurusNode*)child;
 }
 
 void taurus_element_set_next_sibling(TaurusElement elem, TaurusElement sibling) {
     if (!elem) return;
-    elem->next_sibling = sibling;
+    elem->next_sibling = (TaurusNode*)sibling;
 }
 
 /* ============================================================================
@@ -259,30 +243,46 @@ int taurus_element_add_attribute(TaurusElement elem,
     attr->prefix_view = taurus_sv_empty();
     attr->prefix = NULL;
 
-    /* EAGER STRING CONVERSION: Convert attribute name and value to NULL-terminated C-strings
-     * This eliminates the lazy conversion overhead on first access.
-     * Using pooled allocation for O(1) access and proper cleanup.
+    /* EAGER STRING CONVERSION: Convert attribute name and value to NULL-terminated C-strings.
+     *
+     * PERFORMANCE (TODO 22): attribute NAMES are interned via the pool's
+     * hash table (they recur across elements, so dedup pays off).
+     * attribute VALUES bypass interning — values are almost always
+     * unique per element, so the hash-table lookup/insert cost is
+     * wasted.  Direct pool allocation instead.
      *
      * CRITICAL: Decode XML entities in attribute values BEFORE converting to C string.
      * Entities like &lt; &gt; &amp; must be decoded to < > & during parsing. */
     attr->name = taurus_sv_to_cstr_pooled(&name_view, pool);
 
-    /* Check if value contains entities and decode them */
-    if (memchr(value_view.data, '&', value_view.length) != NULL) {
-        /* Value contains entities - decode them first */
-        char* decoded = taurus_decode_entities_view(&value_view, pool);
-        if (decoded) {
-            /* Successfully decoded - use decoded string */
-            attr->value = decoded;
-            attr->has_entities = 0;  /* Entities are now decoded */
+    /* Allocate value storage directly from the pool — no interning. */
+    char* value_storage = (char*)taurus_pool_alloc(pool, value_view.length + 1);
+    if (value_storage) {
+        memcpy(value_storage, value_view.data, value_view.length);
+        value_storage[value_view.length] = '\0';
+
+        /* Check if value contains entities and decode them */
+        if (memchr(value_storage, '&', value_view.length) != NULL) {
+            /* Value contains entities - decode them first.
+             * taurus_decode_entities_view allocates from the pool, so
+             * the value_storage we just allocated becomes garbage
+             * (pool will reclaim it eventually).  This is a minor
+             * waste; entity-bearing attribute values are rare. */
+            TaurusStringView decoded_sv = { value_storage, value_view.length };
+            char* decoded = taurus_decode_entities_view(&decoded_sv, pool);
+            if (decoded) {
+                attr->value = decoded;
+                attr->has_entities = 0;
+            } else {
+                attr->value = value_storage;
+                attr->has_entities = 1;
+            }
         } else {
-            /* Decoding failed (invalid entity) - use raw value as fallback */
-            attr->value = taurus_sv_to_cstr_pooled(&value_view, pool);
-            attr->has_entities = 1;
+            attr->value = value_storage;
+            attr->has_entities = 0;
         }
     } else {
-        /* No entities - use raw value */
-        attr->value = taurus_sv_to_cstr_pooled(&value_view, pool);
+        attr->value = NULL;
         attr->has_entities = 0;
     }
 
@@ -545,30 +545,6 @@ const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* 
     return attr->value;
 }
 
-/* Namespace declarations */
-static void taurus_element_add_namespace(TaurusElement elem,
-                                         const char* prefix,
-                                         const char* uri) {
-    if (!elem || !uri) return;
-
-    /* Store namespace in element's prefix/namespace_uri fields for now */
-    /* TODO: Implement proper namespace list */
-
-    /* CRITICAL: Do NOT use taurus_element_set_prefix() here because it clears
-     * prefix_view, which breaks the namespace resolution code in the parser.
-     * The parser sets prefix_view when parsing element names, and then later
-     * checks prefix_view to resolve the namespace URI. If we clear it here,
-     * the namespace resolution fails. Instead, directly set the prefix field. */
-    if (prefix) {
-        if (elem->prefix) free(elem->prefix);
-        elem->prefix = taurus_strdup(prefix);
-    }
-    if (elem->namespace_uri) free(elem->namespace_uri);
-    elem->namespace_uri = taurus_strdup(uri);
-    /* Clear StringView for namespace_uri (but NOT prefix_view!) */
-    elem->namespace_uri_view = taurus_sv_empty();
-}
-
 /* Add namespace with in-place strings (zero-copy) */
 void taurus_element_add_namespace_inplace(TaurusElement elem,
                                            char* prefix,
@@ -645,7 +621,7 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
 
         /* Append to end of children list */
         /* NOTE: last_child might point to a non-element node, so we need to handle both cases */
-        TaurusElement last = elem->last_child;
+        TaurusElement last = (TaurusElement)elem->last_child;
         if (last) {
             /* last points to the last child element */
             TaurusNode* last_node = (TaurusNode*)last;
@@ -653,24 +629,24 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
             /* Set next_sibling on the last child based on its type */
             if (last_node->type == TAURUS_NODE_TYPE_ELEMENT) {
                 /* Last child is an element - use direct pointer assignment */
-                ((TaurusElement)last_node)->next_sibling = child_elem;
+                ((TaurusElement)last_node)->next_sibling = (TaurusNode*)child_elem;
             } else if (last_node->type == TAURUS_NODE_TYPE_TEXT) {
                 /* Last child is a text node - use direct pointer assignment */
-                ((TaurusTextNode*)last_node)->next_sibling = child;
+                ((TaurusTextNode*)last_node)->next_sibling = (TaurusNode*)child;
             } else if (last_node->type == TAURUS_NODE_TYPE_CDATA) {
-                ((TaurusCDATANode*)last_node)->next_sibling = child;
+                ((TaurusCDATANode*)last_node)->next_sibling = (TaurusNode*)child;
             } else if (last_node->type == TAURUS_NODE_TYPE_COMMENT) {
-                ((TaurusCommentNode*)last_node)->next_sibling = child;
+                ((TaurusCommentNode*)last_node)->next_sibling = (TaurusNode*)child;
             } else if (last_node->type == TAURUS_NODE_TYPE_PI) {
-                ((TaurusPINode*)last_node)->next_sibling = child;
+                ((TaurusPINode*)last_node)->next_sibling = (TaurusNode*)child;
             }
 
             /* Set last_child to the new child */
-            elem->last_child = child_elem;
+            elem->last_child = (TaurusNode*)child_elem;
         } else {
             /* No children yet - set first and last child */
-            elem->first_child = child_elem;
-            elem->last_child = child_elem;
+            elem->first_child = (TaurusNode*)child_elem;
+            elem->last_child = (TaurusNode*)child_elem;
         }
 
         /* Increment child count */
@@ -682,23 +658,23 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
             /* Set next_sibling on the last child based on last's type */
             if (last->type == TAURUS_NODE_TYPE_ELEMENT) {
                 /* Element last: directly set the next_sibling pointer */
-                ((TaurusElement)last)->next_sibling = (TaurusElement)child;
+                ((TaurusElement)last)->next_sibling = (TaurusNode*)child;
             } else if (last->type == TAURUS_NODE_TYPE_TEXT) {
-                ((TaurusTextNode*)last)->next_sibling = child;
+                ((TaurusTextNode*)last)->next_sibling = (TaurusNode*)child;
             } else if (last->type == TAURUS_NODE_TYPE_CDATA) {
-                ((TaurusCDATANode*)last)->next_sibling = child;
+                ((TaurusCDATANode*)last)->next_sibling = (TaurusNode*)child;
             } else if (last->type == TAURUS_NODE_TYPE_COMMENT) {
-                ((TaurusCommentNode*)last)->next_sibling = child;
+                ((TaurusCommentNode*)last)->next_sibling = (TaurusNode*)child;
             } else if (last->type == TAURUS_NODE_TYPE_PI) {
-                ((TaurusPINode*)last)->next_sibling = child;
+                ((TaurusPINode*)last)->next_sibling = (TaurusNode*)child;
             }
 
             /* Set last_child to child using direct pointer assignment */
-            elem->last_child = (TaurusElement)child;
+            elem->last_child = (TaurusNode*)child;
         } else {
             /* No children yet - set first and last child using direct pointer assignment */
-            elem->first_child = (TaurusElement)child;
-            elem->last_child = (TaurusElement)child;
+            elem->first_child = (TaurusNode*)child;
+            elem->last_child = (TaurusNode*)child;
         }
 
         /* Don't increment child_count for non-element children */
@@ -739,21 +715,21 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
 
         /* Insert at beginning of children list */
         /* NOTE: first_child might point to a non-element node */
-        TaurusElement first = elem->first_child;
+        TaurusElement first = (TaurusElement)elem->first_child;
         if (first) {
             /* first points to the first child (could be element or non-element) */
             TaurusNode* first_node = (TaurusNode*)first;
 
             /* Set the new child's next_sibling to point to the first child */
             /* Since the new child is an element, use direct pointer assignment */
-            child_elem->next_sibling = (TaurusElement)first_node;
+            child_elem->next_sibling = (TaurusNode*)(TaurusElement)first_node;
 
             /* Set first_child to the new child */
-            elem->first_child = child_elem;
+            elem->first_child = (TaurusNode*)child_elem;
         } else {
             /* No children yet - set first and last child */
-            elem->first_child = child_elem;
-            elem->last_child = child_elem;
+            elem->first_child = (TaurusNode*)child_elem;
+            elem->last_child = (TaurusNode*)child_elem;
         }
 
         /* Increment child count */
@@ -764,21 +740,21 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
         if (first) {
             /* Set next_sibling on the new child based on child's type */
             if (child->type == TAURUS_NODE_TYPE_TEXT) {
-                ((TaurusTextNode*)child)->next_sibling = first;
+                ((TaurusTextNode*)child)->next_sibling = (TaurusNode*)first;
             } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-                ((TaurusCDATANode*)child)->next_sibling = first;
+                ((TaurusCDATANode*)child)->next_sibling = (TaurusNode*)first;
             } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-                ((TaurusCommentNode*)child)->next_sibling = first;
+                ((TaurusCommentNode*)child)->next_sibling = (TaurusNode*)first;
             } else if (child->type == TAURUS_NODE_TYPE_PI) {
-                ((TaurusPINode*)child)->next_sibling = first;
+                ((TaurusPINode*)child)->next_sibling = (TaurusNode*)first;
             }
 
             /* Set first_child to child using direct pointer assignment */
-            elem->first_child = (TaurusElement)child;
+            elem->first_child = (TaurusNode*)child;
         } else {
             /* No children yet - set first and last child using direct pointer assignment */
-            elem->first_child = (TaurusElement)child;
-            elem->last_child = (TaurusElement)child;
+            elem->first_child = (TaurusNode*)child;
+            elem->last_child = (TaurusNode*)child;
         }
 
         /* Don't increment child_count for non-element children */
