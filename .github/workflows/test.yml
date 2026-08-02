@@ -3,8 +3,22 @@ name: C Library & CLI Test Suite
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-library:
@@ -20,64 +34,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.20.x'
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 'master'
-
-      - name: Install asciidoctor (for man pages)
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y asciidoctor
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install asciidoctor
-          fi
-        shell: bash
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libutf8proc-dev
 
-      - name: Configure CMake
-        run: |
-          mkdir -p build
-          cd build
-          cmake .. -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE:?Variable not set}
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja utf8proc
 
-      - name: Build C library
+      - name: Configure
         run: |
-          cd build
-          make
+          cmake -B build -S . -G Ninja \
+            -DBUILD_TESTING=ON \
+            -DTAURUS_BUILD_CLI=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DTAURUS_ENABLE_ICONV=OFF
 
-      - name: Run C unit tests (Google Test)
-        run: |
-          cd build
-          ctest --output-on-failure --verbose
+      - name: Build
+        run: cmake --build build
 
-      - name: Test C examples
-        run: |
-          cd build
-          ./examples/c/basic_example
-          ./examples/c/xpath_example
-          ./examples/c/namespace_example
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Check for memory leaks (Linux only)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
           sudo apt-get install -y valgrind
-          cd build
           valgrind --leak-check=full --error-exitcode=1 \
-            ./examples/c/basic_example
-
-      - name: Build and run benchmarks
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        run: |
-          cd build
-          cmake .. -DTAURUS_BUILD_BENCHMARKS=ON
-          cmake --build build --target bench_dom_pugixml dom_benchmark
-          echo "=== Running Benchmarks ==="
-          ./benchmarks/dom_benchmark benchmarks/fixtures/small.xml 1000
-          ./benchmarks/bench_dom_pugixml
+            ./build/test/test_smoke
