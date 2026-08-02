@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 /**
  * @file error.c
  * @brief Error handling implementation for Taurus CLI
