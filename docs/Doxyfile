@@ -1,0 +1,47 @@
+# Doxyfile for libtaurus — generates HTML API reference from public headers.
+# See TODO 63.
+
+PROJECT_NAME           = libtaurus
+PROJECT_NUMBER         = 0.1.0
+PROJECT_BRIEF          = "High-performance XML parser & XPath engine in C"
+
+INPUT                  = ../src/include
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h
+
+OUTPUT_DIRECTORY       = ../docs/api-generated
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MULTILINE_CPP_IS_BRIEF = YES
+INHERIT_DOCS           = YES
+SEPARATE_MEMBER_PAGES  = NO
+
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+GENERATE_TREEVIEW      = YES
+
+SEARCHENGINE           = YES
+
+# C-specific
+OPTIMIZE_OUTPUT_FOR_C  = YES
+TYPEDEF_HIDES_STRUCT   = NO
+
+# Layout
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+
+# Preprocessing — pass feature macros so #ifdef'd docs render correctly
+PREDEFINED             = TAURUS_HAS_UTF8PROC=1 \
+                         TAURUS_HAS_ICONV=1 \
+                         TAURUS_API=

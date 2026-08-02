@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns:b="http://books.example.com" xmlns:c="http://cds.example.com">
+  <b:book id="b1" b:isbn="123">
+    <b:title>First Book</b:title>
+    <b:author>A. Author</b:author>
+  </b:book>
+  <c:cd id="c1" c:upc="456">
+    <c:title>First Album</c:title>
+    <c:artist>B. Artist</c:artist>
+  </c:cd>
+</catalog>
