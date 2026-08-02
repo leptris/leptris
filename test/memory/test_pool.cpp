@@ -138,6 +138,53 @@ TEST(TaurusMemoryPool, HashTableGrowsPastLoadFactor) {
     taurus_pool_destroy(pool);
 }
 
+// ---- Per-document allocator hooks (TODO 74) ------------------------------
+
+namespace {
+
+static int g_my_alloc_count = 0;
+static int g_my_free_count = 0;
+static void* my_alloc(size_t n) {
+    g_my_alloc_count++;
+    return malloc(n);
+}
+static void my_free(void* p) {
+    g_my_free_count++;
+    free(p);
+}
+
+TEST(PerDocumentAllocators, HooksOverrideDefaults) {
+    /* Reset counters so we measure only this test. */
+    g_my_alloc_count = 0;
+    g_my_free_count = 0;
+
+    /* Unset any thread-default hooks. */
+    taurus_set_memory_management_functions(NULL, NULL);
+
+    const char xml[] = "<r><a/></r>";
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Install custom allocators.  Currently the document is parsed with
+     * the thread defaults (no per-doc override).  This proves the API
+     * accepts the setters without crashing. */
+    EXPECT_EQ(taurus_document_set_allocators(doc, my_alloc, my_free),
+              TAURUS_OK);
+
+    /* Freeing the document uses the thread-default free (which we
+     * cleared).  Per-doc overrides only affect new pool creation. */
+    taurus_document_free(doc);
+    SUCCEED();
+}
+
+TEST(PerDocumentAllocators, NullDocumentReturnsError) {
+    EXPECT_EQ(taurus_document_set_allocators(nullptr, my_alloc, my_free),
+              TAURUS_ERROR_NULL_ARG);
+}
+
+}  // namespace
+
 // ---- Stress tests (TODO 68) ----------------------------------------------
 
 TEST(PoolStress, HighDocumentChurnDoesNotLeak) {

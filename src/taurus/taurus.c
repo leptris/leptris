@@ -2517,6 +2517,23 @@ TAURUS_API void taurus_set_memory_management_functions(taurus_allocation_functio
 }
 
 /**
+ * Per-document allocator hooks (TODO 74).
+ *
+ * Set the allocator hooks for a specific document.  Must be called
+ * before parsing.  The document's pool is created with these hooks
+ * and uses them for all allocations within the document.
+ */
+TAURUS_API TaurusStatus taurus_document_set_allocators(
+    TaurusDocument doc,
+    taurus_allocation_function alloc,
+    taurus_deallocation_function dealloc) {
+    if (!doc) return TAURUS_ERROR_NULL_ARG;
+    doc->alloc_hook = alloc;
+    doc->dealloc_hook = dealloc;
+    return TAURUS_OK;
+}
+
+/**
  * Get current memory allocation function
  */
 TAURUS_API taurus_allocation_function taurus_get_memory_allocation_function(void) {

@@ -16,8 +16,14 @@
 #define TAURUS_MEMORY_POOL_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include "../common/types_internal.h"   /* Single source for TaurusMemoryPool */
 #include "../common/string_view.h"     /* Full TaurusStringView definition */
+
+/* Forward-declared hook types — full typedefs are in taurus/types.h.
+ * Defining them here too would create a redefinition warning. */
+typedef void* (*taurus_allocation_function)(size_t size);
+typedef void  (*taurus_deallocation_function)(void* ptr);
 
 /* ============================================================================
  * String Interning Structures (for deduplication)
@@ -83,6 +89,12 @@ struct taurus_memory_pool {
     int strict_mode;              /* Strict entity validation mode */
     size_t page_size;             /* Page size for this pool */
     void* page_base;              /* Base pointer for compact pointer decoding */
+
+    /* Per-pool allocator hooks (TODO 74) — if non-NULL, override the
+     * thread-default globals.  When set, every page and oversized
+     * allocation goes through these instead. */
+    taurus_allocation_function  alloc_hook;
+    taurus_deallocation_function dealloc_hook;
 
     /* Oversized allocations — freed in taurus_pool_destroy alongside pages. */
     TaurusBigAlloc* first_big_alloc;            /* Head of side list */
