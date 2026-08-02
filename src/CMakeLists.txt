@@ -41,6 +41,7 @@ set(TAURUS_SOURCES
     # Encoding (UTF-16 support - always available)
     taurus/encoding/utf16.c
     taurus/encoding/unicode.c
+    taurus/encoding/wrapper.c
 
     # Parser and Serializer
     taurus/parse/parser_new.c
