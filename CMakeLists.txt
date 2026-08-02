@@ -29,6 +29,7 @@ option(TAURUS_ENABLE_UTF8PROC "Enable Unicode support via utf8proc" ON)
 option(TAURUS_ENABLE_ICONV "Enable encoding conversion via iconv" ON)
 option(TAURUS_ENABLE_ASAN "Enable AddressSanitizer (catches heap bugs at runtime)" OFF)
 option(TAURUS_ENABLE_FUZZING "Build libFuzzer harness" OFF)
+option(TAURUS_BUILD_DOCS "Build Doxygen API docs" OFF)
 
 # AddressSanitizer — see TODO 35.
 if(TAURUS_ENABLE_ASAN)
@@ -42,6 +43,20 @@ if(TAURUS_ENABLE_FUZZING)
     add_compile_options(-fsanitize=fuzzer-no-link,address -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=fuzzer,address)
     message(STATUS "libFuzzer: ENABLED (implies ASAN)")
+endif()
+
+# Doxygen API docs — see TODO 63.
+if(TAURUS_BUILD_DOCS)
+    find_package(Doxygen)
+    if(DOXYGEN_FOUND)
+        add_custom_target(docs
+            COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/docs/Doxyfile
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/docs
+            COMMENT "Generating Doxygen API documentation")
+        message(STATUS "Doxygen: ENABLED (target: docs)")
+    else()
+        message(WARNING "TAURUS_BUILD_DOCS=ON but Doxygen not found; skipping")
+    endif()
 endif()
 
 # Position independent code for static libraries
