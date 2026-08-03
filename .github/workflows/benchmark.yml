@@ -39,17 +39,19 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libutf8proc-dev
+          sudo apt-get install -y cmake ninja-build \
+            libutf8proc-dev libpugixml-dev libxml2-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake ninja utf8proc
+        run: brew install cmake ninja utf8proc pugixml libxml2
 
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=ON \
+            -DTAURUS_BUILD_BENCHMARKS=ON \
             -DTAURUS_ENABLE_ICONV=OFF
 
       - name: Build
@@ -57,3 +59,69 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+      # Run every benchmark binary, capture output, accumulate into one
+      # Markdown summary. Uploads the summary + per-binary text as an
+      # artifact so PRs can be compared across commits.
+      - name: Run benchmarks
+        working-directory: benchmarks
+        run: |
+          set -u
+          mkdir -p results
+          {
+            echo "# Benchmark results — ${{ matrix.os }}"
+            echo
+            echo "Commit: ${{ github.sha }}"
+            echo
+          } > results/summary.md
+
+          run_bin() {
+            local bin="$1"
+            local name
+            name=$(basename "$bin")
+            if [ -x "$bin" ]; then
+              echo "::group::Running $name"
+              # Bench binaries write JSON next to themselves; we read both
+              # stdout and the JSON drop by running from build/benchmarks/.
+              ( cd ../build/benchmarks && "./$name" ) > "../../benchmarks/results/${name}.txt" 2>&1 || \
+                echo "  (failed — see results/${name}.txt)"
+              echo "::endgroup::"
+              {
+                echo "## ${name}"
+                echo
+                echo '```'
+                cat "results/${name}.txt"
+                echo '```'
+                echo
+              } >> results/summary.md
+            fi
+          }
+
+          for bin in \
+              ../build/benchmarks/bench_dom_taurus \
+              ../build/benchmarks/bench_dom_libxml2 \
+              ../build/benchmarks/bench_xpath_taurus \
+              ../build/benchmarks/bench_xpath_libxml2 \
+              ../build/benchmarks/bench_xpath_axes_taurus \
+              ../build/benchmarks/bench_xpath_axes_libxml2 \
+              ../build/benchmarks/bench_xpath_functions_taurus \
+              ../build/benchmarks/bench_xpath_functions_libxml2 \
+              ../build/benchmarks/bench_sax_taurus \
+              ../build/benchmarks/bench_sax_libxml2 \
+              ../build/benchmarks/bench_serialize \
+              ../build/benchmarks/bench_modify_taurus \
+              ../build/benchmarks/benchmark_parse \
+              ../build/benchmarks/benchmark_parse_ops \
+              ../build/benchmarks/benchmark_first_access \
+              ../build/benchmarks/benchmark_memory \
+              ../build/benchmarks/dom_benchmark_v2; do
+            run_bin "$bin"
+          done
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.os }}
+          path: benchmarks/results/
+          if-no-files-found: warn
