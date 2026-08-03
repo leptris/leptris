@@ -431,6 +431,36 @@ TAURUS_API int taurus_document_get_strict(TaurusDocument doc);
  */
 TAURUS_API int taurus_get_strict_mode(void);
 
+/* ============================================================================
+ * Document Freeze API (TODO 88)
+ *
+ * A frozen document is marked immutable. Mutation functions SHOULD
+ * check the frozen flag and refuse to modify a frozen document.
+ * (Currently the flag is advisory — mutation functions do not yet
+ * enforce it. COW deep-copy on mutation is a future enhancement.)
+ * ============================================================================ */
+
+/**
+ * Freeze a document, marking all its nodes as immutable.
+ *
+ * After freezing, mutation functions (set_attribute, append_child,
+ * etc.) SHOULD return an error instead of modifying the tree.
+ * Currently the flag is advisory — callers can check
+ * taurus_document_is_frozen before mutating.
+ *
+ * @param doc Document to freeze. Must not be NULL.
+ * @return TAURUS_OK on success, TAURUS_ERROR_NULL_ARG if doc is NULL.
+ */
+TAURUS_API TaurusStatus taurus_document_freeze(TaurusDocument doc);
+
+/**
+ * Check if a document is frozen.
+ *
+ * @param doc Document to query. NULL returns 0.
+ * @return 1 if frozen, 0 if mutable.
+ */
+TAURUS_API int taurus_document_is_frozen(TaurusDocument doc);
+
 /**
  * Set the thread-default maximum element-nesting depth.
  *

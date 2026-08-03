@@ -898,3 +898,19 @@ TAURUS_API int taurus_document_finalize_strings(TaurusDocument doc) {
     return 1; /* Success */
 }
 
+/* ---- Freeze API (TODO 88) ---- */
+
+TAURUS_API TaurusStatus taurus_document_freeze(TaurusDocument doc) {
+    if (!doc) return TAURUS_ERROR_NULL_ARG;
+    taurus_document_freeze_tree(doc);
+    return TAURUS_OK;
+}
+
+TAURUS_API int taurus_document_is_frozen(TaurusDocument doc) {
+    if (!doc) return 0;
+    TaurusElement root = taurus_document_root(doc);
+    if (!root) return 0;
+    TaurusNode* root_node = (TaurusNode*)root;
+    return root_node->frozen ? 1 : 0;
+}
+
