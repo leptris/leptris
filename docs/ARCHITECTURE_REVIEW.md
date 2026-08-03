@@ -110,9 +110,12 @@ same thread can have different settings.
 - 27 functions, 13 axes, all operators.
 - Variable support covers boolean/number/string/node-set (the
   node-set case landed in PR #29 / TODO 86).
-- Known issue (TODO 94): XPath variable specs crash on Linux ASAN
-  with near-NULL `strcmp`. Same code passes on macOS. Likely a
-  heap-state bug only Linux ASAN catches; root cause TBD.
+- The Linux-only XPath variable crashes (TODO 94) and DTD parser
+  crashes (TODO 95) were root-caused and fixed in PR #37: the
+  project compiled with strict C99 (`C_EXTENSIONS OFF`) which made
+  `strdup()` implicitly declared as `int`, truncating 64-bit
+  pointers on Linux x86_64. Fixed by adding
+  `_POSIX_C_SOURCE=200809L` project-wide.
 
 ### `sax/` — event-driven parser
 
@@ -129,18 +132,25 @@ same thread can have different settings.
 
 ### `dtd/` — DTD support
 
-**Status**: Partial.
+**Status**: Phase 1 + Phase 2 implemented (PRs #34, #38, #39).
 
 - `parser.c`, `model.c`, `resolver.c` are wired in and work.
-- `validator.c` (PR #34) is now compiled but the validation engine
-  itself is a stub returning `TAURUS_ERROR_NOT_IMPLEMENTED` (TODO 91).
-  `taurus_dtd_error_free` is fully implemented.
+- `validator.c` (PR #34) is compiled. The validation engine has
+  Phase 1 (EMPTY content model check, PR #38) and Phase 2 (ATTLIST
+  parsing + #REQUIRED enforcement, PR #39).
 - Entity resolution works via the document's pool (post-PR-#23 fix
   that routed DTD through the document pool rather than a private
   one).
-- Known issue (TODO 95): the DTD parser crashes on Linux ASAN when
-  parsing `<!ELEMENT ...>` declarations. Same code passes on macOS.
-  Likely sibling of TODO 94 (XPath variables Linux ASAN).
+- `taurus_dtd_parse` now correctly releases its standalone pool
+  via `owns_pool` flag on `TaurusDTD` (PR #37).
+- ATTLIST parsing was unblocked by the `_POSIX_C_SOURCE` define
+  (PR #37) — without it, strdup linkage was broken on Linux.
+
+What's still pending (TODO 91 Phase 3+):
+- General #REQUIRED iteration (needs hash-table iterator API).
+- Element-content grammar matcher `(a, b+, c?)`.
+- Attribute type validation (`ID`, `IDREF`, `NMTOKEN`, enumerated).
+- `ENTITY`-typed attribute resolution.
 
 ### `serialize/` — XML output
 
