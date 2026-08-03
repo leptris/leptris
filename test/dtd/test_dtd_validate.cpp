@@ -159,3 +159,55 @@ TEST(DtdValidate, RequiredAttributePresentIsValid) {
     taurus_dtd_free(dtd);
     taurus_document_free(doc);
 }
+
+TEST(DtdValidate, RequiredCustomAttributeMissingIsInvalid) {
+    /* Phase 3: general #REQUIRED iteration. The DTD declares a
+     * #REQUIRED attribute ("version") that's not in the old
+     * id/ref allowlist — the iterator-based validator now catches it. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root version CDATA #REQUIRED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+    EXPECT_NE(err.element_name, nullptr);
+    EXPECT_STREQ(err.element_name, "root");
+    /* Message names the missing attribute. */
+    EXPECT_NE(std::string(err.message).find("version"), std::string::npos);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, ImpliedAttributeNotRequiredIsValid) {
+    /* #IMPLIED attributes are optional even if absent. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root note CDATA #IMPLIED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(err.message, nullptr);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}

@@ -344,4 +344,23 @@ int taurus_hash_table_set(StringHashTable* table, const char* key, size_t len, v
  */
 int taurus_hash_table_remove(StringHashTable* table, const char* key, size_t len);
 
+/**
+ * Iterator callback signature for taurus_hash_table_for_each.
+ *
+ * Returns 1 to continue iteration, 0 to stop early.
+ */
+typedef int (*TaurusHashTableIterator)(const char* key, size_t key_len,
+                                        void* value, void* user_data);
+
+/**
+ * Walk every entry in the hash table, invoking `iter` on each.
+ * If `iter` returns 0 for any entry, iteration stops.
+ *
+ * Used by the DTD validator (Phase 3 of TODO 91) to scan all
+ * attribute declarations without knowing keys in advance.
+ */
+void taurus_hash_table_for_each(StringHashTable* table,
+                                TaurusHashTableIterator iter,
+                                void* user_data);
+
 #endif /* TAURUS_MEMORY_POOL_H */

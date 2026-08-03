@@ -669,6 +669,27 @@ int taurus_hash_table_remove(StringHashTable* table, const char* key, size_t len
 }
 
 /* ============================================================================
+ * Iterator
+ * ============================================================================ */
+
+void taurus_hash_table_for_each(StringHashTable* table,
+                                TaurusHashTableIterator iter,
+                                void* user_data) {
+    if (!table || !iter) return;
+    for (size_t i = 0; i < table->bucket_count; i++) {
+        StringHashEntry* entry = table->buckets[i];
+        while (entry) {
+            StringHashEntry* next = entry->next;
+            if (!iter(entry->key_data, entry->key_length,
+                     entry->cached_string, user_data)) {
+                return;
+            }
+            entry = next;
+        }
+    }
+}
+
+/* ============================================================================
  * Statistics
  * ============================================================================ */
 
