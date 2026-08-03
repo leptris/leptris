@@ -136,7 +136,14 @@ TaurusDTD* taurus_dtd_create(TaurusMemoryPool* pool) {
  * explicitly invoke it.
  */
 void ttdtd_free(TaurusDTD* dtd) {
-    (void)dtd;
+    if (!dtd) return;
+    /* Only destroy the pool when this DTD owns it (i.e., it was
+     * created via the public taurus_dtd_parse API). Document-pool
+     * DTDs (created internally by the parser) leave pool ownership
+     * to the document. */
+    if (dtd->owns_pool && dtd->pool) {
+        taurus_pool_destroy((TaurusMemoryPool*)dtd->pool);
+    }
 }
 
 /* ============================================================================
