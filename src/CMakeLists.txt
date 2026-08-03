@@ -22,6 +22,7 @@ set(TAURUS_SOURCES
     # DOM nodes
     taurus/dom/node.c
     taurus/dom/node_vtable.c
+    taurus/dom/node_public.c
     taurus/dom/element.c
     taurus/dom/element_modify.c
     taurus/dom/text.c
@@ -60,6 +61,7 @@ set(TAURUS_SOURCES
     taurus/xpath/evaluator_path.c
     taurus/xpath/functions.c
     taurus/xpath/xpath_variables.c
+    taurus/xpath/xpath_public.c
 
     # SAX
     taurus/sax/parser.c
