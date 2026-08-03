@@ -25,6 +25,7 @@ extern "C" {
 
 #ifndef TAURUS_INTERNAL_TYPES_DEFINED
 #define TAURUS_INTERNAL_TYPES_DEFINED
+typedef struct taurus_node*            TaurusNodeRef;
 typedef struct taurus_document*     TaurusDocument;
 typedef struct taurus_element*      TaurusElement;
 typedef struct taurus_attribute*    TaurusAttribute;

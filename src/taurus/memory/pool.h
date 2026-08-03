@@ -17,21 +17,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "../common/types_internal.h"   /* Single source for TaurusMemoryPool */
-#include "../common/string_view.h"     /* Full TaurusStringView definition */
-
-/* Allocator hook types. Canonical definition lives in the public
- * taurus.h (guarded by TAURUS_ALLOCATION_FUNCTION_DEFINED); re-include
- * here so internal TUs that never include the public header still see
- * the typedefs. */
-#ifndef TAURUS_ALLOCATION_FUNCTION_DEFINED
-#define TAURUS_ALLOCATION_FUNCTION_DEFINED
-typedef void* (*taurus_allocation_function)(size_t size);
-#endif
-#ifndef TAURUS_DEALLOCATION_FUNCTION_DEFINED
-#define TAURUS_DEALLOCATION_FUNCTION_DEFINED
-typedef void  (*taurus_deallocation_function)(void* ptr);
-#endif
+#include "../../include/taurus/types.h"  /* Allocator hook typedefs + opaque types */
+#include "../common/types_internal.h"     /* Single source for TaurusMemoryPool */
+#include "../common/string_view.h"       /* Full TaurusStringView definition */
 
 /* ============================================================================
  * String Interning Structures (for deduplication)

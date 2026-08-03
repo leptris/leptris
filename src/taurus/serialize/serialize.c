@@ -11,17 +11,13 @@
 #include "serialize.h"
 #include "../dom/node.h"            /* TaurusNodeVTable + taurus_node_vtable_for */
 #include "../taurus_internal.h"
+/* TaurusSerializeOptions comes from taurus/types.h via taurus_internal.h's
+ * pool.h include.  No local redefinition — it would conflict with the
+ * public type. */
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <ctype.h>
-
-/* Forward declaration for public API types */
-typedef struct {
-    int indent;
-    int xml_declaration;
-    const char* encoding;
-} TaurusSerializeOptions;
 
 /* Initial buffer capacity */
 #define INITIAL_BUFFER_CAPACITY 1024
