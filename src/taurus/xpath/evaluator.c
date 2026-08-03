@@ -667,8 +667,23 @@ struct taurus_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast) 
                 case XPATH_VAR_TYPE_NODE_SET: {
                     struct taurus_xpath_result* result = xpath_result_new(XPATH_RESULT_NODESET);
                     if (!result) return NULL;
-                    /* TODO: Implement nodeset variable support */
-                    result->value.nodeset_value = xpath_nodeset_new();
+                    /* Reference the variable's nodeset by copying the
+                     * node pointer array. The nodes themselves are
+                     * document-owned (TaurusElement pointers) so they
+                     * remain valid for the document's lifetime; the
+                     * result owns the new array. Variable storage must
+                     * outlive the result (XPath spec guarantees this
+                     * within a single eval call). */
+                    XPathNodeSet* var_ns = xpath_variable_get_nodeset(var);
+                    if (var_ns && var_ns->count > 0) {
+                        result->value.nodeset_value = xpath_nodeset_new_with_capacity(var_ns->count);
+                        if (!result->value.nodeset_value) return NULL;
+                        for (size_t i = 0; i < var_ns->count; i++) {
+                            xpath_nodeset_add(result->value.nodeset_value, var_ns->nodes[i]);
+                        }
+                    } else {
+                        result->value.nodeset_value = xpath_nodeset_new();
+                    }
                     return result;
                 }
                 default:
