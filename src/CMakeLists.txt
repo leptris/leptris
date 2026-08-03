@@ -24,6 +24,7 @@ set(TAURUS_SOURCES
     taurus/dom/node_vtable.c
     taurus/dom/node_public.c
     taurus/dom/element.c
+    taurus/dom/element_query.c
     taurus/dom/element_modify.c
     taurus/dom/text.c
     taurus/dom/comment.c
