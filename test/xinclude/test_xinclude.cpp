@@ -169,3 +169,43 @@ TEST(XIncludeProcess, ParseTextReplacesIncludeWithContent) {
 }
 
 }  // namespace
+
+TEST(XIncludeProcess, ParseTextUsesFallbackWhenFileMissing) {
+    /* When the href can't be loaded, use xi:fallback content instead. */
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/this_file_does_not_exist_xyz_123.txt' "
+        "               parse='text'>"
+        "    <xi:fallback>Fallback content here</xi:fallback>"
+        "  </xi:include>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusStatus rc = taurus_xinclude_process(doc, nullptr);
+    EXPECT_EQ(rc, TAURUS_OK);
+
+    /* Verify the fallback content is in the tree as a text node. */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    bool found_fallback = false;
+    bool found_include = false;
+    TaurusNodeRef child = taurus_node_first_child((TaurusNodeRef)root);
+    while (child) {
+        const char* content = taurus_text_node_get_content(child);
+        if (content && std::string(content).find("Fallback content") != std::string::npos) {
+            found_fallback = true;
+        }
+        TaurusElement elem_child = taurus_node_as_element(child);
+        if (elem_child && taurus_xinclude_is_include_element(elem_child)) {
+            found_include = true;
+        }
+        child = taurus_node_next_sibling(child);
+    }
+    EXPECT_TRUE(found_fallback);
+    EXPECT_FALSE(found_include);
+
+    taurus_document_free(doc);
+}
