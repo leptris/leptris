@@ -19,7 +19,12 @@ fi
 DIFF=$(clang-format --style=file $FILES 2>&1 || true)
 if [ -n "$DIFF" ]; then
     echo "::warning::clang-format found formatting issues (informational):"
+    # head closes the pipe after N lines; without `set +o pipefail` the
+    # EPIPE from head would propagate via `set -e` and fail CI for what
+    # is meant to be informational-only output.
+    set +e +o pipefail
     echo "$DIFF" | head -20
+    set -e -o pipefail
     echo "(Not failing CI — formatting migration is a separate task.)"
 fi
 echo "OK: clang-format check complete (informational)"
