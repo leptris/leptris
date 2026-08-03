@@ -81,9 +81,9 @@ jobs:
             name=$(basename "$bin")
             if [ -x "$bin" ]; then
               echo "::group::Running $name"
-              # Bench binaries write JSON next to themselves; we read both
-              # stdout and the JSON drop by running from build/benchmarks/.
-              ( cd ../build/benchmarks && "./$name" ) > "../../benchmarks/results/${name}.txt" 2>&1 || \
+              # Redirect is INSIDE the subshell so it's evaluated relative
+              # to build/benchmarks/ (where JSON also lands).
+              ( cd ../build/benchmarks && "./$name" > "../../benchmarks/results/${name}.txt" 2>&1 ) || \
                 echo "  (failed — see results/${name}.txt)"
               echo "::endgroup::"
               {
