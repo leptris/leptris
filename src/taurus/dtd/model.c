@@ -10,6 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* _POSIX_C_SOURCE=200809L is defined project-wide (see src/CMakeLists.txt)
+ * so strdup() is properly declared. See xpath/xpath_variables.c note
+ * for the bug this prevents (TODOs 94, 95). */
+
 /**
  * Create element declaration
  */
@@ -226,7 +230,7 @@ DTDElementDecl* ttdtd_element_create(const char* name) {
     DTDElementDecl* element = (DTDElementDecl*)calloc(1, sizeof(DTDElementDecl));
     if (!element) return NULL;
 
-    /* Duplicate name */
+    /* Copy name */
     element->name = strdup(name);
     if (!element->name) {
         free(element);
