@@ -30,6 +30,11 @@
 #include <string.h>
 #include <stdio.h>
 
+/* Forward decl from content_check.c (Phase 4 of TODO 91). */
+int taurus_content_model_match(const char* model, const char* elem_name,
+                                const char** child_names, size_t child_count,
+                                char* out_msg, size_t msg_size);
+
 static char* dup_str(const char* src) {
     if (!src) return NULL;
     size_t len = strlen(src);
@@ -137,9 +142,48 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
                 return 0;
             }
         }
-        /* DTD_CONTENT_ANY: any content allowed, always valid.
-         * DTD_CONTENT_MIXED, DTD_CONTENT_CHILDREN, DTD_CONTENT_ELEMENT,
-         * DTD_CONTENT_PCDATA: need the grammar matcher (Phase 4). */
+        /* DTD_CONTENT_ANY: any content allowed, always valid. */
+        if (decl->content_type == DTD_CONTENT_ANY) {
+            /* Valid by definition; fall through. */
+        } else if (decl->content_model && decl->content_model[0]) {
+            /* Phase 4: walk the element's actual element-type
+             * children and match them against the parsed content
+             * model. Phase 1's EMPTY check already handles the empty
+             * case; the matcher handles the other content types
+             * (CHILDREN, MIXED, ELEMENT) where a model is stored. */
+            size_t child_count = 0;
+            for (TaurusNodeRef c = taurus_node_first_child((TaurusNodeRef)elem);
+                 c; c = taurus_node_next_sibling(c)) {
+                if (taurus_node_get_type(c) == TAURUS_NODE_TYPE_ELEMENT) {
+                    child_count++;
+                }
+            }
+            if (child_count > 0) {
+                const char** child_names = (const char**)malloc(
+                    child_count * sizeof(const char*));
+                if (child_names) {
+                    size_t i = 0;
+                    for (TaurusNodeRef c = taurus_node_first_child((TaurusNodeRef)elem);
+                         c && i < child_count; c = taurus_node_next_sibling(c)) {
+                        if (taurus_node_get_type(c) == TAURUS_NODE_TYPE_ELEMENT) {
+                            child_names[i++] = taurus_element_get_name((TaurusElement)c);
+                        }
+                    }
+                    char msg_buf[256];
+                    int ok = taurus_content_model_match(
+                        decl->content_model, name, child_names, child_count,
+                        msg_buf, sizeof(msg_buf));
+                    if (!ok) {
+                        set_error(error, msg_buf, name);
+                        free((void*)child_names);
+                        return 0;
+                    }
+                    free((void*)child_names);
+                }
+            }
+        }
+        /* DTD_CONTENT_PCDATA (text-only): unmatched here; Phase 4
+         * only validates element-type children. */
     }
     /* Phase 1 does NOT error on undeclared elements — that's stricter
      * than most real-world DTD validation (which often permits
