@@ -135,4 +135,86 @@ TEST(XPathLeaks, ComplexQueriesDoNotLeak) {
     /* Under leaks --atExit --: 0 bytes leaked. */
 }
 
+// ---- XPath variables (TODO 86) -------------------------------------------
+
+TEST(XPathVariables, BooleanVariableEvaluates) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><a/></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathVariableSet vars = taurus_xpath_variable_set_new();
+    ASSERT_NE(vars, nullptr);
+    EXPECT_EQ(taurus_xpath_variable_set_boolean(vars, "flag", 1), TAURUS_OK);
+
+    TaurusXPathResult r = taurus_xpath_eval_with_vars(doc, "$flag", vars);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_type(r), TAURUS_XPATH_BOOLEAN);
+    EXPECT_EQ(taurus_xpath_result_boolean(r), 1);
+
+    taurus_xpath_result_free(r);
+    taurus_xpath_variable_set_free(vars);
+    taurus_document_free(doc);
+}
+
+TEST(XPathVariables, NumberVariableEvaluates) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><a/></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathVariableSet vars = taurus_xpath_variable_set_new();
+    ASSERT_NE(vars, nullptr);
+    EXPECT_EQ(taurus_xpath_variable_set_number(vars, "n", 42.5), TAURUS_OK);
+
+    TaurusXPathResult r = taurus_xpath_eval_with_vars(doc, "$n + 1", vars);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_type(r), TAURUS_XPATH_NUMBER);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 43.5);
+
+    taurus_xpath_result_free(r);
+    taurus_xpath_variable_set_free(vars);
+    taurus_document_free(doc);
+}
+
+TEST(XPathVariables, StringVariableEvaluates) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><a>hello</a></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathVariableSet vars = taurus_xpath_variable_set_new();
+    ASSERT_NE(vars, nullptr);
+    EXPECT_EQ(taurus_xpath_variable_set_string(vars, "greeting", "hello"), TAURUS_OK);
+
+    /* The variable itself evaluates to its string value. */
+    TaurusXPathResult r = taurus_xpath_eval_with_vars(doc, "$greeting", vars);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_type(r), TAURUS_XPATH_STRING);
+    char* s = taurus_xpath_result_string(r);
+    EXPECT_STREQ(s, "hello");
+    taurus_free_string(s);
+
+    taurus_xpath_result_free(r);
+    taurus_xpath_variable_set_free(vars);
+    taurus_document_free(doc);
+}
+
+TEST(XPathVariables, UnknownVariableReturnsEmpty) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathVariableSet vars = taurus_xpath_variable_set_new();
+    ASSERT_NE(vars, nullptr);
+
+    /* Referencing undefined variable: evaluator returns NULL */
+    TaurusXPathResult r = taurus_xpath_eval_with_vars(doc, "$undefined", vars);
+    EXPECT_EQ(r, nullptr);
+
+    taurus_xpath_variable_set_free(vars);
+    taurus_document_free(doc);
+}
+
 }  // namespace
