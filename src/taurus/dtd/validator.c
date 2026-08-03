@@ -28,6 +28,7 @@
 #include "../memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdio.h>
 
 /* Forward decl from content_check.c (Phase 4 of TODO 91). */
@@ -224,21 +225,27 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
         if (!attr_name || !attr->value) continue;
         DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
         if (!ad || !ad->attr_type) continue;
-        if (strcmp(ad->attr_type, "ID") != 0) continue;
-        const char* id_value = attr->value;
-        size_t id_len = strlen(id_value);
-        if (taurus_hash_table_get(id_table, id_value, id_len) != NULL) {
-            char msg[160];
-            snprintf(msg, sizeof(msg),
-                     "Duplicate ID value '%s'", id_value);
-            set_error(error, msg, name);
-            return 0;
+        if (strcmp(ad->attr_type, "ID") == 0) {
+            const char* id_value = attr->value;
+            size_t id_len = strlen(id_value);
+            if (taurus_hash_table_get(id_table, id_value, id_len) != NULL) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "Duplicate ID value '%s'", id_value);
+                set_error(error, msg, name);
+                return 0;
+            }
+            if (!taurus_hash_table_set(id_table, id_value, id_len,
+                                        (void*)(uintptr_t)1,
+                                        (TaurusMemoryPool*)dtd->pool)) {
+                /* OOM — would need proper error reporting. */
+            }
         }
-        if (!taurus_hash_table_set(id_table, id_value, id_len,
-                                    (void*)(uintptr_t)1,
-                                    (TaurusMemoryPool*)dtd->pool)) {
-            /* OOM — would need proper error reporting. */
-        }
+        /* Phase 6: IDREF. We can't check yet — the referenced ID
+         * might be declared later in the document. Defer to a
+         * second pass after all IDs are collected. The second pass
+         * (validate_idref_pass) walks again and verifies each IDREF
+         * against the now-complete id_table. */
     }
 
     /* Recurse into children. */
@@ -246,6 +253,68 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
     while (child) {
         int rc = validate_element_recursive(child, dtd, error, id_table);
         if (rc != 1) return rc;  /* propagate first violation */
+        child = taurus_element_next_sibling_any(child);
+    }
+    return 1;
+}
+
+/* Phase 6: second pass — verify IDREF attributes resolve to existing IDs.
+ * By the time this runs, id_table contains every ID in the document. */
+static int validate_idref_pass(TaurusElement elem, TaurusDTD* dtd,
+                                StringHashTable* id_table,
+                                TaurusDTDError* error) {
+    if (!elem) return 1;
+    const char* name = taurus_element_get_name(elem);
+    if (name) {
+        uint8_t ac = taurus_element_attribute_count(elem);
+        for (uint8_t i = 0; i < ac; i++) {
+            struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
+            if (!attr) continue;
+            const char* attr_name = attr->name;
+            if (!attr_name || !attr->value) continue;
+            DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
+            if (!ad || !ad->attr_type) continue;
+            /* IDREF (single) and IDREFS (whitespace-separated list). */
+            if (strcmp(ad->attr_type, "IDREF") == 0) {
+                const char* ref = attr->value;
+                size_t ref_len = strlen(ref);
+                if (taurus_hash_table_get(id_table, ref, ref_len) == NULL) {
+                    char msg[180];
+                    snprintf(msg, sizeof(msg),
+                             "IDREF '%s' does not resolve to any ID", ref);
+                    set_error(error, msg, name);
+                    return 0;
+                }
+            } else if (strcmp(ad->attr_type, "IDREFS") == 0) {
+                /* Whitespace-separated list of references. */
+                const char* p = attr->value;
+                while (*p) {
+                    while (*p && isspace((unsigned char)*p)) p++;
+                    if (!*p) break;
+                    const char* start = p;
+                    while (*p && !isspace((unsigned char)*p)) p++;
+                    size_t one_len = (size_t)(p - start);
+                    if (taurus_hash_table_get(id_table, start, one_len) == NULL) {
+                        char ref_buf[128];
+                        size_t copy = one_len < sizeof(ref_buf) - 1
+                                          ? one_len : sizeof(ref_buf) - 1;
+                        memcpy(ref_buf, start, copy);
+                        ref_buf[copy] = '\0';
+                        char msg[200];
+                        snprintf(msg, sizeof(msg),
+                                 "IDREFS token '%s' does not resolve to any ID",
+                                 ref_buf);
+                        set_error(error, msg, name);
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    TaurusElement child = taurus_element_first_child_any(elem);
+    while (child) {
+        int rc = validate_idref_pass(child, dtd, id_table, error);
+        if (rc != 1) return rc;
         child = taurus_element_next_sibling_any(child);
     }
     return 1;
@@ -274,6 +343,11 @@ int taurus_dtd_validate(TaurusDocument doc, TaurusDTD* dtd, TaurusDTDError* erro
         return -1;
     }
     int rc = validate_element_recursive(root, dtd, error, id_table);
+    if (rc == 1) {
+        /* Phase 6: IDREF resolution. Run after Phase 5 completes so
+         * the ID table contains every ID in the document. */
+        rc = validate_idref_pass(root, dtd, id_table, error);
+    }
     taurus_hash_table_destroy(id_table);
     return rc;
 }

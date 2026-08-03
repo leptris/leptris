@@ -331,3 +331,59 @@ TEST(DtdValidate, DuplicateIdIsInvalid) {
     taurus_dtd_free(dtd);
     taurus_document_free(doc);
 }
+
+TEST(DtdValidate, IdrefResolvesIsValid) {
+    /* Phase 6: IDREF must reference an existing ID. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] =
+        "<root><a id='x1'/><b ref='x1'/></root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root (a|b)>"
+        "<!ELEMENT a EMPTY>"
+        "<!ELEMENT b EMPTY>"
+        "<!ATTLIST a id ID #IMPLIED>"
+        "<!ATTLIST b ref IDREF #IMPLIED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(err.message, nullptr);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, IdrefUnresolvedIsInvalid) {
+    /* Same DTD; ref='unknown' refers to no ID. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] =
+        "<root><a id='x1'/><b ref='unknown'/></root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root (a|b)>"
+        "<!ELEMENT a EMPTY>"
+        "<!ELEMENT b EMPTY>"
+        "<!ATTLIST a id ID #IMPLIED>"
+        "<!ATTLIST b ref IDREF #IMPLIED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+    EXPECT_NE(std::string(err.message).find("unknown"), std::string::npos);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
