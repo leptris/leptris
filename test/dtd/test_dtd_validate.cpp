@@ -7,16 +7,10 @@
 
 namespace {
 
-TEST(DtdValidate, ReturnsNotImplementedAfterParsingDtd) {
-    /* The validator is currently a stub (TODO 91). It must:
-     * - Not crash on valid arguments (including a parsed DTD).
-     * - Return -1 (distinguishable from "valid" = 1 and "invalid" = 0).
-     * - Populate `error` with a message explaining the limitation.
-     *
-     * Exercising taurus_dtd_parse used to crash on Linux ASAN at
-     * strlen in ttdtd_add_element (TODO 95) — fixed by adding
-     * _POSIX_C_SOURCE=200809L project-wide so strdup() is properly
-     * declared. */
+TEST(DtdValidate, EmptyElementWithNoChildrenIsValid) {
+    /* The validator (Phase 1 of TODO 91) now actually runs. With a DTD
+     * declaring <!ELEMENT root EMPTY> and a document whose root has
+     * no children, validation returns 1 (valid). */
     TaurusStatus st = TAURUS_OK;
     const char xml[] = "<root/>";
     TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
@@ -28,8 +22,62 @@ TEST(DtdValidate, ReturnsNotImplementedAfterParsingDtd) {
 
     TaurusDTDError err = {0};
     int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(err.message, nullptr);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, EmptyElementWithChildrenIsInvalid) {
+    /* Same DTD, but the document has a child element — must report
+     * a violation with element_name = "root". */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root><child/></root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] = "<!ELEMENT root EMPTY>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+    EXPECT_NE(err.element_name, nullptr);
+    EXPECT_STREQ(err.element_name, "root");
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, NullDocOrDtdReturnsError) {
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(nullptr, nullptr, &err);
     EXPECT_EQ(rc, -1);
     EXPECT_NE(err.message, nullptr);
+    taurus_dtd_error_free(&err);
+}
+
+TEST(DtdValidate, UndeclaredElementIsAccepted) {
+    /* Phase 1 does not enforce element declaration presence (real-world
+     * DTDs often permit extra elements). Undeclared root is OK. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<undeclared/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] = "<!ELEMENT other EMPTY>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(err.message, nullptr);
 
     taurus_dtd_error_free(&err);
     taurus_dtd_free(dtd);
