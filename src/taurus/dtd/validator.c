@@ -25,6 +25,7 @@
 #include "model.h"
 #include "../dom/element.h"
 #include "../dom/node.h"
+#include "../memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -64,6 +65,55 @@ static int element_has_element_children(TaurusElement elem) {
     return 0;
 }
 
+/* Phase 3: check #REQUIRED ATTLIST attributes by iterating the DTD's
+ * attribute hash table. The iterator context carries the element under
+ * validation and the error struct so we can short-circuit on first
+ * violation. */
+typedef struct {
+    TaurusElement elem;
+    const char* elem_name;
+    size_t elem_name_len;
+    TaurusDTDError* error;
+    int found_violation;
+} AttrCheckContext;
+
+static int attr_check_iter(const char* key, size_t key_len,
+                           void* value, void* user_data) {
+    AttrCheckContext* ctx = (AttrCheckContext*)user_data;
+    DTDAttributeDecl* decl = (DTDAttributeDecl*)value;
+
+    /* Hash key is "element.attr"; does this entry belong to our element? */
+    if (key_len <= ctx->elem_name_len + 1) return 1;  /* continue */
+    if (memcmp(key, ctx->elem_name, ctx->elem_name_len) != 0) return 1;
+    if (key[ctx->elem_name_len] != '.') return 1;
+
+    /* This declaration belongs to the element. If #REQUIRED and the
+     * attribute is missing from the document, that's a violation. */
+    if (decl->default_type == DTD_ATTR_REQUIRED) {
+        const char* attr_name = key + ctx->elem_name_len + 1;
+        size_t attr_name_len = key_len - ctx->elem_name_len - 1;
+        /* Build a temporary null-terminated name so the lookup helper
+         * can use it. Pool the alloc to avoid OOM bookkeeping. */
+        char attr_buf[256];
+        if (attr_name_len < sizeof(attr_buf)) {
+            memcpy(attr_buf, attr_name, attr_name_len);
+            attr_buf[attr_name_len] = '\0';
+            struct taurus_attribute* present =
+                taurus_element_get_attribute_by_name(ctx->elem, attr_buf);
+            if (!present) {
+                char msg_buf[200];
+                snprintf(msg_buf, sizeof(msg_buf),
+                         "Element '%s' missing #REQUIRED attribute '%s'",
+                         ctx->elem_name, attr_buf);
+                set_error(ctx->error, msg_buf, ctx->elem_name);
+                ctx->found_violation = 1;
+                return 0;  /* stop iteration */
+            }
+        }
+    }
+    return 1;  /* continue */
+}
+
 static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
                                        TaurusDTDError* error) {
     if (!elem) return 1;
@@ -89,42 +139,23 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
         }
         /* DTD_CONTENT_ANY: any content allowed, always valid.
          * DTD_CONTENT_MIXED, DTD_CONTENT_CHILDREN, DTD_CONTENT_ELEMENT,
-         * DTD_CONTENT_PCDATA: need the grammar matcher (Phase 3). */
+         * DTD_CONTENT_PCDATA: need the grammar matcher (Phase 4). */
     }
     /* Phase 1 does NOT error on undeclared elements — that's stricter
      * than most real-world DTD validation (which often permits
      * additional elements). Add an option later if needed. */
 
-    /* Phase 2: enforce #REQUIRED ATTLIST attributes on this element.
-     * The DTD attribute hash table is keyed by "element.attr". We
-     * don't know up-front which attrs are declared for this element,
-     * so we walk the common cases via ttdtd_lookup_attribute by
-     * checking each attribute present on the element (Phase 2 needs
-     * the inverse — what's REQUIRED but missing). Without iteration
-     * over the DTD's attribute keys, we approximate by checking the
-     * element's known ATTLIST entries via the parser.
-     *
-     * To keep this Phase 2 bounded, we test the well-known required
-     * attributes from a fixed allowlist (id, ref, class, role). Real
-     * DTDs that declare other #REQUIRED attributes won't be checked
-     * until the DTD's attribute table iteration API is exposed. */
-    static const char* common_required_attrs[] = { "id", "ref", NULL };
-    for (size_t i = 0; common_required_attrs[i]; i++) {
-        const char* attr_name = common_required_attrs[i];
-        DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
-        if (ad && ad->default_type == DTD_ATTR_REQUIRED) {
-            struct taurus_attribute* present =
-                taurus_element_get_attribute_by_name(elem, attr_name);
-            if (!present) {
-                char buf[128];
-                snprintf(buf, sizeof(buf),
-                         "Element '%s' missing #REQUIRED attribute '%s'",
-                         name, attr_name);
-                set_error(error, buf, name);
-                return 0;
-            }
-        }
-    }
+    /* Phase 3: walk attribute declarations for this element. */
+    AttrCheckContext ctx = {
+        .elem = elem,
+        .elem_name = name,
+        .elem_name_len = strlen(name),
+        .error = error,
+        .found_violation = 0,
+    };
+    taurus_hash_table_for_each((StringHashTable*)dtd->tables.attributes,
+                               attr_check_iter, &ctx);
+    if (ctx.found_violation) return 0;
 
     /* Recurse into children. */
     TaurusElement child = taurus_element_first_child_any(elem);
