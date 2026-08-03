@@ -1,15 +1,19 @@
 /* xinclude/xinclude.c — XInclude 1.0 support.
  *
- * Implements parse="text" XInclude processing: walks the document
- * tree, finds xi:include elements with parse="text", loads the
- * referenced file, and replaces the xi:include element with a text
- * node containing the file content.
+ * Implements XInclude 1.0 processing for both parse="text" and
+ * parse="xml" modes.  Walks the document tree, finds xi:include
+ * elements, and substitutes them with the included content.
  *
- * parse="xml" mode is still a stub (requires cross-document node
- * copying with pool ownership transfer — see TODO 92).
+ *   parse="text" — load the file as plain text, splice a text node
+ *                  in place of the xi:include element.
+ *   parse="xml"  — load+parse the file as XML, deep-copy the root
+ *                  of the included document into the parent document's
+ *                  pool, splice the copy in place of the xi:include.
+ *                  xpointer fragment selection is TODO 92 Phase 3.
  *
- * Element-classification helpers (is_include_element, etc.) are
- * fully implemented and documented in taurus.h.
+ * xi:fallback is honored in both modes.  Element-classification
+ * helpers (is_include_element, etc.) are fully implemented and
+ * documented in taurus.h.
  */
 
 #include "../../include/taurus.h"
@@ -17,6 +21,9 @@
 #include "../dom/element.h"
 #include "../dom/node.h"
 #include "../dom/text.h"
+#include "../dom/cdata.h"
+#include "../dom/comment.h"
+#include "../dom/pi.h"
 #include "../memory/pool.h"
 #include <string.h>
 #include <stdlib.h>
@@ -87,6 +94,94 @@ static char* load_file_content(const char* path, size_t* out_len) {
     return buf;
 }
 
+/* ---- cross-document deep copy ---- */
+
+/* Deep-copy a node subtree into `target_pool`, rewriting every StringView
+ * and char* into freshly pool-owned storage.  The returned subtree is
+ * self-contained — none of its pointers reference the source document.
+ *
+ * Returns NULL on allocation failure (partial copies are abandoned
+ * along with the pool, which is freed document-scoped). */
+static TaurusNode* deep_copy_node(const TaurusNode* src,
+                                   TaurusMemoryPool* target_pool);
+
+static TaurusElement deep_copy_element(const TaurusElement src,
+                                        TaurusMemoryPool* target_pool) {
+    const char* name = taurus_element_get_name(src);
+    TaurusElement dst = taurus_element_create_pooled(name, target_pool);
+    if (!dst) return NULL;
+
+    /* Copy attributes. */
+    for (struct taurus_attribute* a = src->first_attribute; a; a = a->next) {
+        const char* a_name = a->name ? a->name : "";
+        const char* a_value = a->value ? a->value : "";
+        taurus_element_add_attribute_pooled(dst, a_name, a_value, target_pool);
+    }
+
+    /* Copy children (any type).  We can't use taurus_element_append_child
+     * because it only links elements — mixed content needs the generic
+     * set_next_sibling + parent.first_child / last_child wiring. */
+    TaurusNode* prev_copy = NULL;
+    for (TaurusNode* child = src->first_child;
+         child;
+         child = taurus_node_get_next_sibling(child)) {
+
+        TaurusNode* child_copy = deep_copy_node(child, target_pool);
+        if (!child_copy) return NULL;
+
+        if (prev_copy) {
+            taurus_node_set_next_sibling(prev_copy, child_copy);
+        } else {
+            dst->first_child = child_copy;
+        }
+        prev_copy = child_copy;
+    }
+    if (prev_copy) {
+        dst->last_child = prev_copy;
+    }
+    return dst;
+}
+
+static TaurusNode* deep_copy_node(const TaurusNode* src,
+                                   TaurusMemoryPool* target_pool) {
+    if (!src) return NULL;
+
+    switch (src->type) {
+        case TAURUS_NODE_TYPE_ELEMENT:
+            return (TaurusNode*)deep_copy_element((TaurusElement)src, target_pool);
+
+        case TAURUS_NODE_TYPE_TEXT: {
+            const TaurusTextNode* t = (const TaurusTextNode*)src;
+            const char* content = t->content ? t->content : "";
+            return (TaurusNode*)taurus_text_create(content, strlen(content), target_pool);
+        }
+
+        case TAURUS_NODE_TYPE_CDATA: {
+            const TaurusCDATANode* c = (const TaurusCDATANode*)src;
+            const char* content = c->content ? c->content : "";
+            return (TaurusNode*)taurus_cdata_create(content, strlen(content), target_pool);
+        }
+
+        case TAURUS_NODE_TYPE_COMMENT: {
+            const TaurusCommentNode* cm = (const TaurusCommentNode*)src;
+            const char* content = cm->content ? cm->content : "";
+            return (TaurusNode*)taurus_comment_create(content, strlen(content), target_pool);
+        }
+
+        case TAURUS_NODE_TYPE_PI: {
+            const TaurusPINode* pi = (const TaurusPINode*)src;
+            const char* tgt = pi->target ? pi->target : "";
+            const char* data = pi->data ? pi->data : "";
+            return (TaurusNode*)taurus_pi_create(tgt, strlen(tgt), data, strlen(data), target_pool);
+        }
+
+        default:
+            /* DOCTYPE and other specialized nodes don't appear in element
+             * content; nothing to copy. */
+            return NULL;
+    }
+}
+
 /* Replace one child of `parent` with `new_node`.
  * Walks parent->first_child to find the node before `old_node`,
  * then splices new_node in. */
@@ -120,97 +215,115 @@ static void replace_child_node(TaurusElement parent,
     }
 }
 
-/* Recursive walker. Returns 0 on first failure (file not found,
- * parse error). Returns 1 if all includes processed. */
-static int process_element_text_xinclude(TaurusElement elem,
-                                          struct taurus_document* doc,
-                                          const char* base_url) {
+/* Build the full path to an xi:include href relative to base_url.
+ * Writes into out (fixed buffer) and returns out on success, NULL on
+ * overflow.  No dynamic allocation — keeps the call site simple. */
+static char* join_path(char* out, size_t out_size,
+                       const char* base_url, const char* href) {
+    if (!href) return NULL;
+    int n;
+    if (base_url && base_url[0]) {
+        n = snprintf(out, out_size, "%s/%s", base_url, href);
+    } else {
+        n = snprintf(out, out_size, "%s", href);
+    }
+    return (n < 0 || (size_t)n >= out_size) ? NULL : out;
+}
+
+/* Find the xi:fallback child of an xi:include element, if any. */
+static TaurusElement find_fallback(TaurusElement include_elem) {
+    for (TaurusNodeRef fb = taurus_node_first_child((TaurusNodeRef)include_elem);
+         fb;
+         fb = taurus_node_next_sibling(fb)) {
+        TaurusElement fe = taurus_node_as_element(fb);
+        if (fe && taurus_xinclude_is_fallback_element(fe)) return fe;
+    }
+    return NULL;
+}
+
+/* Recursive walker. Bottom-up so that included content can itself
+ * contain nested xi:include elements.  Returns 0 on first hard failure
+ * (parse error, alloc failure), 1 otherwise. */
+static int process_element_xinclude(TaurusElement elem,
+                                     struct taurus_document* doc,
+                                     const char* base_url) {
     if (!elem) return 1;
 
-    /* Check children first (depth-first), then check if THIS element
-     * is an xi:include. We process bottom-up so that included content
-     * itself can contain nested xi:include elements. */
     TaurusNodeRef child = taurus_node_first_child((TaurusNodeRef)elem);
     while (child) {
         TaurusNodeRef next = taurus_node_next_sibling(child);
         if (taurus_node_get_type(child) == TAURUS_NODE_TYPE_ELEMENT) {
-            int rc = process_element_text_xinclude(
-                (TaurusElement)child, doc, base_url);
+            int rc = process_element_xinclude((TaurusElement)child, doc, base_url);
             if (!rc) return 0;
         }
         child = next;
     }
 
-    /* Is this element an xi:include? */
     if (!taurus_xinclude_is_include_element(elem)) return 1;
 
-    /* Only process parse="text" for now. parse="xml" is TODO 92. */
     const char* parse = taurus_xinclude_get_parse(elem);
-    if (!parse || strcmp(parse, "text") != 0) {
-        /* parse="xml" not implemented — skip silently. */
-        return 1;
-    }
-
-    /* Load the file. */
     const char* href = taurus_xinclude_get_href(elem);
-    if (!href || !href[0]) return 1;  /* No href — nothing to do. */
+    if (!href || !href[0]) return 1;
 
-    /* Build full path. If base_url is provided, prepend it.
-     * For simplicity, treat href as relative to the current
-     * directory (or to base_url if given). */
     char full_path[4096];
-    if (base_url && base_url[0]) {
-        snprintf(full_path, sizeof(full_path), "%s/%s", base_url, href);
-    } else {
-        snprintf(full_path, sizeof(full_path), "%s", href);
-    }
+    if (!join_path(full_path, sizeof(full_path), base_url, href)) return 1;
 
     size_t content_len = 0;
     char* content = load_file_content(full_path, &content_len);
 
-    TaurusTextNode* text = NULL;
+    /* The substitute node — element for parse="xml", text for parse="text",
+     * NULL on failure (fallback path below). */
+    TaurusNode* substitute = NULL;
 
     if (content) {
-        /* File loaded — create text node from file content. */
-        text = taurus_text_create(content, content_len, doc->pool);
-        free(content);
-    } else {
-        /* File not found — check for xi:fallback child element. */
-        TaurusNodeRef fb = taurus_node_first_child((TaurusNodeRef)elem);
-        TaurusElement fallback_elem = NULL;
-        while (fb) {
-            TaurusElement fe = taurus_node_as_element(fb);
-            if (fe && taurus_xinclude_is_fallback_element(fe)) {
-                fallback_elem = fe;
-                break;
-            }
-            fb = taurus_node_next_sibling(fb);
-        }
+        int is_xml = (!parse || strcmp(parse, "xml") == 0);
 
-        if (fallback_elem) {
-            /* Extract fallback's text content. For simplicity, gather
-             * all text children of the fallback into one string. The
-             * text node replaces the xi:include element.
-             *
-             * NOTE: taurus_element_text calls taurus_element_get_text_content
-             * which may malloc — that string leaks. Use the internal
-             * getter directly so we can free it after creating the
-             * pool-owned text node. */
-            char* fb_text = taurus_element_get_text_content(fallback_elem);
-            if (fb_text) {
-                text = taurus_text_create(fb_text, strlen(fb_text), doc->pool);
-                free(fb_text);
+        if (is_xml) {
+            TaurusStatus st = TAURUS_OK;
+            TaurusDocument included_doc = taurus_parse_string(content, content_len, &st);
+            if (included_doc && st == TAURUS_OK) {
+                /* Resolve any xi:include nested inside the included doc
+                 * before splicing — XInclude processes recursively. */
+                taurus_xinclude_process(included_doc, base_url);
+                TaurusElement inc_root = taurus_document_root(included_doc);
+                if (inc_root) {
+                    substitute = deep_copy_node((const TaurusNode*)inc_root, doc->pool);
+                }
             }
+            if (included_doc) taurus_document_free(included_doc);
+        } else if (strcmp(parse, "text") == 0) {
+            substitute = (TaurusNode*)taurus_text_create(content, content_len, doc->pool);
         }
-        /* If no fallback and no file, silently skip per XInclude spec
-         * when no fallback is provided. The spec says the processor
-         * SHOULD report a resource error, but we're lenient. */
+        /* Unknown parse= value: silently skip, per XInclude spec. */
+        free(content);
     }
 
-    if (text) {
+    if (!substitute) {
+        /* Resource error: try xi:fallback before giving up. */
+        TaurusElement fb = find_fallback(elem);
+        if (fb) {
+            char* fb_text = taurus_element_get_text_content(fb);
+            if (fb_text) {
+                substitute = (TaurusNode*)taurus_text_create(fb_text, strlen(fb_text), doc->pool);
+                taurus_free(fb_text);
+            }
+        }
+        /* No fallback: spec says resource error SHOULD be reported; we're
+         * lenient and leave the xi:include in place. */
+    }
+
+    if (substitute) {
         TaurusElement parent = taurus_element_get_parent(elem);
         if (parent) {
-            replace_child_node(parent, (TaurusNode*)elem, (TaurusNode*)text);
+            replace_child_node(parent, (TaurusNode*)elem, substitute);
+
+            /* The substitute was allocated from doc->pool but its
+             * document pointer (and the document pointers of every
+             * descendant) is still NULL.  Re-stamp them so future
+             * callers can reach the pool through element->document. */
+            if (substitute->type == TAURUS_NODE_TYPE_ELEMENT) {
+                taurus_element_set_document_tree((TaurusElement)substitute, doc);
+            }
         }
     }
 
@@ -223,7 +336,7 @@ TAURUS_API TaurusStatus taurus_xinclude_process(TaurusDocument doc, const char* 
     TaurusElement root = taurus_document_root(doc);
     if (!root) return TAURUS_OK;
 
-    int rc = process_element_text_xinclude(root, doc, base_url);
+    int rc = process_element_xinclude(root, doc, base_url);
     if (!rc) return TAURUS_ERROR_IO;
     return TAURUS_OK;
 }

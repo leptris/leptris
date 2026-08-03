@@ -140,13 +140,9 @@ TaurusElement taurus_element_create_with_view(
 /* Create element with in-place string (zero-copy) */
 TaurusElement taurus_element_create_pooled_inplace(char* name, TaurusMemoryPool* pool);
 
-/* Create element using memory pool (fast O(1) allocation) */
+/* Create element using memory pool (O(1) bump allocation).
+ * Single pool-routed entry point — TODO 26 removed the _fast wrapper. */
 TaurusElement taurus_element_create_pooled(const char* name, TaurusMemoryPool* pool);
-
-/* Create element using memory pool.  Single pool-routed entry point
- * (TODO 26 removed the _fast wrapper; use this directly). */
-TaurusElement taurus_element_create_pooled(const char* name,
-                                            TaurusMemoryPool* pool);
 
 void taurus_element_free(TaurusElement elem);
 

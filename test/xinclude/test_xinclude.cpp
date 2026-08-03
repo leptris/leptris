@@ -209,3 +209,201 @@ TEST(XIncludeProcess, ParseTextUsesFallbackWhenFileMissing) {
 
     taurus_document_free(doc);
 }
+
+// ---- parse="xml" ----------------------------------------------------------
+//
+// XInclude 1.0 default mode: the href is loaded as XML and the root
+// of the included document replaces the xi:include element.  Children,
+// attributes, and mixed content must all survive the cross-document
+// copy.
+
+TEST(XIncludeProcess, ParseXmlReplacesIncludeWithRootElement) {
+    const char included_xml[] =
+        "<chapter><title>Included</title><para>Body text</para></chapter>";
+    const char* inc_path = "/tmp/taurus_xinclude_xml_test.xml";
+    FILE* f = fopen(inc_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(included_xml, 1, std::strlen(included_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<book xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_xinclude_xml_test.xml'/>"
+        "</book>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(taurus_xinclude_process(doc, nullptr), TAURUS_OK);
+
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* The xi:include must be gone, replaced by <chapter>. */
+    bool found_chapter = false;
+    bool found_include = false;
+    for (TaurusNodeRef child = taurus_node_first_child((TaurusNodeRef)root);
+         child;
+         child = taurus_node_next_sibling(child)) {
+        TaurusElement e = taurus_node_as_element(child);
+        if (!e) continue;
+        if (taurus_xinclude_is_include_element(e)) {
+            found_include = true;
+        }
+        if (std::string(taurus_element_name(e)) == "chapter") {
+            found_chapter = true;
+        }
+    }
+    EXPECT_TRUE(found_chapter);
+    EXPECT_FALSE(found_include);
+
+    taurus_document_free(doc);
+    remove(inc_path);
+}
+
+TEST(XIncludeProcess, ParseXmlCopiesAttributesAndChildren) {
+    /* The deep-copy must carry over attributes and the entire child
+     * subtree — not just the bare root element. */
+    const char included_xml[] =
+        "<data id='x' lang='en'>"
+        "  <item>one</item>"
+        "  <item>two</item>"
+        "  text-around"
+        "</data>";
+    const char* inc_path = "/tmp/taurus_xinclude_attrs_test.xml";
+    FILE* f = fopen(inc_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(included_xml, 1, std::strlen(included_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_xinclude_attrs_test.xml' parse='xml'/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(taurus_xinclude_process(doc, nullptr), TAURUS_OK);
+
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    TaurusElement data_elem = nullptr;
+    for (TaurusNodeRef child = taurus_node_first_child((TaurusNodeRef)root);
+         child;
+         child = taurus_node_next_sibling(child)) {
+        TaurusElement e = taurus_node_as_element(child);
+        if (e && std::string(taurus_element_name(e)) == "data") {
+            data_elem = e;
+            break;
+        }
+    }
+    ASSERT_NE(data_elem, nullptr);
+
+    /* Attributes survived the copy. */
+    EXPECT_STREQ(taurus_element_attribute(data_elem, "id"), "x");
+    EXPECT_STREQ(taurus_element_attribute(data_elem, "lang"), "en");
+
+    /* The concatenated text content includes both item text and the
+     * surrounding text node — proving the mixed-content subtree copy
+     * is complete. */
+    const char* text = taurus_element_text(data_elem);
+    EXPECT_NE(text, nullptr);
+    if (text) {
+        std::string s(text);
+        EXPECT_NE(s.find("one"), std::string::npos);
+        EXPECT_NE(s.find("two"), std::string::npos);
+        EXPECT_NE(s.find("text-around"), std::string::npos);
+    }
+
+    /* Child count must match (two <item> elements). */
+    int item_count = 0;
+    for (TaurusElement c = taurus_element_first_child_any(data_elem);
+         c;
+         c = taurus_element_next_sibling_any(c)) {
+        if (std::string(taurus_element_name(c)) == "item") item_count++;
+    }
+    EXPECT_EQ(item_count, 2);
+
+    taurus_document_free(doc);
+    remove(inc_path);
+}
+
+TEST(XIncludeProcess, ParseXmlUsesFallbackWhenFileMissing) {
+    /* Same fallback contract as parse="text": when the resource can't
+     * be loaded, xi:fallback content is spliced in as a text node. */
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/does-not-exist-taurus.xml' parse='xml'>"
+        "    <xi:fallback>xml fallback text</xi:fallback>"
+        "  </xi:include>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(taurus_xinclude_process(doc, nullptr), TAURUS_OK);
+
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    bool found_fallback = false;
+    for (TaurusNodeRef child = taurus_node_first_child((TaurusNodeRef)root);
+         child;
+         child = taurus_node_next_sibling(child)) {
+        const char* c = taurus_text_node_get_content(child);
+        if (c && std::string(c).find("xml fallback text") != std::string::npos) {
+            found_fallback = true;
+        }
+    }
+    EXPECT_TRUE(found_fallback);
+
+    taurus_document_free(doc);
+}
+
+TEST(XIncludeProcess, ParseXmlRecursiveIncludesNestedXi) {
+    /* An included document can itself contain xi:include; the walker
+     * processes bottom-up so the nested include resolves before the
+     * outer splice happens. */
+    const char inner_xml[] = "<inner>deep</inner>";
+    const char* inner_path = "/tmp/taurus_xinclude_inner.xml";
+    FILE* f1 = fopen(inner_path, "wb");
+    ASSERT_NE(f1, nullptr);
+    fwrite(inner_xml, 1, std::strlen(inner_xml), f1);
+    fclose(f1);
+
+    const char outer_xml[] =
+        "<outer xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_xinclude_inner.xml'/>"
+        "</outer>";
+    const char* outer_path = "/tmp/taurus_xinclude_outer.xml";
+    FILE* f2 = fopen(outer_path, "wb");
+    ASSERT_NE(f2, nullptr);
+    fwrite(outer_xml, 1, std::strlen(outer_xml), f2);
+    fclose(f2);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_xinclude_outer.xml'/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(taurus_xinclude_process(doc, nullptr), TAURUS_OK);
+
+    /* Expected tree: root > outer > inner > "deep". */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    TaurusElement outer = taurus_element_first_child_any(root);
+    ASSERT_NE(outer, nullptr);
+    EXPECT_STREQ(taurus_element_name(outer), "outer");
+    TaurusElement inner = taurus_element_first_child_any(outer);
+    ASSERT_NE(inner, nullptr);
+    EXPECT_STREQ(taurus_element_name(inner), "inner");
+    EXPECT_STREQ(taurus_element_text(inner), "deep");
+
+    taurus_document_free(doc);
+    remove(inner_path);
+    remove(outer_path);
+}
