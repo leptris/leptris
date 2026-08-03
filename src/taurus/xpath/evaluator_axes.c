@@ -498,22 +498,6 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
     return result;
 }
 
-/* Helper: Create namespace node from taurus_namespace */
-static TaurusNamespaceNode* create_namespace_node(struct taurus_namespace* ns,
-                                                    TaurusElement owner) {
-    if (!ns) return NULL;
-
-    TaurusNamespaceNode* ns_node = TAURUS_ALLOC(TaurusNamespaceNode);
-    if (!ns_node) return NULL;
-
-    ns_node->node_type = TAURUS_NODE_NAMESPACE;
-    ns_node->prefix = ns->prefix ? taurus_strdup(ns->prefix) : NULL;
-    ns_node->uri = taurus_strdup(ns->uri);
-    ns_node->owner = owner;
-
-    return ns_node;
-}
-
 /* Helper: Check if prefix has already been seen */
 static int is_prefix_seen(char** seen_prefixes, size_t seen_count, const char* prefix) {
     for (size_t i = 0; i < seen_count; i++) {

@@ -128,27 +128,6 @@ static int compare_attributes(const void* a, const void* b) {
 }
 
 /**
- * Compare function for sorting namespace declarations lexicographically (for qsort)
- */
-static int compare_namespaces(const void* a, const void* b) {
-    const struct taurus_namespace* ns_a = *(const struct taurus_namespace**)a;
-    const struct taurus_namespace* ns_b = *(const struct taurus_namespace**)b;
-
-    /* Compare prefix (xmlns:prefix) or "xmlns" for default namespace */
-    const char* prefix_a = ns_a->prefix ? ns_a->prefix : "";
-    const char* prefix_b = ns_b->prefix ? ns_b->prefix : "";
-
-    /* Compare prefixes first */
-    int cmp = strcmp(prefix_a, prefix_b);
-    if (cmp != 0) return cmp;
-
-    /* If prefixes are equal, compare URIs */
-    const char* uri_a = ns_a->uri ? ns_a->uri : "";
-    const char* uri_b = ns_b->uri ? ns_b->uri : "";
-    return strcmp(uri_a, uri_b);
-}
-
-/**
  * Recursive helper to serialize element in C14N format
  */
 static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* size, size_t* capacity) {

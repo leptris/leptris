@@ -20,10 +20,18 @@
 #include "../common/types_internal.h"   /* Single source for TaurusMemoryPool */
 #include "../common/string_view.h"     /* Full TaurusStringView definition */
 
-/* Forward-declared hook types — full typedefs are in taurus/types.h.
- * Defining them here too would create a redefinition warning. */
+/* Allocator hook types. Canonical definition lives in the public
+ * taurus.h (guarded by TAURUS_ALLOCATION_FUNCTION_DEFINED); re-include
+ * here so internal TUs that never include the public header still see
+ * the typedefs. */
+#ifndef TAURUS_ALLOCATION_FUNCTION_DEFINED
+#define TAURUS_ALLOCATION_FUNCTION_DEFINED
 typedef void* (*taurus_allocation_function)(size_t size);
+#endif
+#ifndef TAURUS_DEALLOCATION_FUNCTION_DEFINED
+#define TAURUS_DEALLOCATION_FUNCTION_DEFINED
 typedef void  (*taurus_deallocation_function)(void* ptr);
+#endif
 
 /* ============================================================================
  * String Interning Structures (for deduplication)

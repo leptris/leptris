@@ -1505,13 +1505,19 @@ TAURUS_API void taurus_explicit_cleanup(void);
  * @param size Number of bytes to allocate
  * @return Pointer to allocated memory or NULL on failure
  */
+#ifndef TAURUS_ALLOCATION_FUNCTION_DEFINED
+#define TAURUS_ALLOCATION_FUNCTION_DEFINED
 typedef void* (*taurus_allocation_function)(size_t size);
+#endif
 
 /**
  * Function pointer type for memory deallocation (compatible with free)
  * @param ptr Pointer to memory to deallocate
  */
+#ifndef TAURUS_DEALLOCATION_FUNCTION_DEFINED
+#define TAURUS_DEALLOCATION_FUNCTION_DEFINED
 typedef void (*taurus_deallocation_function)(void* ptr);
+#endif
 
 /**
  * Set custom memory management functions for all allocations

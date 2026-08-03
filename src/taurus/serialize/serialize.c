@@ -621,12 +621,11 @@ char* taurus_document_serialize(struct taurus_document* doc,
     const char* xml_version = doc->xml_version;
     int standalone = doc->standalone;
 
-    /* If xml_declaration is explicitly requested but doc has no version, use defaults */
-    int use_default_declaration = 0;
+    /* If xml_declaration is explicitly requested but doc has no version,
+     * fall back to XML 1.0 with no standalone attribute. */
     if (xml_declaration && !xml_version) {
         xml_version = "1.0";
-        standalone = -1;  /* No standalone declaration */
-        use_default_declaration = 1;
+        standalone = -1;
     }
 
     if ((xml_declaration || (doc->had_declaration && xml_version)) && xml_version) {

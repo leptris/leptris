@@ -26,16 +26,12 @@
 extern struct taurus_xpath_result* xpath_evaluate(XPathContext* context,
                                                    XPathASTNode* ast);
 
-/* Helper functions */
-static char* get_node_text(void* node);
+/* Helper functions.
+ * get_node_text is implemented in evaluator_types.c; the extern
+ * decl appears in the type-conversion block below. */
 static char* result_to_string(struct taurus_xpath_result* result);
 static int result_to_boolean(struct taurus_xpath_result* result);
 static double result_to_number(struct taurus_xpath_result* result);
-
-/* UTF-8 helpers */
-static size_t utf8_strlen(const char* str);
-static size_t utf8_char_offset(const char* str, size_t char_pos);
-static char* utf8_substring(const char* str, size_t start_char, size_t char_count);
 
 /* ============================================================================
  * Function Registry Implementation
@@ -280,82 +276,6 @@ static double result_to_number(struct taurus_xpath_result* result) {
 /* ============================================================================
  * UTF-8 Helper Functions
  * ============================================================================ */
-
-/* Count UTF-8 characters (not bytes) in a string */
-static size_t utf8_strlen(const char* str) {
-    if (!str) return 0;
-
-    size_t count = 0;
-    const unsigned char* p = (const unsigned char*)str;
-
-    while (*p) {
-        /* Count leading bytes only (not continuation bytes 10xxxxxx) */
-        if ((*p & 0xC0) != 0x80) {
-            count++;
-        }
-        p++;
-    }
-
-    return count;
-}
-
-/* Get byte offset for UTF-8 character at position (0-based character index) */
-static size_t utf8_char_offset(const char* str, size_t char_pos) {
-    if (!str) return 0;
-
-    size_t count = 0;
-    size_t offset = 0;
-    const unsigned char* p = (const unsigned char*)str;
-
-    /* Special case: position 0 is offset 0 */
-    if (char_pos == 0) return 0;
-
-    while (*p && count < char_pos) {
-        /* Check if this is a new character (not a continuation byte) */
-        if ((*p & 0xC0) != 0x80) {
-            count++;
-        }
-        /* Move to next byte */
-        offset++;
-        p++;
-    }
-
-    /* Return the current offset */
-    return offset;
-}
-
-/* Extract substring by character positions (0-based character indices) */
-static char* utf8_substring(const char* str, size_t start_char, size_t char_count) {
-    if (!str || char_count == 0) return taurus_strdup("");
-
-    size_t str_len_chars = utf8_strlen(str);
-
-    /* Clamp start position to valid range */
-    if (start_char >= str_len_chars) {
-        return taurus_strdup("");
-    }
-
-    /* Clamp character count to available characters */
-    if (start_char + char_count > str_len_chars) {
-        char_count = str_len_chars - start_char;
-    }
-
-    /* Get byte offsets */
-    size_t start_byte = utf8_char_offset(str, start_char);
-    size_t end_char = start_char + char_count;
-    size_t end_byte = utf8_char_offset(str, end_char);
-
-    size_t length = end_byte - start_byte;
-    if (length == 0) return taurus_strdup("");
-
-    char* result = TAURUS_ALLOC_N(char, length + 1);
-    if (!result) return taurus_strdup("");
-
-    memcpy(result, str + start_byte, length);
-    result[length] = '\0';
-
-    return result;
-}
 
 /* ============================================================================
  * Core XPath 1.0 Functions

@@ -710,7 +710,6 @@ TAURUS_API int taurus_element_text_int(TaurusElement elem, int default_value) {
     /* Check for hex prefix (0x or 0X) */
     int is_hex = 0;
     int is_negative = 0;
-    const char* start = text;
 
     if (*text == '-') {
         is_negative = 1;
@@ -758,7 +757,6 @@ TAURUS_API unsigned int taurus_element_text_uint(TaurusElement elem, unsigned in
 
     /* Check for hex prefix (0x or 0X) */
     int is_hex = 0;
-    const char* start = text;
 
     if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
         is_hex = 1;

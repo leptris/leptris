@@ -53,11 +53,13 @@ static char* dtd_parse_name(DTDParser* p) {
     dtd_skip_whitespace(p);
     const char* start = p->pos;
 
-    /* XML name: letter, '_', ':', followed by letters, digits, '_', '-', '.', ':', combine chars */
+    /* XML name: letter, '_', ':', followed by letters, digits, '_', '-', '.', ':', combine chars.
+     * Cast c to unsigned before the 0x80..0xFF range test — on platforms where
+     * plain char is signed, the test is otherwise tautological (always false). */
     while (!dtd_at_end(p)) {
-        char c = dtd_peek(p);
-        if (isalnum((unsigned char)c) || c == '_' || c == ':' || c == '-' ||
-            c == '.' || c == '\240' || /* No-break space */
+        unsigned char c = (unsigned char)dtd_peek(p);
+        if (isalnum(c) || c == '_' || c == ':' || c == '-' ||
+            c == '.' || c == 0xA0 || /* No-break space */
             (c >= 0x80 && c <= 0xFF)) { /* Allow extended chars */
             dtd_advance(p);
         } else {

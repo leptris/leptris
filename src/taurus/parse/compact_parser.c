@@ -56,8 +56,6 @@ typedef struct {
 /* Forward declarations */
 static uint32_t parse_compact_element(CompactParser* p, uint32_t parent_offset);
 static uint32_t parse_compact_text(CompactParser* p);
-static TaurusElement convert_compact_to_element(CompactDocument* cdoc, uint32_t elem_offset,
-                                                TaurusMemoryPool* pool, const char* xml_data);
 static TaurusElement convert_compact_recursive(CompactDocument* cdoc, uint32_t elem_offset,
                                                TaurusMemoryPool* pool, const char* xml_data);
 
@@ -102,14 +100,6 @@ static CompactParser* compact_parser_create(const char* xml, size_t len) {
     p->doc->has_error = 0;
 
     return p;
-}
-
-/* Free compact parser (does NOT free the document - it owns the memory) */
-static void compact_parser_free(CompactParser* p) {
-    if (p) {
-        /* Note: allocator and document are owned by the returned TaurusDocument */
-        free(p);
-    }
 }
 
 /* ============================================================================

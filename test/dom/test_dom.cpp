@@ -298,3 +298,33 @@ TEST(ElementMutation, AppendChildMovesElement) {
 
     taurus_document_free(doc);
 }
+
+// ---- Status contract (TODO 98) -----------------------------------------
+//
+// taurus_parse_string's status out-param must use the public TaurusStatus
+// enum.  An earlier build wrote the internal taurus_error_code value
+// TAURUS_ERROR_MEMORY_ALLOCATION (=1) on allocation failure, which is
+// outside the public enum range and broke every caller that compared
+// against TAURUS_ERROR_MEMORY (=-1).  The negative-XML and NULL-input
+// paths are the only failure modes reachable from a unit test without
+// an allocator hook; both must produce documented public codes.
+
+TEST(ParseStatusContract, NullInputYieldsPublicError) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(nullptr, 0, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_NE(st, TAURUS_OK);
+    /* st must be one of the public TaurusStatus error codes — never
+     * a positive internal taurus_error_code value. */
+    EXPECT_LT(st, 0)
+        << "status=" << static_cast<int>(st) << " is not a public error code";
+}
+
+TEST(ParseStatusContract, EmptyInputYieldsPublicError) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "";
+    TaurusDocument doc = taurus_parse_string(xml, 0, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_LT(st, 0)
+        << "status=" << static_cast<int>(st) << " is not a public error code";
+}

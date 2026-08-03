@@ -42,7 +42,7 @@ TAURUS_API TaurusDocument taurus_parse_string_with_encoding(
         size_t utf8_size = utf16_to_utf8_size(data, length, enc);
         char* utf8_buffer = (char*)malloc(utf8_size);
         if (!utf8_buffer) {
-            if (status) *status = TAURUS_ERROR_MEMORY_ALLOCATION;
+            if (status) *status = TAURUS_ERROR_MEMORY;
             return NULL;
         }
 
@@ -70,7 +70,7 @@ TAURUS_API TaurusDocument taurus_parse_string_with_encoding(
         size_t utf8_size = utf16_to_utf8_size(data, length, detected);
         char* utf8_buffer = (char*)malloc(utf8_size);
         if (!utf8_buffer) {
-            if (status) *status = TAURUS_ERROR_MEMORY_ALLOCATION;
+            if (status) *status = TAURUS_ERROR_MEMORY;
             return NULL;
         }
 

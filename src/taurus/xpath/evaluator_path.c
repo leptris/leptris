@@ -250,10 +250,8 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
                                 XPathASTNode** predicates, size_t pred_count) {
     if (!nodes || pred_count == 0) return nodes;
 
-    size_t initial_size = xpath_nodeset_count(nodes);
-
     DEBUG_LOG("    === apply_predicates: pred_count=%zu, nodeset size=%zu ===",
-             pred_count, initial_size);
+             pred_count, xpath_nodeset_count(nodes));
 
     /* Apply each predicate in sequence, filtering in-place */
     for (size_t p = 0; p < pred_count; p++) {
@@ -267,7 +265,6 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
         /* Two-pointer in-place filtering algorithm */
         size_t read_pos = 0;      /* Reading from here */
         size_t write_pos = 0;     /* Writing to here */
-        size_t matched_pos = 1;   /* Count of matched nodes (1-based for XPath position()) */
 
         DEBUG_LOG("      Filtering %zu nodes", current_size);
 
@@ -276,8 +273,8 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
             void* node = xpath_nodeset_get(nodes, read_pos);
             size_t proximity_position = read_pos + 1;  /* 1-based position in candidate set */
 
-            DEBUG_LOG("        Node[%zu]: proximity_pos=%zu, matched_pos=%zu",
-                     read_pos, proximity_position, matched_pos);
+            DEBUG_LOG("        Node[%zu]: proximity_pos=%zu",
+                     read_pos, proximity_position);
 
             /* Evaluate predicate for this node */
             int matches = evaluate_predicate_for_node(ctx, node, predicates[p],
@@ -292,7 +289,6 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
                     nodes->nodes[write_pos] = node;
                 }
                 write_pos++;
-                matched_pos++;
 
                 /* Early termination optimization:
                  * If predicate is position-based and we've found enough matches, stop
@@ -582,9 +578,9 @@ normal_absolute_path:
             /* Normal absolute path - start from root and process ALL steps */
             DEBUG_LOG("  Adding root to initial nodeset for absolute path");
 
-            /* Special case: /* (child::* from document node) should return root element directly
-             * In XPath, the document node has one child: the root element
-             * So /* means "select all children of document node" which is just the root element */
+            // Special case: /* (child::* from document node) should return root element directly.
+            // In XPath, the document node has one child: the root element.
+            // So /* means "select all children of document node" which is just the root element.
             int is_wildcard_only = (path->child_count == 1);
             if (is_wildcard_only) {
                 XPathASTNode* first_child = path->children[0];
@@ -596,7 +592,8 @@ normal_absolute_path:
                         if (strcmp(axis, "child") == 0 && step->child_count > 0) {
                             XPathASTNode* node_test =step->children[0];
                             if (node_test->type == XPATH_AST_NODE_TEST_ALL) {
-                                /* This is /* - just return root element */
+                                /* This is / * - just return root element (space so the
+                                 * slash-star sequence doesn't look like a nested comment). */
                                 DEBUG_LOG("  Special case: /* returns document root element");
                                 xpath_nodeset_add(current, (TaurusElement)ctx->document->new_dom_root);
                                 goto done_evaluating;

@@ -64,7 +64,6 @@ extern __thread int g_taurus_strict_mode;
 
 /* Forward declarations for new parser/serializer */
 typedef struct Parser Parser;
-typedef struct taurus_doctype_node TaurusDoctypeNode;
 
 extern Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool);
 extern Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool);
@@ -432,7 +431,7 @@ TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, Ta
         size_t utf8_size = utf16_to_utf8_size(data, length, encoding);
         char* utf8_buffer = (char*)malloc(utf8_size);
         if (!utf8_buffer) {
-            if (status) *status = TAURUS_ERROR_MEMORY_ALLOCATION;
+            if (status) *status = TAURUS_ERROR_MEMORY;
             return NULL;
         }
 
@@ -469,7 +468,7 @@ TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, Ta
         size_t utf8_size = utf16_to_utf8_size(data, length, detected);
         char* utf8_buffer = (char*)malloc(utf8_size);
         if (!utf8_buffer) {
-            if (status) *status = TAURUS_ERROR_MEMORY_ALLOCATION;
+            if (status) *status = TAURUS_ERROR_MEMORY;
             return NULL;
         }
 

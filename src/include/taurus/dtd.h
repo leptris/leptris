@@ -14,9 +14,20 @@
 extern "C" {
 #endif
 
-/* Forward declarations */
-typedef struct TaurusDTD TaurusDTD;
+/* TaurusDocument comes from taurus/types.h (or taurus.h) via the
+ * shared TAURUS_INTERNAL_TYPES_DEFINED guard.  No redefinition. */
+#ifndef TAURUS_INTERNAL_TYPES_DEFINED
+#define TAURUS_INTERNAL_TYPES_DEFINED
 typedef struct taurus_document* TaurusDocument;
+#endif
+
+/* TaurusDTD is opaque to the public API.  Guard matches the internal
+ * common/types_internal.h so the two headers can be included in
+ * either order without a C99 typedef-redefinition warning. */
+#ifndef TAURUS_TYPEDEF_DTD_DECLARED
+#define TAURUS_TYPEDEF_DTD_DECLARED
+typedef struct TaurusDTD TaurusDTD;
+#endif
 
 /**
  * DTD validation error
