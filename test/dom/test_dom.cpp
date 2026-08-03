@@ -4,9 +4,6 @@
 
 #include "taurus.h"
 
-/* Forward declare internal API used in these specs. */
-extern "C" char* taurus_element_get_text_content(TaurusElement elem);
-
 #include <cstring>
 
 namespace {
@@ -192,14 +189,8 @@ TEST(TextContentAccessors, IntTextReturnsValue) {
     TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
     TaurusElement root = taurus_document_root(doc);
-    /* Use internal getter directly so we can free the malloc'd
-     * string (taurus_element_text doesn't document ownership). */
-    char* text = taurus_element_get_text_content(root);
-    EXPECT_NE(text, nullptr);
-    if (text) {
-        EXPECT_EQ(taurus_element_text_int(root, 0), 123);
-        free(text);
-    }
+    EXPECT_EQ(taurus_element_text_int(root, 0), 123);
+    EXPECT_EQ(taurus_element_text_int(nullptr, -1), -1);
     taurus_document_free(doc);
 }
 
@@ -209,12 +200,52 @@ TEST(TextContentAccessors, DoubleTextReturnsValue) {
     TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
     TaurusElement root = taurus_document_root(doc);
-    char* text = taurus_element_get_text_content(root);
-    EXPECT_NE(text, nullptr);
-    if (text) {
-        EXPECT_DOUBLE_EQ(taurus_element_text_double(root, 0.0), 45.67);
-        free(text);
-    }
+    EXPECT_DOUBLE_EQ(taurus_element_text_double(root, 0.0), 45.67);
+    taurus_document_free(doc);
+}
+
+// taurus_element_text promises document-owned storage ("String is owned by
+// element"), so neither path may hand back a malloc'd buffer — ASAN/LSan in CI
+// is what enforces this.
+TEST(TextContentAccessors, TextIsDocumentOwnedForSingleTextChild) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r>plain</r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    const char* first = taurus_element_text(root);
+    EXPECT_STREQ(first, "plain");
+    /* A lone text child needs no concatenation, so repeated calls return the
+     * text node's own storage — same pointer, no allocation at all. */
+    EXPECT_EQ(taurus_element_text(root), first);
+
+    taurus_document_free(doc);
+}
+
+TEST(TextContentAccessors, TextIsDocumentOwnedForMixedContent) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r>a<b>c</b>d</r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    /* Mixed content is concatenated into the document pool; it must stay
+     * readable until taurus_document_free and must not leak. */
+    const char* text = taurus_element_text(root);
+    EXPECT_STREQ(text, "acd");
+
+    taurus_document_free(doc);
+}
+
+TEST(TextContentAccessors, EmptyElementYieldsEmptyString) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    EXPECT_STREQ(taurus_element_text(root), "");
+    EXPECT_STREQ(taurus_element_text(nullptr), "");
     taurus_document_free(doc);
 }
 

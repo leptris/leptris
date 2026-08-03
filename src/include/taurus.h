@@ -500,9 +500,12 @@ TAURUS_API const char* taurus_element_name(TaurusElement elem);
  * Get element text content (concatenation of all text nodes)
  *
  * @param elem Element
- * @return Text content or NULL if elem is NULL or has no text
+ * @return Text content, or "" if elem is NULL or has no text
  *
- * Memory: String is owned by element. Do not free or modify.
+ * Memory: String is owned by the document. Do not free or modify. It stays
+ * valid until taurus_document_free(). When the element's only child is a text
+ * or CDATA node the node's own storage is returned; mixed content is
+ * concatenated into the document pool.
  */
 TAURUS_API const char* taurus_element_text(TaurusElement elem);
 

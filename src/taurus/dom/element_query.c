@@ -40,17 +40,55 @@ TAURUS_API const char* taurus_element_name(TaurusElement elem) {
     return name ? name : "";
 }
 
+/* Locate the owning document by walking up the parent chain.
+ * Only the parse-time root gets `document` set on every node, but detached
+ * subtrees still reach an attached ancestor through `parent`. */
+static struct taurus_document* element_owning_document(TaurusElement elem) {
+    for (; elem; elem = elem->parent) {
+        if (elem->document) return elem->document;
+    }
+    return NULL;
+}
+
 /**
  * Get element text content (concatenated recursively)
+ *
+ * The public contract is a `const char*` owned by the element, so the result
+ * must live as long as the document — it can never be a malloc'd buffer the
+ * caller has no way to release.  Two paths satisfy that:
+ *
+ *   1. A lone text/CDATA child already holds the entire content, NUL-terminated,
+ *      in document-owned storage: return it directly (zero allocation).
+ *   2. Mixed content needs concatenation, so the joined string is interned in
+ *      the document pool and released with taurus_document_free().
  */
 TAURUS_API const char* taurus_element_text(TaurusElement elem) {
     if (!elem) return "";
 
-    /* Use compact accessor to extract text content */
-    char* text = taurus_element_get_text_content(elem);
+    TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)elem);
+    if (!child) return "";
 
-    /* Note: Caller must free the returned string */
-    return text ? text : "";
+    /* Path 1: single character-data child — hand back its own storage. */
+    if (!taurus_node_get_next_sibling(child)) {
+        if (child->type == TAURUS_NODE_TYPE_TEXT) {
+            const char* content = ((TaurusTextNode*)child)->content;
+            return content ? content : "";
+        }
+        if (child->type == TAURUS_NODE_TYPE_CDATA) {
+            const char* content = ((TaurusCDATANode*)child)->content;
+            return content ? content : "";
+        }
+    }
+
+    /* Path 2: concatenate, then intern in the document pool. */
+    struct taurus_document* doc = element_owning_document(elem);
+    if (!doc || !doc->pool) return "";
+
+    char* text = taurus_element_get_text_content(elem);
+    if (!text) return "";
+    const char* owned = taurus_pool_strdup(doc->pool, text);
+    taurus_free(text);
+    return owned ? owned : "";
 }
 
 /**
