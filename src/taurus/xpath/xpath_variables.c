@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdio.h>  /* for debug fprintf — TEMPORARY */
 
 /* ============================================================================
  * Constants
@@ -321,9 +322,14 @@ XPathVariable* xpath_variable_set_get(XPathVariableSet* set, const char* name) {
 const XPathVariable* xpath_variable_set_get_const(const XPathVariableSet* set, const char* name) {
     if (!set || !name) return NULL;
 
+    fprintf(stderr, "DEBUG get_const: set=%p count=%zu variables=%p name=%s\n",
+            (void*)set, set->count, (void*)set->variables, name);
     for (size_t i = 0; i < set->count; i++) {
-        if (strcmp(set->variables[i]->name, name) == 0) {
-            return set->variables[i];
+        XPathVariable* v = set->variables[i];
+        fprintf(stderr, "DEBUG [%zu]: var=%p name=%p\n", i, (void*)v, v ? (void*)v->name : NULL);
+        if (!v || !v->name) continue;
+        if (strcmp(v->name, name) == 0) {
+            return v;
         }
     }
     return NULL;
