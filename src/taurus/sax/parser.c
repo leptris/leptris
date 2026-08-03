@@ -208,34 +208,18 @@ static int sax_parse_element(TaurusSAXParser* p) {
             sax_advance(p); /* Skip '/' */
             sax_advance(p); /* Skip '>' */
 
-            /* Detect and emit namespace declarations */
-            char** ns_prefixes = NULL;
-            size_t ns_count = 0;
-
+            /* Emit start_prefix_mapping for each xmlns* attribute.
+             * No allocations here — we re-iterate attrs at end-of-element
+             * to fire end_prefix_mapping, so there's nothing to free. */
             if (attrs && p->handler && p->handler->start_prefix_mapping) {
                 for (size_t i = 0; i < attr_count * 2; i += 2) {
                     const char* attr_name = attrs[i];
                     const char* attr_value = attrs[i + 1];
 
                     if (strcmp(attr_name, "xmlns") == 0) {
-                        /* Default namespace */
                         p->handler->start_prefix_mapping(p->user_data, "", attr_value);
-                        char** new_prefixes = (char**)realloc(ns_prefixes, (ns_count + 1) * sizeof(char*));
-                        if (new_prefixes) {
-                            ns_prefixes = new_prefixes;
-                            ns_prefixes[ns_count] = strdup("");
-                            ns_count++;
-                        }
                     } else if (strncmp(attr_name, "xmlns:", 6) == 0) {
-                        /* Prefixed namespace */
-                        const char* prefix = attr_name + 6;
-                        p->handler->start_prefix_mapping(p->user_data, prefix, attr_value);
-                        char** new_prefixes = (char**)realloc(ns_prefixes, (ns_count + 1) * sizeof(char*));
-                        if (new_prefixes) {
-                            ns_prefixes = new_prefixes;
-                            ns_prefixes[ns_count] = strdup(prefix);
-                            ns_count++;
-                        }
+                        p->handler->start_prefix_mapping(p->user_data, attr_name + 6, attr_value);
                     }
                 }
             }
@@ -248,17 +232,17 @@ static int sax_parse_element(TaurusSAXParser* p) {
                 p->handler->end_element(p->user_data, name);
             }
 
-            /* Emit end_prefix_mapping events */
-            if (ns_prefixes) {
-                if (p->handler && p->handler->end_prefix_mapping) {
-                    for (size_t i = 0; i < ns_count; i++) {
-                        p->handler->end_prefix_mapping(p->user_data, ns_prefixes[i]);
+            /* Emit end_prefix_mapping by re-iterating attrs */
+            if (attrs && p->handler && p->handler->end_prefix_mapping) {
+                for (size_t i = 0; i < attr_count * 2; i += 2) {
+                    const char* attr_name = attrs[i];
+
+                    if (strcmp(attr_name, "xmlns") == 0) {
+                        p->handler->end_prefix_mapping(p->user_data, "");
+                    } else if (strncmp(attr_name, "xmlns:", 6) == 0) {
+                        p->handler->end_prefix_mapping(p->user_data, attr_name + 6);
                     }
                 }
-                for (size_t i = 0; i < ns_count; i++) {
-                    free(ns_prefixes[i]);
-                }
-                free(ns_prefixes);
             }
 
             free(name);
@@ -342,38 +326,17 @@ static int sax_parse_element(TaurusSAXParser* p) {
         attrs[attr_count * 2] = NULL; /* NULL-terminate array */
     }
 
-    /* Detect and emit namespace declarations */
-    char** ns_prefixes = NULL;
-    size_t ns_count = 0;
-
+    /* Emit start_prefix_mapping for each xmlns* attribute.
+     * No allocations — we re-iterate attrs at end-of-element. */
     if (attrs && p->handler && p->handler->start_prefix_mapping) {
         for (size_t i = 0; i < attr_count * 2; i += 2) {
             const char* attr_name = attrs[i];
             const char* attr_value = attrs[i + 1];
 
             if (strcmp(attr_name, "xmlns") == 0) {
-                /* Default namespace: xmlns="uri" */
                 p->handler->start_prefix_mapping(p->user_data, "", attr_value);
-
-                /* Track for end mapping */
-                char** new_prefixes = (char**)realloc(ns_prefixes, (ns_count + 1) * sizeof(char*));
-                if (new_prefixes) {
-                    ns_prefixes = new_prefixes;
-                    ns_prefixes[ns_count] = strdup("");
-                    ns_count++;
-                }
             } else if (strncmp(attr_name, "xmlns:", 6) == 0) {
-                /* Prefixed namespace: xmlns:prefix="uri" */
-                const char* prefix = attr_name + 6;
-                p->handler->start_prefix_mapping(p->user_data, prefix, attr_value);
-
-                /* Track for end mapping */
-                char** new_prefixes = (char**)realloc(ns_prefixes, (ns_count + 1) * sizeof(char*));
-                if (new_prefixes) {
-                    ns_prefixes = new_prefixes;
-                    ns_prefixes[ns_count] = strdup(prefix);
-                    ns_count++;
-                }
+                p->handler->start_prefix_mapping(p->user_data, attr_name + 6, attr_value);
             }
         }
     }
@@ -564,17 +527,19 @@ static int sax_parse_element(TaurusSAXParser* p) {
         p->handler->end_element(p->user_data, name);
     }
 
-    /* Emit end_prefix_mapping events */
-    if (ns_prefixes) {
-        if (p->handler && p->handler->end_prefix_mapping) {
-            for (size_t i = 0; i < ns_count; i++) {
-                p->handler->end_prefix_mapping(p->user_data, ns_prefixes[i]);
+    /* Emit end_prefix_mapping by re-iterating attrs.
+     * Order is the reverse of start_prefix_mapping, but the SAX spec
+     * does not require a specific order for end_prefix_mapping. */
+    if (attrs && p->handler && p->handler->end_prefix_mapping) {
+        for (size_t i = 0; i < attr_count * 2; i += 2) {
+            const char* attr_name = attrs[i];
+
+            if (strcmp(attr_name, "xmlns") == 0) {
+                p->handler->end_prefix_mapping(p->user_data, "");
+            } else if (strncmp(attr_name, "xmlns:", 6) == 0) {
+                p->handler->end_prefix_mapping(p->user_data, attr_name + 6);
             }
         }
-        for (size_t i = 0; i < ns_count; i++) {
-            free(ns_prefixes[i]);
-        }
-        free(ns_prefixes);
     }
 
     free(name);
