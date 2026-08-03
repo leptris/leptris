@@ -8,6 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>  /* for debug fprintf — TEMPORARY */
+#include <stddef.h>  /* for offsetof — TEMPORARY */
 
 /* ============================================================================
  * Constants
@@ -322,6 +323,13 @@ XPathVariable* xpath_variable_set_get(XPathVariableSet* set, const char* name) {
 const XPathVariable* xpath_variable_set_get_const(const XPathVariableSet* set, const char* name) {
     if (!set || !name) return NULL;
 
+    static int once = 0;
+    if (!once++) {
+        fprintf(stderr, "DEBUG sizeof(XPathVariable)=%zu offsetof(name)=%zu offsetof(value)=%zu\n",
+                sizeof(XPathVariable), offsetof(XPathVariable, name), offsetof(XPathVariable, value));
+        fprintf(stderr, "DEBUG sizeof(XPathVariableValue)=%zu sizeof(XPathVariableSet)=%zu sizeof(XPathVariableType)=%zu\n",
+                sizeof(XPathVariableValue), sizeof(XPathVariableSet), sizeof(XPathVariableType));
+    }
     fprintf(stderr, "DEBUG get_const: set=%p count=%zu variables=%p name=%s\n",
             (void*)set, set->count, (void*)set->variables, name);
     for (size_t i = 0; i < set->count; i++) {
