@@ -209,18 +209,22 @@ static void taurus_workflow_tree_traversal() {
     TaurusElement root = taurus_document_root(doc);
     int node_count = 0;
 
-    // Simple recursive traversal
-    std::function<void(TaurusElement)> traverse = [&](TaurusElement elem) {
-        node_count++;
-        size_t count = taurus_element_child_count(elem);
-        for (size_t i = 0; i < count; i++) {
-            TaurusElement child = taurus_element_child(elem, i);
-            if (child) traverse(child);
+    /* Recursive traversal via functor — C++11 GCC rejects the
+     * self-referential lambda (`std::function<...> f = [&] { f(...); }`)
+     * under two-phase lookup.  Plain recursion is unambiguous. */
+    struct walker {
+        int& count;
+        void operator()(TaurusElement elem) const {
+            count++;
+            size_t n = taurus_element_child_count(elem);
+            for (size_t i = 0; i < n; i++) {
+                TaurusElement child = taurus_element_child(elem, i);
+                if (child) (*this)(child);
+            }
         }
     };
-
-    traverse(root);
-    (void)node_count;
+    walker w{node_count};
+    w(root);
 
     taurus_document_free(doc);
 }
@@ -230,14 +234,17 @@ static void pugixml_workflow_tree_traversal() {
     doc.load_buffer(test_xml, strlen(test_xml));
 
     int node_count = 0;
-    std::function<void(pugi::xml_node)> traverse = [&](pugi::xml_node node) {
-        node_count++;
-        for (pugi::xml_node child : node.children()) {
-            traverse(child);
+    struct walker {
+        int& count;
+        void operator()(pugi::xml_node node) const {
+            count++;
+            for (pugi::xml_node child : node.children()) {
+                (*this)(child);
+            }
         }
     };
-
-    traverse(doc.first_child());
+    walker w{node_count};
+    w(doc.first_child());
     (void)node_count;
 }
 

@@ -1,6 +1,18 @@
 /**
- * Benchmark Utilities Implementation
+ * Benchmark Utilities Implementation.
+ *
+ * clock_gettime / CLOCK_MONOTONIC need _POSIX_C_SOURCE >= 199309L on
+ * glibc (Linux).  Defining it there is enough.  macOS exposes them
+ * without any feature-test macro and is fine with the same define,
+ * but combined with strict POSIX mode its libc hides snprintf — so
+ * we pull in <stdio.h> BEFORE the feature-test definition on macOS.
  */
+
+#ifndef _POSIX_C_SOURCE
+#  if !defined(__APPLE__) && !defined(__MACH__)
+#    define _POSIX_C_SOURCE 199309L
+#  endif
+#endif
 
 #include "utils.h"
 #include <stdio.h>
