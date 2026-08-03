@@ -881,3 +881,15 @@ TAURUS_API const char* taurus_element_namespace_for_prefix(TaurusElement elem, c
 }
 
 
+
+/**
+ * Get hash value of element (Public API)
+ * Returns a hash value based on the element's memory address
+ */
+TAURUS_API size_t taurus_element_hash_value(TaurusElement elem) {
+    if (!elem) return 0;
+
+    /* Simple hash based on pointer address */
+    /* This works because elements are pool-allocated and stable */
+    return (size_t)elem;
+}

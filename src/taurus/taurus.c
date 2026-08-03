@@ -862,18 +862,6 @@ static int compare_attributes(const void* a, const void* b) {
 }
 
 /**
- * Get hash value of element (Public API)
- * Returns a hash value based on the element's memory address
- */
-TAURUS_API size_t taurus_element_hash_value(TaurusElement elem) {
-    if (!elem) return 0;
-
-    /* Simple hash based on pointer address */
-    /* This works because elements are pool-allocated and stable */
-    return (size_t)elem;
-}
-
-/**
  * Compare function for sorting namespace declarations lexicographically (for qsort)
  */
 static int compare_namespaces(const void* a, const void* b) {
