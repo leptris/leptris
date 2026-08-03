@@ -183,6 +183,7 @@ DTDEntityDecl* ttdtd_lookup_entity(const TaurusDTD* dtd, const char* name);
  * @return New element declaration, or NULL on failure
  */
 DTDElementDecl* ttdtd_element_create(const char* name);
+DTDElementDecl* ttdtd_element_create_pooled(const char* name, TaurusMemoryPool* pool);
 
 /**
  * Free an element declaration
