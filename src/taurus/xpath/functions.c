@@ -10,6 +10,7 @@
 #include "../include/taurus.h"
 #include "../dom/element.h"
 #include <string.h>
+#include <strings.h>  /* strcasecmp, strncasecmp */
 #include <stdlib.h>
 #include <math.h>
 #include <ctype.h>

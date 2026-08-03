@@ -7,8 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <stdio.h>  /* for debug fprintf — TEMPORARY */
-#include <stddef.h>  /* for offsetof — TEMPORARY */
+
+/* _POSIX_C_SOURCE=200809L is defined project-wide (see src/CMakeLists.txt)
+ * so strdup() is properly declared. Without it, strict C99 mode implicitly
+ * declares strdup as returning int (4 bytes), truncating the 64-bit pointer
+ * on Linux x86_64. See TODOs 94 / 95. */
 
 /* ============================================================================
  * Constants
@@ -120,18 +123,13 @@ XPathVariable* xpath_variable_new(const char* name, XPathVariableType type) {
         return NULL;
     }
 
-    /* Copy name. Avoid strdup — TODO 94 debug shows that on Linux + ASAN,
-     * var->name ends up holding only the low 32 bits of strdup's return
-     * pointer, sign-extended to 0xffffffff<low32>. Using malloc+memcpy
-     * directly side-steps whatever strdup linkage issue causes this. */
-    size_t name_len = strlen(name);
-    char* name_copy = (char*)malloc(name_len + 1);
-    if (!name_copy) {
+    /* Copy name. strdup is safe here because _POSIX_C_SOURCE is defined
+     * project-wide (see src/CMakeLists.txt). */
+    var->name = strdup(name);
+    if (!var->name) {
         free(var);
         return NULL;
     }
-    memcpy(name_copy, name, name_len + 1);
-    var->name = name_copy;
 
     /* Initialize value */
     var->value.type = type;
@@ -329,31 +327,9 @@ XPathVariable* xpath_variable_set_get(XPathVariableSet* set, const char* name) {
 const XPathVariable* xpath_variable_set_get_const(const XPathVariableSet* set, const char* name) {
     if (!set || !name) return NULL;
 
-    static int once = 0;
-    if (!once++) {
-        fprintf(stderr, "DEBUG sizeof(XPathVariable)=%zu offsetof(name)=%zu offsetof(value)=%zu\n",
-                sizeof(XPathVariable), offsetof(XPathVariable, name), offsetof(XPathVariable, value));
-        fprintf(stderr, "DEBUG sizeof(XPathVariableValue)=%zu sizeof(XPathVariableSet)=%zu sizeof(XPathVariableType)=%zu\n",
-                sizeof(XPathVariableValue), sizeof(XPathVariableSet), sizeof(XPathVariableType));
-    }
-    fprintf(stderr, "DEBUG get_const: set=%p count=%zu variables=%p name=%s\n",
-            (void*)set, set->count, (void*)set->variables, name);
     for (size_t i = 0; i < set->count; i++) {
-        /* Read into a local first — rule out compiler oddities with re-reading
-         * via the array index. */
-        void* raw_var_ptr = (void*)set->variables[i];
-        fprintf(stderr, "DEBUG [%zu]: raw slot=%p\n", i, raw_var_ptr);
-        if (!raw_var_ptr) continue;
-        XPathVariable* v = (XPathVariable*)raw_var_ptr;
-        /* Print raw 8 bytes at offset 0 of v to see what's stored there */
-        unsigned char* bytes = (unsigned char*)v;
-        fprintf(stderr, "DEBUG [%zu]: bytes at var:", i);
-        for (size_t b = 0; b < 24; b++) fprintf(stderr, " %02x", bytes[b]);
-        fprintf(stderr, "\n");
-        fprintf(stderr, "DEBUG [%zu]: var=%p name=%p\n", i, (void*)v, v ? (void*)v->name : NULL);
-        if (!v->name) continue;
-        if (strcmp(v->name, name) == 0) {
-            return v;
+        if (strcmp(set->variables[i]->name, name) == 0) {
+            return set->variables[i];
         }
     }
     return NULL;

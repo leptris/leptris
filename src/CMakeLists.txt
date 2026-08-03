@@ -111,6 +111,14 @@ target_include_directories(taurus_objects
 
 target_link_libraries(taurus_objects PUBLIC m)
 
+# Define _POSIX_C_SOURCE so strdup() and other POSIX functions are
+# properly declared by <string.h>. Without this, strict C99 mode
+# implicitly declares strdup as `int strdup(...)` returning 4 bytes,
+# which truncates 64-bit pointers on Linux x86_64. macOS happens to
+# work because its libc returns pointers that fit in 32 bits.
+# See TODOs 94 / 95 for the bug this caused.
+target_compile_definitions(taurus_objects PUBLIC _POSIX_C_SOURCE=200809L)
+
 target_compile_options(taurus_objects PRIVATE
     -Wall
     -Wextra
