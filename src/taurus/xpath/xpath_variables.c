@@ -333,9 +333,19 @@ const XPathVariable* xpath_variable_set_get_const(const XPathVariableSet* set, c
     fprintf(stderr, "DEBUG get_const: set=%p count=%zu variables=%p name=%s\n",
             (void*)set, set->count, (void*)set->variables, name);
     for (size_t i = 0; i < set->count; i++) {
-        XPathVariable* v = set->variables[i];
+        /* Read into a local first — rule out compiler oddities with re-reading
+         * via the array index. */
+        void* raw_var_ptr = (void*)set->variables[i];
+        fprintf(stderr, "DEBUG [%zu]: raw slot=%p\n", i, raw_var_ptr);
+        if (!raw_var_ptr) continue;
+        XPathVariable* v = (XPathVariable*)raw_var_ptr;
+        /* Print raw 8 bytes at offset 0 of v to see what's stored there */
+        unsigned char* bytes = (unsigned char*)v;
+        fprintf(stderr, "DEBUG [%zu]: bytes at var:", i);
+        for (size_t b = 0; b < 24; b++) fprintf(stderr, " %02x", bytes[b]);
+        fprintf(stderr, "\n");
         fprintf(stderr, "DEBUG [%zu]: var=%p name=%p\n", i, (void*)v, v ? (void*)v->name : NULL);
-        if (!v || !v->name) continue;
+        if (!v->name) continue;
         if (strcmp(v->name, name) == 0) {
             return v;
         }
