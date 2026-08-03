@@ -1,8 +1,8 @@
 = taurus(1)
 :doctype: manpage
 :man manual: Taurus Manual
-:man source: Taurus 2.0.0
-:man version: 2.0.0
+:man source: Taurus 0.1.0
+:man version: 0.1.0
 
 == NAME
 taurus - fast XML parser and XPath evaluator
