@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DTD subsystem leak (was leaking 128 KB per DOCTYPE-bearing document).
 - Pool linked-list corruption that orphaned the pre-allocated second page.
 - Serializer buffer-overflow on realloc failure and size_t wrap.
+- ASAN crash in `parser_create_writable` — `dtd` and `has_namespace_prefixes` fields were uninitialized; ASAN's malloc-fill made `p->dtd` look non-NULL and crashed in `ttdtd_lookup_entity`.
+- SAX namespace-tracking leak — `ns_prefixes` was only freed when `end_prefix_mapping` was registered; restructuring to re-iterate `attrs` at cleanup eliminates both the leak and the per-prefix allocations.
 
 ### Added
 
@@ -28,8 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Node vtable registry — adding a node type is now purely additive (no switch to edit).
 - Hash table dynamic growth past 75% load factor.
 - Pool oversized-allocation tracking via side list.
-- 97 specs across 12 modules (smoke, parser, encoding, dom, vtable, compact, memory, xpath, serializer, c14n, perf, sax, cli).
+- 105 specs across 14 modules (smoke, parser, encoding, dom, vtable, compact, memory, xpath, serializer, c14n, perf, sax, cli, abi).
 - CI: ASAN + leak check on every PR; fuzzing nightly.
+- vcpkg overlay port under `ports/taurus/`.
+- ABI-stability guards: `_Static_assert` on opaque handle sizes; `TAURUS_FOR_BINDGEN` macro for FFI generators.
 
 ### Changed
 
