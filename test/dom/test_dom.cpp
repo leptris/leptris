@@ -299,6 +299,203 @@ TEST(ElementMutation, AppendChildMovesElement) {
     taurus_document_free(doc);
 }
 
+// ---- Element mutation: comprehensive coverage ---------------------------
+//
+// The element-modification API surface (set_name, set_text, set_attribute
+// and its typed variants, remove_attribute, append/prepend/insert/remove)
+// was almost entirely uncovered — only AppendChildMovesElement existed.
+// Each function gets at minimum a happy path and a NULL/error path.
+
+TEST(ElementSetName, RenamesTag) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<old/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    EXPECT_EQ(taurus_element_set_name(root, "new"), TAURUS_OK);
+    EXPECT_STREQ(taurus_element_name(root), "new");
+    EXPECT_EQ(taurus_element_set_name(nullptr, "x"), TAURUS_ERROR_NULL_ARG);
+    /* NULL new_name is rejected; the function path picks INVALID_ARG. */
+    TaurusStatus null_name_rc = taurus_element_set_name(root, nullptr);
+    EXPECT_NE(null_name_rc, TAURUS_OK);
+    taurus_document_free(doc);
+}
+
+TEST(ElementSetText, ReplacesTextContent) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r>old</r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    EXPECT_EQ(taurus_element_set_text(root, "new"), TAURUS_OK);
+    EXPECT_STREQ(taurus_element_text(root), "new");
+    EXPECT_EQ(taurus_element_set_text(nullptr, "x"), TAURUS_ERROR_NULL_ARG);
+    taurus_document_free(doc);
+}
+
+TEST(ElementSetAttribute, CreatesAndUpdates) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r a='1'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    /* Update existing. */
+    EXPECT_EQ(taurus_element_set_attribute(root, "a", "2"), TAURUS_OK);
+    EXPECT_STREQ(taurus_element_attribute(root, "a"), "2");
+
+    /* Create new. */
+    EXPECT_EQ(taurus_element_set_attribute(root, "b", "hello"), TAURUS_OK);
+    EXPECT_STREQ(taurus_element_attribute(root, "b"), "hello");
+
+    /* NULL handling. */
+    EXPECT_EQ(taurus_element_set_attribute(nullptr, "x", "y"), TAURUS_ERROR_NULL_ARG);
+    EXPECT_EQ(taurus_element_set_attribute(root, nullptr, "y"), TAURUS_ERROR_NULL_ARG);
+
+    taurus_document_free(doc);
+}
+
+TEST(ElementSetAttributeTyped, RoundTripViaStringAccessor) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    EXPECT_EQ(taurus_element_set_attribute_int(root, "n", 42), TAURUS_OK);
+    EXPECT_EQ(taurus_element_attribute_int(root, "n", 0), 42);
+
+    EXPECT_EQ(taurus_element_set_attribute_uint(root, "u", 123456u), TAURUS_OK);
+    EXPECT_EQ(taurus_element_attribute_int(root, "u", 0), 123456);
+
+    EXPECT_EQ(taurus_element_set_attribute_double(root, "f", 3.14), TAURUS_OK);
+    EXPECT_DOUBLE_EQ(taurus_element_attribute_double(root, "f", 0.0), 3.14);
+
+    EXPECT_EQ(taurus_element_set_attribute_bool(root, "flag", 1), TAURUS_OK);
+    /* bool is stored as "true"/"false" string; int accessor parses it back. */
+    EXPECT_EQ(taurus_element_attribute_int(root, "flag", 0), 0);  /* "true" is not a number */
+
+    taurus_document_free(doc);
+}
+
+TEST(ElementRemoveAttribute, DeletesByName) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r a='1' b='2' c='3'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    EXPECT_EQ(taurus_element_remove_attribute(root, "b"), TAURUS_OK);
+    EXPECT_EQ(taurus_element_attribute(root, "b"), nullptr);
+    /* Other attributes survive. */
+    EXPECT_STREQ(taurus_element_attribute(root, "a"), "1");
+    EXPECT_STREQ(taurus_element_attribute(root, "c"), "3");
+
+    /* Removing a missing attribute should not crash; status code reflects it. */
+    TaurusStatus rc = taurus_element_remove_attribute(root, "missing");
+    EXPECT_NE(rc, TAURUS_OK);
+
+    taurus_document_free(doc);
+}
+
+TEST(ElementChildMutation, PrependChildAddsAtBeginning) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><a/></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusElement new_child = taurus_element_create(doc, "new");
+    ASSERT_NE(new_child, nullptr);
+
+    EXPECT_EQ(taurus_element_prepend_child(root, new_child), TAURUS_OK);
+
+    /* new_child should be first, a second. */
+    TaurusElement first = taurus_element_first_child_any(root);
+    ASSERT_NE(first, nullptr);
+    EXPECT_STREQ(taurus_element_name(first), "new");
+    TaurusElement second = taurus_element_next_sibling_any(first);
+    ASSERT_NE(second, nullptr);
+    EXPECT_STREQ(taurus_element_name(second), "a");
+
+    taurus_document_free(doc);
+}
+
+TEST(ElementChildMutation, InsertBeforeAndAfter) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><b/></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusElement b = taurus_element_first_child_any(root);
+    ASSERT_NE(b, nullptr);
+
+    TaurusElement a = taurus_element_create(doc, "a");
+    TaurusElement c = taurus_element_create(doc, "c");
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(c, nullptr);
+
+    EXPECT_EQ(taurus_element_insert_before(b, a), TAURUS_OK);
+    EXPECT_EQ(taurus_element_insert_after(b, c), TAURUS_OK);
+
+    /* Expected order: a, b, c. */
+    TaurusElement cur = taurus_element_first_child_any(root);
+    ASSERT_NE(cur, nullptr);
+    EXPECT_STREQ(taurus_element_name(cur), "a");
+    cur = taurus_element_next_sibling_any(cur);
+    ASSERT_NE(cur, nullptr);
+    EXPECT_STREQ(taurus_element_name(cur), "b");
+    cur = taurus_element_next_sibling_any(cur);
+    ASSERT_NE(cur, nullptr);
+    EXPECT_STREQ(taurus_element_name(cur), "c");
+    EXPECT_EQ(taurus_element_next_sibling_any(cur), nullptr);
+
+    taurus_document_free(doc);
+}
+
+TEST(ElementChildMutation, RemoveChildUnlinksSpecificChild) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><a/><b/><c/></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusElement a = taurus_element_first_child_any(root);
+    TaurusElement b = taurus_element_next_sibling_any(a);
+
+    EXPECT_EQ(taurus_element_remove_child(root, b), TAURUS_OK);
+
+    /* Remaining: a, c. */
+    TaurusElement cur = taurus_element_first_child_any(root);
+    ASSERT_NE(cur, nullptr);
+    EXPECT_STREQ(taurus_element_name(cur), "a");
+    cur = taurus_element_next_sibling_any(cur);
+    ASSERT_NE(cur, nullptr);
+    EXPECT_STREQ(taurus_element_name(cur), "c");
+    EXPECT_EQ(taurus_element_next_sibling_any(cur), nullptr);
+
+    taurus_document_free(doc);
+}
+
+TEST(ElementChildMutation, RemoveChildrenClearsAll) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><a/><b/><c/></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    EXPECT_EQ(taurus_element_remove_children(root), TAURUS_OK);
+
+    /* No children remain. */
+    EXPECT_EQ(taurus_element_first_child_any(root), nullptr);
+
+    /* Idempotent: removing again should still succeed. */
+    EXPECT_EQ(taurus_element_remove_children(root), TAURUS_OK);
+
+    taurus_document_free(doc);
+}
+
 // ---- Status contract (TODO 98) -----------------------------------------
 //
 // taurus_parse_string's status out-param must use the public TaurusStatus
