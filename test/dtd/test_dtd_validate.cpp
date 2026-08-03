@@ -211,3 +211,68 @@ TEST(DtdValidate, ImpliedAttributeNotRequiredIsValid) {
     taurus_dtd_free(dtd);
     taurus_document_free(doc);
 }
+
+TEST(DtdValidate, ContentModelSequenceMatchIsValid) {
+    /* Phase 4: element-content grammar matcher.
+     * DTD says <!ELEMENT root (title, author+)>, doc has title then
+     * author — valid. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root><title>X</title><author>A</author></root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] = "<!ELEMENT root (title, author+)>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(err.message, nullptr);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, ContentModelSequenceWrongOrderIsInvalid) {
+    /* Same DTD, but children are out of order: author before title. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root><author>A</author><title>X</title></root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] = "<!ELEMENT root (title, author+)>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+
+TEST(DtdValidate, ContentModelZeroOrOneAcceptsEmpty) {
+    /* <!ELEMENT root (a)?> — zero or one a. No children is valid. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] = "<!ELEMENT root (a)?>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}

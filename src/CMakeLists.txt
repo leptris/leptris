@@ -73,6 +73,7 @@ set(TAURUS_SOURCES
     taurus/dtd/parser.c
     taurus/dtd/resolver.c
     taurus/dtd/validator.c
+    taurus/dtd/content_check.c
 
     # XInclude
     taurus/xinclude/xinclude.c
