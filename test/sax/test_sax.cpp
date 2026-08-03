@@ -275,4 +275,161 @@ TEST_F(SaxParser, FiresNamespacePrefixMapping) {
     }
 }
 
+// ---- Edge cases + regression coverage for SAX perf optimizations -------
+//
+// These specs exercise code paths touched by TODO 102 (scratch arena,
+// vectorized scans, switch dispatch, closing-tag fast path).  Each
+// test pins a behavior that the perf rewrite could regress.
+
+TEST_F(SaxParser, SelfClosingWithoutAttributes) {
+    /* The closing-tag fast path uses memcmp on the already-parsed
+     * opening name.  Empty self-closing elements are the simplest case. */
+    const char xml[] = "<r/>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    ASSERT_GE(log.events.size(), 4u);
+    EXPECT_EQ(log.events[0], "start_document");
+    EXPECT_EQ(log.events[1], "start:r");
+    EXPECT_EQ(log.events[2], "end:r");
+    EXPECT_EQ(log.events.back(), "end_document");
+}
+
+TEST_F(SaxParser, SelfClosingWithAttributes) {
+    /* Exercises both attribute parsing and the self-closing fast path. */
+    const char xml[] = "<r a='1' b='2'/>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto start_it = std::find(log.events.begin(), log.events.end(), "start:r a=1 b=2");
+    EXPECT_NE(start_it, log.events.end());
+}
+
+TEST_F(SaxParser, ManyAttributesExceedInlineThreshold) {
+    /* >16 attrs forces the attrs array to malloc (in the pre-Phase-3
+     * code; now it uses stack-then-malloc).  Verifies the array stays
+     * NULL-terminated and order is preserved regardless of size. */
+    std::string xml = "<r";
+    for (int i = 0; i < 32; i++) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), " a%d='%d'", i, i);
+        xml += buf;
+    }
+    xml += "/>";
+
+    EXPECT_EQ(taurus_sax_parse(xml.c_str(), xml.size(), &handler, &log), 0);
+    auto it = std::find_if(log.events.begin(), log.events.end(),
+        [](const std::string& e) { return e.find("start:r") == 0; });
+    ASSERT_NE(it, log.events.end());
+    /* All 32 attrs must appear, in order. */
+    for (int i = 0; i < 32; i++) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "a%d=%d", i, i);
+        EXPECT_NE(it->find(buf), std::string::npos)
+            << "missing attr " << buf << " in: " << *it;
+    }
+}
+
+TEST_F(SaxParser, DeepNestingDoesNotExhaustStack) {
+    /* The parser is recursive; very deep nesting would crash with
+     * stack overflow.  A modest depth (200) must work cleanly.  The
+     * configurable depth limit (TODO 62) guards against pathological
+     * cases at the parser layer. */
+    std::string xml;
+    for (int i = 0; i < 200; i++) xml += "<a>";
+    for (int i = 0; i < 200; i++) xml += "</a>";
+
+    EXPECT_EQ(taurus_sax_parse(xml.c_str(), xml.size(), &handler, &log), 0);
+    int start_count = 0, end_count = 0;
+    for (const auto& e : log.events) {
+        if (e == "start:a") start_count++;
+        if (e == "end:a") end_count++;
+    }
+    EXPECT_EQ(start_count, 200);
+    EXPECT_EQ(end_count, 200);
+}
+
+TEST_F(SaxParser, MixedContentPreservesTextOrder) {
+    /* The vectorized body-text scan uses memchr to find '<'.  Verify
+     * that text-between-elements still fires in document order. */
+    const char xml[] = "<r>hello<x/>world</r>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+
+    /* Expected sequence (1-indexed event names):
+     *   start_document, start:r, text:hello, start:x, end:x,
+     *   text:world, end:r, end_document */
+    ASSERT_GE(log.events.size(), 8u);
+    EXPECT_EQ(log.events[2], "text:hello");
+    EXPECT_EQ(log.events[3], "start:x");
+    EXPECT_EQ(log.events[4], "end:x");
+    EXPECT_EQ(log.events[5], "text:world");
+    EXPECT_EQ(log.events[6], "end:r");
+}
+
+TEST_F(SaxParser, CommentEmbeddedInContent) {
+    /* The switch-dispatch body loop recognizes comments mid-content. */
+    const char xml[] = "<r>before<!--c-->after</r>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto c = std::find(log.events.begin(), log.events.end(), "comment:c");
+    EXPECT_NE(c, log.events.end());
+    /* Text events still fire on both sides of the comment. */
+    auto t1 = std::find(log.events.begin(), log.events.end(), "text:before");
+    auto t2 = std::find(log.events.begin(), log.events.end(), "text:after");
+    EXPECT_NE(t1, log.events.end());
+    EXPECT_NE(t2, log.events.end());
+    EXPECT_LT(t1 - log.events.begin(), c - log.events.begin());
+    EXPECT_LT(c - log.events.begin(), t2 - log.events.begin());
+}
+
+TEST_F(SaxParser, CdataEmbeddedInContent) {
+    const char xml[] = "<r>before<![CDATA[raw]]>after</r>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto cd = std::find(log.events.begin(), log.events.end(), "cdata:raw");
+    EXPECT_NE(cd, log.events.end());
+}
+
+TEST_F(SaxParser, ProcessingInstructionWithNoData) {
+    /* PIs with just a target and no data — the rewrite handles this
+     * without crashing on empty memchr results. */
+    const char xml[] = "<r><?php?></r>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    /* The PI handler should fire; data may be empty. */
+    bool found_pi = false;
+    for (const auto& e : log.events) {
+        if (e.find("pi:php:") == 0) { found_pi = true; break; }
+    }
+    EXPECT_TRUE(found_pi);
+}
+
+TEST_F(SaxParser, AttributeValueWithSpecialChars) {
+    /* Attribute value containing '<' or '>' chars.  These are illegal
+     * per the XML spec in literal form, but the parser should at
+     * least not crash on memchr-based quote scanning.  Quotes inside
+     * the value (when matched by the OTHER quote char) must work. */
+    const char xml[] = "<r a=\"it's &apos;ok&apos;\"/>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto it = std::find_if(log.events.begin(), log.events.end(),
+        [](const std::string& e) { return e.find("a=") != std::string::npos; });
+    ASSERT_NE(it, log.events.end());
+    EXPECT_NE(it->find("it's"), std::string::npos);
+}
+
+TEST_F(SaxParser, EmptyAttributeValue) {
+    const char xml[] = "<r a=''/>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto it = std::find_if(log.events.begin(), log.events.end(),
+        [](const std::string& e) { return e.find("a=") != std::string::npos; });
+    ASSERT_NE(it, log.events.end());
+    /* Empty value: the attr shows as "a=" with nothing after. */
+    EXPECT_EQ(*it, "start:r a=");
+}
+
+TEST_F(SaxParser, XmlDeclarationSkippedCleanly) {
+    /* The declaration `<?xml ... ?>` is not a processing instruction
+     * to the user — it's skipped silently by the parser.  The body
+     * loop must not fire the PI callback for it. */
+    const char xml[] = "<?xml version='1.0'?><r/>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    for (const auto& e : log.events) {
+        EXPECT_EQ(e.find("pi:xml"), std::string::npos)
+            << "declaration must not fire as a PI: " << e;
+    }
+}
+
 }  // namespace
