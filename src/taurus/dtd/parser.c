@@ -350,11 +350,101 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
                 }
             }
         } else if (dtd_match(&parser, "<!ATTLIST")) {
-            /* Skip ATTLIST for now - Phase 5/6 */
+            /* Parse one or more <!ATTLIST element-name attr-decl+>
+             * declarations. Each ATTLIST can declare multiple
+             * attributes for the same element (whitespace-separated).
+             * Phase 2 of TODO 91. */
+            parser.pos += 9;
+            dtd_skip_whitespace(&parser);
+
+            char* elem_name = dtd_parse_name(&parser);
+            if (!elem_name) {
+                /* Malformed; skip to '>' */
+                while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>') {
+                    dtd_advance(&parser);
+                }
+                if (dtd_peek(&parser) == '>') dtd_advance(&parser);
+                continue;
+            }
+
+            /* Parse attribute declarations until we hit '>'. */
             while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>') {
-                dtd_advance(&parser);
+                dtd_skip_whitespace(&parser);
+                if (dtd_peek(&parser) == '>') break;
+
+                char* attr_name = dtd_parse_name(&parser);
+                if (!attr_name) {
+                    free(elem_name);
+                    break;
+                }
+
+                DTDAttributeDecl* decl = dtd_attribute_decl_create(elem_name, attr_name);
+                free(attr_name);
+                if (!decl) {
+                    free(elem_name);
+                    break;
+                }
+
+                /* Parse attribute type: CDATA | ID | IDREF | IDREFS |
+                 * NMTOKEN | NMTOKENS | (e1|e2|...) */
+                dtd_skip_whitespace(&parser);
+                if (dtd_peek(&parser) == '(') {
+                    /* Enumerated type — read until ')'. */
+                    char type_buf[128];
+                    size_t ti = 0;
+                    while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>' &&
+                           dtd_peek(&parser) != '#' && ti < sizeof(type_buf) - 1) {
+                        char c = dtd_peek(&parser);
+                        type_buf[ti++] = c;
+                        dtd_advance(&parser);
+                        if (c == ')') break;
+                    }
+                    type_buf[ti] = '\0';
+                    free(decl->attr_type);
+                    decl->attr_type = strdup(type_buf);
+                } else {
+                    char* type_name = dtd_parse_name(&parser);
+                    if (type_name) {
+                        free(decl->attr_type);
+                        decl->attr_type = type_name;
+                    }
+                }
+
+                /* Parse default declaration:
+                 * #REQUIRED | #IMPLIED | #FIXED "val" | "val" */
+                dtd_skip_whitespace(&parser);
+                if (dtd_peek(&parser) == '#') {
+                    dtd_advance(&parser);
+                    char* keyword = dtd_parse_name(&parser);
+                    if (keyword) {
+                        if (strcmp(keyword, "REQUIRED") == 0) {
+                            decl->default_type = DTD_ATTR_REQUIRED;
+                        } else if (strcmp(keyword, "IMPLIED") == 0) {
+                            decl->default_type = DTD_ATTR_IMPLIED;
+                        } else if (strcmp(keyword, "FIXED") == 0) {
+                            decl->default_type = DTD_ATTR_FIXED;
+                            dtd_skip_whitespace(&parser);
+                            char* val = dtd_parse_quoted_string(&parser);
+                            if (val) {
+                                free(decl->default_value);
+                                decl->default_value = val;
+                            }
+                        }
+                        free(keyword);
+                    }
+                } else if (dtd_peek(&parser) == '"' || dtd_peek(&parser) == '\'') {
+                    char* val = dtd_parse_quoted_string(&parser);
+                    if (val) {
+                        decl->default_type = DTD_ATTR_DEFAULT;
+                        free(decl->default_value);
+                        decl->default_value = val;
+                    }
+                }
+
+                ttdtd_add_attribute(dtd, decl);
             }
             if (dtd_peek(&parser) == '>') dtd_advance(&parser);
+            free(elem_name);
         } else {
             /* Skip unknown declaration */
             while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>') {
