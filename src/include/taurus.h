@@ -39,23 +39,13 @@ extern "C" {
 #endif  /* TAURUS_FOR_BINDGEN */
 
 /* ============================================================================
- * Opaque Types - Hide implementation details
+ * Public types — single canonical source in taurus/types.h.
  *
- * These mirror the definitions in taurus/types.h.  When both headers
- * are included in the same TU, C99's typedef-redefinition rule fires.
- * Guard each typedef so only the first definition wins (the definitions
- * are intentionally identical).  See TODO 12.
+ * taurus.h is the "full API" header; taurus/types.h is the lightweight
+ * types-only header.  All shared typedefs, enums, and option structs
+ * live in types.h.  See TODO 99.
  * ============================================================================ */
-
-#ifndef TAURUS_INTERNAL_TYPES_DEFINED
-#define TAURUS_INTERNAL_TYPES_DEFINED
-typedef struct taurus_node*            TaurusNodeRef;
-typedef struct taurus_document*        TaurusDocument;
-typedef struct taurus_element*         TaurusElement;
-typedef struct taurus_attribute*       TaurusAttribute;
-typedef const char*                    TaurusNamespace;
-typedef struct taurus_xpath_result*    TaurusXPathResult;
-#endif
+#include "taurus/types.h"
 
 /* ABI sanity asserts — catches accidental struct-field exposure
  * that would change opaque-handle sizes.  See TODO 84.
@@ -72,33 +62,6 @@ _Static_assert(sizeof(TaurusElement)   == sizeof(void*), "ABI");
 _Static_assert(sizeof(TaurusAttribute) == sizeof(void*), "ABI");
 _Static_assert(sizeof(TaurusXPathResult) == sizeof(void*), "ABI");
 #endif
-
-/* ============================================================================
- * Status Codes
- * ============================================================================ */
-
-typedef enum {
-    TAURUS_OK = 0,
-    TAURUS_ERROR_MEMORY = -1,      /* Memory allocation failed */
-    TAURUS_ERROR_PARSE = -2,       /* XML parsing error */
-    TAURUS_ERROR_XPATH = -3,       /* XPath evaluation error */
-    TAURUS_ERROR_NULL_ARG = -4,    /* NULL argument passed */
-    TAURUS_ERROR_INVALID_ARG = -5, /* Invalid argument */
-    TAURUS_ERROR_NOT_FOUND = -6,   /* Resource not found */
-    TAURUS_ERROR_IO = -7,          /* I/O error (file not found, etc.) */
-    TAURUS_ERROR_NOT_IMPLEMENTED = -8 /* Feature not yet implemented */
-} TaurusStatus;
-
-/* ============================================================================
- * XPath Result Types
- * ============================================================================ */
-
-typedef enum {
-    TAURUS_XPATH_NODESET,
-    TAURUS_XPATH_BOOLEAN,
-    TAURUS_XPATH_NUMBER,
-    TAURUS_XPATH_STRING
-} TaurusXPathResultType;
 
 /* ============================================================================
  * Node Operations
@@ -1126,12 +1089,9 @@ TAURUS_API TaurusElement taurus_element_insert_copy_after(TaurusElement sibling,
 
 /**
  * Options for XML serialization
+ *
+ * Definition lives in taurus/types.h.
  */
-typedef struct {
-    int indent;              /* 0 = compact, >0 = pretty-print with N spaces */
-    int xml_declaration;     /* 1 = include <?xml?>, 0 = omit */
-    const char* encoding;    /* "UTF-8" or NULL for default */
-} TaurusSerializeOptions;
 
 /**
  * Serialize document to XML string
@@ -1191,14 +1151,6 @@ TAURUS_API TaurusStatus taurus_document_save_file(TaurusDocument doc,
 /* ============================================================================
  * Canonical XML (C14N) Operations
  * ============================================================================ */
-
-/**
- * C14N (Canonical XML) version flags
- */
-typedef enum {
-    TAURUS_C14N_1_0 = 0,      /* Canonical XML 1.0 */
-    TAURUS_C14N_1_1 = 1       /* Canonical XML 1.1 */
-} TaurusC14NVersion;
 
 /**
  * Canonicalize document to C14N format
@@ -1384,19 +1336,13 @@ TAURUS_API void taurus_xpath_result_free(TaurusXPathResult result);
 
 /**
  * XPath variable value types
+ *
+ * Definition lives in taurus/types.h.
  */
-typedef enum {
-    TAURUS_XPATH_VAR_TYPE_NONE = 0,      /* Invalid type */
-    TAURUS_XPATH_VAR_TYPE_BOOLEAN,       /* Boolean value */
-    TAURUS_XPATH_VAR_TYPE_NUMBER,        /* Floating-point number */
-    TAURUS_XPATH_VAR_TYPE_STRING,        /* String value */
-    TAURUS_XPATH_VAR_TYPE_NODE_SET       /* Node set */
-} TaurusXPathVariableType;
 
 /**
- * Opaque variable set type
+ * Opaque variable set type — defined in taurus/types.h.
  */
-typedef struct taurus_xpath_variable_set* TaurusXPathVariableSet;
 
 /**
  * Create a new variable set
@@ -1498,26 +1444,11 @@ TAURUS_API void taurus_explicit_cleanup(void);
 
 /* ============================================================================
  * Memory Allocation Hooks (for testing and custom allocators)
+ *
+ * The taurus_allocation_function / taurus_deallocation_function typedefs
+ * come from taurus/types.h (included above).  Only the API entry points
+ * live here.
  * ============================================================================ */
-
-/**
- * Function pointer type for memory allocation (compatible with malloc)
- * @param size Number of bytes to allocate
- * @return Pointer to allocated memory or NULL on failure
- */
-#ifndef TAURUS_ALLOCATION_FUNCTION_DEFINED
-#define TAURUS_ALLOCATION_FUNCTION_DEFINED
-typedef void* (*taurus_allocation_function)(size_t size);
-#endif
-
-/**
- * Function pointer type for memory deallocation (compatible with free)
- * @param ptr Pointer to memory to deallocate
- */
-#ifndef TAURUS_DEALLOCATION_FUNCTION_DEFINED
-#define TAURUS_DEALLOCATION_FUNCTION_DEFINED
-typedef void (*taurus_deallocation_function)(void* ptr);
-#endif
 
 /**
  * Set custom memory management functions for all allocations
