@@ -317,6 +317,57 @@ DTDElementDecl* ttdtd_lookup_element(const TaurusDTD* dtd, const char* name) {
 }
 
 /* ============================================================================
+ * Attribute Management
+ * ============================================================================*/
+
+/* Build the "element.attr" composite key used by the attribute hash
+ * table. Returns a malloc'd string the caller must free, or NULL on
+ * OOM. */
+static char* build_attr_key(const char* element_name, const char* attr_name) {
+    size_t elen = strlen(element_name);
+    size_t alen = strlen(attr_name);
+    char* key = (char*)malloc(elen + 1 + alen + 1);
+    if (!key) return NULL;
+    memcpy(key, element_name, elen);
+    key[elen] = '.';
+    memcpy(key + elen + 1, attr_name, alen);
+    key[elen + 1 + alen] = '\0';
+    return key;
+}
+
+int ttdtd_add_attribute(TaurusDTD* dtd, DTDAttributeDecl* attr) {
+    if (!dtd || !attr || !attr->element_name || !attr->attr_name) return 0;
+
+    char* key = build_attr_key(attr->element_name, attr->attr_name);
+    if (!key) return 0;
+    size_t key_len = strlen(key);
+
+    /* Replace existing declaration if present. */
+    int rc = taurus_hash_table_set(dtd->tables.attributes, key, key_len,
+                                   attr, dtd->pool);
+    free(key);
+    if (rc) {
+        dtd->attribute_count++;
+        return 1;
+    }
+    return 0;
+}
+
+DTDAttributeDecl* ttdtd_lookup_attribute(const TaurusDTD* dtd,
+                                          const char* element_name,
+                                          const char* attr_name) {
+    if (!dtd || !element_name || !attr_name) return NULL;
+
+    char* key = build_attr_key(element_name, attr_name);
+    if (!key) return NULL;
+    size_t key_len = strlen(key);
+    DTDAttributeDecl* result = (DTDAttributeDecl*)taurus_hash_table_get(
+        dtd->tables.attributes, key, key_len);
+    free(key);
+    return result;
+}
+
+/* ============================================================================
  * Notation Management
  * ============================================================================*/
 

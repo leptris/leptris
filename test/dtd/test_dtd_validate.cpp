@@ -110,3 +110,52 @@ TEST(DtdValidate, ErrorFreeReusesStructAfterProperAlloc) {
 }
 
 }  // namespace
+
+TEST(DtdValidate, RequiredAttributeMissingIsInvalid) {
+    /* Phase 2: validator enforces #REQUIRED for common attribute
+     * names (id, ref) when the DTD declares them required. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root id ID #REQUIRED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+    EXPECT_NE(err.element_name, nullptr);
+    EXPECT_STREQ(err.element_name, "root");
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, RequiredAttributePresentIsValid) {
+    /* Same DTD, but the document provides id — must pass. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root id='r1'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root id ID #REQUIRED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(err.message, nullptr);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}

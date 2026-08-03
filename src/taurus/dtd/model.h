@@ -210,6 +210,26 @@ int ttdtd_add_element(TaurusDTD* dtd, DTDElementDecl* element);
  */
 DTDElementDecl* ttdtd_lookup_element(const TaurusDTD* dtd, const char* name);
 
+/* Attribute management (ATTLIST declarations). Phase 2 of TODO 91. */
+
+/**
+ * Add an attribute declaration. The "element_name.attr_name" composite
+ * key is built internally. Replaces an existing declaration with the
+ * same key (caller must free the old one if needed).
+ *
+ * @return 1 on success, 0 on failure.
+ */
+int ttdtd_add_attribute(TaurusDTD* dtd, DTDAttributeDecl* attr);
+
+/**
+ * Look up an attribute declaration by element + attribute name.
+ *
+ * @return Declaration, or NULL if not declared.
+ */
+DTDAttributeDecl* ttdtd_lookup_attribute(const TaurusDTD* dtd,
+                                          const char* element_name,
+                                          const char* attr_name);
+
 /* Notation management */
 
 /**
