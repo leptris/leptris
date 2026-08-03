@@ -132,11 +132,15 @@ same thread can have different settings.
 **Status**: Partial.
 
 - `parser.c`, `model.c`, `resolver.c` are wired in and work.
-- `validator.c` is NOT compiled in (commented out in
-  `src/CMakeLists.txt`). DTDs are parsed but never enforced (TODO 91).
+- `validator.c` (PR #34) is now compiled but the validation engine
+  itself is a stub returning `TAURUS_ERROR_NOT_IMPLEMENTED` (TODO 91).
+  `taurus_dtd_error_free` is fully implemented.
 - Entity resolution works via the document's pool (post-PR-#23 fix
   that routed DTD through the document pool rather than a private
   one).
+- Known issue (TODO 95): the DTD parser crashes on Linux ASAN when
+  parsing `<!ELEMENT ...>` declarations. Same code passes on macOS.
+  Likely sibling of TODO 94 (XPath variables Linux ASAN).
 
 ### `serialize/` — XML output
 
@@ -228,7 +232,9 @@ See `docs/FFI.md` for the FFI contract.
    specs. Real bug, needs Linux reproduction.
 2. **TODO 91** — DTD validator not implemented. Big feature gap.
 3. **TODO 69** — W3C XPath conformance suite not integrated.
-4. **TODO 92** — XInclude disabled, needs compact-architecture update.
+4. **TODO 92** — XInclude classifier helpers shipped (PR #33) but
+   the full `taurus_xinclude_process` is a stub returning
+   `TAURUS_ERROR_NOT_IMPLEMENTED`.
 5. **TODO 89** — SAX incremental parsing is one-shot under the hood.
 6. **TODO 79-85** — FFI design done; Ruby/Python/Rust bindings not
    implemented.
