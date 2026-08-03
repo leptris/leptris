@@ -112,17 +112,6 @@ static int match_seq(CMLexer* lx, const char** child_names, size_t* child_idx,
                       size_t child_count, const char* model_name,
                       char* out_msg, size_t msg_size);
 
-static const char* op_name(CMTokenType t) {
-    switch (t) {
-        case CMT_COMMA: return ",";
-        case CMT_PIPE:  return "|";
-        case CMT_Q:     return "?";
-        case CMT_S:     return "*";
-        case CMT_P:     return "+";
-        default:        return "?";
-    }
-}
-
 /* Match a single particle (NAME?occurrence) against one or more
  * children, advancing *child_idx as needed. Returns 1 on success,
  * 0 on mismatch. */

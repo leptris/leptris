@@ -26,29 +26,10 @@ static int compare_document_order(const void* a, const void* b) {
 
     if (node_a == node_b) return 0;
 
-    /* Get element pointers - handle attribute nodes */
-    TaurusElement elem_a = NULL;
-    TaurusElement elem_b = NULL;
-
-    if (XPATH_NODE_TYPE(node_a) == TAURUS_NODE_ELEMENT) {
-        elem_a = (TaurusElement)node_a;
-    } else if (XPATH_NODE_TYPE(node_a) == TAURUS_NODE_ATTRIBUTE) {
-        elem_a = ((TaurusAttributeNode*)node_a)->owner;
-    }
-
-    if (XPATH_NODE_TYPE(node_b) == TAURUS_NODE_ELEMENT) {
-        elem_b = (TaurusElement)node_b;
-    } else if (XPATH_NODE_TYPE(node_b) == TAURUS_NODE_ATTRIBUTE) {
-        elem_b = ((TaurusAttributeNode*)node_b)->owner;
-    }
-
-    /* New DOM doesn't have doc_order field - use pointer comparison for now
-     * This maintains a consistent ordering, though not true document order.
-     * For most XPath queries, this is sufficient. True document order would
-     * require tree traversal to determine ancestor/descendant relationships.
-     */
-
-    /* Fall back to pointer comparison for consistent ordering */
+    /* New DOM doesn't track document order.  Pointer comparison gives a
+     * stable, total ordering sufficient for XPath's de-duplication needs;
+     * true document order would require an ancestor/descendant walk that
+     * is not worth the cost for the queries that reach this path. */
     return (node_a < node_b) ? -1 : 1;
 }
 /* ============================================================================

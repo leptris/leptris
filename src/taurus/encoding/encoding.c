@@ -113,7 +113,6 @@ static taurus_encoding_t detect_heuristic(const unsigned char* data, size_t len)
     }
 
     size_t null_count = 0;
-    size_t ascii_count = 0;
     size_t high_bit_count = 0;
 
     /* Sample first 1024 bytes or entire string if shorter */
@@ -122,9 +121,7 @@ static taurus_encoding_t detect_heuristic(const unsigned char* data, size_t len)
     for (size_t i = 0; i < sample_len; i++) {
         if (data[i] == 0) {
             null_count++;
-        } else if (data[i] < 0x80) {
-            ascii_count++;
-        } else {
+        } else if (data[i] >= 0x80) {
             high_bit_count++;
         }
     }

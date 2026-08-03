@@ -11,8 +11,19 @@
 #include "../taurus_internal.h"
 #include "parser.h"
 
-/* Forward declaration for TaurusElement */
-typedef struct taurus_element* TaurusElement;
+/* If no public taurus/types.h was included earlier in this TU,
+ * provide the public opaque-typedef set under the canonical guard
+ * (matches taurus.h / dom/element.h).  Including the public header
+ * later is then a no-op rather than a C99 typedef-redefinition. */
+#ifndef TAURUS_INTERNAL_TYPES_DEFINED
+#define TAURUS_INTERNAL_TYPES_DEFINED
+typedef struct taurus_node*            TaurusNodeRef;
+typedef struct taurus_document*        TaurusDocument;
+typedef struct taurus_element*         TaurusElement;
+typedef struct taurus_attribute*       TaurusAttribute;
+typedef const char*                    TaurusNamespace;
+typedef struct taurus_xpath_result*    TaurusXPathResult;
+#endif
 
 /* ============================================================================
  * Types from taurus_internal.h

@@ -14,8 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Forward declaration */
-typedef struct taurus_string_view TaurusStringView;
+/* No TaurusStringView forward decl: nothing in this header references
+ * it.  Callers that need it include common/string_view.h directly. */
 
 #ifdef __cplusplus
 extern "C" {

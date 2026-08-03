@@ -8,39 +8,6 @@
  * Pointer Validation - Detects obviously corrupted pointers
  * ============================================================================ */
 
-/**
- * Check if a pointer looks like a valid memory pointer
- * Returns 1 if valid, 0 if obviously corrupted
- *
- * This helps detect memory corruption where pointers have been overwritten
- * with text data (like "descript" instead of a valid address).
- */
-static int is_valid_pointer(const void* ptr) {
-    if (!ptr) return 0;
-
-    uintptr_t addr = (uintptr_t)ptr;
-
-    /* Too small (NULL, near-NULL, or tiny stack addresses) */
-    if (addr < 0x1000) return 0;
-
-    /* Check for ASCII text in pointer (sign of corruption)
-     * If all bytes are printable ASCII (0x20-0x7E), it's likely text data, not a pointer */
-    unsigned char* bytes = (unsigned char*)&addr;
-    int all_printable = 1;
-    for (size_t i = 0; i < sizeof(addr); i++) {
-        if (bytes[i] < 0x20 || bytes[i] > 0x7E) {
-            all_printable = 0;
-            break;
-        }
-    }
-    if (all_printable) return 0;  /* All bytes are printable ASCII - definitely text, not a pointer */
-
-    /* Pointer alignment check - pointers should be at least 2-byte aligned */
-    if (addr & 0x1) return 0;
-
-    return 1;
-}
-
 /* ============================================================================
  * SIMD Support Detection and Includes
  * ============================================================================ */

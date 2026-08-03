@@ -17,8 +17,12 @@
 /* Memory pool — full definition in memory/pool.h */
 typedef struct taurus_memory_pool TaurusMemoryPool;
 
-/* DTD container — full definition in dtd/model.h */
+/* DTD container — full definition in dtd/model.h.  Guard matches the
+ * public dtd.h so the two headers can be included in either order. */
+#ifndef TAURUS_TYPEDEF_DTD_DECLARED
+#define TAURUS_TYPEDEF_DTD_DECLARED
 typedef struct TaurusDTD TaurusDTD;
+#endif
 
 /* Document opaque handle — pointer type, matches public types.h.
  * Do NOT redefine as `struct taurus_document` here; the public API
