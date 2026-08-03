@@ -14,6 +14,13 @@
 
 /**
  * SAX parser state
+ *
+ * The scratch buffer is a small growable arena used to materialize
+ * NUL-terminated copies of names and attribute values for the
+ * callbacks.  It replaces a per-name malloc/free pair that dominated
+ * SAX throughput — see TODO 102.  The buffer is reset at the start of
+ * each top-level call; callbacks receive pointers into it that are
+ * valid only for the duration of the callback.
  */
 struct TaurusSAXParser {
     TaurusSAXHandler* handler;
@@ -26,45 +33,72 @@ struct TaurusSAXParser {
     int column;
     int has_error;
     char error_message[256];
+
+    /* Scratch arena for transient name/value copies (TODO 102). */
+    char*  scratch;
+    size_t scratch_len;
+    size_t scratch_cap;
 };
 
 /* ============================================================================
  * Parser Utilities
  * ============================================================================ */
 
-static int sax_at_end(TaurusSAXParser* p) {
+static inline int sax_at_end(TaurusSAXParser* p) {
     return p->pos >= p->end;
 }
 
-static char sax_peek(TaurusSAXParser* p) {
+static inline char sax_peek(TaurusSAXParser* p) {
     if (sax_at_end(p)) return '\0';
     return *p->pos;
 }
 
-static char sax_advance(TaurusSAXParser* p) {
+/* Advance one byte and track line/column.  Hot loops that don't need
+ * line numbers (whitespace runs, name scans, body text) use direct
+ * pointer arithmetic instead. */
+static inline char sax_advance(TaurusSAXParser* p) {
     if (sax_at_end(p)) return '\0';
-
-    char c = *p->pos;
-    p->pos++;
-
+    char c = *p->pos++;
     if (c == '\n') {
         p->line++;
         p->column = 1;
     } else {
         p->column++;
     }
-
     return c;
 }
 
-static int sax_is_whitespace(char c) {
+static inline int sax_is_whitespace(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
+/* Skip a whitespace run without per-char line tracking.  The run is
+ * almost always short (single space between attrs, newline + indent
+ * between elements), so the line/column recompute is cheap. */
 static void sax_skip_whitespace(TaurusSAXParser* p) {
-    while (!sax_at_end(p) && sax_is_whitespace(sax_peek(p))) {
-        sax_advance(p);
+    const char* start = p->pos;
+    const char* end = p->end;
+    const char* s = start;
+    while (s < end) {
+        char c = *s;
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') break;
+        s++;
     }
+    if (s == start) return;
+
+    ptrdiff_t consumed = s - start;
+    int nl_count = 0;
+    const char* last_nl = NULL;
+    for (const char* q = start; q < s; q++) {
+        if (*q == '\n') { nl_count++; last_nl = q; }
+    }
+    p->line += nl_count;
+    if (last_nl) {
+        p->column = (int)(s - last_nl);
+    } else {
+        p->column += (int)consumed;
+    }
+    p->pos = s;
 }
 
 static int sax_match(TaurusSAXParser* p, const char* str) {
@@ -116,60 +150,91 @@ static void emit_characters(TaurusSAXParser* p, const char* text, size_t len) {
  * SAX Parsing Functions
  * ============================================================================ */
 
+/* Ensure the scratch arena has at least `cap` bytes free; returns the
+ * start of the writable region (no allocation is consumed yet — the
+ * caller advances scratch_len after writing).  Returns NULL on OOM. */
+static char* sax_scratch_reserve(TaurusSAXParser* p, size_t cap) {
+    if (p->scratch_len + cap <= p->scratch_cap) {
+        return p->scratch + p->scratch_len;
+    }
+    size_t need = p->scratch_len + cap;
+    size_t new_cap = p->scratch_cap ? p->scratch_cap : 256;
+    while (new_cap < need) new_cap *= 2;
+    char* grown = (char*)realloc(p->scratch, new_cap);
+    if (!grown) {
+        sax_set_error(p, "out of memory");
+        return NULL;
+    }
+    p->scratch = grown;
+    p->scratch_cap = new_cap;
+    return p->scratch + p->scratch_len;
+}
+
+/* Append [start, start+len) to scratch and return a NUL-terminated
+ * pointer to the in-arena copy.  Does NOT advance the input position. */
+static const char* sax_scratch_append(TaurusSAXParser* p,
+                                       const char* start, size_t len) {
+    char* dst = sax_scratch_reserve(p, len + 1);
+    if (!dst) return NULL;
+    if (len) memcpy(dst, start, len);
+    dst[len] = '\0';
+    const char* result = dst;
+    p->scratch_len += len + 1;
+    return result;
+}
+
 /**
- * Parse element name
+ * Parse element name.  The result is a parser-scratch pointer; valid
+ * until the next call into the parser.  Advances p->pos past the name.
  */
-static char* sax_parse_name(TaurusSAXParser* p) {
+static const char* sax_parse_name(TaurusSAXParser* p) {
     const char* start = p->pos;
 
-    if (!sax_is_name_start(sax_peek(p))) {
+    if (start >= p->end || !sax_is_name_start(*start)) {
         sax_set_error(p, "Expected element name");
         return NULL;
     }
 
-    while (!sax_at_end(p) && sax_is_name_char(sax_peek(p))) {
-        sax_advance(p);
-    }
+    /* Hot loop: scan name chars with no per-char function call.
+     * The compiler inlines sax_is_name_char, but the explicit loop
+     * also lets the autovectorizer see the comparison pattern. */
+    const char* s = start + 1;
+    while (s < p->end && sax_is_name_char(*s)) s++;
 
-    size_t len = p->pos - start;
-    char* name = (char*)malloc(len + 1);
-    if (!name) return NULL;
-
-    memcpy(name, start, len);
-    name[len] = '\0';
-    return name;
+    size_t len = (size_t)(s - start);
+    p->pos = s;
+    return sax_scratch_append(p, start, len);
 }
 
 /**
- * Parse attribute value
+ * Parse attribute value.  Same scratch-arena contract as sax_parse_name.
  */
-static char* sax_parse_attr_value(TaurusSAXParser* p) {
-    char quote = sax_peek(p);
+static const char* sax_parse_attr_value(TaurusSAXParser* p) {
+    if (p->pos >= p->end) {
+        sax_set_error(p, "Expected quote for attribute value");
+        return NULL;
+    }
+    char quote = *p->pos;
     if (quote != '"' && quote != '\'') {
         sax_set_error(p, "Expected quote for attribute value");
         return NULL;
     }
+    p->pos++; /* skip opening quote */
 
-    sax_advance(p); /* Skip opening quote */
     const char* start = p->pos;
-
-    /* Find closing quote */
-    while (!sax_at_end(p) && sax_peek(p) != quote) {
-        sax_advance(p);
+    /* memchr is vectorized on modern CPUs — far faster than the
+     * per-character scan the old version did. */
+    const char* found = (const char*)memchr(start, quote, (size_t)(p->end - start));
+    if (!found) {
+        /* Runaway value — consume rest of input but report parse error. */
+        size_t len = (size_t)(p->end - start);
+        p->pos = p->end;
+        sax_set_error(p, "Unterminated attribute value");
+        return sax_scratch_append(p, start, len);
     }
-
-    size_t len = p->pos - start;
-    char* value = (char*)malloc(len + 1);
-    if (!value) return NULL;
-
-    memcpy(value, start, len);
-    value[len] = '\0';
-
-    if (sax_peek(p) == quote) {
-        sax_advance(p); /* Skip closing quote */
-    }
-
-    return value;
+    size_t len = (size_t)(found - start);
+    p->pos = found + 1; /* skip closing quote */
+    return sax_scratch_append(p, start, len);
 }
 
 /**
@@ -184,7 +249,7 @@ static int sax_parse_element(TaurusSAXParser* p) {
     sax_advance(p);
 
     /* Parse element name */
-    char* name = sax_parse_name(p);
+    const char* name = sax_parse_name(p);
     if (!name) return -1;
 
     /* Parse attributes */
@@ -245,10 +310,8 @@ static int sax_parse_element(TaurusSAXParser* p) {
                 }
             }
 
-            free(name);
             if (attrs) {
                 for (size_t i = 0; i < attr_count * 2; i++) {
-                    free((void*)attrs[i]);
                 }
                 free(attrs);
             }
@@ -256,12 +319,10 @@ static int sax_parse_element(TaurusSAXParser* p) {
         }
 
         /* Parse attribute name */
-        char* attr_name = sax_parse_name(p);
+        const char* attr_name = sax_parse_name(p);
         if (!attr_name) {
-            free(name);
             if (attrs) {
                 for (size_t i = 0; i < attr_count * 2; i++) {
-                    free((void*)attrs[i]);
                 }
                 free(attrs);
             }
@@ -273,11 +334,8 @@ static int sax_parse_element(TaurusSAXParser* p) {
         /* Expect '=' */
         if (sax_peek(p) != '=') {
             sax_set_error(p, "Expected '=' after attribute name");
-            free(attr_name);
-            free(name);
             if (attrs) {
                 for (size_t i = 0; i < attr_count * 2; i++) {
-                    free((void*)attrs[i]);
                 }
                 free(attrs);
             }
@@ -288,13 +346,10 @@ static int sax_parse_element(TaurusSAXParser* p) {
         sax_skip_whitespace(p);
 
         /* Parse attribute value */
-        char* attr_value = sax_parse_attr_value(p);
+        const char* attr_value = sax_parse_attr_value(p);
         if (!attr_value) {
-            free(attr_name);
-            free(name);
             if (attrs) {
                 for (size_t i = 0; i < attr_count * 2; i++) {
-                    free((void*)attrs[i]);
                 }
                 free(attrs);
             }
@@ -306,12 +361,8 @@ static int sax_parse_element(TaurusSAXParser* p) {
             attr_capacity = attr_capacity == 0 ? 8 : attr_capacity * 2;
             const char** new_attrs = (const char**)realloc(attrs, (attr_capacity + 1) * sizeof(char*));
             if (!new_attrs) {
-                free(attr_name);
-                free(attr_value);
-                free(name);
                 if (attrs) {
                     for (size_t i = 0; i < attr_count * 2; i++) {
-                        free((void*)attrs[i]);
                     }
                     free(attrs);
                 }
@@ -357,20 +408,16 @@ static int sax_parse_element(TaurusSAXParser* p) {
             sax_advance(p);
 
             /* Parse closing tag name */
-            char* close_name = sax_parse_name(p);
+            const char* close_name = sax_parse_name(p);
             if (!close_name || strcmp(close_name, name) != 0) {
                 sax_set_error(p, "Mismatched closing tag");
-                if (close_name) free(close_name);
-                free(name);
                 if (attrs) {
                     for (size_t i = 0; i < attr_count * 2; i++) {
-                        free((void*)attrs[i]);
                     }
                     free(attrs);
                 }
                 return -1;
             }
-            free(close_name);
 
             sax_skip_whitespace(p);
 
@@ -499,10 +546,8 @@ static int sax_parse_element(TaurusSAXParser* p) {
             } else {
                 /* Child element */
                 if (sax_parse_element(p) < 0) {
-                    free(name);
                     if (attrs) {
                         for (size_t i = 0; i < attr_count * 2; i++) {
-                            free((void*)attrs[i]);
                         }
                         free(attrs);
                     }
@@ -510,13 +555,25 @@ static int sax_parse_element(TaurusSAXParser* p) {
                 }
             }
         } else {
-            /* Text content */
+            /* Text content.  memchr is vectorized; far faster than the
+             * per-character sax_peek/sax_advance loop the old code used. */
             const char* start = p->pos;
-            while (!sax_at_end(p) && sax_peek(p) != '<') {
-                sax_advance(p);
-            }
-            size_t len = p->pos - start;
+            const char* found = (p->pos < p->end)
+                ? (const char*)memchr(p->pos, '<', (size_t)(p->end - p->pos))
+                : NULL;
+            p->pos = found ? found : p->end;
+            size_t len = (size_t)(p->pos - start);
             if (len > 0) {
+                /* Update line/column for the skipped bytes — count newlines. */
+                int nl_count = 0;
+                const char* last_nl = NULL;
+                for (const char* q = start; q < p->pos; q++) {
+                    if (*q == '\n') { nl_count++; last_nl = q; }
+                }
+                p->line += nl_count;
+                if (last_nl) p->column = (int)(p->pos - last_nl);
+                else         p->column += (int)len;
+
                 emit_characters(p, start, len);
             }
         }
@@ -542,10 +599,8 @@ static int sax_parse_element(TaurusSAXParser* p) {
         }
     }
 
-    free(name);
     if (attrs) {
         for (size_t i = 0; i < attr_count * 2; i++) {
-            free((void*)attrs[i]);
         }
         free(attrs);
     }
@@ -573,6 +628,15 @@ int taurus_sax_parse(const char* xml, size_t len,
     parser.line = 1;
     parser.column = 1;
     parser.has_error = 0;
+
+    /* Pre-size scratch arena to doc size so it never needs to realloc
+     * mid-parse (which would invalidate pointers held across nested
+     * elements).  Total name + attribute-value bytes can never exceed
+     * doc bytes; +1 for a trailing NUL. */
+    parser.scratch_cap = len + 1;
+    parser.scratch = (char*)malloc(parser.scratch_cap);
+    if (!parser.scratch) return -1;
+    parser.scratch_len = 0;
 
     /* Emit start_document */
     emit_start_document(&parser);
@@ -707,7 +771,9 @@ int taurus_sax_parse(const char* xml, size_t len,
     }
 
     /* Parse root element */
-    if (sax_parse_element(&parser) < 0) {
+    int rc = sax_parse_element(&parser);
+    free(parser.scratch);
+    if (rc < 0) {
         return -1;
     }
 
@@ -734,6 +800,9 @@ TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_
     parser->column = 1;
     parser->has_error = 0;
     parser->error_message[0] = '\0';
+    parser->scratch = NULL;
+    parser->scratch_len = 0;
+    parser->scratch_cap = 0;
 
     return parser;
 }
@@ -761,6 +830,7 @@ int taurus_sax_parser_feed(TaurusSAXParser* parser,
  */
 void taurus_sax_parser_free(TaurusSAXParser* parser) {
     if (parser) {
+        free(parser->scratch);
         free(parser);
     }
 }
