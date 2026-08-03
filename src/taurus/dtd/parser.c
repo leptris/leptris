@@ -220,7 +220,7 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
         }
 
         size_t len = p->pos - start;
-        elem->content_model = (char*)malloc(len + 1);
+        elem->content_model = (char*)taurus_pool_alloc(p->pool, len + 1);
         if (elem->content_model) {
             memcpy(elem->content_model, start, len);
             elem->content_model[len] = '\0';
