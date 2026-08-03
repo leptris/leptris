@@ -179,7 +179,7 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
     char* name = dtd_parse_name(p);
     if (!name) return NULL;
 
-    DTDElementDecl* elem = ttdtd_element_create(name);
+    DTDElementDecl* elem = ttdtd_element_create_pooled(name, p->pool);
     free(name);
     if (!elem) return NULL;
 

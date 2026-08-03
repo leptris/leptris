@@ -251,6 +251,26 @@ DTDElementDecl* ttdtd_element_create(const char* name) {
     return element;
 }
 
+/* Pool-allocated variant — the returned declaration is released when
+ * the pool is destroyed. Callers that don't have a pool use the
+ * non-pooled variant above and must call ttdtd_element_free. */
+DTDElementDecl* ttdtd_element_create_pooled(const char* name, TaurusMemoryPool* pool) {
+    if (!name || !pool) return NULL;
+
+    DTDElementDecl* element = (DTDElementDecl*)taurus_pool_calloc(pool, sizeof(DTDElementDecl));
+    if (!element) return NULL;
+
+    size_t name_len = strlen(name);
+    char* name_copy = (char*)taurus_pool_alloc(pool, name_len + 1);
+    if (!name_copy) return NULL;
+    memcpy(name_copy, name, name_len + 1);
+    element->name = name_copy;
+
+    element->content_type = DTD_CONTENT_ANY;
+    element->content_model = NULL;
+    return element;
+}
+
 /**
  * Free an element declaration
  */
