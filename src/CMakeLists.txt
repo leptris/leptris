@@ -74,8 +74,8 @@ set(TAURUS_SOURCES
     taurus/dtd/resolver.c
     # taurus/dtd/validator.c # TODO: Phase 5/6 - Validation layer
 
-    # XInclude - TODO: Update for compact architecture
-    # taurus/xinclude/xinclude.c
+    # XInclude
+    taurus/xinclude/xinclude.c
 
     # Core library
     taurus/taurus.c
