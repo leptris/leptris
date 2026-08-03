@@ -51,6 +51,7 @@ set(TAURUS_SOURCES
     taurus/parse/parser_new.c
     taurus/parse/compact_parser.c
     taurus/serialize/serialize.c
+    taurus/serialize/c14n.c
 
     # XPath
     taurus/xpath/lexer.c
