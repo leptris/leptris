@@ -136,3 +136,23 @@ TEST(XPathLeaks, ComplexQueriesDoNotLeak) {
 }
 
 }  // namespace
+
+// ---- XPath variables debug (TODO 94) ------------------------------------
+
+TEST(XPathVariablesDebug, BooleanVarCrashesOnLinuxAsan) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r><a/></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathVariableSet vars = taurus_xpath_variable_set_new();
+    ASSERT_NE(vars, nullptr);
+    EXPECT_EQ(taurus_xpath_variable_set_boolean(vars, "flag", 1), TAURUS_OK);
+
+    TaurusXPathResult r = taurus_xpath_eval_with_vars(doc, "$flag", vars);
+    EXPECT_NE(r, nullptr);
+    if (r) taurus_xpath_result_free(r);
+
+    taurus_xpath_variable_set_free(vars);
+    taurus_document_free(doc);
+}

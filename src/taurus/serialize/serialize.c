@@ -474,12 +474,10 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
 }
 
 void serialize_node_internal(TaurusNode* node, SerializeBuffer* buf) {
-    /* TODO 30: dispatch via the per-type vtable registry instead of a
-     * hand-rolled switch.  Adding a new node type is now purely
-     * additive — register a new vtable in node_vtable.c and the
-     * serializer picks it up automatically. */
     if (!node) return;
 
+    /* Dispatch via the per-type vtable registry — adding a new node
+     * type is purely additive (register a vtable in node_vtable.c). */
     const TaurusNodeVTable* vt = taurus_node_vtable_for(node->type);
     if (vt && vt->serialize) {
         vt->serialize(node, buf);
