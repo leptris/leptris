@@ -238,6 +238,8 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     p->end = xml + len;
     p->pool = pool;  /* Store pool for fast DOM allocation */
     p->writable = 1;  /* Writable mode - can modify buffer in-place */
+    p->dtd = NULL;    /* No DTD parsed yet */
+    p->has_namespace_prefixes = 0;  /* No namespaces seen yet */
 
     /* Check for UTF-8 BOM (EF BB BF) */
     if (len >= 3 &&
