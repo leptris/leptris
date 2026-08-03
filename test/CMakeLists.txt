@@ -72,6 +72,7 @@ taurus_add_test(test_c14n       serializer/test_c14n.cpp)
 taurus_add_test(test_perf       perf/test_perf.cpp)
 taurus_add_test(test_sax        sax/test_sax.cpp)
 taurus_add_test(test_abi        abi/test_header_hygiene.cpp)
+taurus_add_test(test_dtd        dtd/test_dtd_validate.cpp)
 taurus_add_test(test_xinclude   xinclude/test_xinclude.cpp)
 taurus_add_cli_test(test_cli    cli/test_cli.cpp)
 
