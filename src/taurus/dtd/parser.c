@@ -378,7 +378,7 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
                     break;
                 }
 
-                DTDAttributeDecl* decl = dtd_attribute_decl_create(elem_name, attr_name);
+                DTDAttributeDecl* decl = dtd_attribute_decl_create_pooled(elem_name, attr_name, parser.pool);
                 free(attr_name);
                 if (!decl) {
                     free(elem_name);
@@ -386,28 +386,22 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
                 }
 
                 /* Parse attribute type: CDATA | ID | IDREF | IDREFS |
-                 * NMTOKEN | NMTOKENS | (e1|e2|...) */
+                 * NMTOKEN | NMTOKENS | (e1|e2|...).
+                 * Phase 2 doesn't enforce attribute types, so we
+                 * parse-and-discard the type token. (Pool-owning the
+                 * strdup'd string would also work but adds bookkeeping
+                 * for unused data.) */
                 dtd_skip_whitespace(&parser);
                 if (dtd_peek(&parser) == '(') {
-                    /* Enumerated type — read until ')'. */
-                    char type_buf[128];
-                    size_t ti = 0;
+                    /* Enumerated type — skip to ')'. */
                     while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>' &&
-                           dtd_peek(&parser) != '#' && ti < sizeof(type_buf) - 1) {
-                        char c = dtd_peek(&parser);
-                        type_buf[ti++] = c;
+                           dtd_peek(&parser) != ')') {
                         dtd_advance(&parser);
-                        if (c == ')') break;
                     }
-                    type_buf[ti] = '\0';
-                    free(decl->attr_type);
-                    decl->attr_type = strdup(type_buf);
+                    if (dtd_peek(&parser) == ')') dtd_advance(&parser);
                 } else {
                     char* type_name = dtd_parse_name(&parser);
-                    if (type_name) {
-                        free(decl->attr_type);
-                        decl->attr_type = type_name;
-                    }
+                    if (type_name) free(type_name);
                 }
 
                 /* Parse default declaration:
