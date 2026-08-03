@@ -107,6 +107,13 @@ struct TaurusDTD {
     size_t element_count;
     size_t notation_count;
     size_t attribute_count;
+
+    /* Ownership flag: 1 when this DTD owns its pool (created via
+     * taurus_dtd_parse public API), 0 when the pool belongs to a
+     * document (created via taurus_dtd_parse_internal_subset called
+     * from the document parser). ttdtd_free destroys the pool only
+     * when this flag is set. */
+    int owns_pool;
 };
 
 /* TaurusDTD typedef comes from common/types_internal.h.

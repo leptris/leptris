@@ -393,10 +393,11 @@ TaurusDTD* taurus_dtd_parse(const char* dtd_content, size_t len) {
     TaurusDTD* dtd = taurus_dtd_parse_internal_subset(dtd_content, len, pool);
     if (!dtd) {
         taurus_pool_destroy(pool);
+        return NULL;
     }
-    /* dtd->pool == pool; caller must ttdtd_free to release.  But since
-     * ttdtd_free is now a no-op (TODO 16), this wrapper leaks the pool
-     * by design — public-API callers should migrate to the document-
-     * pool-aware path. */
+    /* Mark this DTD as owning its pool so ttdtd_free releases it.
+     * Document-pool DTDs (created via the internal parser path) leave
+     * owns_pool=0; their pool is destroyed with the document. */
+    dtd->owns_pool = 1;
     return dtd;
 }
