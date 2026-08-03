@@ -246,6 +246,82 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
          * second pass after all IDs are collected. The second pass
          * (validate_idref_pass) walks again and verifies each IDREF
          * against the now-complete id_table. */
+
+        /* Phase 7: NMTOKEN / Enumerated type validation.
+         * These can be checked in-place (no cross-element state). */
+        if (strcmp(ad->attr_type, "NMTOKEN") == 0) {
+            const char* v = attr->value;
+            int valid = (v && *v);
+            for (const char* p = v; *p; p++) {
+                unsigned char c = (unsigned char)*p;
+                if (!(isalnum(c) || c == '.' || c == '-' ||
+                      c == '_' || c == ':')) {
+                    valid = 0;
+                    break;
+                }
+            }
+            if (!valid) {
+                char msg[180];
+                snprintf(msg, sizeof(msg),
+                         "Attribute '%s' is not a valid NMTOKEN", attr_name);
+                set_error(error, msg, name);
+                return 0;
+            }
+        } else if (strcmp(ad->attr_type, "NMTOKENS") == 0) {
+            /* Whitespace-separated list of NMTOKENs. Each non-empty
+             * token must match the NMTOKEN character class. */
+            const char* p = attr->value;
+            while (*p) {
+                while (*p && isspace((unsigned char)*p)) p++;
+                if (!*p) break;
+                int tok_ok = 0;
+                while (*p && !isspace((unsigned char)*p)) {
+                    unsigned char c = (unsigned char)*p;
+                    if (!(isalnum(c) || c == '.' || c == '-' ||
+                          c == '_' || c == ':')) {
+                        tok_ok = -1;
+                    }
+                    p++;
+                }
+                if (tok_ok == -1) {
+                    char msg[180];
+                    snprintf(msg, sizeof(msg),
+                             "Attribute '%s' contains an invalid NMTOKENS token",
+                             attr_name);
+                    set_error(error, msg, name);
+                    return 0;
+                }
+                tok_ok = 1;
+                (void)tok_ok;
+            }
+        } else if (strchr(ad->attr_type, '|') != NULL) {
+            /* Enumerated type: attr_type is "opt1|opt2|opt3" (the
+             * parser strips the surrounding parens). The value must
+             * match one of the pipe-separated options. */
+            const char* val = attr->value;
+            const char* model = ad->attr_type;
+            int matched = 0;
+            while (*model) {
+                /* Extract one option token. */
+                const char* opt_start = model;
+                while (*model && *model != '|') model++;
+                size_t opt_len = (size_t)(model - opt_start);
+                if (strlen(val) == opt_len &&
+                    strncmp(val, opt_start, opt_len) == 0) {
+                    matched = 1;
+                    break;
+                }
+                if (*model == '|') model++;
+            }
+            if (!matched) {
+                char msg[200];
+                snprintf(msg, sizeof(msg),
+                         "Attribute '%s' value '%s' is not in enumerated type %s",
+                         attr_name, val, ad->attr_type);
+                set_error(error, msg, name);
+                return 0;
+            }
+        }
     }
 
     /* Recurse into children. */

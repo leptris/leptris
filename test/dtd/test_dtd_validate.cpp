@@ -387,3 +387,92 @@ TEST(DtdValidate, IdrefUnresolvedIsInvalid) {
     taurus_document_free(doc);
 }
 
+
+TEST(DtdValidate, NmtokenValidValueIsValid) {
+    /* Phase 7: NMTOKEN must match the Name token character class. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root token='valid-name_123'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root token NMTOKEN #IMPLIED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, NmtokenInvalidValueIsInvalid) {
+    /* 'val id' has a space which is invalid in a single NMTOKEN. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root token='val id'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root token NMTOKEN #IMPLIED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, EnumeratedTypeValidValueIsValid) {
+    /* Phase 7: enumerated type (red|green|blue) — value matches. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root color='green'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root color (red|green|blue) #IMPLIED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, EnumeratedTypeInvalidValueIsInvalid) {
+    /* Same DTD; 'yellow' is not in the enumerated list. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root color='yellow'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root color (red|green|blue) #IMPLIED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
