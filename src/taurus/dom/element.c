@@ -29,6 +29,11 @@
 #include <stdio.h>
 #include <assert.h>
 
+/* From taurus_memory.c — declared here to avoid pulling in the
+ * full taurus_memory.h, which conflicts with pi.h's taurus_pi_free. */
+int taurus_element_add_namespace(struct taurus_element* elem, struct taurus_namespace* ns);
+struct taurus_namespace* taurus_namespace_new_pooled(const char* prefix, const char* uri, TaurusMemoryPool* pool);
+
 /* ============================================================================
  * Element Creation
  * ============================================================================ */
@@ -545,16 +550,18 @@ const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* 
     return attr->value;
 }
 
-/* Add namespace with in-place strings (zero-copy) */
+/* Add namespace with in-place strings (zero-copy).
+ *
+ * Stores prefix/uri in the element's own namespace-declaration fields
+ * AND adds a taurus_namespace entry to elem->namespaces so that
+ * taurus_element_lookup_namespace() can find it. The strings are
+ * NOT copied; caller must ensure they outlive the document (typically
+ * pool-allocated). */
 void taurus_element_add_namespace_inplace(TaurusElement elem,
                                            char* prefix,
                                            char* uri,
                                            TaurusMemoryPool* pool) {
-    (void)pool;  /* Unused in compact mode */
     if (!elem || !uri) return;
-
-    /* Store namespace in element's prefix/namespace_uri fields for now */
-    /* TODO: Implement proper namespace list */
 
     /* CRITICAL: Do NOT clear prefix_view when setting namespace prefix */
     if (prefix) {
@@ -563,6 +570,17 @@ void taurus_element_add_namespace_inplace(TaurusElement elem,
     elem->namespace_uri = uri;
     /* Clear StringView for namespace_uri (but NOT prefix_view!) */
     elem->namespace_uri_view = taurus_sv_empty();
+
+    /* Also register the namespace declaration on elem->namespaces so
+     * descendant lookups via taurus_element_lookup_namespace find it.
+     * If pool allocation fails, the in-place fields are still set; the
+     * namespace just won't be discoverable via prefix lookup. */
+    if (pool) {
+        struct taurus_namespace* ns = taurus_namespace_new_pooled(prefix, uri, pool);
+        if (ns) {
+            taurus_element_add_namespace(elem, ns);
+        }
+    }
 }
 
 /* Lookup namespace URI by prefix */
