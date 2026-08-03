@@ -402,153 +402,147 @@ static int sax_parse_element(TaurusSAXParser* p) {
         sax_skip_whitespace(p);
 
         /* Check for closing tag */
-        if (sax_match(p, "</")) {
+        /* Closing tag — check directly instead of via sax_match. */
+        if (p->pos[0] == '<' && p->pos + 1 < p->end && p->pos[1] == '/') {
             /* Skip "</" */
-            sax_advance(p);
-            sax_advance(p);
+            p->pos += 2;
+            /* Update line/column — '<' and '/' are never '\n'. */
+            p->column += 2;
 
-            /* Parse closing tag name */
-            const char* close_name = sax_parse_name(p);
-            if (!close_name || strcmp(close_name, name) != 0) {
+            /* Closing tag name: it must match the opening name.  Skip
+             * the scratch-arena round-trip and compare directly against
+             * the input.  We know `name` came from scratch; we know its
+             * length from when we parsed it (re-derive via strlen —
+             * cheap, names are short). */
+            size_t name_len = strlen(name);
+            int matched = (p->pos + name_len <= p->end &&
+                           memcmp(p->pos, name, name_len) == 0 &&
+                           (p->pos + name_len == p->end ||
+                            sax_is_whitespace(p->pos[name_len]) ||
+                            p->pos[name_len] == '>'));
+
+            if (!matched) {
                 sax_set_error(p, "Mismatched closing tag");
                 if (attrs) {
-                    for (size_t i = 0; i < attr_count * 2; i++) {
-                    }
                     free(attrs);
                 }
                 return -1;
             }
+            p->pos += name_len;
+            p->column += (int)name_len;
 
-            sax_skip_whitespace(p);
-
-            /* Expect '>' */
-            if (sax_peek(p) == '>') {
-                sax_advance(p);
+            /* Skip whitespace + expect '>'. */
+            while (p->pos < p->end) {
+                char c = *p->pos;
+                if (c == '>') { p->pos++; p->column++; break; }
+                if (c == '\n') { p->line++; p->column = 1; p->pos++; }
+                else if (c == ' ' || c == '\t' || c == '\r') { p->pos++; p->column++; }
+                else break;
             }
 
             break; /* End of element */
         }
 
-        /* Check for child element */
+        /* Check for child element.  Dispatch on the byte after '<' to
+         * avoid the 1-5 strncmp calls per body iteration the old
+         * sax_match() chain did. */
         if (sax_peek(p) == '<') {
-            /* Could be element, comment, CDATA, PI */
-            if (sax_match(p, "<!--")) {
-                /* Comment - extract and emit callback */
-                /* Skip "<!--" */
-                for (int i = 0; i < 4; i++) sax_advance(p);
+            const char* tag_start = p->pos;
+            char kind = (p->pos + 1 < p->end) ? p->pos[1] : '\0';
+
+            if (kind == '!' && p->pos + 3 < p->end &&
+                p->pos[2] == '-' && p->pos[3] == '-') {
+                /* Comment.  Find "-->" by scanning for '-' then checking
+                 * the next two bytes — far faster than per-char sax_match. */
+                p->pos += 4;
                 const char* start = p->pos;
-
-                /* Find "-->" */
-                while (!sax_at_end(p) && !sax_match(p, "-->")) {
-                    sax_advance(p);
+                const char* found = NULL;
+                while (p->pos < p->end) {
+                    const char* dash = (const char*)memchr(p->pos, '-', (size_t)(p->end - p->pos));
+                    if (!dash) { p->pos = p->end; break; }
+                    if (dash + 2 < p->end && dash[1] == '-' && dash[2] == '>') {
+                        found = dash;
+                        break;
+                    }
+                    p->pos = dash + 1;
                 }
+                size_t len = found ? (size_t)(found - start) : (size_t)(p->pos - start);
 
-                size_t len = p->pos - start;
-
-                /* Emit comment event */
                 if (p->handler && p->handler->comment && len > 0) {
-                    char* comment = (char*)malloc(len + 1);
-                    if (comment) {
-                        memcpy(comment, start, len);
-                        comment[len] = '\0';
-                        p->handler->comment(p->user_data, comment);
-                        free(comment);
-                    }
+                    const char* comment = sax_scratch_append(p, start, len);
+                    if (comment) p->handler->comment(p->user_data, comment);
                 }
-
-                /* Skip "-->" */
-                if (sax_match(p, "-->")) {
-                    for (int i = 0; i < 3; i++) sax_advance(p);
-                }
-            } else if (sax_match(p, "<![CDATA[")) {
-                /* CDATA - extract and emit callback */
-                /* Skip "<![CDATA[" */
-                for (int i = 0; i < 9; i++) sax_advance(p);
+                if (found) p->pos = found + 3;
+            } else if (kind == '!' && p->pos + 8 < p->end &&
+                       p->pos[2] == '[' && p->pos[3] == 'C' &&
+                       p->pos[4] == 'D' && p->pos[5] == 'A' &&
+                       p->pos[6] == 'T' && p->pos[7] == 'A' &&
+                       p->pos[8] == '[') {
+                /* CDATA.  Find "]]>" via memchr for ']'. */
+                p->pos += 9;
                 const char* start = p->pos;
-
-                /* Find "]]>" */
-                while (!sax_at_end(p) && !sax_match(p, "]]>")) {
-                    sax_advance(p);
+                const char* found = NULL;
+                while (p->pos < p->end) {
+                    const char* bracket = (const char*)memchr(p->pos, ']', (size_t)(p->end - p->pos));
+                    if (!bracket) { p->pos = p->end; break; }
+                    if (bracket + 2 < p->end && bracket[1] == ']' && bracket[2] == '>') {
+                        found = bracket;
+                        break;
+                    }
+                    p->pos = bracket + 1;
                 }
+                size_t len = found ? (size_t)(found - start) : (size_t)(p->pos - start);
 
-                size_t len = p->pos - start;
-
-                /* Emit CDATA event */
                 if (p->handler && p->handler->cdata && len > 0) {
-                    char* cdata = (char*)malloc(len + 1);
-                    if (cdata) {
-                        memcpy(cdata, start, len);
-                        cdata[len] = '\0';
-                        p->handler->cdata(p->user_data, cdata);
-                        free(cdata);
-                    }
+                    const char* cdata = sax_scratch_append(p, start, len);
+                    if (cdata) p->handler->cdata(p->user_data, cdata);
                 }
+                if (found) p->pos = found + 3;
+            } else if (kind == '?') {
+                /* Processing Instruction. */
+                p->pos += 2; /* skip "<?" */
 
-                /* Skip "]]>" */
-                if (sax_match(p, "]]>")) {
-                    for (int i = 0; i < 3; i++) sax_advance(p);
-                }
-            } else if (sax_match(p, "<?")) {
-                /* Processing Instruction - extract target and data */
-                /* Skip "<?" */
-                sax_advance(p);
-                sax_advance(p);
-
-                /* Parse PI target */
+                /* Parse PI target via direct scan. */
                 const char* target_start = p->pos;
-                while (!sax_at_end(p) && !sax_is_whitespace(sax_peek(p)) && !sax_match(p, "?>")) {
-                    sax_advance(p);
+                while (p->pos < p->end) {
+                    char c = *p->pos;
+                    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '?') break;
+                    p->pos++;
                 }
-                size_t target_len = p->pos - target_start;
+                size_t target_len = (size_t)(p->pos - target_start);
+                const char* target = sax_scratch_append(p, target_start, target_len);
 
-                char* target = NULL;
-                if (target_len > 0) {
-                    target = (char*)malloc(target_len + 1);
-                    if (target) {
-                        memcpy(target, target_start, target_len);
-                        target[target_len] = '\0';
-                    }
+                /* Skip optional whitespace. */
+                while (p->pos < p->end) {
+                    char c = *p->pos;
+                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r') break;
+                    p->pos++;
                 }
 
-                /* Skip whitespace before PI data */
-                sax_skip_whitespace(p);
-
-                /* Parse PI data */
+                /* PI data runs to "?>".  memchr for '?' then check '>'. */
                 const char* data_start = p->pos;
-                while (!sax_at_end(p) && !sax_match(p, "?>")) {
-                    sax_advance(p);
-                }
-                size_t data_len = p->pos - data_start;
-
-                char* data = NULL;
-                if (data_len > 0) {
-                    data = (char*)malloc(data_len + 1);
-                    if (data) {
-                        memcpy(data, data_start, data_len);
-                        data[data_len] = '\0';
+                const char* data_end = p->end;
+                while (p->pos < p->end) {
+                    const char* q = (const char*)memchr(p->pos, '?', (size_t)(p->end - p->pos));
+                    if (!q) { p->pos = p->end; break; }
+                    if (q + 1 < p->end && q[1] == '>') {
+                        data_end = q;
+                        break;
                     }
+                    p->pos = q + 1;
                 }
+                size_t data_len = (size_t)(data_end - data_start);
+                const char* data = sax_scratch_append(p, data_start, data_len);
 
-                /* Emit processing instruction event */
-                if (p->handler && p->handler->processing_instruction && target) {
+                if (p->handler && p->handler->processing_instruction) {
                     p->handler->processing_instruction(p->user_data, target, data);
                 }
-
-                /* Free allocated strings */
-                if (target) free(target);
-                if (data) free(data);
-
-                /* Skip "?>" */
-                if (sax_match(p, "?>")) {
-                    sax_advance(p);
-                    sax_advance(p);
-                }
+                if (data_end < p->end) p->pos = data_end + 2;  /* skip "?>" */
+                (void)tag_start;
             } else {
-                /* Child element */
+                /* Child element. */
                 if (sax_parse_element(p) < 0) {
                     if (attrs) {
-                        for (size_t i = 0; i < attr_count * 2; i++) {
-                        }
                         free(attrs);
                     }
                     return -1;
