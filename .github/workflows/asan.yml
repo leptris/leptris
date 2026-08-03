@@ -45,7 +45,7 @@ jobs:
         run: cmake --build build
 
       - name: Test under ASAN
-        run: ctest --test-dir build --output-on-failure -E "PreservesEntitiesAsIs|FiresNamespacePrefixMapping"
+        run: ctest --test-dir build --output-on-failure
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
 
@@ -70,7 +70,7 @@ jobs:
         run: cmake --build build
 
       - name: Tests
-        run: ctest --test-dir build --output-on-failure -E "PreservesEntitiesAsIs|FiresNamespacePrefixMapping"
+        run: ctest --test-dir build --output-on-failure
 
       - name: Leak check on fixtures
         run: |
