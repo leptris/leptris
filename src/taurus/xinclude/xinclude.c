@@ -167,22 +167,45 @@ static int process_element_text_xinclude(TaurusElement elem,
 
     size_t content_len = 0;
     char* content = load_file_content(full_path, &content_len);
-    if (!content) {
-        /* File not found — check for xi:fallback. */
-        /* For now, just skip — Phase 1 doesn't implement fallback. */
-        return 1;
+
+    TaurusTextNode* text = NULL;
+
+    if (content) {
+        /* File loaded — create text node from file content. */
+        text = taurus_text_create(content, content_len, doc->pool);
+        free(content);
+    } else {
+        /* File not found — check for xi:fallback child element. */
+        TaurusNodeRef fb = taurus_node_first_child((TaurusNodeRef)elem);
+        TaurusElement fallback_elem = NULL;
+        while (fb) {
+            TaurusElement fe = taurus_node_as_element(fb);
+            if (fe && taurus_xinclude_is_fallback_element(fe)) {
+                fallback_elem = fe;
+                break;
+            }
+            fb = taurus_node_next_sibling(fb);
+        }
+
+        if (fallback_elem) {
+            /* Extract fallback's text content. For simplicity, gather
+             * all text children of the fallback into one string. The
+             * text node replaces the xi:include element. */
+            const char* fb_text = taurus_element_text(fallback_elem);
+            if (fb_text) {
+                text = taurus_text_create(fb_text, strlen(fb_text), doc->pool);
+            }
+        }
+        /* If no fallback and no file, silently skip per XInclude spec
+         * when no fallback is provided. The spec says the processor
+         * SHOULD report a resource error, but we're lenient. */
     }
 
-    /* Create a text node from the loaded content, pool-allocated. */
-    TaurusTextNode* text = taurus_text_create(content, content_len,
-                                               doc->pool);
-    free(content);  /* taurus_text_create copies into the pool */
-    if (!text) return 0;
-
-    /* Replace xi:include with the text node in the parent's child list. */
-    TaurusElement parent = taurus_element_get_parent(elem);
-    if (parent) {
-        replace_child_node(parent, (TaurusNode*)elem, (TaurusNode*)text);
+    if (text) {
+        TaurusElement parent = taurus_element_get_parent(elem);
+        if (parent) {
+            replace_child_node(parent, (TaurusNode*)elem, (TaurusNode*)text);
+        }
     }
 
     return 1;
