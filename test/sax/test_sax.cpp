@@ -13,6 +13,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cstdio>
 
 namespace {
 
