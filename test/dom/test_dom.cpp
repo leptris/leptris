@@ -93,3 +93,31 @@ TEST(DomBasics, NodeRefTraversalCoversAllNodeTypes) {
 }
 
 }  // namespace
+
+// ---- Freeze API (TODO 88) ------------------------------------------------
+
+TEST(DocumentFreeze, FreshDocumentIsFrozenAfterParse) {
+    /* The parser calls taurus_document_freeze_tree internally. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root><child/></root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(taurus_document_is_frozen(doc), 1);
+    taurus_document_free(doc);
+}
+
+TEST(DocumentFreeze, ExplicitFreezeSetsFlag) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    /* Already frozen by parser, but explicit freeze should still work. */
+    EXPECT_EQ(taurus_document_freeze(doc), TAURUS_OK);
+    EXPECT_EQ(taurus_document_is_frozen(doc), 1);
+    taurus_document_free(doc);
+}
+
+TEST(DocumentFreeze, NullDocReturnsSafe) {
+    EXPECT_EQ(taurus_document_freeze(nullptr), TAURUS_ERROR_NULL_ARG);
+    EXPECT_EQ(taurus_document_is_frozen(nullptr), 0);
+}

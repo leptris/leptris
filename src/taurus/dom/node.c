@@ -262,9 +262,13 @@ TaurusNode* taurus_node_thaw(TaurusNode* node) {
 
 /* Freeze entire document tree */
 void taurus_document_freeze_tree(struct taurus_document* doc) {
-    if (!doc || !doc->root) return;
-
-    TaurusElement root = (TaurusElement)doc->root;
+    if (!doc) return;
+    /* new_dom_root is the actual root in the compact architecture;
+     * doc->root is the legacy field (always NULL in new code). */
+    TaurusElement root = doc->new_dom_root
+        ? (TaurusElement)doc->new_dom_root
+        : (TaurusElement)doc->root;
+    if (!root) return;
     taurus_node_freeze((TaurusNode*)root);
 }
 
