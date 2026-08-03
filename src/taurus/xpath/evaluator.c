@@ -67,6 +67,10 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     context->namespace_count = 0;
     context->namespace_capacity = 0;
 
+    /* Initialize variable support (v1.0.1) — must be NULL so the
+     * no-vars evaluation path correctly reports "no variable set". */
+    context->variable_set = NULL;
+
     /* Initialize error context (v1.0.0) */
     context->input = NULL;
     context->input_len = 0;
