@@ -72,7 +72,7 @@ set(TAURUS_SOURCES
     taurus/dtd/model.c
     taurus/dtd/parser.c
     taurus/dtd/resolver.c
-    # taurus/dtd/validator.c # TODO: Phase 5/6 - Validation layer
+    taurus/dtd/validator.c
 
     # XInclude
     taurus/xinclude/xinclude.c
