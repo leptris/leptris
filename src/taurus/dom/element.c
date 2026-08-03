@@ -93,13 +93,22 @@ TaurusElement taurus_element_create_pooled_inplace(char* name, TaurusMemoryPool*
     return taurus_element_create_with_view(name_view, pool);
 }
 
-/* Create element using memory pool (fast O(1) allocation) */
+/* Create element using memory pool.
+ *
+ * The name is COPIED into the pool — callers can free or reuse their
+ * buffer immediately.  This is the safe contract for the public
+ * taurus_element_create() and for cross-document copies; the parser
+ * uses taurus_element_create_with_view directly for true zero-copy. */
 TaurusElement taurus_element_create_pooled(const char* name, TaurusMemoryPool* pool) {
     if (!name || !pool) return NULL;
 
-    /* Create StringView from C string */
-    TaurusStringView name_view = taurus_sv_from_cstr(name);
-    return taurus_element_create_with_view(name_view, pool);
+    /* Pool-owned copy; lives for the document's lifetime. */
+    char* name_copy = taurus_pool_strdup(pool, name);
+    if (!name_copy) return NULL;
+
+    /* Hand ownership to create_with_view via the inplace path so the
+     * name_view points into pool-owned storage, not the caller's buffer. */
+    return taurus_element_create_pooled_inplace(name_copy, pool);
 }
 
 /* Free element - pool allocated, so this is a no-op */
