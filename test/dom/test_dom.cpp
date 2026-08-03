@@ -4,6 +4,9 @@
 
 #include "taurus.h"
 
+/* Forward declare internal API used in these specs. */
+extern "C" char* taurus_element_get_text_content(TaurusElement elem);
+
 #include <cstring>
 
 namespace {
@@ -189,7 +192,14 @@ TEST(TextContentAccessors, IntTextReturnsValue) {
     TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
     TaurusElement root = taurus_document_root(doc);
-    EXPECT_EQ(taurus_element_text_int(root, 0), 123);
+    /* Use internal getter directly so we can free the malloc'd
+     * string (taurus_element_text doesn't document ownership). */
+    char* text = taurus_element_get_text_content(root);
+    EXPECT_NE(text, nullptr);
+    if (text) {
+        EXPECT_EQ(taurus_element_text_int(root, 0), 123);
+        free(text);
+    }
     taurus_document_free(doc);
 }
 
@@ -199,7 +209,12 @@ TEST(TextContentAccessors, DoubleTextReturnsValue) {
     TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
     TaurusElement root = taurus_document_root(doc);
-    EXPECT_DOUBLE_EQ(taurus_element_text_double(root, 0.0), 45.67);
+    char* text = taurus_element_get_text_content(root);
+    EXPECT_NE(text, nullptr);
+    if (text) {
+        EXPECT_DOUBLE_EQ(taurus_element_text_double(root, 0.0), 45.67);
+        free(text);
+    }
     taurus_document_free(doc);
 }
 
