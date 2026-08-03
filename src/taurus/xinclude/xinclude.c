@@ -190,10 +190,16 @@ static int process_element_text_xinclude(TaurusElement elem,
         if (fallback_elem) {
             /* Extract fallback's text content. For simplicity, gather
              * all text children of the fallback into one string. The
-             * text node replaces the xi:include element. */
-            const char* fb_text = taurus_element_text(fallback_elem);
+             * text node replaces the xi:include element.
+             *
+             * NOTE: taurus_element_text calls taurus_element_get_text_content
+             * which may malloc — that string leaks. Use the internal
+             * getter directly so we can free it after creating the
+             * pool-owned text node. */
+            char* fb_text = taurus_element_get_text_content(fallback_elem);
             if (fb_text) {
                 text = taurus_text_create(fb_text, strlen(fb_text), doc->pool);
+                free(fb_text);
             }
         }
         /* If no fallback and no file, silently skip per XInclude spec
