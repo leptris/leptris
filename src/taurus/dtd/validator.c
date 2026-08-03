@@ -235,7 +235,8 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
             return 0;
         }
         if (!taurus_hash_table_set(id_table, id_value, id_len,
-                                    (void*)(uintptr_t)1, NULL)) {
+                                    (void*)(uintptr_t)1,
+                                    (TaurusMemoryPool*)dtd->pool)) {
             /* OOM — would need proper error reporting. */
         }
     }
