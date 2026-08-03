@@ -120,12 +120,18 @@ XPathVariable* xpath_variable_new(const char* name, XPathVariableType type) {
         return NULL;
     }
 
-    /* Copy name */
-    var->name = strdup(name);
-    if (!var->name) {
+    /* Copy name. Avoid strdup — TODO 94 debug shows that on Linux + ASAN,
+     * var->name ends up holding only the low 32 bits of strdup's return
+     * pointer, sign-extended to 0xffffffff<low32>. Using malloc+memcpy
+     * directly side-steps whatever strdup linkage issue causes this. */
+    size_t name_len = strlen(name);
+    char* name_copy = (char*)malloc(name_len + 1);
+    if (!name_copy) {
         free(var);
         return NULL;
     }
+    memcpy(name_copy, name, name_len + 1);
+    var->name = name_copy;
 
     /* Initialize value */
     var->value.type = type;
