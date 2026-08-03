@@ -658,6 +658,25 @@ char* taurus_document_serialize(struct taurus_document* doc,
         }
     }
 
+    /* Output document-level processing instructions.  These are PIs
+     * that appeared before or after the root element in the original
+     * document (e.g. <?xml-stylesheet?>).  Order is preserved by the
+     * parser appending to a linked list. */
+    for (struct taurus_processing_instruction* pi = doc->pis;
+         pi;
+         pi = pi->next) {
+        buffer_append(buf, "<?");
+        if (pi->target) buffer_append(buf, pi->target);
+        if (pi->data && pi->data[0]) {
+            buffer_append_char(buf, ' ');
+            buffer_append(buf, pi->data);
+        }
+        buffer_append(buf, "?>");
+        if (indent_spaces > 0) {
+            buffer_append_newline(buf);
+        }
+    }
+
     /* Serialize root element */
     serialize_element_internal(root, buf, 1);  /* is_root=1 */
 
