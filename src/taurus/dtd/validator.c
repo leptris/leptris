@@ -225,6 +225,20 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
         if (!attr_name || !attr->value) continue;
         DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
         if (!ad || !ad->attr_type) continue;
+
+        /* #FIXED: the element's attribute value must exactly match
+         * the fixed value declared in the DTD. */
+        if (ad->default_type == DTD_ATTR_FIXED && ad->default_value) {
+            if (strcmp(attr->value, ad->default_value) != 0) {
+                char msg[200];
+                snprintf(msg, sizeof(msg),
+                         "Attribute '%s' has #FIXED value '%s' but document has '%s'",
+                         attr_name, ad->default_value, attr->value);
+                set_error(error, msg, name);
+                return 0;
+            }
+        }
+
         if (strcmp(ad->attr_type, "ID") == 0) {
             const char* id_value = attr->value;
             size_t id_len = strlen(id_value);
