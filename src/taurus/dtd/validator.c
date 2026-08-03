@@ -53,9 +53,20 @@ static void set_error(TaurusDTDError* error, const char* msg, const char* elem_n
     error->column = 0;
 }
 
-/* Forward declaration for the recursive walker. */
+/* Phase 5: hash table for tracking ID values across the document. */
+typedef struct {
+    StringHashTable* ids;  /* maps id value → element name */
+    TaurusDTDError* error;
+    int found_violation;
+} IdCheckContext;
+
+/* IDs need to be tracked in a document-level table, not per-element.
+ * The walker accumulates them as it visits each element with an
+ * ID-typed attribute. */
+
 static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
-                                       TaurusDTDError* error);
+                                       TaurusDTDError* error,
+                                       StringHashTable* id_table);
 
 /* Return 1 if this element has any element-type children, 0 otherwise.
  * Used to validate <!ELEMENT name EMPTY> — no element children allowed. */
@@ -120,7 +131,8 @@ static int attr_check_iter(const char* key, size_t key_len,
 }
 
 static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
-                                       TaurusDTDError* error) {
+                                       TaurusDTDError* error,
+                                       StringHashTable* id_table) {
     if (!elem) return 1;
 
     const char* name = taurus_element_get_name(elem);
@@ -201,10 +213,37 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
                                attr_check_iter, &ctx);
     if (ctx.found_violation) return 0;
 
+    /* Phase 5: ID uniqueness. Walk the element's attributes; if any
+     * is declared as type "ID", record its value in id_table. The
+     * first occurrence of a duplicate triggers a violation. */
+    uint8_t ac = taurus_element_attribute_count(elem);
+    for (uint8_t i = 0; i < ac; i++) {
+        struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
+        if (!attr) continue;
+        const char* attr_name = attr->name;
+        if (!attr_name || !attr->value) continue;
+        DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
+        if (!ad || !ad->attr_type) continue;
+        if (strcmp(ad->attr_type, "ID") != 0) continue;
+        const char* id_value = attr->value;
+        size_t id_len = strlen(id_value);
+        if (taurus_hash_table_get(id_table, id_value, id_len) != NULL) {
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     "Duplicate ID value '%s'", id_value);
+            set_error(error, msg, name);
+            return 0;
+        }
+        if (!taurus_hash_table_set(id_table, id_value, id_len,
+                                    (void*)(uintptr_t)1, NULL)) {
+            /* OOM — would need proper error reporting. */
+        }
+    }
+
     /* Recurse into children. */
     TaurusElement child = taurus_element_first_child_any(elem);
     while (child) {
-        int rc = validate_element_recursive(child, dtd, error);
+        int rc = validate_element_recursive(child, dtd, error, id_table);
         if (rc != 1) return rc;  /* propagate first violation */
         child = taurus_element_next_sibling_any(child);
     }
@@ -225,7 +264,17 @@ int taurus_dtd_validate(TaurusDocument doc, TaurusDTD* dtd, TaurusDTDError* erro
         return 1;
     }
 
-    return validate_element_recursive(root, dtd, error);
+    /* Phase 5: allocate the ID-tracking hash table on the DTD's
+     * pool so it shares the DTD's lifetime. */
+    StringHashTable* id_table = taurus_hash_table_create(
+        (TaurusMemoryPool*)dtd->pool, 16);
+    if (!id_table) {
+        if (error) set_error(error, "Failed to allocate ID table", NULL);
+        return -1;
+    }
+    int rc = validate_element_recursive(root, dtd, error, id_table);
+    taurus_hash_table_destroy(id_table);
+    return rc;
 }
 
 void taurus_dtd_error_free(TaurusDTDError* error) {

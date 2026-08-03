@@ -387,21 +387,35 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
 
                 /* Parse attribute type: CDATA | ID | IDREF | IDREFS |
                  * NMTOKEN | NMTOKENS | (e1|e2|...).
-                 * Phase 2 doesn't enforce attribute types, so we
-                 * parse-and-discard the type token. (Pool-owning the
-                 * strdup'd string would also work but adds bookkeeping
-                 * for unused data.) */
+                 * Phase 5 needs the type to enforce ID uniqueness.
+                 * Pool-allocate so it lives with the DTD. */
                 dtd_skip_whitespace(&parser);
+                size_t type_len = 0;
+                const char* type_start = NULL;
                 if (dtd_peek(&parser) == '(') {
-                    /* Enumerated type — skip to ')'. */
-                    while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>' &&
-                           dtd_peek(&parser) != ')') {
+                    /* Enumerated type — find ')' */
+                    dtd_advance(&parser);  /* consume '(' */
+                    type_start = parser.pos;
+                    while (!dtd_at_end(&parser) && dtd_peek(&parser) != ')') {
                         dtd_advance(&parser);
                     }
+                    type_len = parser.pos - type_start;
                     if (dtd_peek(&parser) == ')') dtd_advance(&parser);
                 } else {
-                    char* type_name = dtd_parse_name(&parser);
-                    if (type_name) free(type_name);
+                    type_start = parser.pos;
+                    while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>' &&
+                           dtd_peek(&parser) != '#' && !isspace((unsigned char)dtd_peek(&parser))) {
+                        dtd_advance(&parser);
+                    }
+                    type_len = parser.pos - type_start;
+                }
+                if (type_len > 0) {
+                    char* type_copy = (char*)taurus_pool_alloc(parser.pool, type_len + 1);
+                    if (type_copy) {
+                        memcpy(type_copy, type_start, type_len);
+                        type_copy[type_len] = '\0';
+                        decl->attr_type = type_copy;
+                    }
                 }
 
                 /* Parse default declaration:
