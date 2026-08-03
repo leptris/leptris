@@ -249,9 +249,13 @@ static int sax_parse_element(TaurusSAXParser* p) {
             }
 
             /* Emit end_prefix_mapping events */
-            if (ns_prefixes && p->handler && p->handler->end_prefix_mapping) {
+            if (ns_prefixes) {
+                if (p->handler && p->handler->end_prefix_mapping) {
+                    for (size_t i = 0; i < ns_count; i++) {
+                        p->handler->end_prefix_mapping(p->user_data, ns_prefixes[i]);
+                    }
+                }
                 for (size_t i = 0; i < ns_count; i++) {
-                    p->handler->end_prefix_mapping(p->user_data, ns_prefixes[i]);
                     free(ns_prefixes[i]);
                 }
                 free(ns_prefixes);
@@ -561,9 +565,13 @@ static int sax_parse_element(TaurusSAXParser* p) {
     }
 
     /* Emit end_prefix_mapping events */
-    if (ns_prefixes && p->handler && p->handler->end_prefix_mapping) {
+    if (ns_prefixes) {
+        if (p->handler && p->handler->end_prefix_mapping) {
+            for (size_t i = 0; i < ns_count; i++) {
+                p->handler->end_prefix_mapping(p->user_data, ns_prefixes[i]);
+            }
+        }
         for (size_t i = 0; i < ns_count; i++) {
-            p->handler->end_prefix_mapping(p->user_data, ns_prefixes[i]);
             free(ns_prefixes[i]);
         }
         free(ns_prefixes);
