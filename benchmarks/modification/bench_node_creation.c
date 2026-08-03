@@ -3,10 +3,10 @@
  */
 
 #include "taurus.h"
-#include "src/taurus/memory/pool.h"
-#include "src/taurus/dom/comment.h"
-#include "src/taurus/dom/cdata.h"
-#include "src/taurus/dom/pi.h"
+#include "taurus/memory/pool.h"
+#include "taurus/dom/comment.h"
+#include "taurus/dom/cdata.h"
+#include "taurus/dom/pi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

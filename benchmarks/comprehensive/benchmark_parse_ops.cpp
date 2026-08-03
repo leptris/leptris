@@ -120,7 +120,7 @@ static uint64_t workflow_parse_and_read_simple() {
                         TaurusElement header_child = taurus_element_child(child, j);
                         const char* hname = taurus_element_name(header_child);
                         if (hname && strcmp(hname, "title") == 0) {
-                            const char* text = taurus_element_text_content(header_child);
+                            const char* text = taurus_element_text(header_child);
                             (void)text;  // Use result
                             break;
                         }
@@ -324,7 +324,7 @@ int main(int argc, char** argv) {
                         TaurusElement hc = taurus_element_child(child, j);
                         const char* hname = taurus_element_name(hc);
                         if (hname && strcmp(hname, "title") == 0) {
-                            const char* text = taurus_element_text_content(hc);
+                            const char* text = taurus_element_text(hc);
                             (void)text;
                             break;
                         }

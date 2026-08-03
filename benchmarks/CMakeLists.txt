@@ -1,183 +1,171 @@
-# Taurus vs pugixml Benchmark Suite
+# Taurus vs libxml2 / pugixml benchmark suite.
+#
+# Re-organized for the on-disk layout: dom/, xpath/, comprehensive/,
+# serialization/, modification/ each contribute their own targets.
+# The shared harness in common/ provides timing, CPU, and RSS reporting.
+#
+# Resource tracking (CPU time + peak RSS) is wired through every
+# benchmark via the common harness; see TODO 101.
 
 cmake_minimum_required(VERSION 3.20)
 
-# ============================================================================
-# Find pugixml - Check multiple locations
-# ============================================================================
-# First, try external path (for local development)
-set(PUGIXML_EXTERNAL_PATH "/Users/mulgogi/src/external/pugixml")
-
-if(EXISTS "${PUGIXML_EXTERNAL_PATH}/CMakeLists.txt")
-    message(STATUS "Found pugixml at external path: ${PUGIXML_EXTERNAL_PATH}")
-    set(PUGIXML_EXTERNAL TRUE)
-else()
-    set(PUGIXML_EXTERNAL FALSE)
-endif()
-
-# Find pugixml (standard CMake find_package)
+# ----------------------------------------------------------------------------
+# Optional dependencies: pugixml (DOM competitor) and libxml2 (XPath/SAX competitor)
+# ----------------------------------------------------------------------------
+# Modern pugixml config exports the pugixml::pugixml imported target.
+# Fall back to find_path/find_library for older installs / hand-built trees.
 find_package(pugixml QUIET)
-
-if(NOT pugixml_FOUND AND NOT PUGIXML_EXTERNAL)
-    # Try standard find_path/find_library
-    find_path(PUGIXML_INCLUDE_DIR
-        NAMES pugixml.hpp
-        PATH_SUFFIXES pugixml src
-    )
-
-    find_library(PUGIXML_LIBRARY
-        NAMES pugixml
-        PATH_SUFFIXES build lib
-    )
-
-    if(NOT PUGIXML_INCLUDE_DIR OR NOT PUGIXML_LIBRARY)
-        message(WARNING "pugixml not found. Benchmark targets will not be built.")
-        set(PUGIXML_AVAILABLE FALSE)
-    else()
-        set(PUGIXML_AVAILABLE TRUE)
-        set(PUGIXML_INCLUDE_DIR ${PUGIXML_INCLUDE_DIR})
-        set(PUGIXML_LIBRARY ${PUGIXML_LIBRARY})
-    endif()
-elseif(pugixml_FOUND)
+if(TARGET pugixml::pugixml)
     set(PUGIXML_AVAILABLE TRUE)
-    # CMake package may not set include dirs - try to find them
-    if(NOT PUGIXML_INCLUDE_DIRS)
-        find_path(_pugixml_inc NAMES pugixml.hpp PATH_SUFFIXES pugixml src)
-        set(PUGIXML_INCLUDE_DIR ${_pugixml_inc})
-        set(PUGIXML_INCLUDE_DIRS ${_pugixml_inc})
-    else()
-        set(PUGIXML_INCLUDE_DIR ${PUGIXML_INCLUDE_DIRS})
-    endif()
-    if(NOT PUGIXML_LIBRARIES)
-        find_library(_pugixml_lib NAMES pugixml)
-        set(PUGIXML_LIBRARY ${_pugixml_lib})
-        set(PUGIXML_LIBRARIES ${_pugixml_lib})
-    else()
-        set(PUGIXML_LIBRARY ${PUGIXML_LIBRARIES})
-    endif()
+    set(PUGIXML_TARGET pugixml::pugixml)
 else()
-    # Use external path - check if build exists
-    set(PUGIXML_INCLUDE_DIR "${PUGIXML_EXTERNAL_PATH}/src")
-    set(PUGIXML_LIBRARY "${PUGIXML_EXTERNAL_PATH}/build/libpugixml.a")
-
-    if(EXISTS "${PUGIXML_LIBRARY}")
+    find_path(PUGIXML_INCLUDE_DIR NAMES pugixml.hpp PATH_SUFFIXES pugixml src)
+    find_library(PUGIXML_LIBRARY  NAMES pugixml)
+    if(PUGIXML_INCLUDE_DIR AND PUGIXML_LIBRARY AND NOT PUGIXML_INCLUDE_DIR MATCHES "-NOTFOUND")
         set(PUGIXML_AVAILABLE TRUE)
+        set(PUGIXML_TARGET "")
     else()
-        # Try to build pugixml from external source
-        message(STATUS "Building pugixml from external source...")
-        execute_process(
-            COMMAND cmake -S "${PUGIXML_EXTERNAL_PATH}" -B "${PUGIXML_EXTERNAL_PATH}/build"
-            COMMAND cmake --build "${PUGIXML_EXTERNAL_PATH}/build"
-            WORKING_DIRECTORY "${PUGIXML_EXTERNAL_PATH}"
-            RESULT_VARIABLE PUGIXML_BUILD )
-
-        if(PUGIXML_BUILD EQUAL 0 AND EXISTS "${PUGIXML_LIBRARY}")
-            message(STATUS "Successfully built pugixml from external source")
-            set(PUGIXML_AVAILABLE TRUE)
-        else()
-            message(WARNING "Failed to build pugixml from external source")
-            set(PUGIXML_AVAILABLE FALSE)
-        endif()
+        message(STATUS "pugixml not found — DOM comparison benchmarks skipped.")
+        set(PUGIXML_AVAILABLE FALSE)
     endif()
 endif()
 
-if(PUGIXML_AVAILABLE)
-    message(STATUS "pugixml include: ${PUGIXML_INCLUDE_DIR}")
-    message(STATUS "pugixml library: ${PUGIXML_LIBRARY}")
+find_package(LibXml2 QUIET)
+if(LIBXML2_FOUND)
+    set(LIBXML2_AVAILABLE TRUE)
+    set(LIBXML2_INCLUDE_DIR ${LIBXML2_INCLUDE_DIR})
+    set(LIBXML2_LIBRARY ${LIBXML2_LIBRARIES})
+else()
+    find_path(LIBXML2_INCLUDE_DIR NAMES libxml/parser.h PATH_SUFFIXES libxml2)
+    find_library(LIBXML2_LIBRARY  NAMES xml2)
+    if(LIBXML2_INCLUDE_DIR AND LIBXML2_LIBRARY AND NOT LIBXML2_INCLUDE_DIR MATCHES "-NOTFOUND")
+        set(LIBXML2_AVAILABLE TRUE)
+    else()
+        message(STATUS "libxml2 not found — XPath/SAX comparison benchmarks skipped.")
+        set(LIBXML2_AVAILABLE FALSE)
+    endif()
+endif()
 
-    # DOM Modification Benchmark
-    add_executable(bench_dom_pugixml
-        workflows/bench_dom_pugixml.cpp
-        pugixml_compat/dom_modify_tests.c
-    )
+# ----------------------------------------------------------------------------
+# Shared harness
+# ----------------------------------------------------------------------------
+add_library(taurus_bench_common STATIC
+    common/benchmark.c
+    common/test_data.c
+)
+target_include_directories(taurus_bench_common PUBLIC common)
+target_link_libraries(taurus_bench_common PUBLIC taurus)
 
-    target_include_directories(bench_dom_pugixml PRIVATE
+# Helper: declare a benchmark target with the standard include + link setup.
+function(taurus_add_benchmark target_name)
+    cmake_parse_arguments(ARG "CXX" "" "" ${ARGN})
+    add_executable(${target_name} ${ARG_UNPARSED_ARGUMENTS})
+    target_include_directories(${target_name} PRIVATE
         ${CMAKE_SOURCE_DIR}/src/include
-        ${PUGIXML_INCLUDE_DIR}
-        pugixml_compat
-    )
-
-    target_link_libraries(bench_dom_pugixml PRIVATE
-        taurus
-        ${PUGIXML_LIBRARY}
-    )
-
-    # Enable C++11 for pugixml
-    set_target_properties(bench_dom_pugixml PROPERTIES
-        CXX_STANDARD 11
-        CXX_STANDARD_REQUIRED ON
-    )
-
-    # Comprehensive DOM Benchmark
-    add_executable(dom_benchmark
-        dom_benchmark.cpp
-        utils.c
-    )
-
-    target_include_directories(dom_benchmark PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/include
-        ${PUGIXML_INCLUDE_DIR}
-    )
-
-    target_link_libraries(dom_benchmark PRIVATE
-        taurus
-        ${PUGIXML_LIBRARY}
-    )
-
-    # Enable C++11 for pugixml
-    set_target_properties(dom_benchmark PROPERTIES
-        CXX_STANDARD 11
-        CXX_STANDARD_REQUIRED ON
-    )
-
-    # Comprehensive DOM Benchmark v2 (parse once, measure operations)
-    add_executable(dom_benchmark_v2
-        dom/dom_benchmark_v2.cpp
-        utils.c
-    )
-
-    target_include_directories(dom_benchmark_v2 PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/include
-        ${PUGIXML_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
+    target_link_libraries(${target_name} PRIVATE taurus_bench_common taurus)
+    if(ARG_CXX)
+        set_target_properties(${target_name} PROPERTIES
+            CXX_STANDARD 11
+            CXX_STANDARD_REQUIRED ON)
+    endif()
+endfunction()
 
-    target_link_libraries(dom_benchmark_v2 PRIVATE
-        taurus
-        ${PUGIXML_LIBRARY}
-    )
+# ----------------------------------------------------------------------------
+# DOM benchmarks (taurus vs libxml2)
+# ----------------------------------------------------------------------------
+if(LIBXML2_AVAILABLE)
+    taurus_add_benchmark(bench_dom_taurus      dom/bench_taurus.c)
+    target_compile_definitions(bench_dom_taurus PRIVATE HAVE_LIBXML2=1)
+    target_include_directories(bench_dom_taurus PRIVATE ${LIBXML2_INCLUDE_DIR})
+    target_link_libraries(bench_dom_taurus PRIVATE ${LIBXML2_LIBRARY})
 
-    set_target_properties(dom_benchmark_v2 PROPERTIES
-        CXX_STANDARD 11
-        CXX_STANDARD_REQUIRED ON
-    )
+    taurus_add_benchmark(bench_dom_libxml2     dom/bench_libxml2.c)
+    target_include_directories(bench_dom_libxml2 PRIVATE ${LIBXML2_INCLUDE_DIR})
+    target_link_libraries(bench_dom_libxml2 PRIVATE ${LIBXML2_LIBRARY})
+endif()
 
-    # Comprehensive Benchmark (complete lifecycle analysis)
-    add_executable(comprehensive_benchmark
-        comprehensive_benchmark.cpp
-        utils.c
-    )
+# ----------------------------------------------------------------------------
+# XPath benchmarks
+# ----------------------------------------------------------------------------
+if(LIBXML2_AVAILABLE)
+    set(_xpath_pairs
+        "bench_xpath_taurus|xpath/bench_taurus.c"
+        "bench_xpath_libxml2|xpath/bench_libxml2.c"
+        "bench_xpath_axes_taurus|xpath/bench_axes.c"
+        "bench_xpath_axes_libxml2|xpath/bench_axes_libxml2.c"
+        "bench_xpath_functions_taurus|xpath/bench_functions.c"
+        "bench_xpath_functions_libxml2|xpath/bench_functions_libxml2.c")
+    foreach(pair ${_xpath_pairs})
+        string(REPLACE "|" ";" kv "${pair}")
+        list(GET kv 0 tgt)
+        list(GET kv 1 src)
+        taurus_add_benchmark(${tgt} ${src})
+        target_include_directories(${tgt} PRIVATE ${LIBXML2_INCLUDE_DIR})
+        target_link_libraries(${tgt} PRIVATE ${LIBXML2_LIBRARY})
+    endforeach()
+endif()
 
-    target_include_directories(comprehensive_benchmark PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/include
-        ${PUGIXML_INCLUDE_DIR}
-    )
+# ----------------------------------------------------------------------------
+# Comprehensive parse / memory / access benchmarks (C++ — use pugixml)
+# ----------------------------------------------------------------------------
+if(PUGIXML_AVAILABLE)
+    foreach(name
+            benchmark_parse
+            benchmark_first_access
+            benchmark_parse_ops
+            benchmark_memory)
+        taurus_add_benchmark(${name} CXX comprehensive/${name}.cpp)
+        if(PUGIXML_TARGET)
+            target_link_libraries(${name} PRIVATE ${PUGIXML_TARGET})
+        else()
+            target_include_directories(${name} PRIVATE ${PUGIXML_INCLUDE_DIR})
+            target_link_libraries(${name} PRIVATE ${PUGIXML_LIBRARY})
+        endif()
+    endforeach()
 
-    target_link_libraries(comprehensive_benchmark PRIVATE
-        taurus
-        ${PUGIXML_LIBRARY}
-    )
+    # Newer integrated DOM comparison.
+    taurus_add_benchmark(dom_benchmark_v2 CXX dom/dom_benchmark_v2.cpp utils.c)
+    if(PUGIXML_TARGET)
+        target_link_libraries(dom_benchmark_v2 PRIVATE ${PUGIXML_TARGET})
+    else()
+        target_include_directories(dom_benchmark_v2 PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(dom_benchmark_v2 PRIVATE ${PUGIXML_LIBRARY})
+    endif()
+endif()
 
-    set_target_properties(comprehensive_benchmark PROPERTIES
-        CXX_STANDARD 11
-        CXX_STANDARD_REQUIRED ON
-    )
+# ----------------------------------------------------------------------------
+# Serialization / modification (taurus only — for self-tracking over time)
+# ----------------------------------------------------------------------------
+taurus_add_benchmark(bench_serialize        serialization/bench_taurus_serialize.c)
+taurus_add_benchmark(bench_modify_taurus    modification/bench_taurus_modify.c)
+# bench_node_creation.c uses the deprecated _fast node-create variants that
+# TODO 18 collapsed into a single entry point; rewrite before re-enabling.
 
-    # Add test target
-    add_custom_target(run_bench_dom_pugixml
-        COMMAND bench_dom_pugixml
-        DEPENDS bench_dom_pugixml
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running Taurus vs pugixml DOM modification benchmark"
-    )
+# ----------------------------------------------------------------------------
+# SAX benchmarks (taurus vs libxml2).  TODO 101.
+# ----------------------------------------------------------------------------
+if(LIBXML2_AVAILABLE)
+    taurus_add_benchmark(bench_sax_taurus    sax/bench_taurus.c)
+    target_include_directories(bench_sax_taurus PRIVATE ${LIBXML2_INCLUDE_DIR})
+    target_link_libraries(bench_sax_taurus PRIVATE ${LIBXML2_LIBRARY})
+
+    taurus_add_benchmark(bench_sax_libxml2   sax/bench_libxml2.c)
+    target_include_directories(bench_sax_libxml2 PRIVATE ${LIBXML2_INCLUDE_DIR})
+    target_link_libraries(bench_sax_libxml2 PRIVATE ${LIBXML2_LIBRARY})
+endif()
+
+# ----------------------------------------------------------------------------
+# Print which targets will be built so CI logs are debuggable.
+# ----------------------------------------------------------------------------
+if(PUGIXML_AVAILABLE)
+    message(STATUS "  pugixml include: ${PUGIXML_INCLUDE_DIR}")
+endif()
+if(LIBXML2_AVAILABLE)
+    message(STATUS "  libxml2 include: ${LIBXML2_INCLUDE_DIR}")
+endif()
+if(NOT PUGIXML_AVAILABLE AND NOT LIBXML2_AVAILABLE)
+    message(WARNING "Neither pugixml nor libxml2 found — only taurus self-benchmarks will build.")
 endif()
