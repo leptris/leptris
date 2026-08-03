@@ -72,6 +72,36 @@ DTDAttributeDecl* dtd_attribute_decl_create(const char* element, const char* att
     return decl;
 }
 
+/* Pool-allocated variant — the returned declaration is released when
+ * the pool is destroyed. The parser uses this so ATTLIST declarations
+ * don't leak on ttdtd_free. */
+DTDAttributeDecl* dtd_attribute_decl_create_pooled(const char* element,
+                                                    const char* attr,
+                                                    TaurusMemoryPool* pool) {
+    if (!element || !attr || !pool) return NULL;
+
+    DTDAttributeDecl* decl = (DTDAttributeDecl*)taurus_pool_calloc(pool, sizeof(DTDAttributeDecl));
+    if (!decl) return NULL;
+
+    /* Pool-allocate each string so the whole decl is pool-owned. */
+    size_t elen = strlen(element);
+    char* element_copy = (char*)taurus_pool_alloc(pool, elen + 1);
+    if (!element_copy) return NULL;
+    memcpy(element_copy, element, elen + 1);
+    decl->element_name = element_copy;
+
+    size_t alen = strlen(attr);
+    char* attr_copy = (char*)taurus_pool_alloc(pool, alen + 1);
+    if (!attr_copy) return NULL;
+    memcpy(attr_copy, attr, alen + 1);
+    decl->attr_name = attr_copy;
+
+    decl->attr_type = "CDATA";  /* static literal — no alloc needed */
+    decl->default_type = DTD_ATTR_IMPLIED;
+    decl->default_value = NULL;
+    return decl;
+}
+
 /**
  * Free attribute declaration
  */

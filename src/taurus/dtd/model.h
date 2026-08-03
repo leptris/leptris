@@ -271,6 +271,7 @@ DTDElementDecl* dtd_element_decl_create(const char* name);
 void dtd_element_decl_free(DTDElementDecl* decl);
 
 DTDAttributeDecl* dtd_attribute_decl_create(const char* element, const char* attr);
+DTDAttributeDecl* dtd_attribute_decl_create_pooled(const char* element, const char* attr, TaurusMemoryPool* pool);
 void dtd_attribute_decl_free(DTDAttributeDecl* decl);
 
 /* DTD Parser functions */
