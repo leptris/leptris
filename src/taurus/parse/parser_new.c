@@ -55,6 +55,7 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
     p->writable = 0;  /* Read-only by default */
     p->dtd = NULL;    /* No DTD parsed yet */
     p->has_namespace_prefixes = 0;  /* No namespaces seen yet */
+    p->strict_mode = taurus_get_strict_mode();  /* Cached for hot-path reads (TODO 103) */
 
     /* Check for UTF-8 BOM (EF BB BF) */
     if (len >= 3 &&
@@ -147,6 +148,7 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     p->writable = 1;  /* Writable mode - can modify buffer in-place */
     p->dtd = NULL;    /* No DTD parsed yet */
     p->has_namespace_prefixes = 0;  /* No namespaces seen yet */
+    p->strict_mode = taurus_get_strict_mode();  /* Cached for hot-path reads (TODO 103) */
 
     /* Check for UTF-8 BOM (EF BB BF) */
     if (len >= 3 &&
@@ -642,7 +644,7 @@ TaurusTextNode* parser_parse_text(Parser* p) {
      *
      * We DON'T validate standalone continuation bytes to allow raw control
      * characters to pass through (for test_high_control_characters). */
-    if (taurus_get_strict_mode()) {
+    if (p->strict_mode) {
         for (size_t i = 0; i < len; i++) {
             unsigned char c = (unsigned char)start[i];
 
@@ -779,7 +781,7 @@ TaurusCommentNode* parser_parse_comment(Parser* p) {
      * - Extracted content: indices 4-12 = " comment " (len=9, contains no "--")
      * - But actual comment text " comment --" contains "--" at indices 13-14!
      * - We need to check start[0..len+1] (indices 4-14) to catch the "--" */
-    if (taurus_get_strict_mode()) {
+    if (p->strict_mode) {
         /* VALIDATION per XML spec: Comments must not contain "--" and must not end with "-"
          *
          * Due to parser's greedy "-->" matching, we need to check:
@@ -949,7 +951,7 @@ TaurusPINode* parser_parse_pi(Parser* p) {
 
     /* STRICT MODE VALIDATION: PI target cannot be "xml" (case-insensitive)
      * The "xml" target is reserved for XML declarations */
-    if (taurus_get_strict_mode()) {
+    if (p->strict_mode) {
         /* Case-insensitive check for "xml" */
         if (target_len == 3) {
             char lower[4] = {0};
@@ -1253,7 +1255,7 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
             /* STRICT MODE VALIDATION: Check for undeclared namespace prefix
              * Per XML Namespaces spec, a prefix used in an element name must be declared
              * For self-closing elements, we check this before returning */
-            if (taurus_get_strict_mode() && !taurus_sv_is_empty(&elem->prefix_view)) {
+            if (p->strict_mode && !taurus_sv_is_empty(&elem->prefix_view)) {
                 /* Check if prefix is "xml" - reserved prefix that's always valid */
                 int is_xml_prefix = (elem->prefix_view.length == 3) &&
                                    (elem->prefix_view.data[0] == 'x' || elem->prefix_view.data[0] == 'X') &&
@@ -1382,7 +1384,7 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
              * 1. Prefix must be a valid XML name (must not start with digit)
              * 2. Prefix "xml" is reserved and must have specific URI
              */
-            if (taurus_get_strict_mode()) {
+            if (p->strict_mode) {
                 /* Check if prefix starts with digit (invalid XML name) */
                 if (prefix.length > 0 && prefix.data[0] >= '0' && prefix.data[0] <= '9') {
                     parser_set_error(p, "Namespace prefix cannot start with digit");
@@ -1423,7 +1425,7 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
             /* Regular attribute - USE STRINGVIEW (zero-copy!) */
             /* STRICT MODE VALIDATION: Check for invalid characters in attribute value
              * Per XML spec, attribute values must not contain '<' or certain control characters */
-            if (taurus_get_strict_mode()) {
+            if (p->strict_mode) {
                 /* Check for '<' in attribute value - this is always invalid */
                 for (size_t i = 0; i < attr_value_view.length; i++) {
                     if (attr_value_view.data[i] == '<') {
@@ -1685,7 +1687,7 @@ TaurusElement parser_parse_document(Parser* p) {
             } else {
                 /* STRICT MODE: In strict mode, reject XML declarations with malformed attributes
                  * (missing '=' after attribute name) */
-                if (taurus_get_strict_mode()) {
+                if (p->strict_mode) {
                     TAURUS_FREE(attr_name);
                     parser_set_error(p, "Malformed XML declaration (missing '=' after attribute name)");
                     return NULL;
@@ -1831,7 +1833,7 @@ TaurusElement parser_parse_document(Parser* p) {
          * Lenient mode (pugixml compatibility): Allow multiple root elements */
         parser_skip_whitespace(p);
         if (!parser_at_end(p)) {
-            int strict_mode = taurus_get_strict_mode();
+            int strict_mode = p->strict_mode;
             if (strict_mode) {
                 /* Strict mode: Enforce single root element */
                 parser_set_error(p, "Extra content after root element");

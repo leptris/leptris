@@ -62,6 +62,15 @@ typedef struct {
     /* Recursion depth guard (stack-overflow DoS protection, TODO 07). */
     int depth;                   /* Current element-nesting depth (0 at top). */
     int max_depth;               /* Hard cap; default TAURUS_MAX_ELEMENT_DEPTH. */
+
+    /* Cached strict-mode flag (TODO 103 Phase 1).
+     *
+     * Copied from the thread-local `g_taurus_strict_mode` at parser
+     * creation.  The parser doesn't observe later changes — strict
+     * mode is documented as "configure before parsing."  Reading a
+     * local field eliminates a function call per check (8 sites in
+     * the hot parse path). */
+    int strict_mode;
 } Parser;
 
 /* ============================================================================
