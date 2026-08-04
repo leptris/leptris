@@ -246,11 +246,18 @@ static const char* sax_parse_name(TaurusSAXParser* p) {
         return NULL;
     }
 
-    /* Hot loop: scan name chars with no per-char function call.
-     * The compiler inlines sax_is_name_char, but the explicit loop
-     * also lets the autovectorizer see the comparison pattern. */
+    /* Hot loop with manual 4-way unroll (TODO 107 — pugixml trick #2:
+     * SCANWHILE_UNROLL).  Cuts loop-overhead (counter increment +
+     * branch) by 4x.  Stops at end-of-input or first non-name-char. */
     const char* s = start + 1;
-    while (s < p->end && sax_is_name_char(*s)) s++;
+    const char* end = p->end;
+    for (;;) {
+        if (s >= end || !sax_is_name_char(s[0])) break;
+        if (s + 1 >= end || !sax_is_name_char(s[1])) { s += 1; break; }
+        if (s + 2 >= end || !sax_is_name_char(s[2])) { s += 2; break; }
+        if (s + 3 >= end || !sax_is_name_char(s[3])) { s += 3; break; }
+        s += 4;
+    }
 
     size_t len = (size_t)(s - start);
     p->pos = s;
