@@ -124,12 +124,12 @@ int main(void) {
     printf("================================================================\n");
 
     /* Benchmark 1: Parse + Root (creates and destroys doc each time) */
-    parse_ctx_t parse_ctx = { BENCH_XML_MEDIUM, BENCH_XML_MEDIUM_LEN };
+    parse_ctx_t parse_ctx = { BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM) };
     BenchResult r1 = bench_run("Parse + Root", bench_parse_root, &parse_ctx, ITERATIONS);
     bench_print_result(&r1);
 
     /* Create document once for remaining benchmarks */
-    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, BENCH_XML_MEDIUM_LEN, NULL);
+    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL);
     if (!doc) {
         fprintf(stderr, "Failed to parse test XML\n");
         return 1;

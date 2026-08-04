@@ -31,7 +31,7 @@ int main(void) {
     LIBXML_TEST_VERSION
 
     /* Parse document once */
-    xmlDocPtr doc = xmlReadMemory(BENCH_XML_MEDIUM, (int)BENCH_XML_MEDIUM_LEN,
+    xmlDocPtr doc = xmlReadMemory(BENCH_XML_MEDIUM, (int)strlen(BENCH_XML_MEDIUM),
                                    NULL, NULL, 0);
     if (!doc) {
         fprintf(stderr, "Failed to parse test XML\n");
