@@ -355,25 +355,34 @@ TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
 TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, const char* value) {
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
 
+    /* Mutation-path perf: skip the pool's string interning hash table
+     * (TODO 106 Phase 1).  Interning deduplicates attribute NAMES that
+     * recur across many elements during parsing; on the public mutation
+     * path the user knows the attr is unique, and the hash lookup/insert
+     * is pure overhead — ~200ns × N attrs.  Inline pool_alloc + memcpy
+     * is faster than taurus_sv_to_cstr_pooled for this case. */
+
     /* Check if attribute already exists */
     struct taurus_attribute* existing = taurus_element_get_attribute_by_name(elem, name);
     if (existing) {
         /* Update existing attribute's value */
-        /* Get the memory pool from the document */
         TaurusMemoryPool* pool = NULL;
         if (elem->document && elem->document->pool) {
             pool = elem->document->pool;
         }
 
         if (pool) {
-            /* Pool-allocated document: Use pool allocation for new value
-             * CRITICAL: Don't free existing->value - it was pool-allocated and
-             * individual pool allocations cannot be freed. The old value will be
-             * reclaimed when the entire document/pool is freed. */
+            /* Pool-allocated document: pool_strdup the new value (no
+             * interning — see header comment).  Old value is pool-
+             * allocated and reclaims when the pool frees. */
             if (value) {
-                TaurusStringView value_view = taurus_sv_from_cstr(value);
-                existing->value = taurus_sv_to_cstr_pooled(&value_view, pool);
-                existing->value_view = taurus_sv_from_cstr(existing->value);
+                size_t vlen = strlen(value);
+                char* storage = (char*)taurus_pool_alloc(pool, vlen + 1);
+                if (!storage) return TAURUS_ERROR_MEMORY;
+                memcpy(storage, value, vlen);
+                storage[vlen] = '\0';
+                existing->value = storage;
+                existing->value_view = taurus_sv_from_ptr(storage, vlen);
             } else {
                 existing->value = NULL;
                 existing->value_view = taurus_sv_empty();
@@ -403,44 +412,45 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
             return TAURUS_ERROR_MEMORY;
         }
 
-        /* Initialize attribute */
-        /* CRITICAL: Pool-allocate strings to avoid pointing to stack memory!
-         * If we use taurus_strdup(), the StringView still points to the input
-         * parameter (stack memory), which gets corrupted when reused. */
-        TaurusStringView name_view = taurus_sv_from_cstr(name);
-        attr->name = taurus_sv_to_cstr_pooled(&name_view, pool);
+        /* Pool-strdup name (NO interning — mutation fast path). */
+        size_t nlen = strlen(name);
+        char* name_storage = (char*)taurus_pool_alloc(pool, nlen + 1);
+        if (!name_storage) return TAURUS_ERROR_MEMORY;
+        memcpy(name_storage, name, nlen);
+        name_storage[nlen] = '\0';
+        attr->name = name_storage;
+        attr->name_view = taurus_sv_from_ptr(name_storage, nlen);
 
         if (value) {
-            TaurusStringView value_view = taurus_sv_from_cstr(value);
-            attr->value = taurus_sv_to_cstr_pooled(&value_view, pool);
+            size_t vlen = strlen(value);
+            char* value_storage = (char*)taurus_pool_alloc(pool, vlen + 1);
+            if (!value_storage) return TAURUS_ERROR_MEMORY;
+            memcpy(value_storage, value, vlen);
+            value_storage[vlen] = '\0';
+            attr->value = value_storage;
+            attr->value_view = taurus_sv_from_ptr(value_storage, vlen);
         } else {
             attr->value = NULL;
+            attr->value_view = taurus_sv_empty();
         }
 
         attr->namespace_uri = NULL;
         attr->prefix = NULL;
-        /* CRITICAL: StringView must point to the allocated strings, not the input parameters!
-         * Otherwise StringView points to stack memory which gets corrupted. */
-        attr->name_view = taurus_sv_from_cstr(attr->name);
-        attr->value_view = value ? taurus_sv_from_cstr(attr->value) : taurus_sv_empty();
         attr->namespace_uri_view = taurus_sv_empty();
         attr->prefix_view = taurus_sv_empty();
         attr->has_entities = 0;
         attr->next = NULL;
 
-        /* Add to linked list */
-        struct taurus_attribute* first_attr = taurus_element_get_first_attribute(elem);
-        if (first_attr) {
-            /* Find end of list */
-            struct taurus_attribute* last = first_attr;
-            while (last->next) {
-                last = last->next;
-            }
-            last->next = attr;
+        /* Append via cached last_attribute pointer — O(1) instead of
+         * the old O(N) walk to find the tail.  The parser path
+         * (taurus_element_add_attribute in element.c) also maintains
+         * this pointer; mutation paths must too.  See TODO 106. */
+        if (elem->last_attribute) {
+            elem->last_attribute->next = attr;
         } else {
-            /* First attribute - direct pointer assignment (no encoding!) */
             elem->first_attribute = attr;
         }
+        elem->last_attribute = attr;
 
         elem->attr_count++;
     }

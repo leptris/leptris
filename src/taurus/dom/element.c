@@ -76,6 +76,7 @@ TaurusElement taurus_element_create_with_view(
     elem->last_child = NULL;
     elem->next_sibling = NULL;
     elem->first_attribute = NULL;
+    elem->last_attribute = NULL;
     elem->children_array = NULL;  /* indexed-access cache, lazy-built */
 
     /* Initialize counts */
@@ -190,7 +191,11 @@ struct taurus_attribute* taurus_element_get_attribute_by_index(TaurusElement ele
 struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
-    /* Walk the attribute linked list */
+    /* Walk the attribute linked list.  Pre-compute strlen once — the
+     * previous version called strlen(name) inside the loop, paying
+     * O(N) per attr for an O(N²) total.  See TODO 106. */
+    size_t name_len = strlen(name);
+
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     while (attr) {
         /* Compare with cached name first (faster) */
@@ -199,7 +204,6 @@ struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem
         }
         /* Fall back to StringView comparison */
         if (!taurus_sv_is_empty(&attr->name_view)) {
-            size_t name_len = strlen(name);
             if (attr->name_view.length == name_len &&
                 memcmp(attr->name_view.data, name, name_len) == 0) {
                 return attr;
@@ -303,19 +307,14 @@ int taurus_element_add_attribute(TaurusElement elem,
 
     attr->next = NULL;
 
-    /* Add to linked list */
-    struct taurus_attribute* first_attr = taurus_element_get_first_attribute(elem);
-    if (!first_attr) {
-        /* First attribute */
-        taurus_element_set_first_attribute(elem, attr);
+    /* Append via cached last_attribute pointer (TODO 106).
+     * Maintains the same invariant as taurus_element_set_attribute. */
+    if (elem->last_attribute) {
+        elem->last_attribute->next = attr;
     } else {
-        /* Find last attribute and append */
-        struct taurus_attribute* last = first_attr;
-        while (last->next) {
-            last = last->next;
-        }
-        last->next = attr;
+        taurus_element_set_first_attribute(elem, attr);
     }
+    elem->last_attribute = attr;
 
     /* Increment attribute count */
     elem->attr_count++;

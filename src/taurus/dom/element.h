@@ -115,6 +115,7 @@ struct taurus_element {
      * Compact pointers for attributes require careful page_base management which
      * causes fragility during parsing. Regular pointers are more reliable. */
     struct taurus_attribute* first_attribute; /* 8 bytes - regular pointer */
+    struct taurus_attribute* last_attribute;  /* 8 bytes - tail pointer for O(1) appends (TODO 106) */
     uint8_t attr_count;                /* Number of attributes */
 
     /* Children (3 bytes) */
