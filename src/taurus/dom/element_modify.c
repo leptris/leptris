@@ -53,6 +53,7 @@ TaurusStatus taurus_element_append_child(TaurusElement parent, TaurusElement chi
 
     /* Call internal void function, assume success */
     taurus_element_append_child_internal(parent, (TaurusNode*)child);
+    parent->children_array = NULL;  /* invalidate indexed-access cache */
     return TAURUS_OK;
 }
 
@@ -64,6 +65,7 @@ TaurusStatus taurus_element_prepend_child(TaurusElement parent, TaurusElement ch
 
     /* Call internal void function, assume success */
     taurus_element_prepend_child_internal(parent, (TaurusNode*)child);
+    parent->children_array = NULL;
     return TAURUS_OK;
 }
 
@@ -152,6 +154,7 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
     /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
 
+    parent->children_array = NULL;  /* invalidate indexed-access cache */
     return TAURUS_OK;
 }
 
@@ -206,6 +209,7 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
     /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
 
+    parent->children_array = NULL;  /* invalidate indexed-access cache */
     return TAURUS_OK;
 }
 
@@ -262,6 +266,7 @@ TaurusStatus taurus_element_remove_child(TaurusElement parent, TaurusElement chi
     /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
 
+    parent->children_array = NULL;  /* invalidate indexed-access cache */
     return TAURUS_OK;
 }
 
@@ -287,6 +292,7 @@ TaurusStatus taurus_element_remove_all_children(TaurusElement elem) {
     /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
 
+    elem->children_array = NULL;  /* invalidate indexed-access cache */
     return TAURUS_OK;
 }
 
