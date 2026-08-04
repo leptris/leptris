@@ -30,12 +30,39 @@ option(TAURUS_ENABLE_ICONV "Enable encoding conversion via iconv" ON)
 option(TAURUS_ENABLE_ASAN "Enable AddressSanitizer (catches heap bugs at runtime)" OFF)
 option(TAURUS_ENABLE_FUZZING "Build libFuzzer harness" OFF)
 option(TAURUS_BUILD_DOCS "Build Doxygen API docs" OFF)
+option(TAURUS_ENABLE_LTO "Enable link-time optimization (interprocedural inlining across TUs)" OFF)
 
 # AddressSanitizer — see TODO 35.
 if(TAURUS_ENABLE_ASAN)
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=address)
     message(STATUS "AddressSanitizer: ENABLED")
+endif()
+
+# Link-time optimization (TODO 110).
+#
+# Lets the compiler inline across translation-unit boundaries.  Without
+# LTO, every "static inline" helper in element_modify.c / element_query.c
+# that crosses a TU boundary from a caller in another .c file is a real
+# function call — including taurus_pool_alloc, taurus_element_set_attribute,
+# the chartype table lookups, etc.  With LTO, the compiler sees the whole
+# program at link time and inlines aggressively.
+#
+# Off by default because:
+#   - LTO significantly increases link time (5-30s for taurus)
+#   - Some older toolchains have LTO bugs
+#   - Debug builds don't benefit
+#
+# Recommended for release builds where every cycle counts.
+if(TAURUS_ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT lto_supported OUTPUT lto_error)
+    if(lto_supported)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+        message(STATUS "Link-time optimization: ENABLED")
+    else()
+        message(WARNING "TAURUS_ENABLE_LTO requested but not supported: ${lto_error}")
+    endif()
 endif()
 
 # libFuzzer — see TODO 40.  Implies ASAN.
