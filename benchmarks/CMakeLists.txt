@@ -108,6 +108,17 @@ if(LIBXML2_AVAILABLE)
     endforeach()
 endif()
 
+# XPath vs pugixml — added in TODO 107 to close the pugixml coverage gap.
+if(PUGIXML_AVAILABLE)
+    taurus_add_benchmark(bench_xpath_pugixml CXX xpath/bench_pugixml.cpp)
+    if(PUGIXML_TARGET)
+        target_link_libraries(bench_xpath_pugixml PRIVATE ${PUGIXML_TARGET})
+    else()
+        target_include_directories(bench_xpath_pugixml PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(bench_xpath_pugixml PRIVATE ${PUGIXML_LIBRARY})
+    endif()
+endif()
+
 # ----------------------------------------------------------------------------
 # Comprehensive parse / memory / access benchmarks (C++ — use pugixml)
 # ----------------------------------------------------------------------------
