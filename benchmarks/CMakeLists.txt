@@ -111,6 +111,19 @@ endif()
 # ----------------------------------------------------------------------------
 # Comprehensive parse / memory / access benchmarks (C++ — use pugixml)
 # ----------------------------------------------------------------------------
+if(PUGIXML_AVAILABLE AND LIBXML2_AVAILABLE)
+    # benchmark_write needs both pugixml AND libxml2 to compare.
+    taurus_add_benchmark(benchmark_write CXX comprehensive/benchmark_write.cpp)
+    if(PUGIXML_TARGET)
+        target_link_libraries(benchmark_write PRIVATE ${PUGIXML_TARGET})
+    else()
+        target_include_directories(benchmark_write PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(benchmark_write PRIVATE ${PUGIXML_LIBRARY})
+    endif()
+    target_include_directories(benchmark_write PRIVATE ${LIBXML2_INCLUDE_DIR})
+    target_link_libraries(benchmark_write PRIVATE ${LIBXML2_LIBRARY})
+endif()
+
 if(PUGIXML_AVAILABLE)
     foreach(name
             benchmark_parse
