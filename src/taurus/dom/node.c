@@ -247,19 +247,6 @@ int taurus_node_is_frozen(TaurusNode* node) {
     return node ? node->frozen : 0;
 }
 
-/* Thaw node (prepare for modification) */
-TaurusNode* taurus_node_thaw(TaurusNode* node) {
-    if (!node) return NULL;
-
-    /* If not frozen, return as-is */
-    if (!node->frozen) return node;
-
-    /* TODO: Implement COW deep copy when frozen
-     * For now, just unfreeze (not safe for COW) */
-    node->frozen = 0;
-    return node;
-}
-
 /* Freeze entire document tree */
 void taurus_document_freeze_tree(struct taurus_document* doc) {
     if (!doc) return;
