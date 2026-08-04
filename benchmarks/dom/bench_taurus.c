@@ -112,6 +112,23 @@ void bench_children(void* ctx) {
     }
 }
 
+/* Benchmark 5b: Child Iteration via O(1) iterator pattern.
+ *
+ * taurus_element_child(elem, j) is O(j) — see taurus.h.
+ * Sequential iteration via first_child + next_sibling is O(1) per
+ * step.  This benchmark shows the difference.  See TODO 105. */
+void bench_children_iterator(void* ctx) {
+    doc_ctx_t* dctx = (doc_ctx_t*)ctx;
+    TaurusElement root = taurus_document_root(dctx->doc);
+
+    for (int i = 0; i < 100; i++) {
+        TaurusElement child = taurus_element_first_child_any(root);
+        while (child) {
+            child = taurus_element_next_sibling_any(child);
+        }
+    }
+}
+
 int main(void) {
     const size_t ITERATIONS = 1000;
 
@@ -149,14 +166,18 @@ int main(void) {
     bench_print_result(&r4);
 
     /* Benchmark 5: Child Iteration */
-    BenchResult r5 = bench_run("Child Iteration (100x)", bench_children, &doc_ctx, ITERATIONS);
+    BenchResult r5 = bench_run("Child Iteration (indexed, O(N²))", bench_children, &doc_ctx, ITERATIONS);
     bench_print_result(&r5);
+
+    /* Benchmark 5b: Child Iteration via O(1) iterator pattern */
+    BenchResult r5b = bench_run("Child Iteration (iterator, O(N))", bench_children_iterator, &doc_ctx, ITERATIONS);
+    bench_print_result(&r5b);
 
     taurus_document_free(doc);
 
     /* Print summary */
-    BenchResult results[] = { r1, r2, r3, r4, r5 };
-    bench_print_summary("Taurus DOM", results, 5);
+    BenchResult results[] = { r1, r2, r3, r4, r5, r5b };
+    bench_print_summary("Taurus DOM", results, 6);
 
     printf("\n");
     return 0;

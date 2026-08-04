@@ -646,6 +646,12 @@ TAURUS_API size_t taurus_element_child_count(TaurusElement elem);
  * @return Child element or NULL if index out of bounds
  *
  * Memory: Element is owned by document. Do not free separately.
+ *
+ * Performance: **O(index)** — walks the linked-list of children from
+ * `first_child`.  Calling this in a `for (i = 0; i < count; i++)` loop
+ * is O(N²) overall.  For sequential iteration prefer the iterator
+ * pattern: `taurus_element_first_child_any` + `next_sibling_any`,
+ * which is O(1) per step.
  */
 TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index);
 
