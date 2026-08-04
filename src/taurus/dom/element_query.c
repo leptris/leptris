@@ -345,9 +345,11 @@ TAURUS_API int taurus_element_set_attribute_uint(TaurusElement elem, const char*
  * Get child element by index (Public API)
  * Returns the index-th ELEMENT child (skips text, comments, etc.)
  *
- * PERFORMANCE: Uses inline accessor functions from element.h for maximum speed.
- * The inline functions use a fast-path check that avoids the while loop
- * when the first child/next sibling is already an element (common case).
+ * Performance: O(index) on first call (walks the linked list),
+ * then O(1) on subsequent calls via the children_array cache.
+ * The cache is invalidated by any structural mutation.  See
+ * taurus_element_child's public docstring in taurus.h for the
+ * user-facing performance contract.
  */
 TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index) {
     if (!elem) return NULL;
@@ -357,15 +359,38 @@ TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index) 
         return NULL;
     }
 
-    /* Navigate to the requested index using inline accessors
-     * These have fast-path optimization for element-only children */
-    TaurusElement child = taurus_element_get_first_child(elem);
+    /* Lazy-build the children_array cache on first indexed access. */
+    if (!elem->children_array) {
+        /* Need a document (and thus a pool) to allocate the cache. */
+        if (!elem->document || !elem->document->pool) {
+            /* No document — fall back to the slow linked-list walk. */
+            TaurusElement child = taurus_element_get_first_child(elem);
+            for (size_t i = 0; i < index && child != NULL; i++) {
+                child = taurus_element_get_next_sibling(child);
+            }
+            return child;
+        }
 
-    for (size_t i = 0; i < index && child != NULL; i++) {
-        child = taurus_element_get_next_sibling(child);
+        TaurusElement* arr = (TaurusElement*)taurus_pool_alloc(
+            elem->document->pool, (size_t)elem->child_count * sizeof(TaurusElement));
+        if (!arr) {
+            /* OOM — fall back to slow path. */
+            TaurusElement child = taurus_element_get_first_child(elem);
+            for (size_t i = 0; i < index && child != NULL; i++) {
+                child = taurus_element_get_next_sibling(child);
+            }
+            return child;
+        }
+
+        TaurusElement child = taurus_element_get_first_child(elem);
+        for (size_t i = 0; i < elem->child_count && child != NULL; i++) {
+            arr[i] = child;
+            child = taurus_element_get_next_sibling(child);
+        }
+        elem->children_array = arr;
     }
 
-    return child;
+    return elem->children_array[index];
 }
 
 /**

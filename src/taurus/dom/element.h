@@ -122,6 +122,18 @@ struct taurus_element {
     struct taurus_namespace* namespaces; /* Linked list of namespace declarations */
     struct taurus_document* document;  /* NULL if not attached to document */
 
+    /* O(1) indexed child access cache (TODO 103 Phase 4).
+     *
+     * NULL until the first call to taurus_element_child(elem, j). Built
+     * lazily from the first_child linked list, then invalidated (set to
+     * NULL) by any structural mutation (append/prepend/insert/remove
+     * child).  Pool-allocated; lives for the document's lifetime.
+     *
+     * Threading: safe for the common parse-then-read pattern (single
+     * threaded first access, then concurrent reads of the immutable
+     * array).  Concurrent first-access from multiple threads would
+     * race; document as a known limitation. */
+    struct taurus_element** children_array;
 };
 
 /* TaurusElement typedef comes from the public include/taurus/types.h
