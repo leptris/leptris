@@ -37,41 +37,6 @@ const char* BENCH_XML_SMALL =
     "  </book>\n"
     "</bookstore>\n";
 
-const size_t BENCH_XML_SMALL_LEN = sizeof(
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-    "<bookstore>\n"
-    "  <book id=\"1\" category=\"fiction\">\n"
-    "    <title lang=\"en\">The Great Novel</title>\n"
-    "    <author>John Doe</author>\n"
-    "    <year>2020</year>\n"
-    "    <price>29.99</price>\n"
-    "  </book>\n"
-    "  <book id=\"2\" category=\"science\">\n"
-    "    <title lang=\"en\">Physics Today</title>\n"
-    "    <author>Jane Smith</author>\n"
-    "    <year>2021</year>\n"
-    "    <price>39.99</price>\n"
-    "  </book>\n"
-    "  <book id=\"3\" category=\"history\">\n"
-    "    <title lang=\"en\">Ancient Civilizations</title>\n"
-    "    <author>Bob Johnson</author>\n"
-    "    <year>2019</year>\n"
-    "    <price>34.99</price>\n"
-    "  </book>\n"
-    "  <book id=\"4\" category=\"fiction\">\n"
-    "    <title lang=\"en\">Mystery at Dawn</title>\n"
-    "    <author>Alice Williams</author>\n"
-    "    <year>2022</year>\n"
-    "    <price>27.99</price>\n"
-    "  </book>\n"
-    "  <book id=\"5\" category=\"science\">\n"
-    "    <title lang=\"en\">Chemistry Basics</title>\n"
-    "    <author>Charlie Brown</author>\n"
-    "    <year>2020</year>\n"
-    "    <price>44.99</price>\n"
-    "  </book>\n"
-    "</bookstore>\n"
-) - 1;
 
 /* Medium XML (~10KB) - Realistic library document */
 const char* BENCH_XML_MEDIUM =
@@ -215,7 +180,6 @@ const char* BENCH_XML_MEDIUM =
     "  </magazines>\n"
     "</library>\n";
 
-const size_t BENCH_XML_MEDIUM_LEN = 5787;  /* Actual length */
 
 /* Large XML (~100KB) - Stress test with many elements */
 const char* BENCH_XML_LARGE =
@@ -449,4 +413,3 @@ const char* BENCH_XML_LARGE =
     "  </suppliers>\n"
     "</catalog>\n";
 
-const size_t BENCH_XML_LARGE_LEN = 10420;  /* Actual length */

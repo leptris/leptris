@@ -133,12 +133,12 @@ int main(void) {
     printf("================================================================\n");
 
     /* Benchmark 1: Parse + Root */
-    parse_ctx_t parse_ctx = { BENCH_XML_MEDIUM, BENCH_XML_MEDIUM_LEN };
+    parse_ctx_t parse_ctx = { BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM) };
     BenchResult r1 = bench_run("Parse + Root", bench_parse_root, &parse_ctx, ITERATIONS);
     bench_print_result(&r1);
 
     /* Create document once for remaining benchmarks */
-    xmlDocPtr doc = xmlReadMemory(BENCH_XML_MEDIUM, (int)BENCH_XML_MEDIUM_LEN,
+    xmlDocPtr doc = xmlReadMemory(BENCH_XML_MEDIUM, (int)strlen(BENCH_XML_MEDIUM),
                                    NULL, NULL, 0);
     if (!doc) {
         fprintf(stderr, "Failed to parse test XML\n");

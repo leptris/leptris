@@ -2,6 +2,9 @@
 #include "../common/test_data.h"
 #include <taurus.h>
 #include <stdio.h>
+#include <string.h>
+#include <string.h>
+#include <string.h>
 #include <stdlib.h>
 
 typedef struct {
@@ -303,7 +306,7 @@ int main(void) {
     const size_t ITERATIONS = 1000;
 
     /* Parse test document */
-    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, BENCH_XML_MEDIUM_LEN, NULL);
+    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL);
     if (!doc) {
         fprintf(stderr, "Failed to parse test document\n");
         return 1;

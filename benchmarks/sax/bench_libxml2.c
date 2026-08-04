@@ -78,16 +78,16 @@ int main(void) {
 
     xmlInitParser();
 
-    sax_ctx_t small_ctx  = { BENCH_XML_SMALL,  BENCH_XML_SMALL_LEN  };
-    sax_ctx_t medium_ctx = { BENCH_XML_MEDIUM, BENCH_XML_MEDIUM_LEN };
+    sax_ctx_t small_ctx  = { BENCH_XML_SMALL,  strlen(BENCH_XML_SMALL)  };
+    sax_ctx_t medium_ctx = { BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM) };
 
     bench_print_header("libxml2 SAX");
 
-    bench_set_payload_size_kb((double)BENCH_XML_SMALL_LEN / 1024.0);
+    bench_set_payload_size_kb((double)strlen(BENCH_XML_SMALL) / 1024.0);
     BenchResult r1 = bench_run("SAX small",  bench_sax, &small_ctx,  ITERS_SMALL);
     bench_print_result(&r1);
 
-    bench_set_payload_size_kb((double)BENCH_XML_MEDIUM_LEN / 1024.0);
+    bench_set_payload_size_kb((double)strlen(BENCH_XML_MEDIUM) / 1024.0);
     BenchResult r2 = bench_run("SAX medium", bench_sax, &medium_ctx, ITERS_SMALL);
     bench_print_result(&r2);
 

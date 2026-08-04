@@ -23,7 +23,7 @@ int main(void) {
     const size_t ITERATIONS = 1000;
 
     /* Parse document once */
-    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, BENCH_XML_MEDIUM_LEN, NULL);
+    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL);
     if (!doc) {
         fprintf(stderr, "Failed to parse test XML\n");
         return 1;
