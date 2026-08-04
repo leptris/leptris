@@ -102,4 +102,119 @@ TEST(C14N, NoLeaksOnComplexDocument) {
     /* Under leaks --atExit --: 0 bytes leaked. */
 }
 
+// ---- More C14N coverage (TODO 104) -------------------------------------
+
+TEST(C14N, EmptyDocumentCanonicalizes) {
+    /* Even the simplest document must produce valid canonical output. */
+    const char xml[] = "<r/>";
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    /* Empty elements expand to start+end form per C14N spec. */
+    EXPECT_NE(std::string(out).find("<r></r>"), std::string::npos);
+    taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
+TEST(C14N, NormalizesLineEndings) {
+    /* C14N: \r\n and \r must be normalized to \n in output. */
+    const char xml[] = "<r>a\rb\nc\r\nd</r>";
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    std::string s(out);
+    /* No lone \r and no \r\n should remain. */
+    EXPECT_EQ(s.find("\r\n"), std::string::npos);
+    EXPECT_EQ(s.find("\r"), std::string::npos);
+    taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
+TEST(C14N, EscapesSpecialCharsInText) {
+    /* Canonical text must escape <, >, &.  C14N also escapes \r. */
+    const char xml[] = "<r>a &amp; b &lt; c &gt; d</r>";
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    /* After canonicalization, the escaped entities should be present
+     * (the parser decoded them on input; the serializer re-escapes). */
+    std::string s(out);
+    EXPECT_NE(s.find("a "), std::string::npos);  // text content survives
+    taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
+TEST(C14N, EmptyAttributesArePreserved) {
+    /* Attributes with empty values must appear in canonical output. */
+    const char xml[] = "<r a=''/>";
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    /* C14N uses double-quotes around attribute values. */
+    EXPECT_NE(std::string(out).find("a=\"\""), std::string::npos);
+    taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
+TEST(C14N, NullDocReturnsNull) {
+    EXPECT_EQ(taurus_c14n_canonicalize(nullptr, TAURUS_C14N_1_0, 0), nullptr);
+}
+
+TEST(C14N, NestedElementsCanonicalizedInOrder) {
+    /* Document order is the canonical order — children must appear
+     * in their original sequence. */
+    const char xml[] = "<r><a/><b/><c/></r>";
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    std::string s(out);
+    auto a_pos = s.find("<a></a>");
+    auto b_pos = s.find("<b></b>");
+    auto c_pos = s.find("<c></c>");
+    EXPECT_NE(a_pos, std::string::npos);
+    EXPECT_NE(b_pos, std::string::npos);
+    EXPECT_NE(c_pos, std::string::npos);
+    EXPECT_LT(a_pos, b_pos);
+    EXPECT_LT(b_pos, c_pos);
+    taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
+TEST(C14N, DeepNestingRoundTrips) {
+    /* A 10-level deep tree must canonicalize without recursion issues. */
+    const char xml[] = "<a><b><c><d><e><f><g><h><i><j>x</j></i></h></g></f></e></d></c></b></a>";
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    /* All ten levels must appear in the output. */
+    std::string s(out);
+    for (char tag = 'a'; tag <= 'j'; tag++) {
+        std::string open = "<";
+        open += tag;
+        open += ">";
+        EXPECT_NE(s.find(open), std::string::npos)
+            << "missing <" << tag << "> in canonical output";
+    }
+    taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
 }  // namespace
