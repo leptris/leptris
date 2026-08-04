@@ -30,7 +30,22 @@ option(TAURUS_ENABLE_ICONV "Enable encoding conversion via iconv" ON)
 option(TAURUS_ENABLE_ASAN "Enable AddressSanitizer (catches heap bugs at runtime)" OFF)
 option(TAURUS_ENABLE_FUZZING "Build libFuzzer harness" OFF)
 option(TAURUS_BUILD_DOCS "Build Doxygen API docs" OFF)
-option(TAURUS_ENABLE_LTO "Enable link-time optimization (interprocedural inlining across TUs)" OFF)
+
+# LTO default: ON for Release/RelWithDebInfo, OFF for Debug/empty.
+# The user can override with -DTAURUS_ENABLE_LTO=OFF.
+# LTO delivers 1.3-3.5x speedups on parse/SAX/DOM benchmarks — see
+# PR #74 for the benchmark data.  Downside: 5-30s longer link time.
+# CheckIPOSupported guards against unsupported toolchains.
+if(NOT DEFINED TAURUS_ENABLE_LTO)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        set(TAURUS_ENABLE_LTO_DEFAULT ON)
+    else()
+        set(TAURUS_ENABLE_LTO_DEFAULT OFF)
+    endif()
+else()
+    set(TAURUS_ENABLE_LTO_DEFAULT ${TAURUS_ENABLE_LTO})
+endif()
+option(TAURUS_ENABLE_LTO "Enable link-time optimization (default ON for Release)" ${TAURUS_ENABLE_LTO_DEFAULT})
 
 # AddressSanitizer — see TODO 35.
 if(TAURUS_ENABLE_ASAN)
