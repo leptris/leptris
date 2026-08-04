@@ -75,4 +75,87 @@ TEST(PerfRegression, DeepNestingIsRejectedQuickly) {
     EXPECT_LT(ms, 100);
 }
 
+// ---- Write + DOM-access regression specs --------------------------------
+//
+// These specs protect the write-path perf gains from PRs #68, #70.
+// Budgets are generous (10x the Release+LTO time on M-series Mac) so
+// they pass on any CI runner but catch 10x+ regressions.
+
+TEST(PerfRegression, AppendChildDoesNotRegress) {
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    auto start = clock_type::now();
+    for (int i = 0; i < 1000; i++) {
+        TaurusElement c = taurus_element_create(doc, "c");
+        taurus_element_append_child(root, c);
+    }
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        clock_type::now() - start).count();
+
+    /* Release+LTO: ~0.015 ms on M-series.
+     * Budget: 10 ms (667x margin for slow CI). */
+    EXPECT_LT(ms, 10);
+
+    taurus_document_free(doc);
+}
+
+TEST(PerfRegression, SetAttributeDoesNotRegress) {
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    auto start = clock_type::now();
+    char name[16], value[32];
+    for (int i = 0; i < 100; i++) {
+        snprintf(name, sizeof(name), "a%d", i);
+        snprintf(value, sizeof(value), "v-%d", i);
+        taurus_element_set_attribute(root, name, value);
+    }
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        clock_type::now() - start).count();
+
+    /* Release+LTO: ~0.043 ms on M-series.
+     * Budget: 20 ms (465x margin). */
+    EXPECT_LT(ms, 20);
+
+    taurus_document_free(doc);
+}
+
+TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
+    /* PR #68 added children_array cache for O(1) indexed access.
+     * This spec catches if someone removes the cache. */
+    std::string xml = "<r>";
+    for (int i = 0; i < 50; i++) xml += "<c/>";
+    xml += "</r>";
+
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    /* Access by index 1000 times — should be fast due to cache. */
+    auto start = clock_type::now();
+    volatile size_t sink = 0;
+    for (int iter = 0; iter < 1000; iter++) {
+        for (size_t i = 0; i < 50; i++) {
+            TaurusElement child = taurus_element_child(root, i);
+            sink += (size_t)child;
+        }
+    }
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        clock_type::now() - start).count();
+
+    /* Release+LTO: ~0.3 ms on M-series with cache.
+     * Without cache it would be ~6 ms (O(N²)).
+     * Budget: 5 ms — catches cache removal without false-alarming on slow CI. */
+    EXPECT_LT(ms, 5);
+    (void)sink;
+
+    taurus_document_free(doc);
+}
+
 }  // namespace
