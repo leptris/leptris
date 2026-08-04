@@ -68,8 +68,67 @@ static inline char sax_advance(TaurusSAXParser* p) {
     return c;
 }
 
+/* ============================================================================
+ * Chartype lookup table (TODO 107 — pugixml-style speed trick)
+ *
+ * One byte load + one AND + one branch replaces the multi-comparison
+ * patterns like `c == ' ' || c == '\t' || c == '\n' || c == '\r'`.
+ * pugixml uses exactly this trick; see TODO 107.
+ *
+ * Bits:
+ *   1  = space        (\r \n space tab)
+ *   2  = name start   (a-z A-Z _ :)
+ *   4  = name char    (a-z A-Z 0-9 _ : - .)
+ *   8  = digit        (0-9)
+ *   16 = quote        (' ")
+ * ============================================================================ */
+
+#define SAX_CT_SPACE       1
+#define SAX_CT_NAME_START  2
+#define SAX_CT_NAME_CHAR   4
+#define SAX_CT_DIGIT       8
+#define SAX_CT_QUOTE       16
+
+static const unsigned char sax_chartype_table[256] = {
+    /*       0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
+    /* 0 */  0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
+    /* 1 */  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    /* 2 */  1, 0, 16, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 4, 4, 0,
+    /*       SP !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /    */
+    /* 3 */ 12,12,12,12,12,12,12,12,12,12, 4, 0, 0, 0, 0, 0,
+    /*       0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?    */
+    /* 4 */  0, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    /*       @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O    */
+    /* 5 */  6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 0, 0, 0, 0, 6,
+    /*       P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _    */
+    /* 6 */  0, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    /*       `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o    */
+    /* 7 */  6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0,
+    /*       p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~  DEL  */
+    /* 8 */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* 9 */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* A */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* B */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* C */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* D */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* E */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* F */  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+};
+
 static inline int sax_is_whitespace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    return (sax_chartype_table[(unsigned char)c] & SAX_CT_SPACE) != 0;
+}
+
+static inline int sax_is_name_start(char c) {
+    return (sax_chartype_table[(unsigned char)c] & SAX_CT_NAME_START) != 0;
+}
+
+static inline int sax_is_name_char(char c) {
+    return (sax_chartype_table[(unsigned char)c] & SAX_CT_NAME_CHAR) != 0;
+}
+
+static inline int sax_is_quote(char c) {
+    return (sax_chartype_table[(unsigned char)c] & SAX_CT_QUOTE) != 0;
 }
 
 /* Skip a whitespace run without per-char line tracking.  The run is
@@ -114,14 +173,6 @@ static void sax_set_error(TaurusSAXParser* p, const char* message) {
     if (p->handler && p->handler->error) {
         p->handler->error(p->user_data, message, p->line, p->column);
     }
-}
-
-static int sax_is_name_start(char c) {
-    return isalpha((unsigned char)c) || c == '_' || c == ':';
-}
-
-static int sax_is_name_char(char c) {
-    return isalnum((unsigned char)c) || c == '_' || c == ':' || c == '-' || c == '.';
 }
 
 /* ============================================================================
@@ -215,7 +266,7 @@ static const char* sax_parse_attr_value(TaurusSAXParser* p) {
         return NULL;
     }
     char quote = *p->pos;
-    if (quote != '"' && quote != '\'') {
+    if (!sax_is_quote(quote)) {
         sax_set_error(p, "Expected quote for attribute value");
         return NULL;
     }
