@@ -406,10 +406,16 @@ TAURUS_API int taurus_get_strict_mode(void);
 /**
  * Freeze a document, marking all its nodes as immutable.
  *
- * After freezing, mutation functions (set_attribute, append_child,
- * etc.) SHOULD return an error instead of modifying the tree.
- * Currently the flag is advisory — callers can check
- * taurus_document_is_frozen before mutating.
+ * The freeze flag is **advisory only** — it does not cause mutation
+ * functions (set_attribute, append_child, etc.) to return an error.
+ * Callers who want to honor the freeze should check
+ * `taurus_document_is_frozen` before mutating.
+ *
+ * Rationale: the alternative ("freeze = read-only, mutations reject")
+ * breaks the common pattern of parse-then-modify, since every
+ * freshly-parsed document is auto-frozen by the parser.  Users who
+ * want true immutability should keep the document pointer private
+ * and check `is_frozen` at their own API boundaries.
  *
  * @param doc Document to freeze. Must not be NULL.
  * @return TAURUS_OK on success, TAURUS_ERROR_NULL_ARG if doc is NULL.
@@ -417,7 +423,8 @@ TAURUS_API int taurus_get_strict_mode(void);
 TAURUS_API TaurusStatus taurus_document_freeze(TaurusDocument doc);
 
 /**
- * Check if a document is frozen.
+ * Check if a document has been frozen (advisory — see
+ * taurus_document_freeze for the full contract).
  *
  * @param doc Document to query. NULL returns 0.
  * @return 1 if frozen, 0 if mutable.

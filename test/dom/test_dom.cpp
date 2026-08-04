@@ -122,6 +122,33 @@ TEST(DocumentFreeze, NullDocReturnsSafe) {
     EXPECT_EQ(taurus_document_is_frozen(nullptr), 0);
 }
 
+// The freeze flag is advisory only — it does NOT cause mutations to
+// reject.  See taurus.h:taurus_document_freeze for the rationale.
+// This spec pins the current contract so future "freeze = read-only"
+// enforcement has to update the spec deliberately.
+TEST(DocumentFreeze, MutationsSucceedOnFrozenDocument) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root><child/></root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    ASSERT_EQ(taurus_document_is_frozen(doc), 1);
+
+    /* These mutation calls succeed even though the doc is frozen.
+     * If we ever want true read-only enforcement, this is the spec
+     * that would need to flip. */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(taurus_element_set_attribute(root, "x", "1"), TAURUS_OK);
+    EXPECT_EQ(taurus_element_set_name(root, "renamed"), TAURUS_OK);
+    EXPECT_STREQ(taurus_element_attribute(root, "x"), "1");
+    EXPECT_STREQ(taurus_element_name(root), "renamed");
+
+    /* The flag is still set — mutating didn't unfreeze. */
+    EXPECT_EQ(taurus_document_is_frozen(doc), 1);
+
+    taurus_document_free(doc);
+}
+
 // ---- Node content accessors (TODO: specs coverage) -----------------------
 
 TEST(NodeContentAccessors, CdataNodeReturnsContent) {

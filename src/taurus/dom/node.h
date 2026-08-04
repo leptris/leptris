@@ -113,11 +113,12 @@ void taurus_node_freeze(TaurusNode* node);
 /* Check if node is frozen (returns 1 if frozen, 0 if mutable) */
 int taurus_node_is_frozen(TaurusNode* node);
 
-/* Thaw node (prepare for modification) - returns mutable copy or NULL on failure
- * NOTE: For Phase 2.1, this just returns the node if not frozen
- * Full COW implementation will be in Phase 2.4 */
-TaurusNode* taurus_node_thaw(TaurusNode* node);
-
+/* Freeze is a permanent marker — see taurus.h for the public contract.
+ * The internal `taurus_node_thaw` was a TODO stub that just cleared the
+ * frozen bit in place, which is unsafe under any COW contract; removed
+ * in TODO 88.  Mutations on a frozen doc are currently NOT rejected —
+ * the flag is advisory only.  If true read-only enforcement is needed,
+ * add explicit `is_frozen` checks at each mutation entry point. */
 /* Freeze entire document tree (starting from root element) */
 void taurus_document_freeze_tree(struct taurus_document* doc);
 
