@@ -9,6 +9,7 @@
 
 #include "evaluator.h"
 #include "parser.h"
+#include "../dom/node.h"  /* TaurusNode for matches_node_test (TODO 109) */
 
 /* Forward declarations for internal functions */
 
@@ -19,7 +20,7 @@ char* xpath_to_string(struct taurus_xpath_result* result);
 char* get_node_text(void* node);
 
 /* From evaluator_axes.c */
-XPathNodeSet* apply_axis(XPathContext* ctx, TaurusElement node,
+XPathNodeSet* apply_axis(XPathContext* ctx, TaurusNode* node,
                          const char* axis_name, XPathASTNode* test);
 
 /* From evaluator_operators.c */
@@ -32,7 +33,7 @@ struct taurus_xpath_result* evaluate_location_path(XPathContext* ctx,
 struct taurus_xpath_result* evaluate_step(XPathContext* ctx,
                                           XPathASTNode* step,
                                           XPathNodeSet* input);
-int matches_node_test(XPathContext* ctx, TaurusElement node,
+int matches_node_test(XPathContext* ctx, TaurusNode* node,
                      XPathASTNode* test);
 XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
                                XPathASTNode** predicates, size_t pred_count);

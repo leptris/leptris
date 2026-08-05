@@ -111,33 +111,12 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
     }
 
     /* Insert new_node before sibling
-     * We need to set next_sibling on prev_child to point to new_node
-     * Since prev_child can be any node type (text, comment, etc.), we need
-     * to handle the different structure layouts. */
+     * Set prev_child's next_sibling via the type-dispatching setter —
+     * each node type encodes the field as int32_t offset (TODO 90
+     * Phase 2c); the previous struct-pun predates the compact
+     * encoding and corrupted PI data when used on non-text nodes. */
     if (prev_child) {
-        switch (prev_child->type) {
-            case TAURUS_NODE_TYPE_TEXT:
-            case TAURUS_NODE_TYPE_COMMENT:
-            case TAURUS_NODE_TYPE_CDATA: {
-                /* These node types have: base(4) + content(8) + next_sibling(8)
-                 * next_sibling is at offset 12 */
-                struct {
-                    TaurusNode base;
-                    char* content;
-                    void* next_sibling;
-                } *text_node = (void*)prev_child;
-                text_node->next_sibling = (TaurusNode*)new_node;
-                break;
-            }
-            case TAURUS_NODE_TYPE_ELEMENT: {
-                /* Element encodes next_sibling as int32_t offset (TODO 90 Phase 2b) */
-                taurus_elem_set_next_sibling((TaurusElement)prev_child, (TaurusNode*)new_node);
-                break;
-            }
-            default:
-                /* PI, DOCTYPE, etc. - not expected in this context */
-                return TAURUS_ERROR_INVALID_ARG;
-        }
+        taurus_node_set_next_sibling(prev_child, (TaurusNode*)new_node);
     } else {
         /* new_node becomes first child */
         taurus_elem_set_first_child(parent, (TaurusNode*)new_node);

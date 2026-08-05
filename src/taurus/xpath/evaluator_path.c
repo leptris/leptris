@@ -5,6 +5,7 @@
  */
 
 #include "evaluator_internal.h"
+#include "../dom/pi.h"  /* TaurusPINode for processing-instruction('target') */
 #include "../taurus_internal.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
 #include <string.h>
@@ -88,13 +89,37 @@ static void parse_node_test_name(const char* test_name,
     }
 }
 
-int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test) {
+int matches_node_test(XPathContext* ctx, TaurusNode* node, XPathASTNode* test) {
     if (!node || !test) return 1;  /* No test means match all */
+
+    /* Name and wildcard tests only match element nodes (TODO 109). */
+    if (node->type != TAURUS_NODE_TYPE_ELEMENT) {
+        if (test->type == XPATH_AST_NODE_TEST_TYPE && test->value) {
+            if (strcmp(test->value, "node") == 0) return 1;
+            if (strcmp(test->value, "text") == 0)
+                return node->type == TAURUS_NODE_TYPE_TEXT ||
+                       node->type == TAURUS_NODE_TYPE_CDATA;
+            if (strcmp(test->value, "comment") == 0)
+                return node->type == TAURUS_NODE_TYPE_COMMENT;
+            if (strcmp(test->value, "processing-instruction") == 0) {
+                if (node->type != TAURUS_NODE_TYPE_PI) return 0;
+                /* Optional target argument: processing-instruction('xml-stylesheet') */
+                if (test->local_name) {
+                    TaurusPINode* pi = (TaurusPINode*)node;
+                    return pi->target && strcmp(pi->target, test->local_name) == 0;
+                }
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    TaurusElement elem = (TaurusElement)node;
 
     switch (test->type) {
         case XPATH_AST_NODE_TEST_NAME: {
             /* Match specific name - namespace-aware */
-            const char* node_name = taurus_element_get_name(node);
+            const char* node_name = taurus_element_get_name(elem);
             if (!test->value || !node_name) return 0;
 
             /* Fast path: No colon means no namespace prefix */
@@ -102,7 +127,7 @@ int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test)
 
             if (!colon) {
                 /* Simple name match - no prefix in test */
-                const char* node_prefix = taurus_element_get_prefix(node);
+                const char* node_prefix = taurus_element_get_prefix(elem);
                 DEBUG_LOG("      matches_node_test: test='%s', node_name='%s', node_prefix=%s",
                          test->value, node_name, node_prefix ? node_prefix : "(null)");
                 /* Unprefixed test should only match unprefixed elements */
@@ -117,7 +142,7 @@ int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test)
             const char* test_local = colon + 1;
 
             /* Get node prefix */
-            const char* node_prefix = taurus_element_get_prefix(node);
+            const char* node_prefix = taurus_element_get_prefix(elem);
             if (!node_prefix) return 0;  /* Test has prefix, node doesn't */
 
             /* Match prefix (compare up to prefix_len) */
@@ -135,11 +160,11 @@ int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test)
             if (test->value) {
                 /* Fast path: No colon means match all */
                 const char* colon = strchr(test->value, ':');
-                if (!colon) return 1;  /* Pure "*" matches all */
+                if (!colon) return 1;  /* Pure "*" matches all elements */
 
                 /* Has prefix (e.g., "ns1:*") - match namespace */
                 size_t prefix_len = colon - test->value;
-                const char* node_prefix = taurus_element_get_prefix(node);
+                const char* node_prefix = taurus_element_get_prefix(elem);
 
                 if (!node_prefix) return 0;
 
@@ -154,15 +179,14 @@ int matches_node_test(XPathContext* ctx, TaurusElement node, XPathASTNode* test)
         case XPATH_AST_NODE_TEST_TYPE:
             /* Node type tests (node(), text(), comment(), etc.) */
             if (test->value) {
-                if (strcmp(test->value, "node") == 0) {
-                    return 1;  /* node() matches all nodes */
-                }
+                if (strcmp(test->value, "node") == 0) return 1;
                 if (strcmp(test->value, "text") == 0) {
                     /* text() matches elements with non-empty text content */
-                    const char* text = taurus_element_get_text_content(node);
+                    const char* text = taurus_element_get_text_content(elem);
                     return (text && text[0] != '\0');
                 }
-                /* comment(), processing-instruction() not fully implemented yet */
+                if (strcmp(test->value, "comment") == 0) return 0;
+                if (strcmp(test->value, "processing-instruction") == 0) return 0;
             }
             return 0;
 
