@@ -77,70 +77,60 @@ struct taurus_attribute {
  * - Falls back to hash table for large offsets
  */
 struct taurus_element {
-    /* Compact base node (4 bytes) - only type, no redundant pointers */
-    TaurusNode base;                   /* MUST be first - allows casting */
+    /* Compact base node (8 bytes) - MUST be first for casting.
+     * TaurusNode is 8 bytes (4-byte enum + 4-byte bitfield word). */
+    TaurusNode base;
 
-    /* Compact header (2 bytes) */
-    TaurusCompactHeader header;        /* Page offset and flags */
+    /* Packed header + counts (5 bytes, fills the 8-byte tail of base's
+     * alignment slot). Phase 2a of TODO 90 — eliminated 8 bytes of
+     * padding that the previous layout wasted. */
+    TaurusCompactHeader header;        /* 2 bytes */
+    uint8_t attr_count;                /* 1 byte */
+    uint16_t child_count;              /* 2 bytes */
 
-    /* name_view only (16 bytes) — prefix_view removed (TODO 90),
-     * namespace_uri_view removed (TODO 90 PR #82). */
+    /* Cached NULL-terminated strings (24 bytes).
+     * Phase 1 of TODO 90 removed the parallel StringView fields. */
+    char* name;                        /* NULL until first access */
+    char* prefix;                      /* NULL until first access */
+    char* namespace_uri;               /* NULL until first access */
 
-    /* Cached NULL-terminated strings (24 bytes) - lazy conversion */
-    char* name;                      /* NULL until first access */
-    char* prefix;                    /* NULL until first access */
-    char* namespace_uri;             /* NULL until first access */
+    /* Tree pointers (32 bytes). Hot navigation paths — kept as raw
+     * pointers; compact offset encoding is Phase 2b of TODO 90. */
+    struct taurus_element* parent;     /* parent is always an element */
+    struct taurus_node* first_child;   /* can be any node type */
+    struct taurus_node* last_child;    /* can be any node type */
+    struct taurus_node* next_sibling;  /* can be any node type */
 
-    /* Tree pointers (32 bytes) - Regular pointers for performance!
-     * Uses TaurusNode* for type-safe mixed content (elements, text, CDATA, etc.)
-     * COMPACT vs REGULAR POINTERS TRADE-OFF:
-     * - Compact: 3 bytes, but requires page_base calculation (SLOW!)
-     * - Regular: 32 bytes (4×8 bytes), but direct pointer access (FAST!)
-     *
-     * Hybrid approach: Use regular pointers for hot navigation paths
-     * to achieve 1.2x performance target. Still 2x better than legacy 192 bytes.
-     *
-     * NOTE: Using TaurusNode* instead of TaurusElement for type safety:
-     * - Allows mixed content (elements + text nodes) without type confusion
-     * - Consistent with text/cdata/comment/PI node structures
-     * - Traversal uses taurus_node_get_next_sibling() helper */
-    struct taurus_element* parent;     /* 8 bytes - parent is always an element */
-    struct taurus_node* first_child;   /* 8 bytes - can be any node type */
-    struct taurus_node* last_child;    /* 8 bytes - can be any node type */
-    struct taurus_node* next_sibling;  /* 8 bytes - can be any node type */
+    /* Attributes (16 bytes). Tail pointer for O(1) appends (TODO 106). */
+    struct taurus_attribute* first_attribute;
+    struct taurus_attribute* last_attribute;
 
-    /* Attributes (9 bytes) - Use regular pointers for correctness and robustness
-     * Compact pointers for attributes require careful page_base management which
-     * causes fragility during parsing. Regular pointers are more reliable. */
-    struct taurus_attribute* first_attribute; /* 8 bytes - regular pointer */
-    struct taurus_attribute* last_attribute;  /* 8 bytes - tail pointer for O(1) appends (TODO 106) */
-    uint8_t attr_count;                /* Number of attributes */
-
-    /* Children (3 bytes) */
-    uint16_t child_count;             /* Number of elements (max 65535) */
-    struct taurus_namespace* namespaces; /* Linked list of namespace declarations */
-    struct taurus_document* document;  /* NULL if not attached to document */
+    /* Document context (16 bytes). */
+    struct taurus_namespace* namespaces; /* Linked list of declarations */
+    struct taurus_document* document;    /* NULL if detached */
 };
 
 
 /* Compile-time element-size tracker (TODO 90).
  *
- * Current layout (Phase 1 complete, 112 bytes):
- *   - 4-byte base + 2-byte header + 6 bytes name/prefix/namespace_uri
- *     char* pointers (24 bytes total)
- *   - 4 raw tree pointers (parent, first_child, last_child, next_sibling)
- *   - 2 attribute list pointers + 1-byte count
- *   - 2-byte child_count + namespaces pointer + document pointer
+ * Current layout (Phase 1 + Phase 2a complete, 104 bytes):
+ *   - 8-byte base + 2-byte header + 1-byte attr_count + 2-byte child_count
+ *     packed into the 8-byte alignment slot of base (5 bytes used, 3 pad)
+ *   - 24 bytes of cached name/prefix/namespace_uri char* pointers
+ *   - 32 bytes of raw tree pointers (parent, first_child, last_child, next_sibling)
+ *   - 16 bytes of attribute list pointers (first, last)
+ *   - 16 bytes of document context (namespaces, document)
  *
- * pugixml compact node: 12 bytes. Phase 2 of TODO 90 will compress the
- * tree pointers to 1-2 byte page-relative offsets; this upper bound
- * drops accordingly. */
+ * pugixml compact node: 12 bytes. Phase 2b of TODO 90 will compress the
+ * tree pointers to 4-byte self-relative offsets (saves 16 bytes → 88);
+ * deferred because the migration touches ~180 pointer-access sites
+ * across 15 files and needs an accessor-macro layer to be safe. */
 #ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 120,
-    "taurus_element grew beyond 120 bytes — check for accidental field additions");
+_Static_assert(sizeof(struct taurus_element) <= 112,
+    "taurus_element grew beyond 112 bytes — check for accidental field additions");
 #else
-static_assert(sizeof(struct taurus_element) <= 120,
-    "taurus_element grew beyond 120 bytes");
+static_assert(sizeof(struct taurus_element) <= 112,
+    "taurus_element grew beyond 112 bytes");
 #endif
 
 /* TaurusElement typedef comes from the public include/taurus/types.h
