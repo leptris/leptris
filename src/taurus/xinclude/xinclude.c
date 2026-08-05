@@ -241,19 +241,34 @@ static TaurusElement find_fallback(TaurusElement include_elem) {
     return NULL;
 }
 
+/* Recursion depth cap. Per XInclude spec, the recursion limit is
+ * impl-defined but must be bounded to prevent infinite loops on
+ * mutually-recursive xi:include. 32 is generous; most real-world
+ * inclusion chains are < 5 deep. */
+#define XINCLUDE_MAX_DEPTH 32
+
+/* Forward decl for internal recursion-aware variant. */
+static TaurusStatus xinclude_process_internal(struct taurus_document* doc,
+                                              const char* base_url,
+                                              int depth);
+
 /* Recursive walker. Bottom-up so that included content can itself
  * contain nested xi:include elements.  Returns 0 on first hard failure
- * (parse error, alloc failure), 1 otherwise. */
+ * (parse error, alloc failure), 1 otherwise. The `depth` parameter
+ * (TODO 92 Phase 5) tracks how many xi:include layers we've descended
+ * through; XINCLUDE_MAX_DEPTH stops mutual-recursion attacks. */
 static int process_element_xinclude(TaurusElement elem,
                                      struct taurus_document* doc,
-                                     const char* base_url) {
+                                     const char* base_url,
+                                     int depth) {
     if (!elem) return 1;
 
     TaurusNodeRef child = taurus_node_first_child((TaurusNodeRef)elem);
     while (child) {
         TaurusNodeRef next = taurus_node_next_sibling(child);
         if (taurus_node_get_type(child) == TAURUS_NODE_TYPE_ELEMENT) {
-            int rc = process_element_xinclude((TaurusElement)child, doc, base_url);
+            int rc = process_element_xinclude((TaurusElement)child, doc,
+                                              base_url, depth);
             if (!rc) return 0;
         }
         child = next;
@@ -283,8 +298,9 @@ static int process_element_xinclude(TaurusElement elem,
             TaurusDocument included_doc = taurus_parse_string(content, content_len, &st);
             if (included_doc && st == TAURUS_OK) {
                 /* Resolve any xi:include nested inside the included doc
-                 * before splicing — XInclude processes recursively. */
-                taurus_xinclude_process(included_doc, base_url);
+                 * before splicing — XInclude processes recursively.
+                 * Bump depth so mutual-recursion stops at MAX_DEPTH. */
+                xinclude_process_internal(included_doc, base_url, depth + 1);
                 TaurusElement inc_root = taurus_document_root(included_doc);
                 if (inc_root) {
                     /* Phase 4 of TODO 92: xpointer attribute selects
@@ -369,13 +385,22 @@ static int process_element_xinclude(TaurusElement elem,
     return 1;
 }
 
-TAURUS_API TaurusStatus taurus_xinclude_process(TaurusDocument doc, const char* base_url) {
+/* Internal recursion-aware variant. Aborts with TAURUS_ERROR_INVALID_ARG
+ * if depth exceeds XINCLUDE_MAX_DEPTH (TODO 92 Phase 5). */
+static TaurusStatus xinclude_process_internal(struct taurus_document* doc,
+                                              const char* base_url,
+                                              int depth) {
     if (!doc) return TAURUS_ERROR_NULL_ARG;
+    if (depth > XINCLUDE_MAX_DEPTH) return TAURUS_ERROR_INVALID_ARG;
 
     TaurusElement root = taurus_document_root(doc);
     if (!root) return TAURUS_OK;
 
-    int rc = process_element_xinclude(root, doc, base_url);
+    int rc = process_element_xinclude(root, doc, base_url, depth);
     if (!rc) return TAURUS_ERROR_IO;
     return TAURUS_OK;
+}
+
+TAURUS_API TaurusStatus taurus_xinclude_process(TaurusDocument doc, const char* base_url) {
+    return xinclude_process_internal(doc, base_url, 0);
 }
