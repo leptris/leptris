@@ -31,24 +31,39 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
     /* Call internal implementation with string length */
     size_t expr_len = strlen(expression);
 
-    /* Parse XPath expression */
-    XPathParser* parser = xpath_parser_new(expression, expr_len);
-    if (!parser) return NULL;
+    /* AST cache (TODO 113 perf): repeated evaluations of the same
+     * expression skip the parse phase. 16-entry LRU keyed by FNV-1a
+     * hash of the expression string. For single-threaded use; the
+     * race on concurrent first-insert is benign (worst case is a
+     * duplicate parse, then last-writer-wins on the cache slot).
+     *
+     * Ownership: the cache owns the AST after first parse. Subsequent
+     * calls borrow it for the duration of one evaluate; never free. */
+    XPathASTNode* ast = xpath_ast_cache_lookup(expression, expr_len);
 
-    XPathASTNode* ast = xpath_parse(parser);
-    const char* parse_error = xpath_parser_error(parser);
+    if (!ast) {
+        XPathParser* parser = xpath_parser_new(expression, expr_len);
+        if (!parser) return NULL;
 
-    if (!ast || parse_error) {
+        ast = xpath_parse(parser);
+        const char* parse_error = xpath_parser_error(parser);
+
+        if (!ast || parse_error) {
+            xpath_parser_free(parser);
+            return NULL;
+        }
+
         xpath_parser_free(parser);
-        return NULL;
-    }
 
-    xpath_parser_free(parser);
+        /* Hand ownership to the cache. The cache returns the same
+         * pointer on subsequent lookups. */
+        xpath_ast_cache_insert(expression, expr_len, ast);
+    }
 
     /* Create evaluation context with TaurusElement directly - NO CONVERSION! */
     XPathContext* xpath_ctx = xpath_context_new(doc, context_elem);
     if (!xpath_ctx) {
-        ast_node_free(ast);
+        /* Don't free ast — owned by the cache. */
         return NULL;
     }
 
@@ -61,9 +76,8 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
         /* Error already set in context */
     }
 
-    /* Cleanup */
+    /* Cleanup. ast is owned by the cache — never free here. */
     xpath_context_free(xpath_ctx);
-    ast_node_free(ast);
 
     return result;
 }

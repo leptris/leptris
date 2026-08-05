@@ -75,12 +75,9 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     context->input = NULL;
     context->input_len = 0;
 
-    /* Initialize function registry with standard XPath 1.0 functions */
-    context->function_registry = xpath_function_registry_new();
-    if (context->function_registry) {
-        xpath_function_registry_init_standard(
-            (XPathFunctionRegistry*)context->function_registry);
-    }
+    /* Initialize function registry: use the shared standard singleton
+     * (TODO 113 perf). Skip the ~27 alloc + register ops per eval. */
+    context->function_registry = xpath_function_registry_get_standard();
 
     /* Auto-populate namespace mappings from document (v0.8.0) */
     xpath_context_init_from_document(context);
@@ -100,10 +97,8 @@ void xpath_context_free(XPathContext* context) {
         TAURUS_FREE(context->namespace_mappings);
     }
 
-    /* Free function registry */
-    if (context->function_registry) {
-        xpath_function_registry_free((XPathFunctionRegistry*)context->function_registry);
-    }
+    /* Function registry is now the shared singleton (TODO 113 perf).
+     * Do NOT free it here — it lives for the process lifetime. */
 
     TAURUS_FREE(context);
 }

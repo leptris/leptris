@@ -64,6 +64,7 @@ set(TAURUS_SOURCES
     taurus/xpath/functions.c
     taurus/xpath/xpath_variables.c
     taurus/xpath/xpath_public.c
+    taurus/xpath/xpath_ast_cache.c
 
     # SAX
     taurus/sax/parser.c

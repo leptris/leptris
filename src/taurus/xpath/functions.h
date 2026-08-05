@@ -122,6 +122,12 @@ XPathFunctionDef* xpath_function_registry_get(
     const char* name
 );
 
+/* Returns the shared standard registry, initializing it on first call.
+ * The registry is read-only after init — concurrent reads are safe.
+ * Per-eval function registry setup was the largest single perf cost
+ * in taurus_xpath_eval (TODO 113). */
+XPathFunctionRegistry* xpath_function_registry_get_standard(void);
+
 /* ============================================================================
  * Standard Function Library
  * ============================================================================ */
