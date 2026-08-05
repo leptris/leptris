@@ -150,7 +150,7 @@ static void xml_print_element_recursive(
     }
 
     /* Check if element has children (including text nodes) */
-    TaurusNode* first_child = (TaurusNode*)elem->first_child;
+    TaurusNode* first_child = taurus_elem_first_child(elem);
     int has_children = (first_child != NULL);
     int first_is_element = first_child && TAURUS_NODE_IS_ELEMENT(first_child);
 
@@ -172,7 +172,7 @@ static void xml_print_element_recursive(
     }
 
     /* Children - iterate through ALL children (including text nodes) */
-    TaurusNode* child = (TaurusNode*)elem->first_child;
+    TaurusNode* child = taurus_elem_first_child(elem);
     while (child) {
         if (TAURUS_NODE_IS_ELEMENT(child)) {
             /* Element child - recurse with indentation */
@@ -515,7 +515,7 @@ static void json_print_element_recursive(
     TAURUS_FREE(text_content);
 
     /* Children - iterate using compact accessor functions */
-    TaurusNode* first_child = (TaurusNode*)elem->first_child;
+    TaurusNode* first_child = taurus_elem_first_child(elem);
     if (first_child != NULL) {
         fprintf(out, ",\"children\":[");
         int first = 1;
@@ -713,7 +713,7 @@ static void text_print_element_recursive(
     fprintf(out, "\n");
 
     /* Children - iterate through ALL children (including text nodes) */
-    TaurusNode* child = (TaurusNode*)elem->first_child;
+    TaurusNode* child = taurus_elem_first_child(elem);
     while (child) {
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             text_print_element_recursive((TaurusElement)child, out, level + 1);

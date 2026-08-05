@@ -203,7 +203,7 @@ TaurusNode* taurus_node_first_child_internal(TaurusNode* node) {
 
     TaurusElement elem = (TaurusElement)node;
     /* Return first_child directly - it may point to any node type */
-    return (TaurusNode*)elem->first_child;
+    return taurus_elem_first_child(elem);
 }
 
 /* Get last child of node (any type: element, text, comment, CDATA, etc.) */
@@ -213,7 +213,7 @@ TaurusNode* taurus_node_last_child_internal(TaurusNode* node) {
 
     TaurusElement elem = (TaurusElement)node;
     /* Return last_child directly - it may point to any node type */
-    return (TaurusNode*)elem->last_child;
+    return taurus_elem_last_child(elem);
 }
 
 /* Get child count */
@@ -287,9 +287,9 @@ TaurusNode* taurus_node_get_next_sibling(TaurusNode* node) {
 
     switch (node->type) {
         case TAURUS_NODE_TYPE_ELEMENT: {
-            /* Element nodes use regular pointer at specific offset */
+            /* Element nodes encode sibling as int32_t offset (TODO 90 Phase 2b). */
             TaurusElement elem = (TaurusElement)node;
-            return (TaurusNode*)elem->next_sibling;
+            return taurus_elem_next_sibling(elem);
         }
         case TAURUS_NODE_TYPE_TEXT: {
             TaurusTextNode* text = (TaurusTextNode*)node;
@@ -328,7 +328,7 @@ void taurus_node_set_next_sibling(TaurusNode* node, TaurusNode* sibling) {
     switch (node->type) {
         case TAURUS_NODE_TYPE_ELEMENT: {
             TaurusElement elem = (TaurusElement)node;
-            elem->next_sibling = sibling;
+            taurus_elem_set_next_sibling(elem, sibling);
             break;
         }
         case TAURUS_NODE_TYPE_TEXT: {

@@ -122,7 +122,7 @@ static TaurusElement deep_copy_element(const TaurusElement src,
      * because it only links elements — mixed content needs the generic
      * set_next_sibling + parent.first_child / last_child wiring. */
     TaurusNode* prev_copy = NULL;
-    for (TaurusNode* child = src->first_child;
+    for (TaurusNode* child = taurus_elem_first_child(src);
          child;
          child = taurus_node_get_next_sibling(child)) {
 
@@ -132,12 +132,12 @@ static TaurusElement deep_copy_element(const TaurusElement src,
         if (prev_copy) {
             taurus_node_set_next_sibling(prev_copy, child_copy);
         } else {
-            dst->first_child = child_copy;
+            taurus_elem_set_first_child(dst, child_copy);
         }
         prev_copy = child_copy;
     }
     if (prev_copy) {
-        dst->last_child = prev_copy;
+        taurus_elem_set_last_child(dst, prev_copy);
     }
     return dst;
 }
@@ -191,7 +191,7 @@ static void replace_child_node(TaurusElement parent,
     if (!parent || !old_node || !new_node) return;
 
     TaurusNode* prev = NULL;
-    TaurusNode* child = parent->first_child;
+    TaurusNode* child = taurus_elem_first_child(parent);
     while (child && child != old_node) {
         prev = child;
         child = taurus_node_get_next_sibling(child);
@@ -206,12 +206,12 @@ static void replace_child_node(TaurusElement parent,
         taurus_node_set_next_sibling(prev, new_node);
     } else {
         /* old_node was first_child */
-        parent->first_child = new_node;
+        taurus_elem_set_first_child(parent, new_node);
     }
 
     /* Update last_child if old_node was last. */
-    if (parent->last_child == (struct taurus_node*)old_node) {
-        parent->last_child = new_node;
+    if (taurus_elem_last_child(parent) == old_node) {
+        taurus_elem_set_last_child(parent, new_node);
     }
 }
 

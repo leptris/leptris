@@ -130,8 +130,8 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
                 break;
             }
             case TAURUS_NODE_TYPE_ELEMENT: {
-                /* Element has next_sibling as a struct member */
-                ((TaurusElement)prev_child)->next_sibling = (TaurusNode*)new_node;
+                /* Element encodes next_sibling as int32_t offset (TODO 90 Phase 2b) */
+                taurus_elem_set_next_sibling((TaurusElement)prev_child, (TaurusNode*)new_node);
                 break;
             }
             default:
@@ -140,12 +140,12 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
         }
     } else {
         /* new_node becomes first child */
-        parent->first_child = (TaurusNode*)new_node;
+        taurus_elem_set_first_child(parent, (TaurusNode*)new_node);
     }
-    new_node->next_sibling = (TaurusNode*)sibling;
+    taurus_elem_set_next_sibling(new_node, (TaurusNode*)sibling);
 
     /* Set parent and document */
-    new_node->parent = parent;
+    taurus_elem_set_parent(new_node, parent);
     new_node->document = parent->document;
 
     /* Increment child count */
@@ -187,20 +187,20 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
     TaurusNode* next_sibling = taurus_node_get_next_sibling(sibling_ptr);
 
     /* Link sibling to new_node */
-    sibling->next_sibling = (TaurusNode*)new_node;
+    taurus_elem_set_next_sibling(sibling, (TaurusNode*)new_node);
 
     /* Link new_node to next_sibling */
-    new_node->next_sibling = (TaurusNode*)next_sibling;
+    taurus_elem_set_next_sibling(new_node, (TaurusNode*)next_sibling);
 
     /* Set parent */
-    new_node->parent = parent;
+    taurus_elem_set_parent(new_node, parent);
     new_node->document = parent->document;
 
     /* Update last_child if needed - use generic node API */
     TaurusNode* last = taurus_node_last_child_internal((TaurusNode*)parent);
     if (last == sibling_ptr) {
         /* new_node is always an element (checked above) */
-        parent->last_child = (TaurusNode*)new_node;
+        taurus_elem_set_last_child(parent, (TaurusNode*)new_node);
     }
 
     /* Increment child count */
@@ -247,20 +247,20 @@ TaurusStatus taurus_element_remove_child(TaurusElement parent, TaurusElement chi
 
     /* Unlink child from the list */
     if (prev_child) {
-        prev_child->next_sibling = (TaurusNode*)next_child;
+        taurus_elem_set_next_sibling(prev_child, (TaurusNode*)next_child);
     } else {
         /* Child was first child */
-        parent->first_child = (TaurusNode*)next_child;
+        taurus_elem_set_first_child(parent, (TaurusNode*)next_child);
     }
 
     /* Update last_child pointer - directly check instead of using get_last_child */
-    if ((TaurusNode*)parent->last_child == (TaurusNode*)child) {
+    if (taurus_elem_last_child(parent) == (TaurusNode*)child) {
         /* Child was last child */
-        parent->last_child = (TaurusNode*)prev_child;
+        taurus_elem_set_last_child(parent, (TaurusNode*)prev_child);
     }
 
     /* Clear parent and decrement count */
-    child->parent = NULL;
+    taurus_elem_set_parent(child, NULL);
     parent->child_count--;
 
     /* COW: Increment version */
@@ -280,13 +280,13 @@ TaurusStatus taurus_element_remove_all_children(TaurusElement elem) {
     TaurusElement child = taurus_element_get_first_child(elem);
     while (child) {
         TaurusElement next = taurus_element_get_next_sibling(child);
-        child->parent = NULL;
+        taurus_elem_set_parent(child, NULL);
         child = next;
     }
 
     /* Clear child pointers */
-    elem->first_child = NULL;
-    elem->last_child = NULL;
+    taurus_elem_set_first_child(elem, NULL);
+    taurus_elem_set_last_child(elem, NULL);
     elem->child_count = 0;
 
     /* COW: Increment version */
@@ -567,7 +567,7 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
     }
 
     /* Fast path: Simple element (no attributes, no children) - skip all loops */
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
         TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
         if (!copy) return NULL;
         if (taurus_element_append_child(parent, copy) != TAURUS_OK) {
@@ -630,7 +630,7 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
     }
 
     /* Copy children recursively */
-    TaurusElement child = (TaurusElement)source->first_child;  /* Direct field access */
+    TaurusElement child = (TaurusElement)taurus_elem_first_child(source);
 
     /* SAFETY: Verify child pointer is valid before accessing.
      * Small values like 0x4 indicate memory corruption or uninitialized fields. */
@@ -725,7 +725,7 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
     }
 
     /* Fast path: Simple element (no attributes, no children) */
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
         TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
         if (!copy) return NULL;
         if (taurus_element_prepend_child(parent, copy) != TAURUS_OK) {
@@ -783,7 +783,7 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
     }
 
     /* Copy children recursively */
-    TaurusElement child = (TaurusElement)source->first_child;  /* Direct field access */
+    TaurusElement child = (TaurusElement)taurus_elem_first_child(source);
     while (child) {
         TaurusNode* child_node = (TaurusNode*)child;
         if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
@@ -840,7 +840,7 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
     }
 
     /* Fast path: Simple element (no attributes, no children) */
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
         TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
         if (!copy) return NULL;
         if (taurus_element_insert_after(sibling, copy) != TAURUS_OK) {
@@ -898,7 +898,7 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
     }
 
     /* Copy children recursively */
-    TaurusElement child = (TaurusElement)source->first_child;  /* Direct field access */
+    TaurusElement child = (TaurusElement)taurus_elem_first_child(source);
     while (child) {
         TaurusNode* child_node = (TaurusNode*)child;
         if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
@@ -955,7 +955,7 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
     }
 
     /* Fast path: Simple element (no attributes, no children) */
-    if (!taurus_element_get_first_attribute(source) && !source->first_child) {
+    if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
         TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
         if (!copy) return NULL;
         if (taurus_element_insert_before(sibling, copy) != TAURUS_OK) {
@@ -1013,7 +1013,7 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
     }
 
     /* Copy children recursively */
-    TaurusElement child = (TaurusElement)source->first_child;  /* Direct field access */
+    TaurusElement child = (TaurusElement)taurus_elem_first_child(source);
     while (child) {
         TaurusNode* child_node = (TaurusNode*)child;
         if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
@@ -1116,7 +1116,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     copy->namespace_uri = source->namespace_uri;
 
     /* Set parent pointer */
-    copy->parent = parent_copy;
+    taurus_elem_set_parent(copy, parent_copy);
 
     /* Copy attributes */
     copy->attr_count = source->attr_count;
@@ -1173,7 +1173,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     TaurusElement first_child = NULL;
     TaurusElement last_child = NULL;
 
-    TaurusElement child = (TaurusElement)source->first_child;
+    TaurusElement child = (TaurusElement)taurus_elem_first_child(source);
     while (child) {
         TaurusNode* child_node = (TaurusNode*)child;
 
@@ -1203,7 +1203,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
                     first_child = (TaurusElement)text_copy;
                 }
                 if (last_child) {
-                    last_child->next_sibling = (TaurusNode*)text_copy;
+                    taurus_elem_set_next_sibling(last_child, (TaurusNode*)text_copy);
                 }
                 last_child = (TaurusElement)text_copy;
             }
@@ -1216,8 +1216,8 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     }
 
     /* Set child pointers */
-    copy->first_child = (TaurusNode*)first_child;
-    copy->last_child = (TaurusNode*)last_child;
+    taurus_elem_set_first_child(copy, (TaurusNode*)first_child);
+    taurus_elem_set_last_child(copy, (TaurusNode*)last_child);
 
     /* Copy child count */
     copy->child_count = source->child_count;
