@@ -73,8 +73,9 @@ TaurusElement taurus_element_create_with_view(
     elem->first_child_off = 0;
     elem->last_child_off = 0;
     elem->next_sibling_off = 0;
-    elem->first_attribute = NULL;
-    elem->last_attribute = NULL;
+    /* Initialize attribute-list edges (encoded as 0 = NULL) */
+    elem->first_attribute_off = 0;
+    elem->last_attribute_off = 0;
 
     /* Initialize counts */
     elem->attr_count = 0;
@@ -144,18 +145,14 @@ void taurus_element_set_next_sibling(TaurusElement elem, TaurusElement sibling) 
  * Attribute Access Functions (still uses compact pointers - cold path)
  * ============================================================================ */
 
-/* Get first attribute from element - DIRECT POINTER ACCESS (no encoding!) */
+/* Get first attribute — decodes the int32_t offset (TODO 90 Phase 2d). */
 struct taurus_attribute* taurus_element_get_first_attribute(TaurusElement elem) {
-    if (!elem) return NULL;
-    /* first_attribute is a regular pointer - no decoding needed! */
-    return elem->first_attribute;
+    return taurus_elem_first_attribute(elem);
 }
 
-/* Set first attribute in element - DIRECT POINTER ACCESS (no encoding!) */
+/* Set first attribute — encodes the int32_t offset (TODO 90 Phase 2d). */
 void taurus_element_set_first_attribute(TaurusElement elem, struct taurus_attribute* attr) {
-    if (!elem) return;
-    /* first_attribute is a regular pointer - no encoding needed! */
-    elem->first_attribute = attr;
+    taurus_elem_set_first_attribute(elem, attr);
 }
 
 /* Get attribute count */
@@ -302,13 +299,16 @@ int taurus_element_add_attribute(TaurusElement elem,
     attr->next = NULL;
 
     /* Append via cached last_attribute pointer (TODO 106).
-     * Maintains the same invariant as taurus_element_set_attribute. */
-    if (elem->last_attribute) {
-        elem->last_attribute->next = attr;
+     * Maintains the same invariant as taurus_element_set_attribute.
+     * Decode the int32_t offset to access the struct, then update via
+     * the encoder (TODO 90 Phase 2d). */
+    struct taurus_attribute* last = taurus_elem_last_attribute(elem);
+    if (last) {
+        last->next = attr;
     } else {
-        taurus_element_set_first_attribute(elem, attr);
+        taurus_elem_set_first_attribute(elem, attr);
     }
-    elem->last_attribute = attr;
+    taurus_elem_set_last_attribute(elem, attr);
 
     /* Increment attribute count */
     elem->attr_count++;
@@ -815,8 +815,9 @@ int taurus_element_remove_all_attributes(TaurusElement elem) {
         attr = next;
     }
 
-    /* Clear the first_attribute pointer and count */
-    elem->first_attribute = NULL;
+    /* Clear the attribute-list head/tail offsets and count */
+    taurus_elem_set_first_attribute(elem, NULL);
+    taurus_elem_set_last_attribute(elem, NULL);
     elem->attr_count = 0;
 
     return 0; /* TAURUS_OK */

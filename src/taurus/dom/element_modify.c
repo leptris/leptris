@@ -440,16 +440,16 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
         attr->has_entities = 0;
         attr->next = NULL;
 
-        /* Append via cached last_attribute pointer — O(1) instead of
-         * the old O(N) walk to find the tail.  The parser path
-         * (taurus_element_add_attribute in element.c) also maintains
-         * this pointer; mutation paths must too.  See TODO 106. */
-        if (elem->last_attribute) {
-            elem->last_attribute->next = attr;
+        /* Append via cached last_attribute offset — O(1) instead of
+         * the old O(N) walk to find the tail.  Decode the offset to
+         * access the struct, then re-encode (TODO 90 Phase 2d). */
+        struct taurus_attribute* last = taurus_elem_last_attribute(elem);
+        if (last) {
+            last->next = attr;
         } else {
-            elem->first_attribute = attr;
+            taurus_elem_set_first_attribute(elem, attr);
         }
-        elem->last_attribute = attr;
+        taurus_elem_set_last_attribute(elem, attr);
 
         elem->attr_count++;
     }
@@ -1159,12 +1159,11 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
 
         /* Link to previous attribute or set as first attribute */
         if (!prev_dst_attr) {
-            /* First attribute - use compact pointer */
-            void* page_base = (char*)copy - (copy->header.page_offset * TAURUS_COMPACT_ALIGNMENT);
-            taurus_compact_ptr8_encode((TaurusCompactPtr8*)&copy->first_attribute, dst_attr, page_base);
+            taurus_elem_set_first_attribute(copy, dst_attr);
         } else {
             prev_dst_attr->next = dst_attr;
         }
+        taurus_elem_set_last_attribute(copy, dst_attr);
         prev_dst_attr = dst_attr;
         src_attr = src_attr->next;
     }
