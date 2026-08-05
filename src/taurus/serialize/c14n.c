@@ -175,20 +175,8 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
                 break;
             }
         }
-        /* Get next sibling based on node type */
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            child = taurus_node_get_next_sibling(child);
-        } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            child = (TaurusNode*)(((TaurusTextNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            child = (TaurusNode*)(((TaurusCDATANode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-            child = (TaurusNode*)(((TaurusCommentNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_PI) {
-            child = (TaurusNode*)(((TaurusPINode*)child)->next_sibling);
-        } else {
-            child = NULL;
-        }
+        /* Get next sibling - the generic dispatch handles every node type */
+        child = taurus_node_get_next_sibling(child);
     }
 
     /* Start opening tag */
@@ -268,7 +256,7 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
                         free(escaped_text);
                     }
                 }
-                child = (TaurusNode*)(((TaurusTextNode*)child)->next_sibling);
+                child = taurus_node_get_next_sibling(child);
             } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
                 /* CDATA content is treated as character data in C14N */
                 const char* text = taurus_cdata_get_content((TaurusCDATANode*)child);
@@ -280,7 +268,7 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
                         free(escaped_text);
                     }
                 }
-                child = (TaurusNode*)(((TaurusCDATANode*)child)->next_sibling);
+                child = taurus_node_get_next_sibling(child);
             } else if (child->type == TAURUS_NODE_TYPE_PI) {
                 /* Processing Instruction: <?target data?> */
                 TaurusPINode* pi = (TaurusPINode*)child;
@@ -295,10 +283,10 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
                     }
                     APPEND_STRING("?>", 2);
                 }
-                child = (TaurusNode*)(((TaurusPINode*)child)->next_sibling);
+                child = taurus_node_get_next_sibling(child);
             } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
                 /* Comments are NOT included in C14N - skip */
-                child = (TaurusNode*)(((TaurusCommentNode*)child)->next_sibling);
+                child = taurus_node_get_next_sibling(child);
             } else {
                 /* Unknown node type - stop */
                 child = NULL;
