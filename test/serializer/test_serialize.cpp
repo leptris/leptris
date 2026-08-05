@@ -263,4 +263,77 @@ TEST(SerializeOptions, IndentsMultiLevelNesting) {
     taurus_document_free(doc);
 }
 
+TEST(SerializeRoundTrip, PreservesCommentsAndPIs) {
+    /* Comments and PIs survive parse -> serialize -> parse with the
+     * tree structure intact. TODO 112 fix makes this round-trip clean. */
+    const char xml[] = "<r><!-- c1 -->text<?pi data?><!-- c2 --></r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc1 = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc1, nullptr);
+
+    char* round1 = taurus_document_serialize(doc1, nullptr);
+    ASSERT_NE(round1, nullptr);
+
+    /* Serialize must preserve all 4 children: 2 comments, 1 text, 1 PI. */
+    std::string s(round1);
+    EXPECT_NE(s.find("<!-- c1 -->"), std::string::npos);
+    EXPECT_NE(s.find("<!-- c2 -->"), std::string::npos);
+    EXPECT_NE(s.find("<?pi data?>"), std::string::npos);
+    EXPECT_NE(s.find("text"), std::string::npos);
+
+    /* Second parse must succeed and produce the same tree. */
+    TaurusDocument doc2 = taurus_parse_string(round1, std::strlen(round1), &st);
+    ASSERT_NE(doc2, nullptr);
+    char* round2 = taurus_document_serialize(doc2, nullptr);
+    ASSERT_NE(round2, nullptr);
+    EXPECT_STREQ(round1, round2);
+
+    taurus_free_string(round2);
+    taurus_document_free(doc2);
+    taurus_free_string(round1);
+    taurus_document_free(doc1);
+}
+
+TEST(SerializeRoundTrip, PreservesNamespacedAttributes) {
+    /* Namespaced attributes (xmlns declarations and prefixed attrs)
+     * must survive round-trip verbatim. */
+    const char xml[] = "<r xmlns:ns='http://example.com/ns' ns:attr='value'/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc1 = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc1, nullptr);
+
+    char* round1 = taurus_document_serialize(doc1, nullptr);
+    ASSERT_NE(round1, nullptr);
+
+    TaurusDocument doc2 = taurus_parse_string(round1, std::strlen(round1), &st);
+    ASSERT_NE(doc2, nullptr);
+
+    TaurusElement root = taurus_document_root(doc2);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(taurus_element_attribute(root, "ns:attr"), "value");
+
+    taurus_document_free(doc2);
+    taurus_free_string(round1);
+    taurus_document_free(doc1);
+}
+
+TEST(SerializeOptions, OmitsXmlDeclarationWhenDisabled) {
+    const char xml[] = "<r/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusSerializeOptions opts = {0};
+    opts.xml_declaration = 0;
+    char* s = taurus_document_serialize(doc, &opts);
+    ASSERT_NE(s, nullptr);
+    /* When xml_declaration is off, the serialized output must not
+     * contain the "<?xml" prefix at all. */
+    std::string str(s);
+    EXPECT_EQ(str.find("<?xml"), std::string::npos);
+
+    taurus_free_string(s);
+    taurus_document_free(doc);
+}
+
 }  // namespace
