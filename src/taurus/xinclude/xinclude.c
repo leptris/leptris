@@ -287,7 +287,46 @@ static int process_element_xinclude(TaurusElement elem,
                 taurus_xinclude_process(included_doc, base_url);
                 TaurusElement inc_root = taurus_document_root(included_doc);
                 if (inc_root) {
-                    substitute = deep_copy_node((const TaurusNode*)inc_root, doc->pool);
+                    /* Phase 4 of TODO 92: xpointer attribute selects
+                     * fragment from the included document. The value
+                     * is evaluated as an XPath expression against the
+                     * included doc. If it returns a nodeset, the
+                     * resulting nodes are spliced into the parent
+                     * (replacing the xi:include). Non-nodeset results
+                     * or missing xpointer fall back to the root element.
+                     *
+                     * The XPointer framework also defines scheme-
+                     * qualified forms (xpointer(...), element(/1/2),
+                     * xmlns(...)) which we don't support here — the
+                     * raw attribute value is passed straight to the
+                     * XPath engine as a best-effort implementation. */
+                    const char* xp = taurus_xinclude_get_xpointer(elem);
+                    if (xp && xp[0]) {
+                        TaurusXPathResult xr = taurus_xpath_eval(
+                            included_doc, NULL, xp);
+                        if (xr) {
+                            size_t n = taurus_xpath_result_count(xr);
+                            if (n > 0) {
+                                /* Splice each node from the result. The
+                                 * first one becomes the substitute; the
+                                 * rest are appended as siblings via
+                                 * element_insert_after on each new
+                                 * node's predecessor — but we don't
+                                 * have multi-splice API yet, so for
+                                 * now take just the first node. */
+                                TaurusElement first = taurus_xpath_result_get(xr, 0);
+                                if (first) {
+                                    substitute = deep_copy_node(
+                                        (const TaurusNode*)first, doc->pool);
+                                }
+                            }
+                            taurus_xpath_result_free(xr);
+                        }
+                    }
+                    if (!substitute) {
+                        substitute = deep_copy_node(
+                            (const TaurusNode*)inc_root, doc->pool);
+                    }
                 }
             }
             if (included_doc) taurus_document_free(included_doc);
