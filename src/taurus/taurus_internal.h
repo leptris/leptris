@@ -267,13 +267,22 @@ typedef struct xpath_parser {
     char error_msg[256];
 } XPathParser;
 
-/* XPath nodeset - Holds typed node pointers (elements or attributes) */
+/* XPath nodeset - Holds typed node pointers (elements or attributes).
+ *
+ * TODO 113 Phase 2 perf: small-buffer optimization. The first 16
+ * entries live inline in the struct so the common case (small query
+ * result) avoids the second heap allocation entirely. Larger
+ * nodesets spill to a separately-allocated array. */
+#define XPATH_NODESET_INLINE_CAPACITY 16
 typedef struct xpath_nodeset {
-    void** nodes;                /* Typed node pointers (element* or TaurusAttributeNode*) */
+    void** nodes;                /* Typed node pointers; points to
+                                  * inline_data for small nodesets,
+                                  * otherwise heap-allocated. */
     size_t count;
     size_t capacity;
     int owns_attributes;         /* If true, free attribute nodes on nodeset_free */
     int owns_namespaces;         /* If true, free namespace nodes on nodeset_free */
+    void* inline_data[XPATH_NODESET_INLINE_CAPACITY];
 } XPathNodeSet;
 
 /* XPath result types - MUST match public enum in ext/taurus/xpath.h!

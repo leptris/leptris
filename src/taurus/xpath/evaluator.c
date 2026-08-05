@@ -333,28 +333,36 @@ void xpath_context_init_from_document(XPathContext* context) {
  * ============================================================================ */
 
 XPathNodeSet* xpath_nodeset_new(void) {
-    return xpath_nodeset_new_with_capacity(4);
+    return xpath_nodeset_new_with_capacity(XPATH_NODESET_INLINE_CAPACITY);
 }
 
 XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
     XPathNodeSet* nodeset = TAURUS_ALLOC(XPathNodeSet);
     if (!nodeset) return NULL;
 
-    nodeset->nodes = NULL;
     nodeset->count = 0;
-    nodeset->capacity = 0;
     nodeset->owns_attributes = 0;
     nodeset->owns_namespaces = 0;
+    memset(nodeset->inline_data, 0, sizeof(nodeset->inline_data));
 
-    if (capacity > 0) {
+    /* TODO 113 Phase 2: small-buffer optimization. For capacity ≤ the
+     * inline buffer size, point `nodes` at the inline array. This
+     * avoids the second heap allocation in the common case where the
+     * query result is small (most queries return ≤16 nodes). */
+    if (capacity <= XPATH_NODESET_INLINE_CAPACITY) {
+        nodeset->nodes = nodeset->inline_data;
+        nodeset->capacity = XPATH_NODESET_INLINE_CAPACITY;
+    } else if (capacity > 0) {
         nodeset->nodes = TAURUS_ALLOC_N(void*, capacity);
         if (!nodeset->nodes) {
             TAURUS_FREE(nodeset);
             return NULL;
         }
-        /* Initialize all entries to NULL for safety */
         memset(nodeset->nodes, 0, sizeof(void*) * capacity);
         nodeset->capacity = capacity;
+    } else {
+        nodeset->nodes = NULL;
+        nodeset->capacity = 0;
     }
 
     return nodeset;
@@ -390,7 +398,8 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
         }
     }
 
-    if (nodeset->nodes) {
+    /* Free the nodes array unless it's the inline buffer (TODO 113). */
+    if (nodeset->nodes && nodeset->nodes != nodeset->inline_data) {
         TAURUS_FREE(nodeset->nodes);
     }
     TAURUS_FREE(nodeset);
@@ -431,15 +440,27 @@ void xpath_nodeset_add(XPathNodeSet* nodeset, void* node) {
             return;
         }
 
-        /* SAFETY: Validate nodes pointer before realloc */
-        if (nodeset->nodes && (uintptr_t)nodeset->nodes < 0x1000) {
-            return;
-        }
+        /* TODO 113 Phase 2: if currently using inline_data, switch
+         * to a heap allocation and copy. REALLOC can't be used on
+         * the inline buffer (it's part of the struct). */
+        if (nodeset->nodes == nodeset->inline_data) {
+            void** new_nodes = TAURUS_ALLOC_N(void*, new_capacity);
+            if (!new_nodes) return;
+            memcpy(new_nodes, nodeset->inline_data,
+                   sizeof(void*) * nodeset->count);
+            nodeset->nodes = new_nodes;
+            nodeset->capacity = new_capacity;
+        } else {
+            /* SAFETY: Validate nodes pointer before realloc */
+            if (nodeset->nodes && (uintptr_t)nodeset->nodes < 0x1000) {
+                return;
+            }
 
-        void** new_nodes = TAURUS_REALLOC_N(nodeset->nodes, void*, new_capacity);
-        if (!new_nodes) return;
-        nodeset->nodes = new_nodes;
-        nodeset->capacity = new_capacity;
+            void** new_nodes = TAURUS_REALLOC_N(nodeset->nodes, void*, new_capacity);
+            if (!new_nodes) return;
+            nodeset->nodes = new_nodes;
+            nodeset->capacity = new_capacity;
+        }
     }
 
     nodeset->nodes[nodeset->count++] = node;
