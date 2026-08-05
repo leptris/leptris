@@ -83,13 +83,9 @@ struct taurus_element {
     /* Compact header (2 bytes) */
     TaurusCompactHeader header;        /* Page offset and flags */
 
-    /* StringView storage (32 bytes) - zero-copy into XML buffer.
-     * namespace_uri_view REMOVED (TODO 90) — the field was always
-     * set from the input buffer and lazily converted to namespace_uri
-     * char*.  Removing it makes the eager conversion the only path.
-     * Saves 16 bytes per element. */
+    /* name_view only (16 bytes) — prefix_view removed (TODO 90),
+     * namespace_uri_view removed (TODO 90 PR #82). */
     TaurusStringView name_view;       /* Element name */
-    TaurusStringView prefix_view;     /* Namespace prefix (zero-copy) */
 
     /* Cached NULL-terminated strings (24 bytes) - lazy conversion */
     char* name;                      /* NULL until first access */
@@ -305,7 +301,6 @@ int taurus_element_add_attribute(TaurusElement elem,
 const char* taurus_element_get_name(TaurusElement elem);
 
 /* Set prefix using StringView (zero-copy!) */
-void taurus_element_set_prefix_view(TaurusElement elem, TaurusStringView prefix_view);
 
 /* Set namespace URI from StringView (eager pool-strdup — TODO 90).
  * The namespace_uri_view field was removed from the struct; this
@@ -334,7 +329,7 @@ static inline TaurusStringView taurus_element_name_view(TaurusElement elem) {
 
 /* Get element prefix as StringView (NO conversion, O(1) access) */
 static inline TaurusStringView taurus_element_prefix_view(TaurusElement elem) {
-    return elem ? elem->prefix_view : taurus_sv_empty();
+    return elem && elem->prefix ? taurus_sv_from_ptr(elem->prefix, strlen(elem->prefix)) : taurus_sv_empty();
 }
 
 /* Get element namespace URI as StringView (derived from cached char*).

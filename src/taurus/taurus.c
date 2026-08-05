@@ -814,11 +814,8 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
     if (!elem->name && !taurus_sv_is_empty(&elem->name_view)) {
         elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, pool);
     }
-    /* namespace_uri_view removed (TODO 90) — namespace_uri is now
-     * set eagerly by taurus_element_set_namespace_uri_view. */
-    if (!elem->prefix && !taurus_sv_is_empty(&elem->prefix_view)) {
-        elem->prefix = taurus_sv_to_cstr_pooled(&elem->prefix_view, pool);
-    }
+    /* namespace_uri_view + prefix_view removed (TODO 90) — both are now
+     * set eagerly by the parser via pool-strdup. */
 
     /* Convert all attribute StringViews */
     size_t attr_count = taurus_element_attribute_count(elem);
@@ -850,11 +847,6 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
         if (!attr->namespace_uri && !taurus_sv_is_empty(&attr->namespace_uri_view)) {
             if ((uintptr_t)attr->namespace_uri_view.data >= 0x1000) {
                 attr->namespace_uri = taurus_sv_to_cstr_pooled(&attr->namespace_uri_view, pool);
-            }
-        }
-        if (!attr->prefix && !taurus_sv_is_empty(&attr->prefix_view)) {
-            if ((uintptr_t)attr->prefix_view.data >= 0x1000) {
-                attr->prefix = taurus_sv_to_cstr_pooled(&attr->prefix_view, pool);
             }
         }
     }
