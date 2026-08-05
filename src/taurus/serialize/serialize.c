@@ -325,12 +325,8 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         /* Use cached NULL-terminated string */
         elem_name = elem->name;
         elem_name_len = strlen(elem->name);
-    } else if (!taurus_sv_is_empty(&elem->name_view)) {
-        /* Use StringView directly */
-        elem_name = elem->name_view.data;
-        elem_name_len = elem->name_view.length;
     } else {
-        return;  /* No name available */
+        return;
     }
 
     /* Add indentation before opening tag (not for root element) */

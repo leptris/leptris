@@ -809,11 +809,7 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
     /* Convert element name StringView to NULL-terminated string.
      *
      * TODO 25: pool is always non-NULL when called from
-     * taurus_document_finalize_strings; force the pooled path so we
-     * never calloc. */
-    if (!elem->name && !taurus_sv_is_empty(&elem->name_view)) {
-        elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, pool);
-    }
+    /* name_view removed (TODO 90) — name is set eagerly by create_with_view. */
     /* namespace_uri_view + prefix_view removed (TODO 90) — both are now
      * set eagerly by the parser via pool-strdup. */
 
