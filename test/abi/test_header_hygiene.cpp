@@ -48,9 +48,9 @@ TEST(HeaderHygiene, NamespaceTypedefIsPointerSized) {
 
 // Report the internal element struct size for tracking (TODO 90).
 // The public TaurusElement is an opaque pointer (8 bytes); the struct
-// it points to is 88 bytes after TODO 90 Phase 2b (tree pointers stored
-// as int32_t self-relative offsets). pugixml compact node: 12 bytes.
-// Phase 2d target: ~80 bytes via compact attribute pointers.
+// it points to is 80 bytes after TODO 90 Phase 2d (first/last attribute
+// pointers compressed to int32_t offsets). pugixml compact node: 12 B.
+// Phase 2e (string/document-context pointers) is a stretch goal.
 TEST(HeaderHygiene, ElementStructSizeTracked) {
     /* This test prints the actual size via a record_property call so
      * the CI artifact captures it.  No assertion — the _Static_assert

@@ -103,10 +103,12 @@ struct taurus_element {
     int32_t last_child_off;            /* target may be any node type */
     int32_t next_sibling_off;          /* target may be any node type */
 
-    /* Attributes (16 bytes). Tail pointer for O(1) appends (TODO 106).
-     * Phase 2d of TODO 90 will convert these to int32_t offsets. */
-    struct taurus_attribute* first_attribute;
-    struct taurus_attribute* last_attribute;
+    /* Attribute list (8 bytes). Phase 2d of TODO 90: first/last
+     * attribute pointers are stored as int32_t offsets relative to
+     * this element's own address, encoded exactly like the tree
+     * edges. The inline accessors below decode/encode them. */
+    int32_t first_attribute_off;
+    int32_t last_attribute_off;
 
     /* Document context (16 bytes). */
     struct taurus_namespace* namespaces; /* Linked list of declarations */
@@ -116,22 +118,22 @@ struct taurus_element {
 
 /* Compile-time element-size tracker (TODO 90).
  *
- * Current layout (Phase 1 + 2a + 2b complete, 88 bytes):
+ * Current layout (Phase 1 + 2a + 2b + 2d complete, 80 bytes):
  *   - 8-byte base + 2-byte header + 1-byte attr_count + 2-byte child_count
  *     packed into the 8-byte alignment slot of base (5 bytes used, 3 pad)
  *   - 24 bytes of cached name/prefix/namespace_uri char* pointers
  *   - 16 bytes of int32_t tree-edge offsets (parent, first/last/next)
- *   - 16 bytes of attribute list pointers (first, last) — Phase 2d target
+ *   - 8 bytes of int32_t attribute-list offsets (first, last)
  *   - 16 bytes of document context (namespaces, document)
  *
- * pugixml compact node: 12 bytes. Phase 2d/2e of TODO 90 will compress
- * the attribute pointers and possibly string pointers. */
+ * pugixml compact node: 12 bytes. Phase 2e of TODO 90 may compress
+ * the document-context pointers and string pointers further. */
 #ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 88,
-    "taurus_element grew beyond 88 bytes — check for accidental field additions");
+_Static_assert(sizeof(struct taurus_element) <= 80,
+    "taurus_element grew beyond 80 bytes — check for accidental field additions");
 #else
-static_assert(sizeof(struct taurus_element) <= 88,
-    "taurus_element grew beyond 88 bytes");
+static_assert(sizeof(struct taurus_element) <= 80,
+    "taurus_element grew beyond 80 bytes");
 #endif
 
 /* ============================================================================
@@ -220,6 +222,38 @@ static inline void taurus_elem_set_next_sibling(TaurusElement e, TaurusNode* sib
         return;
     }
     e->next_sibling_off = (int32_t)d;
+}
+
+/* Compact attribute-list accessors (Phase 2d of TODO 90).
+ * first_attribute and last_attribute are int32_t byte-offsets to
+ * taurus_attribute records in the document's pool; 0 = empty list.
+ * Pool-allocated, same safety argument as the tree edges. */
+static inline struct taurus_attribute* taurus_elem_first_attribute(const TaurusElement e) {
+    return (e && e->first_attribute_off != 0)
+        ? (struct taurus_attribute*)((const char*)e + e->first_attribute_off)
+        : NULL;
+}
+
+static inline struct taurus_attribute* taurus_elem_last_attribute(const TaurusElement e) {
+    return (e && e->last_attribute_off != 0)
+        ? (struct taurus_attribute*)((const char*)e + e->last_attribute_off)
+        : NULL;
+}
+
+static inline void taurus_elem_set_first_attribute(TaurusElement e, struct taurus_attribute* attr) {
+    if (!e) return;
+    if (!attr) { e->first_attribute_off = 0; return; }
+    ptrdiff_t d = (const char*)attr - (const char*)e;
+    if (d < INT32_MIN || d > INT32_MAX) { e->first_attribute_off = 0; return; }
+    e->first_attribute_off = (int32_t)d;
+}
+
+static inline void taurus_elem_set_last_attribute(TaurusElement e, struct taurus_attribute* attr) {
+    if (!e) return;
+    if (!attr) { e->last_attribute_off = 0; return; }
+    ptrdiff_t d = (const char*)attr - (const char*)e;
+    if (d < INT32_MIN || d > INT32_MAX) { e->last_attribute_off = 0; return; }
+    e->last_attribute_off = (int32_t)d;
 }
 
 /* TaurusElement typedef comes from the public include/taurus/types.h
