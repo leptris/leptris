@@ -814,9 +814,8 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
     if (!elem->name && !taurus_sv_is_empty(&elem->name_view)) {
         elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, pool);
     }
-    if (!elem->namespace_uri && !taurus_sv_is_empty(&elem->namespace_uri_view)) {
-        elem->namespace_uri = taurus_sv_to_cstr_pooled(&elem->namespace_uri_view, pool);
-    }
+    /* namespace_uri_view removed (TODO 90) — namespace_uri is now
+     * set eagerly by taurus_element_set_namespace_uri_view. */
     if (!elem->prefix && !taurus_sv_is_empty(&elem->prefix_view)) {
         elem->prefix = taurus_sv_to_cstr_pooled(&elem->prefix_view, pool);
     }

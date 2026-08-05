@@ -60,7 +60,6 @@ TaurusElement taurus_element_create_with_view(
     /* Store StringViews - ZERO COPY! */
     elem->name_view = name_view;
     elem->prefix_view = taurus_sv_empty();
-    elem->namespace_uri_view = taurus_sv_empty();
 
     /* Initialize cached strings as NULL (lazy conversion) */
     elem->name = NULL;
@@ -367,14 +366,30 @@ void taurus_element_set_prefix_view(TaurusElement elem, TaurusStringView prefix_
     }
 }
 
-/* Set namespace URI using StringView (zero-copy!) */
+/* Set namespace URI from StringView (eager pool-strdup — no lazy staging).
+ * TODO 90: namespace_uri_view removed from struct; this setter is now
+ * the only path. It does the conversion eagerly so subsequent
+ * taurus_element_get_namespace_uri() just returns the cached char*. */
 void taurus_element_set_namespace_uri_view(TaurusElement elem, TaurusStringView uri_view) {
     if (!elem) return;
-    elem->namespace_uri_view = uri_view;
-    /* Clear cached string - will be reconverted on next access */
-    if (elem->namespace_uri) {
-        free(elem->namespace_uri);
+    if (taurus_sv_is_empty(&uri_view)) {
         elem->namespace_uri = NULL;
+        return;
+    }
+    /* Pool-strdup so the string survives document lifecycle. */
+    if (elem->document && elem->document->pool) {
+        char* storage = (char*)taurus_pool_alloc(elem->document->pool, uri_view.length + 1);
+        if (!storage) { elem->namespace_uri = NULL; return; }
+        memcpy(storage, uri_view.data, uri_view.length);
+        storage[uri_view.length] = '\0';
+        elem->namespace_uri = storage;
+    } else {
+        /* No pool — use malloc/strdup as fallback. */
+        char* storage = (char*)malloc(uri_view.length + 1);
+        if (!storage) { elem->namespace_uri = NULL; return; }
+        memcpy(storage, uri_view.data, uri_view.length);
+        storage[uri_view.length] = '\0';
+        elem->namespace_uri = storage;
     }
 }
 
@@ -402,18 +417,9 @@ const char* taurus_element_get_prefix(TaurusElement elem) {
 const char* taurus_element_get_namespace_uri(TaurusElement elem) {
     if (!elem) return NULL;
 
-    /* Return cached string if available */
+    /* Return cached string if available (TODO 90: set eagerly by
+     * taurus_element_set_namespace_uri_view, no lazy staging). */
     if (elem->namespace_uri) return elem->namespace_uri;
-
-    /* Lazy convert StringView to NULL-terminated string */
-    if (!taurus_sv_is_empty(&elem->namespace_uri_view)) {
-        if (elem->document && elem->document->pool) {
-            elem->namespace_uri = taurus_sv_to_cstr_pooled(&elem->namespace_uri_view, elem->document->pool);
-        } else {
-            elem->namespace_uri = taurus_sv_to_cstr(&elem->namespace_uri_view);
-        }
-        return elem->namespace_uri;
-    }
 
     /* LAZY NAMESPACE RESOLUTION: If namespace_uri is not set but we have a prefix,
      * resolve it now by looking up the namespace declaration in the element or its ancestors.
@@ -451,7 +457,6 @@ void taurus_element_set_namespace_uri(TaurusElement elem, const char* uri) {
     if (elem->namespace_uri) free(elem->namespace_uri);
     elem->namespace_uri = uri ? taurus_strdup(uri) : NULL;
     /* Clear StringView */
-    elem->namespace_uri_view = taurus_sv_empty();
 }
 
 /* ============================================================================
@@ -578,7 +583,6 @@ void taurus_element_add_namespace_inplace(TaurusElement elem,
     }
     elem->namespace_uri = uri;
     /* Clear StringView for namespace_uri (but NOT prefix_view!) */
-    elem->namespace_uri_view = taurus_sv_empty();
 
     /* Also register the namespace declaration on elem->namespaces so
      * descendant lookups via taurus_element_lookup_namespace find it.
