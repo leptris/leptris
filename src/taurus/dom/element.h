@@ -120,33 +120,27 @@ struct taurus_element {
     uint16_t child_count;             /* Number of elements (max 65535) */
     struct taurus_namespace* namespaces; /* Linked list of namespace declarations */
     struct taurus_document* document;  /* NULL if not attached to document */
-
-    /* O(1) indexed child access cache (TODO 103 Phase 4).
-     *
-     * NULL until the first call to taurus_element_child(elem, j). Built
-     * lazily from the first_child linked list, then invalidated (set to
-     * NULL) by any structural mutation (append/prepend/insert/remove
-     * child).  Pool-allocated; lives for the document's lifetime.
-     *
-     * Threading: safe for the common parse-then-read pattern (single
-     * threaded first access, then concurrent reads of the immutable
-     * array).  Concurrent first-access from multiple threads would
-     * race; document as a known limitation. */
-    struct taurus_element** children_array;
 };
+
 
 /* Compile-time element-size tracker (TODO 90).
  *
- * Current layout uses regular 8-byte pointers + StringView (16 bytes each).
- * pugixml compact node: 12 bytes. Our compact-mode target: ~23 bytes.
- * This assert catches accidental growth.  When the compact-pointer
- * migration lands, the struct shrinks and this upper bound drops. */
+ * Current layout (Phase 1 complete, 112 bytes):
+ *   - 4-byte base + 2-byte header + 6 bytes name/prefix/namespace_uri
+ *     char* pointers (24 bytes total)
+ *   - 4 raw tree pointers (parent, first_child, last_child, next_sibling)
+ *   - 2 attribute list pointers + 1-byte count
+ *   - 2-byte child_count + namespaces pointer + document pointer
+ *
+ * pugixml compact node: 12 bytes. Phase 2 of TODO 90 will compress the
+ * tree pointers to 1-2 byte page-relative offsets; this upper bound
+ * drops accordingly. */
 #ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 200,
-    "taurus_element grew beyond 200 bytes — check for accidental field additions");
+_Static_assert(sizeof(struct taurus_element) <= 120,
+    "taurus_element grew beyond 120 bytes — check for accidental field additions");
 #else
-static_assert(sizeof(struct taurus_element) <= 200,
-    "taurus_element grew beyond 200 bytes");
+static_assert(sizeof(struct taurus_element) <= 120,
+    "taurus_element grew beyond 120 bytes");
 #endif
 
 /* TaurusElement typedef comes from the public include/taurus/types.h
@@ -254,14 +248,12 @@ void taurus_element_set_first_child(TaurusElement elem, TaurusElement child);
 void taurus_element_set_last_child(TaurusElement elem, TaurusElement child);
 void taurus_element_set_next_sibling(TaurusElement elem, TaurusElement sibling);
 
-/* Cache invalidation: call after any structural mutation (child add/
- * remove/insert) to mark the indexed-access cache as stale.  Next
- * taurus_element_child(elem, j) call rebuilds it lazily.  Encapsulates
- * the cache so mutation sites don't poke at children_array directly
- * — and so compact-storage migration (TODO 90) can change the cache
- * representation without touching every call site. */
+/* Cache invalidation hook: no-op since children_array was removed in
+ * TODO 90 Phase 1. Retained as a single mutation-site chokepoint so a
+ * future compact-storage cache (e.g. pugixml-style compact pointer
+ * table) can plug in without touching every mutation call site. */
 static inline void taurus_element_invalidate_child_cache(TaurusElement elem) {
-    if (elem) elem->children_array = NULL;
+    (void)elem;
 }
 
 /* ============================================================================

@@ -126,8 +126,11 @@ TEST(PerfRegression, SetAttributeDoesNotRegress) {
 }
 
 TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
-    /* PR #68 added children_array cache for O(1) indexed access.
-     * This spec catches if someone removes the cache. */
+    /* Indexed child access walks the sibling linked list O(index) per call
+     * (children_array cache removed in TODO 90 Phase 1 to shrink element
+     * struct). This spec guards against accidental slowdown of the
+     * remaining linked-list walk — the O(N²) shape is acceptable for
+     * typical N=50; the budget catches a constant-factor regression. */
     std::string xml = "<r>";
     for (int i = 0; i < 50; i++) xml += "<c/>";
     xml += "</r>";
@@ -137,7 +140,6 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
     ASSERT_NE(doc, nullptr);
     TaurusElement root = taurus_document_root(doc);
 
-    /* Access by index 1000 times — should be fast due to cache. */
     auto start = clock_type::now();
     volatile size_t sink = 0;
     for (int iter = 0; iter < 1000; iter++) {
@@ -149,10 +151,10 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         clock_type::now() - start).count();
 
-    /* Release+LTO: ~0.3 ms on M-series with cache.
-     * Without cache it would be ~6 ms (O(N²)).
-     * Budget: 5 ms — catches cache removal without false-alarming on slow CI. */
-    EXPECT_LT(ms, 5);
+    /* Release+LTO: ~3 ms on M-series (O(N²) walk over 50 children × 1000).
+     * Budget: 8 ms — catches constant-factor regression while tolerating
+     * slower CI hardware. */
+    EXPECT_LT(ms, 8);
     (void)sink;
 
     taurus_document_free(doc);
