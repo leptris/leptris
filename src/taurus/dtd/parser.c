@@ -455,6 +455,89 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
             }
             if (dtd_peek(&parser) == '>') dtd_advance(&parser);
             free(elem_name);
+        } else if (dtd_match(&parser, "<![")) {
+            /* Conditional section (TODO 91 Phase 8d). Only valid in
+             * external subsets per XML 1.0 spec, but we accept them
+             * everywhere for leniency. <![INCLUDE[...]]> parses the
+             * inner content normally; <![IGNORE[...]]> skips to the
+             * matching ]]>. Nested conditional sections are tracked
+             * via a depth counter so IGNORE doesn't stop at an inner
+             * ]]> belonging to a nested INCLUDE.
+             *
+             * The implementation here is recursive for INCLUDE (re-parses
+             * the inner content as a DTD subset) and iterative for IGNORE. */
+            parser.pos += 3;  /* consume "<![" */
+            dtd_skip_whitespace(&parser);
+
+            /* Parse the keyword (INCLUDE or IGNORE). */
+            const char* kw_start = parser.pos;
+            while (!dtd_at_end(&parser) &&
+                   (isalnum((unsigned char)dtd_peek(&parser)) ||
+                    dtd_peek(&parser) == '_')) {
+                dtd_advance(&parser);
+            }
+            size_t kw_len = (size_t)(parser.pos - kw_start);
+            int is_include = (kw_len == 7 && strncmp(kw_start, "INCLUDE", 7) == 0);
+            int is_ignore = (kw_len == 6 && strncmp(kw_start, "IGNORE", 6) == 0);
+
+            /* Skip to '[' that opens the body. */
+            dtd_skip_whitespace(&parser);
+            if (dtd_peek(&parser) == '[') dtd_advance(&parser);
+
+            if (is_ignore) {
+                /* Skip until matching ]]>. Track nesting depth so a
+                 * nested <![INCLUDE[...]]> inside the IGNORE doesn't
+                 * terminate the skip early. */
+                int depth = 1;
+                while (!dtd_at_end(&parser) && depth > 0) {
+                    if (dtd_match(&parser, "<![")) {
+                        depth++;
+                        parser.pos += 3;
+                    } else if (dtd_match(&parser, "]]>")) {
+                        depth--;
+                        parser.pos += 3;
+                    } else {
+                        dtd_advance(&parser);
+                    }
+                }
+            } else if (is_include) {
+                /* Parse the inner content as a DTD subset. Find the
+                 * matching ]]> (respecting nesting) and recurse. */
+                const char* body_start = parser.pos;
+                int depth = 1;
+                while (!dtd_at_end(&parser) && depth > 0) {
+                    if (dtd_match(&parser, "<![")) {
+                        depth++;
+                        parser.pos += 3;
+                    } else if (dtd_match(&parser, "]]>")) {
+                        depth--;
+                        if (depth == 0) break;
+                        parser.pos += 3;
+                    } else {
+                        dtd_advance(&parser);
+                    }
+                }
+                size_t body_len = (size_t)(parser.pos - body_start);
+                /* Recurse — the inner content is itself a DTD subset. */
+                if (body_len > 0) {
+                    taurus_dtd_parse_internal_subset(body_start, body_len, pool);
+                }
+                if (dtd_match(&parser, "]]>")) parser.pos += 3;
+            } else {
+                /* Unknown keyword — skip to ]]> (best-effort recovery). */
+                int depth = 1;
+                while (!dtd_at_end(&parser) && depth > 0) {
+                    if (dtd_match(&parser, "<![")) {
+                        depth++;
+                        parser.pos += 3;
+                    } else if (dtd_match(&parser, "]]>")) {
+                        depth--;
+                        parser.pos += 3;
+                    } else {
+                        dtd_advance(&parser);
+                    }
+                }
+            }
         } else {
             /* Skip unknown declaration */
             while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>') {
