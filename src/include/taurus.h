@@ -17,6 +17,12 @@ extern "C" {
 
 /* Export macro for Windows DLL support and binding generators.
  *
+ * On Unix the build sets default symbol visibility to hidden
+ * (CMAKE_C_VISIBILITY_PRESET=hidden in CMakeLists.txt); TAURUS_API
+ * opts back into default visibility for the public surface.
+ * Internal helpers stay hidden and never appear in the .so export
+ * table. See TODO 80.
+ *
  * When TAURUS_FOR_BINDGEN is defined (by bindgen/cffi/ctypes),
  * the macro expands to nothing so the header parses cleanly.
  * See TODO 84. */
@@ -33,7 +39,7 @@ extern "C" {
 #      define TAURUS_API
 #    endif
 #  else
-#    define TAURUS_API
+#    define TAURUS_API __attribute__((visibility("default")))
 #  endif
 #endif
 #endif  /* TAURUS_FOR_BINDGEN */

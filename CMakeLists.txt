@@ -104,6 +104,13 @@ endif()
 # Position independent code for static libraries
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Hide all symbols by default; the public surface is exactly the
+# functions marked TAURUS_API. Cuts the shared-library export table
+# from ~445 entries down to the ~295 taurus_* symbols. See TODO 80.
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 # Configuration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
