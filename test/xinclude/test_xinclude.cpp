@@ -480,3 +480,46 @@ TEST(XIncludeXpointer, EmptyResultFallsBackToRoot) {
     taurus_document_free(doc);
     remove(path);
 }
+
+TEST(XIncludeRecursion, MutuallyRecursiveIncludesHitDepthLimit) {
+    /* Two files include each other — would loop forever without the
+     * recursion guard. The processor must stop at XINCLUDE_MAX_DEPTH
+     * and return an error (or silently stop; we accept either as long
+     * as the process terminates within reasonable time). */
+    const char* path_a = "/tmp/taurus_xinclude_recursion_a.xml";
+    const char* path_b = "/tmp/taurus_xinclude_recursion_b.xml";
+    const char a_xml[] =
+        "<a xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "<xi:include href='/tmp/taurus_xinclude_recursion_b.xml'/>"
+        "</a>";
+    const char b_xml[] =
+        "<b xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "<xi:include href='/tmp/taurus_xinclude_recursion_a.xml'/>"
+        "</b>";
+    FILE* fa = fopen(path_a, "wb");
+    ASSERT_NE(fa, nullptr);
+    fwrite(a_xml, 1, std::strlen(a_xml), fa);
+    fclose(fa);
+    FILE* fb = fopen(path_b, "wb");
+    ASSERT_NE(fb, nullptr);
+    fwrite(b_xml, 1, std::strlen(b_xml), fb);
+    fclose(fb);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "<xi:include href='/tmp/taurus_xinclude_recursion_a.xml'/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Should terminate (not hang). Return value may be OK or an error
+     * depending on whether the impl treats max-depth as fatal. The
+     * important thing is that this call returns. */
+    TaurusStatus rc = taurus_xinclude_process(doc, nullptr);
+    (void)rc;  /* either TAURUS_OK or TAURUS_ERROR_INVALID_ARG */
+
+    taurus_document_free(doc);
+    remove(path_a);
+    remove(path_b);
+}
