@@ -10,12 +10,10 @@
 // evaluate one expression, assert one outcome). Failures pinpoint
 // the exact feature that regressed.
 //
-// Known engine gaps documented here (each has its own TODO.fix/ entry):
+// Known engine gap documented here (has its own TODO.fix/ entry):
 //   - //comment() and //processing-instruction() return 0 even when
 //     comments/PIs exist in the tree (TODO 109: XPath over non-element
 //     nodes doesn't traverse them).
-//   - substring('hello', 0, 2) returns 'he' instead of 'h' (TODO 110:
-//     XPath substring rounding edge cases).
 
 #include <gtest/gtest.h>
 
@@ -122,8 +120,29 @@ TEST(XPathConformanceString, SubstringIsOneIndexed) {
     EXPECT_EQ(Str(doc, "substring('hello',2)"), "ello");
     EXPECT_EQ(Str(doc, "substring('hello',2,3)"), "ell");
     EXPECT_EQ(Str(doc, "substring('hello',1,5)"), "hello");
-    // Edge cases (negative start, fractional) — TODO 110 documents
-    // rounding divergences from the spec; omitted here.
+    taurus_document_free(doc);
+}
+
+TEST(XPathConformanceString, SubstringMatchesW3CSpecExamples) {
+    // Each case is taken verbatim from XPath 1.0 spec section 4.2.
+    auto doc = Parse(kCatalog);
+    EXPECT_EQ(Str(doc, "substring('12345', 2, 3)"), "234");
+    EXPECT_EQ(Str(doc, "substring('12345', 2)"), "2345");
+    EXPECT_EQ(Str(doc, "substring('12345', 1.5, 2.6)"), "234");
+    EXPECT_EQ(Str(doc, "substring('12345', 0, 2)"), "1");
+    EXPECT_EQ(Str(doc, "substring('12345', 0, 3)"), "12");
+    // -1 div 0 = -Inf start: no positions satisfy p >= -Inf AND p < -Inf+5.
+    EXPECT_EQ(Str(doc, "substring('12345', -1 div 0, 5)"), "");
+    taurus_document_free(doc);
+}
+
+TEST(XPathConformanceString, SubstringHandlesNanAndInf) {
+    auto doc = Parse(kCatalog);
+    // NaN start or length yields empty string.
+    EXPECT_EQ(Str(doc, "substring('hello', 0 div 0)"), "");
+    EXPECT_EQ(Str(doc, "substring('hello', 1, 0 div 0)"), "");
+    // +Inf length yields the suffix from `start`.
+    EXPECT_EQ(Str(doc, "substring('hello', 2, 1 div 0)"), "ello");
     taurus_document_free(doc);
 }
 
