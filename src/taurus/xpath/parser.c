@@ -1168,8 +1168,24 @@ static XPathASTNode* parse_node_test(XPathParser* parser) {
         }
 
         if (current_token_is(parser, TOK_STRING)) {
-            char* arg = token_to_string(current_token(parser));
-            if (arg) TAURUS_FREE(arg);
+            /* PI node test target argument, e.g.,
+             * processing-instruction('xml-stylesheet'). The lexer
+             * includes the surrounding quotes in token->value; strip
+             * them so local_name holds the bare target name. */
+            const XPathToken* tok = current_token(parser);
+            if (tok->value_len >= 2 &&
+                (tok->value[0] == '\'' || tok->value[0] == '"') &&
+                tok->value[0] == tok->value[tok->value_len - 1]) {
+                size_t inner_len = tok->value_len - 2;
+                char* arg = TAURUS_ALLOC_N(char, inner_len + 1);
+                if (arg) {
+                    memcpy(arg, tok->value + 1, inner_len);
+                    arg[inner_len] = '\0';
+                    node->local_name = arg;
+                }
+            } else {
+                node->local_name = token_to_string(tok);
+            }
             advance_token(parser);
         }
 

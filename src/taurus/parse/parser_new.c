@@ -1556,8 +1556,22 @@ TaurusNode* parser_parse_node(Parser* p) {
         } else if (parser_match(p, "<![CDATA[")) {
             return (TaurusNode*)parser_parse_cdata(p);
         } else if (parser_match(p, "<?")) {
-            /* Skip XML declaration */
+            /* Skip XML declaration: must be exactly "<?xml " (space or
+             * "?" after "xml" per spec). "<?xml-stylesheet?>" is a real
+             * processing-instruction, not the XML declaration —
+             * previously the prefix match "<?xml" ate both (TODO 112). */
+            int is_xml_decl = 0;
             if (parser_match(p, "<?xml")) {
+                size_t save = p->pos;
+                for (int i = 0; i < 5; i++) parser_advance(p);  /* consume "<?xml" */
+                int next = parser_peek(p);
+                if (next == ' ' || next == '\t' || next == '\n' || next == '\r') {
+                    is_xml_decl = 1;
+                } else {
+                    p->pos = save;  /* not the declaration, restore */
+                }
+            }
+            if (is_xml_decl) {
                 while (!parser_at_end(p) && !parser_match(p, "?>")) {
                     parser_advance(p);
                 }

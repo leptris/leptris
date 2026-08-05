@@ -23,47 +23,51 @@
  * Axis Implementations (All 13 XPath Axes)
  * ============================================================================ */
 
-/* Helper: Collect descendants recursively */
+/* Helper: Collect descendants recursively (TODO 109: walks all node
+ * types, not just elements). */
 static void collect_descendants(XPathContext* ctx,
                                TaurusElement node,
                                XPathNodeSet* result,
                                XPathASTNode* node_test) {
     if (!node) return;
 
-    /* Iterate through children using compact accessor functions */
-    TaurusElement child_elem = taurus_element_get_first_child(node);
-    while (child_elem) {
-        TaurusNode* child_node = (TaurusNode*)child_elem;
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElement child = child_elem;
-            if (matches_node_test(ctx, child, node_test)) {
-                xpath_nodeset_add(result, child);
-            }
-            collect_descendants(ctx, child, result, node_test);
+    /* Walk the raw child list — any node type (text, comment, cdata, pi). */
+    TaurusNode* child = taurus_elem_first_child(node);
+    while (child) {
+        if (matches_node_test(ctx, child, node_test)) {
+            xpath_nodeset_add(result, child);
         }
-        child_elem = taurus_element_get_next_sibling(child_elem);
+        /* Recurse into element children only (other nodes have no children). */
+        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+            collect_descendants(ctx, (TaurusElement)child, result, node_test);
+        }
+        child = taurus_node_get_next_sibling(child);
     }
 }
 
-/* Helper: Collect descendants or self */
+/* Helper: Collect descendants or self (TODO 109: walks all node types). */
 static void collect_descendants_or_self(XPathContext* ctx,
                                        TaurusElement node,
                                        XPathNodeSet* result,
                                        XPathASTNode* node_test) {
     if (!node) return;
 
-    if (matches_node_test(ctx, node, node_test)) {
+    if (matches_node_test(ctx, (TaurusNode*)node, node_test)) {
         xpath_nodeset_add(result, node);
     }
 
-    /* Iterate through children using compact accessor functions */
-    TaurusElement child_elem = taurus_element_get_first_child(node);
-    while (child_elem) {
-        TaurusNode* child_node = (TaurusNode*)child_elem;
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            collect_descendants_or_self(ctx, child_elem, result, node_test);
+    /* Walk the raw child list — any node type. */
+    TaurusNode* child = taurus_elem_first_child(node);
+    while (child) {
+        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+            collect_descendants_or_self(ctx, (TaurusElement)child, result, node_test);
+        } else {
+            /* Non-element child: test it directly (no recursion). */
+            if (matches_node_test(ctx, child, node_test)) {
+                xpath_nodeset_add(result, child);
+            }
         }
-        child_elem = taurus_element_get_next_sibling(child_elem);
+        child = taurus_node_get_next_sibling(child);
     }
 }
 
@@ -152,34 +156,23 @@ static int is_text_node_test(XPathASTNode* test) {
     return (strcmp(test->value, "text") == 0);
 }
 
-/* child:: axis */
-static XPathNodeSet* axis_child(XPathContext* ctx, TaurusElement node,
+/* child:: axis (TODO 109: walks all node types, not just elements).
+ * Note: only elements have children. Text/comment/CDATA/PI never have
+ * children — return an empty nodeset for non-element context. */
+static XPathNodeSet* axis_child(XPathContext* ctx, TaurusNode* node,
                                XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    /* Check if this is a text() node test */
-    int text_test = is_text_node_test(test);
+    if (node->type != TAURUS_NODE_TYPE_ELEMENT) return result;
 
-    /* Iterate through children using compact accessor functions */
-    TaurusElement child_elem = taurus_element_get_first_child(node);
-    while (child_elem) {
-        TaurusNode* child_node = (TaurusNode*)child_elem;
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElement child = child_elem;
-            if (matches_node_test(ctx, child, test)) {
-                xpath_nodeset_add(result, child);
-            }
+    /* Walk the raw child list — any node type. */
+    TaurusNode* child = taurus_elem_first_child((TaurusElement)node);
+    while (child) {
+        if (matches_node_test(ctx, child, test)) {
+            xpath_nodeset_add(result, child);
         }
-        child_elem = taurus_element_get_next_sibling(child_elem);
-    }
-
-    /* For text() node test, also add text content of the current element */
-    if (text_test) {
-        XPathTextNode* text_node = create_text_node(node);
-        if (text_node) {
-            xpath_nodeset_add(result, text_node);
-        }
+        child = taurus_node_get_next_sibling(child);
     }
 
     return result;
@@ -596,40 +589,57 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElement node,
     return result;
 }
 
-/* Apply axis dispatcher */
-XPathNodeSet* apply_axis(XPathContext* ctx, TaurusElement node,
+/* Apply axis dispatcher.
+ * TODO 109: accepts TaurusNode* so the descendant-or-self expansion
+ * of // can pass non-element nodes through. Most axes only make
+ * sense on element context (child, descendant, sibling, etc.); the
+ * dispatcher returns an empty nodeset for those if the context is
+ * not an element. */
+XPathNodeSet* apply_axis(XPathContext* ctx, TaurusNode* node,
                          const char* axis_name, XPathASTNode* test) {
     DEBUG_LOG("      === apply_axis: %s ===", axis_name ? axis_name : "(null/child)");
+
+    int element_only = 0;  /* set per-axis below */
     if (!axis_name) {
-        DEBUG_LOG("        Using default 'child' axis");
         return axis_child(ctx, node, test);
     }
 
     if (strcmp(axis_name, "child") == 0) {
-        DEBUG_LOG("        Using 'child' axis");
         return axis_child(ctx, node, test);
     }
+    element_only = (strcmp(axis_name, "descendant") == 0 ||
+                    strcmp(axis_name, "descendant-or-self") == 0 ||
+                    strcmp(axis_name, "following-sibling") == 0 ||
+                    strcmp(axis_name, "preceding-sibling") == 0 ||
+                    strcmp(axis_name, "following") == 0 ||
+                    strcmp(axis_name, "preceding") == 0);
+
+    if (element_only && node && node->type != TAURUS_NODE_TYPE_ELEMENT) {
+        return xpath_nodeset_new();
+    }
+
+    TaurusElement elem = (TaurusElement)node;
     if (strcmp(axis_name, "descendant") == 0) {
         DEBUG_LOG("        Using 'descendant' axis");
-        return axis_descendant(ctx, node, test);
+        return axis_descendant(ctx, elem, test);
     }
     if (strcmp(axis_name, "descendant-or-self") == 0) {
         DEBUG_LOG("        Using 'descendant-or-self' axis");
-        return axis_descendant_or_self(ctx, node, test);
+        return axis_descendant_or_self(ctx, elem, test);
     }
-    if (strcmp(axis_name, "parent") == 0) return axis_parent(ctx, node, test);
-    if (strcmp(axis_name, "ancestor") == 0) return axis_ancestor(ctx, node, test);
+    if (strcmp(axis_name, "parent") == 0) return axis_parent(ctx, elem, test);
+    if (strcmp(axis_name, "ancestor") == 0) return axis_ancestor(ctx, elem, test);
     if (strcmp(axis_name, "ancestor-or-self") == 0)
-        return axis_ancestor_or_self(ctx, node, test);
-    if (strcmp(axis_name, "self") == 0) return axis_self(ctx, node, test);
+        return axis_ancestor_or_self(ctx, elem, test);
+    if (strcmp(axis_name, "self") == 0) return axis_self(ctx, elem, test);
     if (strcmp(axis_name, "following-sibling") == 0)
-        return axis_following_sibling(ctx, node, test);
+        return axis_following_sibling(ctx, elem, test);
     if (strcmp(axis_name, "preceding-sibling") == 0)
-        return axis_preceding_sibling(ctx, node, test);
-    if (strcmp(axis_name, "following") == 0) return axis_following(ctx, node, test);
-    if (strcmp(axis_name, "preceding") == 0) return axis_preceding(ctx, node, test);
-    if (strcmp(axis_name, "attribute") == 0) return axis_attribute(ctx, node, test);
-    if (strcmp(axis_name, "namespace") == 0) return axis_namespace(ctx, node, test);
+        return axis_preceding_sibling(ctx, elem, test);
+    if (strcmp(axis_name, "following") == 0) return axis_following(ctx, elem, test);
+    if (strcmp(axis_name, "preceding") == 0) return axis_preceding(ctx, elem, test);
+    if (strcmp(axis_name, "attribute") == 0) return axis_attribute(ctx, elem, test);
+    if (strcmp(axis_name, "namespace") == 0) return axis_namespace(ctx, elem, test);
 
     return xpath_nodeset_new();  /* Unknown axis */
 }

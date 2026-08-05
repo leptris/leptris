@@ -10,10 +10,11 @@
 // evaluate one expression, assert one outcome). Failures pinpoint
 // the exact feature that regressed.
 //
-// Known engine gap documented here (has its own TODO.fix/ entry):
-//   - //comment() and //processing-instruction() return 0 even when
-//     comments/PIs exist in the tree (TODO 109: XPath over non-element
-//     nodes doesn't traverse them).
+// Engine gaps previously documented here have been fixed:
+//   - //comment() and //processing-instruction() now traverse correctly
+//     (TODO 109, fixed by the matches_node_test / axis dispatcher
+//     rewrite that accepts TaurusNode* and skips non-element contexts
+//     for the element-only axes).
 
 #include <gtest/gtest.h>
 
@@ -526,15 +527,42 @@ TEST(XPathConformanceOperators, UnionCombinesNodeSets) {
 // ============================================================================
 // Node tests
 // ============================================================================
-//
-// Note: comment() and processing-instruction() node tests currently
-// return empty results even when the relevant nodes exist in the
-// tree — the XPath engine doesn't descend into non-element children.
-// This is tracked as TODO 109. The specs below cover the node tests
-// that DO work today; specs for comment/PI traversal live in TODO 109.
 
 TEST(XPathConformanceNodeTest, TextMatchesTextNodes) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "//title/text()"), 3u);
+    taurus_document_free(doc);
+}
+
+TEST(XPathConformanceNodeTest, CommentMatchesComments) {
+    auto doc = Parse("<r><!-- one --><!-- two -->x</r>");
+    EXPECT_EQ(Count(doc, "//comment()"), 2u);
+    EXPECT_EQ(Count(doc, "/r/comment()"), 2u);
+    EXPECT_EQ(Count(doc, "count(//comment()) > 0"), 0u);  // count returns number
+    taurus_document_free(doc);
+}
+
+TEST(XPathConformanceNodeTest, ProcessingInstructionMatchesAny) {
+    auto doc = Parse("<r>x<?xml-stylesheet href='x.y'?><?other data?></r>");
+    EXPECT_EQ(Count(doc, "//processing-instruction()"), 2u);
+    taurus_document_free(doc);
+}
+
+TEST(XPathConformanceNodeTest, ProcessingInstructionMatchesByTarget) {
+    auto doc = Parse("<r>x<?xml-stylesheet href='x.y'?><?other data?></r>");
+    EXPECT_EQ(Count(doc, "//processing-instruction('xml-stylesheet')"), 1u);
+    EXPECT_EQ(Count(doc, "//processing-instruction('other')"), 1u);
+    EXPECT_EQ(Count(doc, "//processing-instruction('nope')"), 0u);
+    taurus_document_free(doc);
+}
+
+TEST(XPathConformanceNodeTest, NodeMatchesAnyKind) {
+    // <r> has: 2 comments, text "x", 1 PI = 4 child nodes.
+    // //node() expands to /descendant-or-self::node()/child::node(),
+    // so it returns only the *children* of (r + descendants of r) —
+    // i.e., the 4 children of r (no descendants under any leaf node).
+    auto doc = Parse("<r><!-- one --><!-- two -->x<?pi data?></r>");
+    EXPECT_EQ(Count(doc, "/r/node()"), 4u);
+    EXPECT_EQ(Count(doc, "//node()"), 4u);
     taurus_document_free(doc);
 }
