@@ -713,3 +713,77 @@ TEST(DtdValidate, ConditionalSectionNestedIgnoreHandlesDepth) {
     taurus_dtd_free(dtd);
     taurus_document_free(doc);
 }
+
+// ---- Phase 8b: Parameter entities (TODO 91) ---------------------------
+
+TEST(DtdValidate, ParameterEntityInternalSubstitutesValue) {
+    /* <!ENTITY % pe "..."> declares an internal parameter entity.
+     * %pe; references substitute the value inline before parsing
+     * continues. The included declarations become live. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY % root-decl \"<!ELEMENT root EMPTY>\">"
+        "%root-decl;";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, ParameterEntityDoesNotCollideWithGeneral) {
+    /* A general entity "foo" and a parameter entity "%foo" should be
+     * distinct. The validator should accept both with the same name. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root>hello</root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY foo 'general'>"
+        "<!ENTITY % foo 'parameter'>"
+        "<!ELEMENT root (#PCDATA)>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, ParameterEntityChainedReferencesExpand) {
+    /* Parameter entity referencing another parameter entity. Both
+     * should expand to produce the final declaration. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY % inner \"<!ELEMENT root EMPTY>\">"
+        "<!ENTITY % outer \"%inner;\">"
+        "%outer;";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
