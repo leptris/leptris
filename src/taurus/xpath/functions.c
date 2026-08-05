@@ -44,6 +44,36 @@ static double xpath_round_half_up(double num) {
 }
 
 /* ============================================================================
+ * Standard function registry singleton (TODO 113 perf optimization)
+ *
+ * The standard XPath 1.0 function set is fixed (27 functions). Every
+ * taurus_xpath_eval call previously allocated a new registry, registered
+ * all 27 functions (each with a heap-allocated name string), then freed
+ * them. That's ~30 heap operations per query just for function setup.
+ *
+ * The singleton is initialized on first call and never freed. Reads
+ * are concurrent-safe (no mutating operations after init). The
+ * registry is internal-only — never modified at runtime.
+ * ============================================================================ */
+
+static XPathFunctionRegistry* g_standard_registry = NULL;
+
+const XPathFunctionRegistry* xpath_function_registry_get_standard_impl(void) {
+    return g_standard_registry;
+}
+
+/* Lazily initialize the global registry on first call. After init,
+ * the registry is read-only. */
+XPathFunctionRegistry* xpath_function_registry_get_standard(void) {
+    if (g_standard_registry) return g_standard_registry;
+    XPathFunctionRegistry* r = xpath_function_registry_new();
+    if (!r) return NULL;
+    xpath_function_registry_init_standard(r);
+    g_standard_registry = r;
+    return r;
+}
+
+/* ============================================================================
  * Function Registry Implementation
  * ============================================================================ */
 

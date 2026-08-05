@@ -67,4 +67,9 @@ extern const char* xpath_token_type_names[];
 /* Use XPathToken and XPathLexer types from taurus_internal.h */
 /* They are already defined there, no need to redefine */
 
+/* AST cache (TODO 113 perf). Lookup/insert parsed expression ASTs
+ * so repeated evaluations skip the parse phase. */
+XPathASTNode* xpath_ast_cache_lookup(const char* expr, size_t expr_len);
+void xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast);
+
 #endif /* XPATH_INTERNAL_H */
