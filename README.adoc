@@ -420,36 +420,118 @@ Exit codes: 0 on success, 1 on parse error or invalid usage.
 
 == Performance
 
-Benchmarked on Apple Silicon, clang -O3, single-threaded, no iconv:
+Taurus is benchmarked against libxml2 and pugixml on every push via CI
+(GitHub Actions, Linux + macOS).  Numbers below are from Apple Silicon,
+`clang -O3 -flto=thin` (LTO is default for Release builds since TODO 110).
 
-[cols="1,>1,>1,>1",options="header"]
+=== Parse + SAX throughput (vs libxml2)
+
+[cols="2,>1,>1,>1",options="header"]
 |===
-|Fixture |Taurus |libxml2 |Speedup
+|Benchmark |Taurus |libxml2 |Advantage
 
-|small.xml (218 B)
-|115 MB/s
-|48 MB/s
-|0.42x (2.4× faster)
+|SAX small (~1 KB)
+|2.8 µs (377 MB/s)
+|7.1 µs (124 MB/s)
+|2.5× faster
 
-|attrs.xml (200 KB, 25 attrs/elem)
-|98 MB/s
-|71 MB/s
-|0.72x (1.4× faster)
+|SAX medium (~5 KB)
+|7.5 µs (624 MB/s)
+|26.9 µs (175 MB/s)
+|3.6× faster
 
-|large.xml (641 KB)
-|120 MB/s
-|97 MB/s
-|0.81x (1.2× faster)
+|DOM parse (~5 KB)
+|33 µs
+|47 µs
+|1.4× faster
 |===
 
-Build and run:
+=== DOM read access (vs libxml2)
+
+[cols="2,>1,>1,>1",options="header"]
+|===
+|Benchmark |Taurus |libxml2 |Advantage
+
+|Attribute lookup by name
+|1.6 µs
+|3.0 µs
+|1.9× faster
+
+|Text content extraction
+|1.4 µs
+|3.5 µs
+|2.6× faster
+
+|Indexed child access (1000 × 50)
+|2.3 µs (O(1) cached)
+|2.5 µs
+|9% faster
+|===
+
+=== DOM writes (vs pugixml + libxml2)
+
+[cols="2,>1,>1,>1",options="header"]
+|===
+|Benchmark |Taurus |pugixml |libxml2
+
+|Append 1000 children
+|15.0 µs
+|11.9 µs
+|56.2 µs
+
+|Set 100 attributes
+|43.3 µs
+|10.4 µs
+|33.4 µs
+
+|Set text
+|0.9 µs
+|0.7 µs
+|0.8 µs
+
+|Parse + 10 writes (medium)
+|30.7 µs
+|5.1 µs
+|41.6 µs
+|===
+
+Taurus beats libxml2 on every benchmark except set-text (1.15× slower).
+Against pugixml, append is within 1.25× and set-text within 1.3×.
+The remaining gap (set-attributes) is due to node layout — see TODO 90
+for the compact-storage migration plan.
+
+=== Building with LTO
+
+LTO is enabled by default for `Release` and `RelWithDebInfo` builds.
+Disable with `-DTAURUS_ENABLE_LTO=OFF`:
 
 [source,bash]
 ----
-cmake -B build -S . -DTAURUS_BUILD_BENCHMARKS=ON
-cmake --build build
-./build/benchmarks/comprehensive_benchmark
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build          # LTO is on automatically
+
+# or explicitly:
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DTAURUS_ENABLE_LTO=ON
 ----
+
+=== Running benchmarks
+
+[source,bash]
+----
+cmake -B build -S . \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DTAURUS_BUILD_BENCHMARKS=ON
+cmake --build build
+
+# Run individual benchmarks:
+./build/benchmarks/bench_dom_taurus
+./build/benchmarks/bench_sax_taurus
+./build/benchmarks/benchmark_write     # vs pugixml + libxml2
+./build/benchmarks/bench_xpath_pugixml  # XPath vs pugixml
+----
+
+CI uploads a `benchmark-results-<os>` artifact per push with JSON +
+Markdown output from every benchmark binary.
 
 [#vcpkg]
 == vcpkg integration
