@@ -22,6 +22,7 @@ char* get_node_text(void* node);
 /* From evaluator_axes.c */
 XPathNodeSet* apply_axis(XPathContext* ctx, TaurusNode* node,
                          const char* axis_name, XPathASTNode* test);
+XPathAxisType xpath_axis_from_name(const char* name);
 
 /* From evaluator_operators.c */
 struct taurus_xpath_result* evaluate_operator(XPathContext* ctx,

@@ -7,6 +7,7 @@
 
 #include "parser.h"
 #include "lexer.h"
+#include "evaluator_internal.h"  /* xpath_axis_from_name (TODO 113) */
 #include "../taurus_internal.h"
 #include <string.h>
 #include <stdlib.h>
@@ -140,6 +141,7 @@ static XPathASTNode* ast_node_new(XPathASTType type) {
     node->children = NULL;
     node->child_count = 0;
     node->child_capacity = 0;
+    node->axis_id = XPATH_AXIS_CHILD;
 
     /* Initialize namespace support fields (v0.8.0) */
     node->prefix = NULL;
@@ -638,6 +640,7 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             XPathASTNode* desc_step = ast_node_new(XPATH_AST_STEP);
             if (desc_step) {
                 desc_step->value = taurus_strdup("descendant-or-self");
+                desc_step->axis_id = XPATH_AXIS_DESCENDANT_OR_SELF;
                 XPathASTNode* node_test = ast_node_new(XPATH_AST_NODE_TEST_TYPE);
                 if (node_test) {
                     node_test->value = taurus_strdup("node");
@@ -1038,6 +1041,7 @@ static XPathASTNode* parse_step(XPathParser* parser) {
         XPathASTNode* node = ast_node_new(XPATH_AST_STEP);
         if (node) {
             node->value = taurus_strdup("self");
+            node->axis_id = XPATH_AXIS_SELF;
             XPathASTNode* test = ast_node_new(XPATH_AST_NODE_TEST_ALL);
             ast_node_add_child(node, test);
         }
@@ -1049,6 +1053,7 @@ static XPathASTNode* parse_step(XPathParser* parser) {
         XPathASTNode* node = ast_node_new(XPATH_AST_STEP);
         if (node) {
             node->value = taurus_strdup("parent");
+            node->axis_id = XPATH_AXIS_PARENT;
             XPathASTNode* test = ast_node_new(XPATH_AST_NODE_TEST_ALL);
             ast_node_add_child(node, test);
         }
@@ -1062,6 +1067,7 @@ static XPathASTNode* parse_step(XPathParser* parser) {
         if (!node) return NULL;
 
         node->value = taurus_strdup("attribute");
+        node->axis_id = XPATH_AXIS_ATTRIBUTE;
 
         XPathASTNode* test = parse_node_test(parser);
         if (!test) {
@@ -1103,6 +1109,10 @@ static XPathASTNode* parse_step(XPathParser* parser) {
 
     node->value = axis ? taurus_strdup(axis) : taurus_strdup("child");
     if (axis) TAURUS_FREE(axis);
+
+    /* Pre-compute axis enum so apply_axis can dispatch via switch
+     * instead of strcmp chain (TODO 113 Phase 1). */
+    node->axis_id = xpath_axis_from_name(node->value);
 
     /* Parse node test */
     XPathASTNode* test = parse_node_test(parser);

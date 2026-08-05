@@ -589,57 +589,116 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElement node,
     return result;
 }
 
+/* Map an axis name string to its enum (TODO 113 Phase 1 perf).
+ * Called once at parse time so apply_axis can switch on the enum
+ * instead of strcmp'ing the name on every axis dispatch. */
+XPathAxisType xpath_axis_from_name(const char* name) {
+    if (!name || !*name) return XPATH_AXIS_CHILD;
+    /* First-character dispatch: most axes have a unique first char,
+     * collapsing 13 strcmp calls into a single switch + one compare.
+     * axis_id is set once at parse time, so this runs ~13× less
+     * often than apply_axis itself (TODO 113 Phase 1). */
+    switch (name[0]) {
+        case 'a':
+            if (strcmp(name, "ancestor") == 0) return XPATH_AXIS_ANCESTOR;
+            if (strcmp(name, "ancestor-or-self") == 0) return XPATH_AXIS_ANCESTOR_OR_SELF;
+            if (strcmp(name, "attribute") == 0) return XPATH_AXIS_ATTRIBUTE;
+            break;
+        case 'c':
+            if (strcmp(name, "child") == 0) return XPATH_AXIS_CHILD;
+            break;
+        case 'd':
+            if (strcmp(name, "descendant") == 0) return XPATH_AXIS_DESCENDANT;
+            if (strcmp(name, "descendant-or-self") == 0) return XPATH_AXIS_DESCENDANT_OR_SELF;
+            break;
+        case 'f':
+            if (strcmp(name, "following") == 0) return XPATH_AXIS_FOLLOWING;
+            if (strcmp(name, "following-sibling") == 0) return XPATH_AXIS_FOLLOWING_SIBLING;
+            break;
+        case 'n':
+            if (strcmp(name, "namespace") == 0) return XPATH_AXIS_NAMESPACE;
+            break;
+        case 'p':
+            if (strcmp(name, "parent") == 0) return XPATH_AXIS_PARENT;
+            if (strcmp(name, "preceding") == 0) return XPATH_AXIS_PRECEDING;
+            if (strcmp(name, "preceding-sibling") == 0) return XPATH_AXIS_PRECEDING_SIBLING;
+            break;
+        case 's':
+            if (strcmp(name, "self") == 0) return XPATH_AXIS_SELF;
+            break;
+    }
+    return XPATH_AXIS_CHILD;
+}
+
 /* Apply axis dispatcher.
  * TODO 109: accepts TaurusNode* so the descendant-or-self expansion
  * of // can pass non-element nodes through. Most axes only make
  * sense on element context (child, descendant, sibling, etc.); the
  * dispatcher returns an empty nodeset for those if the context is
- * not an element. */
+ * not an element.
+ *
+ * TODO 113 Phase 1: switches on the pre-computed axis_id from the
+ * AST node, avoiding the strcmp chain. Falls back to from_name if
+ * axis_id wasn't set (defensive — should always be set by parser). */
 XPathNodeSet* apply_axis(XPathContext* ctx, TaurusNode* node,
                          const char* axis_name, XPathASTNode* test) {
     DEBUG_LOG("      === apply_axis: %s ===", axis_name ? axis_name : "(null/child)");
 
+    XPathAxisType axis_id = test ? test->axis_id : XPATH_AXIS_CHILD;
+    if (axis_name && *axis_name && axis_id == XPATH_AXIS_CHILD &&
+        strcmp(axis_name, "child") != 0) {
+        /* Defensive fallback: re-derive from name if axis_id wasn't
+         * set to the right value but the name is non-default. */
+        axis_id = xpath_axis_from_name(axis_name);
+    }
+
     int element_only = 0;  /* set per-axis below */
-    if (!axis_name) {
+
+    /* Fast path: child is the default axis. Skip the element_only
+     * check and dispatch directly. */
+    if (axis_id == XPATH_AXIS_CHILD) {
         return axis_child(ctx, node, test);
     }
 
-    if (strcmp(axis_name, "child") == 0) {
-        return axis_child(ctx, node, test);
-    }
-    element_only = (strcmp(axis_name, "descendant") == 0 ||
-                    strcmp(axis_name, "descendant-or-self") == 0 ||
-                    strcmp(axis_name, "following-sibling") == 0 ||
-                    strcmp(axis_name, "preceding-sibling") == 0 ||
-                    strcmp(axis_name, "following") == 0 ||
-                    strcmp(axis_name, "preceding") == 0);
+    /* Most axes require an element context. */
+    element_only = (axis_id == XPATH_AXIS_DESCENDANT ||
+                    axis_id == XPATH_AXIS_DESCENDANT_OR_SELF ||
+                    axis_id == XPATH_AXIS_FOLLOWING_SIBLING ||
+                    axis_id == XPATH_AXIS_PRECEDING_SIBLING ||
+                    axis_id == XPATH_AXIS_FOLLOWING ||
+                    axis_id == XPATH_AXIS_PRECEDING);
 
     if (element_only && node && node->type != TAURUS_NODE_TYPE_ELEMENT) {
         return xpath_nodeset_new();
     }
 
     TaurusElement elem = (TaurusElement)node;
-    if (strcmp(axis_name, "descendant") == 0) {
-        DEBUG_LOG("        Using 'descendant' axis");
-        return axis_descendant(ctx, elem, test);
+    switch (axis_id) {
+        case XPATH_AXIS_DESCENDANT:
+            return axis_descendant(ctx, elem, test);
+        case XPATH_AXIS_DESCENDANT_OR_SELF:
+            return axis_descendant_or_self(ctx, elem, test);
+        case XPATH_AXIS_PARENT:
+            return axis_parent(ctx, elem, test);
+        case XPATH_AXIS_ANCESTOR:
+            return axis_ancestor(ctx, elem, test);
+        case XPATH_AXIS_ANCESTOR_OR_SELF:
+            return axis_ancestor_or_self(ctx, elem, test);
+        case XPATH_AXIS_SELF:
+            return axis_self(ctx, elem, test);
+        case XPATH_AXIS_FOLLOWING_SIBLING:
+            return axis_following_sibling(ctx, elem, test);
+        case XPATH_AXIS_PRECEDING_SIBLING:
+            return axis_preceding_sibling(ctx, elem, test);
+        case XPATH_AXIS_FOLLOWING:
+            return axis_following(ctx, elem, test);
+        case XPATH_AXIS_PRECEDING:
+            return axis_preceding(ctx, elem, test);
+        case XPATH_AXIS_ATTRIBUTE:
+            return axis_attribute(ctx, elem, test);
+        case XPATH_AXIS_NAMESPACE:
+            return axis_namespace(ctx, elem, test);
+        default:
+            return xpath_nodeset_new();  /* Unknown axis */
     }
-    if (strcmp(axis_name, "descendant-or-self") == 0) {
-        DEBUG_LOG("        Using 'descendant-or-self' axis");
-        return axis_descendant_or_self(ctx, elem, test);
-    }
-    if (strcmp(axis_name, "parent") == 0) return axis_parent(ctx, elem, test);
-    if (strcmp(axis_name, "ancestor") == 0) return axis_ancestor(ctx, elem, test);
-    if (strcmp(axis_name, "ancestor-or-self") == 0)
-        return axis_ancestor_or_self(ctx, elem, test);
-    if (strcmp(axis_name, "self") == 0) return axis_self(ctx, elem, test);
-    if (strcmp(axis_name, "following-sibling") == 0)
-        return axis_following_sibling(ctx, elem, test);
-    if (strcmp(axis_name, "preceding-sibling") == 0)
-        return axis_preceding_sibling(ctx, elem, test);
-    if (strcmp(axis_name, "following") == 0) return axis_following(ctx, elem, test);
-    if (strcmp(axis_name, "preceding") == 0) return axis_preceding(ctx, elem, test);
-    if (strcmp(axis_name, "attribute") == 0) return axis_attribute(ctx, elem, test);
-    if (strcmp(axis_name, "namespace") == 0) return axis_namespace(ctx, elem, test);
-
-    return xpath_nodeset_new();  /* Unknown axis */
 }
