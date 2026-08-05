@@ -1232,9 +1232,8 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
      *
      * TODO 25: use p->pool (always non-NULL during parsing) rather
      * than elem->document->pool (NULL until parsing completes).
-     * Previously the calloc fallback fired for every element during
-     * parsing, leaking name strings. */
-    elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, p->pool);
+    /* Name already pool-strdup'd by create_with_view (TODO 90: no
+     * name_view field on the struct — conversion is eager). */
 
     /* Set prefix if present (TODO 90: eager pool-strdup, no staging view). */
     if (!taurus_sv_is_empty(&prefix_view)) {
@@ -1484,8 +1483,9 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
                 }
             }
 
-            /* Verify it matches opening tag's local name */
-            if (!taurus_sv_equals(&close_local, &elem->name_view)) {
+            /* Verify it matches opening tag's local name (TODO 90: use char*). */
+            if (close_local.length != strlen(elem->name) ||
+                memcmp(close_local.data, elem->name, close_local.length) != 0) {
                 parser_set_error(p, "Mismatched closing tag");
                 return NULL;
             }

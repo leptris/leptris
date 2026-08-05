@@ -85,7 +85,6 @@ struct taurus_element {
 
     /* name_view only (16 bytes) — prefix_view removed (TODO 90),
      * namespace_uri_view removed (TODO 90 PR #82). */
-    TaurusStringView name_view;       /* Element name */
 
     /* Cached NULL-terminated strings (24 bytes) - lazy conversion */
     char* name;                      /* NULL until first access */
@@ -322,9 +321,11 @@ void taurus_element_set_namespace_uri(TaurusElement elem, const char* uri);
  * Internal StringView Accessors (for performance-critical internal code)
  * ============================================================================ */
 
-/* Get element name as StringView (NO conversion, O(1) access) */
+/* Get element name as StringView (derived from cached char* — TODO 90). */
 static inline TaurusStringView taurus_element_name_view(TaurusElement elem) {
-    return elem ? elem->name_view : taurus_sv_empty();
+    return elem && elem->name
+        ? taurus_sv_from_ptr(elem->name, strlen(elem->name))
+        : taurus_sv_empty();
 }
 
 /* Get element prefix as StringView (NO conversion, O(1) access) */
@@ -354,14 +355,14 @@ static inline TaurusStringView taurus_attribute_value_view(const struct taurus_a
 
 /* Fast name comparison helpers (for hot paths like traversal) */
 static inline int taurus_element_name_equals(TaurusElement elem, TaurusStringView name) {
-    return taurus_sv_equals(&elem->name_view, &name);
+    if (!elem || !elem->name) return 0;
+    return name.length == strlen(elem->name) &&
+           memcmp(elem->name, name.data, name.length) == 0;
 }
 
 static inline int taurus_element_name_equals_lit(TaurusElement elem, const char* lit) {
-    if (!elem || !lit) return 0;
-    size_t lit_len = strlen(lit);
-    return elem->name_view.length == lit_len &&
-           memcmp(elem->name_view.data, lit, lit_len) == 0;
+    if (!elem || !lit || !elem->name) return 0;
+    return strcmp(elem->name, lit) == 0;
 }
 
 /* ============================================================================

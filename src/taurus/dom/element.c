@@ -58,10 +58,10 @@ TaurusElement taurus_element_create_with_view(
     elem->base.version = 0;
 
     /* Store StringViews - ZERO COPY! */
-    elem->name_view = name_view;
+    /* EAGER: pool-strdup the name (TODO 90: no view staging) */
 
     /* Initialize cached strings as NULL (lazy conversion) */
-    elem->name = NULL;
+    elem->name = taurus_sv_to_cstr_pooled(&name_view, pool);
     elem->prefix = NULL;
     elem->namespace_uri = NULL;
 
@@ -333,24 +333,8 @@ const char* taurus_element_get_name(TaurusElement elem) {
         return NULL;  /* Not an element node */
     }
 
-    /* Return cached string if available (lazy conversion already done) */
-    if (elem->name) return elem->name;
-
-    /* Convert from StringView to NULL-terminated string */
-    if (!taurus_sv_is_empty(&elem->name_view)) {
-        /* Store the cached string in the element structure
-         * Note: This string should be pool-allocated for proper cleanup */
-        /* For now, we'll use the document's pool if available */
-        if (elem->document && elem->document->pool) {
-            elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, elem->document->pool);
-        } else {
-            /* Fallback to regular malloc (not ideal for pool-allocated elements) */
-            elem->name = taurus_sv_to_cstr(&elem->name_view);
-        }
-        return elem->name;
-    }
-
-    return NULL;  /* No name available */
+    /* name_view removed (TODO 90) — name is set eagerly by create_with_view. */
+    return elem->name;
 }
 
 /* Set prefix using StringView (zero-copy!) */

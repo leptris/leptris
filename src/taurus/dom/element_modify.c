@@ -315,7 +315,6 @@ TaurusStatus taurus_element_set_name(TaurusElement elem, const char* name) {
         /* Fallback to malloc for standalone elements */
         elem->name = taurus_strdup(name);
     }
-    elem->name_view = taurus_sv_from_cstr(name);
 
     /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
@@ -1107,8 +1106,8 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     /* Copy base node type */
     copy->base.type = TAURUS_NODE_TYPE_ELEMENT;
 
-    /* Copy name as StringView (zero-copy from source) */
-    copy->name_view = source->name_view;
+    /* name_view removed (TODO 90) — name is already pool-strdup'd
+     * by create_with_view during the deep_copy_element call above. */
 
     /* Copy prefix and namespace as StringView (TODO 90) */
     /* prefix_view removed (TODO 90) — prefix is copied as char* below */;
