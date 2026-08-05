@@ -33,6 +33,16 @@ static char* result_to_string(struct taurus_xpath_result* result);
 static int result_to_boolean(struct taurus_xpath_result* result);
 static double result_to_number(struct taurus_xpath_result* result);
 
+/* XPath round() per spec section 4.4: nearest integer, ties toward
+ * positive infinity. Used by substring() and exposed as the public
+ * round() function. NaN/Inf pass through unchanged. */
+static double xpath_round_half_up(double num) {
+    if (isnan(num) || isinf(num) || num == 0.0) return num;
+    double frac = num - floor(num);
+    if (frac == 0.5) return ceil(num);  /* tie -> +Inf */
+    return floor(num + 0.5);
+}
+
 /* ============================================================================
  * Function Registry Implementation
  * ============================================================================ */
@@ -523,30 +533,27 @@ static struct taurus_xpath_result* xpath_func_substring(XPathContext* context,
     double start_double = result_to_number(start_result);
     xpath_result_free(start_result);
 
-    /* XPath positions are 1-indexed, round to nearest integer */
-    long start_rounded = (long)floor(start_double + 0.5);
+    /* XPath 1.0 substring() uses IEEE-754 comparisons with round() of
+     * arguments. Per spec section 4.2: returned chars are those whose
+     * 1-indexed position p satisfies
+     *     round(start) <= p < round(start) + round(length)
+     * (length omitted means +Inf, so the upper bound is +Inf.)
+     * NaN start or length returns the empty string. */
 
-    /* XPath spec: clamp start to minimum 1 */
-    long effective_start = start_rounded < 1 ? 1 : start_rounded;
-
-    /* Calculate actual start index (0-indexed) */
-    /* Position 1 = index 0, Position 2 = index 1, etc. */
-    size_t start_idx = (size_t)(effective_start - 1);
-
-    if (start_idx >= len) {
-        /* Start is past end of string */
+    if (isnan(start_double)) {
         TAURUS_FREE(str);
         struct taurus_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
         if (result) result->value.string_value = taurus_strdup("");
         return result;
     }
 
-    size_t count;
+    /* round() per XPath spec: half rounds toward +Inf. */
+    double start_rounded = xpath_round_half_up(start_double);
+
+    double end_rounded;
     if (arg_count == 2) {
-        /* substring(string, start) - return all characters from start to end */
-        count = len - start_idx;
+        end_rounded = INFINITY;  /* substring(str, start) = start..end */
     } else {
-        /* substring(string, start, length) */
         struct taurus_xpath_result* len_result = xpath_evaluate(context, args[2]);
         if (!len_result) {
             TAURUS_FREE(str);
@@ -554,24 +561,30 @@ static struct taurus_xpath_result* xpath_func_substring(XPathContext* context,
         }
         double len_double = result_to_number(len_result);
         xpath_result_free(len_result);
-
-        long len_rounded = (long)floor(len_double + 0.5);
-        if (len_rounded < 0) len_rounded = 0;
-        count = (size_t)len_rounded;
-
-        /* Don't exceed available characters */
-        if (count > len - start_idx) {
-            count = len - start_idx;
+        if (isnan(len_double)) {
+            TAURUS_FREE(str);
+            struct taurus_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
+            if (result) result->value.string_value = taurus_strdup("");
+            return result;
         }
+        end_rounded = start_rounded + xpath_round_half_up(len_double);
     }
 
-    char* result_str = TAURUS_ALLOC_N(char, count + 1);
+    /* Walk the string positions and collect the matching chars.
+     * Position p is 1-indexed. */
+    size_t out_len = 0;
+    char* result_str = TAURUS_ALLOC_N(char, len + 1);
     if (!result_str) {
         TAURUS_FREE(str);
         return NULL;
     }
-    memcpy(result_str, str + start_idx, count);
-    result_str[count] = '\0';
+    for (size_t i = 0; i < len; i++) {
+        double p = (double)(i + 1);
+        if (p >= start_rounded && p < end_rounded) {
+            result_str[out_len++] = str[i];
+        }
+    }
+    result_str[out_len] = '\0';
     TAURUS_FREE(str);
 
     struct taurus_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
@@ -1183,7 +1196,7 @@ static struct taurus_xpath_result* xpath_func_ceiling(XPathContext* context,
     return result;
 }
 
-/* round(number) - Round to nearest integer (half away from zero) */
+/* round(number) - Round to nearest integer; ties toward +Inf (XPath 1.0 spec 4.4). */
 static struct taurus_xpath_result* xpath_func_round(XPathContext* context,
     XPathASTNode** args,
     size_t arg_count
@@ -1203,18 +1216,8 @@ static struct taurus_xpath_result* xpath_func_round(XPathContext* context,
     struct taurus_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!result) return NULL;
 
-    /* XPath round() rounds half away from zero */
-    if (isnan(num) || isinf(num) || num == 0.0) {
-        result->value.number_value = num;
-    } else {
-        double frac = num - floor(num);
-        if (frac == 0.5) {
-            /* Half case: round away from zero - use ceil() for both positive and negative */
-            result->value.number_value = ceil(num);
-        } else {
-            result->value.number_value = floor(num + 0.5);
-        }
-    }
+    /* XPath round() rounds half toward +Inf (spec 4.4). */
+    result->value.number_value = xpath_round_half_up(num);
     return result;
 }
 
