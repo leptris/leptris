@@ -1236,10 +1236,9 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
      * parsing, leaking name strings. */
     elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, p->pool);
 
-    /* Set prefix if present */
+    /* Set prefix if present (TODO 90: eager pool-strdup, no staging view). */
     if (!taurus_sv_is_empty(&prefix_view)) {
-        taurus_element_set_prefix_view(elem, prefix_view);
-        /* PERFORMANCE: Track that we found a namespace prefix */
+        elem->prefix = taurus_sv_to_cstr_pooled(&prefix_view, p->pool);
         p->has_namespace_prefixes = 1;
     }
 
@@ -1255,19 +1254,20 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
             /* STRICT MODE VALIDATION: Check for undeclared namespace prefix
              * Per XML Namespaces spec, a prefix used in an element name must be declared
              * For self-closing elements, we check this before returning */
-            if (p->strict_mode && !taurus_sv_is_empty(&elem->prefix_view)) {
+            if (p->strict_mode && elem->prefix && elem->prefix[0]) {
                 /* Check if prefix is "xml" - reserved prefix that's always valid */
-                int is_xml_prefix = (elem->prefix_view.length == 3) &&
-                                   (elem->prefix_view.data[0] == 'x' || elem->prefix_view.data[0] == 'X') &&
-                                   (elem->prefix_view.data[1] == 'm' || elem->prefix_view.data[1] == 'M') &&
-                                   (elem->prefix_view.data[2] == 'l' || elem->prefix_view.data[2] == 'L');
+                const char* pfx = elem->prefix;
+                int is_xml_prefix = (strlen(pfx) == 3) &&
+                                   (pfx[0] == 'x' || pfx[0] == 'X') &&
+                                   (pfx[1] == 'm' || pfx[1] == 'M') &&
+                                   (pfx[2] == 'l' || pfx[2] == 'L');
 
                 if (!is_xml_prefix) {
                     /* Check if prefix is declared in this element's namespaces */
                     int prefix_declared = 0;
                     struct taurus_namespace* ns = elem->namespaces;
                     while (ns) {
-                        if (ns->prefix && taurus_sv_equals_cstr(&elem->prefix_view, ns->prefix)) {
+                        if (ns->prefix && strcmp(pfx, ns->prefix) == 0) {
                             prefix_declared = 1;
                             break;
                         }
@@ -1275,11 +1275,9 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
                     }
 
                     if (!prefix_declared) {
-                        char* prefix_str = taurus_sv_to_cstr(&elem->prefix_view);
                         char error_msg[256];
                         snprintf(error_msg, sizeof(error_msg),
-                                "Undeclared namespace prefix '%s'", prefix_str);
-                        free(prefix_str);
+                                "Undeclared namespace prefix '%s'", pfx);
                         parser_set_error(p, error_msg);
                         return NULL;
                     }
@@ -1620,16 +1618,13 @@ static void resolve_namespaces_recursive_impl(TaurusElement elem, int depth) {
      * TODO 15: route the prefix conversion through the document pool
      * so we don't rely on manual free() (which previously leaked on
      * early-return paths). */
-    if (!taurus_sv_is_empty(&elem->prefix_view) && elem->namespace_uri == NULL) {
-        TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
-        char* prefix_cstr = pool
-            ? taurus_sv_to_cstr_pooled(&elem->prefix_view, pool)
-            : taurus_sv_to_cstr(&elem->prefix_view);
-        const char* uri = taurus_element_lookup_namespace(elem, prefix_cstr);
+    /* LAZY NAMESPACE RESOLUTION (TODO 90: prefix_view removed,
+     * use cached elem->prefix char* directly). */
+    if (elem->prefix && elem->prefix[0] && elem->namespace_uri == NULL) {
+        const char* uri = taurus_element_lookup_namespace(elem, elem->prefix);
         if (uri) {
             taurus_element_set_namespace_uri_view(elem, taurus_sv_from_cstr(uri));
         }
-        if (!pool) free(prefix_cstr);  /* Pool-allocated: nothing to free. */
     }
 }
 
