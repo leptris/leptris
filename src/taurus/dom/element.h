@@ -242,6 +242,16 @@ void taurus_element_set_first_child(TaurusElement elem, TaurusElement child);
 void taurus_element_set_last_child(TaurusElement elem, TaurusElement child);
 void taurus_element_set_next_sibling(TaurusElement elem, TaurusElement sibling);
 
+/* Cache invalidation: call after any structural mutation (child add/
+ * remove/insert) to mark the indexed-access cache as stale.  Next
+ * taurus_element_child(elem, j) call rebuilds it lazily.  Encapsulates
+ * the cache so mutation sites don't poke at children_array directly
+ * — and so compact-storage migration (TODO 90) can change the cache
+ * representation without touching every call site. */
+static inline void taurus_element_invalidate_child_cache(TaurusElement elem) {
+    if (elem) elem->children_array = NULL;
+}
+
 /* ============================================================================
  * Attribute Access Functions
  * ============================================================================ */

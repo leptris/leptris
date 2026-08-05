@@ -77,7 +77,7 @@ TaurusElement taurus_element_create_with_view(
     elem->next_sibling = NULL;
     elem->first_attribute = NULL;
     elem->last_attribute = NULL;
-    elem->children_array = NULL;  /* indexed-access cache, lazy-built */
+    elem->children_array = NULL;  /* indexed-access cache, lazy-built (TODO 90: accessor when compact mode lands) */
 
     /* Initialize counts */
     elem->attr_count = 0;
