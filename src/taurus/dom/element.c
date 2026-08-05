@@ -357,12 +357,12 @@ void taurus_element_set_namespace_uri_view(TaurusElement elem, TaurusStringView 
         storage[uri_view.length] = '\0';
         elem->namespace_uri = storage;
     } else {
-        /* No pool — use malloc/strdup as fallback. */
-        char* storage = (char*)malloc(uri_view.length + 1);
-        if (!storage) { elem->namespace_uri = NULL; return; }
-        memcpy(storage, uri_view.data, uri_view.length);
-        storage[uri_view.length] = '\0';
-        elem->namespace_uri = storage;
+        /* During parsing, document may be NULL. The uri_view was
+         * constructed from a pool-owned C string via
+         * taurus_sv_from_cstr, so uri_view.data is already
+         * NUL-terminated and pool-owned. Store the pointer directly
+         * — no allocation, no leak. */
+        elem->namespace_uri = (char*)uri_view.data;
     }
 }
 
