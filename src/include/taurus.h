@@ -647,20 +647,12 @@ TAURUS_API size_t taurus_element_child_count(TaurusElement elem);
  *
  * Memory: Element is owned by document. Do not free separately.
  *
- * Performance: **Amortized O(1)**.  The first call lazily builds an
- * index cache from the linked-list of children; subsequent calls are
- * O(1) array lookups.  Any structural mutation (append/prepend/insert/
- * remove child) invalidates the cache; the next indexed access
- * rebuilds it.
- *
- * Sequential iteration via `taurus_element_first_child_any` +
- * `next_sibling_any` is also O(1) per step and avoids the cache —
- * use whichever pattern fits the calling code.
- *
- * Threading: safe for the parse-then-read pattern (single-threaded
- * first access, then concurrent reads of the populated cache).
- * Concurrent first-access from multiple threads would race; document
- * this as a known limitation.
+ * Performance: **O(index)**.  Walks the linked-list of children from
+ * `first_child` to reach the requested index.  The legacy index-cache
+ * (`children_array`) was removed in TODO 90 Phase 1 to shrink the
+ * element struct; sequential iteration via
+ * `taurus_element_first_child_any` + `next_sibling_any` is O(1) per
+ * step and is the recommended pattern when iterating all children.
  */
 TAURUS_API TaurusElement taurus_element_child(TaurusElement elem, size_t index);
 
