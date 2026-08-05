@@ -137,6 +137,20 @@ struct taurus_element {
     struct taurus_element** children_array;
 };
 
+/* Compile-time element-size tracker (TODO 90).
+ *
+ * Current layout uses regular 8-byte pointers + StringView (16 bytes each).
+ * pugixml compact node: 12 bytes. Our compact-mode target: ~23 bytes.
+ * This assert catches accidental growth.  When the compact-pointer
+ * migration lands, the struct shrinks and this upper bound drops. */
+#ifndef __cplusplus
+_Static_assert(sizeof(struct taurus_element) <= 200,
+    "taurus_element grew beyond 200 bytes — check for accidental field additions");
+#else
+static_assert(sizeof(struct taurus_element) <= 200,
+    "taurus_element grew beyond 200 bytes");
+#endif
+
 /* TaurusElement typedef comes from the public include/taurus/types.h
  * (re-exported via taurus.h).  No local redefinition — see TODO 12. */
 
