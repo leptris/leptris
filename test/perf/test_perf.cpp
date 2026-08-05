@@ -151,10 +151,11 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         clock_type::now() - start).count();
 
-    /* Release+LTO: ~3 ms on M-series (O(N²) walk over 50 children × 1000).
-     * Budget: 8 ms — catches constant-factor regression while tolerating
+    /* Release+LTO: ~7 ms on M-series (O(N²) walk over 50 children × 1000,
+     * with the int32_t offset decoding from TODO 90 Phase 2b).
+     * Budget: 12 ms — catches constant-factor regression while tolerating
      * slower CI hardware. */
-    EXPECT_LT(ms, 8);
+    EXPECT_LT(ms, 12);
     (void)sink;
 
     taurus_document_free(doc);
