@@ -191,7 +191,7 @@ static void xml_print_element_recursive(
                     }
                     if (*p == '\0') {
                         /* Whitespace-only, skip in compact mode */
-                        child = (TaurusNode*)(text_node->next_sibling);
+                        child = taurus_node_get_next_sibling(child);
                         continue;
                     }
                 }
@@ -204,8 +204,8 @@ static void xml_print_element_recursive(
                     }
                 }
             }
-            /* Get next sibling for text node */
-            child = (TaurusNode*)(text_node->next_sibling);
+            /* Get next sibling via the type-dispatching accessor */
+            child = taurus_node_get_next_sibling(child);
             continue;
         }
         else if (TAURUS_NODE_IS_CDATA(child)) {
@@ -214,8 +214,7 @@ static void xml_print_element_recursive(
             if (cdata && cdata->content) {
                 fprintf(out, "<![CDATA[%s]]>", cdata->content);
             }
-            /* Get next sibling for CDATA node */
-            child = (TaurusNode*)(cdata->next_sibling);
+            child = taurus_node_get_next_sibling(child);
             continue;
         }
         else if (TAURUS_NODE_IS_COMMENT(child)) {
@@ -224,8 +223,7 @@ static void xml_print_element_recursive(
             if (comment && comment->content) {
                 fprintf(out, "<!--%s-->", comment->content);
             }
-            /* Get next sibling for comment node */
-            child = (TaurusNode*)(comment->next_sibling);
+            child = taurus_node_get_next_sibling(child);
             continue;
         }
         else if (TAURUS_NODE_IS_PI(child)) {
@@ -238,8 +236,7 @@ static void xml_print_element_recursive(
                 }
                 fprintf(out, "?>");
             }
-            /* Get next sibling for PI node */
-            child = (TaurusNode*)(pi->next_sibling);
+            child = taurus_node_get_next_sibling(child);
             continue;
         }
         /* DOCTYPE nodes are not printed as children of elements */
@@ -525,22 +522,8 @@ static void json_print_element_recursive(
                 if (!first) fprintf(out, ",");
                 first = 0;
                 json_print_element_recursive((TaurusElement)child, out, level + 1);
-                child = taurus_node_get_next_sibling(child);
-            } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
-                TaurusTextNode* text = (TaurusTextNode*)child;
-                child = (TaurusNode*)(text->next_sibling);
-            } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-                TaurusCDATANode* cdata = (TaurusCDATANode*)child;
-                child = (TaurusNode*)(cdata->next_sibling);
-            } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-                TaurusCommentNode* comment = (TaurusCommentNode*)child;
-                child = (TaurusNode*)(comment->next_sibling);
-            } else if (child->type == TAURUS_NODE_TYPE_PI) {
-                TaurusPINode* pi = (TaurusPINode*)child;
-                child = (TaurusNode*)(pi->next_sibling);
-            } else {
-                child = NULL;
             }
+            child = taurus_node_get_next_sibling(child);
         }
         fprintf(out, "]");
     }
@@ -717,22 +700,8 @@ static void text_print_element_recursive(
     while (child) {
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             text_print_element_recursive((TaurusElement)child, out, level + 1);
-            child = taurus_node_get_next_sibling(child);
-        } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            TaurusTextNode* text = (TaurusTextNode*)child;
-            child = (TaurusNode*)(text->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)child;
-            child = (TaurusNode*)(cdata->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-            TaurusCommentNode* comment = (TaurusCommentNode*)child;
-            child = (TaurusNode*)(comment->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_PI) {
-            TaurusPINode* pi = (TaurusPINode*)child;
-            child = (TaurusNode*)(pi->next_sibling);
-        } else {
-            child = NULL;
         }
+        child = taurus_node_get_next_sibling(child);
     }
 }
 

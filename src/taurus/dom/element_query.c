@@ -400,21 +400,7 @@ TAURUS_API TaurusElement taurus_element_first_child_any(TaurusElement elem) {
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             return (TaurusElement)child;
         }
-
-        /* Get next sibling based on node type - each type has different offset! */
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            child = taurus_node_get_next_sibling(child);
-        } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            child = (TaurusNode*)(((TaurusTextNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            child = (TaurusNode*)(((TaurusCDATANode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-            child = (TaurusNode*)(((TaurusCommentNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_PI) {
-            child = (TaurusNode*)(((TaurusPINode*)child)->next_sibling);
-        } else {
-            child = NULL;
-        }
+        child = taurus_node_get_next_sibling(child);
     }
 
     return NULL;
@@ -434,21 +420,7 @@ TAURUS_API TaurusElement taurus_element_last_child_any(TaurusElement elem) {
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             last_elem = (TaurusElement)child;
         }
-
-        /* Get next sibling based on node type - each type has different offset! */
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            child = taurus_node_get_next_sibling(child);
-        } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            child = (TaurusNode*)(((TaurusTextNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            child = (TaurusNode*)(((TaurusCDATANode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-            child = (TaurusNode*)(((TaurusCommentNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_PI) {
-            child = (TaurusNode*)(((TaurusPINode*)child)->next_sibling);
-        } else {
-            child = NULL;
-        }
+        child = taurus_node_get_next_sibling(child);
     }
 
     return last_elem;
@@ -465,23 +437,10 @@ TAURUS_API TaurusElement taurus_element_next_sibling_any(TaurusElement elem) {
 
     /* Keep traversing until we find an element (skip text/comment nodes) */
     while (sibling) {
-        /* Check if it's an element */
         if (sibling->type == TAURUS_NODE_TYPE_ELEMENT) {
             return (TaurusElement)sibling;
         }
-
-        /* Get next sibling based on node type - each type has different offset! */
-        if (sibling->type == TAURUS_NODE_TYPE_TEXT) {
-            sibling = (TaurusNode*)(((TaurusTextNode*)sibling)->next_sibling);
-        } else if (sibling->type == TAURUS_NODE_TYPE_CDATA) {
-            sibling = (TaurusNode*)(((TaurusCDATANode*)sibling)->next_sibling);
-        } else if (sibling->type == TAURUS_NODE_TYPE_COMMENT) {
-            sibling = (TaurusNode*)(((TaurusCommentNode*)sibling)->next_sibling);
-        } else if (sibling->type == TAURUS_NODE_TYPE_PI) {
-            sibling = (TaurusNode*)(((TaurusPINode*)sibling)->next_sibling);
-        } else {
-            sibling = NULL;
-        }
+        sibling = taurus_node_get_next_sibling(sibling);
     }
 
     return NULL;
@@ -507,21 +466,7 @@ TAURUS_API TaurusElement taurus_element_previous_sibling_any(TaurusElement elem)
         if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
             prev = (TaurusElement)child;
         }
-
-        /* Get next sibling based on node type */
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            child = taurus_node_get_next_sibling(child);
-        } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            child = (TaurusNode*)(((TaurusTextNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-            child = (TaurusNode*)(((TaurusCDATANode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-            child = (TaurusNode*)(((TaurusCommentNode*)child)->next_sibling);
-        } else if (child->type == TAURUS_NODE_TYPE_PI) {
-            child = (TaurusNode*)(((TaurusPINode*)child)->next_sibling);
-        } else {
-            child = NULL;
-        }
+        child = taurus_node_get_next_sibling(child);
     }
 
     return prev;

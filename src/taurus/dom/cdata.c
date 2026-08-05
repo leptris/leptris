@@ -24,7 +24,7 @@ TaurusCDATANode* taurus_cdata_create(const char* content,
     node->base.type = TAURUS_NODE_TYPE_CDATA;
     node->base.frozen = 0;
     node->base.version = 0;
-    node->next_sibling = NULL;
+    node->next_sibling_off = 0;
 
     if (content && content_len > 0) {
         memcpy(content_storage, content, content_len);

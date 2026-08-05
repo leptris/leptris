@@ -10,11 +10,12 @@
 
 #include "node.h"
 
-/* CDATA node - inherits from TaurusNode */
+/* CDATA node - inherits from TaurusNode.
+ * Phase 2c of TODO 90: next_sibling is a 4-byte offset (0=NULL). */
 typedef struct taurus_cdata_node {
     TaurusNode base;                   /* MUST be first */
     char* content;                    /* CDATA content - never escaped */
-    void* next_sibling;               /* Next sibling in linked list (mixed content) */
+    int32_t next_sibling_off;         /* Byte offset to next sibling (0=NULL) */
 } TaurusCDATANode;
 
 /* CDATA node creation.  Pool-allocated with contiguous content
@@ -33,5 +34,20 @@ const char* taurus_cdata_get_content(TaurusCDATANode* cdata);
 
 #define TAURUS_CDATA_AS_NODE(cdata) \
     ((TaurusNode*)(cdata))
+
+/* Compact next_sibling accessors (TODO 90 Phase 2c). */
+static inline TaurusNode* taurus_cdata_next_sibling(const TaurusCDATANode* c) {
+    return (c && c->next_sibling_off != 0)
+        ? (TaurusNode*)((const char*)c + c->next_sibling_off)
+        : NULL;
+}
+
+static inline void taurus_cdata_set_next_sibling(TaurusCDATANode* c, TaurusNode* sibling) {
+    if (!c) return;
+    if (!sibling) { c->next_sibling_off = 0; return; }
+    ptrdiff_t d = (const char*)sibling - (const char*)c;
+    if (d < INT32_MIN || d > INT32_MAX) { c->next_sibling_off = 0; return; }
+    c->next_sibling_off = (int32_t)d;
+}
 
 #endif /* TAURUS_DOM_CDATA_H */

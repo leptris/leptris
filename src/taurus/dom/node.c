@@ -286,27 +286,17 @@ TaurusNode* taurus_node_get_next_sibling(TaurusNode* node) {
     if (!node) return NULL;
 
     switch (node->type) {
-        case TAURUS_NODE_TYPE_ELEMENT: {
+        case TAURUS_NODE_TYPE_ELEMENT:
             /* Element nodes encode sibling as int32_t offset (TODO 90 Phase 2b). */
-            TaurusElement elem = (TaurusElement)node;
-            return taurus_elem_next_sibling(elem);
-        }
-        case TAURUS_NODE_TYPE_TEXT: {
-            TaurusTextNode* text = (TaurusTextNode*)node;
-            return (TaurusNode*)text->next_sibling;
-        }
-        case TAURUS_NODE_TYPE_CDATA: {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)node;
-            return (TaurusNode*)cdata->next_sibling;
-        }
-        case TAURUS_NODE_TYPE_COMMENT: {
-            TaurusCommentNode* comment = (TaurusCommentNode*)node;
-            return (TaurusNode*)comment->next_sibling;
-        }
-        case TAURUS_NODE_TYPE_PI: {
-            TaurusPINode* pi = (TaurusPINode*)node;
-            return (TaurusNode*)pi->next_sibling;
-        }
+            return taurus_elem_next_sibling((TaurusElement)node);
+        case TAURUS_NODE_TYPE_TEXT:
+            return taurus_textnode_next_sibling((TaurusTextNode*)node);
+        case TAURUS_NODE_TYPE_CDATA:
+            return taurus_cdata_next_sibling((TaurusCDATANode*)node);
+        case TAURUS_NODE_TYPE_COMMENT:
+            return taurus_comment_next_sibling((TaurusCommentNode*)node);
+        case TAURUS_NODE_TYPE_PI:
+            return taurus_pi_next_sibling((TaurusPINode*)node);
         case TAURUS_NODE_TYPE_DOCTYPE:
         default:
             /* DOCTYPE and other node types don't have siblings in this implementation */
@@ -326,31 +316,21 @@ void taurus_node_set_next_sibling(TaurusNode* node, TaurusNode* sibling) {
     if (!node) return;
 
     switch (node->type) {
-        case TAURUS_NODE_TYPE_ELEMENT: {
-            TaurusElement elem = (TaurusElement)node;
-            taurus_elem_set_next_sibling(elem, sibling);
+        case TAURUS_NODE_TYPE_ELEMENT:
+            taurus_elem_set_next_sibling((TaurusElement)node, sibling);
             break;
-        }
-        case TAURUS_NODE_TYPE_TEXT: {
-            TaurusTextNode* text = (TaurusTextNode*)node;
-            text->next_sibling = sibling;
+        case TAURUS_NODE_TYPE_TEXT:
+            taurus_textnode_set_next_sibling((TaurusTextNode*)node, sibling);
             break;
-        }
-        case TAURUS_NODE_TYPE_CDATA: {
-            TaurusCDATANode* cdata = (TaurusCDATANode*)node;
-            cdata->next_sibling = sibling;
+        case TAURUS_NODE_TYPE_CDATA:
+            taurus_cdata_set_next_sibling((TaurusCDATANode*)node, sibling);
             break;
-        }
-        case TAURUS_NODE_TYPE_COMMENT: {
-            TaurusCommentNode* comment = (TaurusCommentNode*)node;
-            comment->next_sibling = sibling;
+        case TAURUS_NODE_TYPE_COMMENT:
+            taurus_comment_set_next_sibling((TaurusCommentNode*)node, sibling);
             break;
-        }
-        case TAURUS_NODE_TYPE_PI: {
-            TaurusPINode* pi = (TaurusPINode*)node;
-            pi->next_sibling = sibling;
+        case TAURUS_NODE_TYPE_PI:
+            taurus_pi_set_next_sibling((TaurusPINode*)node, sibling);
             break;
-        }
         case TAURUS_NODE_TYPE_DOCTYPE:
         default:
             /* DOCTYPE and other node types don't have siblings */
