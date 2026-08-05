@@ -20,6 +20,15 @@
  * directly in the same TU redefines enums (intentional — see TODO 12). */
 #include "taurus.h"
 
+/* Internal headers — needed for the compact-pointer round-trip specs
+ * (TODO 90 Phase 2). The structs are opaque to public callers.
+ * The test CMake target adds src/taurus/dom to the include path. */
+#include "element.h"
+#include "text.h"
+#include "cdata.h"
+#include "comment.h"
+#include "pi.h"
+
 namespace {
 
 TEST(HeaderHygiene, UmbrellaHeaderCompilesStandalone) {
@@ -78,6 +87,79 @@ TEST(HeaderHygiene, XPathResultTypeEnumValues) {
     EXPECT_EQ(TAURUS_XPATH_BOOLEAN, 1);
     EXPECT_EQ(TAURUS_XPATH_NUMBER,  2);
     EXPECT_EQ(TAURUS_XPATH_STRING,  3);
+}
+
+/* Compact-pointer encoding round-trip (TODO 90 Phase 2b/2c/2d).
+ *
+ * Tree edges, attribute-list edges, and non-element-node siblings
+ * are stored as int32_t byte-offsets relative to the hosting node's
+ * own address. These specs exercise the inline encoder/decoder pairs
+ * for each edge kind. A regression here would mean the offset math
+ * is wrong, which would silently corrupt the tree. */
+TEST(HeaderHygiene, ElementTreeEdgeRoundTrip) {
+    /* Allocate two fake elements in the same memory region so their
+     * offset fits in int32_t. Use a small aligned buffer. */
+    static const size_t kAlign = alignof(struct taurus_element);
+    alignas(kAlign) char buf[2 * sizeof(struct taurus_element)];
+    struct taurus_element* a = (struct taurus_element*)buf;
+    struct taurus_element* b = (struct taurus_element*)(buf + sizeof(*a));
+
+    /* parent round-trip */
+    taurus_elem_set_parent(a, b);
+    EXPECT_EQ(taurus_elem_parent(a), b);
+
+    /* NULL encoding */
+    taurus_elem_set_parent(a, NULL);
+    EXPECT_EQ(taurus_elem_parent(a), nullptr);
+
+    /* first_child, last_child, next_sibling round-trip */
+    taurus_elem_set_first_child(a, (TaurusNode*)b);
+    taurus_elem_set_last_child(a, (TaurusNode*)b);
+    taurus_elem_set_next_sibling(a, (TaurusNode*)b);
+    EXPECT_EQ(taurus_elem_first_child(a), (TaurusNode*)b);
+    EXPECT_EQ(taurus_elem_last_child(a), (TaurusNode*)b);
+    EXPECT_EQ(taurus_elem_next_sibling(a), (TaurusNode*)b);
+}
+
+TEST(HeaderHygiene, ElementAttributeEdgeRoundTrip) {
+    /* Attribute-list offsets use the same encoding as tree edges. */
+    static const size_t kAlign = alignof(struct taurus_element);
+    alignas(kAlign) char buf[sizeof(struct taurus_element) + 64];
+    struct taurus_element* e = (struct taurus_element*)buf;
+    struct taurus_attribute* attr =
+        (struct taurus_attribute*)(buf + sizeof(*e));
+
+    taurus_elem_set_first_attribute(e, attr);
+    taurus_elem_set_last_attribute(e, attr);
+    EXPECT_EQ(taurus_elem_first_attribute(e), attr);
+    EXPECT_EQ(taurus_elem_last_attribute(e), attr);
+
+    taurus_elem_set_first_attribute(e, NULL);
+    taurus_elem_set_last_attribute(e, NULL);
+    EXPECT_EQ(taurus_elem_first_attribute(e), nullptr);
+    EXPECT_EQ(taurus_elem_last_attribute(e), nullptr);
+}
+
+TEST(HeaderHygiene, NonElementNodeSiblingRoundTrip) {
+    /* Text/CDATA/Comment/PI nodes each carry their own sibling offset. */
+    alignas(64) char buf[128];
+    TaurusTextNode* t = (TaurusTextNode*)buf;
+    TaurusNode* sibling = (TaurusNode*)(buf + 64);
+
+    taurus_textnode_set_next_sibling(t, sibling);
+    EXPECT_EQ(taurus_textnode_next_sibling(t), sibling);
+
+    TaurusCDATANode* c = (TaurusCDATANode*)buf;
+    taurus_cdata_set_next_sibling(c, sibling);
+    EXPECT_EQ(taurus_cdata_next_sibling(c), sibling);
+
+    TaurusCommentNode* cm = (TaurusCommentNode*)buf;
+    taurus_comment_set_next_sibling(cm, sibling);
+    EXPECT_EQ(taurus_comment_next_sibling(cm), sibling);
+
+    TaurusPINode* pi = (TaurusPINode*)buf;
+    taurus_pi_set_next_sibling(pi, sibling);
+    EXPECT_EQ(taurus_pi_next_sibling(pi), sibling);
 }
 
 }  // namespace
