@@ -220,6 +220,25 @@ typedef enum {
     XPATH_AST_NODE_TEST_ALL_IN_NS
 } XPathASTType;
 
+/* XPath axis types (forward decl of the canonical enum — full
+ * definition lives below; here so XPathASTNode can reference it
+ * for the axis_id perf optimization in TODO 113 Phase 1). */
+typedef enum {
+    XPATH_AXIS_ANCESTOR,
+    XPATH_AXIS_ANCESTOR_OR_SELF,
+    XPATH_AXIS_ATTRIBUTE,
+    XPATH_AXIS_CHILD,
+    XPATH_AXIS_DESCENDANT,
+    XPATH_AXIS_DESCENDANT_OR_SELF,
+    XPATH_AXIS_FOLLOWING,
+    XPATH_AXIS_FOLLOWING_SIBLING,
+    XPATH_AXIS_NAMESPACE,
+    XPATH_AXIS_PARENT,
+    XPATH_AXIS_PRECEDING,
+    XPATH_AXIS_PRECEDING_SIBLING,
+    XPATH_AXIS_SELF
+} XPathAxisType;
+
 /* XPath AST node - Matches ext/taurus/xpath.h _xpath_ast_node */
 typedef struct xpath_ast_node {
     XPathASTType type;
@@ -232,6 +251,11 @@ typedef struct xpath_ast_node {
     /* Namespace support for node tests (v0.8.0) */
     char* prefix;                /* Namespace prefix (NULL if no prefix) */
     char* local_name;            /* Local name part (NULL if not applicable) */
+
+    /* Axis enum (TODO 113 Phase 1): populated on XPATH_AST_STEP nodes
+     * to skip the strcmp dispatch chain in apply_axis. Defaults to
+     * XPATH_AXIS_CHILD (the default axis per XPath spec). */
+    XPathAxisType axis_id;
 } XPathASTNode;
 
 /* XPath parser - Matches ext/taurus/xpath.h _xpath_parser */
@@ -330,22 +354,8 @@ typedef enum {
     XPATH_OP_NEGATION
 } XPathOperatorType;
 
-/* XPath axis types - From ext/taurus/xpath.h */
-typedef enum {
-    XPATH_AXIS_ANCESTOR,
-    XPATH_AXIS_ANCESTOR_OR_SELF,
-    XPATH_AXIS_ATTRIBUTE,
-    XPATH_AXIS_CHILD,
-    XPATH_AXIS_DESCENDANT,
-    XPATH_AXIS_DESCENDANT_OR_SELF,
-    XPATH_AXIS_FOLLOWING,
-    XPATH_AXIS_FOLLOWING_SIBLING,
-    XPATH_AXIS_NAMESPACE,
-    XPATH_AXIS_PARENT,
-    XPATH_AXIS_PRECEDING,
-    XPATH_AXIS_PRECEDING_SIBLING,
-    XPATH_AXIS_SELF
-} XPathAxisType;
+/* XPathAxisType defined above (near XPathASTType) so it's in scope
+ * for the XPathASTNode.axis_id field. */
 
 /* ============================================================================
  * Memory Management Macros
