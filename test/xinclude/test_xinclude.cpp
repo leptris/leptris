@@ -407,3 +407,76 @@ TEST(XIncludeProcess, ParseXmlRecursiveIncludesNestedXi) {
     remove(inner_path);
     remove(outer_path);
 }
+
+// ---- Phase 4: xpointer fragment selection (TODO 92) ------------------
+
+TEST(XIncludeXpointer, SelectsFragmentByXPath) {
+    /* Included document has multiple sections; xpointer selects one
+     * by id attribute. Only that subtree is spliced in. */
+    const char included_xml[] =
+        "<doc>"
+        "  <section id='intro'>introduction</section>"
+        "  <section id='body'>main content</section>"
+        "  <section id='appendix'>extra</section>"
+        "</doc>";
+    const char* path = "/tmp/taurus_xinclude_xpointer_src.xml";
+    FILE* f = fopen(path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(included_xml, 1, std::strlen(included_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_xinclude_xpointer_src.xml'"
+        "              xpointer=\"//section[@id='body']\"/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(taurus_xinclude_process(doc, nullptr), TAURUS_OK);
+
+    /* Expected: root has one child <section id='body'>main content</section>. */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    TaurusElement child = taurus_element_first_child_any(root);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(taurus_element_name(child), "section");
+    EXPECT_STREQ(taurus_element_attribute(child, "id"), "body");
+    EXPECT_STREQ(taurus_element_text(child), "main content");
+
+    taurus_document_free(doc);
+    remove(path);
+}
+
+TEST(XIncludeXpointer, EmptyResultFallsBackToRoot) {
+    /* If the xpointer matches nothing, the spec is unclear; we fall
+     * back to the included doc's root element. */
+    const char included_xml[] = "<doc><a/></doc>";
+    const char* path = "/tmp/taurus_xinclude_xpointer_empty.xml";
+    FILE* f = fopen(path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(included_xml, 1, std::strlen(included_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_xinclude_xpointer_empty.xml'"
+        "              xpointer=\"//nonexistent\"/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(taurus_xinclude_process(doc, nullptr), TAURUS_OK);
+
+    /* Expected: root has the included doc's root element <doc>. */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    TaurusElement child = taurus_element_first_child_any(root);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(taurus_element_name(child), "doc");
+
+    taurus_document_free(doc);
+    remove(path);
+}
