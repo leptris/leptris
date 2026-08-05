@@ -1620,7 +1620,7 @@ static void resolve_namespaces_recursive_impl(TaurusElement elem, int depth) {
      * TODO 15: route the prefix conversion through the document pool
      * so we don't rely on manual free() (which previously leaked on
      * early-return paths). */
-    if (!taurus_sv_is_empty(&elem->prefix_view) && taurus_sv_is_empty(&elem->namespace_uri_view)) {
+    if (!taurus_sv_is_empty(&elem->prefix_view) && elem->namespace_uri == NULL) {
         TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
         char* prefix_cstr = pool
             ? taurus_sv_to_cstr_pooled(&elem->prefix_view, pool)

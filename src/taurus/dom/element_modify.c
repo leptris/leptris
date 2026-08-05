@@ -1110,9 +1110,11 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     /* Copy name as StringView (zero-copy from source) */
     copy->name_view = source->name_view;
 
-    /* Copy prefix and namespace as StringView */
+    /* Copy prefix and namespace as StringView (TODO 90) */
     copy->prefix_view = source->prefix_view;
-    copy->namespace_uri_view = source->namespace_uri_view;
+    /* namespace_uri_view removed from struct — the cached char* was
+     * already set by the recursive deep_copy_element call. */
+    copy->namespace_uri = source->namespace_uri;
 
     /* Set parent pointer */
     copy->parent = parent_copy;

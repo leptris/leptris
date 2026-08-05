@@ -83,10 +83,13 @@ struct taurus_element {
     /* Compact header (2 bytes) */
     TaurusCompactHeader header;        /* Page offset and flags */
 
-    /* StringView storage (48 bytes) - zero-copy into XML buffer */
+    /* StringView storage (32 bytes) - zero-copy into XML buffer.
+     * namespace_uri_view REMOVED (TODO 90) — the field was always
+     * set from the input buffer and lazily converted to namespace_uri
+     * char*.  Removing it makes the eager conversion the only path.
+     * Saves 16 bytes per element. */
     TaurusStringView name_view;       /* Element name */
     TaurusStringView prefix_view;     /* Namespace prefix (zero-copy) */
-    TaurusStringView namespace_uri_view; /* Namespace URI (zero-copy) */
 
     /* Cached NULL-terminated strings (24 bytes) - lazy conversion */
     char* name;                      /* NULL until first access */
@@ -304,7 +307,10 @@ const char* taurus_element_get_name(TaurusElement elem);
 /* Set prefix using StringView (zero-copy!) */
 void taurus_element_set_prefix_view(TaurusElement elem, TaurusStringView prefix_view);
 
-/* Set namespace URI using StringView (zero-copy!) */
+/* Set namespace URI from StringView (eager pool-strdup — TODO 90).
+ * The namespace_uri_view field was removed from the struct; this
+ * setter does the conversion eagerly so the cached char* is always
+ * available. */
 void taurus_element_set_namespace_uri_view(TaurusElement elem, TaurusStringView uri_view);
 
 /* Get element prefix */
@@ -331,9 +337,14 @@ static inline TaurusStringView taurus_element_prefix_view(TaurusElement elem) {
     return elem ? elem->prefix_view : taurus_sv_empty();
 }
 
-/* Get element namespace URI as StringView (NO conversion, O(1) access) */
+/* Get element namespace URI as StringView (derived from cached char*).
+ * TODO 90: namespace_uri_view removed from struct; this accessor
+ * reconstructs the view on demand. Safe because namespace_uri is
+ * always NUL-terminated and pool-owned. */
 static inline TaurusStringView taurus_element_namespace_view(TaurusElement elem) {
-    return elem ? elem->namespace_uri_view : taurus_sv_empty();
+    return elem && elem->namespace_uri
+        ? taurus_sv_from_ptr(elem->namespace_uri, strlen(elem->namespace_uri))
+        : taurus_sv_empty();
 }
 
 /* Get attribute name as StringView (NO conversion, O(1) access) */
