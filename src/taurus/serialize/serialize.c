@@ -343,7 +343,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
     buffer_append_len(buf, elem_name, elem_name_len);
 
     /* Attributes - iterate through linked list */
-    for (struct taurus_attribute* attr = elem->first_attribute; attr != NULL; attr = attr->next) {
+    for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem); attr != NULL; attr = attr->next) {
         if (!attr || !attr->name) continue;
 
         buffer_append_char(buf, ' ');
@@ -372,10 +372,10 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
     }
 
     /* Check if element has children */
-    if (elem->first_child) {
+    if (taurus_node_first_child_internal((TaurusNode*)elem)) {
         /* Check if this is a text-only element (single text child, no element children) */
         int is_text_only = 1;
-        TaurusNode* child = elem->first_child;
+        TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)elem);
 
         /* Check if there's only one child and it's a text node */
         if (child && child->type == TAURUS_NODE_TYPE_TEXT) {
@@ -394,7 +394,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             buffer_append_char(buf, '>');
 
             /* Serialize the single text child */
-            serialize_node_internal(elem->first_child, buf);
+            serialize_node_internal(taurus_node_first_child_internal((TaurusNode*)elem), buf);
 
             /* Closing tag */
             buffer_append(buf, "</");
@@ -406,7 +406,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             buffer_append_char(buf, '>');
 
             /* Serialize the single text child */
-            serialize_node_internal(elem->first_child, buf);
+            serialize_node_internal(taurus_node_first_child_internal((TaurusNode*)elem), buf);
 
             /* Closing tag */
             buffer_append(buf, "</");
@@ -429,7 +429,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             buf->indent++;
 
             /* Serialize children */
-            TaurusNode* child = elem->first_child;
+            TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)elem);
             while (child) {
                 /* Pass is_root=0 for all children */
                 if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
