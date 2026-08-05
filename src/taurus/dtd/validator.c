@@ -336,6 +336,69 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
                 return 0;
             }
         }
+
+        /* Phase 8: ENTITY / ENTITIES attribute validation (TODO 91).
+         * Each value must be the name of an unparsed entity declared
+         * via <!ENTITY name SYSTEM "uri" NDATA notation>, and the
+         * referenced notation must itself be declared via <!NOTATION>.
+         * Entities are stored in dtd->tables.entities; notations in
+         * dtd->tables.notations. */
+        if (strcmp(ad->attr_type, "ENTITY") == 0 ||
+            strcmp(ad->attr_type, "ENTITIES") == 0) {
+            const char* p = attr->value;
+            while (*p) {
+                /* Skip whitespace between tokens (ENTITIES). */
+                while (*p && isspace((unsigned char)*p)) p++;
+                if (!*p) break;
+
+                /* Extract one name token. */
+                const char* tok_start = p;
+                while (*p && !isspace((unsigned char)*p)) p++;
+                size_t tok_len = (size_t)(p - tok_start);
+
+                /* Look up in the entity table. */
+                char name_buf[256];
+                if (tok_len >= sizeof(name_buf)) {
+                    char msg[200];
+                    snprintf(msg, sizeof(msg),
+                             "ENTITY name too long in attribute '%s'", attr_name);
+                    set_error(error, msg, name);
+                    return 0;
+                }
+                memcpy(name_buf, tok_start, tok_len);
+                name_buf[tok_len] = '\0';
+
+                DTDEntityDecl* entity = ttdtd_lookup_entity(dtd, name_buf);
+                if (!entity) {
+                    char msg[200];
+                    snprintf(msg, sizeof(msg),
+                             "Attribute '%s' references undeclared entity '%s'",
+                             attr_name, name_buf);
+                    set_error(error, msg, name);
+                    return 0;
+                }
+                /* Per XML 1.0 spec: ENTITY-typed attributes must
+                 * reference unparsed entities (those with NDATA). */
+                if (!entity->notation_name) {
+                    char msg[200];
+                    snprintf(msg, sizeof(msg),
+                             "Attribute '%s' references parsed entity '%s' "
+                         "(must be unparsed / have NDATA)",
+                             attr_name, name_buf);
+                    set_error(error, msg, name);
+                    return 0;
+                }
+                /* The notation itself must be declared. */
+                if (!ttdtd_lookup_notation(dtd, entity->notation_name)) {
+                    char msg[220];
+                    snprintf(msg, sizeof(msg),
+                             "Entity '%s' references undeclared notation '%s'",
+                             name_buf, entity->notation_name);
+                    set_error(error, msg, name);
+                    return 0;
+                }
+            }
+        }
     }
 
     /* Recurse into children. */

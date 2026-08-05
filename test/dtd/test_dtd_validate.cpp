@@ -521,3 +521,109 @@ TEST(DtdValidate, FixedAttributeMismatchedValueIsInvalid) {
     taurus_dtd_free(dtd);
     taurus_document_free(doc);
 }
+
+// ---- Phase 8: ENTITY / ENTITIES attribute validation (TODO 91) --------
+
+TEST(DtdValidate, EntityAttrRejectsUndeclaredEntity) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root src='nope.jpg'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root src ENTITY #REQUIRED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+    EXPECT_NE(std::string(err.message).find("undeclared"), std::string::npos);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, EntityAttrAcceptsDeclaredUnparsedEntity) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root src='image'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Per XML 1.0 spec, an ENTITY-typed attribute must reference an
+     * unparsed entity (one declared with NDATA). The referenced
+     * notation must itself be declared. */
+    const char dtd_text[] =
+        "<!NOTATION png PUBLIC 'image/png'>"
+        "<!ENTITY image SYSTEM 'image.png' NDATA png>"
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root src ENTITY #REQUIRED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, EntityAttrRejectsParsedEntity) {
+    /* A parsed entity (no NDATA) is not a valid value for an
+     * ENTITY-typed attribute. The validator must catch this. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root src='text'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY text 'hello world'>"  /* parsed (no NDATA) */
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root src ENTITY #REQUIRED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+    EXPECT_NE(std::string(err.message).find("unparsed"), std::string::npos);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
+
+TEST(DtdValidate, EntitiesAttrValidatesEachToken) {
+    /* ENTITIES is the whitespace-separated plural of ENTITY. Each
+     * token must be a declared unparsed entity with a declared notation. */
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<root imgs='a b c'/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!NOTATION png PUBLIC 'image/png'>"
+        "<!ENTITY a SYSTEM 'a.png' NDATA png>"
+        "<!ENTITY b SYSTEM 'b.png' NDATA png>"
+        /* 'c' intentionally NOT declared */
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root imgs ENTITIES #REQUIRED>";
+    TaurusDTD* dtd = taurus_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    TaurusDTDError err = {0};
+    int rc = taurus_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+    EXPECT_NE(std::string(err.message).find("undeclared"), std::string::npos);
+
+    taurus_dtd_error_free(&err);
+    taurus_dtd_free(dtd);
+    taurus_document_free(doc);
+}
