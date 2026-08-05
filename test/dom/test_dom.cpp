@@ -5,6 +5,7 @@
 #include "taurus.h"
 
 #include <cstring>
+#include <string>
 
 namespace {
 
@@ -551,4 +552,101 @@ TEST(ParseStatusContract, EmptyInputYieldsPublicError) {
     EXPECT_EQ(doc, nullptr);
     EXPECT_LT(st, 0)
         << "status=" << static_cast<int>(st) << " is not a public error code";
+}
+
+// ---- Compact-pointer integration (TODO 90 Phase 2 + TODO 109) ----------
+//
+// The element struct now stores parent/child/sibling/attribute edges as
+// int32_t byte-offsets relative to the hosting node's address. This test
+// exercises the full cycle (parse → tree-walk via XPath → mutate →
+// serialize) to catch any regression in the offset encoding/decoding.
+
+TEST(CompactPointerIntegration, ParseWalkMutateSerializeRoundTrip) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] =
+        "<root attr1='a'>"
+        "  <child id='1'>alpha</child>"
+        "  <child id='2'>beta</child>"
+        "  <child id='3'>gamma</child>"
+        "</root>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    // XPath descendant axis uses taurus_elem_first_child + taurus_node_get_next_sibling
+    // — the offset-encoded traversal. 3 child elements must be visible.
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "//child");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 3u);
+    taurus_xpath_result_free(r);
+
+    // Mutation exercises taurus_elem_set_*, which encodes offsets.
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(taurus_element_set_attribute(root, "new", "value"), TAURUS_OK);
+
+    // Append a 4th child — exercises set_last_child + set_next_sibling.
+    TaurusElement new_child = taurus_element_create(doc, "child");
+    ASSERT_NE(new_child, nullptr);
+    EXPECT_EQ(taurus_element_append_child(root, new_child), TAURUS_OK);
+
+    // Re-walk via XPath — must see 4 children now.
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "//child");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r2), 4u);
+    taurus_xpath_result_free(r2);
+
+    // Serialize — exercises the same edges in reverse.
+    char* serialized = taurus_document_serialize(doc, nullptr);
+    ASSERT_NE(serialized, nullptr);
+    EXPECT_STRNE(serialized, "");
+    EXPECT_NE(std::string(serialized).find("new=\"value\""), std::string::npos);
+    taurus_free_string(serialized);
+
+    taurus_document_free(doc);
+}
+
+TEST(CompactPointerIntegration, MixedContentTreeWalksCorrectly) {
+    // The walker visits every child regardless of type — TODO 109 + Phase 2c.
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r>text1<!-- comment -->text2<?pi data?></r>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    // count(node()) walks the offset-encoded sibling chain through every
+    // node type (text, comment, text, PI).
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "count(/r/node())");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 4.0);
+    taurus_xpath_result_free(r);
+
+    taurus_document_free(doc);
+}
+
+TEST(CompactPointerIntegration, DeepNestingTraversesViaOffsets) {
+    // 50-level deep nesting — exercises offset arithmetic at every depth.
+    // Pool-allocated elements stay within int32_t range; no overflow.
+    std::string xml = "<a0>";
+    for (int i = 1; i < 50; i++) xml += "<a" + std::to_string(i) + ">";
+    for (int i = 49; i >= 0; i--) xml += "</a" + std::to_string(i) + ">";
+
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+
+    // count(//*) walks every element via the offset-encoded edges.
+    // The deeply-nested tree has 50 elements; if any offset corrupts,
+    // the count would differ.
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "count(//*)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 50.0);
+    taurus_xpath_result_free(r);
+
+    // count(//a49) finds the deepest element via 49 chained first_child
+    // offset decodes.
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "count(//a49)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 1.0);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
 }
