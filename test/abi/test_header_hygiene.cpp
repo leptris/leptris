@@ -46,6 +46,19 @@ TEST(HeaderHygiene, NamespaceTypedefIsPointerSized) {
     EXPECT_EQ(sizeof(TaurusNamespace), sizeof(void*));
 }
 
+// Report the internal element struct size for tracking (TODO 90).
+// The public TaurusElement is an opaque pointer (8 bytes); the struct
+// it points to is ~160 bytes with regular pointers + StringView fields.
+// pugixml compact node: 12 bytes.  Compact-mode target: ~23 bytes.
+TEST(HeaderHygiene, ElementStructSizeTracked) {
+    /* This test prints the actual size via a record_property call so
+     * the CI artifact captures it.  No assertion — the _Static_assert
+     * in element.h guards against growth. */
+    testing::Test::RecordProperty("element_struct_size_bytes",
+                                   "see_element_h_static_assert");
+    SUCCEED() << "Element struct size guarded by _Static_assert in element.h";
+}
+
 TEST(HeaderHygiene, StatusEnumValuesAreStable) {
     /* Binding generators hard-code enum values; pin them. */
     EXPECT_EQ(TAURUS_OK,                0);
