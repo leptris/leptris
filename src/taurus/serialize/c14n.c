@@ -164,7 +164,7 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
     int has_content = 0;
     int has_children = 0;
 
-    TaurusNode* child = (TaurusNode*)elem->first_child;
+    TaurusNode* child = (TaurusNode*)taurus_node_first_child_internal((TaurusNode*)elem);
     while (child) {
         has_children = 1;
         /* Check if child is text or CDATA by checking node type */
@@ -253,7 +253,7 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
         APPEND_STRING(temp, len);
 
         /* Add children - traverse ALL children including text nodes */
-        TaurusNode* child = (TaurusNode*)elem->first_child;
+        TaurusNode* child = (TaurusNode*)taurus_node_first_child_internal((TaurusNode*)elem);
         while (child) {
             if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
                 c14n_serialize_element((TaurusElement)child, buffer, size, capacity);

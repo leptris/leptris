@@ -19,21 +19,14 @@ TAURUS_API int taurus_node_get_type(TaurusNodeRef node) {
 }
 
 TAURUS_API TaurusNodeRef taurus_node_first_child(TaurusNodeRef node) {
-    if (!node) return NULL;
-    if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
-        TaurusElement elem = (TaurusElement)node;
-        return (TaurusNodeRef)elem->first_child;
-    }
-    return NULL;
+    /* Use the internal accessor that returns ANY child type (text,
+     * element, CDATA, etc.) — the public taurus_element_get_first_child
+     * would skip non-element children and break node-level traversal. */
+    return (TaurusNodeRef)taurus_node_first_child_internal((TaurusNode*)node);
 }
 
 TAURUS_API TaurusNodeRef taurus_node_last_child(TaurusNodeRef node) {
-    if (!node) return NULL;
-    if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
-        TaurusElement elem = (TaurusElement)node;
-        return (TaurusNodeRef)elem->last_child;
-    }
-    return NULL;
+    return (TaurusNodeRef)taurus_node_last_child_internal((TaurusNode*)node);
 }
 
 TAURUS_API TaurusNodeRef taurus_node_next_sibling(TaurusNodeRef node) {
@@ -45,7 +38,7 @@ TAURUS_API TaurusNodeRef taurus_node_previous_sibling(TaurusNodeRef node) {
     if (!node) return NULL;
     if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
         TaurusElement elem = (TaurusElement)node;
-        TaurusElement parent = elem->parent;
+        TaurusElement parent = taurus_element_get_parent(elem);
         if (!parent) return NULL;
 
         TaurusNodeRef prev = NULL;
