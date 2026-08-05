@@ -68,11 +68,11 @@ TaurusElement taurus_element_create_with_view(
     /* Store document pointer - will be set later */
     elem->document = NULL;
 
-    /* Initialize all regular pointers to NULL */
-    elem->parent = NULL;
-    elem->first_child = NULL;
-    elem->last_child = NULL;
-    elem->next_sibling = NULL;
+    /* Initialize tree edges (encoded as 0 = NULL) */
+    elem->parent_off = 0;
+    elem->first_child_off = 0;
+    elem->last_child_off = 0;
+    elem->next_sibling_off = 0;
     elem->first_attribute = NULL;
     elem->last_attribute = NULL;
 
@@ -121,25 +121,23 @@ void taurus_element_free(TaurusElement elem) {
  * Regular Pointer Access Functions (no page_base calculation!)
  * ============================================================================ */
 
-/* Set pointers in element - DIRECT POINTER ACCESS (no encoding!) */
+/* Legacy public setter entrypoints — delegate to the compact-offset
+ * setters in element.h (TODO 90 Phase 2b). Kept as out-of-line
+ * symbols so the public API doesn't depend on the inline bodies. */
 void taurus_element_set_parent(TaurusElement elem, TaurusElement parent) {
-    if (!elem) return;
-    elem->parent = parent;
+    taurus_elem_set_parent(elem, parent);
 }
 
 void taurus_element_set_first_child(TaurusElement elem, TaurusElement child) {
-    if (!elem) return;
-    elem->first_child = (TaurusNode*)child;
+    taurus_elem_set_first_child(elem, (TaurusNode*)child);
 }
 
 void taurus_element_set_last_child(TaurusElement elem, TaurusElement child) {
-    if (!elem) return;
-    elem->last_child = (TaurusNode*)child;
+    taurus_elem_set_last_child(elem, (TaurusNode*)child);
 }
 
 void taurus_element_set_next_sibling(TaurusElement elem, TaurusElement sibling) {
-    if (!elem) return;
-    elem->next_sibling = (TaurusNode*)sibling;
+    taurus_elem_set_next_sibling(elem, (TaurusNode*)sibling);
 }
 
 /* ============================================================================
@@ -600,62 +598,33 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
         /* Set document pointer */
         child_elem->document = elem->document;
 
-        /* Append to end of children list */
-        /* NOTE: last_child might point to a non-element node, so we need to handle both cases */
-        TaurusElement last = (TaurusElement)elem->last_child;
-        if (last) {
-            /* last points to the last child element */
-            TaurusNode* last_node = (TaurusNode*)last;
-
-            /* Set next_sibling on the last child based on its type */
-            if (last_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-                /* Last child is an element - use direct pointer assignment */
-                ((TaurusElement)last_node)->next_sibling = (TaurusNode*)child_elem;
-            } else if (last_node->type == TAURUS_NODE_TYPE_TEXT) {
-                /* Last child is a text node - use direct pointer assignment */
-                ((TaurusTextNode*)last_node)->next_sibling = (TaurusNode*)child;
-            } else if (last_node->type == TAURUS_NODE_TYPE_CDATA) {
-                ((TaurusCDATANode*)last_node)->next_sibling = (TaurusNode*)child;
-            } else if (last_node->type == TAURUS_NODE_TYPE_COMMENT) {
-                ((TaurusCommentNode*)last_node)->next_sibling = (TaurusNode*)child;
-            } else if (last_node->type == TAURUS_NODE_TYPE_PI) {
-                ((TaurusPINode*)last_node)->next_sibling = (TaurusNode*)child;
-            }
+        /* Append to end of children list.
+         * last_child may point to any node type (text/comment/etc.) so
+         * we set its next_sibling via the type-dispatching setter. */
+        TaurusNode* last_node = taurus_elem_last_child(elem);
+        if (last_node) {
+            taurus_node_set_next_sibling(last_node, (TaurusNode*)child_elem);
 
             /* Set last_child to the new child */
-            elem->last_child = (TaurusNode*)child_elem;
+            taurus_elem_set_last_child(elem, (TaurusNode*)child_elem);
         } else {
             /* No children yet - set first and last child */
-            elem->first_child = (TaurusNode*)child_elem;
-            elem->last_child = (TaurusNode*)child_elem;
+            taurus_elem_set_first_child(elem, (TaurusNode*)child_elem);
+            taurus_elem_set_last_child(elem, (TaurusNode*)child_elem);
         }
 
         /* Increment child count */
         elem->child_count++;
     } else {
         /* For non-element children (text, cdata, comment, pi), append to linked list */
-        TaurusNode* last = (TaurusNode*)elem->last_child;
+        TaurusNode* last = taurus_elem_last_child(elem);
         if (last) {
-            /* Set next_sibling on the last child based on last's type */
-            if (last->type == TAURUS_NODE_TYPE_ELEMENT) {
-                /* Element last: directly set the next_sibling pointer */
-                ((TaurusElement)last)->next_sibling = (TaurusNode*)child;
-            } else if (last->type == TAURUS_NODE_TYPE_TEXT) {
-                ((TaurusTextNode*)last)->next_sibling = (TaurusNode*)child;
-            } else if (last->type == TAURUS_NODE_TYPE_CDATA) {
-                ((TaurusCDATANode*)last)->next_sibling = (TaurusNode*)child;
-            } else if (last->type == TAURUS_NODE_TYPE_COMMENT) {
-                ((TaurusCommentNode*)last)->next_sibling = (TaurusNode*)child;
-            } else if (last->type == TAURUS_NODE_TYPE_PI) {
-                ((TaurusPINode*)last)->next_sibling = (TaurusNode*)child;
-            }
-
-            /* Set last_child to child using direct pointer assignment */
-            elem->last_child = (TaurusNode*)child;
+            taurus_node_set_next_sibling(last, (TaurusNode*)child);
+            taurus_elem_set_last_child(elem, (TaurusNode*)child);
         } else {
             /* No children yet - set first and last child using direct pointer assignment */
-            elem->first_child = (TaurusNode*)child;
-            elem->last_child = (TaurusNode*)child;
+            taurus_elem_set_first_child(elem, (TaurusNode*)child);
+            taurus_elem_set_last_child(elem, (TaurusNode*)child);
         }
 
         /* Don't increment child_count for non-element children */
@@ -694,48 +663,32 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
         /* Set document pointer */
         child_elem->document = elem->document;
 
-        /* Insert at beginning of children list */
-        /* NOTE: first_child might point to a non-element node */
-        TaurusElement first = (TaurusElement)elem->first_child;
-        if (first) {
-            /* first points to the first child (could be element or non-element) */
-            TaurusNode* first_node = (TaurusNode*)first;
-
-            /* Set the new child's next_sibling to point to the first child */
-            /* Since the new child is an element, use direct pointer assignment */
-            child_elem->next_sibling = (TaurusNode*)(TaurusElement)first_node;
-
-            /* Set first_child to the new child */
-            elem->first_child = (TaurusNode*)child_elem;
+        /* Insert at beginning of children list.
+         * first_child may point to a non-element node; the new element's
+         * next_sibling is set via the compact-offset setter. */
+        TaurusNode* first_node = taurus_elem_first_child(elem);
+        if (first_node) {
+            taurus_elem_set_next_sibling(child_elem, first_node);
+            taurus_elem_set_first_child(elem, (TaurusNode*)child_elem);
         } else {
             /* No children yet - set first and last child */
-            elem->first_child = (TaurusNode*)child_elem;
-            elem->last_child = (TaurusNode*)child_elem;
+            taurus_elem_set_first_child(elem, (TaurusNode*)child_elem);
+            taurus_elem_set_last_child(elem, (TaurusNode*)child_elem);
         }
 
         /* Increment child count */
         elem->child_count++;
     } else {
         /* For non-element children (text, cdata, comment, pi), insert at beginning */
-        TaurusNode* first = (TaurusNode*)elem->first_child;
+        TaurusNode* first = taurus_elem_first_child(elem);
         if (first) {
-            /* Set next_sibling on the new child based on child's type */
-            if (child->type == TAURUS_NODE_TYPE_TEXT) {
-                ((TaurusTextNode*)child)->next_sibling = (TaurusNode*)first;
-            } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
-                ((TaurusCDATANode*)child)->next_sibling = (TaurusNode*)first;
-            } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
-                ((TaurusCommentNode*)child)->next_sibling = (TaurusNode*)first;
-            } else if (child->type == TAURUS_NODE_TYPE_PI) {
-                ((TaurusPINode*)child)->next_sibling = (TaurusNode*)first;
-            }
-
-            /* Set first_child to child using direct pointer assignment */
-            elem->first_child = (TaurusNode*)child;
+            /* Set the new child's next_sibling via the type-dispatching setter */
+            taurus_node_set_next_sibling(child, first);
+            taurus_elem_set_first_child(elem, (TaurusNode*)child);
         } else {
             /* No children yet - set first and last child using direct pointer assignment */
-            elem->first_child = (TaurusNode*)child;
-            elem->last_child = (TaurusNode*)child;
+            taurus_elem_set_first_child(elem, (TaurusNode*)child);
+            taurus_elem_set_last_child(elem, (TaurusNode*)child);
         }
 
         /* Don't increment child_count for non-element children */
@@ -895,7 +848,7 @@ void taurus_element_count_subtree(TaurusElement elem, TaurusSubtreeStats* stats)
     stats->attribute_count = elem->attr_count;
 
     /* Recursively traverse all children */
-    TaurusNode* child = (TaurusNode*)elem->first_child;
+    TaurusNode* child = taurus_elem_first_child(elem);
     while (child) {
         switch (child->type) {
             case TAURUS_NODE_TYPE_ELEMENT:

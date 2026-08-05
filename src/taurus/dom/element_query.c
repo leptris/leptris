@@ -44,7 +44,7 @@ TAURUS_API const char* taurus_element_name(TaurusElement elem) {
  * Only the parse-time root gets `document` set on every node, but detached
  * subtrees still reach an attached ancestor through `parent`. */
 static struct taurus_document* element_owning_document(TaurusElement elem) {
-    for (; elem; elem = elem->parent) {
+    for (; elem; elem = taurus_elem_parent(elem)) {
         if (elem->document) return elem->document;
     }
     return NULL;

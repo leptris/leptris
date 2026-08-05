@@ -94,14 +94,17 @@ struct taurus_element {
     char* prefix;                      /* NULL until first access */
     char* namespace_uri;               /* NULL until first access */
 
-    /* Tree pointers (32 bytes). Hot navigation paths — kept as raw
-     * pointers; compact offset encoding is Phase 2b of TODO 90. */
-    struct taurus_element* parent;     /* parent is always an element */
-    struct taurus_node* first_child;   /* can be any node type */
-    struct taurus_node* last_child;    /* can be any node type */
-    struct taurus_node* next_sibling;  /* can be any node type */
+    /* Tree edges (16 bytes). Stored as int32_t byte-offsets relative
+     * to this element's own address (Phase 2b of TODO 90). Offset 0
+     * encodes NULL. Access via the inline accessors below — never
+     * dereference these fields directly. */
+    int32_t parent_off;                /* target is always an element */
+    int32_t first_child_off;           /* target may be any node type */
+    int32_t last_child_off;            /* target may be any node type */
+    int32_t next_sibling_off;          /* target may be any node type */
 
-    /* Attributes (16 bytes). Tail pointer for O(1) appends (TODO 106). */
+    /* Attributes (16 bytes). Tail pointer for O(1) appends (TODO 106).
+     * Phase 2d of TODO 90 will convert these to int32_t offsets. */
     struct taurus_attribute* first_attribute;
     struct taurus_attribute* last_attribute;
 
@@ -113,25 +116,111 @@ struct taurus_element {
 
 /* Compile-time element-size tracker (TODO 90).
  *
- * Current layout (Phase 1 + Phase 2a complete, 104 bytes):
+ * Current layout (Phase 1 + 2a + 2b complete, 88 bytes):
  *   - 8-byte base + 2-byte header + 1-byte attr_count + 2-byte child_count
  *     packed into the 8-byte alignment slot of base (5 bytes used, 3 pad)
  *   - 24 bytes of cached name/prefix/namespace_uri char* pointers
- *   - 32 bytes of raw tree pointers (parent, first_child, last_child, next_sibling)
- *   - 16 bytes of attribute list pointers (first, last)
+ *   - 16 bytes of int32_t tree-edge offsets (parent, first/last/next)
+ *   - 16 bytes of attribute list pointers (first, last) — Phase 2d target
  *   - 16 bytes of document context (namespaces, document)
  *
- * pugixml compact node: 12 bytes. Phase 2b of TODO 90 will compress the
- * tree pointers to 4-byte self-relative offsets (saves 16 bytes → 88);
- * deferred because the migration touches ~180 pointer-access sites
- * across 15 files and needs an accessor-macro layer to be safe. */
+ * pugixml compact node: 12 bytes. Phase 2d/2e of TODO 90 will compress
+ * the attribute pointers and possibly string pointers. */
 #ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 112,
-    "taurus_element grew beyond 112 bytes — check for accidental field additions");
+_Static_assert(sizeof(struct taurus_element) <= 88,
+    "taurus_element grew beyond 88 bytes — check for accidental field additions");
 #else
-static_assert(sizeof(struct taurus_element) <= 112,
-    "taurus_element grew beyond 112 bytes");
+static_assert(sizeof(struct taurus_element) <= 88,
+    "taurus_element grew beyond 88 bytes");
 #endif
+
+/* ============================================================================
+ * Compact tree-edge accessors (Phase 2b of TODO 90)
+ *
+ * Tree edges (parent, first_child, last_child, next_sibling) are stored
+ * as int32_t byte-offsets relative to the element's own address, not as
+ * raw pointers. This cuts the element struct from 104 → 88 bytes (better
+ * cache locality, fewer pool pages on large documents).
+ *
+ * Offset 0 encodes NULL (no element has zero offset to itself because
+ * pool-allocated elements are 8-byte aligned). Read via these inline
+ * accessors; never read the `_off` fields directly.
+ *
+ * Type aliases preserve the original types: parent is always an element;
+ * the child/sibling edges may point to any node type (element, text,
+ * comment, cdata, pi) so they return TaurusNode*.
+ * ============================================================================ */
+
+static inline TaurusElement taurus_elem_parent(const TaurusElement e) {
+    return (e && e->parent_off != 0)
+        ? (TaurusElement)((const char*)e + e->parent_off)
+        : NULL;
+}
+
+static inline TaurusNode* taurus_elem_first_child(const TaurusElement e) {
+    return (e && e->first_child_off != 0)
+        ? (TaurusNode*)((const char*)e + e->first_child_off)
+        : NULL;
+}
+
+static inline TaurusNode* taurus_elem_last_child(const TaurusElement e) {
+    return (e && e->last_child_off != 0)
+        ? (TaurusNode*)((const char*)e + e->last_child_off)
+        : NULL;
+}
+
+static inline TaurusNode* taurus_elem_next_sibling(const TaurusElement e) {
+    return (e && e->next_sibling_off != 0)
+        ? (TaurusNode*)((const char*)e + e->next_sibling_off)
+        : NULL;
+}
+
+/* Setters. NULL target resets the offset to 0. */
+static inline void taurus_elem_set_parent(TaurusElement e, TaurusElement parent) {
+    if (!e) return;
+    if (!parent) { e->parent_off = 0; return; }
+    ptrdiff_t d = (const char*)parent - (const char*)e;
+    /* Pool-allocated elements live within ±2GB of each other in any
+     * realistic document. Assert so we catch a runaway pool early. */
+    if (d < INT32_MIN || d > INT32_MAX) {
+        e->parent_off = 0;
+        return;
+    }
+    e->parent_off = (int32_t)d;
+}
+
+static inline void taurus_elem_set_first_child(TaurusElement e, TaurusNode* child) {
+    if (!e) return;
+    if (!child) { e->first_child_off = 0; return; }
+    ptrdiff_t d = (const char*)child - (const char*)e;
+    if (d < INT32_MIN || d > INT32_MAX) {
+        e->first_child_off = 0;
+        return;
+    }
+    e->first_child_off = (int32_t)d;
+}
+
+static inline void taurus_elem_set_last_child(TaurusElement e, TaurusNode* child) {
+    if (!e) return;
+    if (!child) { e->last_child_off = 0; return; }
+    ptrdiff_t d = (const char*)child - (const char*)e;
+    if (d < INT32_MIN || d > INT32_MAX) {
+        e->last_child_off = 0;
+        return;
+    }
+    e->last_child_off = (int32_t)d;
+}
+
+static inline void taurus_elem_set_next_sibling(TaurusElement e, TaurusNode* sibling) {
+    if (!e) return;
+    if (!sibling) { e->next_sibling_off = 0; return; }
+    ptrdiff_t d = (const char*)sibling - (const char*)e;
+    if (d < INT32_MIN || d > INT32_MAX) {
+        e->next_sibling_off = 0;
+        return;
+    }
+    e->next_sibling_off = (int32_t)d;
+}
 
 /* TaurusElement typedef comes from the public include/taurus/types.h
  * (re-exported via taurus.h).  No local redefinition — see TODO 12. */
@@ -164,7 +253,7 @@ void taurus_element_free(TaurusElement elem);
  * All are simple field accesses with NULL checks - O(1) operations. */
 
 static inline TaurusElement taurus_element_get_parent(TaurusElement elem) {
-    return elem ? elem->parent : NULL;
+    return taurus_elem_parent(elem);
 }
 
 static inline TaurusElement taurus_element_get_first_child(TaurusElement elem) {
@@ -172,7 +261,7 @@ static inline TaurusElement taurus_element_get_first_child(TaurusElement elem) {
 
     /* Fast path: if first child is an element, return immediately
      * This covers the common case where elements are directly nested */
-    TaurusNode* node = (TaurusNode*)elem->first_child;
+    TaurusNode* node = taurus_elem_first_child(elem);
     if (node && node->type == TAURUS_NODE_TYPE_ELEMENT) {
         return (TaurusElement)node;
     }
@@ -192,7 +281,7 @@ static inline TaurusElement taurus_element_get_last_child(TaurusElement elem) {
 
     /* last_child might point to a non-element node (text, comment, etc.)
      * We need to scan from first_child to find the last element child */
-    TaurusNode* node = (TaurusNode*)elem->first_child;
+    TaurusNode* node = taurus_elem_first_child(elem);
     TaurusElement last_elem = NULL;
 
     while (node) {
@@ -208,7 +297,7 @@ static inline TaurusElement taurus_element_get_next_sibling(TaurusElement elem) 
     if (!elem) return NULL;
     /* Get next sibling and skip non-element nodes
      * This implements the XPath semantics where sibling axis only returns elements */
-    TaurusNode* next = (TaurusNode*)elem->next_sibling;
+    TaurusNode* next = taurus_elem_next_sibling(elem);
 
     /* Fast path: if next sibling is an element, return immediately
      * This covers the common case where elements are directly nested */
