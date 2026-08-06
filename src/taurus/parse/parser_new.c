@@ -695,41 +695,21 @@ TaurusTextNode* parser_parse_text(Parser* p) {
     }
 
     /* PERFORMANCE: Fast path - check if content contains '&' BEFORE allocating
-     * Most text doesn't have entities, so we can avoid the allocation entirely */
-    int has_entities = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (start[i] == '&') {
-            has_entities = 1;
-            break;
-        }
-    }
-
-    char* content;
-    if (p->writable) {
-        /* Zero-copy: NULL-terminate in place */
-        content = (char*)start;
-        if (p->pos < p->end && *p->pos == '<') {
-            /* Save position before NULL-terminating */
-            /* Don't modify the '<' as it's needed for next parse */
-            /* Instead, create a temporary NULL terminator if needed */
-            /* Actually, we need a different approach - we'll mark the end */
-            /* For now, allocate but note we can optimize this later with length tracking */
-        }
-        /* For text nodes, we need to preserve the content exactly */
-        /* Copy approach for now, optimize later with length-aware text nodes */
-        content = TAURUS_ALLOC_N(char, len + 1);
-        memcpy(content, start, len);
-        content[len] = '\0';
-    } else {
-        /* Traditional: allocate and copy */
-        content = TAURUS_ALLOC_N(char, len + 1);
-        memcpy(content, start, len);
-        content[len] = '\0';
-    }
+     * Most text doesn't have entities, so we can avoid the allocation entirely.
+     * memchr is vectorized; for large text bodies this is 10-50x faster than
+     * a byte-by-byte loop. */
+    int has_entities = memchr(start, '&', len) != NULL;
 
     /* Resolve XML entities - only if we detected '&' */
     if (has_entities) {
-        /* Use DTD-aware entity decoding if DTD is available */
+        /* Entity decode needs a NUL-terminated C string. Build one
+         * (we can't NUL-terminate in the writable buffer here because
+         * the byte at `start[len]` is the '<' the parser still needs). */
+        char* content = TAURUS_ALLOC_N(char, len + 1);
+        if (!content) return NULL;
+        memcpy(content, start, len);
+        content[len] = '\0';
+
         char* resolved;
         if (p->dtd) {
             resolved = taurus_decode_entities_with_dtd(content, (const TaurusDTD*)p->dtd);
@@ -739,24 +719,20 @@ TaurusTextNode* parser_parse_text(Parser* p) {
 
         if (resolved) {
             TaurusTextNode* node = taurus_text_create(resolved, strlen(resolved), p->pool);
-            /* text_create copies `resolved` into the pool; the calloc'd
-             * original is now redundant.  Free it (TODO 15). */
             TAURUS_FREE(resolved);
             TAURUS_FREE(content);
             return node;
-        } else {
-            /* Entity decoding failed - likely invalid entity */
-            parser_set_error(p, "Invalid entity in text content");
-            TAURUS_FREE(content);
-            return NULL;
         }
+
+        parser_set_error(p, "Invalid entity in text content");
+        TAURUS_FREE(content);
+        return NULL;
     }
 
-    /* If no entities, use original content.  text_create copies the
-     * string into the pool, so our intermediate buffer is now redundant. */
-    TaurusTextNode* node = taurus_text_create(content, len, p->pool);
-    TAURUS_FREE(content);
-    return node;
+    /* No entities — pass `start` directly to text_create, which does
+     * its own pool copy. Skipping the intermediate buffer saves one
+     * malloc + one memcpy + one free per text node (TODO 114 Phase 1). */
+    return taurus_text_create(start, len, p->pool);
 }
 
 /* ============================================================================
