@@ -342,8 +342,9 @@ static int process_element_xinclude(TaurusElement elem,
 
         if (is_xml) {
             /* TODO 117 Phase C: push current URI onto ancestor stack so
-             * nested xi:include can detect cycles. */
-            CycleNode* saved = ancestors;
+             * nested xi:include can detect cycles.  Pop after we're
+             * done with this include (pushed node is the new head;
+             * cycle_pop(ancestors) pops the head). */
             ancestors = cycle_push(ancestors, full_path);
 
             TaurusStatus st = TAURUS_OK;
@@ -413,8 +414,11 @@ static int process_element_xinclude(TaurusElement elem,
                 }
             }
             if (included_doc) taurus_document_free(included_doc);
-            /* TODO 117 Phase C: pop the URI we pushed at the start. */
-            ancestors = cycle_pop(saved);
+            /* TODO 117 Phase C: pop the URI we pushed at the start.
+             * cycle_pop pops the head (the pushed node) and returns
+             * the previous head, restoring ancestors to its pre-push
+             * value. */
+            ancestors = cycle_pop(ancestors);
         } else if (strcmp(parse, "text") == 0) {
             substitute = (TaurusNode*)taurus_text_create(content, content_len, doc->pool);
             /* parse="text" doesn't recurse into another file's body
