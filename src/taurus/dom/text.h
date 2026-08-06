@@ -15,13 +15,20 @@
  * sibling (byte distance from this node's address). 0 means NULL.
  *
  * TODO 115 Phase A: content_len is the byte length of `content`,
- * excluding the NUL terminator. After Phase A it always equals
- * strlen(content); Phase B introduces borrowed (non-NUL-terminated)
- * text where content_len is the only authoritative size. */
+ * excluding the NUL terminator.
+ *
+ * TODO 115 Phase B: a "borrowed" text node stores a pointer into a
+ * caller-owned buffer (typically the parser's writable input buffer)
+ * instead of pool-resident storage. Its `content` is NOT NUL-terminated
+ * — `content_len` is the only authoritative size. The `pool` field
+ * holds the pool to use for lazy materialization when a consumer asks
+ * for a NUL-terminated view via taurus_text_get_content. */
 typedef struct taurus_text_node {
     TaurusNode base;                   /* MUST be first */
     char* content;                    /* Text content - NEVER trim! */
     size_t content_len;               /* Byte length of content (excl. NUL) */
+    TaurusMemoryPool* pool;           /* Pool for lazy materialization (NULL if content is NUL-term'd) */
+    int borrowed;                     /* 1 = content is borrowed (non-NUL-term'd) */
     int32_t next_sibling_off;         /* Byte offset to next sibling (0=NULL) */
 } TaurusTextNode;
 
@@ -39,6 +46,22 @@ typedef struct taurus_text_node {
 TaurusTextNode* taurus_text_create(const char* content,
                                     size_t content_len,
                                     TaurusMemoryPool* pool);
+
+/* Create a borrowed text node (TODO 115 Phase B).
+ *
+ * Stores `content` as a non-owning pointer into the caller's buffer.
+ * Content is NOT NUL-terminated; `content_len` is authoritative.
+ *
+ * The pool is stored on the node so that taurus_text_get_content can
+ * lazily allocate a NUL-terminated copy on demand. Callers must ensure
+ * `content` outlives the document (e.g. point into `doc->xml_buffer`).
+ *
+ * Use when the source bytes already live in a long-lived buffer and
+ * the per-node pool allocation + memcpy that taurus_text_create would
+ * do is worth avoiding on the parse hot path. */
+TaurusTextNode* taurus_text_create_borrowed(const char* content,
+                                             size_t content_len,
+                                             TaurusMemoryPool* pool);
 
 void taurus_text_free(TaurusTextNode* text);
 

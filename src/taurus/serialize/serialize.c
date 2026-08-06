@@ -198,7 +198,10 @@ void serialize_text_internal(TaurusTextNode* text, SerializeBuffer* buf) {
     if (!text || !text->content) return;
 
     const char* content = text->content;
-    for (size_t i = 0; content[i] != '\0'; i++) {
+    /* content_len is authoritative: a borrowed text node's content is
+     * NOT NUL-terminated (TODO 115 Phase B). Don't pay for a materialize
+     * + strlen round-trip here. */
+    for (size_t i = 0; i < text->content_len; i++) {
         /* Check if this is start of entity reference */
         if (content[i] == '&') {
             /* Look ahead for ';' to detect entity reference */
@@ -206,7 +209,7 @@ void serialize_text_internal(TaurusTextNode* text, SerializeBuffer* buf) {
             int found_semicolon = 0;
 
             /* Entity names are typically short (lt, gt, amp, quot, apos, or #digits) */
-            while (content[j] && j < i + 12) {
+            while (j < text->content_len && j < i + 12) {
                 if (content[j] == ';') {
                     found_semicolon = 1;
                     break;

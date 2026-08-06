@@ -738,9 +738,20 @@ TaurusTextNode* parser_parse_text(Parser* p) {
         return NULL;
     }
 
-    /* No entities — pass `start` directly to text_create, which does
-     * its own pool copy. Skipping the intermediate buffer saves one
-     * malloc + one memcpy + one free per text node (TODO 114 Phase 1). */
+    /* No entities — the writable buffer owns `start` for the document's
+     * lifetime (taurus_parse_string / taurus_parse_inplace both attach
+     * the buffer to doc->xml_buffer). Hand the text node a borrowed
+     * view; no copy. The byte at start[len] is the '<' the parser still
+     * needs, so the borrowed content is intentionally NOT NUL-terminated
+     * — content_len is authoritative. Consumers go through
+     * taurus_text_get_content, which lazily materializes a NUL-terminated
+     * copy on demand. (TODO 115 Phase B.) */
+    if (p->writable) {
+        return taurus_text_create_borrowed(start, len, p->pool);
+    }
+
+    /* Read-only buffer: copy through taurus_text_create, which pool-
+     * allocates a NUL-terminated copy. */
     return taurus_text_create(start, len, p->pool);
 }
 

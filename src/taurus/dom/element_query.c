@@ -71,7 +71,7 @@ TAURUS_API const char* taurus_element_text(TaurusElement elem) {
     /* Path 1: single character-data child — hand back its own storage. */
     if (!taurus_node_get_next_sibling(child)) {
         if (child->type == TAURUS_NODE_TYPE_TEXT) {
-            const char* content = ((TaurusTextNode*)child)->content;
+            const char* content = taurus_text_get_content((TaurusTextNode*)child);
             return content ? content : "";
         }
         if (child->type == TAURUS_NODE_TYPE_CDATA) {
@@ -110,7 +110,7 @@ TAURUS_API const char* taurus_element_child_value(TaurusElement elem) {
     /* If first child is a text node, return its content */
     if (child->type == TAURUS_NODE_TYPE_TEXT) {
         TaurusTextNode* text = (TaurusTextNode*)child;
-        return text->content;
+        return taurus_text_get_content(text);
     }
 
     /* If first child is a CDATA node, return its content */

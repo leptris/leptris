@@ -152,8 +152,9 @@ static TaurusNode* deep_copy_node(const TaurusNode* src,
 
         case TAURUS_NODE_TYPE_TEXT: {
             const TaurusTextNode* t = (const TaurusTextNode*)src;
-            const char* content = t->content ? t->content : "";
-            return (TaurusNode*)taurus_text_create(content, strlen(content), target_pool);
+            /* Source text may be borrowed (non-NUL-terminated) — content_len
+             * is authoritative. TODO 115 Phase B. */
+            return (TaurusNode*)taurus_text_create(t->content, t->content_len, target_pool);
         }
 
         case TAURUS_NODE_TYPE_CDATA: {
