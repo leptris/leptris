@@ -856,7 +856,11 @@ TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_
     parser->carry_cap = 0;
     parser->consumed_offset = 0;
     parser->pending_attr_name = NULL;
-    parser->streaming = 0;
+    /* TODO 116 Phase B: streaming is now the default.  The recursive
+     * parser is still used by taurus_sax_parse() (one-shot); feed()
+     * goes through the state machine unless the user explicitly
+     * opts out via taurus_sax_parser_set_streaming(parser, 0). */
+    parser->streaming = 1;
     parser->start_emitted = 0;
     parser->end_emitted = 0;
 
