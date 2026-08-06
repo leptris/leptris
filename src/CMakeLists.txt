@@ -68,6 +68,7 @@ set(TAURUS_SOURCES
 
     # SAX
     taurus/sax/parser.c
+    taurus/sax/streaming.c
 
     # DTD
     taurus/dtd/model.c
