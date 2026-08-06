@@ -1213,6 +1213,43 @@ TaurusDoctypeNode* parser_parse_doctype(Parser* p) {
  * process stack.  The body lives in parser_parse_element_impl. */
 TaurusElement parser_parse_element(Parser* p);
 
+/* Finalize zero-copy element/attribute strings after the opening tag
+ * is consumed (TODO 113 Phase 5).
+ *
+ * Writes NUL terminators into the writable XML buffer at the end of
+ * the element local name, prefix, and each attribute name/value,
+ * then points the corresponding struct fields at the in-buffer
+ * strings. This eliminates one pool_strdup per element name + two
+ * per attribute on the common (no-entity) parse path.
+ *
+ * Safe because the parser advances monotonically — every byte we
+ * NUL here (whitespace, '/', '>', '=', quote) was already consumed.
+ * Caller MUST ensure p->writable is set and the opening tag's
+ * terminator ('>' or '/>') has been read past. */
+static void finalize_zero_copy_open_tag(TaurusElement elem,
+                                         const TaurusStringView* local_view,
+                                         const TaurusStringView* prefix_view) {
+    if (local_view->data && local_view->length > 0) {
+        ((char*)local_view->data)[local_view->length] = '\0';
+        elem->name = (char*)local_view->data;
+    }
+    if (prefix_view->data && prefix_view->length > 0) {
+        ((char*)prefix_view->data)[prefix_view->length] = '\0';
+        elem->prefix = (char*)prefix_view->data;
+    }
+    for (struct taurus_attribute* a = taurus_elem_first_attribute(elem);
+         a != NULL; a = a->next) {
+        if (a->name_view.length > 0) {
+            ((char*)a->name_view.data)[a->name_view.length] = '\0';
+            a->name = (char*)a->name_view.data;
+        }
+        if (a->value == NULL && a->value_view.data) {
+            ((char*)a->value_view.data)[a->value_view.length] = '\0';
+            a->value = (char*)a->value_view.data;
+        }
+    }
+}
+
 static TaurusElement parser_parse_element_impl(Parser* p) {
     /* Expect '<' */
     if (parser_peek(p) != '<') {
@@ -1239,8 +1276,16 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
         }
     }
 
-    /* Create element with StringView - ZERO COPY! */
-    TaurusElement elem = taurus_element_create_with_view(local_view, p->pool);
+    /* Create element. Two paths:
+     *   writable: defer NUL-termination until the opening tag is
+     *             consumed (zero-copy name/attr from xml_buffer,
+     *             TODO 113 Phase 5). elem->name is NULL until the
+     *             finalizer runs.
+     *   read-only: pool-strdup the name eagerly — safe for callers
+     *             that didn't copy the input (tests, in-place tests). */
+    TaurusElement elem = p->writable
+        ? taurus_element_create_zero_copy(p->pool)
+        : taurus_element_create_with_view(local_view, p->pool);
     if (!elem) {
         parser_set_error(p, "Failed to create element");
         return NULL;
@@ -1253,9 +1298,12 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
     /* Name already pool-strdup'd by create_with_view (TODO 90: no
      * name_view field on the struct — conversion is eager). */
 
-    /* Set prefix if present (TODO 90: eager pool-strdup, no staging view). */
+    /* Set prefix if present. Zero-copy path defers prefix finalization
+     * to finalize_zero_copy_open_tag (TODO 113 Phase 5). */
     if (!taurus_sv_is_empty(&prefix_view)) {
-        elem->prefix = taurus_sv_to_cstr_pooled(&prefix_view, p->pool);
+        if (!p->writable) {
+            elem->prefix = taurus_sv_to_cstr_pooled(&prefix_view, p->pool);
+        }
         p->has_namespace_prefixes = 1;
     }
 
@@ -1268,6 +1316,12 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
         /* FAST PATH 1: Self-closing element with no attributes - <tag/>
          * This is one of the most common patterns in XML (empty elements) */
         if (c == '/' && p->pos + 1 < p->end && p->pos[1] == '>') {
+            /* Zero-copy: finalize name/prefix/attrs now. The bytes at
+             * the end of each view were tag syntax consumed earlier. */
+            if (p->writable) {
+                finalize_zero_copy_open_tag(elem, &local_view, &prefix_view);
+            }
+
             /* STRICT MODE VALIDATION: Check for undeclared namespace prefix
              * Per XML Namespaces spec, a prefix used in an element name must be declared
              * For self-closing elements, we check this before returning */
@@ -1311,6 +1365,11 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
          * For elements with content, we fall through to the standard parsing logic */
         if (c == '>') {
             p->pos++; /* Skip '>' */
+
+            /* Zero-copy: opening tag fully consumed — finalize strings. */
+            if (p->writable) {
+                finalize_zero_copy_open_tag(elem, &local_view, &prefix_view);
+            }
 
             /* Check if this is an empty element <tag></tag> by looking ahead */
             if (p->pos + 1 < p->end && p->pos[0] == '<' && p->pos[1] == '/') {
@@ -1450,8 +1509,13 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
                 }
             }
 
-            taurus_element_add_attribute(elem, attr_name_view,
-                                         attr_value_view, p->pool);
+            if (p->writable) {
+                taurus_element_add_attribute_zero_copy(elem, attr_name_view,
+                                             attr_value_view, p->pool);
+            } else {
+                taurus_element_add_attribute(elem, attr_name_view,
+                                             attr_value_view, p->pool);
+            }
         }
 
         /* After processing an attribute, check for proper separation before next attribute.
