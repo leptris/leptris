@@ -49,6 +49,10 @@ static int dtd_match(DTDParser* p, const char* str) {
     return strncmp(p->pos, str, len) == 0;
 }
 
+/**
+ * Parse XML name, pool-allocated (TODO 33: was malloc'd; the malloc'd
+ * copy leaked when the result was stored on a pool-owned struct).
+ */
 static char* dtd_parse_name(DTDParser* p) {
     dtd_skip_whitespace(p);
     const char* start = p->pos;
@@ -70,7 +74,7 @@ static char* dtd_parse_name(DTDParser* p) {
     size_t len = p->pos - start;
     if (len == 0) return NULL;
 
-    char* name = (char*)malloc(len + 1);
+    char* name = (char*)taurus_pool_alloc(p->pool, len + 1);
     if (!name) return NULL;
     memcpy(name, start, len);
     name[len] = '\0';
@@ -137,17 +141,13 @@ static DTDEntityDecl* dtd_parse_entity(DTDParser* p) {
     char* stored_name = name;
     if (is_param) {
         size_t nlen = strlen(name);
-        stored_name = (char*)malloc(nlen + 2);
-        if (stored_name) {
-            stored_name[0] = '%';
-            memcpy(stored_name + 1, name, nlen + 1);
-        }
-        free(name);
+        stored_name = (char*)taurus_pool_alloc(p->pool, nlen + 2);
         if (!stored_name) return NULL;
+        stored_name[0] = '%';
+        memcpy(stored_name + 1, name, nlen + 1);
     }
 
     DTDEntityDecl* entity = ttdtd_entity_create(stored_name, p->pool);
-    free(stored_name);
     if (!entity) return NULL;
 
     dtd_skip_whitespace(p);
@@ -209,7 +209,6 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
     if (!name) return NULL;
 
     DTDElementDecl* elem = ttdtd_element_create_pooled(name, p->pool);
-    free(name);
     if (!elem) return NULL;
 
     dtd_skip_whitespace(p);
@@ -284,8 +283,7 @@ static DTDNotationDecl* dtd_parse_notation(DTDParser* p) {
     char* name = dtd_parse_name(p);
     if (!name) return NULL;
 
-    DTDNotationDecl* notation = ttdtd_notation_create(name);
-    free(name);
+    DTDNotationDecl* notation = ttdtd_notation_create(name, p->pool);
     if (!notation) return NULL;
 
     dtd_skip_whitespace(p);
@@ -458,14 +456,11 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
 
                 char* attr_name = dtd_parse_name(&parser);
                 if (!attr_name) {
-                    free(elem_name);
                     break;
                 }
 
                 DTDAttributeDecl* decl = dtd_attribute_decl_create_pooled(elem_name, attr_name, parser.pool);
-                free(attr_name);
                 if (!decl) {
-                    free(elem_name);
                     break;
                 }
 
@@ -518,17 +513,14 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
                             dtd_skip_whitespace(&parser);
                             char* val = dtd_parse_quoted_string(&parser);
                             if (val) {
-                                free(decl->default_value);
                                 decl->default_value = val;
                             }
                         }
-                        free(keyword);
                     }
                 } else if (dtd_peek(&parser) == '"' || dtd_peek(&parser) == '\'') {
                     char* val = dtd_parse_quoted_string(&parser);
                     if (val) {
                         decl->default_type = DTD_ATTR_DEFAULT;
-                        free(decl->default_value);
                         decl->default_value = val;
                     }
                 }
@@ -536,7 +528,6 @@ TaurusDTD* taurus_dtd_parse_internal_subset(const char* dtd_content, size_t len,
                 ttdtd_add_attribute(dtd, decl);
             }
             if (dtd_peek(&parser) == '>') dtd_advance(&parser);
-            free(elem_name);
         } else if (dtd_match(&parser, "<![")) {
             /* Conditional section (TODO 91 Phase 8d). Only valid in
              * external subsets per XML 1.0 spec, but we accept them
