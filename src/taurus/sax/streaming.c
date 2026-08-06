@@ -166,9 +166,18 @@ static int sxs_elem_push(TaurusSAXParser* p, const char* name, size_t name_len) 
         return -1;
     }
     SaxElementFrame* f = &p->elem_stack[p->elem_depth];
-    /* name already lives in scratch (we materialized it there); just
-     * keep the pointer. */
-    f->name = (char*)name;
+    /* Heap-allocate the name so it survives scratch arena reallocs
+     * across feed() calls.  Cost: one small malloc + free per
+     * element.  For typical elements (short names) this is well under
+     * 1% of parse time. */
+    char* name_copy = (char*)malloc(name_len + 1);
+    if (!name_copy) {
+        sxs_set_error(p, "out of memory");
+        return -1;
+    }
+    memcpy(name_copy, name, name_len);
+    name_copy[name_len] = '\0';
+    f->name = name_copy;
     f->name_len = name_len;
     f->attrs = NULL;
     f->attr_count = 0;
@@ -182,7 +191,13 @@ static void sxs_elem_pop(TaurusSAXParser* p) {
     if (p->elem_depth == 0) return;
     p->elem_depth--;
     SaxElementFrame* f = &p->elem_stack[p->elem_depth];
-    if (f->attrs) free(f->attrs);
+    free(f->name);
+    f->name = NULL;
+    f->name_len = 0;
+    if (f->attrs) {
+        /* attrs[i] pointers are scratch-owned; do not free individually. */
+        free(f->attrs);
+    }
     f->attrs = NULL;
     f->attr_count = 0;
     f->attr_cap = 0;
