@@ -576,3 +576,52 @@ TEST(XIncludePhaseA, AdoptedRootHasParentDocPointer) {
     taurus_document_free(doc);
     remove(inc_path);
 }
+
+/* TODO 117 Phase C: cycle detection.
+ *
+ * Two files xi:include each other.  The depth guard (32 layers) would
+ * stop this in most cases, but the cycle-detect pass catches the
+ * direct cycle before recursion even ramps up.  After processing, the
+ * tree should NOT be infinite and the included-doc pools should
+ * not leak. */
+TEST(XIncludePhaseC, MutualIncludeCycleDoesNotLeak) {
+    const char* path_a = "/tmp/taurus_cycle_a.xml";
+    const char* path_b = "/tmp/taurus_cycle_b.xml";
+
+    /* a includes b */
+    const char a_xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_cycle_b.xml'/>"
+        "</root>";
+    FILE* f = fopen(path_a, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(a_xml, 1, std::strlen(a_xml), f);
+    fclose(f);
+
+    /* b includes a (cycle) */
+    const char b_xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_cycle_a.xml'/>"
+        "</root>";
+    f = fopen(path_b, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(b_xml, 1, std::strlen(b_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/taurus_cycle_a.xml'/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Either succeeds (with cycle pruned to fallback) or returns an
+     * error code -- but does NOT infinite-loop and does NOT leak. */
+    TaurusStatus rc = taurus_xinclude_process(doc, nullptr);
+    (void)rc;  /* Any completion is success for this test. */
+
+    taurus_document_free(doc);
+    remove(path_a);
+    remove(path_b);
+}
