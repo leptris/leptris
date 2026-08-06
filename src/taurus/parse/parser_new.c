@@ -540,6 +540,7 @@ static char* parse_attribute_value(Parser* p) {
  */
 static TaurusStringView parse_name_view(Parser* p) {
     const char* start = p->pos;
+    const char* end = p->end;
 
     /* Use inline version for speed */
     if (!parser_is_name_start_inline(parser_peek_inline(p))) {
@@ -559,44 +560,52 @@ static TaurusStringView parse_name_view(Parser* p) {
         parser_advance(p);
     }
 
-    /* PERFORMANCE: Fast path for ASCII - scan until non-ASCII or invalid */
-    while (!parser_at_end(p)) {
-        unsigned char c = (unsigned char)parser_peek_inline(p);
+    /* PERFORMANCE: ASCII tight loop. Read p->pos directly and bump
+     * inline — avoids the parser_advance / parser_peek call overhead
+     * that dominated the previous version. Non-ASCII falls out to
+     * the slow path. (TODO 114 Phase 1.) */
+    const char* pos = p->pos;
+    while (pos < end) {
+        unsigned char c = (unsigned char)*pos;
+        if (c >= 0x80) break;  /* Non-ASCII: hand off to slow path */
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == ':' ||
+              c == '-' || c == '.')) {
+            break;
+        }
+        pos++;
+    }
 
+    /* If we stopped on non-ASCII, continue with the UTF-8-aware path. */
+    while (pos < end) {
+        unsigned char c = (unsigned char)*pos;
         if (c < 0x80) {
-            /* ASCII character - use inline validation */
-            if (!parser_is_name_char_inline(c)) break;
-            parser_advance(p);
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '_' || c == ':' ||
+                  c == '-' || c == '.')) {
+                break;
+            }
+            pos++;
         } else if (is_utf8_multibyte_start(c)) {
-            /* UTF-8 multi-byte sequence - validate and consume */
             int seq_len = utf8_seq_length(c);
-            if (p->pos + seq_len > p->end) break;  /* Incomplete sequence */
+            if (pos + seq_len > end) break;
 
-            /* Validate continuation bytes */
             int valid = 1;
             for (int i = 1; i < seq_len; i++) {
-                if (!is_utf8_continuation((unsigned char)p->pos[i])) {
+                if (!is_utf8_continuation((unsigned char)pos[i])) {
                     valid = 0;
                     break;
                 }
             }
-
-            if (valid) {
-                /* Consume the entire UTF-8 sequence */
-                for (int i = 0; i < seq_len; i++) {
-                    parser_advance(p);
-                }
-            } else {
-                /* Invalid UTF-8 - stop here */
-                break;
-            }
+            if (!valid) break;
+            pos += seq_len;
         } else {
-            /* Invalid byte (0x80-0xBF without start, or 0xF5-0xFF) */
             break;
         }
     }
 
-    size_t len = p->pos - start;
+    p->pos = (char*)pos;
+    size_t len = pos - start;
     return taurus_sv_from_ptr(start, len);
 }
 
