@@ -1660,7 +1660,7 @@ TaurusNode* parser_parse_node(Parser* p) {
              * previously the prefix match "<?xml" ate both (TODO 112). */
             int is_xml_decl = 0;
             if (parser_match(p, "<?xml")) {
-                size_t save = p->pos;
+                const char* save = p->pos;
                 for (int i = 0; i < 5; i++) parser_advance(p);  /* consume "<?xml" */
                 int next = parser_peek(p);
                 if (next == ' ' || next == '\t' || next == '\n' || next == '\r') {

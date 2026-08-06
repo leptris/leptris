@@ -125,37 +125,6 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
     return attr_node;
 }
 
-/* Helper: Create text node from element text content */
-static XPathTextNode* create_text_node(TaurusElement elem) {
-    if (!elem) return NULL;
-
-    /* Get text content from element */
-    const char* text = taurus_element_get_text_content(elem);
-    if (!text || text[0] == '\0') return NULL;
-
-    XPathTextNode* text_node = TAURUS_ALLOC(XPathTextNode);
-    if (!text_node) return NULL;
-
-    text_node->node_type = TAURUS_NODE_TEXT;
-    text_node->content = taurus_strdup(text);
-    text_node->owner = elem;
-
-    if (!text_node->content) {
-        TAURUS_FREE(text_node);
-        return NULL;
-    }
-
-    return text_node;
-}
-
-/* Helper: Check if node test is for text nodes */
-static int is_text_node_test(XPathASTNode* test) {
-    if (!test) return 0;
-    if (test->type != XPATH_AST_NODE_TEST_TYPE) return 0;
-    if (!test->value) return 0;
-    return (strcmp(test->value, "text") == 0);
-}
-
 /* child:: axis (TODO 109: walks all node types, not just elements).
  * Note: only elements have children. Text/comment/CDATA/PI never have
  * children — return an empty nodeset for non-element context. */
@@ -208,7 +177,7 @@ static XPathNodeSet* axis_parent(XPathContext* ctx, TaurusElement node,
 
     if (!parent) return result;
 
-    if (matches_node_test(ctx, parent, test)) {
+    if (matches_node_test(ctx, (TaurusNode*)parent, test)) {
         xpath_nodeset_add(result, parent);
     }
 
@@ -223,7 +192,7 @@ static XPathNodeSet* axis_ancestor(XPathContext* ctx, TaurusElement node,
 
     TaurusElement current = taurus_element_get_parent(node);
     while (current) {
-        if (matches_node_test(ctx, current, test)) {
+        if (matches_node_test(ctx, (TaurusNode*)current, test)) {
             xpath_nodeset_add(result, current);
         }
         current = taurus_element_get_parent(current);
@@ -239,13 +208,13 @@ static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    if (matches_node_test(ctx, node, test)) {
+    if (matches_node_test(ctx, (TaurusNode*)node, test)) {
         xpath_nodeset_add(result, node);
     }
 
     TaurusElement current = taurus_element_get_parent(node);
     while (current) {
-        if (matches_node_test(ctx, current, test)) {
+        if (matches_node_test(ctx, (TaurusNode*)current, test)) {
             xpath_nodeset_add(result, current);
         }
         current = taurus_element_get_parent(current);
@@ -260,7 +229,7 @@ static XPathNodeSet* axis_self(XPathContext* ctx, TaurusElement node,
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    if (matches_node_test(ctx, node, test)) {
+    if (matches_node_test(ctx, (TaurusNode*)node, test)) {
         xpath_nodeset_add(result, node);
     }
 
@@ -285,7 +254,7 @@ static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
         if (sibling == node) {
             found = 1;
         } else if (found) {
-            if (matches_node_test(ctx, sibling, test)) {
+            if (matches_node_test(ctx, (TaurusNode*)sibling, test)) {
                 xpath_nodeset_add(result, sibling);
             }
         }
@@ -308,7 +277,7 @@ static XPathNodeSet* axis_preceding_sibling(XPathContext* ctx,
     /* Collect all preceding siblings in forward order using compact accessor functions */
     TaurusElement sibling = taurus_element_get_first_child(parent);
     while (sibling && sibling != node) {
-        if (matches_node_test(ctx, sibling, test)) {
+        if (matches_node_test(ctx, (TaurusNode*)sibling, test)) {
             xpath_nodeset_add(result, sibling);
         }
         sibling = taurus_element_get_next_sibling(sibling);
@@ -344,7 +313,7 @@ static XPathNodeSet* axis_following(XPathContext* ctx, TaurusElement node,
         if (sibling == node) {
             found = 1;
         } else if (found) {
-            if (matches_node_test(ctx, sibling, test)) {
+            if (matches_node_test(ctx, (TaurusNode*)sibling, test)) {
                 xpath_nodeset_add(result, sibling);
             }
             collect_descendants(ctx, sibling, result, test);
@@ -377,7 +346,7 @@ static XPathNodeSet* axis_preceding(XPathContext* ctx, TaurusElement node,
     /* Iterate through siblings using compact accessor functions */
     TaurusElement sibling = taurus_element_get_first_child(parent);
     while (sibling && sibling != node) {
-        if (matches_node_test(ctx, sibling, test)) {
+        if (matches_node_test(ctx, (TaurusNode*)sibling, test)) {
             xpath_nodeset_add(result, sibling);
         }
         collect_descendants(ctx, sibling, result, test);
