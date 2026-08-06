@@ -45,7 +45,10 @@ int taurus_element_add_namespace(struct taurus_element* elem, struct taurus_name
 Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
     if (!xml || len == 0) return NULL;
 
-    Parser* p = TAURUS_ALLOC(Parser);
+    /* Pool-route the parser struct (TODO 114 Phase 3): one fewer heap
+     * alloc per parse, freed in bulk via taurus_pool_destroy. The
+     * struct is large (~512 B) but always fits in a pool page. */
+    Parser* p = (Parser*)taurus_pool_alloc(pool, sizeof(Parser));
     if (!p) return NULL;
 
     p->input = xml;
@@ -101,7 +104,8 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
         /* If validation fails and we don't have iconv, it's an error */
         #ifndef TAURUS_HAS_ICONV
         if (p->encoding) TAURUS_FREE(p->encoding);
-        TAURUS_FREE(p);
+        /* p is pool-owned (TODO 114 Phase 3); pool_destroy releases it
+         * when the caller tears down the parse. */
         return NULL;
         #endif
     }
@@ -142,7 +146,8 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
 Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     if (!xml || len == 0) return NULL;
 
-    Parser* p = TAURUS_ALLOC(Parser);
+    /* Pool-route the parser struct (TODO 114 Phase 3). */
+    Parser* p = (Parser*)taurus_pool_alloc(pool, sizeof(Parser));
     if (!p) return NULL;
 
     p->input = xml;
@@ -194,7 +199,7 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
         /* If validation fails and we don't have iconv, it's an error */
         #ifndef TAURUS_HAS_ICONV
         if (p->encoding) TAURUS_FREE(p->encoding);
-        TAURUS_FREE(p);
+        /* p is pool-owned; see parser_create. */
         return NULL;
         #endif
         /* With iconv, we might be able to convert from another encoding */
@@ -241,7 +246,8 @@ void parser_free(Parser* p) {
         if (p->doctype) {
             taurus_doctype_free(p->doctype);
         }
-        TAURUS_FREE(p);
+        /* p itself is pool-owned (TODO 114 Phase 3); release happens
+         * via taurus_pool_destroy when the document is freed. */
     }
 }
 
