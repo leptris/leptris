@@ -242,6 +242,27 @@ int taurus_sax_parser_feed(TaurusSAXParser* parser,
  */
 void taurus_sax_parser_free(TaurusSAXParser* parser);
 
+/**
+ * Opt into the streaming state-machine parser (TODO 116).
+ *
+ * The legacy parser buffers the entire document between feed()
+ * calls, then parses on `is_final=1`.  The streaming path emits
+ * events as chunks arrive and uses constant memory bounded by
+ * maximum nesting depth, not by document size.
+ *
+ * Call this *before* the first feed().  When enabled, each
+ * taurus_sax_parser_feed() call advances the state machine and
+ * emits events immediately; chunks whose token straddles the chunk
+ * boundary are buffered internally and resumed on the next feed().
+ *
+ * @param parser Parser instance
+ * @param streaming 1 to enable streaming, 0 to use legacy buffering
+ * @return 0 on success, -1 if parser is NULL
+ *
+ * Thread safety: Not thread-safe. Set once before the first feed().
+ */
+int taurus_sax_parser_set_streaming(TaurusSAXParser* parser, int streaming);
+
 #ifdef __cplusplus
 }
 #endif

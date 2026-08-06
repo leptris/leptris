@@ -1,56 +1,33 @@
 /**
  * @file sax/parser.c
- * @brief SAX parser implementation
+ * @brief SAX parser implementation (legacy recursive-descent path)
  *
  * Event-driven XML parsing without DOM tree construction.
+ *
+ * TODO 116: this file is the legacy recursive parser. The streaming
+ * state machine lives in streaming.c and is dispatched via
+ * taurus_sax_parser_set_streaming(1) before the first feed().
+ * taurus_sax_parse() (one-shot) continues to use this path; see
+ * TODO 116 plan for the eventual flip-of-default.
  */
 
 #include "../../include/taurus/sax/sax.h"
+#include "sax_internal.h"
 #include "../taurus_internal.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdio.h>
 
-/**
- * SAX parser state
- *
- * The scratch buffer is a small growable arena used to materialize
- * NUL-terminated copies of names and attribute values for the
- * callbacks.  It replaces a per-name malloc/free pair that dominated
- * SAX throughput — see TODO 102.  The buffer is reset at the start of
- * each top-level call; callbacks receive pointers into it that are
- * valid only for the duration of the callback.
- */
-struct TaurusSAXParser {
-    TaurusSAXHandler* handler;
-    void* user_data;
+/* struct TaurusSAXParser is now in sax_internal.h so streaming.c can
+ * share and extend the layout without re-declaration. */
 
-    /* Parser state */
-    const char* pos;
-    const char* end;
-    int line;
-    int column;
-    int has_error;
-    char error_message[256];
-
-    /* Scratch arena for transient name/value copies (TODO 102). */
-    char*  scratch;
-    size_t scratch_len;
-    size_t scratch_cap;
-
-    /* Incremental parsing support (TODO 89).
-     * input_buf accumulates chunks from taurus_sax_parser_feed
-     * calls. The parser works on [pos, end) within this buffer.
-     * On each feed call, new data is appended and we try to
-     * parse as far as we safely can (stopping before any
-     * construct whose closing delimiter hasn't arrived yet). */
-    char*  input_buf;
-    size_t input_len;
-    size_t input_cap;
-    int    document_started;  /* start_document emitted */
-    int    document_ended;    /* end_document emitted */
-};
+/* Forward declarations for the streaming path (TODO 116).  When the
+ * streaming flag is set on the parser, feed()/free() dispatch here
+ * instead of using the legacy buffering path. */
+int  taurus_sax_streaming_feed(TaurusSAXParser* p,
+                               const char* xml, size_t len, int is_final);
+void taurus_sax_streaming_reset(TaurusSAXParser* p);
 
 /* ============================================================================
  * Parser Utilities
@@ -870,6 +847,18 @@ TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_
     parser->input_buf = NULL;
     parser->input_len = 0;
     parser->input_cap = 0;
+    /* TODO 116 streaming fields start zero-initialized; the user
+     * opts into the streaming path via taurus_sax_parser_set_streaming. */
+    parser->state = SAX_ST_TOPLEVEL;
+    parser->elem_depth = 0;
+    parser->carry = NULL;
+    parser->carry_len = 0;
+    parser->carry_cap = 0;
+    parser->consumed_offset = 0;
+    parser->pending_attr_name = NULL;
+    parser->streaming = 0;
+    parser->start_emitted = 0;
+    parser->end_emitted = 0;
 
     return parser;
 }
@@ -896,6 +885,11 @@ int taurus_sax_parser_feed(TaurusSAXParser* parser,
                             size_t len,
                             int is_final) {
     if (!parser || !xml) return -1;
+
+    /* TODO 116: opt-in streaming state machine. */
+    if (parser->streaming) {
+        return taurus_sax_streaming_feed(parser, xml, len, is_final);
+    }
 
     /* Append chunk to the internal buffer. */
     if (len > 0) {
@@ -933,6 +927,11 @@ int taurus_sax_parser_feed(TaurusSAXParser* parser,
  */
 void taurus_sax_parser_free(TaurusSAXParser* parser) {
     if (parser) {
+        /* TODO 116: release streaming resources if any.  Safe to call
+         * unconditionally — it walks elem_stack and frees carry, both
+         * of which are no-ops when streaming was never enabled. */
+        taurus_sax_streaming_reset(parser);
+        free(parser->input_buf);
         free(parser->scratch);
         free(parser);
     }
