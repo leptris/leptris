@@ -7,19 +7,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Create CDATA node.  Single pool-routed entry point: struct + content
- * contiguous (TODO 18 consolidated _create and _create_fast). */
+/* Create CDATA node.  Single pool-routed entry point via
+ * taurus_pool_alloc_node_with_content — keeps the struct
+ * pool-resident even for oversized content (TODO 90 Phase 2b fix). */
 TaurusCDATANode* taurus_cdata_create(const char* content,
                                       size_t content_len,
                                       TaurusMemoryPool* pool) {
     if (!pool) return NULL;
 
-    size_t total_size = sizeof(TaurusCDATANode) + content_len + 1;
-    char* memory = (char*)taurus_pool_alloc(pool, total_size);
-    if (!memory) return NULL;
-
-    TaurusCDATANode* node = (TaurusCDATANode*)memory;
-    char* content_storage = memory + sizeof(TaurusCDATANode);
+    char* content_storage;
+    TaurusCDATANode* node = (TaurusCDATANode*)taurus_pool_alloc_node_with_content(
+        pool, sizeof(TaurusCDATANode), content_len, &content_storage);
+    if (!node) return NULL;
 
     node->base.type = TAURUS_NODE_TYPE_CDATA;
     node->base.frozen = 0;

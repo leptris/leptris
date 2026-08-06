@@ -220,6 +220,36 @@ char* taurus_pool_strdup_inplace(TaurusMemoryPool* pool, char* str);
  */
 char* taurus_pool_strdup(TaurusMemoryPool* pool, const char* str);
 
+/* Allocate a node struct plus an associated content buffer.
+ *
+ * When the combined size fits in a pool page, both pieces land in
+ * the same page (contiguous, cache-friendly) — the fast path used
+ * for typical small nodes.
+ *
+ * When the combined size would exceed the pool's page size, the
+ * struct stays in a normal pool page (so it remains within ±2GB of
+ * other pool-resident nodes — required for int32_t compact-pointer
+ * offsets, see TODO 90 Phase 2b) and the content goes into a
+ * separate oversized allocation referenced via raw pointer.
+ *
+ * Without this split, a 5MB text node forces an oversized
+ * allocation for struct+content; on systems where malloc places
+ * oversized requests far from small ones (e.g. macOS), the parent
+ * element's int32_t first_child_off silently overflows to 0 and
+ * the child is dropped from the tree without any error.
+ *
+ * @param pool         Pool to allocate from
+ * @param struct_size  Size of the node struct (e.g. sizeof(TaurusTextNode))
+ * @param content_size Size of the content buffer (excluding NUL)
+ * @param content_out  Out-param: pointer to the NUL-terminated content
+ *                     buffer. Caller must memcpy content in and set NUL.
+ *
+ * Returns: pointer to the struct (NULL on failure). */
+void* taurus_pool_alloc_node_with_content(TaurusMemoryPool* pool,
+                                           size_t struct_size,
+                                           size_t content_size,
+                                           char** content_out);
+
 /* ============================================================================
  * Statistics (for debugging/profiling)
  * ============================================================================ */

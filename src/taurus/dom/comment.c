@@ -7,19 +7,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Create comment node.  Single pool-routed entry point: struct + content
- * allocated contiguously (TODO 18 consolidated the dual _create/_fast paths). */
+/* Create comment node.  Single pool-routed entry point: struct +
+ * content use taurus_pool_alloc_node_with_content so oversized
+ * content doesn't drag the struct out of the pool's compact-pointer
+ * range (TODO 90 Phase 2b silent-drop fix). */
 TaurusCommentNode* taurus_comment_create(const char* content,
                                           size_t content_len,
                                           TaurusMemoryPool* pool) {
     if (!pool) return NULL;
 
-    size_t total_size = sizeof(TaurusCommentNode) + content_len + 1;
-    char* memory = (char*)taurus_pool_alloc(pool, total_size);
-    if (!memory) return NULL;
-
-    TaurusCommentNode* node = (TaurusCommentNode*)memory;
-    char* content_storage = memory + sizeof(TaurusCommentNode);
+    char* content_storage;
+    TaurusCommentNode* node = (TaurusCommentNode*)taurus_pool_alloc_node_with_content(
+        pool, sizeof(TaurusCommentNode), content_len, &content_storage);
+    if (!node) return NULL;
 
     node->base.type = TAURUS_NODE_TYPE_COMMENT;
     node->base.frozen = 0;
