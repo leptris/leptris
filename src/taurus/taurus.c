@@ -665,11 +665,15 @@ TAURUS_API void taurus_document_adopt_child(TaurusDocument parent,
                                            TaurusDocument child) {
     if (!parent || !child) return;
     /* Single-linked list threaded through each child's `next_adopted`.
-     * Note: child_docs / child_docs_tail are for THIS doc's OWN adopted
-     * children (recursive xi:include); don't reuse them here. */
+     * Note: child_docs / child_docs_tail are CHILD's OWN adopted-
+     * children list (its nested xi:include descendants).  Do NOT
+     * touch them here -- overwriting destroys the chain that frees
+     * the child's grandchildren when we recurse into taurus_document_free.
+     *
+     * Bug found by CI leak check: prior version NULLed child->child_docs
+     * here, which orphaned all nested xi:include docs that had
+     * already been adopted into the child. */
     child->next_adopted = NULL;
-    child->child_docs = NULL;
-    child->child_docs_tail = NULL;
     if (parent->child_docs_tail) {
         parent->child_docs_tail->next_adopted = child;
     } else {
