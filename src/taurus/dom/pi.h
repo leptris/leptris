@@ -8,6 +8,7 @@
 #define TAURUS_DOM_PI_H
 
 #include "node.h"
+#include "compact.h"  /* int32 compact-pointer helpers (TODO 121) */
 
 /* Forward declaration */
 struct taurus_memory_pool;
@@ -44,17 +45,14 @@ const char* taurus_pi_get_data(TaurusPINode* pi);
 
 /* Compact next_sibling accessors (TODO 90 Phase 2c). */
 static inline TaurusNode* taurus_pi_next_sibling(const TaurusPINode* p) {
-    return (p && p->next_sibling_off != 0)
-        ? (TaurusNode*)((const char*)p + p->next_sibling_off)
+    return (p)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)p, p->next_sibling_off, &p->next_sibling_off)
         : NULL;
 }
 
 static inline void taurus_pi_set_next_sibling(TaurusPINode* p, TaurusNode* sibling) {
     if (!p) return;
-    if (!sibling) { p->next_sibling_off = 0; return; }
-    ptrdiff_t d = (const char*)sibling - (const char*)p;
-    if (d < INT32_MIN || d > INT32_MAX) { p->next_sibling_off = 0; return; }
-    p->next_sibling_off = (int32_t)d;
+    p->next_sibling_off = taurus_compact_int32_encode(p, sibling, &p->next_sibling_off);
 }
 
 #endif /* TAURUS_DOM_PI_H */

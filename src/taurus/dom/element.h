@@ -160,74 +160,51 @@ static_assert(sizeof(struct taurus_element) <= 80,
  * ============================================================================ */
 
 static inline TaurusElement taurus_elem_parent(const TaurusElement e) {
-    return (e && e->parent_off != 0)
-        ? (TaurusElement)((const char*)e + e->parent_off)
+    return (e)
+        ? (TaurusElement)taurus_compact_int32_decode((void*)e, e->parent_off, &e->parent_off)
         : NULL;
 }
 
 static inline TaurusNode* taurus_elem_first_child(const TaurusElement e) {
-    return (e && e->first_child_off != 0)
-        ? (TaurusNode*)((const char*)e + e->first_child_off)
+    return (e)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)e, e->first_child_off, &e->first_child_off)
         : NULL;
 }
 
 static inline TaurusNode* taurus_elem_last_child(const TaurusElement e) {
-    return (e && e->last_child_off != 0)
-        ? (TaurusNode*)((const char*)e + e->last_child_off)
+    return (e)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)e, e->last_child_off, &e->last_child_off)
         : NULL;
 }
 
 static inline TaurusNode* taurus_elem_next_sibling(const TaurusElement e) {
-    return (e && e->next_sibling_off != 0)
-        ? (TaurusNode*)((const char*)e + e->next_sibling_off)
+    return (e)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)e, e->next_sibling_off, &e->next_sibling_off)
         : NULL;
 }
 
-/* Setters. NULL target resets the offset to 0. */
+/* Setters. NULL target resets the offset to 0.  TODO 121: on int32
+ * overflow (macOS ASLR can place pool-resident nodes > 2GB apart),
+ * fall back to the global overflow table keyed on the field address
+ * instead of silently dropping the edge. */
 static inline void taurus_elem_set_parent(TaurusElement e, TaurusElement parent) {
     if (!e) return;
-    if (!parent) { e->parent_off = 0; return; }
-    ptrdiff_t d = (const char*)parent - (const char*)e;
-    /* Pool-allocated elements live within ±2GB of each other in any
-     * realistic document. Assert so we catch a runaway pool early. */
-    if (d < INT32_MIN || d > INT32_MAX) {
-        e->parent_off = 0;
-        return;
-    }
-    e->parent_off = (int32_t)d;
+    e->parent_off = taurus_compact_int32_encode(e, parent, &e->parent_off);
 }
 
 static inline void taurus_elem_set_first_child(TaurusElement e, TaurusNode* child) {
     if (!e) return;
-    if (!child) { e->first_child_off = 0; return; }
-    ptrdiff_t d = (const char*)child - (const char*)e;
-    if (d < INT32_MIN || d > INT32_MAX) {
-        e->first_child_off = 0;
-        return;
-    }
-    e->first_child_off = (int32_t)d;
+    e->first_child_off = taurus_compact_int32_encode(e, child, &e->first_child_off);
 }
 
 static inline void taurus_elem_set_last_child(TaurusElement e, TaurusNode* child) {
     if (!e) return;
-    if (!child) { e->last_child_off = 0; return; }
-    ptrdiff_t d = (const char*)child - (const char*)e;
-    if (d < INT32_MIN || d > INT32_MAX) {
-        e->last_child_off = 0;
-        return;
-    }
-    e->last_child_off = (int32_t)d;
+    e->last_child_off = taurus_compact_int32_encode(e, child, &e->last_child_off);
 }
 
 static inline void taurus_elem_set_next_sibling(TaurusElement e, TaurusNode* sibling) {
     if (!e) return;
-    if (!sibling) { e->next_sibling_off = 0; return; }
-    ptrdiff_t d = (const char*)sibling - (const char*)e;
-    if (d < INT32_MIN || d > INT32_MAX) {
-        e->next_sibling_off = 0;
-        return;
-    }
-    e->next_sibling_off = (int32_t)d;
+    e->next_sibling_off = taurus_compact_int32_encode(e, sibling, &e->next_sibling_off);
 }
 
 /* Compact attribute-list accessors (Phase 2d of TODO 90).
@@ -235,31 +212,25 @@ static inline void taurus_elem_set_next_sibling(TaurusElement e, TaurusNode* sib
  * taurus_attribute records in the document's pool; 0 = empty list.
  * Pool-allocated, same safety argument as the tree edges. */
 static inline struct taurus_attribute* taurus_elem_first_attribute(const TaurusElement e) {
-    return (e && e->first_attribute_off != 0)
-        ? (struct taurus_attribute*)((const char*)e + e->first_attribute_off)
+    return (e)
+        ? (struct taurus_attribute*)taurus_compact_int32_decode((void*)e, e->first_attribute_off, &e->first_attribute_off)
         : NULL;
 }
 
 static inline struct taurus_attribute* taurus_elem_last_attribute(const TaurusElement e) {
-    return (e && e->last_attribute_off != 0)
-        ? (struct taurus_attribute*)((const char*)e + e->last_attribute_off)
+    return (e)
+        ? (struct taurus_attribute*)taurus_compact_int32_decode((void*)e, e->last_attribute_off, &e->last_attribute_off)
         : NULL;
 }
 
 static inline void taurus_elem_set_first_attribute(TaurusElement e, struct taurus_attribute* attr) {
     if (!e) return;
-    if (!attr) { e->first_attribute_off = 0; return; }
-    ptrdiff_t d = (const char*)attr - (const char*)e;
-    if (d < INT32_MIN || d > INT32_MAX) { e->first_attribute_off = 0; return; }
-    e->first_attribute_off = (int32_t)d;
+    e->first_attribute_off = taurus_compact_int32_encode(e, attr, &e->first_attribute_off);
 }
 
 static inline void taurus_elem_set_last_attribute(TaurusElement e, struct taurus_attribute* attr) {
     if (!e) return;
-    if (!attr) { e->last_attribute_off = 0; return; }
-    ptrdiff_t d = (const char*)attr - (const char*)e;
-    if (d < INT32_MIN || d > INT32_MAX) { e->last_attribute_off = 0; return; }
-    e->last_attribute_off = (int32_t)d;
+    e->last_attribute_off = taurus_compact_int32_encode(e, attr, &e->last_attribute_off);
 }
 
 /* TaurusElement typedef comes from the public include/taurus/types.h

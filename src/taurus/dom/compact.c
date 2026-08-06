@@ -342,6 +342,64 @@ void* taurus_compact_ptr16_decode(const TaurusCompactPtr16* compact,
 }
 
 /* ============================================================================
+ * int32 Compact Pointer with Overflow Fallback (TODO 121)
+ *
+ * The element/text/comment/cdata/pi node types store tree edges
+ * (parent, first/last/next sibling) as int32_t byte offsets relative
+ * to the node's own address.  On Linux, pool-resident nodes typically
+ * stay within ±2GB so int32_t is sufficient.  On macOS, ASLR + malloc
+ * can scatter pool pages such that two nodes end up > 2GB apart,
+ * overflowing int32_t.
+ *
+ * Without overflow handling, the encode side silently dropped the edge
+ * (set offset = 0, meaning NULL) — trees lost edges on macOS, breaking
+ * XInclude + CompactPointer tests.
+ *
+ * With overflow handling, we register the (field address → target)
+ * mapping in the global overflow table (same one the 8-bit compact
+ * pointer system uses) and store INT32_MIN as a sentinel.  Decode
+ * recognises the sentinel and consults the table.  NULL stays 0.
+ *
+ * Helpers exposed because the encode/decode sites are inlined in
+ * headers (element.h, text.h, etc.) — they can't reach file-static
+ * helpers here.  The field address (`const int32_t* field`) is the
+ * hash key, giving each edge its own overflow entry.  Per-document
+ * cleanup via the existing `taurus_compact_cleanup_document`.
+ * ============================================================================ */
+
+#include <stdint.h>
+
+#define TAURUS_INT32_OVERFLOW_SENTINEL INT32_MIN
+
+int32_t taurus_compact_int32_encode(void* base, void* target,
+                                     const int32_t* field_addr) {
+    if (!target) return 0;
+    ptrdiff_t d = (char*)target - (char*)base;
+    if (d < INT32_MIN || d > INT32_MAX) {
+        /* Overflow — register in table keyed on field address. */
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        struct taurus_document* doc = get_current_document();
+        if (table && taurus_compact_overflow_set(table, field_addr,
+                                                  target, doc) == 0) {
+            return TAURUS_INT32_OVERFLOW_SENTINEL;
+        }
+        return 0;  /* last-resort: NULL */
+    }
+    return (int32_t)d;
+}
+
+void* taurus_compact_int32_decode(void* base, int32_t off,
+                                   const int32_t* field_addr) {
+    if (off == 0) return NULL;
+    if (off == TAURUS_INT32_OVERFLOW_SENTINEL) {
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        if (table) return taurus_compact_overflow_get(table, field_addr);
+        return NULL;
+    }
+    return (char*)base + off;
+}
+
+/* ============================================================================
  * Compact String Implementation
  * ============================================================================ */
 
