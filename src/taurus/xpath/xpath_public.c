@@ -9,6 +9,7 @@
 #include "../taurus_internal.h"
 #include "parser.h"
 #include "evaluator.h"
+#include "evaluator_internal.h"  /* TODO 120: taurus_xpath_vm_eval */
 #include "xpath_variables.h"
 #include "../dom/element.h"
 #include <string.h>
@@ -67,8 +68,13 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
         return NULL;
     }
 
-    /* Evaluate expression */
-    struct taurus_xpath_result* result = xpath_evaluate(xpath_ctx, ast);
+    /* TODO 120 Phase D: try the bytecode VM first.  If it succeeds,
+     * we avoid the AST dispatch overhead on literals.  If it fails
+     * (bug, OOM), fall back to the AST evaluator. */
+    struct taurus_xpath_result* result = taurus_xpath_vm_eval(ast, xpath_ctx);
+    if (!result) {
+        result = xpath_evaluate(xpath_ctx, ast);
+    }
 
     /* Check for evaluation errors */
     const char* eval_error = xpath_context_error(xpath_ctx);

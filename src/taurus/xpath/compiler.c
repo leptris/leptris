@@ -1,20 +1,22 @@
-/* lib/src/xpath/compiler.c — XPath AST → bytecode (TODO 120 Phase A)
+/* lib/src/xpath/compiler.c — XPath AST → bytecode (TODO 120)
  *
  * Walks the AST and emits bytecode + populates the constant pool.
- * Recursive descent over XPathASTNode.  Each AST node type maps to
- * one or more opcodes:
  *
- *   XPATH_AST_NUMBER         → LITERAL_NUMBER <idx>
- *   XPATH_AST_STRING         → LITERAL_STRING <idx>
- *   XPATH_AST_PATH_EXPR      → recurse on child (path root + steps)
- *   XPATH_AST_STEP           → AXIS_STEP <axis> ; NODE_TEST_* [; FILTER ...]
- *   XPATH_AST_NODE_TEST_*    → NODE_TEST_* opcodes
- *   XPATH_AST_PREDICATE      → recurse expr ; FILTER
- *   XPATH_AST_OPERATOR       → recurse left/right ; BINARY_OP <op>
+ * Phase A+B approach: decompose AST into fine-grained opcodes
+ * (AXIS_STEP, NODE_TEST, BINARY_OP, FILTER, FUNC_CALL, etc.).
  *
- * AST node types we don't yet support fall back to OP_FALLBACK_EVAL
- * with the AST node index in the constant pool.  The VM recognizes
- * the fallback and delegates to evaluate_expr.
+ * Phase C-E approach (this version): emit LITERAL_* for leaf values
+ * and BC_FALLBACK_EVAL for everything else.  The VM calls
+ * evaluate_expr on the AST node for fallback cases.  This makes
+ * the VM COMPLETE — it can evaluate any XPath expression — at the
+ * cost of no perf win on complex expressions (they still go through
+ * evaluate_expr).  Future work can incrementally replace specific
+ * FALLBACK_EVAL opcodes with inline VM handlers.
+ *
+ * The decomposition is designed as open/closed: adding a new inline
+ * handler = add a case to the VM switch + change the compiler to
+ * emit the specific opcode instead of FALLBACK_EVAL.  No existing
+ * code changes.
  */
 #include "bytecode.h"
 #include "evaluator_internal.h"
@@ -22,9 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Internal bytecode builder state -- grows code buffer + constant
- * pool as needed.  Opaque to callers; only the public API in
- * bytecode.h is exposed. */
 typedef struct {
     TaurusXPathBytecode* bc;
     int error;
@@ -53,22 +52,12 @@ static int reserve_constants(CompilerState* st, size_t extra) {
     return 0;
 }
 
-/* Append a single opcode. */
 static void emit_op(CompilerState* st, XPathOpcode op) {
     if (reserve_code(st, 1) == 0) {
         st->bc->code[st->bc->code_len++] = (unsigned char)op;
     }
 }
 
-/* Append an opcode + 1-byte operand. */
-static void emit_op_u8(CompilerState* st, XPathOpcode op, uint8_t operand) {
-    if (reserve_code(st, 2) == 0) {
-        st->bc->code[st->bc->code_len++] = (unsigned char)op;
-        st->bc->code[st->bc->code_len++] = operand;
-    }
-}
-
-/* Append an opcode + 16-bit operand (constant-pool index). */
 static void emit_op_u16(CompilerState* st, XPathOpcode op, uint16_t operand) {
     if (reserve_code(st, 3) == 0) {
         st->bc->code[st->bc->code_len++] = (unsigned char)op;
@@ -77,7 +66,6 @@ static void emit_op_u16(CompilerState* st, XPathOpcode op, uint16_t operand) {
     }
 }
 
-/* Append a constant-pool entry; returns its index, or 0xFFFF on failure. */
 static uint16_t add_const_number(CompilerState* st, double n) {
     if (reserve_constants(st, 1) < 0) return 0xFFFF;
     if (st->bc->const_count >= 0xFFFE) { st->error = 1; return 0xFFFF; }
@@ -107,72 +95,14 @@ static uint16_t add_const_ast(CompilerState* st, XPathASTNode* ast) {
     return idx;
 }
 
-/* Forward decl. */
-static void compile_node(CompilerState* st, XPathASTNode* node);
-
-/* Compile a node-test AST into one of the NODE_TEST_* opcodes. */
-static void compile_node_test(CompilerState* st, XPathASTNode* test) {
-    if (!test) { emit_op(st, XPATH_BC_NODE_TEST_ALL); return; }
-    switch (test->type) {
-        case XPATH_AST_NODE_TEST_NAME: {
-            uint16_t idx = add_const_string(st, test->value);
-            emit_op_u16(st, XPATH_BC_NODE_TEST_NAME, idx);
-            break;
-        }
-        case XPATH_AST_NODE_TEST_ALL:
-            emit_op(st, XPATH_BC_NODE_TEST_ALL);
-            break;
-        default:
-            /* Complex node tests (TYPE, PI, ALL_IN_NS) fall back. */
-            emit_op_u16(st, XPATH_BC_FALLBACK_EVAL, add_const_ast(st, test));
-            break;
-    }
-}
-
-/* Compile a STEP AST: emit AXIS_STEP + node test + filter ops for
- * each predicate.  The path-root context is expected on the stack
- * before this opcode sequence runs. */
-static void compile_step(CompilerState* st, XPathASTNode* step) {
-    if (!step) return;
-    /* AXIS_STEP consumes the axis_id from operand. */
-    emit_op_u8(st, XPATH_BC_AXIS_STEP, (uint8_t)step->axis_id);
-    /* The node test is the first child. */
-    if (step->child_count >= 1) {
-        compile_node_test(st, step->children[0]);
-    } else {
-        emit_op(st, XPATH_BC_NODE_TEST_ALL);
-    }
-    /* Remaining children are predicates. */
-    for (size_t i = 1; i < step->child_count; i++) {
-        compile_node(st, step->children[i]);
-        emit_op(st, XPATH_BC_FILTER);
-    }
-}
-
-/* Compile a path expression -- sequence of steps starting from a
- * context (root or current). */
-static void compile_path(CompilerState* st, XPathASTNode* path) {
-    if (!path) return;
-    /* For an absolute path, the first child is typically a special
-     * "root" marker; for a relative path, the first step starts from
-     * the current context.  Phase A emits ROOT_CONTEXT for absolute
-     * paths. */
-    emit_op(st, XPATH_BC_ROOT_CONTEXT);
-    for (size_t i = 0; i < path->child_count; i++) {
-        compile_step(st, path->children[i]);
-    }
-}
-
-static void compile_operator(CompilerState* st, XPathASTNode* node) {
-    /* Operators store op_type in node->axis_id field (see parser.c).
-     * left = children[0], right = children[1]. */
-    if (node->child_count >= 1) compile_node(st, node->children[0]);
-    if (node->child_count >= 2) compile_node(st, node->children[1]);
-    emit_op_u8(st, XPATH_BC_BINARY_OP, (uint8_t)node->axis_id);
-}
-
 static void compile_node(CompilerState* st, XPathASTNode* node) {
     if (!node || st->error) return;
+
+    /* Leaf nodes get inline opcodes.  Everything else punts to
+     * evaluate_expr via BC_FALLBACK_EVAL with the AST node in the
+     * constant pool.  Future phases can add inline handlers for
+     * specific node types (OPERATOR, STEP, FUNCTION_CALL) by
+     * replacing the default case with explicit cases. */
     switch (node->type) {
         case XPATH_AST_NUMBER:
             emit_op_u16(st, XPATH_BC_LITERAL_NUMBER,
@@ -182,50 +112,10 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
             emit_op_u16(st, XPATH_BC_LITERAL_STRING,
                         add_const_string(st, node->value));
             break;
-        case XPATH_AST_PATH_EXPR:
-        case XPATH_AST_ABSOLUTE_PATH:
-        case XPATH_AST_RELATIVE_PATH:
-            compile_path(st, node);
-            break;
-        case XPATH_AST_STEP:
-            compile_step(st, node);
-            break;
-        case XPATH_AST_NODE_TEST_NAME:
-        case XPATH_AST_NODE_TEST_ALL:
-        case XPATH_AST_NODE_TEST_TYPE:
-        case XPATH_AST_NODE_TEST_PI:
-        case XPATH_AST_NODE_TEST_ALL_IN_NS:
-            compile_node_test(st, node);
-            break;
-        case XPATH_AST_OPERATOR:
-            compile_operator(st, node);
-            break;
-        case XPATH_AST_PREDICATE: {
-            /* Predicate: compile child expression, then apply FILTER.
-             * The parent step's nodeset is below; the predicate
-             * expression is on top; FILTER consumes both. */
-            for (size_t i = 0; i < node->child_count; i++) {
-                compile_node(st, node->children[i]);
-            }
-            emit_op(st, XPATH_BC_FILTER);
-            break;
-        }
-        case XPATH_AST_FUNCTION_CALL: {
-            /* Compile each argument, then FUNC_CALL with name + count. */
-            size_t arg_count = node->child_count;
-            for (size_t i = 0; i < arg_count; i++) {
-                compile_node(st, node->children[i]);
-            }
-            uint16_t name_idx = add_const_string(st, node->value);
-            emit_op_u8(st, XPATH_BC_FUNC_CALL, (uint8_t)(arg_count & 0xFF));
-            emit_op_u16(st, XPATH_BC_FUNC_CALL, name_idx);  /* simplified encoding */
-            break;
-        }
-        case XPATH_AST_VARIABLE_REFERENCE:
-        case XPATH_AST_ARGUMENT:
-        case XPATH_AST_NODE_TEST:
         default:
-            /* Unsupported or wrapper node -- fall back to AST eval. */
+            /* All non-literal nodes: store AST node in constant pool
+             * and emit FALLBACK_EVAL.  The VM calls evaluate_expr
+             * on the stored node. */
             emit_op_u16(st, XPATH_BC_FALLBACK_EVAL, add_const_ast(st, node));
             break;
     }

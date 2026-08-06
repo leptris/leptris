@@ -42,6 +42,14 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
 /* Main expression evaluator (in evaluator.c) */
 struct taurus_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast);
 
+/* Bytecode VM entry point (TODO 120 Phase D — in vm.c).
+ * Compiles the AST to bytecode and runs the VM interpreter.
+ * For literals, avoids the AST dispatch overhead.
+ * For complex expressions, delegates to evaluate_expr via
+ * BC_FALLBACK_EVAL. */
+struct taurus_xpath_result* taurus_xpath_vm_eval(XPathASTNode* ast,
+                                                  XPathContext* ctx);
+
 /* Namespace support (in evaluator.c) */
 const char* xpath_context_resolve_prefix(XPathContext* context,
                                          const char* prefix);
