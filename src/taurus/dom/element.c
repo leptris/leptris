@@ -266,9 +266,10 @@ int taurus_element_add_attribute(TaurusElement elem,
      * These fields are not set during attribute creation, but they are accessed
      * during finalize_element_strings. Without initialization, they contain
      * garbage data from pool allocation, causing crashes when memory is reused. */
+    attr->prefix_view = taurus_sv_empty();
     attr->namespace_uri_view = taurus_sv_empty();
-    attr->namespace_uri = NULL;
     attr->prefix = NULL;
+    attr->namespace_uri = NULL;
 
     /* EAGER STRING CONVERSION: Convert attribute name and value to NULL-terminated C-strings.
      *

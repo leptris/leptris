@@ -867,6 +867,9 @@ TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_
     parser->scratch = NULL;
     parser->scratch_len = 0;
     parser->scratch_cap = 0;
+    parser->input_buf = NULL;
+    parser->input_len = 0;
+    parser->input_cap = 0;
 
     return parser;
 }

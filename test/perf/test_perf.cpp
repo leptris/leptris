@@ -5,6 +5,10 @@
 // tuned conservatively so they pass on CI runners (typically 2-core
 // GitHub Actions instances) but catch major regressions like the
 // attrs.xml 3.4x slowdown the validation pass found.
+//
+// ASAN: budgets are skipped under AddressSanitizer. ASAN slows each
+// allocation 5-20x and shadows every memory access — measurements
+// reflect sanitizer overhead, not the code under test.
 
 #include <gtest/gtest.h>
 #include <cstring>
@@ -12,6 +16,17 @@
 
 #include <chrono>
 #include <string>
+
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define TAURUS_TEST_ASAN 1
+#  endif
+#elif defined(__SANITIZE_ADDRESS__)
+#  define TAURUS_TEST_ASAN 1
+#endif
+#ifndef TAURUS_TEST_ASAN
+#  define TAURUS_TEST_ASAN 0
+#endif
 
 namespace {
 
@@ -34,8 +49,10 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
     /* 5000 parses should take < 500 ms even on a slow CI runner.
      * The validation pass measured ~0.02 ms/parse on Apple Silicon. */
     double ms = ParseBenchMs(xml, std::strlen(xml), 5000);
-    EXPECT_LT(ms, 500.0)
-        << "Small-doc parse regression: " << ms << " ms for 5000 parses";
+    if (!TAURUS_TEST_ASAN) {
+        EXPECT_LT(ms, 500.0)
+            << "Small-doc parse regression: " << ms << " ms for 5000 parses";
+    }
 }
 
 TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
@@ -51,8 +68,10 @@ TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
     /* 1000 parses should take < 200 ms.  Pre-fix was ~14 ms/parse;
      * post-fix is ~2 ms/parse. */
     double ms = ParseBenchMs(xml.data(), xml.size(), 1000);
-    EXPECT_LT(ms, 200.0)
-        << "Attribute-heavy parse regression: " << ms << " ms for 1000 parses";
+    if (!TAURUS_TEST_ASAN) {
+        EXPECT_LT(ms, 200.0)
+            << "Attribute-heavy parse regression: " << ms << " ms for 1000 parses";
+    }
 }
 
 TEST(PerfRegression, DeepNestingIsRejectedQuickly) {
@@ -72,7 +91,9 @@ TEST(PerfRegression, DeepNestingIsRejectedQuickly) {
         clock_type::now() - start).count();
 
     EXPECT_EQ(doc, nullptr);
-    EXPECT_LT(ms, 100);
+    if (!TAURUS_TEST_ASAN) {
+        EXPECT_LT(ms, 100);
+    }
 }
 
 // ---- Write + DOM-access regression specs --------------------------------
@@ -97,7 +118,9 @@ TEST(PerfRegression, AppendChildDoesNotRegress) {
 
     /* Release+LTO: ~0.015 ms on M-series.
      * Budget: 10 ms (667x margin for slow CI). */
-    EXPECT_LT(ms, 10);
+    if (!TAURUS_TEST_ASAN) {
+        EXPECT_LT(ms, 10);
+    }
 
     taurus_document_free(doc);
 }
@@ -120,7 +143,9 @@ TEST(PerfRegression, SetAttributeDoesNotRegress) {
 
     /* Release+LTO: ~0.043 ms on M-series.
      * Budget: 20 ms (465x margin). */
-    EXPECT_LT(ms, 20);
+    if (!TAURUS_TEST_ASAN) {
+        EXPECT_LT(ms, 20);
+    }
 
     taurus_document_free(doc);
 }
@@ -155,7 +180,9 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
      * with the int32_t offset decoding from TODO 90 Phase 2b).
      * Budget: 12 ms — catches constant-factor regression while tolerating
      * slower CI hardware. */
-    EXPECT_LT(ms, 12);
+    if (!TAURUS_TEST_ASAN) {
+        EXPECT_LT(ms, 12);
+    }
     (void)sink;
 
     taurus_document_free(doc);
