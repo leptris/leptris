@@ -66,7 +66,10 @@ jobs:
         if: steps.validate.outputs.skip_bump != 'true'
         id: current_version
         run: |
-          CURRENT=$(grep -E 'project\(taurus' CMakeLists.txt | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' | awk '{print $2}')
+          # Match project(taurus across multiple lines — the multi-line
+          # project() declaration in CMakeLists spreads VERSION over
+          # several lines. -A 5 includes them in the grep output.
+          CURRENT=$(grep -E -A 5 'project\(\s*taurus' CMakeLists.txt | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
           if [ -z "$CURRENT" ]; then
             echo "::error::Could not find version in CMakeLists.txt"
             exit 1
@@ -114,10 +117,12 @@ jobs:
         if: steps.validate.outputs.skip_bump != 'true'
         run: |
           NEW_VERSION="${{ steps.get_version.outputs.version }}"
-          sed -i "s/project(taurus VERSION [0-9]\+\.[0-9]\+\.[0-9]\+/project(taurus VERSION $NEW_VERSION/" CMakeLists.txt
+          # project() is multi-line in CMakeLists; use perl -i -0777 -pe
+          # to apply the regex across the whole file (not line-by-line).
+          perl -i -0777 -pe "s/(project\(\s*taurus\b[^\)]*?)VERSION\s+[0-9]+\.[0-9]+\.[0-9]+/\${1}VERSION $NEW_VERSION/s" CMakeLists.txt
           sed -i "s/\"version\": \"[0-9]\+\.[0-9]\+\.[0-9]\+\"/\"version\": \"$NEW_VERSION\"/" vcpkg.json
           sed -i "s/\"version-semver\": \"[0-9]\+\.[0-9]\+\.[0-9]\+\"/\"version-semver\": \"$NEW_VERSION\"/" vcpkg.json
-          cat CMakeLists.txt | head -5
+          cat CMakeLists.txt | head -10
 
       - name: Commit version bump
         run: |
