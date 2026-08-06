@@ -56,6 +56,8 @@ set(TAURUS_SOURCES
     # XPath
     taurus/xpath/lexer.c
     taurus/xpath/parser.c
+    taurus/xpath/compiler.c
+    taurus/xpath/vm.c
     taurus/xpath/evaluator.c
     taurus/xpath/evaluator_types.c
     taurus/xpath/evaluator_axes.c
