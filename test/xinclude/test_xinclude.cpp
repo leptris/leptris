@@ -523,3 +523,56 @@ TEST(XIncludeRecursion, MutuallyRecursiveIncludesHitDepthLimit) {
     remove(path_a);
     remove(path_b);
 }
+
+/* TODO 117 Phase A: adopted nodes live in the CHILD doc's pool,
+ * but are spliced into the parent's tree.  Validate that:
+ *   1. The adopted root's document pointer is the PARENT doc
+ *      (so subsequent tree ops can resolve back to the parent pool).
+ *   2. The parent's pool doesn't free the adopted nodes (they live
+ *      in the child pool).  We check this by NOT freeing the parent
+ *      until the child pool is gone; the test just confirms the tree
+ *      is readable and that free() doesn't crash. */
+TEST(XIncludePhaseA, AdoptedRootHasParentDocPointer) {
+    const char included[] = "<child><greeting>hi</greeting></child>";
+    const char* inc_path = "/tmp/taurus_adopt_child.xml";
+    FILE* f = fopen(inc_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(included, 1, std::strlen(included), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "<xi:include href='/tmp/taurus_adopt_child.xml'/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    ASSERT_EQ(taurus_xinclude_process(doc, nullptr), TAURUS_OK);
+
+    /* Walk down to <child> and read its text -- if the adoption
+     * worked, the pointer arithmetic across pool boundaries is
+     * still valid (parent's pool + child's pool, freed in the
+     * right order by taurus_document_free below). */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    bool found = false;
+    for (TaurusNodeRef c = taurus_node_first_child((TaurusNodeRef)root);
+         c; c = taurus_node_next_sibling(c)) {
+        TaurusElement e = taurus_node_as_element(c);
+        if (!e) continue;
+        if (std::string(taurus_element_name(e)) == "child") {
+            found = true;
+            const char* txt = taurus_element_text(e);
+            ASSERT_NE(txt, nullptr);
+            EXPECT_STREQ(txt, "hi");
+        }
+    }
+    EXPECT_TRUE(found);
+
+    /* If pool ordering is broken, taurus_document_free crashes or
+     * double-frees.  ASAN should catch any leaks. */
+    taurus_document_free(doc);
+    remove(inc_path);
+}

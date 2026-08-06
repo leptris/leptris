@@ -107,6 +107,15 @@ struct taurus_document {
      * `alloc_hook` / `dealloc_hook` default to the thread-local
      * hooks; per-document overrides are TODO 38 phase 3. */
     int strict_mode;
+
+    /* TODO 117: adopted child documents from xi:include parse="xml".
+     * The included doc's pool is owned by this document -- the
+     * included nodes were MOVED (not copied) into our tree, so they
+     * live in the included doc's pool.  We keep a list of adopted docs
+     * here so taurus_document_free releases them.  Single-linked
+     * list; typically very short (a handful of xi:include directives). */
+    struct taurus_document* child_docs;
+    struct taurus_document* child_docs_tail;  /* Append in O(1). */
 };
 
 /* Parse options structure */

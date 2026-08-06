@@ -661,6 +661,20 @@ TAURUS_API TaurusDocument taurus_parse_file(const char* filepath, TaurusStatus* 
 /**
  * Free document and all its contents
  */
+TAURUS_API void taurus_document_adopt_child(TaurusDocument parent,
+                                           TaurusDocument child) {
+    if (!parent || !child) return;
+    /* Single-link list of adopted docs.  Append in O(1). */
+    child->child_docs = NULL;
+    child->child_docs_tail = NULL;
+    if (parent->child_docs_tail) {
+        parent->child_docs_tail->child_docs = child;
+    } else {
+        parent->child_docs = child;
+    }
+    parent->child_docs_tail = child;
+}
+
 TAURUS_API void taurus_document_free(struct taurus_document* doc) {
     if (!doc) return;
 
@@ -704,6 +718,26 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         if (pi->data) TAURUS_FREE(pi->data);
         TAURUS_FREE(pi);
         pi = next;
+    }
+
+    /* TODO 117: release adopted child documents from xi:include
+     * parse="xml".  Each child was parsed into its own pool; its
+     * nodes were MOVED (not copied) into our tree, so the child's
+     * pool must outlive us.  Free after our own cleanup so the
+     * walk over own metadata precedes the release of pools. */
+    {
+        struct taurus_document* ch = doc->child_docs;
+        while (ch) {
+            struct taurus_document* next = ch->child_docs;
+            ch->new_dom_root = NULL;  /* Detach so taurus_document_free
+                                       * doesn't try to walk our tree
+                                       * (which contains its nodes). */
+            ch->root = NULL;
+            taurus_document_free(ch);
+            ch = next;
+        }
+        doc->child_docs = NULL;
+        doc->child_docs_tail = NULL;
     }
 
     /* Free owned XML buffer if present
