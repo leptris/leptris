@@ -1616,7 +1616,22 @@ TaurusNode* parser_parse_node(Parser* p) {
     char c = parser_peek(p);
 
     if (c == '<') {
-        /* Determine what kind of markup */
+        /* Fast dispatch on the byte after '<' — most markup types are
+         * unambiguously identified by their second byte. Avoids 4-5
+         * parser_match strncmp calls per element (TODO 114 Phase 1). */
+        char c2 = (p->pos + 1 < p->end) ? p->pos[1] : '\0';
+
+        /* Element start: <letter> or <_:> (XML name-start char). */
+        if ((c2 >= 'a' && c2 <= 'z') || (c2 >= 'A' && c2 <= 'Z') ||
+            c2 == '_' || (unsigned char)c2 >= 0x80) {
+            return (TaurusNode*)parser_parse_element(p);
+        }
+        if (c2 == '/') {
+            /* Closing tag - return NULL to signal end of children */
+            return NULL;
+        }
+
+        /* Slower paths: comments, CDATA, PIs, DOCTYPE. */
         if (parser_match(p, "<!--")) {
             return (TaurusNode*)parser_parse_comment(p);
         } else if (parser_match(p, "<![CDATA[")) {
@@ -1650,11 +1665,9 @@ TaurusNode* parser_parse_node(Parser* p) {
             return (TaurusNode*)parser_parse_pi(p);
         } else if (parser_match(p, "<!DOCTYPE")) {
             return (TaurusNode*)parser_parse_doctype(p);
-        } else if (parser_match(p, "</")) {
-            /* Closing tag - return NULL to signal end of children */
-            return NULL;
         } else {
-            /* Regular element */
+            /* Fall back to element parse for unusual name-start bytes
+             * (e.g. multi-byte UTF-8) that the fast path didn't catch. */
             return (TaurusNode*)parser_parse_element(p);
         }
     } else {
