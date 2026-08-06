@@ -183,6 +183,8 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
                         add_const_string(st, node->value));
             break;
         case XPATH_AST_PATH_EXPR:
+        case XPATH_AST_ABSOLUTE_PATH:
+        case XPATH_AST_RELATIVE_PATH:
             compile_path(st, node);
             break;
         case XPATH_AST_STEP:
@@ -198,8 +200,32 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
         case XPATH_AST_OPERATOR:
             compile_operator(st, node);
             break;
+        case XPATH_AST_PREDICATE: {
+            /* Predicate: compile child expression, then apply FILTER.
+             * The parent step's nodeset is below; the predicate
+             * expression is on top; FILTER consumes both. */
+            for (size_t i = 0; i < node->child_count; i++) {
+                compile_node(st, node->children[i]);
+            }
+            emit_op(st, XPATH_BC_FILTER);
+            break;
+        }
+        case XPATH_AST_FUNCTION_CALL: {
+            /* Compile each argument, then FUNC_CALL with name + count. */
+            size_t arg_count = node->child_count;
+            for (size_t i = 0; i < arg_count; i++) {
+                compile_node(st, node->children[i]);
+            }
+            uint16_t name_idx = add_const_string(st, node->value);
+            emit_op_u8(st, XPATH_BC_FUNC_CALL, (uint8_t)(arg_count & 0xFF));
+            emit_op_u16(st, XPATH_BC_FUNC_CALL, name_idx);  /* simplified encoding */
+            break;
+        }
+        case XPATH_AST_VARIABLE_REFERENCE:
+        case XPATH_AST_ARGUMENT:
+        case XPATH_AST_NODE_TEST:
         default:
-            /* Unsupported node type -- fall back to AST eval. */
+            /* Unsupported or wrapper node -- fall back to AST eval. */
             emit_op_u16(st, XPATH_BC_FALLBACK_EVAL, add_const_ast(st, node));
             break;
     }
