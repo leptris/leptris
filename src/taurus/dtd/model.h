@@ -238,7 +238,8 @@ DTDAttributeDecl* ttdtd_lookup_attribute(const TaurusDTD* dtd,
  * @param name Notation name (must not be NULL)
  * @return New notation declaration, or NULL on failure
  */
-DTDNotationDecl* ttdtd_notation_create(const char* name);
+DTDNotationDecl* ttdtd_notation_create(const char* name,
+                                        struct taurus_memory_pool* pool);
 
 /**
  * Free a notation declaration

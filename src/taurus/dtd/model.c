@@ -402,39 +402,42 @@ DTDAttributeDecl* ttdtd_lookup_attribute(const TaurusDTD* dtd,
  * ============================================================================*/
 
 /**
- * Create a notation declaration
+ * Create a notation declaration, pool-allocated.
+ *
+ * Struct + name live in one pool bump (matching the entity-decl
+ * pattern). public_id and system_id are filled in later via
+ * pool_strdup; ttdtd_free releases everything when the pool is
+ * destroyed. (TODO 41: pool-routed, no separate free needed.)
  */
-DTDNotationDecl* ttdtd_notation_create(const char* name) {
-    if (!name) return NULL;
+DTDNotationDecl* ttdtd_notation_create(const char* name,
+                                        TaurusMemoryPool* pool) {
+    if (!name || !pool) return NULL;
 
-    /* Allocate notation structure */
-    DTDNotationDecl* notation = (DTDNotationDecl*)calloc(1, sizeof(DTDNotationDecl));
-    if (!notation) return NULL;
+    size_t name_len = strlen(name);
+    size_t total = sizeof(DTDNotationDecl) + name_len + 1;
+    char* memory = (char*)taurus_pool_alloc(pool, total);
+    if (!memory) return NULL;
 
-    /* Duplicate name */
-    notation->name = strdup(name);
-    if (!notation->name) {
-        free(notation);
-        return NULL;
-    }
+    DTDNotationDecl* notation = (DTDNotationDecl*)memory;
+    char* name_storage = memory + sizeof(DTDNotationDecl);
+    memcpy(name_storage, name, name_len);
+    name_storage[name_len] = '\0';
 
-    /* Initialize fields */
+    notation->name = name_storage;
     notation->public_id = NULL;
     notation->system_id = NULL;
-
     return notation;
 }
 
 /**
- * Free a notation declaration
+ * Free a notation declaration.
+ *
+ * Pool-ownership model: notations created via ttdtd_notation_create
+ * live in the DTD's pool. This function is a no-op, kept for source
+ * compatibility with callers that explicitly invoke it.
  */
 void ttdtd_notation_free(DTDNotationDecl* notation) {
-    if (!notation) return;
-
-    free(notation->name);
-    free(notation->public_id);
-    free(notation->system_id);
-    free(notation);
+    (void)notation;
 }
 
 /**
