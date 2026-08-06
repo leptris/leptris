@@ -9,6 +9,7 @@
 #define TAURUS_DOM_TEXT_H
 
 #include "node.h"
+#include "compact.h"  /* int32 compact-pointer helpers (TODO 121) */
 
 /* Text node - inherits from TaurusNode.
  * Phase 2c of TODO 90: next_sibling is a 4-byte offset to the next
@@ -82,17 +83,14 @@ void taurus_text_set_content(TaurusTextNode* text, const char* content);
  * their siblings live within +/-2GB of each other on any realistic
  * document. */
 static inline TaurusNode* taurus_textnode_next_sibling(const TaurusTextNode* t) {
-    return (t && t->next_sibling_off != 0)
-        ? (TaurusNode*)((const char*)t + t->next_sibling_off)
+    return (t)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)t, t->next_sibling_off, &t->next_sibling_off)
         : NULL;
 }
 
 static inline void taurus_textnode_set_next_sibling(TaurusTextNode* t, TaurusNode* sibling) {
     if (!t) return;
-    if (!sibling) { t->next_sibling_off = 0; return; }
-    ptrdiff_t d = (const char*)sibling - (const char*)t;
-    if (d < INT32_MIN || d > INT32_MAX) { t->next_sibling_off = 0; return; }
-    t->next_sibling_off = (int32_t)d;
+    t->next_sibling_off = taurus_compact_int32_encode(t, sibling, &t->next_sibling_off);
 }
 
 #endif /* TAURUS_DOM_TEXT_H */

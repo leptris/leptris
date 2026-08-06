@@ -137,6 +137,30 @@ void taurus_compact_ptr8_encode(TaurusCompactPtr8* compact,
                                 void* target,
                                 void* base);
 
+/* TODO 121: int32 compact pointer encode/decode for tree edges.
+ *
+ * Used by element.h, text.h, comment.h, cdata.h, pi.h for parent/
+ * first/last/next-sibling offsets.  On macOS, ASLR can place pool-
+ * resident nodes > 2GB apart, overflowing int32_t.  The encode side
+ * detects overflow and registers the mapping in the global overflow
+ * table keyed on `field_addr` (the address of the int32_t field
+ * itself), returning INT32_MIN as a sentinel.  Decode recognises the
+ * sentinel and consults the table.
+ *
+ * The helpers are exposed because the call sites are inlined in
+ * headers; they can't reach file-static helpers in compact.c. */
+#include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+int32_t taurus_compact_int32_encode(void* base, void* target,
+                                     const int32_t* field_addr);
+void*   taurus_compact_int32_decode(void* base, int32_t off,
+                                     const int32_t* field_addr);
+#ifdef __cplusplus
+}
+#endif
+
 /**
  * Decode 8-bit compact pointer to full pointer (FAST PATH - inline version)
  *
