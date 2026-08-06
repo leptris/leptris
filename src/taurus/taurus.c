@@ -664,11 +664,14 @@ TAURUS_API TaurusDocument taurus_parse_file(const char* filepath, TaurusStatus* 
 TAURUS_API void taurus_document_adopt_child(TaurusDocument parent,
                                            TaurusDocument child) {
     if (!parent || !child) return;
-    /* Single-link list of adopted docs.  Append in O(1). */
+    /* Single-linked list threaded through each child's `next_adopted`.
+     * Note: child_docs / child_docs_tail are for THIS doc's OWN adopted
+     * children (recursive xi:include); don't reuse them here. */
+    child->next_adopted = NULL;
     child->child_docs = NULL;
     child->child_docs_tail = NULL;
     if (parent->child_docs_tail) {
-        parent->child_docs_tail->child_docs = child;
+        parent->child_docs_tail->next_adopted = child;
     } else {
         parent->child_docs = child;
     }
@@ -723,15 +726,15 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
     /* TODO 117: release adopted child documents from xi:include
      * parse="xml".  Each child was parsed into its own pool; its
      * nodes were MOVED (not copied) into our tree, so the child's
-     * pool must outlive us.  Free after our own cleanup so the
-     * walk over own metadata precedes the release of pools. */
+     * pool must outlive us.  Walk `next_adopted` (siblings of THIS doc)
+     * and recurse into each via taurus_document_free. */
     {
         struct taurus_document* ch = doc->child_docs;
         while (ch) {
-            struct taurus_document* next = ch->child_docs;
+            struct taurus_document* next = ch->next_adopted;
             ch->new_dom_root = NULL;  /* Detach so taurus_document_free
-                                       * doesn't try to walk our tree
-                                       * (which contains its nodes). */
+                                       * doesn't try to walk the
+                                       * adopted subtree. */
             ch->root = NULL;
             taurus_document_free(ch);
             ch = next;

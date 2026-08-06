@@ -111,11 +111,14 @@ struct taurus_document {
     /* TODO 117: adopted child documents from xi:include parse="xml".
      * The included doc's pool is owned by this document -- the
      * included nodes were MOVED (not copied) into our tree, so they
-     * live in the included doc's pool.  We keep a list of adopted docs
-     * here so taurus_document_free releases them.  Single-linked
-     * list; typically very short (a handful of xi:include directives). */
+     * live in the included doc's pool.  `child_docs` / `child_docs_tail`
+     * are the head/tail of OUR adopted-children list (single-linked
+     * via `next_adopted` on each child so we can append in O(1) without
+     * needing a "next" pointer on the parent).  Typically very short
+     * (a handful of xi:include directives). */
     struct taurus_document* child_docs;
     struct taurus_document* child_docs_tail;  /* Append in O(1). */
+    struct taurus_document* next_adopted;    /* Singly-linked sibling. */
 };
 
 /* Parse options structure */
