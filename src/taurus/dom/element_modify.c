@@ -399,6 +399,13 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
         attr->name = name_storage;
         attr->name_view = taurus_sv_from_ptr(name_storage, nlen);
 
+        /* Pre-compute name hash for O(1) lookup filtering (TODO 113). */
+        attr->name_hash = 2166136261u;
+        for (size_t i = 0; i < nlen; i++) {
+            attr->name_hash ^= (unsigned char)name_storage[i];
+            attr->name_hash *= 16777619u;
+        }
+
         if (value) {
             size_t vlen = strlen(value);
             char* value_storage = (char*)taurus_pool_alloc(pool, vlen + 1);
@@ -1118,6 +1125,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
         dst_attr->value_view = src_attr->value_view;
         dst_attr->prefix_view = src_attr->prefix_view;
         dst_attr->namespace_uri_view = src_attr->namespace_uri_view;
+        dst_attr->name_hash = src_attr->name_hash;
 
         /* Copy cached strings if they exist */
         if (src_attr->name) {

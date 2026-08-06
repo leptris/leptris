@@ -183,20 +183,29 @@ struct taurus_attribute* taurus_element_get_attribute_by_index(TaurusElement ele
 struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
-    /* Walk the attribute linked list.  Pre-compute strlen once — the
-     * previous version called strlen(name) inside the loop, paying
-     * O(N) per attr for an O(N²) total.  See TODO 106. */
+    /* Hash-filtered attribute lookup (TODO 113 Phase 4).
+     * Compute the FNV-1a hash of the search name once, then compare
+     * 4-byte hashes in the loop before touching string data. This
+     * turns O(N × strlen) into O(N × uint32) for the non-matching
+     * case. */
     size_t name_len = strlen(name);
+    uint32_t name_hash = 2166136261u;
+    for (size_t i = 0; i < name_len; i++) {
+        name_hash ^= (unsigned char)name[i];
+        name_hash *= 16777619u;
+    }
 
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     while (attr) {
-        /* Compare with cached name first (faster) */
-        if (attr->name && strcmp(attr->name, name) == 0) {
-            return attr;
-        }
-        /* Fall back to StringView comparison */
-        if (!taurus_sv_is_empty(&attr->name_view)) {
-            if (attr->name_view.length == name_len &&
+        /* Hash pre-filter: reject most non-matching attrs in one
+         * integer comparison. Only when hash AND length match do
+         * we do the full memcmp. */
+        if (attr->name_hash == name_hash &&
+            attr->name_view.length == name_len) {
+            if (attr->name && memcmp(attr->name, name, name_len) == 0) {
+                return attr;
+            }
+            if (!taurus_sv_is_empty(&attr->name_view) &&
                 memcmp(attr->name_view.data, name, name_len) == 0) {
                 return attr;
             }
@@ -244,6 +253,14 @@ int taurus_element_add_attribute(TaurusElement elem,
     /* Initialize attribute */
     attr->name_view = name_view;
     attr->value_view = value_view;
+
+    /* Pre-compute FNV-1a hash of attribute name for O(1) lookup
+     * filtering (TODO 113 Phase 4). */
+    attr->name_hash = 2166136261u;
+    for (size_t i = 0; i < name_view.length; i++) {
+        attr->name_hash ^= (unsigned char)name_view.data[i];
+        attr->name_hash *= 16777619u;
+    }
 
     /* CRITICAL FIX: Initialize namespace/prefix fields to prevent stale data
      * These fields are not set during attribute creation, but they are accessed
