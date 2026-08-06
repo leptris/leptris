@@ -341,8 +341,23 @@ static int process_element_xinclude(TaurusElement elem,
                         }
                     }
                     if (!substitute) {
-                        substitute = deep_copy_node(
-                            (const TaurusNode*)inc_root, doc->pool);
+                        /* TODO 117 Phase A: pool ownership transfer.
+                         *
+                         * Move (don't copy) the included root into our
+                         * tree.  The child's pool still owns the
+                         * memory, so adopt the child document into
+                         * our lifecycle -- it will be freed when we
+                         * are.  Set included_doc = NULL below the
+                         * adoption to skip the early-exit free. */
+                        included_doc->root = NULL;
+                        if (included_doc->new_dom_root ==
+                            (void*)inc_root) {
+                            included_doc->new_dom_root = NULL;
+                        }
+                        taurus_element_set_document_tree(inc_root, doc);
+                        taurus_document_adopt_child(doc, included_doc);
+                        substitute = (TaurusNode*)inc_root;
+                        included_doc = NULL;  /* now owned by `doc` */
                     }
                 }
             }

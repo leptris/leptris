@@ -322,6 +322,21 @@ TAURUS_API TaurusDocument taurus_parse_file(const char* filepath, TaurusStatus* 
 TAURUS_API void taurus_document_free(TaurusDocument doc);
 
 /**
+ * Adopt a child document into the parent's lifecycle.
+ *
+ * TODO 117: used by xi:include parse="xml" to transfer ownership
+ * of a freshly-parsed included document so its pool (which now
+ * owns nodes spliced into the parent tree) survives until the
+ * parent is freed.  Sets `child->child_docs` to NULL so the child
+ * doesn't recursively carry its own adopted docs.
+ *
+ * @param parent Owning document (must outlive child)
+ * @param child  Adopted document (its pool is kept alive by `parent`)
+ */
+TAURUS_API void taurus_document_adopt_child(TaurusDocument parent,
+                                           TaurusDocument child);
+
+/**
  * Get root element of document
  *
  * @param doc Document
