@@ -30,11 +30,90 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdint.h>
 
 /* Forward decl from content_check.c (Phase 4 of TODO 91). */
 int taurus_content_model_match(const char* model, const char* elem_name,
                                 const char** child_names, size_t child_count,
                                 char* out_msg, size_t msg_size);
+
+/* TODO 119: per-validation content-model memoization.
+ *
+ * Elements with the same content model and the same children signature
+ * produce the same match result.  Without memoization, validating a
+ * document with N identical elements re-runs the matcher N times.
+ * With memoization, the second and subsequent calls return a cached
+ * result in O(1).
+ *
+ * The cache lives for the duration of a single taurus_dtd_validate
+ * call -- allocated on the stack, no malloc.  Bounded by MEMO_CAP;
+ * LRU eviction via ring buffer.  Most docs have <64 distinct
+ * (model, children-shape) pairs. */
+#define CONTENT_MODEL_MEMO_CAP 64
+
+typedef struct {
+    const char* model;       /* pointer into DTD decl; stable for cache life */
+    size_t child_count;
+    /* Hash of the child_names array -- avoids storing the names. */
+    uint32_t child_hash;
+    int      match_result;   /* 1 = match, 0 = mismatch */
+    char     error_msg[256];
+    int      used;           /* 0 = empty slot */
+} ContentModelMemoEntry;
+
+typedef struct {
+    ContentModelMemoEntry entries[CONTENT_MODEL_MEMO_CAP];
+    size_t next;             /* ring-buffer write index */
+} ContentModelMemo;
+
+/* FNV-1a hash over a child_names array.  Stable across calls because
+ * the array elements are pool-owned name strings (lifetime = doc). */
+static uint32_t hash_child_names(const char** names, size_t count) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < count; i++) {
+        const char* s = names[i] ? names[i] : "";
+        while (*s) {
+            h ^= (unsigned char)*s++;
+            h *= 16777619u;
+        }
+        h ^= ',';
+        h *= 16777619u;
+    }
+    return h;
+}
+
+/* Look up memo.  Returns NULL on miss.  Match is on (model pointer,
+ * child_count, child_hash) -- assumes the model string is stable for
+ * the duration of the validation (it's pool-owned on the DTD decl). */
+static ContentModelMemoEntry* memo_lookup(ContentModelMemo* m,
+                                           const char* model,
+                                           size_t child_count,
+                                           uint32_t child_hash) {
+    for (size_t i = 0; i < CONTENT_MODEL_MEMO_CAP; i++) {
+        ContentModelMemoEntry* e = &m->entries[i];
+        if (e->used && e->model == model &&
+            e->child_count == child_count &&
+            e->child_hash == child_hash) {
+            return e;
+        }
+    }
+    return NULL;
+}
+
+/* Store a new memo entry.  Ring-buffer eviction. */
+static void memo_store(ContentModelMemo* m, const char* model,
+                        size_t child_count, uint32_t child_hash,
+                        int match_result, const char* error_msg) {
+    ContentModelMemoEntry* e = &m->entries[m->next];
+    m->next = (m->next + 1) % CONTENT_MODEL_MEMO_CAP;
+    e->model = model;
+    e->child_count = child_count;
+    e->child_hash = child_hash;
+    e->match_result = match_result;
+    snprintf(e->error_msg, sizeof(e->error_msg), "%s",
+             error_msg ? error_msg : "");
+    e->used = 1;
+}
 
 static char* dup_str(const char* src) {
     if (!src) return NULL;
@@ -67,7 +146,8 @@ typedef struct {
 
 static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
                                        TaurusDTDError* error,
-                                       StringHashTable* id_table);
+                                       StringHashTable* id_table,
+                                       ContentModelMemo* memo);
 
 /* Return 1 if this element has any element-type children, 0 otherwise.
  * Used to validate <!ELEMENT name EMPTY> — no element children allowed. */
@@ -133,7 +213,8 @@ static int attr_check_iter(const char* key, size_t key_len,
 
 static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
                                        TaurusDTDError* error,
-                                       StringHashTable* id_table) {
+                                       StringHashTable* id_table,
+                                       ContentModelMemo* memo) {
     if (!elem) return 1;
 
     const char* name = taurus_element_get_name(elem);
@@ -182,10 +263,31 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
                             child_names[i++] = taurus_element_get_name((TaurusElement)c);
                         }
                     }
+                    /* TODO 119: memoize.  The cache key is (model
+                     * pointer, child_count, child_hash) -- pool-owned
+                     * model string is stable for the validation
+                     * lifetime.  Hit: skip the matcher.  Miss: run
+                     * matcher, store result. */
+                    uint32_t ch = hash_child_names(child_names, child_count);
+                    ContentModelMemoEntry* hit = NULL;
+                    if (memo) {
+                        hit = memo_lookup(memo, decl->content_model,
+                                          child_count, ch);
+                    }
+                    int ok;
                     char msg_buf[256];
-                    int ok = taurus_content_model_match(
-                        decl->content_model, name, child_names, child_count,
-                        msg_buf, sizeof(msg_buf));
+                    if (hit) {
+                        ok = hit->match_result;
+                        snprintf(msg_buf, sizeof(msg_buf), "%s", hit->error_msg);
+                    } else {
+                        ok = taurus_content_model_match(
+                            decl->content_model, name, child_names, child_count,
+                            msg_buf, sizeof(msg_buf));
+                        if (memo) {
+                            memo_store(memo, decl->content_model, child_count,
+                                       ch, ok, msg_buf);
+                        }
+                    }
                     if (!ok) {
                         set_error(error, msg_buf, name);
                         free((void*)child_names);
@@ -404,7 +506,7 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
     /* Recurse into children. */
     TaurusElement child = taurus_element_first_child_any(elem);
     while (child) {
-        int rc = validate_element_recursive(child, dtd, error, id_table);
+        int rc = validate_element_recursive(child, dtd, error, id_table, memo);
         if (rc != 1) return rc;  /* propagate first violation */
         child = taurus_element_next_sibling_any(child);
     }
@@ -495,7 +597,12 @@ int taurus_dtd_validate(TaurusDocument doc, TaurusDTD* dtd, TaurusDTDError* erro
         if (error) set_error(error, "Failed to allocate ID table", NULL);
         return -1;
     }
-    int rc = validate_element_recursive(root, dtd, error, id_table);
+    /* TODO 119: per-validation memo cache.  Stack-allocated; no
+     * malloc; freed when this function returns. */
+    ContentModelMemo memo = {{{0}}};
+    memo.next = 0;
+
+    int rc = validate_element_recursive(root, dtd, error, id_table, &memo);
     if (rc == 1) {
         /* Phase 6: IDREF resolution. Run after Phase 5 completes so
          * the ID table contains every ID in the document. */
