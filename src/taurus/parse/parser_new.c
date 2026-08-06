@@ -1247,18 +1247,16 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
     TaurusStringView name_view = parse_name_view(p);
     if (taurus_sv_is_empty(&name_view)) return NULL;
 
-    /* Split qualified name into prefix:local */
+    /* Split qualified name into prefix:local. memchr is vectorized;
+     * most names have no colon so this stays O(1) for the common case. */
     TaurusStringView prefix_view = taurus_sv_empty();
     TaurusStringView local_view = name_view;
-
-    /* Find colon in view */
-    for (size_t i = 0; i < name_view.length; i++) {
-        if (name_view.data[i] == ':') {
-            prefix_view = taurus_sv_from_ptr(name_view.data, i);
-            local_view = taurus_sv_from_ptr(name_view.data + i + 1,
-                                            name_view.length - i - 1);
-            break;
-        }
+    const char* colon = memchr(name_view.data, ':', name_view.length);
+    if (colon) {
+        size_t i = colon - name_view.data;
+        prefix_view = taurus_sv_from_ptr(name_view.data, i);
+        local_view = taurus_sv_from_ptr(name_view.data + i + 1,
+                                        name_view.length - i - 1);
     }
 
     /* Create element. Two paths:
@@ -1540,19 +1538,20 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
                 return NULL;
             }
 
-            /* Extract local name from closing tag for comparison */
+            /* Extract local name from closing tag for comparison.
+             * memchr is vectorized; most closing tags have no colon. */
             TaurusStringView close_local = close_name_view;
-            for (size_t i = 0; i < close_name_view.length; i++) {
-                if (close_name_view.data[i] == ':') {
-                    close_local = taurus_sv_from_ptr(close_name_view.data + i + 1,
-                                                      close_name_view.length - i - 1);
-                    break;
-                }
+            const char* colon = memchr(close_name_view.data, ':', close_name_view.length);
+            if (colon) {
+                close_local = taurus_sv_from_ptr(close_name_view.data + (colon - close_name_view.data) + 1,
+                                                  close_name_view.length - (colon - close_name_view.data) - 1);
             }
 
-            /* Verify it matches opening tag's local name (TODO 90: use char*). */
-            if (close_local.length != strlen(elem->name) ||
-                memcmp(close_local.data, elem->name, close_local.length) != 0) {
+            /* Verify it matches opening tag's local name. Compare via
+             * the local_view captured at open-tag time — avoids an
+             * elem->name strlen+memcmp round-trip. */
+            if (close_local.length != local_view.length ||
+                memcmp(close_local.data, local_view.data, local_view.length) != 0) {
                 parser_set_error(p, "Mismatched closing tag");
                 return NULL;
             }
