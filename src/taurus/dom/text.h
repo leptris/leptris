@@ -12,10 +12,16 @@
 
 /* Text node - inherits from TaurusNode.
  * Phase 2c of TODO 90: next_sibling is a 4-byte offset to the next
- * sibling (byte distance from this node's address). 0 means NULL. */
+ * sibling (byte distance from this node's address). 0 means NULL.
+ *
+ * TODO 115 Phase A: content_len is the byte length of `content`,
+ * excluding the NUL terminator. After Phase A it always equals
+ * strlen(content); Phase B introduces borrowed (non-NUL-terminated)
+ * text where content_len is the only authoritative size. */
 typedef struct taurus_text_node {
     TaurusNode base;                   /* MUST be first */
     char* content;                    /* Text content - NEVER trim! */
+    size_t content_len;               /* Byte length of content (excl. NUL) */
     int32_t next_sibling_off;         /* Byte offset to next sibling (0=NULL) */
 } TaurusTextNode;
 
