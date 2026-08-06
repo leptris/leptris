@@ -278,6 +278,11 @@ TaurusElement taurus_element_create_with_view(
 /* Create element with in-place string (zero-copy) */
 TaurusElement taurus_element_create_pooled_inplace(char* name, TaurusMemoryPool* pool);
 
+/* Create element skeleton for the deferred-NUL zero-copy parser path
+ * (TODO 113 Phase 5). Element name is left NULL — parser fills it in
+ * after consuming the opening tag. See taurus_element_create_zero_copy. */
+TaurusElement taurus_element_create_zero_copy(TaurusMemoryPool* pool);
+
 /* Create element using memory pool (O(1) bump allocation).
  * Single pool-routed entry point — TODO 26 removed the _fast wrapper. */
 TaurusElement taurus_element_create_pooled(const char* name, TaurusMemoryPool* pool);
@@ -402,6 +407,14 @@ int taurus_element_add_attribute(TaurusElement elem,
                                 TaurusStringView name_view,
                                 TaurusStringView value_view,
                                 TaurusMemoryPool* pool);
+
+/* Add attribute in deferred-NUL mode (TODO 113 Phase 5).
+ * Leaves attr->name and attr->value NULL; parser finalizes them
+ * after consuming the opening tag. */
+int taurus_element_add_attribute_zero_copy(TaurusElement elem,
+                                           TaurusStringView name_view,
+                                           TaurusStringView value_view,
+                                           TaurusMemoryPool* pool);
 
 /* ============================================================================
  * Name and Namespace Access

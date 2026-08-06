@@ -650,3 +650,92 @@ TEST(CompactPointerIntegration, DeepNestingTraversesViaOffsets) {
 
     taurus_document_free(doc);
 }
+
+// Zero-copy deferred NUL-termination (TODO 113 Phase 5). The parser
+// writes NUL terminators into the writable XML buffer to avoid one
+// pool_strdup per element/attribute name and per attribute value.
+// These specs exercise the edge cases where that path could corrupt
+// state: prefix splitting, entity-bearing values, self-closing tags,
+// empty elements, and namespaced names.
+TEST(ZeroCopyParse, ElementAndAttributeNamesRoundTrip) {
+    const char xml[] =
+        "<root attr='value' empty=''>"
+        "<child id='1' name='first'>text</child>"
+        "<self-closing enabled='yes'/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(taurus_element_name(root), "root");
+    EXPECT_STREQ(taurus_element_attribute(root, "attr"), "value");
+    EXPECT_STREQ(taurus_element_attribute(root, "empty"), "");
+
+    TaurusElement child = taurus_element_first_child_any(root);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(taurus_element_name(child), "child");
+    EXPECT_STREQ(taurus_element_attribute(child, "id"), "1");
+
+    // Self-closing — name was NUL-terminated at '/'.
+    TaurusElement sc = taurus_element_next_sibling_any(child);
+    ASSERT_NE(sc, nullptr);
+    EXPECT_STREQ(taurus_element_name(sc), "self-closing");
+    EXPECT_STREQ(taurus_element_attribute(sc, "enabled"), "yes");
+
+    taurus_document_free(doc);
+}
+
+TEST(ZeroCopyParse, NamespacedElementExposesLocalName) {
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "<xi:include href='chapter.xml'/>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusElement include = taurus_element_first_child_any(root);
+    ASSERT_NE(include, nullptr);
+    // Local name only — prefix "xi:" was stripped during parse.
+    EXPECT_STREQ(taurus_element_name(include), "include");
+    EXPECT_STREQ(taurus_element_attribute(include, "href"), "chapter.xml");
+
+    taurus_document_free(doc);
+}
+
+TEST(ZeroCopyParse, AttributeValueWithEntitiesDecodesCorrectly) {
+    const char xml[] =
+        "<root encoded='a&amp;b&lt;c&gt;d' normal='plain'/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    EXPECT_STREQ(taurus_element_attribute(root, "encoded"), "a&b<c>d");
+    EXPECT_STREQ(taurus_element_attribute(root, "normal"), "plain");
+
+    taurus_document_free(doc);
+}
+
+TEST(ZeroCopyParse, EmptyElementRoundTrips) {
+    const char xml[] = "<root><child></child><empty/></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusElement child = taurus_element_first_child_any(root);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(taurus_element_name(child), "child");
+    EXPECT_EQ(taurus_element_first_child_any(child), nullptr);
+
+    TaurusElement empty = taurus_element_next_sibling_any(child);
+    ASSERT_NE(empty, nullptr);
+    EXPECT_STREQ(taurus_element_name(empty), "empty");
+    EXPECT_EQ(taurus_element_first_child_any(empty), nullptr);
+
+    taurus_document_free(doc);
+}

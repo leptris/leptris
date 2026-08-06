@@ -93,6 +93,25 @@ TaurusElement taurus_element_create_pooled_inplace(char* name, TaurusMemoryPool*
     return taurus_element_create_with_view(name_view, pool);
 }
 
+/* Create an element skeleton with no name — for the deferred-NUL
+ * zero-copy parser path (TODO 113 Phase 5). The parser fills in
+ * elem->name/prefix after consuming the opening tag's terminator,
+ * at which point writing a NUL at name_view.data[name_view.length]
+ * is safe (the parser has moved past that byte).
+ *
+ * Caller MUST finalize via the parser before any code reads name. */
+TaurusElement taurus_element_create_zero_copy(TaurusMemoryPool* pool) {
+    if (!pool) return NULL;
+
+    TaurusElement elem = (TaurusElement)taurus_pool_alloc(
+        pool, sizeof(struct taurus_element));
+    if (!elem) return NULL;
+
+    memset(elem, 0, sizeof(struct taurus_element));
+    elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
+    return elem;
+}
+
 /* Create element using memory pool.
  *
  * The name is COPIED into the pool — callers can free or reuse their
@@ -331,6 +350,76 @@ int taurus_element_add_attribute(TaurusElement elem,
     /* Increment attribute count */
     elem->attr_count++;
 
+    return 0;
+}
+
+/* Add attribute in deferred-NUL mode (TODO 113 Phase 5).
+ *
+ * Mirrors taurus_element_add_attribute but leaves attr->name and
+ * attr->value NULL when no entity decoding is needed. The parser
+ * fills them in by NUL-terminating in the writable XML buffer after
+ * the opening tag is consumed — saving two pool allocations per
+ * attribute on the common (no-entity) path. Entity-bearing values
+ * are still pool-allocated eagerly (rare path, can't be zero-copied
+ * because the decoded bytes don't exist in the source buffer). */
+int taurus_element_add_attribute_zero_copy(TaurusElement elem,
+                                           TaurusStringView name_view,
+                                           TaurusStringView value_view,
+                                           TaurusMemoryPool* pool) {
+    if (!elem || taurus_sv_is_empty(&name_view) || !pool) return -1;
+
+    struct taurus_attribute* attr = (struct taurus_attribute*)taurus_pool_alloc(
+        pool, sizeof(struct taurus_attribute));
+    if (!attr) return -1;
+
+    attr->name_view = name_view;
+    attr->value_view = value_view;
+    attr->name = NULL;
+    attr->value = NULL;
+
+    attr->name_hash = 2166136261u;
+    for (size_t i = 0; i < name_view.length; i++) {
+        attr->name_hash ^= (unsigned char)name_view.data[i];
+        attr->name_hash *= 16777619u;
+    }
+
+    attr->prefix_view = taurus_sv_empty();
+    attr->namespace_uri_view = taurus_sv_empty();
+    attr->namespace_uri = NULL;
+    attr->prefix = NULL;
+
+    if (memchr(value_view.data, '&', value_view.length) != NULL) {
+        char* value_storage = (char*)taurus_pool_alloc(pool, value_view.length + 1);
+        if (value_storage) {
+            memcpy(value_storage, value_view.data, value_view.length);
+            value_storage[value_view.length] = '\0';
+            TaurusStringView decoded_sv = { value_storage, value_view.length };
+            char* decoded = taurus_decode_entities_view(&decoded_sv, pool);
+            if (decoded) {
+                attr->value = decoded;
+                attr->has_entities = 0;
+            } else {
+                attr->value = value_storage;
+                attr->has_entities = 1;
+            }
+        } else {
+            attr->has_entities = 0;
+        }
+    } else {
+        attr->has_entities = 0;
+    }
+
+    attr->next = NULL;
+
+    struct taurus_attribute* last = taurus_elem_last_attribute(elem);
+    if (last) {
+        last->next = attr;
+    } else {
+        taurus_elem_set_first_attribute(elem, attr);
+    }
+    taurus_elem_set_last_attribute(elem, attr);
+
+    elem->attr_count++;
     return 0;
 }
 
