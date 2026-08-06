@@ -36,6 +36,7 @@ TaurusTextNode* taurus_text_create(const char* content,
     }
     content_storage[content_len] = '\0';
     node->content = content_storage;
+    node->content_len = content_len;
 
     return node;
 }
@@ -60,5 +61,11 @@ void taurus_text_set_content(TaurusTextNode* text, const char* content) {
     if (!text) return;
 
     if (text->content) free(text->content);
-    text->content = content ? taurus_strdup(content) : NULL;
+    if (content) {
+        text->content_len = strlen(content);
+        text->content = taurus_strdup(content);
+    } else {
+        text->content_len = 0;
+        text->content = NULL;
+    }
 }
