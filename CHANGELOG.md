@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-06
+
+First tagged release.
+
 ### Fixed
 
 - All memory leaks across the test suite (was 43 leaks on basic.xml, now 0).
@@ -55,7 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stray 0-byte `src/taurus/dom/compact_allocator.c`.
 - `gtest` from `vcpkg.json` (tests use CMake FetchContent).
 
-## [0.1.0] - TBD
+## [0.1.0] - Pre-release baseline
+
+Initial development snapshot, never formally tagged.
 
 ### Added
 
