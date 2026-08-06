@@ -59,6 +59,36 @@ TEST(SerializeRoundTrip, GrowsBufferForHugeTextContent) {
     taurus_document_free(doc);
 }
 
+// Regression for the compact-pointer int32_t offset silent-drop bug
+// (TODO 90 Phase 2b). When content exceeds the pool's page size, the
+// node struct must still stay within ±2GB of its parent element so
+// first_child_off doesn't overflow. Before the fix, a 5MB text body
+// forced an oversized allocation for struct+content; on systems where
+// malloc places oversized requests far from small ones (notably macOS
+// runners), the int32_t offset overflowed to 0 and the text was
+// silently dropped from the tree.
+TEST(SerializeRoundTrip, HugeTextContentStaysAttachedToParent) {
+    // Pick a body size well past the largest pool page (32 KB) but
+    // small enough that the test runs in a fraction of a second.
+    const std::string body(100'000, 'A');
+    const std::string xml = "<r>" + body + "</r>";
+
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+
+    // The text node MUST be attached as a child of r. Before the fix,
+    // first_child_off was 0 here on affected platforms and the
+    // serializer emitted "<r/>".
+    char* serialized = taurus_document_serialize(doc, nullptr);
+    ASSERT_NE(serialized, nullptr);
+    EXPECT_EQ(std::strlen(serialized), xml.size());
+    EXPECT_STREQ(serialized, xml.c_str());
+    taurus_free_string(serialized);
+
+    taurus_document_free(doc);
+}
+
 TEST(SerializeOptions, IndentsWithGivenSpaces) {
     const char xml[] = "<r><a><b>x</b></a></r>";
     TaurusStatus st = TAURUS_OK;

@@ -299,6 +299,48 @@ void* taurus_pool_alloc_batch(TaurusMemoryPool* pool, size_t item_size, size_t c
     return ptr;
 }
 
+/* Allocate a node struct + content buffer with the split-on-oversize
+ * behavior documented in the header (TODO 90 Phase 2b silent-drop
+ * bug fix). */
+void* taurus_pool_alloc_node_with_content(TaurusMemoryPool* pool,
+                                           size_t struct_size,
+                                           size_t content_size,
+                                           char** content_out) {
+    if (!pool || struct_size == 0 || !content_out) return NULL;
+
+    size_t aligned_struct = ALIGN_SIZE(struct_size);
+    size_t total = aligned_struct + ALIGN_SIZE(content_size + 1);
+
+    if (total <= pool->page_size) {
+        /* Fast path: struct + content in a single pool bump. Both
+         * end up in the same page, cache-friendly and within ±2GB
+         * of every other pool-resident node. */
+        char* memory = (char*)taurus_pool_alloc(pool, total);
+        if (!memory) return NULL;
+        *content_out = memory + aligned_struct;
+        return memory;
+    }
+
+    /* Oversize path: keep the struct pool-resident (so int32_t
+     * offsets from the parent element stay valid) and put the
+     * content in its own oversized allocation. The content is
+     * referenced via raw pointer; the distance between the content
+     * buffer and the struct is unconstrained — only the struct's
+     * address matters for compact-pointer offsets. */
+    char* struct_ptr = (char*)taurus_pool_alloc(pool, aligned_struct);
+    if (!struct_ptr) return NULL;
+
+    char* content = (char*)taurus_pool_alloc(pool, content_size + 1);
+    if (!content) {
+        /* struct_ptr stays in the pool; reclaimed at pool destroy.
+         * Caller sees NULL and aborts; no leak. */
+        return NULL;
+    }
+
+    *content_out = content;
+    return struct_ptr;
+}
+
 /* ============================================================================
  * String Functions - Zero-Copy Support
  * ============================================================================ */

@@ -9,9 +9,11 @@
 
 /* Create text node: single pool-routed entry point.
  *
- * Allocates struct + content contiguously in one pool bump (TODO 18
- * consolidated the legacy calloc-backed create with the pool-backed
- * _create_fast — both now flow through here).
+ * Struct and content come from the pool. For typical small content
+ * they share a single pool page (cache-friendly); for oversized
+ * content the struct stays pool-resident (so int32_t compact
+ * pointers from the parent element remain valid) and the content
+ * lives in a separate oversized allocation referenced via pointer.
  *
  * CRITICAL: Content is NEVER trimmed — preserved exactly as given. */
 TaurusTextNode* taurus_text_create(const char* content,
@@ -19,13 +21,10 @@ TaurusTextNode* taurus_text_create(const char* content,
                                     TaurusMemoryPool* pool) {
     if (!pool) return NULL;
 
-    /* Single allocation: node struct + content + NUL */
-    size_t total_size = sizeof(TaurusTextNode) + content_len + 1;
-    char* memory = (char*)taurus_pool_alloc(pool, total_size);
-    if (!memory) return NULL;
-
-    TaurusTextNode* node = (TaurusTextNode*)memory;
-    char* content_storage = memory + sizeof(TaurusTextNode);
+    char* content_storage;
+    TaurusTextNode* node = (TaurusTextNode*)taurus_pool_alloc_node_with_content(
+        pool, sizeof(TaurusTextNode), content_len, &content_storage);
+    if (!node) return NULL;
 
     node->base.type = TAURUS_NODE_TYPE_TEXT;
     node->base.frozen = 0;

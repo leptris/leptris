@@ -7,9 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Create PI node.  Single pool-routed entry point: struct + target +
- * optional data, all contiguous (TODO 18 consolidated _create and
- * _create_fast). */
+/* Create PI node.  Single pool-routed entry point via
+ * taurus_pool_alloc_node_with_content so oversized PI data doesn't
+ * drag the struct out of the pool's compact-pointer range (TODO 90
+ * Phase 2b silent-drop fix). Target is always small; data may be
+ * arbitrarily large. */
 TaurusPINode* taurus_pi_create(const char* target,
                                 size_t target_len,
                                 const char* data,
@@ -17,18 +19,18 @@ TaurusPINode* taurus_pi_create(const char* target,
                                 TaurusMemoryPool* pool) {
     if (!target || target_len == 0 || !pool) return NULL;
 
-    /* Single allocation: struct + target + NUL + (data + NUL if present) */
-    size_t total_size = sizeof(TaurusPINode) + target_len + 1;
+    /* Combined "content" buffer holds target\0 + data\0 (if data). */
+    size_t content_size = target_len;  /* NUL added by helper */
     if (data && data_len > 0) {
-        total_size += data_len + 1;
+        content_size += 1 + data_len;  /* +1 for target's NUL */
     }
 
-    char* memory = (char*)taurus_pool_alloc(pool, total_size);
-    if (!memory) return NULL;
+    char* content_storage;
+    TaurusPINode* node = (TaurusPINode*)taurus_pool_alloc_node_with_content(
+        pool, sizeof(TaurusPINode), content_size, &content_storage);
+    if (!node) return NULL;
 
-    TaurusPINode* node = (TaurusPINode*)memory;
-    char* target_storage = memory + sizeof(TaurusPINode);
-
+    char* target_storage = content_storage;
     memcpy(target_storage, target, target_len);
     target_storage[target_len] = '\0';
 
