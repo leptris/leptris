@@ -293,10 +293,13 @@ static int sxs_step_top(TaurusSAXParser* p, int is_final) {
         return SAX_STEP_ERR;
     }
 
-    /* Peek at what follows '<' to dispatch XML decl / DOCTYPE / comment /
-     * PI / element.  We need up to 9 bytes ("<![CDATA[") to be sure. */
-    if (p->end - p->pos < 9 && !is_final) {
-        /* Not enough to disambiguate; ask for more. */
+    /* Peek at what follows '<' to dispatch.  Need at least 2 bytes to
+     * distinguish element ('<x') from PI ('<?'), comment/DOCTYPE/CDATA
+     * ('<!').  For '<!' we need 4 bytes for '<!--' or 9 for '<!DOCTYPE'
+     * and '<![CDATA['.  Dispatch progressively so a chunk_size=1 stream
+     * doesn't stall at TOPLEVEL waiting for 9 bytes that may never be
+     * needed (e.g. for a plain '<r>' root). */
+    if (p->end - p->pos < 2 && !is_final) {
         if (sxs_carry_append(p, p->pos, (size_t)(p->end - p->pos)) < 0) {
             sxs_set_error(p, "out of memory");
             return SAX_STEP_ERR;
@@ -305,9 +308,55 @@ static int sxs_step_top(TaurusSAXParser* p, int is_final) {
         return SAX_STEP_NEED_MORE;
     }
 
-    /* We have enough bytes (or it's final -- best effort). */
     const char* q = p->pos;
     size_t avail = (size_t)(p->end - q);
+    char kind = (avail >= 2) ? q[1] : '\0';
+
+    /* Element: '<' + name-start. */
+    if (kind != '?' && kind != '!') {
+        if (avail >= 2 && sxs_is_name_start(kind)) {
+            p->pos++;  /* consume '<' */
+            p->state = SAX_ST_ELEM_OPEN_NAME;
+            sxs_carry_reset(p);
+            return SAX_STEP_OK;
+        }
+        if (avail >= 2) {
+            sxs_set_error(p, "Unexpected character after '<'");
+            return SAX_STEP_ERR;
+        }
+        /* avail < 2 only reachable when is_final; fall through to best-effort below. */
+    }
+
+    /* PI: '<?' (may also be XML decl if followed by 'xml' + ws/'?'). */
+    if (kind == '?') {
+        /* Need at least 2 bytes; defer to detailed handler below if we have them. */
+    }
+
+    /* Comment / DOCTYPE / CDATA: '<!'. */
+    if (kind == '!') {
+        /* Need 4 bytes to distinguish '<!--' from '<!D...'/'<![...'. */
+        if (avail < 4 && !is_final) {
+            if (sxs_carry_append(p, q, avail) < 0) {
+                sxs_set_error(p, "out of memory");
+                return SAX_STEP_ERR;
+            }
+            p->pos = p->end;
+            return SAX_STEP_NEED_MORE;
+        }
+        if (avail >= 4 && q[2] == '-' && q[3] == '-') {
+            /* Comment.  Detailed handler below. */
+        } else {
+            /* DOCTYPE or CDATA: need 9 bytes. */
+            if (avail < 9 && !is_final) {
+                if (sxs_carry_append(p, q, avail) < 0) {
+                    sxs_set_error(p, "out of memory");
+                    return SAX_STEP_ERR;
+                }
+                p->pos = p->end;
+                return SAX_STEP_NEED_MORE;
+            }
+        }
+    }
 
     /* <?xml ... ?> — XML declaration.  Only valid at very start. */
     if (avail >= 5 && q[0] == '<' && q[1] == '?' &&
@@ -689,10 +738,18 @@ static int sxs_step_elem_content(TaurusSAXParser* p, int is_final) {
     }
 
     if (*p->pos == '<') {
-        /* Need at least 2 bytes to dispatch. */
+        /* Need at least 2 bytes to dispatch ('</', '<!', '<?', '<x'). */
         if (p->end - p->pos < 2) {
-            return is_final ? (sxs_set_error(p, "Unterminated element"), SAX_STEP_ERR)
-                            : SAX_STEP_NEED_MORE;
+            if (!is_final) {
+                if (sxs_carry_append(p, p->pos, (size_t)(p->end - p->pos)) < 0) {
+                    sxs_set_error(p, "out of memory");
+                    return SAX_STEP_ERR;
+                }
+                p->pos = p->end;
+                return SAX_STEP_NEED_MORE;
+            }
+            sxs_set_error(p, "Unterminated element");
+            return SAX_STEP_ERR;
         }
         char kind = p->pos[1];
         if (kind == '/') {
@@ -702,10 +759,18 @@ static int sxs_step_elem_content(TaurusSAXParser* p, int is_final) {
             return SAX_STEP_OK;
         }
         if (kind == '!') {
-            /* Need 4 bytes for '<!--', 9 for '<![CDATA[' */
+            /* Need 4 bytes for '<!--', 9 for '<![CDATA['. */
             if (p->end - p->pos < 4) {
-                return is_final ? (sxs_set_error(p, "Unterminated element"), SAX_STEP_ERR)
-                                : SAX_STEP_NEED_MORE;
+                if (!is_final) {
+                    if (sxs_carry_append(p, p->pos, (size_t)(p->end - p->pos)) < 0) {
+                        sxs_set_error(p, "out of memory");
+                        return SAX_STEP_ERR;
+                    }
+                    p->pos = p->end;
+                    return SAX_STEP_NEED_MORE;
+                }
+                sxs_set_error(p, "Unterminated element");
+                return SAX_STEP_ERR;
             }
             if (p->pos[2] == '-' && p->pos[3] == '-') {
                 p->pos += 4;
@@ -713,8 +778,20 @@ static int sxs_step_elem_content(TaurusSAXParser* p, int is_final) {
                 sxs_carry_reset(p);
                 return SAX_STEP_OK;
             }
-            if (p->end - p->pos >= 9 &&
-                memcmp(p->pos, "<![CDATA[", 9) == 0) {
+            /* Not comment; must be CDATA ('<![CDATA['). Need 9 bytes. */
+            if (p->end - p->pos < 9) {
+                if (!is_final) {
+                    if (sxs_carry_append(p, p->pos, (size_t)(p->end - p->pos)) < 0) {
+                        sxs_set_error(p, "out of memory");
+                        return SAX_STEP_ERR;
+                    }
+                    p->pos = p->end;
+                    return SAX_STEP_NEED_MORE;
+                }
+                sxs_set_error(p, "Unterminated element");
+                return SAX_STEP_ERR;
+            }
+            if (memcmp(p->pos, "<![CDATA[", 9) == 0) {
                 p->pos += 9;
                 p->state = SAX_ST_CDATA;
                 sxs_carry_reset(p);
@@ -839,10 +916,41 @@ static int sxs_step_closing_tag(TaurusSAXParser* p, int is_final) {
  * ============================================================================ */
 
 static int sxs_step_comment(TaurusSAXParser* p, int is_final) {
-    /* Drain input into carry until we find "-->". */
+    /* Boundary: `-->` straddling carry and new input. */
+    if (p->carry_len >= 2 && p->pos < p->end &&
+        p->carry[p->carry_len - 2] == '-' &&
+        p->carry[p->carry_len - 1] == '-' &&
+        *p->pos == '>') {
+        p->carry_len -= 2;
+        p->pos++;
+        if (p->carry_len > 0) {
+            const char* c = sxs_scratch_from_carry(p);
+            if (c && p->handler && p->handler->comment) {
+                p->handler->comment(p->user_data, c);
+            }
+        }
+        sxs_carry_reset(p);
+        p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
+        return SAX_STEP_OK;
+    }
+    if (p->carry_len >= 1 && p->pos + 1 < p->end &&
+        p->carry[p->carry_len - 1] == '-' &&
+        p->pos[0] == '-' && p->pos[1] == '>') {
+        p->carry_len -= 1;
+        p->pos += 2;
+        if (p->carry_len > 0) {
+            const char* c = sxs_scratch_from_carry(p);
+            if (c && p->handler && p->handler->comment) {
+                p->handler->comment(p->user_data, c);
+            }
+        }
+        sxs_carry_reset(p);
+        p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
+        return SAX_STEP_OK;
+    }
+
     while (p->pos + 2 < p->end) {
         if (p->pos[0] == '-' && p->pos[1] == '-' && p->pos[2] == '>') {
-            /* Found.  Emit carry (or skip if empty). */
             if (p->carry_len > 0) {
                 const char* c = sxs_scratch_from_carry(p);
                 if (c && p->handler && p->handler->comment) {
@@ -851,17 +959,20 @@ static int sxs_step_comment(TaurusSAXParser* p, int is_final) {
             }
             p->pos += 3;
             sxs_carry_reset(p);
-            /* Comments don't change the depth -- back to content. */
             p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
             return SAX_STEP_OK;
         }
-        sxs_carry_putc(p, *p->pos);
+        if (sxs_carry_putc(p, *p->pos) < 0) {
+            sxs_set_error(p, "out of memory");
+            return SAX_STEP_ERR;
+        }
         p->pos++;
     }
-    /* Ran out of input.  Save the trailing 0-2 bytes that might be the
-     * start of '-->' so we don't lose them across the boundary. */
     while (p->pos < p->end) {
-        sxs_carry_putc(p, *p->pos);
+        if (sxs_carry_putc(p, *p->pos) < 0) {
+            sxs_set_error(p, "out of memory");
+            return SAX_STEP_ERR;
+        }
         p->pos++;
     }
     if (is_final) {
@@ -874,9 +985,48 @@ static int sxs_step_comment(TaurusSAXParser* p, int is_final) {
 /* ============================================================================
  * State: SAX_ST_CDATA
  * Scan to ']]>', emit cdata event.
+ *
+ * Boundary handling: the closing `]]>` may straddle carry and new input
+ * (a `]` at end of one chunk + `]>` at start of the next).  Before the
+ * normal scan, check whether the last 1-2 bytes of carry + the first
+ * 1-2 bytes of input form `]]>`.
  * ============================================================================ */
 
 static int sxs_step_cdata(TaurusSAXParser* p, int is_final) {
+    /* Boundary check: does `]]>` straddle carry and new input? */
+    if (p->carry_len >= 2 && p->pos < p->end &&
+        p->carry[p->carry_len - 2] == ']' &&
+        p->carry[p->carry_len - 1] == ']' &&
+        *p->pos == '>') {
+        p->carry_len -= 2;  /* strip trailing ']]' from body */
+        p->pos++;           /* consume '>' */
+        if (p->carry_len > 0) {
+            const char* c = sxs_scratch_from_carry(p);
+            if (c && p->handler && p->handler->cdata) {
+                p->handler->cdata(p->user_data, c);
+            }
+        }
+        sxs_carry_reset(p);
+        p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
+        return SAX_STEP_OK;
+    }
+    if (p->carry_len >= 1 && p->pos + 1 < p->end &&
+        p->carry[p->carry_len - 1] == ']' &&
+        p->pos[0] == ']' && p->pos[1] == '>') {
+        p->carry_len -= 1;  /* strip trailing ']' from body */
+        p->pos += 2;        /* consume ']>' */
+        if (p->carry_len > 0) {
+            const char* c = sxs_scratch_from_carry(p);
+            if (c && p->handler && p->handler->cdata) {
+                p->handler->cdata(p->user_data, c);
+            }
+        }
+        sxs_carry_reset(p);
+        p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
+        return SAX_STEP_OK;
+    }
+
+    /* Normal scan within new input. */
     while (p->pos + 2 < p->end) {
         if (p->pos[0] == ']' && p->pos[1] == ']' && p->pos[2] == '>') {
             if (p->carry_len > 0) {
@@ -890,11 +1040,18 @@ static int sxs_step_cdata(TaurusSAXParser* p, int is_final) {
             p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
             return SAX_STEP_OK;
         }
-        sxs_carry_putc(p, *p->pos);
+        if (sxs_carry_putc(p, *p->pos) < 0) {
+            sxs_set_error(p, "out of memory");
+            return SAX_STEP_ERR;
+        }
         p->pos++;
     }
+    /* Trailing 0-2 bytes might be start of `]]>`; save them. */
     while (p->pos < p->end) {
-        sxs_carry_putc(p, *p->pos);
+        if (sxs_carry_putc(p, *p->pos) < 0) {
+            sxs_set_error(p, "out of memory");
+            return SAX_STEP_ERR;
+        }
         p->pos++;
     }
     if (is_final) {
@@ -910,6 +1067,26 @@ static int sxs_step_cdata(TaurusSAXParser* p, int is_final) {
  * ============================================================================ */
 
 static int sxs_step_pi(TaurusSAXParser* p, int is_final) {
+    /* Boundary: `?>` straddling carry and new input. */
+    if (p->carry_len >= 1 && p->pos < p->end &&
+        p->carry[p->carry_len - 1] == '?' && *p->pos == '>') {
+        p->carry_len -= 1;  /* strip trailing '?' */
+        p->pos++;           /* consume '>' */
+        const char* ts = p->carry;
+        const char* te = ts;
+        while (te < p->carry + p->carry_len && !sxs_is_ws(*te)) te++;
+        const char* target = sxs_scratch_append(p, ts, (size_t)(te - ts));
+        const char* ds = te;
+        while (ds < p->carry + p->carry_len && sxs_is_ws(*ds)) ds++;
+        const char* data = sxs_scratch_append(p, ds, (size_t)(p->carry + p->carry_len - ds));
+        if (p->handler && p->handler->processing_instruction) {
+            p->handler->processing_instruction(p->user_data, target, data);
+        }
+        sxs_carry_reset(p);
+        p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
+        return SAX_STEP_OK;
+    }
+
     /* Drain until '?>'. */
     while (p->pos + 1 < p->end) {
         if (p->pos[0] == '?' && p->pos[1] == '>') {
@@ -929,11 +1106,17 @@ static int sxs_step_pi(TaurusSAXParser* p, int is_final) {
             p->state = (p->elem_depth > 0) ? SAX_ST_ELEM_CONTENT : SAX_ST_TOPLEVEL;
             return SAX_STEP_OK;
         }
-        sxs_carry_putc(p, *p->pos);
+        if (sxs_carry_putc(p, *p->pos) < 0) {
+            sxs_set_error(p, "out of memory");
+            return SAX_STEP_ERR;
+        }
         p->pos++;
     }
     while (p->pos < p->end) {
-        sxs_carry_putc(p, *p->pos);
+        if (sxs_carry_putc(p, *p->pos) < 0) {
+            sxs_set_error(p, "out of memory");
+            return SAX_STEP_ERR;
+        }
         p->pos++;
     }
     if (is_final) {
@@ -1006,12 +1189,15 @@ int taurus_sax_streaming_feed(TaurusSAXParser* p,
     /* Emit start_document on the very first chunk. */
     sxs_emit_start_document(p);
 
-    /* If the previous TOPLEVEL step stashed partial bytes in carry
-     * because there weren't enough to disambiguate (< 9 for "<![CDATA["),
-     * prepend them to the new input so the dispatcher sees a contiguous
-     * stream.  Carry is otherwise used as "in-progress token" by other
-     * states (ATTR_NAME, COMMENT body, etc.) and must NOT be touched. */
-    if (p->carry_len > 0 && p->state == SAX_ST_TOPLEVEL) {
+    /* If the previous step stashed partial bytes in carry because
+     * there weren't enough to disambiguate (TOPLEVEL needs up to 9
+     * for "<![CDATA[", ELEM_CONTENT needs up to 9 for the same in
+     * body position), prepend them to the new input so the
+     * dispatcher sees a contiguous stream.  Carry is otherwise used
+     * as "in-progress token" by ATTR_NAME, ATTR_VALUE, COMMENT body,
+     * etc. and must NOT be touched. */
+    if (p->carry_len > 0 &&
+        (p->state == SAX_ST_TOPLEVEL || p->state == SAX_ST_ELEM_CONTENT)) {
         if (p->input_len + p->carry_len + len > p->input_cap) {
             size_t need = p->input_len + p->carry_len + len;
             size_t new_cap = p->input_cap ? p->input_cap : 256;
