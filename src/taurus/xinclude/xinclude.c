@@ -253,6 +253,44 @@ static TaurusStatus xinclude_process_internal(struct taurus_document* doc,
                                               const char* base_url,
                                               int depth);
 
+/* TODO 117 Phase C: cycle detection.
+ *
+ * Each include directive resolves to an absolute path.  We thread a
+ * singly-linked list of `CycleNode` paths through the recursion so we
+ * can reject A -> B -> A without going through the depth guard (which
+ * protects against unbounded recursion, not cycles specifically).
+ *
+ * Memory: each entry is a malloc'd string, freed when the scope ends
+ * (matching push/pop pairing in the recursion). */
+typedef struct CycleNode {
+    char* path;                 /* heap-allocated absolute path */
+    struct CycleNode* next;
+} CycleNode;
+
+static int cycle_contains(CycleNode* ancestors, const char* path) {
+    for (CycleNode* n = ancestors; n; n = n->next) {
+        if (strcmp(n->path, path) == 0) return 1;
+    }
+    return 0;
+}
+
+static CycleNode* cycle_push(CycleNode* ancestors, const char* path) {
+    CycleNode* n = (CycleNode*)malloc(sizeof(CycleNode));
+    if (!n) return ancestors;
+    n->path = strdup(path);
+    n->next = ancestors;
+    if (!n->path) { free(n); return ancestors; }
+    return n;
+}
+
+static CycleNode* cycle_pop(CycleNode* ancestors) {
+    if (!ancestors) return NULL;
+    CycleNode* next = ancestors->next;
+    free(ancestors->path);
+    free(ancestors);
+    return next;
+}
+
 /* Recursive walker. Bottom-up so that included content can itself
  * contain nested xi:include elements.  Returns 0 on first hard failure
  * (parse error, alloc failure), 1 otherwise. The `depth` parameter
@@ -261,7 +299,8 @@ static TaurusStatus xinclude_process_internal(struct taurus_document* doc,
 static int process_element_xinclude(TaurusElement elem,
                                      struct taurus_document* doc,
                                      const char* base_url,
-                                     int depth) {
+                                     int depth,
+                                     CycleNode* ancestors) {
     if (!elem) return 1;
 
     TaurusNodeRef child = taurus_node_first_child((TaurusNodeRef)elem);
@@ -269,7 +308,7 @@ static int process_element_xinclude(TaurusElement elem,
         TaurusNodeRef next = taurus_node_next_sibling(child);
         if (taurus_node_get_type(child) == TAURUS_NODE_TYPE_ELEMENT) {
             int rc = process_element_xinclude((TaurusElement)child, doc,
-                                              base_url, depth);
+                                              base_url, depth, ancestors);
             if (!rc) return 0;
         }
         child = next;
@@ -284,6 +323,13 @@ static int process_element_xinclude(TaurusElement elem,
     char full_path[4096];
     if (!join_path(full_path, sizeof(full_path), base_url, href)) return 1;
 
+    /* TODO 117 Phase C: cycle detection.  If `full_path` is already in
+     * the ancestor chain, we'd be re-including something we're
+     * currently processing -- treat as failure (fallback below). */
+    if (cycle_contains(ancestors, full_path)) {
+        return 0;  /* signal failure so caller (or fallback) handles it */
+    }
+
     size_t content_len = 0;
     char* content = load_file_content(full_path, &content_len);
 
@@ -295,6 +341,11 @@ static int process_element_xinclude(TaurusElement elem,
         int is_xml = (!parse || strcmp(parse, "xml") == 0);
 
         if (is_xml) {
+            /* TODO 117 Phase C: push current URI onto ancestor stack so
+             * nested xi:include can detect cycles. */
+            CycleNode* saved = ancestors;
+            ancestors = cycle_push(ancestors, full_path);
+
             TaurusStatus st = TAURUS_OK;
             TaurusDocument included_doc = taurus_parse_string(content, content_len, &st);
             if (included_doc && st == TAURUS_OK) {
@@ -362,8 +413,12 @@ static int process_element_xinclude(TaurusElement elem,
                 }
             }
             if (included_doc) taurus_document_free(included_doc);
+            /* TODO 117 Phase C: pop the URI we pushed at the start. */
+            ancestors = cycle_pop(saved);
         } else if (strcmp(parse, "text") == 0) {
             substitute = (TaurusNode*)taurus_text_create(content, content_len, doc->pool);
+            /* parse="text" doesn't recurse into another file's body
+             * (no risk of A -> B -> A via text), so no push/pop here. */
         }
         /* Unknown parse= value: silently skip, per XInclude spec. */
         free(content);
@@ -412,7 +467,10 @@ static TaurusStatus xinclude_process_internal(struct taurus_document* doc,
     TaurusElement root = taurus_document_root(doc);
     if (!root) return TAURUS_OK;
 
-    int rc = process_element_xinclude(root, doc, base_url, depth);
+    /* TODO 117 Phase C: thread empty ancestor list into the walk.
+     * The first include pushes its own URI, so the second visit to the
+     * same URI is detected as a cycle. */
+    int rc = process_element_xinclude(root, doc, base_url, depth, NULL);
     if (!rc) return TAURUS_ERROR_IO;
     return TAURUS_OK;
 }
