@@ -35,7 +35,9 @@ TEST(XPathBytecode, StringLiteralRoundTrips) {
 
     TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "'hello'");
     ASSERT_NE(r, nullptr);
-    EXPECT_STREQ(taurus_xpath_result_string(r), "hello");
+    char* s = taurus_xpath_result_string(r);
+    EXPECT_STREQ(s, "hello");
+    taurus_free_string(s);
     taurus_xpath_result_free(r);
 
     taurus_document_free(doc);
