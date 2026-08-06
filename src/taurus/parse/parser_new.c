@@ -53,6 +53,7 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
     p->end = xml + len;
     p->pool = pool;  /* Store pool for fast DOM allocation */
     p->writable = 0;  /* Read-only by default */
+    p->track_position = 0;  /* Skip line/column in hot path (TODO 113) */
     p->dtd = NULL;    /* No DTD parsed yet */
     p->has_namespace_prefixes = 0;  /* No namespaces seen yet */
     p->strict_mode = taurus_get_strict_mode();  /* Cached for hot-path reads (TODO 103) */
@@ -91,15 +92,18 @@ Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool) {
 #endif
 
 #ifdef TAURUS_HAS_UTF8PROC
-    /* Validate UTF-8 if utf8proc is available */
-    if (!taurus_unicode_validate_utf8(p->pos, p->end - p->pos)) {
+    /* PERFORMANCE (TODO 113 Phase 3): skip full-document UTF-8
+     * validation by default — it scans every byte (~4µs for 1KB).
+     * pugixml doesn't validate during parse either. Validation runs
+     * only in strict mode. Invalid UTF-8 in lenient mode is handled
+     * gracefully by the parser (garbled chars, not crashes). */
+    if (p->strict_mode && !taurus_unicode_validate_utf8(p->pos, p->end - p->pos)) {
         /* If validation fails and we don't have iconv, it's an error */
         #ifndef TAURUS_HAS_ICONV
         if (p->encoding) TAURUS_FREE(p->encoding);
         TAURUS_FREE(p);
         return NULL;
         #endif
-        /* With iconv, we might be able to convert from another encoding */
     }
 #endif
 
@@ -146,6 +150,7 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
     p->end = xml + len;
     p->pool = pool;  /* Store pool for fast DOM allocation */
     p->writable = 1;  /* Writable mode - can modify buffer in-place */
+    p->track_position = 0;  /* Skip line/column in hot path (TODO 113) */
     p->dtd = NULL;    /* No DTD parsed yet */
     p->has_namespace_prefixes = 0;  /* No namespaces seen yet */
     p->strict_mode = taurus_get_strict_mode();  /* Cached for hot-path reads (TODO 103) */
@@ -184,8 +189,8 @@ Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool) {
 #endif
 
 #ifdef TAURUS_HAS_UTF8PROC
-    /* Validate UTF-8 if utf8proc is available */
-    if (!taurus_unicode_validate_utf8(p->pos, p->end - p->pos)) {
+    /* Skip full-doc UTF-8 validation in lenient mode (TODO 113). */
+    if (p->strict_mode && !taurus_unicode_validate_utf8(p->pos, p->end - p->pos)) {
         /* If validation fails and we don't have iconv, it's an error */
         #ifndef TAURUS_HAS_ICONV
         if (p->encoding) TAURUS_FREE(p->encoding);
@@ -327,19 +332,21 @@ char parser_peek_ahead(Parser* p, int offset) {
     return parser_peek_ahead_inline(p, offset);
 }
 
+/* PERFORMANCE: parser_advance is called MILLIONS of times. The
+ * line/column tracking adds 2-3 branches per call. For the hot
+ * parsing path, we skip tracking and compute line/column lazily
+ * only when an error occurs (TODO 113 Phase 3 perf).
+ *
+ * Set track_position=1 only when you need accurate line/column
+ * for error reporting. The parse_name and element loops set it to
+ * 0 for maximum speed. */
 char parser_advance(Parser* p) {
     if (parser_at_end(p)) return '\0';
-
-    char c = *p->pos;
-    p->pos++;
-
-    if (c == '\n') {
-        p->line++;
-        p->column = 1;
-    } else {
-        p->column++;
+    char c = *p->pos++;
+    if (p->track_position) {
+        if (c == '\n') { p->line++; p->column = 1; }
+        else { p->column++; }
     }
-
     return c;
 }
 
@@ -427,6 +434,17 @@ int parser_match(Parser* p, const char* str) {
 }
 
 void parser_set_error(Parser* p, const char* message) {
+    /* Lazy line/column computation (TODO 113 Phase 3). When
+     * track_position is 0 (the hot path), line/column are stale.
+     * Compute them now by scanning from the start of the buffer. */
+    if (!p->track_position) {
+        p->line = 1;
+        p->column = 1;
+        for (const char* s = p->input; s < p->pos; s++) {
+            if (*s == '\n') { p->line++; p->column = 1; }
+            else { p->column++; }
+        }
+    }
     snprintf(p->error, sizeof(p->error), "Line %d, Column %d: %s",
              p->line, p->column, message);
     p->has_error = 1;

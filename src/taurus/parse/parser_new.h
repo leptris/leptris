@@ -55,6 +55,11 @@ typedef struct {
     /* In-place parsing mode (zero-copy optimization) */
     int writable;                /* 1 if input can be modified in-place, 0 otherwise */
 
+    /* PERFORMANCE: when 0, parser_advance skips line/column tracking
+     * (TODO 113 Phase 3). Set to 1 only when reporting an error.
+     * Saves ~2 branches per character advance in the hot parse loop. */
+    int track_position;
+
     /* PERFORMANCE: Track if any namespace prefixes were found during parsing
      * This allows us to skip post-parse namespace resolution for documents without namespaces */
     int has_namespace_prefixes;  /* 1 if any element has a prefix (e.g., "foo:bar"), 0 otherwise */
