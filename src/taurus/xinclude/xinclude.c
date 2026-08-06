@@ -376,17 +376,33 @@ static int process_element_xinclude(TaurusElement elem,
                         if (xr) {
                             size_t n = taurus_xpath_result_count(xr);
                             if (n > 0) {
-                                /* Splice each node from the result. The
-                                 * first one becomes the substitute; the
-                                 * rest are appended as siblings via
-                                 * element_insert_after on each new
-                                 * node's predecessor — but we don't
-                                 * have multi-splice API yet, so for
-                                 * now take just the first node. */
+                                /* TODO 117 Phase B: when the xpointer
+                                 * selects an ELEMENT, move it via the
+                                 * same ownership-transfer machinery as
+                                 * Phase A.  For non-element results
+                                 * (text, attribute, comment), keep the
+                                 * deep-copy path -- those node types
+                                 * don't have a "detach from tree" API
+                                 * that's pool-safe across docs. */
                                 TaurusElement first = taurus_xpath_result_get(xr, 0);
-                                if (first) {
+                                if (first && taurus_node_get_type(
+                                        (TaurusNodeRef)first) ==
+                                    TAURUS_NODE_TYPE_ELEMENT) {
+                                    /* Move: the fragment still lives
+                                     * in included_doc's pool, so we
+                                     * adopt included_doc into our
+                                     * lifecycle to keep the pool
+                                     * alive. */
+                                    taurus_element_set_document_tree(
+                                        first, doc);
+                                    taurus_document_adopt_child(
+                                        doc, included_doc);
+                                    substitute = (TaurusNode*)first;
+                                    included_doc = NULL;
+                                } else if (first) {
                                     substitute = deep_copy_node(
-                                        (const TaurusNode*)first, doc->pool);
+                                        (const TaurusNode*)first,
+                                        doc->pool);
                                 }
                             }
                             taurus_xpath_result_free(xr);
