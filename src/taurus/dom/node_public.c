@@ -69,7 +69,7 @@ TAURUS_API TaurusNodeRef taurus_element_as_node(TaurusElement elem) {
 TAURUS_API const char* taurus_text_node_get_content(TaurusNodeRef node) {
     if (!node) return NULL;
     if (node->type == TAURUS_NODE_TYPE_TEXT) {
-        return ((TaurusTextNode*)node)->content;
+        return taurus_text_get_content((TaurusTextNode*)node);
     }
     if (node->type == TAURUS_NODE_TYPE_CDATA) {
         return ((TaurusCDATANode*)node)->content;

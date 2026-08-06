@@ -646,7 +646,7 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
             /* SAFETY: Verify text pointer is valid before accessing content */
             if ((uintptr_t)text > 0x1000) {
                 TaurusTextNode* text_copy = taurus_text_create(text->content,
-                    text->content ? strlen(text->content) : 0,
+                    text->content_len,
                     copy->document ? copy->document->pool : NULL);
                 if (text_copy) {
                     taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
@@ -778,7 +778,7 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
         } else if (child_node->type == TAURUS_NODE_TYPE_TEXT) {
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
-                text->content ? strlen(text->content) : 0,
+                text->content_len,
                 copy->document ? copy->document->pool : NULL);
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
@@ -893,7 +893,7 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
         } else if (child_node->type == TAURUS_NODE_TYPE_TEXT) {
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
-                text->content ? strlen(text->content) : 0,
+                text->content_len,
                 copy->document ? copy->document->pool : NULL);
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
@@ -1008,7 +1008,7 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
         } else if (child_node->type == TAURUS_NODE_TYPE_TEXT) {
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
-                text->content ? strlen(text->content) : 0,
+                text->content_len,
                 copy->document ? copy->document->pool : NULL);
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
@@ -1180,7 +1180,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
             /* Copy text node (not bulk-allocated) */
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
-                text->content ? strlen(text->content) : 0,
+                text->content_len,
                 copy->document ? copy->document->pool : NULL);
             if (text_copy) {
                 /* Link as child using internal function */

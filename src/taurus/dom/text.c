@@ -29,6 +29,8 @@ TaurusTextNode* taurus_text_create(const char* content,
     node->base.type = TAURUS_NODE_TYPE_TEXT;
     node->base.frozen = 0;
     node->base.version = 0;
+    node->pool = NULL;       /* content is pool-resident + NUL-terminated */
+    node->borrowed = 0;
     node->next_sibling_off = 0;
 
     if (content && content_len > 0) {
@@ -37,6 +39,32 @@ TaurusTextNode* taurus_text_create(const char* content,
     content_storage[content_len] = '\0';
     node->content = content_storage;
     node->content_len = content_len;
+
+    return node;
+}
+
+/* Create a borrowed text node (TODO 115 Phase B).
+ *
+ * Allocates only sizeof(TaurusTextNode) from the pool — no content
+ * copy. Stores the caller's pointer + length; content is NOT
+ * NUL-terminated. The pool is kept on the node so a later
+ * taurus_text_get_content call can materialize a NUL-terminated copy. */
+TaurusTextNode* taurus_text_create_borrowed(const char* content,
+                                             size_t content_len,
+                                             TaurusMemoryPool* pool) {
+    if (!pool) return NULL;
+
+    TaurusTextNode* node = (TaurusTextNode*)taurus_pool_alloc(pool, sizeof(TaurusTextNode));
+    if (!node) return NULL;
+
+    node->base.type = TAURUS_NODE_TYPE_TEXT;
+    node->base.frozen = 0;
+    node->base.version = 0;
+    node->content = (char*)content;  /* Non-owning; caller guarantees lifetime. */
+    node->content_len = content_len;
+    node->pool = pool;
+    node->borrowed = 1;
+    node->next_sibling_off = 0;
 
     return node;
 }
@@ -51,16 +79,34 @@ void taurus_text_free(TaurusTextNode* text) {
     /* Pool-owned; nothing to do. */
 }
 
-/* Get text content */
+/* Get text content.
+ *
+ * For a borrowed (non-NUL-terminated) node this lazily materializes a
+ * NUL-terminated copy into the node's pool and flips the node out of
+ * borrowed mode, so subsequent calls are O(1). The materialized copy
+ * is pool-owned and freed by taurus_document_free. */
 const char* taurus_text_get_content(TaurusTextNode* text) {
-    return text ? text->content : NULL;
+    if (!text) return NULL;
+
+    if (text->borrowed && text->pool) {
+        char* storage = (char*)taurus_pool_alloc(text->pool, text->content_len + 1);
+        if (!storage) return text->content;  /* Out of pool; return what we have. */
+        if (text->content_len > 0) {
+            memcpy(storage, text->content, text->content_len);
+        }
+        storage[text->content_len] = '\0';
+        text->content = storage;
+        text->borrowed = 0;
+    }
+
+    return text->content;
 }
 
 /* Set text content */
 void taurus_text_set_content(TaurusTextNode* text, const char* content) {
     if (!text) return;
 
-    if (text->content) free(text->content);
+    if (text->content && !text->borrowed) free(text->content);
     if (content) {
         text->content_len = strlen(content);
         text->content = taurus_strdup(content);
@@ -68,4 +114,6 @@ void taurus_text_set_content(TaurusTextNode* text, const char* content) {
         text->content_len = 0;
         text->content = NULL;
     }
+    text->borrowed = 0;
+    text->pool = NULL;
 }

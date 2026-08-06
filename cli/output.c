@@ -181,11 +181,14 @@ static void xml_print_element_recursive(
         else if (TAURUS_NODE_IS_TEXT(child)) {
             /* Text node - escape and print */
             TaurusTextNode* text_node = TAURUS_NODE_AS_TEXT(child);
-            if (text_node && text_node->content) {
+            /* text may be borrowed (non-NUL-terminated); materialize so the
+             * whitespace check and output loop below can rely on NUL. */
+            const char* content = taurus_text_get_content(text_node);
+            if (text_node && content) {
                 /* In compact mode, skip whitespace-only text nodes */
                 if (!ctx->options.pretty_print) {
                     /* Check if content is whitespace-only */
-                    const char* p = text_node->content;
+                    const char* p = content;
                     while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
                         p++;
                     }
@@ -195,7 +198,7 @@ static void xml_print_element_recursive(
                         continue;
                     }
                 }
-                for (const char* p = text_node->content; *p; p++) {
+                for (const char* p = content; *p; p++) {
                     switch (*p) {
                         case '<':  fprintf(out, "&lt;"); break;
                         case '>':  fprintf(out, "&gt;"); break;
