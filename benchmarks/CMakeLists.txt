@@ -78,6 +78,7 @@ endfunction()
 # ----------------------------------------------------------------------------
 if(LIBXML2_AVAILABLE)
     taurus_add_benchmark(bench_dom_taurus      dom/bench_taurus.c)
+taurus_add_benchmark(bench_text_borrowed   dom/bench_text_borrowed.c)
     target_compile_definitions(bench_dom_taurus PRIVATE HAVE_LIBXML2=1)
     target_include_directories(bench_dom_taurus PRIVATE ${LIBXML2_INCLUDE_DIR})
     target_link_libraries(bench_dom_taurus PRIVATE ${LIBXML2_LIBRARY})
