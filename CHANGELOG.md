@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-06
+
+Parse-perf push + streaming SAX rewrite + XInclude ownership transfer.
+
+### Added — Streaming SAX state machine (TODO 116)
+
+- New `taurus_sax_parser_set_streaming(parser, 1)` API.
+- `taurus_sax_parser_create` now defaults to streaming for `feed()`. Events emit as chunks arrive; memory bounded by max nesting depth, not document size.
+- `taurus_sax_parse` (one-shot) routes through the state machine too — the recursive-descent parser is gone (~840 lines removed from `parser.c`).
+- 20 new specs cover chunk-boundary edge cases: element names, attribute values, `-->` / `]]>` / `?>` close delimiters that straddle feeds, deep nesting, namespace prefixes, mixed content.
+- Bug fixes the legacy parser had and streaming does not: legacy trimmed inter-element whitespace via `sax_skip_whitespace` at the top of the content loop. Streaming correctly preserves whitespace per the SAX contract.
+
+### Added — XInclude ownership transfer (TODO 117)
+
+- `taurus_document_adopt_child(parent, child)` — public API for transferring ownership of a freshly-parsed included doc into a parent's lifecycle.
+- `xi:include parse="xml"` (the common case) now **moves** the included root into the parent tree instead of deep-copying. O(1) pointer detach instead of O(subtree-size) per include.
+- Cycle detection: thread ancestor URIs through `xi:include` recursion via a `CycleNode` linked list. Catches `A → B → A` before the depth guard burns through 32 levels.
+- 2 new specs: `XIncludePhaseA.AdoptedRootHasParentDocPointer`, `XIncludePhaseC.MutualIncludeCycleDoesNotLeak`.
+
+### Added — Zero-copy text nodes (TODO 115)
+
+- `taurus_text_create_borrowed(content, len, pool)` — non-owning pointer into the parser's writable input buffer. Content is intentionally not NUL-terminated; `content_len` is authoritative.
+- Lazy materialization in `taurus_text_get_content` preserves the public NUL-terminated contract.
+- 5 new specs in `test/dom/test_text_borrowed.cpp`.
+- New `benchmarks/dom/bench_text_borrowed.c` — permanent perf target for the borrowed-text path.
+
+### Changed — Parser perf (TODO 114)
+
+- Phase 1: parser no longer allocates an intermediate buffer for text on the writable + no-entity path.
+- Phase 3: `Parser` struct itself is pool-allocated (one fewer `malloc`/`free` per parse).
+- Small-doc parse: 11.75 µs (was 15.17 µs pre-v0.2.0, -22.5%).
+
+### Fixed
+
+- `evaluator_axes.c`: 11 `matches_node_test` call sites now cast `TaurusElement` → `TaurusNode*` explicitly. Pre-existing; clang/macOS with `-Werror` failed the build. The macOS CI Benchmarks check is now clean.
+- `parser_new.c`: XML-declaration probe save/restore used `size_t` for a pointer (`size_t save = p->pos`), truncating the upper bits on 64-bit. Use `const char*` so no conversion happens.
+- Two stale `static` helpers removed from `evaluator_axes.c` (were tripping `-Wunused-function`).
+
 ## [0.2.0] - 2026-08-06
 
 First tagged release.
