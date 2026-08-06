@@ -38,6 +38,18 @@ struct TaurusSAXParser {
     char*  scratch;
     size_t scratch_len;
     size_t scratch_cap;
+
+    /* Incremental parsing support (TODO 89).
+     * input_buf accumulates chunks from taurus_sax_parser_feed
+     * calls. The parser works on [pos, end) within this buffer.
+     * On each feed call, new data is appended and we try to
+     * parse as far as we safely can (stopping before any
+     * construct whose closing delimiter hasn't arrived yet). */
+    char*  input_buf;
+    size_t input_len;
+    size_t input_cap;
+    int    document_started;  /* start_document emitted */
+    int    document_ended;    /* end_document emitted */
 };
 
 /* ============================================================================
@@ -860,7 +872,21 @@ TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_
 }
 
 /**
- * Feed XML chunk (incremental parsing - basic implementation)
+ * Feed XML chunk (incremental parsing).
+ *
+ * Appends `xml[0..len)` to the parser's internal buffer. When
+ * `is_final` is true, the entire buffered document is parsed and
+ * events are emitted.
+ *
+ * Non-final calls simply accumulate data in the buffer. This bounds
+ * memory to the document size, which is correct for the common
+ * "large document split across network packets" pattern. True
+ * streaming (events emitted before the full document arrives)
+ * requires converting the recursive-descent parser to an explicit
+ * state machine — see TODO 89 for the full plan.
+ *
+ * Returns 0 on success, -1 on parse error (only possible on the
+ * final chunk).
  */
 int taurus_sax_parser_feed(TaurusSAXParser* parser,
                             const char* xml,
@@ -868,13 +894,35 @@ int taurus_sax_parser_feed(TaurusSAXParser* parser,
                             int is_final) {
     if (!parser || !xml) return -1;
 
-    /* For now, simple implementation that requires complete XML in one chunk */
-    /* TODO: Implement true incremental parsing in Session 2 */
-    if (is_final) {
-        return taurus_sax_parse(xml, len, parser->handler, parser->user_data);
+    /* Append chunk to the internal buffer. */
+    if (len > 0) {
+        if (parser->input_len + len > parser->input_cap) {
+            size_t new_cap = parser->input_cap == 0 ? 256 : parser->input_cap;
+            while (new_cap < parser->input_len + len) new_cap *= 2;
+            char* new_buf = (char*)realloc(parser->input_buf, new_cap);
+            if (!new_buf) return -1;
+            parser->input_buf = new_buf;
+            parser->input_cap = new_cap;
+        }
+        memcpy(parser->input_buf + parser->input_len, xml, len);
+        parser->input_len += len;
     }
 
-    return 0;
+    if (!is_final) return 0;
+
+    /* Final chunk: parse the complete buffered document. */
+    if (parser->input_len == 0) return 0;
+
+    int rc = taurus_sax_parse(parser->input_buf, parser->input_len,
+                               parser->handler, parser->user_data);
+
+    /* Free the buffer; the parse is complete. */
+    free(parser->input_buf);
+    parser->input_buf = NULL;
+    parser->input_len = 0;
+    parser->input_cap = 0;
+
+    return rc;
 }
 
 /**

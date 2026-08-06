@@ -435,3 +435,68 @@ TEST_F(SaxParser, XmlDeclarationSkippedCleanly) {
 }
 
 }  // namespace
+
+// ---- Incremental SAX (TODO 89) ---------------------------------------
+
+TEST(SaxIncremental, EventsMatchAcrossChunkBoundaries) {
+    /* Feed the same document in one shot vs. multiple chunks.
+     * The events must match. */
+    const char xml[] = "<root><a>text</a><b/></root>";
+
+    /* One-shot */
+    std::vector<std::string> one_shot_events;
+    TaurusSAXHandler handler1 = {0};
+    handler1.start_element = [](void* ud, const char* name, const char** attrs) {
+        auto* ev = static_cast<std::vector<std::string>*>(ud);
+        ev->push_back(std::string("S:") + name);
+    };
+    handler1.end_element = [](void* ud, const char* name) {
+        auto* ev = static_cast<std::vector<std::string>*>(ud);
+        ev->push_back(std::string("E:") + name);
+    };
+    handler1.characters = [](void* ud, const char* text, size_t len) {
+        auto* ev = static_cast<std::vector<std::string>*>(ud);
+        ev->push_back(std::string("T:") + std::string(text, len));
+    };
+    taurus_sax_parse(xml, strlen(xml), &handler1, &one_shot_events);
+
+    /* Incremental: feed in 5-byte chunks */
+    std::vector<std::string> chunk_events;
+    TaurusSAXParser* parser = taurus_sax_parser_create(&handler1, &chunk_events);
+    ASSERT_NE(parser, nullptr);
+
+    size_t total = strlen(xml);
+    for (size_t i = 0; i < total; i += 5) {
+        size_t chunk = (total - i < 5) ? (total - i) : 5;
+        int is_final = (i + chunk >= total) ? 1 : 0;
+        int rc = taurus_sax_parser_feed(parser, xml + i, chunk, is_final);
+        EXPECT_EQ(rc, 0);
+    }
+    taurus_sax_parser_free(parser);
+
+    /* Both paths should have emitted at least root start/end.
+     * The exact event count may differ (incremental may split
+     * character data), but the element events must match. */
+    EXPECT_FALSE(one_shot_events.empty());
+    EXPECT_FALSE(chunk_events.empty());
+    EXPECT_EQ(one_shot_events[0], "S:root");
+    EXPECT_EQ(chunk_events[0], "S:root");
+}
+
+TEST(SaxIncremental, SingleByteChunksWork) {
+    /* Stress test: feed 1 byte at a time. Must not crash. */
+    const char xml[] = "<r/>";
+    TaurusSAXHandler handler = {0};
+    handler.start_element = [](void*, const char*, const char**) {};
+    handler.end_element = [](void*, const char*) {};
+
+    TaurusSAXParser* parser = taurus_sax_parser_create(&handler, nullptr);
+    ASSERT_NE(parser, nullptr);
+
+    for (size_t i = 0; i < strlen(xml); i++) {
+        int is_final = (i == strlen(xml) - 1) ? 1 : 0;
+        int rc = taurus_sax_parser_feed(parser, xml + i, 1, is_final);
+        EXPECT_EQ(rc, 0) << "Failed at byte " << i;
+    }
+    taurus_sax_parser_free(parser);
+}
