@@ -59,6 +59,12 @@ struct taurus_attribute {
 
     /* Performance: Pre-computed entity flag (set during parsing) */
     unsigned char has_entities;  /* 1 if value_view contains '&', 0 otherwise */
+
+    /* Performance: FNV-1a hash of the attribute name. Pre-computed at
+     * creation so lookup can compare 4-byte hashes before touching
+     * the string data. Turns O(N × strlen) into O(N × uint32) for the
+     * non-matching case. TODO 113 Phase 4. */
+    uint32_t name_hash;
 };
 
 /* Element node - compact architecture
