@@ -191,11 +191,11 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
     int include_self = (mode == 0 || mode == 2);
     if (include_self) {
         if (wild) {
-            xpath_nodeset_add(out, root);
+            xpath_nodeset_add_fast(out, root);
         } else {
             const char* rn = taurus_element_get_name(root);
             if (rn && strcmp(rn, name) == 0) {
-                xpath_nodeset_add(out, root);
+                xpath_nodeset_add_fast(out, root);
             }
         }
     }
@@ -219,7 +219,7 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
             if (wild) {
                 for (size_t i = 0; i < idx->all_count; i++) {
                     if (idx->all_elements[i] == root) continue;
-                    xpath_nodeset_add(out, idx->all_elements[i]);
+                    xpath_nodeset_add_fast(out, idx->all_elements[i]);
                 }
             } else {
                 const TaurusElementIndexBucket* bucket =
@@ -227,7 +227,7 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
                 if (bucket) {
                     for (size_t i = 0; i < bucket->count; i++) {
                         if (bucket->matches[i] == root) continue;
-                        xpath_nodeset_add(out, bucket->matches[i]);
+                        xpath_nodeset_add_fast(out, bucket->matches[i]);
                     }
                 }
             }
@@ -258,11 +258,11 @@ struct taurus_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
         TaurusElement child = taurus_element_get_first_child(elem);
         while (child) {
             if (wild) {
-                xpath_nodeset_add(out, child);
+                xpath_nodeset_add_fast(out, child);
             } else {
                 const char* cn = taurus_element_get_name(child);
                 if (cn && strcmp(cn, name) == 0) {
-                    xpath_nodeset_add(out, child);
+                    xpath_nodeset_add_fast(out, child);
                 }
             }
             child = taurus_element_get_next_sibling(child);
@@ -341,7 +341,7 @@ struct taurus_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* 
                 an->namespace_uri = NULL;
                 an->owner = elem;
 
-                xpath_nodeset_add(out, an);
+                xpath_nodeset_add_fast(out, an);
             }
             attr = attr->next;
         }
@@ -368,11 +368,11 @@ struct taurus_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
         if (!node_is_element(input->nodes[i])) continue;
         TaurusElement elem = (TaurusElement)input->nodes[i];
         if (wild) {
-            xpath_nodeset_add(out, elem);
+            xpath_nodeset_add_fast(out, elem);
         } else {
             const char* en = taurus_element_get_name(elem);
             if (en && strcmp(en, name) == 0) {
-                xpath_nodeset_add(out, elem);
+                xpath_nodeset_add_fast(out, elem);
             }
         }
     }
@@ -412,7 +412,7 @@ struct taurus_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
         for (size_t j = 0; j < out->count; j++) {
             if (out->nodes[j] == parent) { dup = 1; break; }
         }
-        if (!dup) xpath_nodeset_add(out, parent);
+        if (!dup) xpath_nodeset_add_fast(out, parent);
     }
 
     xpath_nodeset_free(input);
@@ -431,11 +431,11 @@ struct taurus_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
 static inline void descendant_visit(XPathNodeSet* out, TaurusElement elem,
                                       const char* name, int wild) {
     if (wild) {
-        xpath_nodeset_add(out, elem);
+        xpath_nodeset_add_fast(out, elem);
     } else {
         const char* en = taurus_element_get_name(elem);
         if (en && strcmp(en, name) == 0) {
-            xpath_nodeset_add(out, elem);
+            xpath_nodeset_add_fast(out, elem);
         }
     }
 }
@@ -521,11 +521,11 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
         }
         if (idx) {
             /* include_self handling: for include_self=1 add root first. */
-            if (include_self) xpath_nodeset_add(out, doc_root);
+            if (include_self) xpath_nodeset_add_fast(out, doc_root);
             if (wild) {
                 for (size_t i = 0; i < idx->all_count; i++) {
                     if (idx->all_elements[i] == doc_root) continue;
-                    xpath_nodeset_add(out, idx->all_elements[i]);
+                    xpath_nodeset_add_fast(out, idx->all_elements[i]);
                 }
             } else {
                 const TaurusElementIndexBucket* bucket =
@@ -533,7 +533,7 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
                 if (bucket) {
                     for (size_t i = 0; i < bucket->count; i++) {
                         if (bucket->matches[i] == doc_root) continue;
-                        xpath_nodeset_add(out, bucket->matches[i]);
+                        xpath_nodeset_add_fast(out, bucket->matches[i]);
                     }
                 }
             }
@@ -621,7 +621,7 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
                     /* [@attr] — return all matches except root. */
                     for (size_t i = 0; i < abucket->count; i++) {
                         if (abucket->matches[i] == doc_root) continue;
-                        xpath_nodeset_add(out, abucket->matches[i]);
+                        xpath_nodeset_add_fast(out, abucket->matches[i]);
                     }
                 } else {
                     /* [@attr='value'] — lookup value sub-bucket. */
@@ -630,7 +630,7 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
                     if (vbucket) {
                         for (size_t i = 0; i < vbucket->count; i++) {
                             if (vbucket->matches[i] == doc_root) continue;
-                            xpath_nodeset_add(out, vbucket->matches[i]);
+                            xpath_nodeset_add_fast(out, vbucket->matches[i]);
                         }
                     }
                 }
@@ -679,7 +679,7 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
                 }
                 a = a->next;
             }
-            if (match) xpath_nodeset_add(out, cur);
+            if (match) xpath_nodeset_add_fast(out, cur);
 
             /* Descend or backtrack. */
             TaurusElement next = taurus_element_get_first_child(cur);
@@ -778,7 +778,7 @@ static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
                     for (size_t j = 0; j < out->count; j++) {
                         if (out->nodes[j] == candidate) { dup = 1; break; }
                     }
-                    if (!dup) xpath_nodeset_add(out, candidate);
+                    if (!dup) xpath_nodeset_add_fast(out, candidate);
                 }
             }
         }

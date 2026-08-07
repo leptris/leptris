@@ -19,6 +19,10 @@ double xpath_to_number(struct taurus_xpath_result* result);
 char* xpath_to_string(struct taurus_xpath_result* result);
 char* get_node_text(void* node);
 
+/* Fast inline nodeset_add (TODO 135). Internal-only; callers must
+ * guarantee well-formed nodeset. See evaluator.c for the contract. */
+void xpath_nodeset_add_fast(struct xpath_nodeset* nodeset, void* node);
+
 /* From evaluator_axes.c */
 XPathNodeSet* apply_axis(XPathContext* ctx, TaurusNode* node,
                          const char* axis_name, XPathASTNode* test);
