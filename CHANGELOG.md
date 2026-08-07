@@ -1,13 +1,49 @@
 ## [Unreleased]
 
-## [0.5.2] - Y-08-07
+## [0.5.2] - 2026-08-07
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Nokogiri-compatible API (#181, #183)
 
-### Changed
+- `taurus_element_add_namespace_definition(elem, prefix, href)`
+- `taurus_element_set_default_namespace(elem, href)`
+- `taurus_element_remove_namespace_definition(elem, prefix)`
+- `taurus_c14n_canonicalize_ex(doc, version, mode, prefixes, with_comments)`
+- `taurus_c14n_canonicalize_subtree_ex(elem, version, mode, prefixes, with_comments)`
+- New `TaurusC14NMode` enum (`TAURUS_C14N_MODE_CANONICAL`,
+  `TAURUS_C14N_MODE_EXCLUSIVE`).
 
-- (describe changes here)
+The C14N `with_comments` toggle is fully implemented — comments are
+emitted by the canonical walk when the flag is set. Exclusive mode
+and `inclusive_ns_prefixes` are accepted as parameters and currently
+fall back to canonical pending the namespace-use-tracking follow-up.
+
+### Fixed
+
+- `taurus_node_previous_sibling` now works for any node type,
+  not just elements (#179). Previously returned NULL for text,
+  comment, CDATA, or PI nodes even when they had a real previous
+  sibling.
+- `taurus_element_create` (and the typed node creators) no longer
+  return NULL on freshly-parsed FlatDoc documents (#184). The fix
+  triggers lazy promote at the top of each creator so `doc->pool`
+  is allocated before the new node is pool-allocated.
+- `generate_medium_doc` in `benchmark_parse` overflowed its
+  12 KB static buffer by ~3 KB. The flat fast path exposed the
+  corruption because it reads input before copying; the legacy
+  parser's upfront copy hid the bug. Grew buffer to 32 KB.
+
+### Performance — TODO 141 Phase A
+
+Inline `promote_wire_child` helper in the flat promote pass.
+Bypasses `taurus_element_append_child_internal`'s validation,
+type dispatch, and version increment for the hot path where we
+know the structure (preorder DFS walk).
+
+| Doc size  | parse+promote before | after   | speedup |
+|----------:|---------------------:|--------:|--------:|
+|     829 B |              25.2 µs | 16.7 µs | 34%     |
+|    4469 B |              78.1 µs | 70.8 µs | 10%     |
+|   18377 B |             441.4 µs | 253.4 µs| 43%     |
 
 
 ## [0.5.1] - 2026-08-07
