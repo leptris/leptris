@@ -201,10 +201,9 @@ TEST(HeaderHygiene, AttributeIndexAccess) {
 }
 
 TEST(HeaderHygiene, NamespaceCount) {
-    /* xmlns declarations are stripped from the regular attribute list
-     * by the parser. namespace_count walks the attribute list and
-     * finds 0 xmlns. The namespace itself is accessible via
-     * taurus_element_namespace(). */
+    /* The parser strips xmlns declarations from the regular attribute
+     * list and stores them on elem->namespaces. taurus_element_namespace_count
+     * walks both lists (issue #171 made it count namespaces correctly). */
     const char xml[] = "<e xmlns='http://default' a='1'/>";
     TaurusStatus st = TAURUS_OK;
     TaurusDocument doc = taurus_parse_string(xml, sizeof(xml) - 1, &st);
@@ -215,11 +214,42 @@ TEST(HeaderHygiene, NamespaceCount) {
     /* Regular attributes are counted. */
     EXPECT_EQ(taurus_element_attribute_count(root), 1u);
 
-    /* Namespace declarations are NOT in the attribute list in the
-     * current parser. namespace_count returns 0. This is a known
-     * limitation — the active namespace is available via
-     * taurus_element_namespace(). */
-    EXPECT_EQ(taurus_element_namespace_count(root), 0u);
+    /* xmlns declarations are counted via elem->namespaces (was 0
+     * pre-issue #171 because the old impl only walked the attribute
+     * list, missing the parser-moved declarations). */
+    EXPECT_EQ(taurus_element_namespace_count(root), 1u);
+    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 0),
+                 "http://default");
+    EXPECT_EQ(taurus_element_namespace_decl_prefix(root, 0), nullptr);
+
+    taurus_document_free(doc);
+}
+
+TEST(HeaderHygiene, NamespaceDeclEnumeration) {
+    /* issue #171: per-index (prefix, uri) accessors. */
+    const char xml[] =
+        "<e xmlns='http://default' "
+        "   xmlns:foo='http://foo' "
+        "   xmlns:bar='http://bar' a='1'/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    EXPECT_EQ(taurus_element_namespace_count(root), 3u);
+    /* Order matches source order: default, foo, bar. */
+    EXPECT_EQ(taurus_element_namespace_decl_prefix(root, 0), nullptr);
+    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 0),
+                 "http://default");
+    EXPECT_STREQ(taurus_element_namespace_decl_prefix(root, 1), "foo");
+    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 1), "http://foo");
+    EXPECT_STREQ(taurus_element_namespace_decl_prefix(root, 2), "bar");
+    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 2), "http://bar");
+
+    /* Out of range. */
+    EXPECT_EQ(taurus_element_namespace_decl_prefix(root, 99), nullptr);
+    EXPECT_EQ(taurus_element_namespace_decl_uri(root, 99), nullptr);
 
     taurus_document_free(doc);
 }

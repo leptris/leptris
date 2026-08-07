@@ -287,11 +287,26 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars(
     const char* expression,
     TaurusXPathVariableSet variables)
 {
+    return taurus_xpath_eval_with_vars_context(doc, NULL, expression, variables);
+}
+
+TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars_context(
+    TaurusDocument doc,
+    TaurusElement context,
+    const char* expression,
+    TaurusXPathVariableSet variables)
+{
     if (!doc || !expression) {
         return NULL;
     }
 
-    /* Parse XPath expression */
+    /* Resolve context: explicit context if provided, else root. */
+    TaurusElement context_elem = context ? context : taurus_document_root(doc);
+    if (!context_elem) return NULL;
+
+    /* Parse XPath expression. The variable-bound path is not yet on
+     * the AST cache + bytecode fast path (TODO 120 Phase F follow-up);
+     * we parse + eval directly. */
     XPathParser* parser = xpath_parser_new(expression, strlen(expression));
     if (!parser) return NULL;
 
@@ -305,8 +320,8 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars(
 
     xpath_parser_free(parser);
 
-    /* Create evaluation context with TaurusElement directly - NO CONVERSION! */
-    XPathContext* xpath_ctx = xpath_context_new(doc, taurus_document_root(doc));
+    /* Create evaluation context with the resolved context element. */
+    XPathContext* xpath_ctx = xpath_context_new(doc, context_elem);
     if (!xpath_ctx) {
         ast_node_free(ast);
         return NULL;
@@ -317,12 +332,6 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars(
 
     /* Evaluate expression */
     struct taurus_xpath_result* result = xpath_evaluate(xpath_ctx, ast);
-
-    /* Check for evaluation errors */
-    const char* eval_error = xpath_context_error(xpath_ctx);
-    if (eval_error && !result) {
-        /* Error already set in context */
-    }
 
     /* Cleanup */
     xpath_context_free(xpath_ctx);

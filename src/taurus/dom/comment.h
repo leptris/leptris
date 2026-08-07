@@ -12,11 +12,14 @@
 #include "compact.h"  /* int32 compact-pointer helpers (TODO 121) */
 
 /* Comment node - inherits from TaurusNode.
- * Phase 2c of TODO 90: next_sibling is a 4-byte offset (0=NULL). */
+ * Phase 2c of TODO 90: next_sibling is a 4-byte offset (0=NULL).
+ * Issue #168: parent_off mirrors next_sibling_off so the parent of a
+ * non-element node can be queried in O(1). */
 typedef struct taurus_comment_node {
     TaurusNode base;                   /* MUST be first */
     char* content;                    /* Comment content */
     int32_t next_sibling_off;         /* Byte offset to next sibling (0=NULL) */
+    int32_t parent_off;               /* Byte offset to parent element (0=NULL) */
 } TaurusCommentNode;
 
 /* Comment node creation.  Pool-allocated with contiguous content
@@ -46,6 +49,18 @@ static inline TaurusNode* taurus_comment_next_sibling(const TaurusCommentNode* c
 static inline void taurus_comment_set_next_sibling(TaurusCommentNode* c, TaurusNode* sibling) {
     if (!c) return;
     c->next_sibling_off = taurus_compact_int32_encode(c, sibling, &c->next_sibling_off);
+}
+
+/* Compact parent accessors (issue #168). */
+static inline TaurusElement taurus_comment_parent(const TaurusCommentNode* c) {
+    return (c)
+        ? (TaurusElement)taurus_compact_int32_decode((void*)c, c->parent_off, &c->parent_off)
+        : NULL;
+}
+
+static inline void taurus_comment_set_parent(TaurusCommentNode* c, TaurusElement parent) {
+    if (!c) return;
+    c->parent_off = taurus_compact_int32_encode(c, parent, &c->parent_off);
 }
 
 #endif /* TAURUS_DOM_COMMENT_H */

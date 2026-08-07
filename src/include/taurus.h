@@ -163,6 +163,122 @@ TAURUS_API TaurusNodeRef taurus_element_as_node(TaurusElement elem);
 TAURUS_API const char* taurus_text_node_get_content(TaurusNodeRef node);
 
 /**
+ * Create a new Text node owned by the given document (issue #167).
+ *
+ * @param doc Document that will own the new node
+ * @param content Text content (NUL-terminated). May be empty ("").
+ * @return New node handle, or NULL on allocation failure
+ *
+ * Memory: Node is owned by doc; released by taurus_document_free.
+ *         content is pool-copied.
+ */
+TAURUS_API TaurusNodeRef taurus_text_node_create(TaurusDocument doc,
+                                                  const char* content);
+
+/**
+ * Create a new Comment node owned by the given document (issue #167).
+ *
+ * @param doc Owning document
+ * @param content Comment body (NUL-terminated)
+ * @return New node handle, or NULL on allocation failure
+ */
+TAURUS_API TaurusNodeRef taurus_comment_node_create(TaurusDocument doc,
+                                                     const char* content);
+
+/**
+ * Create a new CDATA node owned by the given document (issue #167).
+ *
+ * @param doc Owning document
+ * @param content CDATA section content (NUL-terminated)
+ * @return New node handle, or NULL on allocation failure
+ */
+TAURUS_API TaurusNodeRef taurus_cdata_node_create(TaurusDocument doc,
+                                                   const char* content);
+
+/**
+ * Create a new Processing Instruction node (issue #167).
+ *
+ * @param doc Owning document
+ * @param target PI target (e.g. "xml-stylesheet")
+ * @param data PI data (may be NULL or empty)
+ * @return New node handle, or NULL on allocation failure
+ */
+TAURUS_API TaurusNodeRef taurus_pi_node_create(TaurusDocument doc,
+                                                const char* target,
+                                                const char* data);
+
+/**
+ * Replace a Text node's content (issue #167).
+ *
+ * @param node Node handle (must be TEXT or CDATA)
+ * @param content New content (NUL-terminated, pool-copied)
+ * @return TAURUS_OK on success, TAURUS_ERROR_NULL_ARG or
+ *         TAURUS_ERROR_INVALID_ARG on bad input
+ */
+TAURUS_API TaurusStatus taurus_text_node_set_content(TaurusNodeRef node,
+                                                      const char* content);
+
+/**
+ * Replace a Comment node's content (issue #167).
+ */
+TAURUS_API TaurusStatus taurus_comment_node_set_content(TaurusNodeRef node,
+                                                         const char* content);
+
+/**
+ * Replace a CDATA node's content (issue #167).
+ */
+TAURUS_API TaurusStatus taurus_cdata_node_set_content(TaurusNodeRef node,
+                                                       const char* content);
+
+/**
+ * Replace a PI node's target (issue #167).
+ */
+TAURUS_API TaurusStatus taurus_pi_node_set_target(TaurusNodeRef node,
+                                                   const char* target);
+
+/**
+ * Replace a PI node's data (issue #167).
+ */
+TAURUS_API TaurusStatus taurus_pi_node_set_data(TaurusNodeRef node,
+                                                 const char* data);
+
+/**
+ * Get the parent of any node type (issue #168). Works on Text, Comment,
+ * CDATA, PI, and Element nodes. Returns NULL if node is detached or is
+ * the document root.
+ *
+ * @param node Node handle
+ * @return Parent element, or NULL if no parent
+ */
+TAURUS_API TaurusElement taurus_node_parent(TaurusNodeRef node);
+
+/**
+ * Detach a node from its parent (issue #168). The node remains owned
+ * by its document and can be re-attached via taurus_element_append_child.
+ *
+ * @param node Node to unlink
+ * @return TAURUS_OK on success,
+ *         TAURUS_ERROR_NULL_ARG if node is NULL,
+ *         TAURUS_ERROR_NOT_FOUND if node has no parent
+ */
+TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node);
+
+/**
+ * Get the source line number where the node's opening token appeared
+ * (issue #172). Returns 0 if the node was created programmatically
+ * (no source info) or the parser did not record line numbers.
+ */
+TAURUS_API int taurus_node_line(TaurusNodeRef node);
+
+/**
+ * Document-order comparison (issue #172).
+ *
+ * @return -1 if a precedes b, 0 if equal, 1 if a follows b.
+ *         Returns 0 if either is NULL or they are in different documents.
+ */
+TAURUS_API int taurus_node_compare(TaurusNodeRef a, TaurusNodeRef b);
+
+/**
  * Get comment content
  *
  * @param node Node handle (must be TAURUS_NODE_TYPE_COMMENT)
@@ -1255,6 +1371,22 @@ TAURUS_API char* taurus_c14n_canonicalize(struct taurus_document* doc,
                                           int version,
                                           int flags);
 
+/**
+ * Canonicalize a subtree rooted at the given element (issue #169).
+ * Same algorithm as taurus_c14n_canonicalize but limited to elem
+ * and its descendants. Pairs of PIs and the document's XML
+ * declaration are NOT included (subtree C14N is element-scoped).
+ *
+ * @param elem Subtree root
+ * @param version C14N version (TAURUS_C14N_1_0 or TAURUS_C14N_1_1)
+ * @param flags Reserved for future use (pass 0)
+ * @return Canonicalized XML string (caller must free with
+ *         taurus_free_string), or NULL on error
+ */
+TAURUS_API char* taurus_c14n_canonicalize_subtree(TaurusElement elem,
+                                                   int version,
+                                                   int flags);
+
 /* ============================================================================
  * Namespace Operations
  * ============================================================================ */
@@ -1309,6 +1441,32 @@ TAURUS_API const char* taurus_element_namespace_for_prefix(TaurusElement elem, c
  * @return Namespace count or 0 if elem is NULL
  */
 TAURUS_API size_t taurus_element_namespace_count(TaurusElement elem);
+
+/**
+ * Get the prefix of the namespace declaration at the given index
+ * (issue #171). Use with taurus_element_namespace_count to enumerate
+ * all declarations on an element.
+ *
+ * @param elem Element
+ * @param index 0-based index, must be < namespace_count
+ * @return Prefix string (NULL for the default namespace),
+ *         or NULL if index is out of range
+ *
+ * Memory: String is owned by the element. Do not free or modify.
+ */
+TAURUS_API const char* taurus_element_namespace_decl_prefix(TaurusElement elem,
+                                                              size_t index);
+
+/**
+ * Get the URI of the namespace declaration at the given index
+ * (issue #171). Pairs with taurus_element_namespace_decl_prefix.
+ *
+ * @param elem Element
+ * @param index 0-based index
+ * @return URI string, or NULL if index is out of range
+ */
+TAURUS_API const char* taurus_element_namespace_decl_uri(TaurusElement elem,
+                                                          size_t index);
 
 /**
  * Convert status code to human-readable string
@@ -1501,6 +1659,24 @@ TAURUS_API TaurusStatus taurus_xpath_variable_set_string(TaurusXPathVariableSet 
  */
 TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars(
     TaurusDocument doc,
+    const char* expression,
+    TaurusXPathVariableSet variables
+);
+
+/**
+ * Evaluate an XPath expression with both a context node and a variable
+ * set (issue #170). Use this when the receiver is not the document
+ * root (e.g. relative paths like ".//item[@id = $x]").
+ *
+ * @param doc Document
+ * @param context Context element (NULL = document root)
+ * @param expression XPath expression
+ * @param variables Variable set (may be NULL)
+ * @return XPath result (caller frees with taurus_xpath_result_free)
+ */
+TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars_context(
+    TaurusDocument doc,
+    TaurusElement context,
     const char* expression,
     TaurusXPathVariableSet variables
 );

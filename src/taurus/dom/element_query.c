@@ -917,6 +917,14 @@ TAURUS_API const char* taurus_element_attribute_value_at(TaurusElement elem, siz
 TAURUS_API size_t taurus_element_namespace_count(TaurusElement elem) {
     if (!elem) return 0;
     size_t count = 0;
+    /* The parser strips xmlns declarations from the regular attribute
+     * list and moves them to elem->namespaces. Walk THAT list. */
+    for (struct taurus_namespace* ns = elem->namespaces; ns; ns = ns->next) {
+        count++;
+    }
+    /* Backward compat: also count xmlns attributes in case any caller
+     * added them via taurus_element_add_attribute instead of the
+     * namespace API. This is the original implementation. */
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     while (attr) {
         TaurusStringView nv = attr->name_view;
@@ -929,4 +937,73 @@ TAURUS_API size_t taurus_element_namespace_count(TaurusElement elem) {
         attr = attr->next;
     }
     return count;
+}
+
+/* Walk the union of elem->namespaces and any xmlns:* attributes to
+ * the N-th declaration. The parser uses elem->namespaces; legacy
+ * callers may have used the attribute list. Both are walked in order. */
+static int element_namespace_decl_at(TaurusElement elem, size_t index,
+                                      const char** out_prefix,
+                                      const char** out_uri) {
+    if (!elem) return 0;
+    size_t i = 0;
+    for (struct taurus_namespace* ns = elem->namespaces; ns; ns = ns->next) {
+        if (i == index) {
+            *out_prefix = ns->prefix;
+            *out_uri = ns->uri;
+            return 1;
+        }
+        i++;
+    }
+    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+    while (attr) {
+        TaurusStringView nv = attr->name_view;
+        if (nv.length >= 5 && nv.data &&
+            nv.data[0] == 'x' && nv.data[1] == 'm' &&
+            nv.data[2] == 'l' && nv.data[3] == 'n' &&
+            nv.data[4] == 's') {
+            if (i == index) {
+                /* Materialize full name + value. */
+                const char* full = attr->name;
+                if (!full) {
+                    attr->name = taurus_sv_to_cstr(&nv);
+                    full = attr->name;
+                }
+                if (full && strlen(full) > 5) {
+                    *out_prefix = full + 6;
+                } else {
+                    *out_prefix = NULL;
+                }
+                if (attr->value) {
+                    *out_uri = attr->value;
+                } else {
+                    TaurusStringView vv = attr->value_view;
+                    if (vv.length > 0 && vv.data) {
+                        attr->value = taurus_sv_to_cstr(&vv);
+                    }
+                    *out_uri = attr->value;
+                }
+                return 1;
+            }
+            i++;
+        }
+        attr = attr->next;
+    }
+    return 0;
+}
+
+TAURUS_API const char* taurus_element_namespace_decl_prefix(
+    TaurusElement elem, size_t index) {
+    const char* prefix = NULL;
+    const char* uri = NULL;
+    if (!element_namespace_decl_at(elem, index, &prefix, &uri)) return NULL;
+    return prefix;
+}
+
+TAURUS_API const char* taurus_element_namespace_decl_uri(
+    TaurusElement elem, size_t index) {
+    const char* prefix = NULL;
+    const char* uri = NULL;
+    if (!element_namespace_decl_at(elem, index, &prefix, &uri)) return NULL;
+    return uri;
 }
