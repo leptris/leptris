@@ -163,18 +163,17 @@ static void descendant_walk(XPathNodeSet* out, TaurusElement elem,
  * document-root semantics: `/foo` matches root itself (not its
  * children), `//foo` walks the entire tree.
  *
- * `include_self` controls whether root itself is a candidate:
- *   - BC_ABSOLUTE_ROOT_MATCH (child axis): include_self=1, no
- *     descendant walk. `/foo` = root if root.name == foo.
- *   - BC_ABSOLUTE_DESCENDANT (descendant axis): include_self=0,
- *     walk subtree. `/descendant::foo` = all descendants named foo.
- *   - BC_ABSOLUTE_DESCENDANT_OR_SELF (descendant-or-self axis):
- *     include_self=1, walk subtree. `//foo` = root if it matches
- *     + all matching descendants. */
+ * `mode` controls behavior:
+ *   0 = root-match only: push [root] if root matches name/wild.
+ *       Used for BC_ABSOLUTE_ROOT_MATCH (child axis from document).
+ *   1 = descendant: push all descendants of root matching name.
+ *       Used for BC_ABSOLUTE_DESCENDANT (descendant axis).
+ *   2 = descendant-or-self: push root if matches + descendants
+ *       matching. Used for BC_ABSOLUTE_DESCENDANT_OR_SELF. */
 static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
                                                       const char* name,
                                                       int wild,
-                                                      int include_self) {
+                                                      int mode) {
     if (!ctx || !ctx->document) return NULL;
     TaurusElement root = (TaurusElement)ctx->document->new_dom_root;
     if (!root) return NULL;
@@ -182,6 +181,7 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
     XPathNodeSet* out = xpath_nodeset_new();
     if (!out) return NULL;
 
+    int include_self = (mode == 0 || mode == 2);
     if (include_self) {
         if (wild) {
             xpath_nodeset_add(out, root);
@@ -193,9 +193,10 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
         }
     }
 
-    /* Walk subtree (root not re-added; handled by include_self above
-     * if applicable). */
-    descendant_walk(out, root, name, wild, 0);
+    /* Walk subtree only for descendant / descendant-or-self modes. */
+    if (mode > 0) {
+        descendant_walk(out, root, name, wild, 0);
+    }
 
     struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
     if (!r) { xpath_nodeset_free(out); return NULL; }
@@ -817,7 +818,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                                    ? bc->constants[idx].v.string : NULL;
                 /* `/foo` = root if root.name == foo. No descendants. */
                 struct taurus_xpath_result* r =
-                    vm_apply_absolute(ctx, name, 0, 1 /* include_self */);
+                    vm_apply_absolute(ctx, name, 0, 0 /* root-match only */);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
@@ -826,7 +827,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
             case XPATH_BC_ABSOLUTE_ROOT_MATCH_WILD: {
                 /* `/*` = root. */
                 struct taurus_xpath_result* r =
-                    vm_apply_absolute(ctx, NULL, 1, 1);
+                    vm_apply_absolute(ctx, NULL, 1, 0);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
@@ -839,7 +840,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                                    ? bc->constants[idx].v.string : NULL;
                 /* `/descendant::foo` = all descendants of root named foo. */
                 struct taurus_xpath_result* r =
-                    vm_apply_absolute(ctx, name, 0, 0);
+                    vm_apply_absolute(ctx, name, 0, 1);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
@@ -847,7 +848,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
 
             case XPATH_BC_ABSOLUTE_DESCENDANT_WILD: {
                 struct taurus_xpath_result* r =
-                    vm_apply_absolute(ctx, NULL, 1, 0);
+                    vm_apply_absolute(ctx, NULL, 1, 1);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
@@ -860,7 +861,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                                    ? bc->constants[idx].v.string : NULL;
                 /* `//foo` = root if matches + all matching descendants. */
                 struct taurus_xpath_result* r =
-                    vm_apply_absolute(ctx, name, 0, 1);
+                    vm_apply_absolute(ctx, name, 0, 2);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
@@ -868,7 +869,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
 
             case XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD: {
                 struct taurus_xpath_result* r =
-                    vm_apply_absolute(ctx, NULL, 1, 1);
+                    vm_apply_absolute(ctx, NULL, 1, 2);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
@@ -1014,6 +1015,189 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                     evaluate_function_call_inline(ctx, fc_ast);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
+                break;
+            }
+
+            /* Inline function handlers (TODO 130). Each pops its
+             * args from the stack and pushes the result. The
+             * compiler emits <arg bytecode> + BC_FUNC_<NAME>
+             * instead of BC_FUNC_CALL for the common XPath
+             * functions. The VM evaluates args via normal dispatch
+             * (which uses the fast specialized axis opcodes), then
+             * applies the function inline. */
+
+            case XPATH_BC_FUNC_COUNT: {
+                struct taurus_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                size_t count = 0;
+                if (arg->type == XPATH_RESULT_NODESET && arg->value.nodeset_value) {
+                    count = arg->value.nodeset_value->count;
+                }
+                xpath_result_free(arg);
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = (double)count;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_SUM: {
+                struct taurus_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                double sum = 0.0;
+                if (arg->type == XPATH_RESULT_NODESET && arg->value.nodeset_value) {
+                    XPathNodeSet* ns = arg->value.nodeset_value;
+                    for (size_t i = 0; i < ns->count; i++) {
+                        char* txt = get_node_text(ns->nodes[i]);
+                        if (txt) {
+                            sum += atof(txt);
+                            free(txt);
+                        }
+                    }
+                }
+                xpath_result_free(arg);
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = sum;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_POSITION: {
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = (double)ctx->context_position;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_LAST: {
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = (double)ctx->context_size;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_TRUE: {
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = 1;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_FALSE: {
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = 0;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_NOT: {
+                struct taurus_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                int b = xpath_to_boolean(arg);
+                xpath_result_free(arg);
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = !b;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_BOOLEAN: {
+                struct taurus_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                int b = xpath_to_boolean(arg);
+                xpath_result_free(arg);
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = b;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_NUMBER: {
+                struct taurus_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                double n = xpath_to_number(arg);
+                xpath_result_free(arg);
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = n;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_STRING: {
+                struct taurus_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                char* s = xpath_to_string(arg);
+                xpath_result_free(arg);
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_STRING);
+                if (!r) { free(s); vm.error = 1; break; }
+                r->value.string_value = s ? s : taurus_strdup("");
+                if (!r->value.string_value) {
+                    free(s);
+                    xpath_result_free(r);
+                    vm.error = 1;
+                    break;
+                }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_NAME:
+            case XPATH_BC_FUNC_LOCAL_NAME:
+            case XPATH_BC_FUNC_NAMESPACE_URI: {
+                struct taurus_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+
+                const char* str = NULL;
+                int free_str = 0;
+                if (arg->type == XPATH_RESULT_NODESET &&
+                    arg->value.nodeset_value &&
+                    arg->value.nodeset_value->count > 0) {
+                    void* first = arg->value.nodeset_value->nodes[0];
+                    TaurusNodeType nt = *(TaurusNodeType*)first;
+                    if (nt == TAURUS_NODE_ATTRIBUTE) {
+                        TaurusAttributeNode* an = (TaurusAttributeNode*)first;
+                        if (op == XPATH_BC_FUNC_NAME) str = an->name;
+                        else if (op == XPATH_BC_FUNC_LOCAL_NAME) {
+                            /* Strip prefix from "prefix:local". */
+                            const char* colon = an->name ? strchr(an->name, ':') : NULL;
+                            str = colon ? colon + 1 : an->name;
+                        } else {
+                            str = an->namespace_uri;  /* may be NULL */
+                        }
+                    } else if (nt != TAURUS_NODE_NAMESPACE &&
+                               nt != TAURUS_NODE_TEXT) {
+                        /* Element. */
+                        TaurusElement e = (TaurusElement)first;
+                        if (op == XPATH_BC_FUNC_NAME) {
+                            str = taurus_element_get_name(e);
+                        } else if (op == XPATH_BC_FUNC_LOCAL_NAME) {
+                            str = taurus_element_get_name(e);
+                        } else {
+                            str = taurus_element_get_namespace_uri(e);
+                        }
+                    }
+                }
+
+                xpath_result_free(arg);
+
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_STRING);
+                if (!r) { vm.error = 1; break; }
+                r->value.string_value = taurus_strdup(str ? str : "");
+                if (!r->value.string_value) {
+                    xpath_result_free(r);
+                    vm.error = 1;
+                    break;
+                }
+                vm_push(&vm, r);
+                (void)free_str;
                 break;
             }
 

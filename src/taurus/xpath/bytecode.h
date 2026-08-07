@@ -77,6 +77,39 @@ typedef enum {
     XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME, /* u16: name */
     XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD, /* no operand */
 
+    /* Inline function opcodes (TODO 130). The compiler emits
+     * <arg bytecode> + BC_FUNC_<NAME> for the common XPath functions
+     * instead of BC_FUNC_CALL. The VM evaluates args via normal
+     * dispatch (which uses the fast specialized axis opcodes from
+     * TODO 126-129), then applies the function inline.
+     *
+     * Each opcode pops its args from the stack and pushes the result.
+     * Arg counts:
+     *   no-arg: position, last, true, false
+     *   1-arg (optional, defaults to context node as nodeset):
+     *     string, number, boolean, name, local-name, namespace-uri,
+     *     normalize-space, string-length
+     *   1-arg (required): count, sum, not, floor, ceiling, round, lang
+     *   2-arg: contains, starts-with, substring-before, substring-after
+     *   2-3 arg: substring
+     *   3-arg: translate, concat (variadic; operand = arg count)
+     *
+     * For variadic / multi-arg functions, the operand is the arg count.
+     */
+    XPATH_BC_FUNC_COUNT,           /* 1 nodeset arg → number */
+    XPATH_BC_FUNC_STRING,          /* 0/1 arg → string */
+    XPATH_BC_FUNC_NUMBER,          /* 0/1 arg → number */
+    XPATH_BC_FUNC_BOOLEAN,         /* 1 arg → boolean */
+    XPATH_BC_FUNC_NAME,            /* 0/1 arg → string */
+    XPATH_BC_FUNC_LOCAL_NAME,      /* 0/1 arg → string */
+    XPATH_BC_FUNC_NAMESPACE_URI,   /* 0/1 arg → string */
+    XPATH_BC_FUNC_SUM,             /* 1 nodeset arg → number */
+    XPATH_BC_FUNC_POSITION,        /* no arg → number */
+    XPATH_BC_FUNC_LAST,            /* no arg → number */
+    XPATH_BC_FUNC_TRUE,            /* no arg → boolean */
+    XPATH_BC_FUNC_FALSE,           /* no arg → boolean */
+    XPATH_BC_FUNC_NOT,             /* 1 arg → boolean */
+
     /* Simple predicate opcodes (TODO 128). Each pops the input
      * nodeset from the stack, applies the filter inline, and pushes
      * the filtered result. The compiler emits these for the common
