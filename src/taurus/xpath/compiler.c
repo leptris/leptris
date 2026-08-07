@@ -106,6 +106,102 @@ static uint16_t add_const_ast(CompilerState* st, XPathASTNode* ast) {
 /* Forward decl for recursive compilation. */
 static void compile_node(CompilerState* st, XPathASTNode* node);
 
+/* Try to lower a function call to an inline VM opcode (TODO 130).
+ * Returns 1 if emitted, 0 if the function isn't in the inline set
+ * or has unexpected arg count (caller falls back to BC_FUNC_CALL).
+ *
+ * For each inlinable function, emits the arg bytecode (via
+ * compile_node) followed by the specialized opcode. The VM evals
+ * the arg using all the existing axis / predicate optimizations,
+ * then applies the function inline.
+ *
+ * Functions that take an optional arg (string, name, etc.) get the
+ * context node as default when no arg is supplied. We approximate
+ * this by emitting BC_PATH_RELATIVE (which pushes [context_node])
+ * as the implicit arg. */
+static int try_compile_inline_function(CompilerState* st, XPathASTNode* node) {
+    if (!node || node->type != XPATH_AST_FUNCTION_CALL) return 0;
+    const char* name = node->value;
+    if (!name) return 0;
+    size_t nargs = node->child_count;
+
+    /* Helper: emit bytecode for arg i. */
+    #define EMIT_ARG(i) do { \
+        if ((i) < nargs && node->children[(i)]) { \
+            compile_node(st, node->children[(i)]); \
+        } else { \
+            /* Implicit context-node arg for optional-arg functions. */ \
+            emit_op(st, XPATH_BC_PATH_RELATIVE); \
+        } \
+    } while (0)
+
+    XPathOpcode op = XPATH_BC_NOP;
+
+    /* No-arg functions. */
+    if (strcmp(name, "true") == 0 && nargs == 0) {
+        emit_op(st, XPATH_BC_FUNC_TRUE);
+        return 1;
+    }
+    if (strcmp(name, "false") == 0 && nargs == 0) {
+        emit_op(st, XPATH_BC_FUNC_FALSE);
+        return 1;
+    }
+    if (strcmp(name, "position") == 0 && nargs == 0) {
+        emit_op(st, XPATH_BC_FUNC_POSITION);
+        return 1;
+    }
+    if (strcmp(name, "last") == 0 && nargs == 0) {
+        emit_op(st, XPATH_BC_FUNC_LAST);
+        return 1;
+    }
+
+    /* Required-1-arg functions. */
+    if (strcmp(name, "count") == 0 && nargs == 1) {
+        EMIT_ARG(0);
+        emit_op(st, XPATH_BC_FUNC_COUNT);
+        return 1;
+    }
+    if (strcmp(name, "sum") == 0 && nargs == 1) {
+        EMIT_ARG(0);
+        emit_op(st, XPATH_BC_FUNC_SUM);
+        return 1;
+    }
+    if (strcmp(name, "not") == 0 && nargs == 1) {
+        EMIT_ARG(0);
+        emit_op(st, XPATH_BC_FUNC_NOT);
+        return 1;
+    }
+
+    /* Optional-1-arg functions. */
+    if (strcmp(name, "string") == 0 && nargs <= 1) {
+        if (nargs == 0) emit_op(st, XPATH_BC_PATH_RELATIVE);
+        else EMIT_ARG(0);
+        emit_op(st, XPATH_BC_FUNC_STRING);
+        return 1;
+    }
+    if (strcmp(name, "number") == 0 && nargs <= 1) {
+        if (nargs == 0) emit_op(st, XPATH_BC_PATH_RELATIVE);
+        else EMIT_ARG(0);
+        emit_op(st, XPATH_BC_FUNC_NUMBER);
+        return 1;
+    }
+    if (strcmp(name, "boolean") == 0 && nargs == 1) {
+        EMIT_ARG(0);
+        emit_op(st, XPATH_BC_FUNC_BOOLEAN);
+        return 1;
+    }
+    /* name / local-name / namespace-uri: keep on BC_FUNC_CALL for now.
+     * The QName construction (prefix + ":" + local) requires more
+     * plumbing than the inline handler saves. TODO future. */
+
+    #undef EMIT_ARG
+    (void)op;
+    return 0;
+}
+
+/* Forward decl for recursive compilation. */
+static void compile_node(CompilerState* st, XPathASTNode* node);
+
 /* Heuristic: does this AST type potentially produce a nodeset at
  * eval time? Used by the compiler to decide whether a comparison
  * can be lowered to BC_BINARY_OP (correct only for scalar operands)
@@ -699,12 +795,17 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
         }
 
         case XPATH_AST_FUNCTION_CALL:
-            /* The handler signature takes AST args, so we don't
-             * pre-evaluate them on the stack. Stash the FUNC_CALL
-             * AST in the constant pool; the VM calls
-             * evaluate_function_call(ctx, ast_fc) directly,
-             * skipping the evaluate_expr AST-type switch. */
-            emit_op_u16(st, XPATH_BC_FUNC_CALL, add_const_ast(st, node));
+            /* Try to emit an inline function opcode (TODO 130).
+             * Falls back to BC_FUNC_CALL if the function isn't in
+             * the inline set or has unexpected arg count. */
+            if (!try_compile_inline_function(st, node)) {
+                /* The handler signature takes AST args, so we don't
+                 * pre-evaluate them on the stack. Stash the FUNC_CALL
+                 * AST in the constant pool; the VM calls
+                 * evaluate_function_call(ctx, ast_fc) directly,
+                 * skipping the evaluate_expr AST-type switch. */
+                emit_op_u16(st, XPATH_BC_FUNC_CALL, add_const_ast(st, node));
+            }
             break;
 
         default:

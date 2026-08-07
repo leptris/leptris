@@ -469,4 +469,147 @@ TEST(XPathBytecodeAbsolutePath, PositionPredicatePerContext) {
     taurus_document_free(doc);
 }
 
+TEST(XPathBytecodeInlineFunctions, Count) {
+    /* count() lowers to BC_FUNC_COUNT. */
+    const char xml[] = "<r><a/><a/><a/></r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr, "count(//a)");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r1), 3.0);
+    taurus_xpath_result_free(r1);
+
+    /* Empty nodeset. */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "count(//missing)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 0.0);
+    taurus_xpath_result_free(r2);
+
+    /* With predicate. */
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, nullptr,
+                                                "count(/r/a[position() = 1])");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r3), 1.0);
+    taurus_xpath_result_free(r3);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeInlineFunctions, BooleanFunctions) {
+    const char xml[] = "<r/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr, "true()");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_EQ(taurus_xpath_result_boolean(r1), 1);
+    taurus_xpath_result_free(r1);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "false()");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(taurus_xpath_result_boolean(r2), 0);
+    taurus_xpath_result_free(r2);
+
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, nullptr, "not(false())");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_EQ(taurus_xpath_result_boolean(r3), 1);
+    taurus_xpath_result_free(r3);
+
+    TaurusXPathResult r4 = taurus_xpath_eval(doc, nullptr, "boolean(/r)");
+    ASSERT_NE(r4, nullptr);
+    EXPECT_EQ(taurus_xpath_result_boolean(r4), 1);
+    taurus_xpath_result_free(r4);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeInlineFunctions, StringAndNumber) {
+    const char xml[] = "<r><a>42</a></r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* string() with arg. */
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr, "string(/r/a)");
+    ASSERT_NE(r1, nullptr);
+    char* s1 = taurus_xpath_result_string(r1);
+    EXPECT_STREQ(s1, "42");
+    taurus_free_string(s1);
+    taurus_xpath_result_free(r1);
+
+    /* number() converts string to number. */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "number(/r/a)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 42.0);
+    taurus_xpath_result_free(r2);
+
+    /* number literal. */
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, nullptr, "number(3.14)");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r3), 3.14);
+    taurus_xpath_result_free(r3);
+
+    /* sum() of nodeset values. */
+    TaurusXPathResult r4 = taurus_xpath_eval(doc, nullptr, "sum(/r/a)");
+    ASSERT_NE(r4, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r4), 42.0);
+    taurus_xpath_result_free(r4);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeInlineFunctions, NameFunctions) {
+    /* name() / local-name() / namespace-uri() stay on BC_FUNC_CALL —
+     * the QName construction (prefix + local) requires more plumbing
+     * than the inline handler saves. These specs verify the fallback
+     * path still produces correct results. */
+    const char xml[] = "<r xmlns:ns='http://example.com'><ns:a id='x'/></r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr, "name(/r/ns:a)");
+    ASSERT_NE(r1, nullptr);
+    char* s1 = taurus_xpath_result_string(r1);
+    EXPECT_STREQ(s1, "ns:a");
+    taurus_free_string(s1);
+    taurus_xpath_result_free(r1);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "local-name(/r/ns:a)");
+    ASSERT_NE(r2, nullptr);
+    char* s2 = taurus_xpath_result_string(r2);
+    EXPECT_STREQ(s2, "a");
+    taurus_free_string(s2);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeInlineFunctions, PositionLast) {
+    const char xml[] = "<r><a/><a/><a/></r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* position() inside predicate — but predicate falls back to AST eval,
+     * so this tests the fallback path. Still: result must be correct. */
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr,
+                                                "count(/r/a[position() = last()])");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r1), 1.0);
+    taurus_xpath_result_free(r1);
+
+    /* last() as a top-level number (degenerate but valid). */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr,
+                                                "count(/r/a[last()])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 1.0);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
+}
+
 }  // namespace
