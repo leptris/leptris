@@ -612,4 +612,33 @@ TEST(XPathBytecodeInlineFunctions, PositionLast) {
     taurus_document_free(doc);
 }
 
+TEST(XPathBytecodeFusedAxisPredicate, DescendantWildWithAttrExists) {
+    /* descendant::*[@id] lowers to BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS
+     * when input is the document root (TODO 134). */
+    const char xml[] =
+        "<root><a id='1'>x</a><a>y</a><a id='2'>z</a><b id='3'>w</b></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusXPathResult r = taurus_xpath_eval(doc, root, "count(descendant::*[@id])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 3.0);
+    taurus_xpath_result_free(r);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, root,
+                                                "count(descendant::*[@id='1'])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 1.0);
+    taurus_xpath_result_free(r2);
+
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, root, "count(a[@id])");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r3), 2.0);
+    taurus_xpath_result_free(r3);
+
+    taurus_document_free(doc);
+}
+
 }  // namespace
