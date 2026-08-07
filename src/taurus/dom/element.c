@@ -469,7 +469,20 @@ const char* taurus_element_get_namespace_uri(TaurusElement elem) {
     if (elem->prefix) {
         const char* uri = taurus_element_lookup_namespace(elem, elem->prefix);
         if (uri) {
-            elem->namespace_uri = taurus_strdup(uri);
+            /* Pool-allocate so taurus_document_free releases via pool
+             * destroy (heap strdup would leak — pool owns elements). */
+            if (elem->document && elem->document->pool) {
+                size_t len = strlen(uri);
+                char* copy = (char*)taurus_pool_alloc(
+                    elem->document->pool, len + 1);
+                if (copy) {
+                    memcpy(copy, uri, len);
+                    copy[len] = '\0';
+                    elem->namespace_uri = copy;
+                }
+            } else {
+                elem->namespace_uri = taurus_strdup(uri);
+            }
         }
         return elem->namespace_uri;
     }

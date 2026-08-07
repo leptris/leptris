@@ -169,11 +169,10 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
      * internal subset — the flat parser silently strips DTD
      * entities, so any text containing &entity; would lose its
      * expansion. The legacy parser handles DTD correctly. */
-    /* Skip flat fast path when the caller has configured a non-default
-     * max_depth — the flat parser uses its own FLAT_MAX_DEPTH=256 cap
-     * and doesn't honor the global setting. */
+    /* TODO 145: namespace handling now lives in promote, so the
+     * flat fast path covers xmlns docs too. Keep the DTD-entity
+     * fallbacks (the flat parser still strips those silently). */
     if (!taurus_input_has_internal_dtd_subset(xml, len) &&
-        !taurus_input_has_namespaces(xml, len) &&
         !taurus_input_has_entities(xml, len) &&
         g_taurus_max_depth == 0) {
         FlatDoc* flat = flat_parse(xml, len);

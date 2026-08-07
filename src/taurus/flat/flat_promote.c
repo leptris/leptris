@@ -37,6 +37,14 @@
 extern __thread int g_taurus_strict_mode;
 extern void taurus_compact_set_current_document(struct taurus_document* doc);
 
+/* Forward decls from taurus_memory.c — avoid pulling taurus_memory.h
+ * directly because it conflicts with pi.h's taurus_pi_free. */
+int taurus_element_add_namespace(struct taurus_element* elem,
+                                  struct taurus_namespace* ns);
+struct taurus_namespace* taurus_namespace_new_pooled(const char* prefix,
+                                                      const char* uri,
+                                                      TaurusMemoryPool* pool);
+
 /* TODO 141 Phase A: hot-path inliner for promote.
  *
  * Append `child` to parent's child chain in O(1). The general-purpose
@@ -99,7 +107,12 @@ static char* flat_promote_strdup(const char* xml_buffer,
 
 /* Promote all FlatAttr records in [start, start+count) into
  * attributes on the given element. Returns 0 on success, -1 on
- * alloc failure. */
+ * alloc failure.
+ *
+ * TODO 145: handles xmlns / xmlns:prefix declarations — moves
+ * them from the regular attribute list to elem->namespaces, and
+ * splits the element name on ':' for prefix:local form. Mirrors
+ * what the legacy parser does inline during parse. */
 static int flat_promote_attrs(FlatDoc* flat, TaurusElement elem,
                                uint32_t start, uint16_t count,
                                TaurusMemoryPool* pool,
@@ -110,6 +123,38 @@ static int flat_promote_attrs(FlatDoc* flat, TaurusElement elem,
             xml_buffer + a->name_offset, a->name_len);
         TaurusStringView value_view = taurus_sv_from_ptr(
             xml_buffer + a->value_offset, a->value_len);
+
+        /* Detect xmlns declarations. */
+        if (name_view.length >= 5 && name_view.data &&
+            name_view.data[0] == 'x' && name_view.data[1] == 'm' &&
+            name_view.data[2] == 'l' && name_view.data[3] == 'n' &&
+            name_view.data[4] == 's') {
+            /* Either "xmlns" (default ns) or "xmlns:prefix". */
+            const char* prefix = NULL;
+            if (name_view.length > 5) {
+                /* Skip "xmlns:" — record the prefix portion. */
+                prefix = xml_buffer + a->name_offset + 6;
+                size_t prefix_len = name_view.length - 6;
+                /* Pool-copy the prefix so it's NUL-terminated. */
+                char* pbuf = (char*)taurus_pool_alloc(pool, prefix_len + 1);
+                if (!pbuf) return -1;
+                memcpy(pbuf, prefix, prefix_len);
+                pbuf[prefix_len] = '\0';
+                prefix = pbuf;
+            }
+            /* Pool-copy the URI. */
+            char* uri_buf = (char*)taurus_pool_alloc(pool, value_view.length + 1);
+            if (!uri_buf) return -1;
+            memcpy(uri_buf, value_view.data, value_view.length);
+            uri_buf[value_view.length] = '\0';
+
+            struct taurus_namespace* ns =
+                taurus_namespace_new_pooled(prefix, uri_buf, pool);
+            if (ns) taurus_element_add_namespace(elem, ns);
+            continue;
+        }
+
+        /* Regular attribute. */
         if (taurus_element_add_attribute(elem, name_view, value_view, pool) != 0) {
             return -1;
         }
@@ -186,11 +231,28 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
 
         switch ((FlatNodeType)fn->type) {
             case FLAT_NODE_ELEMENT: {
-                TaurusStringView name_view = taurus_sv_from_ptr(
-                    xml_buffer + fn->name_offset, fn->name_len);
+                /* TODO 145: split qualified name "prefix:local" if
+                 * present. The flat parser stores the full name as
+                 * one byte range; the legacy parser splits inline. */
+                const char* name_start = xml_buffer + fn->name_offset;
+                size_t name_len = fn->name_len;
+                const char* colon = (const char*)memchr(name_start, ':', name_len);
+                TaurusStringView name_view;
+                TaurusStringView prefix_view = taurus_sv_empty();
+                if (colon && colon > name_start) {
+                    size_t prefix_len = (size_t)(colon - name_start);
+                    prefix_view = taurus_sv_from_ptr(name_start, prefix_len);
+                    name_view = taurus_sv_from_ptr(colon + 1,
+                                                     name_len - prefix_len - 1);
+                } else {
+                    name_view = taurus_sv_from_ptr(name_start, name_len);
+                }
                 TaurusElement elem = taurus_element_create_with_view(name_view, pool);
                 if (!elem) { free(mapping); return -1; }
                 elem->document = doc;
+                if (!taurus_sv_is_empty(&prefix_view)) {
+                    elem->prefix = taurus_sv_to_cstr_pooled(&prefix_view, pool);
+                }
 
                 if (flat_promote_attrs(flat, elem, fn->attr_start,
                                         fn->attr_count, pool, xml_buffer) != 0) {
