@@ -42,6 +42,14 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
 /* Main expression evaluator (in evaluator.c) */
 struct taurus_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast);
 
+/* Direct function-call entry for the VM (TODO 120 Phase F).
+ * Identical semantics to invoking evaluate_expr on a FUNCTION_CALL
+ * AST, but skips the AST-type switch in evaluate_expr. The handler
+ * evaluates arguments itself via evaluate_expr, so callers must not
+ * pre-evaluate args. */
+struct taurus_xpath_result* evaluate_function_call_inline(XPathContext* ctx,
+                                                           XPathASTNode* ast);
+
 /* Bytecode VM entry point (TODO 120 Phase D — in vm.c).
  * Compiles the AST to bytecode and runs the VM interpreter.
  * For literals, avoids the AST dispatch overhead.
@@ -49,6 +57,13 @@ struct taurus_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast);
  * BC_FALLBACK_EVAL. */
 struct taurus_xpath_result* taurus_xpath_vm_eval(XPathASTNode* ast,
                                                   XPathContext* ctx);
+
+/* Run an already-compiled bytecode (TODO 120 Phase F). Avoids the
+ * compile cost when the caller has cached the bytecode (typically
+ * via xpath_ast_cache_get_bc / xpath_ast_cache_store_bc). */
+struct TaurusXPathBytecode;  /* forward; full definition in bytecode.h */
+struct taurus_xpath_result* taurus_xpath_vm_run_bc(struct TaurusXPathBytecode* bc,
+                                                    XPathContext* ctx);
 
 /* Namespace support (in evaluator.c) */
 const char* xpath_context_resolve_prefix(XPathContext* context,
