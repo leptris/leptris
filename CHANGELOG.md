@@ -1,4 +1,14 @@
-# Changelog
+## [Unreleased]
+
+## [0.4.3] - Y-08-07
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
 
 All notable changes to Taurus will be documented in this file.
 
