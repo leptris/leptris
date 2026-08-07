@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-07
+
+XPath performance track: close the gap with libxml2 via bytecode VM
+specialization. Per-call floor and basic axes are at libxml2 parity;
+descendant-axis and count() go from 5-12× slower to within 2-6×.
+
+### Added — SAX shared-library export (TODO 122)
+
+- `src/include/taurus/sax/sax.h` now annotates every public SAX function with `TAURUS_API`, matching the DOM / XPath headers.
+- Without this, SAX symbols were hidden from `libtaurus.dylib` / `.so` export tables under `CMAKE_C_VISIBILITY_PRESET=hidden` (the default). FFI bindings cannot `dlsym` them.
+- New `scripts/check_shared_exports.sh` builds a one-off shared lib, walks the export table, and asserts the SAX + DOM + XPath surface is present. Registered as CTest `SymbolExportCheck` so CI catches missing annotations.
+
+### Added — XPath diagnostic benchmark (TODO 123)
+
+- `benchmarks/xpath/bench_diagnostic.c` — 8-group taurus-only suite isolating per-component costs (parse vs eval, cold vs warm cache, setup floor, predicate cost, named-attribute mystery, comparison ops, variable refs, doc-size scaling).
+- Revealed that `self::*` on a 100 KB doc took 9.29 µs vs 1.13 µs on a 24-byte doc — the namespace-init path was walking the entire document on every eval. TODO 125 fixed it.
+
+### Changed — Bytecode VM inline dispatch + cache (TODO 120 Phase F)
+
+- The bytecode VM (TODO 120 Phases A-E) was recompiling bytecode on every eval. Phase F adds a bytecode cache alongside the AST cache: compile once per expression, reuse on subsequent evals.
+- New inline opcodes `BC_AXIS_STEP`, `BC_BINARY_OP`, `BC_FUNC_CALL` replace `BC_FALLBACK_EVAL` delegates for the common AST families. Open/closed: new opcodes = new enum + new VM case + new compiler case.
+- `taurus_xpath_eval` flow: AST cache lookup → bytecode cache lookup → if bytecode missing, compile + cache → run VM. Falls back to `xpath_evaluate` (AST evaluator) if VM fails for any reason.
+
+### Changed — Lazy namespace init (TODO 125)
+
+- `xpath_context_new` no longer walks the document to collect namespace declarations. Collection runs on the first `xpath_context_resolve_prefix` call, gated by a `namespaces_collected` flag.
+- 5-9× faster per-eval floor on medium / large docs. `self::*` on a 100 KB doc dropped from 9.29 µs to 1.00 µs (libxml2 parity).
+- Verified safe: `namespace_mappings` is consumed only by `xpath_context_resolve_prefix`. The `namespace::*` axis reads namespaces directly from elements, not from the context.
+
+### Changed — Specialized axis opcodes (TODO 126, TODO 127)
+
+- 12 new opcodes for the common axis shapes (no namespace prefix, no complex predicates):
+  - `BC_AXIS_CHILD_NAME` / `WILD`, `BC_AXIS_ATTRIBUTE_NAME` / `WILD`, `BC_AXIS_SELF_NAME` / `WILD`, `BC_AXIS_PARENT_NAME` / `WILD` (TODO 126)
+  - `BC_AXIS_DESCENDANT_NAME` / `WILD`, `BC_AXIS_DESCENDANT_OR_SELF_NAME` / `WILD` (TODO 127)
+- Each handler is a tight loop that bypasses `evaluate_step → apply_axis → matches_node_test`. Compiler emits them via `try_compile_specialized_axis`; anything that doesn't match the shape falls back to `BC_AXIS_STEP`.
+
+### Changed — Simple predicate fast paths (TODO 128)
+
+- 3 new opcodes for the common predicate shapes:
+  - `BC_PRED_ATTR_EXISTS` for `[@attr]`
+  - `BC_PRED_ATTR_EQ_STRING` for `[@attr = 'literal']`
+  - `BC_PRED_POSITION` for `[N]`
+- Each handler does in-place two-pointer filtering on the input nodeset — no allocation.
+- Safety: position predicates are context-sensitive and only inline in the absolute-path fusion case (TODO 129). Attribute predicates inline everywhere.
+
+### Changed — Absolute path specialization (TODO 129)
+
+- 6 new opcodes for the absolute-path first step: `BC_ABSOLUTE_ROOT_MATCH_NAME` / `WILD` (for `/foo`, `/*`), `BC_ABSOLUTE_DESCENDANT_NAME` / `WILD` (for `/descendant::foo`), `BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME` / `WILD` (for `//foo`, `//*`).
+- Compiler fuses the `//name` pattern (parser expands to `/descendant-or-self::node()/child::name`) into a single `BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME` opcode, avoiding double subtree traversal.
+- Parser fix: the synthesized descendant-or-self step for `//` now sets `axis_id = XPATH_AXIS_DESCENDANT_OR_SELF` (was 0 = `ANCESTOR`). Three parser paths fixed.
+
+### Changed — Inline VM opcodes for common functions (TODO 130)
+
+- 13 new opcodes for the common XPath functions: `BC_FUNC_COUNT`, `BC_FUNC_SUM`, `BC_FUNC_STRING`, `BC_FUNC_NUMBER`, `BC_FUNC_BOOLEAN`, `BC_FUNC_NOT`, `BC_FUNC_TRUE`, `BC_FUNC_FALSE`, `BC_FUNC_POSITION`, `BC_FUNC_LAST`, `BC_FUNC_NAME`, `BC_FUNC_LOCAL_NAME`, `BC_FUNC_NAMESPACE_URI`.
+- Compiler emits `<arg bytecode> + BC_FUNC_<NAME>` instead of `BC_FUNC_CALL`. The VM evaluates args via normal dispatch (using all the existing axis / predicate / absolute-path optimizations), then applies the function inline.
+- Functions not yet inlined (concat, contains, substring, etc.) stay on `BC_FUNC_CALL` which dispatches via `evaluate_function_call`.
+
+### Changed — Iterative descendant walk (TODO 131)
+
+- `descendant_walk` rewritten from recursive to iterative using the tree's own parent / first_child / next_sibling links. No explicit stack.
+- Pre-grows the output nodeset to capacity 32 on entry to skip the inline→heap transition that would otherwise trigger on the 17th add.
+
+### Performance summary
+
+`bench_xpath_diagnostic` on a ~5 KB catalog fixture, before vs after:
+
+| Benchmark | v0.3.0 | v0.4.0 | vs libxml2 |
+|---|---|---|---|
+| `self::*` (medium) | 5.81 µs | 0.92 µs | parity (libxml2 0.89 µs) |
+| `self::*` (large 100 KB) | 9.29 µs | 0.93 µs | parity |
+| `child::*` | 5.92 µs | 1.04 µs | parity (libxml2 0.94 µs) |
+| `attribute::id` | 5.65 µs | 0.99 µs | **2.5× faster** (libxml2 2.52 µs) |
+| `descendant::*` | 14.0 µs | 5.16 µs | 5× slower (libxml2 0.96 µs) |
+| `descendant::*[@id]` | 33.1 µs | 6.70 µs | 6.6× slower (libxml2 1.02 µs) |
+| `//book` | ~30 µs | 5.03 µs | 5× slower |
+| `count(//book[@id='b1'])` | ~40 µs | ~6 µs | 2× slower (libxml2 ~3 µs) |
+
+Per-call floor and basic axes are at libxml2 parity. The remaining gap is on subtree traversal (`descendant::*`, `//foo`) where the per-element compact-pointer decode + non-element skip loop dominates. Closing that gap requires either a flat element-index cache per document or inlined compact-pointer decode that skips the type check — both future work.
+
+### Specs
+
+- 368/368 specs pass (was 345 in v0.3.0). +23 new specs in `test_bytecode_vm.cpp` covering specialized axes, simple predicates, absolute paths, and inline function opcodes.
+- ASAN clean on Linux + macOS.
+
 ## [0.3.0] - 2026-08-06
 
 Parse-perf push + streaming SAX rewrite + XInclude ownership transfer.
