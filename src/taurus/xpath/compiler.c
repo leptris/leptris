@@ -181,8 +181,16 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
         case XPATH_AXIS_ATTRIBUTE:  op_name = XPATH_BC_AXIS_ATTRIBUTE_NAME;  op_wild = XPATH_BC_AXIS_ATTRIBUTE_WILD;  break;
         case XPATH_AXIS_SELF:       op_name = XPATH_BC_AXIS_SELF_NAME;       op_wild = XPATH_BC_AXIS_SELF_WILD;       break;
         case XPATH_AXIS_PARENT:     op_name = XPATH_BC_AXIS_PARENT_NAME;     op_wild = XPATH_BC_AXIS_PARENT_WILD;     break;
+        case XPATH_AXIS_DESCENDANT:
+            op_name = XPATH_BC_AXIS_DESCENDANT_NAME;
+            op_wild = XPATH_BC_AXIS_DESCENDANT_WILD;
+            break;
+        case XPATH_AXIS_DESCENDANT_OR_SELF:
+            op_name = XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME;
+            op_wild = XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD;
+            break;
         default:
-            return 0;  /* descendant / ancestor / following / etc. stay on BC_AXIS_STEP */
+            return 0;  /* ancestor / following / etc. stay on BC_AXIS_STEP */
     }
 
     if (has_wild) {

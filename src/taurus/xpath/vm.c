@@ -149,6 +149,9 @@ struct taurus_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
                                                 const char* name, int wild);
 struct taurus_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
                                                   const char* name, int wild);
+struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM* vm,
+                                                      const char* name, int wild,
+                                                      int include_self);
 
 struct taurus_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
                                                  const char* name, int wild) {
@@ -320,6 +323,82 @@ struct taurus_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
             if (out->nodes[j] == parent) { dup = 1; break; }
         }
         if (!dup) xpath_nodeset_add(out, parent);
+    }
+
+    xpath_nodeset_free(input);
+
+    struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+/* Recursive subtree walk for descendant / descendant-or-self.
+ * Appends matching elements to `out`. No dedup at this layer —
+ * the caller decides based on input size. */
+static void descendant_walk(XPathNodeSet* out, TaurusElement elem,
+                              const char* name, int wild, int include_self) {
+    if (!elem) return;
+
+    if (include_self) {
+        if (wild) {
+            xpath_nodeset_add(out, elem);
+        } else {
+            const char* en = taurus_element_get_name(elem);
+            if (en && strcmp(en, name) == 0) {
+                xpath_nodeset_add(out, elem);
+            }
+        }
+    }
+
+    TaurusElement child = taurus_element_get_first_child(elem);
+    while (child) {
+        descendant_walk(out, child, name, wild, 1);
+        child = taurus_element_get_next_sibling(child);
+    }
+}
+
+struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM* vm,
+                                                      const char* name, int wild,
+                                                      int include_self) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    /* Single-element input: descendant output cannot contain
+     * duplicates by tree structure. Skip dedup.
+     *
+     * Multi-element input: dedup the newly-added range per input
+     * element via pointer-equality. O(n^2) but multi-root
+     * descendant is uncommon. */
+    int need_dedup = (input->count > 1);
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        TaurusElement elem = (TaurusElement)input->nodes[i];
+
+        size_t mark = out->count;
+        descendant_walk(out, elem, name, wild, include_self);
+
+        if (need_dedup) {
+            for (size_t k = mark; k < out->count; k++) {
+                int dup = 0;
+                for (size_t j = 0; j < mark; j++) {
+                    if (out->nodes[j] == out->nodes[k]) {
+                        dup = 1;
+                        break;
+                    }
+                }
+                if (dup) {
+                    out->nodes[k] = out->nodes[out->count - 1];
+                    out->count--;
+                    k--;
+                }
+            }
+        }
     }
 
     xpath_nodeset_free(input);
@@ -633,6 +712,46 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
             case XPATH_BC_AXIS_PARENT_WILD: {
                 struct taurus_xpath_result* r =
                     vm_apply_axis_parent(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, name, 0, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, NULL, 1, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, name, 0, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, NULL, 1, 1);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
