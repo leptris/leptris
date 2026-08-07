@@ -10,26 +10,28 @@ on:
     inputs:
       next_version:
         description: |
-          Next release version. Possible values: x.y.z, major, minor, patch, or skip.
-          - major: Bump major version (0.1.2 → 1.0.0)
-          - minor: Bump minor version (0.1.2 → 0.2.0)
-          - patch: Bump patch version (0.1.2 → 0.1.3)
-          - x.y.z: Specific version (e.g., 0.2.1)
-          - skip: Skip version bump, release from current version
+          Next release version. Possible values: x.y.z, major, minor, patch.
+          - major: Bump major version (0.4.2 → 1.0.0)
+          - minor: Bump minor version (0.4.2 → 0.5.0)
+          - patch: Bump patch version (0.4.2 → 0.4.3)
+          - x.y.z: Specific version (e.g., 0.5.0)
         required: true
         default: 'patch'
-      create_github_release:
-        description: 'Create GitHub release after tagging?'
-        required: true
-        type: boolean
-        default: true
   pull_request:
     types: [closed]
     branches: [main]
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Phase 1: Bump version, create release branch, open PR.
+  # Triggered by workflow_dispatch.
+  # ─────────────────────────────────────────────────────────────────────────
   validate-and-bump:
-    name: Validate and bump version
+    name: Bump version and open release PR
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     outputs:
@@ -46,115 +48,167 @@ jobs:
       - name: Validate version input
         id: validate
         run: |
-          VERSION_INPUT="${{ github.event.inputs.next_version }}"
-
-          if [[ "$VERSION_INPUT" == "skip" ]]; then
-            echo "Skipping version bump, using current version"
-            echo "skip_bump=true" >> $GITHUB_OUTPUT
-          elif [[ "$VERSION_INPUT" =~ ^(major|minor|patch)$ ]]; then
-            echo "Valid bump type: $VERSION_INPUT"
+          INPUT="${{ github.event.inputs.next_version }}"
+          if [[ "$INPUT" =~ ^(major|minor|patch|[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             echo "skip_bump=false" >> $GITHUB_OUTPUT
-          elif [[ "$VERSION_INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Valid specific version: $VERSION_INPUT"
-            echo "skip_bump=false" >> $GITHUB_OUTPUT
+            echo "Valid: $INPUT"
           else
-            echo "::error::Invalid version input: $VERSION_INPUT"
+            echo "::error::Invalid version input: $INPUT"
             exit 1
           fi
 
-      - name: Get current version
-        if: steps.validate.outputs.skip_bump != 'true'
-        id: current_version
+      - name: Run bump-version.sh
         run: |
-          # Match project(taurus across multiple lines — the multi-line
-          # project() declaration in CMakeLists spreads VERSION over
-          # several lines. -A 5 includes them in the grep output.
-          CURRENT=$(grep -E -A 5 'project\(\s*taurus' CMakeLists.txt | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
-          if [ -z "$CURRENT" ]; then
-            echo "::error::Could not find version in CMakeLists.txt"
-            exit 1
-          fi
-          echo "version=$CURRENT" >> $GITHUB_OUTPUT
-          echo "Current version: $CURRENT"
+          chmod +x .github/scripts/bump-version.sh
+          echo "y" | .github/scripts/bump-version.sh "${{ github.event.inputs.next_version }}"
 
-      - name: Calculate next version
-        if: steps.validate.outputs.skip_bump != 'true'
+      - name: Get new version
         id: get_version
         run: |
-          INPUT="${{ github.event.inputs.next_version }}"
-          CURRENT="${{ steps.current_version.outputs.version }}"
+          VERSION=$(grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -1 | awk '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Determined version: $VERSION"
 
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-
-          case "$INPUT" in
-            major)
-              NEXT="$((MAJOR + 1)).0.0"
-              ;;
-            minor)
-              NEXT="$MAJOR.$((MINOR + 1)).0"
-              ;;
-            patch)
-              NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
-              ;;
-            *)
-              NEXT="$INPUT"
-              ;;
-          esac
-
-          echo "Next version: $NEXT"
-          echo "version=$NEXT" >> $GITHUB_OUTPUT
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Create release branch
         id: create_branch
         run: |
-          BRANCH="release/v${{ steps.get_version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          VERSION="${{ steps.get_version.outputs.version }}"
+          BRANCH="release/v${VERSION}"
           git checkout -b "$BRANCH"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
-      - name: Bump version in CMakeLists.txt
-        if: steps.validate.outputs.skip_bump != 'true'
-        run: |
-          NEW_VERSION="${{ steps.get_version.outputs.version }}"
-          # project() is multi-line in CMakeLists; use perl -i -0777 -pe
-          # to apply the regex across the whole file (not line-by-line).
-          perl -i -0777 -pe "s/(project\(\s*taurus\b[^\)]*?)VERSION\s+[0-9]+\.[0-9]+\.[0-9]+/\${1}VERSION $NEW_VERSION/s" CMakeLists.txt
-          sed -i "s/\"version\": \"[0-9]\+\.[0-9]\+\.[0-9]\+\"/\"version\": \"$NEW_VERSION\"/" vcpkg.json
-          sed -i "s/\"version-semver\": \"[0-9]\+\.[0-9]\+\.[0-9]\+\"/\"version-semver\": \"$NEW_VERSION\"/" vcpkg.json
-          cat CMakeLists.txt | head -10
-
       - name: Commit version bump
         run: |
-          git add CMakeLists.txt vcpkg.json
-          git commit -m "release: v${{ steps.get_version.outputs.version }}"
+          VERSION="${{ steps.get_version.outputs.version }}"
+          git add CMakeLists.txt vcpkg.json CHANGELOG.md
+          git commit -m "release: v${VERSION}"
 
       - name: Push release branch
         run: git push origin "${{ steps.create_branch.outputs.branch }}"
 
-      - name: Create PR
-        id: create_pr
+  create-pr:
+    name: Create release PR
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate-and-bump
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Create Pull Request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_BRANCH: ${{ needs.validate-and-bump.outputs.release_branch }}
+          VERSION: ${{ needs.validate-and-bump.outputs.version }}
         run: |
-          PR_URL=$(gh pr create \
-            --title "release: v${{ steps.get_version.outputs.version }}" \
-            --body "Bump version to v${{ steps.get_version.outputs.version }}." \
+          PR_BODY_FILE="$(mktemp)"
+          {
+            echo "## Release v${VERSION}"
+            echo ""
+            echo "This PR was auto-generated by the release workflow."
+            echo ""
+            echo "### Before merging"
+            echo "- [ ] Review and complete the CHANGELOG entry"
+            echo "- [ ] Verify all CI checks pass"
+            echo "- [ ] Ensure version number is correct"
+            echo ""
+            echo "### After merging"
+            echo "The following happen automatically:"
+            echo "- Git tag \`v${VERSION}\` is created"
+            echo "- GitHub release is published with notes from CHANGELOG"
+            echo "- Source tarball is attached to the release"
+          } > "$PR_BODY_FILE"
+
+          gh pr create \
             --base main \
-            --head "${{ steps.create_branch.outputs.branch }}")
-          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+            --head "$RELEASE_BRANCH" \
+            --title "release: v${VERSION}" \
+            --body-file "$PR_BODY_FILE" \
+            --label release \
+            --label automated
 
-      - name: Create tag
+  # ─────────────────────────────────────────────────────────────────────────
+  # Phase 2: When a release-labeled PR is merged, tag + publish.
+  # Triggered by pull_request.closed.
+  # ─────────────────────────────────────────────────────────────────────────
+  tag-and-release:
+    name: Tag and publish GitHub release
+    runs-on: ubuntu-24.04
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag: ${{ steps.get_version.outputs.tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from CMakeLists.txt
+        id: get_version
         run: |
-          git tag "v${{ steps.get_version.outputs.version }}"
-          git push origin "v${{ steps.get_version.outputs.version }}"
+          VERSION=$(grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -1 | awk '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
 
-      - name: Create GitHub release
-        if: github.event.inputs.create_github_release == 'true'
+      - name: Extract release notes from CHANGELOG
+        id: extract_notes
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          NOTES_FILE="$(mktemp)"
+
+          # Extract the section for this version from CHANGELOG.md.
+          # Format: ## [X.Y.Z] - date ...
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (in_section) exit
+              if ($0 ~ "\\[" ver "\\]") { in_section = 1; next }
+            }
+            in_section { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+
+          # Fallback if no section found
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "Release v${VERSION}" > "$NOTES_FILE"
+          fi
+
+          echo "notes_file=$NOTES_FILE" >> $GITHUB_OUTPUT
+          echo "--- Release notes ---"
+          cat "$NOTES_FILE"
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push git tag
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: taurus v${{ steps.get_version.outputs.version }}
+          body_path: ${{ steps.extract_notes.outputs.notes_file }}
+          draft: false
+          prerelease: false
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release summary
         run: |
-          gh release create "v${{ steps.get_version.outputs.version }}" \
-            --title "v${{ steps.get_version.outputs.version }}" \
-            --notes "Release v${{ steps.get_version.outputs.version }}" \
-            --target "${{ steps.create_branch.outputs.branch }}"
+          VERSION="${{ steps.get_version.outputs.version }}"
+          echo "::notice::Tag v${VERSION} created"
+          echo "::notice::Release: https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
