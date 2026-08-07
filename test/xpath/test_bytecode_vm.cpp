@@ -242,4 +242,129 @@ TEST(XPathBytecodeSpecializedAxes, DescendantFromMultiRoot) {
     taurus_document_free(doc);
 }
 
+TEST(XPathBytecodeSimplePredicates, AttributeExistsPredicate) {
+    /* [@attr] lowers to BC_PRED_ATTR_EXISTS. */
+    const char xml[] =
+        "<root><a id='1'>x</a><a>y</a><a id='2'>z</a></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                               "count(//a[@id])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    /* Combined with descendant axis: BC_AXIS_DESCENDANT_NAME + BC_PRED_ATTR_EXISTS. */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr,
+                                                "count(/root/descendant::a[@id])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 2.0);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeSimplePredicates, AttributeEqualsStringPredicate) {
+    /* [@attr = 'literal'] lowers to BC_PRED_ATTR_EQ_STRING. */
+    const char xml[] =
+        "<root><a t='x'>1</a><a t='y'>2</a><a t='x'>3</a></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                               "count(//a[@t='x'])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    /* No match. */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr,
+                                                "count(//a[@t='z'])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 0.0);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeSimplePredicates, PositionPredicate) {
+    /* [N] lowers to BC_PRED_POSITION. */
+    const char xml[] =
+        "<root><a>1</a><a>2</a><a>3</a><a>4</a></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr,
+                                                "count(//a[1])");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r1), 1.0);
+    taurus_xpath_result_free(r1);
+
+    /* Out-of-bounds position. */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr,
+                                                "count(//a[99])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 0.0);
+    taurus_xpath_result_free(r2);
+
+    /* Combined with descendant: descendant::a[2] = second a in pre-order. */
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, nullptr,
+                                                "string(/root/descendant::a[2])");
+    ASSERT_NE(r3, nullptr);
+    char* s = taurus_xpath_result_string(r3);
+    EXPECT_STREQ(s, "2");
+    taurus_free_string(s);
+    taurus_xpath_result_free(r3);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeSimplePredicates, ChainedPredicates) {
+    /* Multiple simple predicates chain: [@a][@b] = has-attr-a AND has-attr-b. */
+    const char xml[] =
+        "<root><a x='1' y='2'>m</a><a x='1'>n</a><a y='2'>o</a></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                               "count(//a[@x][@y])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 1.0);
+    taurus_xpath_result_free(r);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeSimplePredicates, ComplexPredicateFallsBack) {
+    /* Predicates with general expressions stay on the apply_predicates
+     * path. Ensures the compiler's predicate classifier doesn't
+     * accidentally inline a complex predicate. */
+    const char xml[] =
+        "<root><a id='1' p='10'>x</a><a id='2' p='20'>y</a></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Comparison predicate — falls back. */
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                               "count(//a[@p > 15])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 1.0);
+    taurus_xpath_result_free(r);
+
+    /* Function-call predicate — falls back. */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr,
+                                                "count(//a[string-length() > 0])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 2.0);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
+}
+
 }  // namespace

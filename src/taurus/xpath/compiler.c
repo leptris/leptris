@@ -158,11 +158,98 @@ static int op_is_comparison(XPathOperatorType op) {
  * Name tests with a `:` (namespace prefix) require XPath's
  * namespace-aware matching semantics, which the inline handler
  * doesn't implement. Wildcards with namespace prefix same. */
+static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step);
+
+/* Classify a predicate AST into a "simple" shape that the VM can
+ * apply inline (TODO 128). Returns PRED_KIND_NONE if the predicate
+ * is too complex; out-params carry the matched values.
+ *
+ * Recognized shapes:
+ *   - [@attr]            → PRED_KIND_ATTR_EXISTS
+ *       The predicate is a bare attribute-axis STEP or a PATH_EXPR
+ *       wrapping one, with a single name test.
+ *   - [@attr = 'lit']    → PRED_KIND_ATTR_EQ_STRING
+ *       Operator EQUAL with @attr on the left and a string literal
+ *       on the right.
+ *   - [N]                → PRED_KIND_POSITION
+ *       Predicate is a numeric literal. */
+typedef enum {
+    PRED_KIND_NONE,
+    PRED_KIND_ATTR_EXISTS,
+    PRED_KIND_ATTR_EQ_STRING,
+    PRED_KIND_POSITION
+} PredKind;
+
+static const char* pred_attr_name(XPathASTNode* pred) {
+    /* pred may be a STEP or a PATH_EXPR wrapping a STEP. */
+    XPathASTNode* step = pred;
+    if (step->type == XPATH_AST_PATH_EXPR && step->child_count == 1) {
+        step = step->children[0];
+    }
+    if (!step || step->type != XPATH_AST_STEP) return NULL;
+    if (step->axis_id != XPATH_AXIS_ATTRIBUTE) return NULL;
+    if (step->child_count != 1) return NULL;  /* predicate on the attr step */
+    XPathASTNode* test = step->children[0];
+    if (!test || test->type != XPATH_AST_NODE_TEST_NAME) return NULL;
+    if (!test->value || strchr(test->value, ':')) return NULL;  /* no prefix */
+    return test->value;
+}
+
+static PredKind classify_predicate(XPathASTNode* pred,
+                                     const char** out_attr_name,
+                                     const char** out_attr_value,
+                                     long* out_position) {
+    if (!pred) return PRED_KIND_NONE;
+    *out_attr_name = NULL;
+    *out_attr_value = NULL;
+    *out_position = 0;
+
+    /* [N] — numeric literal. */
+    if (pred->type == XPATH_AST_NUMBER) {
+        double v = pred->number_value;
+        if (v >= 1.0 && v == (double)(long)v) {
+            *out_position = (long)v;
+            return PRED_KIND_POSITION;
+        }
+        return PRED_KIND_NONE;
+    }
+
+    /* [@attr] — bare attribute step. */
+    if (pred->type == XPATH_AST_STEP || pred->type == XPATH_AST_PATH_EXPR) {
+        const char* attr = pred_attr_name(pred);
+        if (attr) {
+            *out_attr_name = attr;
+            return PRED_KIND_ATTR_EXISTS;
+        }
+    }
+
+    /* [@attr = 'literal'] — operator EQUAL with @attr left, string right. */
+    if (pred->type == XPATH_AST_OPERATOR &&
+        (XPathOperatorType)pred->number_value == XPATH_OP_EQUAL &&
+        pred->child_count == 2) {
+        const char* attr = pred_attr_name(pred->children[0]);
+        XPathASTNode* rhs = pred->children[1];
+        if (attr && rhs && rhs->type == XPATH_AST_STRING && rhs->value) {
+            *out_attr_name = attr;
+            *out_attr_value = rhs->value;
+            return PRED_KIND_ATTR_EQ_STRING;
+        }
+    }
+
+    return PRED_KIND_NONE;
+}
+
+/* Try to compile a STEP with its predicates specialized (TODO 128).
+ * Emits a specialized axis opcode (if the axis shape matches) followed
+ * by one specialized predicate opcode per simple predicate. Falls
+ * back to BC_AXIS_STEP if the axis shape doesn't match or any
+ * predicate is non-simple.
+ *
+ * Returns 1 if emitted, 0 on fallback. */
 static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
     if (!step || step->type != XPATH_AST_STEP) return 0;
-    if (step->child_count != 1) return 0;  /* has predicates */
 
-    XPathASTNode* test = step->children[0];
+    XPathASTNode* test = (step->child_count >= 1) ? step->children[0] : NULL;
     if (!test) return 0;
 
     /* The test value carries the qualified name (may contain ':').
@@ -172,6 +259,20 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
     int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL);
     if (!has_name && !has_wild) return 0;
     if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
+
+    /* Predicates: child_count==1 means no predicates. >1 means
+     * there are predicates; check each is simple. */
+    size_t pred_count = step->child_count - 1;
+    if (pred_count > 0) {
+        for (size_t i = 0; i < pred_count; i++) {
+            XPathASTNode* pred = step->children[1 + i];
+            const char *a, *v;
+            long p;
+            if (classify_predicate(pred, &a, &v, &p) == PRED_KIND_NONE) {
+                return 0;  /* non-simple predicate — fall back */
+            }
+        }
+    }
 
     XPathAxisType axis = step->axis_id;
     XPathOpcode op_name, op_wild;
@@ -193,11 +294,60 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
             return 0;  /* ancestor / following / etc. stay on BC_AXIS_STEP */
     }
 
+    /* Emit the axis opcode. */
     if (has_wild) {
         emit_op(st, op_wild);
     } else {
         emit_op_u16(st, op_name, add_const_string(st, test->value));
     }
+
+    /* Emit one predicate opcode per simple predicate. The VM applies
+     * them in order, which matches XPath semantics for chained
+     * predicates ([@a][@b] = has-attr-a AND has-attr-b). */
+    for (size_t i = 0; i < pred_count; i++) {
+        XPathASTNode* pred = step->children[1 + i];
+        const char *a, *v;
+        long p;
+        PredKind kind = classify_predicate(pred, &a, &v, &p);
+
+        switch (kind) {
+            case PRED_KIND_ATTR_EXISTS:
+                emit_op_u16(st, XPATH_BC_PRED_ATTR_EXISTS,
+                            add_const_string(st, a));
+                break;
+            case PRED_KIND_ATTR_EQ_STRING: {
+                uint16_t name_idx = add_const_string(st, a);
+                uint16_t value_idx = add_const_string(st, v);
+                /* Encode the pair as two consecutive u16 operands
+                 * in the instruction stream. */
+                if (reserve_code(st, 5) == 0) {
+                    st->bc->code[st->bc->code_len++] = (unsigned char)XPATH_BC_PRED_ATTR_EQ_STRING;
+                    st->bc->code[st->bc->code_len++] = (name_idx >> 8) & 0xFF;
+                    st->bc->code[st->bc->code_len++] = name_idx & 0xFF;
+                    st->bc->code[st->bc->code_len++] = (value_idx >> 8) & 0xFF;
+                    st->bc->code[st->bc->code_len++] = value_idx & 0xFF;
+                }
+                break;
+            }
+            case PRED_KIND_POSITION:
+                /* XPath positions are 1-based; cap at 255 to fit in u8.
+                 * Larger positions are rare; fall back to BC_AXIS_STEP
+                 * would require re-issuing the axis — not worth it. */
+                if (p >= 1 && p <= 255) {
+                    emit_op_u8(st, XPATH_BC_PRED_POSITION, (uint8_t)p);
+                } else {
+                    /* Predicates were classified as simple but we
+                     * can't encode this one. Bail — restart with
+                     * BC_AXIS_STEP. This branch is unreachable in
+                     * practice (classify gates to >= 1). */
+                    return 0;
+                }
+                break;
+            default:
+                return 0;  /* unreachable due to gating above */
+        }
+    }
+
     return 1;
 }
 
