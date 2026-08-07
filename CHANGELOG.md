@@ -86,6 +86,32 @@ descendant-axis and count() go from 5-12× slower to within 2-6×.
 
 Per-call floor and basic axes are at libxml2 parity. The remaining gap is on subtree traversal (`descendant::*`, `//foo`) where the per-element compact-pointer decode + non-element skip loop dominates. Closing that gap requires either a flat element-index cache per document or inlined compact-pointer decode that skips the type check — both future work.
 
+### Changed — Element index for O(1) descendant (TODO 132)
+
+- New `src/taurus/dom/element_index.{h,c}` — per-document flat array of elements in preorder + per-name buckets.
+- Built lazily on first descendant-axis access, cached on `TaurusDocument`, freed in `taurus_document_free`, invalidated by `taurus_element_append_child`.
+- `vm_apply_absolute` uses the index for descendant / descendant-or-self modes (covers `//foo`, `//*`).
+- `vm_apply_axis_descendant` uses the index when input is the document root (covers `descendant::*` from root context, which is the common case).
+- Non-root input falls back to the iterative walk from TODO 131.
+
+### Final performance (v0.4.0 with TODO 132)
+
+`bench_xpath_diagnostic` (CPU time):
+
+| Benchmark | Taurus | libxml2 | Verdict |
+|---|---|---|---|
+| `self::*` (medium) | 0.92 µs | 0.89 µs | parity |
+| `child::*` | 1.04 µs | 0.94 µs | parity |
+| `attribute::id` | 0.99 µs | 2.52 µs | **2.5× faster** |
+| `descendant::*` | 1.33 µs | 0.96 µs | 1.4× slower |
+| `descendant::title` | 0.84 µs | 0.99 µs | **BEATS libxml2** |
+| `//book` | 0.66 µs | ~1 µs | **BEATS libxml2** |
+| `//*` | 1.20 µs | ~1 µs | parity |
+| `count(//book[@id='b1'])` | 1.19 µs | ~3 µs | **2.5× faster** |
+| `descendant::*[@id]` | 3.15 µs | 1.02 µs | 3× slower |
+
+Per-call floor + basic axes + named-descendant + function-wrapped paths now beat libxml2 or match it. Remaining gap: predicate-heavy wildcard (`descendant::*[@id]`) where the per-element attribute predicate scan dominates — future work.
+
 ### Specs
 
 - 368/368 specs pass (was 345 in v0.3.0). +23 new specs in `test_bytecode_vm.cpp` covering specialized axes, simple predicates, absolute paths, and inline function opcodes.
