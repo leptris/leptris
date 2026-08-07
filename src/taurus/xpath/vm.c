@@ -757,6 +757,125 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 break;
             }
 
+            /* Simple predicate handlers (TODO 128). Each pops the
+             * input nodeset, filters inline, pushes the filtered
+             * result. The compiler emits these after a specialized
+             * axis opcode for the common predicate shapes
+             * ([@attr], [@attr = 'lit'], [N]). */
+
+            case XPATH_BC_PRED_ATTR_EXISTS: {
+                uint16_t idx = read_u16(&pc);
+                const char* attr_name = (idx < bc->const_count &&
+                                          bc->constants[idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[idx].v.string : NULL;
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+
+                /* In-place two-pointer filter. The VM owns the
+                 * input nodeset (we detached it from the result
+                 * wrapper), so we can mutate it safely. */
+                size_t write = 0;
+                for (size_t read = 0; read < input->count; read++) {
+                    void* node = input->nodes[read];
+                    if (!node_is_element(node)) continue;
+                    TaurusElement elem = (TaurusElement)node;
+                    struct taurus_attribute* a =
+                        taurus_element_get_first_attribute(elem);
+                    int found = 0;
+                    while (a) {
+                        TaurusStringView nv = a->name_view;
+                        if (attr_name && nv.length > 0 && nv.data &&
+                            strlen(attr_name) == nv.length &&
+                            memcmp(attr_name, nv.data, nv.length) == 0) {
+                            found = 1;
+                            break;
+                        }
+                        a = a->next;
+                    }
+                    if (found) {
+                        if (write != read) input->nodes[write] = node;
+                        write++;
+                    }
+                }
+                input->count = write;
+
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PRED_ATTR_EQ_STRING: {
+                /* Two u16 operands: attr name idx, value idx. */
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* attr_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                const char* expected = (value_idx < bc->const_count &&
+                                         bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                        ? bc->constants[value_idx].v.string : NULL;
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+
+                size_t write = 0;
+                for (size_t read = 0; read < input->count; read++) {
+                    void* node = input->nodes[read];
+                    if (!node_is_element(node)) continue;
+                    TaurusElement elem = (TaurusElement)node;
+                    struct taurus_attribute* a =
+                        taurus_element_get_first_attribute(elem);
+                    int match = 0;
+                    while (a) {
+                        TaurusStringView nv = a->name_view;
+                        TaurusStringView vv = a->value_view;
+                        if (attr_name && expected &&
+                            nv.length > 0 && nv.data &&
+                            strlen(attr_name) == nv.length &&
+                            memcmp(attr_name, nv.data, nv.length) == 0 &&
+                            strlen(expected) == vv.length &&
+                            memcmp(expected, vv.data, vv.length) == 0) {
+                            match = 1;
+                            break;
+                        }
+                        a = a->next;
+                    }
+                    if (match) {
+                        if (write != read) input->nodes[write] = node;
+                        write++;
+                    }
+                }
+                input->count = write;
+
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PRED_POSITION: {
+                uint8_t pos = read_u8(&pc);
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+
+                /* Keep only the pos-th element (1-based). */
+                if (pos == 0 || (size_t)pos > input->count) {
+                    input->count = 0;
+                } else {
+                    void* keep = input->nodes[pos - 1];
+                    input->nodes[0] = keep;
+                    input->count = 1;
+                }
+
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
             case XPATH_BC_BINARY_OP: {
                 uint8_t op_type = read_u8(&pc);
                 if (vm_apply_binary_op(&vm, ctx,

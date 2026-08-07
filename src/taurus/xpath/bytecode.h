@@ -66,6 +66,18 @@ typedef enum {
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME,/* u16 operand: const-pool string */
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD,/* no operand */
 
+    /* Simple predicate opcodes (TODO 128). Each pops the input
+     * nodeset from the stack, applies the filter inline, and pushes
+     * the filtered result. The compiler emits these for the common
+     * predicate shapes:
+     *   - [@attr]              → BC_PRED_ATTR_EXISTS
+     *   - [@attr = 'literal']  → BC_PRED_ATTR_EQ_STRING
+     *   - [N]                  → BC_PRED_POSITION
+     * Anything else stays on the existing apply_predicates path. */
+    XPATH_BC_PRED_ATTR_EXISTS,       /* u16 operand: const-pool attr name */
+    XPATH_BC_PRED_ATTR_EQ_STRING,    /* u16 operand: const-pool (name, value) pair encoded as two consecutive const-pool indices */
+    XPATH_BC_PRED_POSITION,          /* u8 operand: position (1-based) */
+
     XPATH_BC_BINARY_OP,        /* u8 operand: XPathOperatorType */
     XPATH_BC_FUNC_CALL,        /* u16 operand: const-pool index (FUNC AST) */
     XPATH_BC_FALLBACK_EVAL,    /* u16 operand: const-pool index (AST) */
