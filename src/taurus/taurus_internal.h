@@ -23,6 +23,7 @@
 /* Forward declarations - actual typedefs in respective headers */
 struct taurus_element;  /* typedef in dom/element.h */
 struct taurus_compact_overflow_entry;  /* typedef in dom/compact.h */
+struct taurus_element_index;  /* typedef in dom/element_index.h */
 
 /* ============================================================================
  * Error Codes (Internal)
@@ -107,6 +108,11 @@ struct taurus_document {
      * `alloc_hook` / `dealloc_hook` default to the thread-local
      * hooks; per-document overrides are TODO 38 phase 3. */
     int strict_mode;
+
+    /* Element index (TODO 132) — lazily-built flat array + per-name
+     * buckets for O(1) descendant queries. Built on first access.
+     * NULL until first descendant-axis query touches it. */
+    struct taurus_element_index* element_index;
 
     /* TODO 117: adopted child documents from xi:include parse="xml".
      * The included doc's pool is owned by this document -- the
