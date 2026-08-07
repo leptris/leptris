@@ -36,7 +36,9 @@ function(taurus_add_test name)
         ${PROJECT_SOURCE_DIR}/src/taurus/memory
         ${PROJECT_SOURCE_DIR}/src/taurus/common
         # DOM internals — used by vtable specs.
-        ${PROJECT_SOURCE_DIR}/src/taurus/dom)
+        ${PROJECT_SOURCE_DIR}/src/taurus/dom
+        # Flat doc internals — used by flat parse specs (TODO 139).
+        ${PROJECT_SOURCE_DIR}/src/taurus/flat)
     target_compile_features(${name} PRIVATE cxx_std_11)
     gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
     add_dependencies(check_all ${name})
@@ -76,6 +78,7 @@ taurus_add_test(test_perf       perf/test_perf.cpp)
 taurus_add_test(test_sax        sax/test_sax.cpp)
 taurus_add_test(test_streaming  sax/test_streaming.cpp)
 taurus_add_test(test_abi        abi/test_header_hygiene.cpp)
+taurus_add_test(test_flat_doc   flat/test_flat_doc.cpp)
 
 # Shared-library export check (TODO 122).  Runs the bash script that
 # builds a one-off libtaurus.dylib / .so and asserts SAX + DOM + XPath

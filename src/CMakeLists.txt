@@ -83,6 +83,10 @@ set(TAURUS_SOURCES
     # XInclude
     taurus/xinclude/xinclude.c
 
+    # Flat document buffer (TODO 139) — fast parse representation
+    # that converts to the compact-pointer tree lazily on first access.
+    taurus/flat/flat_doc.c
+
     # Core library
     taurus/taurus.c
     taurus/error.c
@@ -113,6 +117,7 @@ target_include_directories(taurus_objects
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/xpath
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
+        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
 )
 
 target_link_libraries(taurus_objects PUBLIC m)
@@ -224,6 +229,7 @@ if(TAURUS_BUILD_STATIC)
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/xpath
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
+            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
     )
 
     # Pull in link dependencies (utf8proc, Iconv, m) declared on
@@ -280,6 +286,7 @@ if(TAURUS_BUILD_SHARED)
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/xpath
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
             ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
+            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
     )
 
     # See note on taurus_static above.
