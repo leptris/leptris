@@ -407,25 +407,31 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
     }
 
     /* Fused axis+predicate fast path (TODO 134). For descendant::*
-     * with a single attribute predicate, emit one opcode that the VM
-     * can serve directly from the attribute index when input is the
-     * document root. Skips the intermediate nodeset allocation that
-     * the two-opcode form would require. */
-    if (axis == XPATH_AXIS_DESCENDANT && has_wild && pred_count == 1) {
+     * and descendant-or-self::* with a single attribute predicate,
+     * emit one opcode that the VM can serve directly from the
+     * attribute index when input is the document root. */
+    if ((axis == XPATH_AXIS_DESCENDANT || axis == XPATH_AXIS_DESCENDANT_OR_SELF) &&
+        has_wild && pred_count == 1) {
         const char *a, *v;
         long p;
         PredKind kind = classify_predicate(step->children[1], &a, &v, &p);
+        XPathOpcode exists_op, eq_op;
+        if (axis == XPATH_AXIS_DESCENDANT) {
+            exists_op = XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS;
+            eq_op = XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EQ_STRING;
+        } else {
+            exists_op = XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EXISTS;
+            eq_op = XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EQ_STRING;
+        }
         if (kind == PRED_KIND_ATTR_EXISTS) {
-            emit_op_u16(st, XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS,
-                        add_const_string(st, a));
+            emit_op_u16(st, exists_op, add_const_string(st, a));
             return 1;
         }
         if (kind == PRED_KIND_ATTR_EQ_STRING) {
             uint16_t name_idx = add_const_string(st, a);
             uint16_t value_idx = add_const_string(st, v);
             if (reserve_code(st, 5) == 0) {
-                st->bc->code[st->bc->code_len++] =
-                    (unsigned char)XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EQ_STRING;
+                st->bc->code[st->bc->code_len++] = (unsigned char)eq_op;
                 st->bc->code[st->bc->code_len++] = (name_idx >> 8) & 0xFF;
                 st->bc->code[st->bc->code_len++] = name_idx & 0xFF;
                 st->bc->code[st->bc->code_len++] = (value_idx >> 8) & 0xFF;

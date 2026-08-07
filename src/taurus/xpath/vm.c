@@ -158,7 +158,7 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
 static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
     XPathContext* ctx, XPathVM* vm,
     const char* attr_name, const char* attr_value,
-    int value_match);
+    int value_match, int include_self);
 
 /* Forward decl: descendant_walk is defined below, but vm_apply_absolute
  * uses it. */
@@ -592,7 +592,7 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
 static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
     XPathContext* ctx, XPathVM* vm,
     const char* attr_name, const char* attr_value,
-    int value_match) {
+    int value_match, int include_self) {
 
     XPathNodeSet* input = vm_detach_input_nodeset(vm);
     if (!input) return NULL;
@@ -618,18 +618,19 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
                 taurus_element_index_lookup_attr(idx, attr_name);
             if (abucket) {
                 if (!value_match) {
-                    /* [@attr] — return all matches except root. */
+                    /* [@attr] — return all matches (root is in the
+                     * bucket iff it has the attr; same for both
+                     * descendant and descendant-or-self). */
                     for (size_t i = 0; i < abucket->count; i++) {
-                        if (abucket->matches[i] == doc_root) continue;
+                        if (!include_self && abucket->matches[i] == doc_root) continue;
                         xpath_nodeset_add_fast(out, abucket->matches[i]);
                     }
                 } else {
-                    /* [@attr='value'] — lookup value sub-bucket. */
                     const TaurusElementIndexAttrValue* vbucket =
                         taurus_element_index_attr_lookup_value(abucket, attr_value);
                     if (vbucket) {
                         for (size_t i = 0; i < vbucket->count; i++) {
-                            if (vbucket->matches[i] == doc_root) continue;
+                            if (!include_self && vbucket->matches[i] == doc_root) continue;
                             xpath_nodeset_add_fast(out, vbucket->matches[i]);
                         }
                     }
@@ -650,36 +651,37 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
     size_t attr_name_len = attr_name ? strlen(attr_name) : 0;
     size_t value_len = attr_value ? strlen(attr_value) : 0;
 
+    /* Helper macro: check if `e` has the matching attr. */
+    #define ATTR_MATCHES(e) ({ \
+        struct taurus_attribute* _a = taurus_element_get_first_attribute(e); \
+        int _m = 0; \
+        while (_a) { \
+            TaurusStringView _nv = _a->name_view; \
+            if (attr_name && _nv.length == attr_name_len && _nv.length > 0 && _nv.data && \
+                memcmp(attr_name, _nv.data, _nv.length) == 0) { \
+                if (!value_match) { _m = 1; break; } \
+                TaurusStringView _vv = _a->value_view; \
+                if (_vv.length == value_len && _vv.length > 0 && _vv.data && \
+                    memcmp(attr_value, _vv.data, _vv.length) == 0) { _m = 1; break; } \
+            } \
+            _a = _a->next; \
+        } \
+        _m; \
+    })
+
     for (size_t i = 0; i < input->count; i++) {
         if (!node_is_element(input->nodes[i])) continue;
         TaurusElement elem = (TaurusElement)input->nodes[i];
 
+        /* include_self: check the input element itself. */
+        if (include_self && ATTR_MATCHES(elem)) {
+            xpath_nodeset_add_fast(out, elem);
+        }
+
         /* Inline subtree walk + attr filter. */
         TaurusElement cur = taurus_element_get_first_child(elem);
         while (cur) {
-            /* Check if cur has the matching attribute. */
-            struct taurus_attribute* a = taurus_element_get_first_attribute(cur);
-            int match = 0;
-            while (a) {
-                TaurusStringView nv = a->name_view;
-                if (attr_name && nv.length == attr_name_len &&
-                    nv.length > 0 && nv.data &&
-                    memcmp(attr_name, nv.data, nv.length) == 0) {
-                    if (!value_match) {
-                        match = 1;
-                        break;
-                    }
-                    TaurusStringView vv = a->value_view;
-                    if (vv.length == value_len &&
-                        vv.length > 0 && vv.data &&
-                        memcmp(attr_value, vv.data, vv.length) == 0) {
-                        match = 1;
-                        break;
-                    }
-                }
-                a = a->next;
-            }
-            if (match) xpath_nodeset_add_fast(out, cur);
+            if (ATTR_MATCHES(cur)) xpath_nodeset_add_fast(out, cur);
 
             /* Descend or backtrack. */
             TaurusElement next = taurus_element_get_first_child(cur);
@@ -695,6 +697,7 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
             if (cur == elem) break;
         }
     }
+    #undef ATTR_MATCHES
 
     xpath_nodeset_free(input);
 
@@ -1039,7 +1042,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                                           bc->constants[idx].type == XPATH_CONST_STRING)
                                          ? bc->constants[idx].v.string : NULL;
                 struct taurus_xpath_result* r =
-                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, NULL, 0);
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, NULL, 0, 0);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
@@ -1055,7 +1058,35 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                                            bc->constants[value_idx].type == XPATH_CONST_STRING)
                                           ? bc->constants[value_idx].v.string : NULL;
                 struct taurus_xpath_result* r =
-                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, attr_value, 1);
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, attr_value, 1, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EXISTS: {
+                uint16_t idx = read_u16(&pc);
+                const char* attr_name = (idx < bc->const_count &&
+                                          bc->constants[idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, NULL, 0, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EQ_STRING: {
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* attr_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_value = (value_idx < bc->const_count &&
+                                           bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                          ? bc->constants[value_idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, attr_value, 1, 1);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;

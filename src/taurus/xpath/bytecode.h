@@ -75,6 +75,10 @@ typedef enum {
         /* u16 operand: attr name */
     XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EQ_STRING,
         /* u16 u16 operands: attr name, attr value */
+    XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EXISTS,
+        /* u16 operand: attr name */
+    XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EQ_STRING,
+        /* u16 u16 operands: attr name, attr value */
 
     /* Absolute-path first-step opcodes (TODO 129). The first step
      * of an absolute path needs document-root semantics: `/foo`
