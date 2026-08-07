@@ -79,6 +79,7 @@ taurus_add_test(test_sax        sax/test_sax.cpp)
 taurus_add_test(test_streaming  sax/test_streaming.cpp)
 taurus_add_test(test_abi        abi/test_header_hygiene.cpp)
 taurus_add_test(test_flat_doc   flat/test_flat_doc.cpp)
+taurus_add_test(test_flat_parser flat/test_flat_parser.cpp)
 
 # Shared-library export check (TODO 122).  Runs the bash script that
 # builds a one-off libtaurus.dylib / .so and asserts SAX + DOM + XPath

@@ -86,6 +86,7 @@ set(TAURUS_SOURCES
     # Flat document buffer (TODO 139) — fast parse representation
     # that converts to the compact-pointer tree lazily on first access.
     taurus/flat/flat_doc.c
+    taurus/flat/flat_parser.c
 
     # Core library
     taurus/taurus.c
