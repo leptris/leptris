@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.3] - Y-08-07
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.2] - 2026-08-07
 
 ### Added — Nokogiri-compatible API (#181, #183)
