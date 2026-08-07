@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.4] - Y-08-07
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.3] - 2026-08-07
 
 ### Fixed — Full exclusive C14N (#183, real implementation)
