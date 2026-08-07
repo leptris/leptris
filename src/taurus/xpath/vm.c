@@ -38,6 +38,7 @@
 #include "functions.h"
 #include "../taurus_internal.h"
 #include "../dom/element.h"
+#include "../dom/element_index.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -193,9 +194,41 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
         }
     }
 
-    /* Walk subtree only for descendant / descendant-or-self modes. */
+    /* Walk subtree only for descendant / descendant-or-self modes.
+     *
+     * Use the element index when available (TODO 132). The index
+     * gives O(K) lookup where K = match count, vs O(N) walk where
+     * N = total element count. Built lazily on first access. */
     if (mode > 0) {
-        descendant_walk(out, root, name, wild, 0);
+        struct taurus_element_index* idx = ctx->document->element_index;
+        if (!idx) {
+            idx = taurus_element_index_build(ctx->document);
+            ctx->document->element_index = idx;  /* race-safe last-writer-wins */
+        }
+
+        if (idx) {
+            /* Use index. The `include_self` block above already
+             * added root if applicable (mode 0 or 2). Always skip
+             * root when iterating the index to avoid duplication. */
+            if (wild) {
+                for (size_t i = 0; i < idx->all_count; i++) {
+                    if (idx->all_elements[i] == root) continue;
+                    xpath_nodeset_add(out, idx->all_elements[i]);
+                }
+            } else {
+                const TaurusElementIndexBucket* bucket =
+                    taurus_element_index_lookup(idx, name);
+                if (bucket) {
+                    for (size_t i = 0; i < bucket->count; i++) {
+                        if (bucket->matches[i] == root) continue;
+                        xpath_nodeset_add(out, bucket->matches[i]);
+                    }
+                }
+            }
+        } else {
+            /* Index build failed — fall back to walk. */
+            descendant_walk(out, root, name, wild, 0);
+        }
     }
 
     struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
@@ -462,19 +495,52 @@ static void descendant_walk(XPathNodeSet* out, TaurusElement elem,
 struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM* vm,
                                                       const char* name, int wild,
                                                       int include_self) {
-    (void)ctx;
     XPathNodeSet* input = vm_detach_input_nodeset(vm);
     if (!input) return NULL;
 
     XPathNodeSet* out = xpath_nodeset_new();
     if (!out) { xpath_nodeset_free(input); return NULL; }
 
-    /* Single-element input: descendant output cannot contain
-     * duplicates by tree structure. Skip dedup.
-     *
-     * Multi-element input: dedup the newly-added range per input
-     * element via pointer-equality. O(n^2) but multi-root
-     * descendant is uncommon. */
+    /* Fast path: single-element input that IS the document root.
+     * Use the element index (TODO 132) for O(K) lookup. */
+    TaurusElement doc_root = (ctx && ctx->document)
+        ? (TaurusElement)ctx->document->new_dom_root : NULL;
+
+    if (input->count == 1 && doc_root &&
+        input->nodes[0] == doc_root && node_is_element(input->nodes[0])) {
+        struct taurus_element_index* idx = ctx->document->element_index;
+        if (!idx) {
+            idx = taurus_element_index_build(ctx->document);
+            ctx->document->element_index = idx;
+        }
+        if (idx) {
+            /* include_self handling: for include_self=1 add root first. */
+            if (include_self) xpath_nodeset_add(out, doc_root);
+            if (wild) {
+                for (size_t i = 0; i < idx->all_count; i++) {
+                    if (idx->all_elements[i] == doc_root) continue;
+                    xpath_nodeset_add(out, idx->all_elements[i]);
+                }
+            } else {
+                const TaurusElementIndexBucket* bucket =
+                    taurus_element_index_lookup(idx, name);
+                if (bucket) {
+                    for (size_t i = 0; i < bucket->count; i++) {
+                        if (bucket->matches[i] == doc_root) continue;
+                        xpath_nodeset_add(out, bucket->matches[i]);
+                    }
+                }
+            }
+            xpath_nodeset_free(input);
+            struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+            if (!r) { xpath_nodeset_free(out); return NULL; }
+            r->value.nodeset_value = out;
+            return r;
+        }
+        /* Index build failed — fall through to walk. */
+    }
+
+    /* General path: walk subtrees from each input element. */
     int need_dedup = (input->count > 1);
 
     for (size_t i = 0; i < input->count; i++) {

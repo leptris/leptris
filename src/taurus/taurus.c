@@ -10,6 +10,7 @@
 #include "xpath/evaluator.h"
 #include "xpath/xpath_variables.h"
 #include "dom/element.h"
+#include "dom/element_index.h"
 #include "dom/node.h"
 #include "dom/text.h"
 #include "dom/comment.h"
@@ -710,6 +711,12 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
     /* Free DOCTYPE if present */
     if (doc->doctype) {
         taurus_doctype_free((TaurusDoctypeNode*)doc->doctype);
+    }
+
+    /* Free element index (TODO 132) */
+    if (doc->element_index) {
+        taurus_element_index_free(doc->element_index);
+        doc->element_index = NULL;
     }
 
     /* Free DTD if present */

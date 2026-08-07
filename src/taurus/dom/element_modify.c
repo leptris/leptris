@@ -10,6 +10,7 @@
 #include "../common/string_view.h"
 #include "../memory/pool.h"
 #include "element.h"
+#include "element_index.h"
 #include "compact.h"
 #include "node.h"
 #include "text.h"
@@ -54,6 +55,13 @@ TaurusStatus taurus_element_append_child(TaurusElement parent, TaurusElement chi
     /* Call internal void function, assume success */
     taurus_element_append_child_internal(parent, (TaurusNode*)child);
     taurus_element_invalidate_child_cache(parent);
+
+    /* Invalidate element index (TODO 132): the new child changes
+     * the document's element set. The index will be rebuilt lazily
+     * on the next descendant-axis query. */
+    if (parent->document) {
+        taurus_element_index_invalidate(parent->document);
+    }
     return TAURUS_OK;
 }
 

@@ -26,6 +26,7 @@ set(TAURUS_SOURCES
     taurus/dom/element.c
     taurus/dom/element_query.c
     taurus/dom/element_modify.c
+    taurus/dom/element_index.c
     taurus/dom/text.c
     taurus/dom/comment.c
     taurus/dom/cdata.c
