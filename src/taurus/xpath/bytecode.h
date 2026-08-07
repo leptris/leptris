@@ -66,6 +66,16 @@ typedef enum {
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME,/* u16 operand: const-pool string */
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD,/* no operand */
 
+    /* Fused axis+predicate opcodes (TODO 134). Combines the axis
+     * walk with the predicate filter into a single pass, and uses
+     * the attribute index for O(K) lookup when input is doc_root.
+     * The compiler emits these instead of <axis> + BC_PRED_ATTR_*
+     * when the predicate is simple. */
+    XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS,
+        /* u16 operand: attr name */
+    XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EQ_STRING,
+        /* u16 u16 operands: attr name, attr value */
+
     /* Absolute-path first-step opcodes (TODO 129). The first step
      * of an absolute path needs document-root semantics: `/foo`
      * matches the root element if its name is foo, NOT root's

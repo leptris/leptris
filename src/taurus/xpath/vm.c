@@ -154,6 +154,12 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
                                                       const char* name, int wild,
                                                       int include_self);
 
+/* Forward decl for fused handler (TODO 134). */
+static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
+    XPathContext* ctx, XPathVM* vm,
+    const char* attr_name, const char* attr_value,
+    int value_match);
+
 /* Forward decl: descendant_walk is defined below, but vm_apply_absolute
  * uses it. */
 static void descendant_walk(XPathNodeSet* out, TaurusElement elem,
@@ -576,6 +582,128 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
     return r;
 }
 
+/* Fused axis+predicate handler (TODO 134). Walks descendant::* and
+ * filters by attribute in a single pass — no intermediate nodeset.
+ * When input is the document root, uses the attribute index for
+ * O(K) lookup where K = match count.
+ *
+ * `value_match`: if 0, presence check (attr exists). If 1, equality
+ * check (attr value == attr_value). */
+static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
+    XPathContext* ctx, XPathVM* vm,
+    const char* attr_name, const char* attr_value,
+    int value_match) {
+
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    TaurusElement doc_root = (ctx && ctx->document)
+        ? (TaurusElement)ctx->document->new_dom_root : NULL;
+
+    /* Index fast path: single-element input that IS the document root.
+     * Look up attr_bucket directly. */
+    if (input->count == 1 && doc_root &&
+        input->nodes[0] == doc_root && node_is_element(input->nodes[0])) {
+
+        struct taurus_element_index* idx = ctx->document->element_index;
+        if (!idx) {
+            idx = taurus_element_index_build(ctx->document);
+            ctx->document->element_index = idx;
+        }
+        if (idx) {
+            const TaurusElementIndexAttrBucket* abucket =
+                taurus_element_index_lookup_attr(idx, attr_name);
+            if (abucket) {
+                if (!value_match) {
+                    /* [@attr] — return all matches except root. */
+                    for (size_t i = 0; i < abucket->count; i++) {
+                        if (abucket->matches[i] == doc_root) continue;
+                        xpath_nodeset_add(out, abucket->matches[i]);
+                    }
+                } else {
+                    /* [@attr='value'] — lookup value sub-bucket. */
+                    const TaurusElementIndexAttrValue* vbucket =
+                        taurus_element_index_attr_lookup_value(abucket, attr_value);
+                    if (vbucket) {
+                        for (size_t i = 0; i < vbucket->count; i++) {
+                            if (vbucket->matches[i] == doc_root) continue;
+                            xpath_nodeset_add(out, vbucket->matches[i]);
+                        }
+                    }
+                }
+            }
+            xpath_nodeset_free(input);
+            struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+            if (!r) { xpath_nodeset_free(out); return NULL; }
+            r->value.nodeset_value = out;
+            return r;
+        }
+        /* Index build failed — fall through to walk+filter. */
+    }
+
+    /* Walk+filter fallback. Single pass: visit each descendant and
+     * check the attribute inline. Avoids the intermediate nodeset
+     * that the two-opcode form would allocate. */
+    size_t attr_name_len = attr_name ? strlen(attr_name) : 0;
+    size_t value_len = attr_value ? strlen(attr_value) : 0;
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        TaurusElement elem = (TaurusElement)input->nodes[i];
+
+        /* Inline subtree walk + attr filter. */
+        TaurusElement cur = taurus_element_get_first_child(elem);
+        while (cur) {
+            /* Check if cur has the matching attribute. */
+            struct taurus_attribute* a = taurus_element_get_first_attribute(cur);
+            int match = 0;
+            while (a) {
+                TaurusStringView nv = a->name_view;
+                if (attr_name && nv.length == attr_name_len &&
+                    nv.length > 0 && nv.data &&
+                    memcmp(attr_name, nv.data, nv.length) == 0) {
+                    if (!value_match) {
+                        match = 1;
+                        break;
+                    }
+                    TaurusStringView vv = a->value_view;
+                    if (vv.length == value_len &&
+                        vv.length > 0 && vv.data &&
+                        memcmp(attr_value, vv.data, vv.length) == 0) {
+                        match = 1;
+                        break;
+                    }
+                }
+                a = a->next;
+            }
+            if (match) xpath_nodeset_add(out, cur);
+
+            /* Descend or backtrack. */
+            TaurusElement next = taurus_element_get_first_child(cur);
+            if (next) {
+                cur = next;
+                continue;
+            }
+            while (cur && cur != elem) {
+                TaurusElement sib = taurus_element_get_next_sibling(cur);
+                if (sib) { cur = sib; break; }
+                cur = taurus_element_get_parent(cur);
+            }
+            if (cur == elem) break;
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
 /* Inline binary-operator dispatch. Pops right then left, computes,
  * pushes the result. Returns 0 on success, -1 on error.
  *
@@ -899,6 +1027,35 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
             case XPATH_BC_AXIS_DESCENDANT_WILD: {
                 struct taurus_xpath_result* r =
                     vm_apply_axis_descendant(ctx, &vm, NULL, 1, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            /* Fused axis+predicate (TODO 134). */
+            case XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS: {
+                uint16_t idx = read_u16(&pc);
+                const char* attr_name = (idx < bc->const_count &&
+                                          bc->constants[idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, NULL, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EQ_STRING: {
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* attr_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_value = (value_idx < bc->const_count &&
+                                           bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                          ? bc->constants[value_idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, attr_value, 1);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;
