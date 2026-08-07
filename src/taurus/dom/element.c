@@ -712,6 +712,25 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
             taurus_elem_set_last_child(elem, (TaurusNode*)child);
         }
 
+        /* Issue #168: set parent_off on the non-element child so
+         * taurus_node_parent can resolve in O(1). */
+        switch (child->type) {
+            case TAURUS_NODE_TYPE_TEXT:
+                taurus_textnode_set_parent((TaurusTextNode*)child, elem);
+                break;
+            case TAURUS_NODE_TYPE_COMMENT:
+                taurus_comment_set_parent((TaurusCommentNode*)child, elem);
+                break;
+            case TAURUS_NODE_TYPE_CDATA:
+                taurus_cdata_set_parent((TaurusCDATANode*)child, elem);
+                break;
+            case TAURUS_NODE_TYPE_PI:
+                taurus_pi_set_parent((TaurusPINode*)child, elem);
+                break;
+            default:
+                break;
+        }
+
         /* Don't increment child_count for non-element children */
     }
 
@@ -774,6 +793,24 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
             /* No children yet - set first and last child using direct pointer assignment */
             taurus_elem_set_first_child(elem, (TaurusNode*)child);
             taurus_elem_set_last_child(elem, (TaurusNode*)child);
+        }
+
+        /* Issue #168: set parent_off on the non-element child. */
+        switch (child->type) {
+            case TAURUS_NODE_TYPE_TEXT:
+                taurus_textnode_set_parent((TaurusTextNode*)child, elem);
+                break;
+            case TAURUS_NODE_TYPE_COMMENT:
+                taurus_comment_set_parent((TaurusCommentNode*)child, elem);
+                break;
+            case TAURUS_NODE_TYPE_CDATA:
+                taurus_cdata_set_parent((TaurusCDATANode*)child, elem);
+                break;
+            case TAURUS_NODE_TYPE_PI:
+                taurus_pi_set_parent((TaurusPINode*)child, elem);
+                break;
+            default:
+                break;
         }
 
         /* Don't increment child_count for non-element children */

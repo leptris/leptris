@@ -68,6 +68,23 @@ REQUIRED=(
     taurus_document_serialize
     taurus_element_serialize
     taurus_document_save_file
+    taurus_text_node_create
+    taurus_comment_node_create
+    taurus_cdata_node_create
+    taurus_pi_node_create
+    taurus_text_node_set_content
+    taurus_comment_node_set_content
+    taurus_cdata_node_set_content
+    taurus_pi_node_set_target
+    taurus_pi_node_set_data
+    taurus_node_parent
+    taurus_node_unlink
+    taurus_node_line
+    taurus_node_compare
+    taurus_element_namespace_decl_prefix
+    taurus_element_namespace_decl_uri
+    taurus_c14n_canonicalize_subtree
+    taurus_xpath_eval_with_vars_context
     taurus_sax_parse
     taurus_sax_parser_create
     taurus_sax_parser_feed

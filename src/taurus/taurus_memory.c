@@ -135,13 +135,21 @@ struct taurus_namespace* taurus_namespace_find(struct taurus_element* elem, cons
     return NULL;
 }
 
-/* Add namespace to element's namespace linked list */
+/* Add namespace to element's namespace linked list.
+ *
+ * Issue #171: append in source order so taurus_element_namespace_decl_*
+ * returns declarations in the order they appear in the document.
+ * Previously this prepended, giving consumers a reversed view. */
 int taurus_element_add_namespace(struct taurus_element* elem, struct taurus_namespace* ns) {
     if (!elem || !ns) return -1;
 
-    /* Add to front of linked list */
-    ns->next = elem->namespaces;
-    elem->namespaces = ns;
-
+    ns->next = NULL;
+    if (!elem->namespaces) {
+        elem->namespaces = ns;
+        return 0;
+    }
+    struct taurus_namespace* tail = elem->namespaces;
+    while (tail->next) tail = tail->next;
+    tail->next = ns;
     return 0;
 }

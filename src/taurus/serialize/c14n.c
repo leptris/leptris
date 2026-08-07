@@ -406,3 +406,28 @@ TAURUS_API char* taurus_c14n_canonicalize(struct taurus_document* doc, int versi
     return buf;
 }
 
+TAURUS_API char* taurus_c14n_canonicalize_subtree(TaurusElement elem,
+                                                    int version,
+                                                    int flags) {
+    (void)version;
+    (void)flags;
+    if (!elem) return NULL;
+
+    /* Allocate initial buffer. */
+    size_t capacity = 4096;
+    size_t size = 0;
+    char* buf = (char*)malloc(capacity);
+    if (!buf) return NULL;
+    buf[0] = '\0';
+
+    /* Subtree C14N: serialize just this element + descendants. The
+     * document-level PIs and XML declaration are NOT included
+     * (subtree C14N is element-scoped, matching xmlsec and Nokogiri
+     * semantics). */
+    char* buffer = buf;
+    c14n_serialize_element(elem, &buffer, &size, &capacity);
+    buf = buffer;
+    buf[size] = '\0';
+    return buf;
+}
+

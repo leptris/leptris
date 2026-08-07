@@ -23,7 +23,10 @@
  * instead of pool-resident storage. Its `content` is NOT NUL-terminated
  * — `content_len` is the only authoritative size. The `pool` field
  * holds the pool to use for lazy materialization when a consumer asks
- * for a NUL-terminated view via taurus_text_get_content. */
+ * for a NUL-terminated view via taurus_text_get_content.
+ *
+ * Issue #168: parent_off mirrors next_sibling_off so the parent of a
+ * text node can be queried in O(1). */
 typedef struct taurus_text_node {
     TaurusNode base;                   /* MUST be first */
     char* content;                    /* Text content - NEVER trim! */
@@ -31,6 +34,7 @@ typedef struct taurus_text_node {
     TaurusMemoryPool* pool;           /* Pool for lazy materialization (NULL if content is NUL-term'd) */
     int borrowed;                     /* 1 = content is borrowed (non-NUL-term'd) */
     int32_t next_sibling_off;         /* Byte offset to next sibling (0=NULL) */
+    int32_t parent_off;               /* Byte offset to parent element (0=NULL) */
 } TaurusTextNode;
 
 /* Text node creation.
@@ -91,6 +95,18 @@ static inline TaurusNode* taurus_textnode_next_sibling(const TaurusTextNode* t) 
 static inline void taurus_textnode_set_next_sibling(TaurusTextNode* t, TaurusNode* sibling) {
     if (!t) return;
     t->next_sibling_off = taurus_compact_int32_encode(t, sibling, &t->next_sibling_off);
+}
+
+/* Compact parent accessors (issue #168). */
+static inline TaurusElement taurus_textnode_parent(const TaurusTextNode* t) {
+    return (t)
+        ? (TaurusElement)taurus_compact_int32_decode((void*)t, t->parent_off, &t->parent_off)
+        : NULL;
+}
+
+static inline void taurus_textnode_set_parent(TaurusTextNode* t, TaurusElement parent) {
+    if (!t) return;
+    t->parent_off = taurus_compact_int32_encode(t, parent, &t->parent_off);
 }
 
 #endif /* TAURUS_DOM_TEXT_H */
