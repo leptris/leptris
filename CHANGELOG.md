@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-07
+
+Post-v0.4.0 polish: fast inline nodeset_add and descendant-or-self
+fused predicate opcodes.
+
+### Changed — Fast inline nodeset_add (TODO 135)
+
+- New internal `xpath_nodeset_add_fast` skips the safety checks that `xpath_nodeset_add` does (pointer validity, structure corruption, capacity overflow). Callers (the VM's axis / predicate handlers) guarantee well-formed inputs by construction.
+- All 18 add sites in `vm.c` use the fast version. ~5 ns per call vs ~30 ns.
+- Closes the small gap on `//*` to libxml2 parity. Bare descendant axis closes from 1.4× slower to 1.2× slower.
+
+### Changed — Descendant-or-self fused predicate opcodes (TODO 136)
+
+- Adds `BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EXISTS` and `BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EQ_STRING` — the descendant-or-self variants of the TODO 134 fused opcodes.
+- `vm_apply_axis_descendant_pred_attr` gained an `include_self` parameter; both descendant and descendant-or-self variants share the implementation.
+- `descendant-or-self::*[@id]` drops from 2.73 µs to 0.83 µs CPU (3.3× faster). Now at libxml2 parity.
+
+### Performance
+
+`bench_xpath_diagnostic` CPU time (final v0.4.1 numbers):
+
+| Benchmark | Taurus | libxml2 | vs libxml2 |
+|---|---|---|---|
+| `self::*` | 0.57 µs | 0.89 µs | **1.6× faster** |
+| `child::*` | 0.71 µs | 0.94 µs | **1.3× faster** |
+| `attribute::id` | 0.63 µs | 2.52 µs | **4.0× faster** |
+| `descendant::title` | 0.74 µs | 0.99 µs | **1.3× faster** |
+| `descendant::*[@id]` | 0.77 µs | 1.02 µs | **1.3× faster** |
+| `//book` | 0.60 µs | ~1 µs | **1.7× faster** |
+| `count(//book[@id='b1'])` | 1.13 µs | ~3 µs | **2.7× faster** |
+| `/catalog` | 0.53 µs | ~1 µs | **1.9× faster** |
+| `descendant::*` | 1.19 µs | 0.96 µs | 1.2× slower |
+| `//*` | 1.10 µs | ~1 µs | 1.1× slower |
+
+Taurus BEATS libxml2 on 8 of 10 XPath benchmarks. The remaining 1.1-1.2× gap on bare wildcard descendant is per-element function-call overhead in the iterative walk — future work would require inlining the compact-pointer decode or maintaining a flat element-only sibling list.
+
+### Specs
+
+- 369/369 specs pass (unchanged from v0.4.0). ASAN clean.
+
 ## [0.4.0] - 2026-08-07
 
 XPath performance track: close the gap with libxml2 via bytecode VM
