@@ -1005,9 +1005,12 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 XPathNodeSet* input = vm_detach_input_nodeset(&vm);
                 if (!input) { vm.error = 1; break; }
 
-                /* In-place two-pointer filter. The VM owns the
-                 * input nodeset (we detached it from the result
-                 * wrapper), so we can mutate it safely. */
+                /* In-place two-pointer filter. Walks each element's
+                 * attribute list. For docs where most elements have
+                 * the queried attribute, this is faster than set-
+                 * membership against the (also large) attr_bucket.
+                 * The element index (TODO 133) is built for future
+                 * fusion opportunities but not used here. */
                 size_t write = 0;
                 for (size_t read = 0; read < input->count; read++) {
                     void* node = input->nodes[read];
