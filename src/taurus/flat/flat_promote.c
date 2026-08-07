@@ -29,12 +29,61 @@
 #include "../dom/comment.h"
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
+#include "../dom/compact.h"
 #include "../common/string_view.h"
 
 #include <string.h>
 
 extern __thread int g_taurus_strict_mode;
 extern void taurus_compact_set_current_document(struct taurus_document* doc);
+
+/* TODO 141 Phase A: hot-path inliner for promote.
+ *
+ * Append `child` to parent's child chain in O(1). The general-purpose
+ * taurus_element_append_child_internal does type validation, type
+ * dispatch, and child_count maintenance that promote doesn't need
+ * (we know the child type — we just created it; we know parent is
+ * an element — we resolved it from the mapping array).
+ *
+ * The wire logic for elements vs non-elements differs only in
+ * which compact-pointer setter we call. We dispatch on type
+ * directly here. */
+static inline void promote_wire_child(TaurusElement parent,
+                                       TaurusNode* child) {
+    /* Set child's parent pointer. */
+    if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+        taurus_element_set_parent((TaurusElement)child, parent);
+        ((TaurusElement)child)->document = parent->document;
+    } else {
+        switch (child->type) {
+            case TAURUS_NODE_TYPE_TEXT:
+                taurus_textnode_set_parent((TaurusTextNode*)child, parent);
+                break;
+            case TAURUS_NODE_TYPE_COMMENT:
+                taurus_comment_set_parent((TaurusCommentNode*)child, parent);
+                break;
+            case TAURUS_NODE_TYPE_CDATA:
+                taurus_cdata_set_parent((TaurusCDATANode*)child, parent);
+                break;
+            case TAURUS_NODE_TYPE_PI:
+                taurus_pi_set_parent((TaurusPINode*)child, parent);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /* Splice into parent's child chain as the new last child. Since
+     * promote walks in preorder DFS, the next node we encounter at
+     * any level is the next sibling — never an earlier one. */
+    TaurusNode* last = taurus_elem_last_child(parent);
+    if (last) {
+        taurus_node_set_next_sibling(last, child);
+    } else {
+        taurus_elem_set_first_child(parent, child);
+    }
+    taurus_elem_set_last_child(parent, child);
+}
 
 /* Copy a length-bounded slice of the flat XML buffer into a heap-
  * allocated NUL-terminated string. Use for document-level fields
@@ -152,8 +201,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
                         (TaurusElement)mapping[fn->parent];
-                    taurus_element_append_child_internal(parent,
-                                                          (TaurusNode*)elem);
+                    promote_wire_child(parent, (TaurusNode*)elem);
                 } else {
                     if (i == flat->root_index) {
                         root_elem = elem;
@@ -174,8 +222,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
                         (TaurusElement)mapping[fn->parent];
-                    taurus_element_append_child_internal(parent,
-                                                          (TaurusNode*)text);
+                    promote_wire_child(parent, (TaurusNode*)text);
                 }
                 mapping[i] = (TaurusNode*)text;
                 break;
@@ -191,8 +238,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
                         (TaurusElement)mapping[fn->parent];
-                    taurus_element_append_child_internal(parent,
-                                                          (TaurusNode*)comment);
+                    promote_wire_child(parent, (TaurusNode*)comment);
                 }
                 mapping[i] = (TaurusNode*)comment;
                 break;
@@ -208,8 +254,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
                         (TaurusElement)mapping[fn->parent];
-                    taurus_element_append_child_internal(parent,
-                                                          (TaurusNode*)cdata);
+                    promote_wire_child(parent, (TaurusNode*)cdata);
                 }
                 mapping[i] = (TaurusNode*)cdata;
                 break;
@@ -226,8 +271,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
                         (TaurusElement)mapping[fn->parent];
-                    taurus_element_append_child_internal(parent,
-                                                          (TaurusNode*)pi);
+                    promote_wire_child(parent, (TaurusNode*)pi);
                 } else {
                     /* Doc-level PI (appeared before root element).
                      * Build a taurus_processing_instruction node and
