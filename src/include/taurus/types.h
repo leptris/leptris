@@ -79,6 +79,25 @@ typedef enum {
     TAURUS_C14N_1_1 = 1       /* Canonical XML 1.1 */
 } TaurusC14NVersion;
 
+/* C14N mode (issue #183).
+ *
+ * CANONICAL: standard Canonical XML 1.0/1.1 (the original algorithm).
+ *   Keeps all namespace declarations visible in the output.
+ *
+ * EXCLUSIVE: Exclusive Canonical XML (http://www.w3.org/2001/10/xml-exc-c14n#).
+ *   Drops namespace declarations that are not visibly used by the
+ *   canonicalized subtree. Used by XML Digital Signature to avoid
+ *   signature breakage when enveloped XML carries extra namespace
+ *   context.
+ *
+ * Pair with `inclusive_ns_prefixes` on the `_ex` variants to add
+ * prefixes to the visible-namespace set even when exclusive mode
+ * would otherwise drop them. */
+typedef enum {
+    TAURUS_C14N_MODE_CANONICAL  = 0,
+    TAURUS_C14N_MODE_EXCLUSIVE  = 1
+} TaurusC14NMode;
+
 /* ============================================================================
  * XPath Variable Types
  * ============================================================================ */

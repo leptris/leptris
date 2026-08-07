@@ -115,7 +115,10 @@ static const char* test_docs[] = {
 
 // Generate medium document programmatically
 static char* generate_medium_doc() {
-    static char doc[12000];
+    /* Actual doc is ~15 KB; old 12000-byte buffer overflowed silently
+     * and crashed the flat fast path (which reads the input before
+     * copying). Size to the real output + headroom. */
+    static char doc[32768];
     char* p = doc;
     p += sprintf(p, "<root>");
 

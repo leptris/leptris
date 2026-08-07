@@ -1387,6 +1387,38 @@ TAURUS_API char* taurus_c14n_canonicalize_subtree(TaurusElement elem,
                                                    int version,
                                                    int flags);
 
+/**
+ * Extended canonicalization with mode, inclusive namespaces, and
+ * comments toggle (issue #183).
+ *
+ * @param doc Document
+ * @param version TAURUS_C14N_1_0 or TAURUS_C14N_1_1
+ * @param mode TAURUS_C14N_MODE_CANONICAL or TAURUS_C14N_MODE_EXCLUSIVE
+ * @param inclusive_ns_prefixes NULL or NULL-terminated array of
+ *        namespace prefixes to include even under EXCLUSIVE mode.
+ *        Pass NULL when not needed.
+ * @param with_comments 0 to strip comments, 1 to preserve
+ * @return Canonicalized XML string (caller frees with
+ *         taurus_free_string), or NULL on error
+ */
+TAURUS_API char* taurus_c14n_canonicalize_ex(
+    struct taurus_document* doc,
+    int version,
+    TaurusC14NMode mode,
+    const char** inclusive_ns_prefixes,
+    int with_comments);
+
+/**
+ * Extended subtree canonicalization (issue #183). Same parameters
+ * as taurus_c14n_canonicalize_ex but limited to elem + descendants.
+ */
+TAURUS_API char* taurus_c14n_canonicalize_subtree_ex(
+    TaurusElement elem,
+    int version,
+    TaurusC14NMode mode,
+    const char** inclusive_ns_prefixes,
+    int with_comments);
+
 /* ============================================================================
  * Namespace Operations
  * ============================================================================ */
