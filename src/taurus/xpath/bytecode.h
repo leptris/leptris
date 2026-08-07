@@ -66,6 +66,17 @@ typedef enum {
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME,/* u16 operand: const-pool string */
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD,/* no operand */
 
+    /* Absolute-path first-step opcodes (TODO 129). The first step
+     * of an absolute path needs document-root semantics: `/foo`
+     * matches the root element if its name is foo, NOT root's
+     * children. `//foo` walks the entire tree from root. */
+    XPATH_BC_ABSOLUTE_ROOT_MATCH_NAME,         /* u16: name */
+    XPATH_BC_ABSOLUTE_ROOT_MATCH_WILD,         /* no operand */
+    XPATH_BC_ABSOLUTE_DESCENDANT_NAME,         /* u16: name */
+    XPATH_BC_ABSOLUTE_DESCENDANT_WILD,         /* no operand */
+    XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME, /* u16: name */
+    XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD, /* no operand */
+
     /* Simple predicate opcodes (TODO 128). Each pops the input
      * nodeset from the stack, applies the filter inline, and pushes
      * the filtered result. The compiler emits these for the common

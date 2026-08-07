@@ -23,6 +23,7 @@
 #include "../taurus_internal.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 typedef struct {
     TaurusXPathBytecode* bc;
@@ -261,15 +262,30 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
     if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
 
     /* Predicates: child_count==1 means no predicates. >1 means
-     * there are predicates; check each is simple. */
+     * there are predicates; check each is simple.
+     *
+     * IMPORTANT: position predicates ([N]) are context-sensitive.
+     * The semantics are "position within the current step's
+     * candidate set, per input context". The BC_PRED_POSITION
+     * opcode implements "position within the global result",
+     * which is only correct when the input is a single root
+     * (absolute-path fusion). For relative paths and most
+     * specialized axes, the input may be multi-context, so we
+     * must NOT inline position predicates there. Fall back to
+     * BC_AXIS_STEP + apply_predicates which handles per-context
+     * position correctly. */
     size_t pred_count = step->child_count - 1;
     if (pred_count > 0) {
         for (size_t i = 0; i < pred_count; i++) {
             XPathASTNode* pred = step->children[1 + i];
             const char *a, *v;
             long p;
-            if (classify_predicate(pred, &a, &v, &p) == PRED_KIND_NONE) {
+            PredKind kind = classify_predicate(pred, &a, &v, &p);
+            if (kind == PRED_KIND_NONE) {
                 return 0;  /* non-simple predicate — fall back */
+            }
+            if (kind == PRED_KIND_POSITION) {
+                return 0;  /* position is per-context — fall back */
             }
         }
     }
@@ -378,6 +394,234 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
     }
 }
 
+/* Forward decl. */
+static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step);
+
+/* Try to compile an ABSOLUTE_PATH root step into a specialized
+ * absolute-root opcode (TODO 129). Returns 1 if emitted, 0 on
+ * fallback.
+ *
+ * Match: step is the first child of an ABSOLUTE_PATH, axis is
+ * CHILD / DESCENDANT / DESCENDANT_OR_SELF, test is a name (no `:`)
+ * or wildcard, no predicates. The compiler emits:
+ *   - BC_ABSOLUTE_ROOT_MATCH_NAME / WILD          for `/foo`, `/*`
+ *   - BC_ABSOLUTE_DESCENDANT_NAME / WILD          for `/descendant::foo`
+ *   - BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME / WILD  for `//foo`, `//*`,
+ *     `/descendant-or-self::foo`
+ *
+ * For shapes we don't match (predicate on first step, namespace
+ * prefix, multi-axis), caller falls back to BC_FALLBACK_EVAL on
+ * the whole ABSOLUTE_PATH. */
+static int try_compile_absolute_root_step(CompilerState* st, XPathASTNode* step) {
+    if (!step || step->type != XPATH_AST_STEP) return 0;
+    if (step->child_count != 1) return 0;  /* has predicates */
+
+    XPathASTNode* test = step->children[0];
+    if (!test) return 0;
+
+    int has_name = (test->type == XPATH_AST_NODE_TEST_NAME);
+    int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL);
+    if (!has_name && !has_wild) return 0;
+    if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
+
+    XPathAxisType axis = step->axis_id;
+    XPathOpcode op_name, op_wild;
+
+    switch (axis) {
+        case XPATH_AXIS_CHILD:
+            op_name = XPATH_BC_ABSOLUTE_ROOT_MATCH_NAME;
+            op_wild = XPATH_BC_ABSOLUTE_ROOT_MATCH_WILD;
+            break;
+        case XPATH_AXIS_DESCENDANT:
+            op_name = XPATH_BC_ABSOLUTE_DESCENDANT_NAME;
+            op_wild = XPATH_BC_ABSOLUTE_DESCENDANT_WILD;
+            break;
+        case XPATH_AXIS_DESCENDANT_OR_SELF:
+            op_name = XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME;
+            op_wild = XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD;
+            break;
+        default:
+            return 0;
+    }
+
+    if (has_wild) {
+        emit_op(st, op_wild);
+    } else {
+        emit_op_u16(st, op_name, add_const_string(st, test->value));
+    }
+    return 1;
+}
+
+/* Compile an absolute path. Try to specialize the first step + emit
+ * subsequent steps via the regular try_compile_specialized_axis.
+ * Falls back to BC_FALLBACK_EVAL on the whole path if the first
+ * step doesn't match a specialization shape. */
+static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
+    /* The first child may be a STEP directly or wrapped in
+     * RELATIVE_PATH. Handle both. */
+    if (node->child_count == 0) {
+        /* `/` alone — select the document root. */
+        emit_op(st, XPATH_BC_ABSOLUTE_ROOT_MATCH_WILD);
+        return;
+    }
+
+    XPathASTNode* first = node->children[0];
+    XPathASTNode* first_step = NULL;
+    XPathASTNode* second_step = NULL;
+    XPathASTNode** rest = NULL;
+    size_t rest_count = 0;
+
+    if (first->type == XPATH_AST_RELATIVE_PATH) {
+        if (first->child_count >= 1) first_step = first->children[0];
+        if (first->child_count >= 2) second_step = first->children[1];
+        if (first->child_count > 2) {
+            rest = &first->children[2];
+            rest_count = first->child_count - 2;
+        }
+    } else if (first->type == XPATH_AST_STEP) {
+        first_step = first;
+        /* The second child of ABSOLUTE_PATH may be a STEP directly
+         * or a RELATIVE_PATH wrapping steps. Handle both. */
+        if (node->child_count >= 2) {
+            XPathASTNode* second = node->children[1];
+            if (second->type == XPATH_AST_STEP) {
+                second_step = second;
+                if (node->child_count > 2) {
+                    rest = &node->children[2];
+                    rest_count = node->child_count - 2;
+                }
+            } else if (second->type == XPATH_AST_RELATIVE_PATH) {
+                if (second->child_count >= 1) second_step = second->children[0];
+                if (second->child_count > 1) {
+                    rest = &second->children[1];
+                    rest_count = second->child_count - 1;
+                }
+            }
+        }
+    } else {
+        emit_op_u16(st, XPATH_BC_FALLBACK_EVAL, add_const_ast(st, node));
+        return;
+    }
+
+    /* Fusion: `//foo` parses to `/descendant-or-self::node()/child::foo`.
+     * Detect this two-step shape and lower it to a single
+     * BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME / WILD opcode that walks
+     * the subtree once. Same for `//*`.
+     *
+     * Match: first step is descendant-or-self axis with wildcard or
+     * node() test (no predicates), second step is child axis with
+     * name (no colon) or wildcard test (no predicates). */
+    if (first_step && second_step &&
+        first_step->type == XPATH_AST_STEP &&
+        first_step->axis_id == XPATH_AXIS_DESCENDANT_OR_SELF &&
+        first_step->child_count == 1) {
+        XPathASTNode* dstest = first_step->children[0];
+        /* descendant-or-self::node()  OR  descendant-or-self::* */
+        int ds_is_wild = (dstest && dstest->type == XPATH_AST_NODE_TEST_ALL);
+        int ds_is_node = (dstest && dstest->type == XPATH_AST_NODE_TEST_TYPE &&
+                          dstest->value && strcmp(dstest->value, "node") == 0);
+        if (ds_is_wild || ds_is_node) {
+            if (second_step->type == XPATH_AST_STEP &&
+                second_step->axis_id == XPATH_AXIS_CHILD &&
+                second_step->child_count >= 1) {
+                XPathASTNode* ctest = second_step->children[0];
+                int c_has_name = (ctest && ctest->type == XPATH_AST_NODE_TEST_NAME &&
+                                  ctest->value && !strchr(ctest->value, ':'));
+                int c_has_wild = (ctest && ctest->type == XPATH_AST_NODE_TEST_ALL);
+
+                if (c_has_name || c_has_wild) {
+                    /* Check predicates on the child step. Position
+                     * predicates are context-sensitive even in the
+                     * fused absolute-path case (`//title[1]` means
+                     * first-title-per-book, not first-title-globally),
+                     * so only allow attribute predicates here. */
+                    size_t cpred = second_step->child_count - 1;
+                    int preds_ok = 1;
+                    for (size_t i = 0; i < cpred; i++) {
+                        const char *a, *v;
+                        long p;
+                        PredKind pk = classify_predicate(
+                            second_step->children[1 + i], &a, &v, &p);
+                        if (pk != PRED_KIND_ATTR_EXISTS &&
+                            pk != PRED_KIND_ATTR_EQ_STRING) {
+                            preds_ok = 0;
+                            break;
+                        }
+                    }
+
+                    if (preds_ok) {
+                        /* Emit the fused opcode. */
+                        if (c_has_wild) {
+                            emit_op(st, XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD);
+                        } else {
+                            emit_op_u16(st, XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME,
+                                        add_const_string(st, ctest->value));
+                        }
+                        /* Emit predicate opcodes. Only attr predicates
+                         * are eligible (see preds_ok check above). */
+                        for (size_t i = 0; i < cpred; i++) {
+                            const char *a, *v;
+                            long p;
+                            PredKind k = classify_predicate(second_step->children[1 + i],
+                                                              &a, &v, &p);
+                            if (k == PRED_KIND_ATTR_EXISTS) {
+                                emit_op_u16(st, XPATH_BC_PRED_ATTR_EXISTS,
+                                            add_const_string(st, a));
+                            } else if (k == PRED_KIND_ATTR_EQ_STRING) {
+                                uint16_t n = add_const_string(st, a);
+                                uint16_t v2 = add_const_string(st, v);
+                                if (reserve_code(st, 5) == 0) {
+                                    st->bc->code[st->bc->code_len++] = (unsigned char)XPATH_BC_PRED_ATTR_EQ_STRING;
+                                    st->bc->code[st->bc->code_len++] = (n >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (v2 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = v2 & 0xFF;
+                                }
+                            }
+                            /* PRED_KIND_POSITION is excluded by preds_ok. */
+                        }
+                        /* Then any remaining steps. */
+                        for (size_t i = 0; i < rest_count; i++) {
+                            XPathASTNode* s = rest[i];
+                            if (s && s->type == XPATH_AST_STEP) {
+                                if (!try_compile_specialized_axis(st, s)) {
+                                    emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, s));
+                                }
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!try_compile_absolute_root_step(st, first_step)) {
+        emit_op_u16(st, XPATH_BC_FALLBACK_EVAL, add_const_ast(st, node));
+        return;
+    }
+
+    /* Subsequent steps use the regular specialized-axis lowering. */
+    if (second_step) {
+        if (second_step->type == XPATH_AST_STEP) {
+            if (!try_compile_specialized_axis(st, second_step)) {
+                emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, second_step));
+            }
+        }
+    }
+    for (size_t i = 0; i < rest_count; i++) {
+        XPathASTNode* step = rest[i];
+        if (!step) continue;
+        if (step->type == XPATH_AST_STEP) {
+            if (!try_compile_specialized_axis(st, step)) {
+                emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, step));
+            }
+        } else if (step->type == XPATH_AST_RELATIVE_PATH) {
+            emit_op_u16(st, XPATH_BC_FALLBACK_EVAL, add_const_ast(st, step));
+        }
+    }
+}
+
 static void compile_node(CompilerState* st, XPathASTNode* node) {
     if (!node || st->error) return;
 
@@ -393,13 +637,9 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
             break;
 
         case XPATH_AST_ABSOLUTE_PATH:
-            /* Absolute paths require the document-root special case
-             * from evaluate_location_path (matching `/rootname` to
-             * the document root element). Replicating that in the
-             * VM is brittle; fall back to evaluate_expr, which
-             * calls evaluate_location_path. The bytecode cache
-             * still amortizes compile cost across evals. */
-            emit_op_u16(st, XPATH_BC_FALLBACK_EVAL, add_const_ast(st, node));
+            /* Try to specialize the first step (TODO 129); fall back
+             * to BC_FALLBACK_EVAL if the shape doesn't match. */
+            compile_absolute_path(st, node);
             break;
 
         case XPATH_AST_RELATIVE_PATH:

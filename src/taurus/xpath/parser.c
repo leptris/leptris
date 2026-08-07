@@ -914,6 +914,7 @@ static XPathASTNode* parse_location_path(XPathParser* parser) {
                 return NULL;
             }
             desc_step->value = taurus_strdup("descendant-or-self");
+            desc_step->axis_id = XPATH_AXIS_DESCENDANT_OR_SELF;
 
             /* Use wildcard node test instead of node() */
             XPathASTNode* node_test = ast_node_new(XPATH_AST_NODE_TEST_ALL);
@@ -951,6 +952,7 @@ static XPathASTNode* parse_location_path(XPathParser* parser) {
         }
 
         desc_step->value = taurus_strdup("descendant-or-self");
+        desc_step->axis_id = XPATH_AXIS_DESCENDANT_OR_SELF;
         XPathASTNode* node_test = ast_node_new(XPATH_AST_NODE_TEST_TYPE);
         if (!node_test) {
             ast_node_free(desc_step);
@@ -1014,6 +1016,7 @@ static XPathASTNode* parse_relative_location_path(XPathParser* parser) {
                 return NULL;
             }
             desc_step->value = taurus_strdup("descendant-or-self");
+            desc_step->axis_id = XPATH_AXIS_DESCENDANT_OR_SELF;
             XPathASTNode* node_test = ast_node_new(XPATH_AST_NODE_TEST_TYPE);
             if (node_test) {
                 node_test->value = taurus_strdup("node");
