@@ -145,6 +145,54 @@ static int op_is_comparison(XPathOperatorType op) {
            op == XPATH_OP_GREATER || op == XPATH_OP_GREATER_EQUAL;
 }
 
+/* Try to lower a STEP AST to a specialized axis opcode (TODO 126).
+ * Returns 1 if emitted, 0 if the shape doesn't match a fast path
+ * and the caller should fall back to BC_AXIS_STEP.
+ *
+ * Match criteria:
+ *   - axis is one of CHILD, ATTRIBUTE, SELF, PARENT
+ *   - first child (node test) is NODE_TEST_NAME with no namespace
+ *     prefix, OR NODE_TEST_ALL
+ *   - no predicate children (child_count == 1)
+ *
+ * Name tests with a `:` (namespace prefix) require XPath's
+ * namespace-aware matching semantics, which the inline handler
+ * doesn't implement. Wildcards with namespace prefix same. */
+static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
+    if (!step || step->type != XPATH_AST_STEP) return 0;
+    if (step->child_count != 1) return 0;  /* has predicates */
+
+    XPathASTNode* test = step->children[0];
+    if (!test) return 0;
+
+    /* The test value carries the qualified name (may contain ':').
+     * For namespace-aware fast path we'd need to split + resolve.
+     * For now, only fast-path the no-colon case. */
+    int has_name = (test->type == XPATH_AST_NODE_TEST_NAME);
+    int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL);
+    if (!has_name && !has_wild) return 0;
+    if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
+
+    XPathAxisType axis = step->axis_id;
+    XPathOpcode op_name, op_wild;
+
+    switch (axis) {
+        case XPATH_AXIS_CHILD:      op_name = XPATH_BC_AXIS_CHILD_NAME;      op_wild = XPATH_BC_AXIS_CHILD_WILD;      break;
+        case XPATH_AXIS_ATTRIBUTE:  op_name = XPATH_BC_AXIS_ATTRIBUTE_NAME;  op_wild = XPATH_BC_AXIS_ATTRIBUTE_WILD;  break;
+        case XPATH_AXIS_SELF:       op_name = XPATH_BC_AXIS_SELF_NAME;       op_wild = XPATH_BC_AXIS_SELF_WILD;       break;
+        case XPATH_AXIS_PARENT:     op_name = XPATH_BC_AXIS_PARENT_NAME;     op_wild = XPATH_BC_AXIS_PARENT_WILD;     break;
+        default:
+            return 0;  /* descendant / ancestor / following / etc. stay on BC_AXIS_STEP */
+    }
+
+    if (has_wild) {
+        emit_op(st, op_wild);
+    } else {
+        emit_op_u16(st, op_name, add_const_string(st, test->value));
+    }
+    return 1;
+}
+
 /* Emit bytecode for a sequence of STEP nodes that appear as children
  * of a path expression. Each step becomes one BC_AXIS_STEP that
  * consumes the previous step's nodeset and produces the next.
@@ -159,7 +207,9 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
         if (!child) continue;
 
         if (child->type == XPATH_AST_STEP) {
-            emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, child));
+            if (!try_compile_specialized_axis(st, child)) {
+                emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, child));
+            }
         } else if (child->type == XPATH_AST_RELATIVE_PATH) {
             compile_step_sequence(st, child->children, child->child_count);
         } else {
@@ -205,7 +255,9 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
             /* Bare step (e.g. `@id`, `.`, `..`) — evaluate as a
              * one-step relative path from the context node. */
             emit_op(st, XPATH_BC_PATH_RELATIVE);
-            emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, node));
+            if (!try_compile_specialized_axis(st, node)) {
+                emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, node));
+            }
             break;
 
         case XPATH_AST_OPERATOR: {

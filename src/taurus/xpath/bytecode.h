@@ -43,6 +43,21 @@ typedef enum {
     XPATH_BC_PATH_ABSOLUTE,    /* push document root as single-node nodeset */
     XPATH_BC_PATH_RELATIVE,    /* push context node as single-node nodeset */
     XPATH_BC_AXIS_STEP,        /* u16 operand: const-pool index (STEP AST) */
+
+    /* Specialized axis opcodes (TODO 126). The compiler emits these
+     * for the common shape: single name test or wildcard, no
+     * namespace prefix, no predicates. The VM handler is a tight
+     * loop that bypasses evaluate_step → apply_axis →
+     * matches_node_test. */
+    XPATH_BC_AXIS_CHILD_NAME,       /* u16 operand: const-pool string */
+    XPATH_BC_AXIS_CHILD_WILD,       /* no operand */
+    XPATH_BC_AXIS_ATTRIBUTE_NAME,   /* u16 operand: const-pool string */
+    XPATH_BC_AXIS_ATTRIBUTE_WILD,   /* no operand */
+    XPATH_BC_AXIS_SELF_NAME,        /* u16 operand: const-pool string */
+    XPATH_BC_AXIS_SELF_WILD,        /* no operand */
+    XPATH_BC_AXIS_PARENT_NAME,      /* u16 operand: const-pool string */
+    XPATH_BC_AXIS_PARENT_WILD,      /* no operand */
+
     XPATH_BC_BINARY_OP,        /* u8 operand: XPathOperatorType */
     XPATH_BC_FUNC_CALL,        /* u16 operand: const-pool index (FUNC AST) */
     XPATH_BC_FALLBACK_EVAL,    /* u16 operand: const-pool index (AST) */
