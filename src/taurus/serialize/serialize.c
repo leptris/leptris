@@ -587,6 +587,25 @@ TAURUS_API char* taurus_document_serialize(struct taurus_document* doc,
                                  TaurusSerializeOptions* options) {
     if (!doc) return NULL;
 
+    /* TODO 145 Phase 2: serialize directly from FlatDoc when
+     * available, skipping promote. Output is identical to the
+     * compact path for documents that haven't been mutated. */
+    if (doc->flat_doc && !doc->flat_promoted) {
+        extern char* flat_serialize_document(struct taurus_document*,
+                                              int, int, const char*);
+        int xml_decl = 0;
+        int indent = 0;
+        const char* enc = NULL;
+        if (options) {
+            xml_decl = options->xml_declaration;
+            indent = options->indent;
+            enc = options->encoding;
+        }
+        char* result = flat_serialize_document(doc, xml_decl, indent, enc);
+        if (result) return result;
+        /* Fall through to compact path on failure. */
+    }
+
     /* Get root element from new_dom_root field */
     /* TODO 139 Phase D: trigger lazy promote if the doc was produced
      * by the flat-parse fast path. */
