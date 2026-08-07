@@ -140,10 +140,100 @@ TEST(C14NEx, SubtreeWithoutComments) {
     taurus_document_free(doc);
 }
 
-TEST(C14NEx, ExclusiveModeFallsBackToCanonical) {
-    // Exclusive C14N semantics land in a future release; the API
-    // surface works and returns canonical-form output for now.
-    const char xml[] = "<r xmlns='http://default'><a/></r>";
+TEST(C14NEx, ExclusiveModeDropsUnusedNamespaces) {
+    // The key exclusive-C14N behavior: namespaces NOT visibly used
+    // in the canonicalized subtree are dropped from the output.
+    //
+    // Subtree <inner/> visibly uses nothing — its output should
+    // contain ZERO xmlns declarations.
+    const char xml[] =
+        "<SignedRoot xmlns:ds='http://ds' xmlns:foo='http://foo'>"
+        "<inner/></SignedRoot>";
+    TaurusDocument doc = Parse(xml);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusElement inner = (TaurusElement)taurus_node_first_child(
+        taurus_element_as_node(root));
+
+    char* excl = taurus_c14n_canonicalize_subtree_ex(
+        inner, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, nullptr, 1);
+    ASSERT_NE(excl, nullptr);
+    std::string s(excl);
+    /* No xmlns declarations because <inner/> visibly uses nothing. */
+    EXPECT_EQ(s.find("xmlns:"), std::string::npos)
+        << "exclusive output should not emit unused ns: " << s;
+    EXPECT_EQ(s.find("xmlns="), std::string::npos)
+        << "exclusive output should not emit default ns: " << s;
+    taurus_free_string(excl);
+
+    taurus_document_free(doc);
+}
+
+TEST(C14NEx, ExclusiveModeKeepsUsedNamespaces) {
+    // Subtree visibly uses ds: prefix via the element's qualified
+    // name. Exclusive output MUST emit the corresponding xmlns:ds.
+    const char xml[] =
+        "<SignedRoot xmlns:ds='http://www.w3.org/2000/09/xmldsig#'>"
+        "<ds:Signature/></SignedRoot>";
+    TaurusDocument doc = Parse(xml);
+    ASSERT_NE(doc, nullptr);
+
+    /* Force promote first to ensure the tree is materialized. */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(root));
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(taurus_node_get_type(child), 0);  // element
+
+    TaurusElement sig = taurus_node_as_element(child);
+    ASSERT_NE(sig, nullptr);
+    EXPECT_STREQ(taurus_element_name(sig), "Signature");
+
+    char* excl = taurus_c14n_canonicalize_subtree_ex(
+        sig, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, nullptr, 1);
+    ASSERT_NE(excl, nullptr);
+    std::string s(excl);
+    EXPECT_NE(s.find("xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\""),
+              std::string::npos)
+        << "exclusive output must include visibly-used ns: " << s;
+    taurus_free_string(excl);
+
+    taurus_document_free(doc);
+}
+
+TEST(C14NEx, InclusiveNsPrefixesForceInclude) {
+    // Caller asks exclusive mode to keep "xenc" prefix even though
+    // it's not visibly used by the subtree.
+    const char xml[] =
+        "<SignedRoot xmlns:ds='http://ds' xmlns:xenc='http://xenc'>"
+        "<ds:Signature/></SignedRoot>";
+    TaurusDocument doc = Parse(xml);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement root = taurus_document_root(doc);
+    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(root));
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(taurus_node_get_type(child), 0);
+    TaurusElement sig = taurus_node_as_element(child);
+    ASSERT_NE(sig, nullptr);
+
+    const char* prefixes[] = {"xenc", nullptr};
+    char* excl = taurus_c14n_canonicalize_subtree_ex(
+        sig, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, prefixes, 1);
+    ASSERT_NE(excl, nullptr);
+    std::string s(excl);
+    EXPECT_NE(s.find("xmlns:ds="), std::string::npos);
+    EXPECT_NE(s.find("xmlns:xenc="), std::string::npos);
+    taurus_free_string(excl);
+    taurus_document_free(doc);
+}
+
+TEST(C14NEx, ExclusiveOnEmptyDoc) {
+    // Exclusive mode on a doc without namespaces — should produce
+    // the same output as canonical (no ns filtering needed).
+    const char xml[] = "<r><a/></r>";
     TaurusDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
 
@@ -151,7 +241,6 @@ TEST(C14NEx, ExclusiveModeFallsBackToCanonical) {
         doc, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, nullptr, 1);
     EXPECT_NE(out, nullptr);
     if (out) taurus_free_string(out);
-
     taurus_document_free(doc);
 }
 
