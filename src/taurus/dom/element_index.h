@@ -35,6 +35,29 @@ typedef struct taurus_element_index_bucket {
     size_t capacity;
 } TaurusElementIndexBucket;
 
+typedef struct taurus_element_index_attr_value {
+    char* value;                 /* Owned */
+    size_t value_len;
+    TaurusElement* matches;      /* Elements with attr name AND this value */
+    size_t count;
+    size_t capacity;
+} TaurusElementIndexAttrValue;
+
+typedef struct taurus_element_index_attr_bucket {
+    char* attr_name;             /* Owned, NUL-terminated */
+    size_t attr_name_len;
+    TaurusElement* matches;      /* Elements with this attr (any value) */
+    size_t count;
+    size_t capacity;
+
+    /* Per-value breakdown for [@attr='value'] predicates. Linear scan
+     * is fine — the number of distinct values per attr is typically
+     * small. */
+    TaurusElementIndexAttrValue* values;
+    size_t value_count;
+    size_t value_capacity;
+} TaurusElementIndexAttrBucket;
+
 typedef struct taurus_element_index {
     TaurusElement* all_elements; /* Flat array in preorder */
     size_t all_count;
@@ -45,6 +68,13 @@ typedef struct taurus_element_index {
     TaurusElementIndexBucket* buckets;
     size_t bucket_count;
     size_t bucket_capacity;
+
+    /* Per-attribute-name buckets (TODO 133). Lets predicate opcodes
+     * BC_PRED_ATTR_EXISTS / BC_PRED_ATTR_EQ_STRING skip per-element
+     * attribute scanning. */
+    TaurusElementIndexAttrBucket* attr_buckets;
+    size_t attr_bucket_count;
+    size_t attr_bucket_capacity;
 } TaurusElementIndex;
 
 /* Build the index for a document. Walks the tree once.
@@ -62,5 +92,15 @@ void taurus_element_index_invalidate(struct taurus_document* doc);
 /* Look up a bucket by name. Returns NULL if not found. */
 const TaurusElementIndexBucket* taurus_element_index_lookup(
     const TaurusElementIndex* idx, const char* name);
+
+/* Look up an attribute-name bucket by attribute name. Returns NULL
+ * if no element in the document has an attribute with that name. */
+const TaurusElementIndexAttrBucket* taurus_element_index_lookup_attr(
+    const TaurusElementIndex* idx, const char* attr_name);
+
+/* Within an attribute bucket, look up elements matching a specific
+ * value. Returns NULL if no element has that attr=value combination. */
+const TaurusElementIndexAttrValue* taurus_element_index_attr_lookup_value(
+    const TaurusElementIndexAttrBucket* bucket, const char* value);
 
 #endif /* TAURUS_DOM_ELEMENT_INDEX_H */
