@@ -588,6 +588,9 @@ TAURUS_API char* taurus_document_serialize(struct taurus_document* doc,
     if (!doc) return NULL;
 
     /* Get root element from new_dom_root field */
+    /* TODO 139 Phase D: trigger lazy promote if the doc was produced
+     * by the flat-parse fast path. */
+    taurus_document_ensure_promoted(doc);
     TaurusElement root = (TaurusElement)doc->new_dom_root;
     if (!root) return NULL;
 

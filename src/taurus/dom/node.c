@@ -250,6 +250,8 @@ int taurus_node_is_frozen(TaurusNode* node) {
 /* Freeze entire document tree */
 void taurus_document_freeze_tree(struct taurus_document* doc) {
     if (!doc) return;
+    /* TODO 139 Phase D: lazy promote. */
+    taurus_document_ensure_promoted(doc);
     /* new_dom_root is the actual root in the compact architecture;
      * doc->root is the legacy field (always NULL in new code). */
     TaurusElement root = doc->new_dom_root

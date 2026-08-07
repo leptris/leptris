@@ -315,6 +315,9 @@ TAURUS_API char* taurus_c14n_canonicalize(struct taurus_document* doc, int versi
     if (!doc) return NULL;
 
     /* Get root element */
+    /* TODO 139 Phase D: trigger lazy promote if the doc was produced
+     * by the flat-parse fast path. */
+    taurus_document_ensure_promoted(doc);
     TaurusElement root = (TaurusElement)doc->new_dom_root;
     if (!root) return NULL;
 

@@ -203,7 +203,10 @@ static int fp_scan_pi(FlatParser* p, FlatDoc* doc) {
     uint16_t target_len;
     if (fp_scan_name(p, &target_offset, &target_len) != 0) return -1;
 
-    /* Optional whitespace before data. */
+    /* Skip whitespace before data. The serializer inserts its own
+     * space between target and data, so we strip leading whitespace
+     * here to match the legacy parser's behavior. */
+    fp_skip_ws(p);
     const char* data_start = p->pos;
     while (p->pos < p->end && *p->pos != '?') p->pos++;
     if (p->pos >= p->end || p->pos + 1 >= p->end ||
@@ -559,6 +562,9 @@ FlatDoc* flat_parse(const char* xml, size_t len) {
 
     /* Unclosed elements at end of input = malformed. */
     if (p.depth != 0) goto fail;
+
+    /* No root element = malformed. */
+    if (doc->root_index == FLAT_INDEX_NULL) goto fail;
 
     /* Commit parser state to the doc. */
     doc->version_offset = p.version_offset;

@@ -274,6 +274,7 @@ static void xml_print_document_impl(
     }
 
     /* Root element - use compact accessor */
+    taurus_document_ensure_promoted(doc);
     if (doc->new_dom_root) {
         TaurusElement root = (TaurusElement)doc->new_dom_root;
         xml_print_element_recursive(root, out, 0, xml_ctx);
@@ -542,6 +543,7 @@ static void json_print_document_impl(
     (void)ctx;
     if (!doc || !out) return;
 
+    taurus_document_ensure_promoted(doc);
     if (doc->new_dom_root) {
         TaurusElement root = (TaurusElement)doc->new_dom_root;
         json_print_element_recursive(root, out, 0);
@@ -716,6 +718,7 @@ static void text_print_document_impl(
     (void)ctx;
     if (!doc || !out) return;
 
+    taurus_document_ensure_promoted(doc);
     if (doc->new_dom_root) {
         TaurusElement root = (TaurusElement)doc->new_dom_root;
         text_print_element_recursive(root, out, 0);
