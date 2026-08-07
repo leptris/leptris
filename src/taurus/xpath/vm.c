@@ -153,6 +153,56 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
                                                       const char* name, int wild,
                                                       int include_self);
 
+/* Forward decl: descendant_walk is defined below, but vm_apply_absolute
+ * uses it. */
+static void descendant_walk(XPathNodeSet* out, TaurusElement elem,
+                              const char* name, int wild, int include_self);
+
+/* Absolute-path handlers (TODO 129). Like vm_apply_axis_descendant
+ * but starts from the document root element directly, with the
+ * document-root semantics: `/foo` matches root itself (not its
+ * children), `//foo` walks the entire tree.
+ *
+ * `include_self` controls whether root itself is a candidate:
+ *   - BC_ABSOLUTE_ROOT_MATCH (child axis): include_self=1, no
+ *     descendant walk. `/foo` = root if root.name == foo.
+ *   - BC_ABSOLUTE_DESCENDANT (descendant axis): include_self=0,
+ *     walk subtree. `/descendant::foo` = all descendants named foo.
+ *   - BC_ABSOLUTE_DESCENDANT_OR_SELF (descendant-or-self axis):
+ *     include_self=1, walk subtree. `//foo` = root if it matches
+ *     + all matching descendants. */
+static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
+                                                      const char* name,
+                                                      int wild,
+                                                      int include_self) {
+    if (!ctx || !ctx->document) return NULL;
+    TaurusElement root = (TaurusElement)ctx->document->new_dom_root;
+    if (!root) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) return NULL;
+
+    if (include_self) {
+        if (wild) {
+            xpath_nodeset_add(out, root);
+        } else {
+            const char* rn = taurus_element_get_name(root);
+            if (rn && strcmp(rn, name) == 0) {
+                xpath_nodeset_add(out, root);
+            }
+        }
+    }
+
+    /* Walk subtree (root not re-added; handled by include_self above
+     * if applicable). */
+    descendant_walk(out, root, name, wild, 0);
+
+    struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
 struct taurus_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
                                                  const char* name, int wild) {
     (void)ctx;
@@ -752,6 +802,73 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
             case XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD: {
                 struct taurus_xpath_result* r =
                     vm_apply_axis_descendant(ctx, &vm, NULL, 1, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            /* Absolute-path first-step opcodes (TODO 129). Each
+             * pushes a nodeset directly — no pop. These start a
+             * new path evaluation from the document root. */
+            case XPATH_BC_ABSOLUTE_ROOT_MATCH_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                /* `/foo` = root if root.name == foo. No descendants. */
+                struct taurus_xpath_result* r =
+                    vm_apply_absolute(ctx, name, 0, 1 /* include_self */);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_ROOT_MATCH_WILD: {
+                /* `/*` = root. */
+                struct taurus_xpath_result* r =
+                    vm_apply_absolute(ctx, NULL, 1, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                /* `/descendant::foo` = all descendants of root named foo. */
+                struct taurus_xpath_result* r =
+                    vm_apply_absolute(ctx, name, 0, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_absolute(ctx, NULL, 1, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                /* `//foo` = root if matches + all matching descendants. */
+                struct taurus_xpath_result* r =
+                    vm_apply_absolute(ctx, name, 0, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_absolute(ctx, NULL, 1, 1);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;

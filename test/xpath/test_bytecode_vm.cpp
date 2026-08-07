@@ -367,4 +367,106 @@ TEST(XPathBytecodeSimplePredicates, ComplexPredicateFallsBack) {
     taurus_document_free(doc);
 }
 
+TEST(XPathBytecodeAbsolutePath, RootMatch) {
+    const char xml[] = "<catalog><book/><book/></catalog>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr, "count(/catalog)");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r1), 1.0);
+    taurus_xpath_result_free(r1);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "count(/library)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 0.0);
+    taurus_xpath_result_free(r2);
+
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, nullptr, "count(/*)");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r3), 1.0);
+    taurus_xpath_result_free(r3);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeAbsolutePath, DescendantOrSelfFusion) {
+    const char xml[] =
+        "<lib><b><c>X</c></b><b><c>Y</c></b><d><b><c>Z</c></b></d></lib>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr, "count(//b)");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r1), 3.0);
+    taurus_xpath_result_free(r1);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "count(//c)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 3.0);
+    taurus_xpath_result_free(r2);
+
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, nullptr, "count(//*)");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r3), 8.0);  /* lib + 3 b + 3 c + d */
+    taurus_xpath_result_free(r3);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeAbsolutePath, PredicateAfterDescendantOrSelf) {
+    const char xml[] =
+        "<lib><b id='1'>x</b><b id='2'>y</b><b id='1'>z</b></lib>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                               "count(//b[@id='1'])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeAbsolutePath, MultiStepAbsolute) {
+    const char xml[] = "<root><a><b/></a><a><b/></a></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "count(/root/a)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "count(/root/a/b)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 2.0);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeAbsolutePath, PositionPredicatePerContext) {
+    /* `//title[1]` means "first title child of each context", NOT
+     * "first title globally". The compiler must NOT fuse position
+     * predicates (they're context-sensitive). */
+    const char xml[] =
+        "<lib><b><t>A</t><t>B</t></b><b><t>C</t></b></lib>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "count(//t[1])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    taurus_document_free(doc);
+}
+
 }  // namespace

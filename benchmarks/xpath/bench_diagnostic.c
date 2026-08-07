@@ -284,6 +284,36 @@ static void bench_medium_pred_nodeset_cmp(void* p) {
 }
 
 /* ----------------------------------------------------------------------- *
+ * Group 6b: absolute-path first-step specialization (TODO 129).
+ *
+ * These run the absolute path AS THE TOP-LEVEL expression so the
+ * VM specialization kicks in. (count() wraps the path in a function
+ * call, which currently evaluates the arg via AST — the
+ * specialization doesn't apply there yet.)
+ * ----------------------------------------------------------------------- */
+
+static void bench_medium_absolute_root_match(void* p) {
+    medium_ctx_t* c = (medium_ctx_t*)p;
+    /* `/catalog` → BC_ABSOLUTE_ROOT_MATCH_NAME. */
+    TaurusXPathResult r = taurus_xpath_eval(c->doc, NULL, "/catalog");
+    taurus_xpath_result_free(r);
+}
+
+static void bench_medium_absolute_descendant_or_self(void* p) {
+    medium_ctx_t* c = (medium_ctx_t*)p;
+    /* `//book` → BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME. */
+    TaurusXPathResult r = taurus_xpath_eval(c->doc, NULL, "//book");
+    taurus_xpath_result_free(r);
+}
+
+static void bench_medium_absolute_descendant_wild(void* p) {
+    medium_ctx_t* c = (medium_ctx_t*)p;
+    /* `//*` → BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD. */
+    TaurusXPathResult r = taurus_xpath_eval(c->doc, NULL, "//*");
+    taurus_xpath_result_free(r);
+}
+
+/* ----------------------------------------------------------------------- *
  * Group 7: variable references
  *
  * Variables bypass the cache (need a context-bound value set).
@@ -377,6 +407,11 @@ int main(void) {
     print_section("Group 6: comparison operators");
     RUN("count(1 = 1) (scalar)",   bench_medium_pred_literal_cmp, &med, iters);
     RUN("count(//book[@id='b1'])", bench_medium_pred_nodeset_cmp, &med, iters);
+
+    print_section("Group 6b: absolute-path first-step specialization");
+    RUN("/catalog (root match)",          bench_medium_absolute_root_match,         &med, iters);
+    RUN("//book (descendant-or-self)",    bench_medium_absolute_descendant_or_self, &med, iters);
+    RUN("//* (descendant-or-self wild)",  bench_medium_absolute_descendant_wild,    &med, iters);
 
     print_section("Group 7: variable references");
     RUN("42 (literal)",            bench_medium_literal, &med, iters);
