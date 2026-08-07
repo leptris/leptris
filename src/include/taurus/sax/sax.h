@@ -11,6 +11,25 @@
 
 #include <stddef.h>
 
+/* Export macro.  Defined fully in taurus.h; sax.h allows standalone
+ * inclusion (taurus.h is not required) so we mirror the same logic.
+ * See TODO 80 (visibility preset) and TODO 122 (SAX surface). */
+#ifndef TAURUS_API
+#  ifdef TAURUS_FOR_BINDGEN
+#    define TAURUS_API
+#  elif defined(_WIN32)
+#    ifdef TAURUS_BUILD_SHARED
+#      define TAURUS_API __declspec(dllexport)
+#    elif defined(TAURUS_USE_SHARED)
+#      define TAURUS_API __declspec(dllimport)
+#    else
+#      define TAURUS_API
+#    endif
+#  else
+#    define TAURUS_API __attribute__((visibility("default")))
+#  endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -194,9 +213,9 @@ struct TaurusSAXHandler {
  *
  * Thread safety: Not thread-safe. One parse per thread.
  */
-int taurus_sax_parse(const char* xml, size_t len,
-                     TaurusSAXHandler* handler,
-                     void* user_data);
+TAURUS_API int taurus_sax_parse(const char* xml, size_t len,
+                                TaurusSAXHandler* handler,
+                                void* user_data);
 
 /**
  * Create SAX parser for streaming/incremental parsing
@@ -209,7 +228,7 @@ int taurus_sax_parse(const char* xml, size_t len,
  *
  * Memory: Caller must call taurus_sax_parser_free() when done
  */
-TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_data);
+TAURUS_API TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_data);
 
 /**
  * Feed XML chunk to incremental parser
@@ -230,17 +249,17 @@ TaurusSAXParser* taurus_sax_parser_create(TaurusSAXHandler* handler, void* user_
  *
  *   taurus_sax_parser_free(parser);
  */
-int taurus_sax_parser_feed(TaurusSAXParser* parser,
-                            const char* xml,
-                            size_t len,
-                            int is_final);
+TAURUS_API int taurus_sax_parser_feed(TaurusSAXParser* parser,
+                                      const char* xml,
+                                      size_t len,
+                                      int is_final);
 
 /**
  * Free SAX parser
  *
  * @param parser Parser to free (can be NULL)
  */
-void taurus_sax_parser_free(TaurusSAXParser* parser);
+TAURUS_API void taurus_sax_parser_free(TaurusSAXParser* parser);
 
 /**
  * Opt into the streaming state-machine parser (TODO 116).
@@ -261,7 +280,7 @@ void taurus_sax_parser_free(TaurusSAXParser* parser);
  *
  * Thread safety: Not thread-safe. Set once before the first feed().
  */
-int taurus_sax_parser_set_streaming(TaurusSAXParser* parser, int streaming);
+TAURUS_API int taurus_sax_parser_set_streaming(TaurusSAXParser* parser, int streaming);
 
 #ifdef __cplusplus
 }

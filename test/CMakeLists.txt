@@ -76,6 +76,16 @@ taurus_add_test(test_perf       perf/test_perf.cpp)
 taurus_add_test(test_sax        sax/test_sax.cpp)
 taurus_add_test(test_streaming  sax/test_streaming.cpp)
 taurus_add_test(test_abi        abi/test_header_hygiene.cpp)
+
+# Shared-library export check (TODO 122).  Runs the bash script that
+# builds a one-off libtaurus.dylib / .so and asserts SAX + DOM + XPath
+# symbols appear in the export table.  Catches missing TAURUS_API
+# annotations that would silently break FFI bindings.
+add_test(
+    NAME SymbolExportCheck
+    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/check_shared_exports.sh
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 taurus_add_test(test_dtd        dtd/test_dtd_validate.cpp)
 taurus_add_test(test_xinclude   xinclude/test_xinclude.cpp)
 taurus_add_cli_test(test_cli    cli/test_cli.cpp)
