@@ -867,3 +867,66 @@ TAURUS_API size_t taurus_element_hash_value(TaurusElement elem) {
     /* This works because elements are pool-allocated and stable */
     return (size_t)elem;
 }
+
+/* ============================================================================
+ * FFI Helpers: indexed attribute and namespace access (TODO 138)
+ *
+ * O(n) walk over the attribute linked list. Nokogiri and libxml2 do
+ * the same. The Ruby binding caches results.
+ * ============================================================================ */
+
+TAURUS_API const char* taurus_element_attribute_name_at(TaurusElement elem, size_t index) {
+    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+    size_t i = 0;
+    while (attr) {
+        if (i == index) {
+            if (attr->name) return attr->name;
+            TaurusStringView nv = attr->name_view;
+            if (nv.length > 0 && nv.data) {
+                attr->name = taurus_sv_to_cstr(&nv);
+                return attr->name;
+            }
+            return NULL;
+        }
+        i++;
+        attr = attr->next;
+    }
+    return NULL;
+}
+
+TAURUS_API const char* taurus_element_attribute_value_at(TaurusElement elem, size_t index) {
+    if (!elem) return NULL;
+    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+    size_t i = 0;
+    while (attr) {
+        if (i == index) {
+            if (attr->value) return attr->value;
+            TaurusStringView vv = attr->value_view;
+            if (vv.length > 0 && vv.data) {
+                attr->value = taurus_sv_to_cstr(&vv);
+                return attr->value;
+            }
+            return NULL;
+        }
+        i++;
+        attr = attr->next;
+    }
+    return NULL;
+}
+
+TAURUS_API size_t taurus_element_namespace_count(TaurusElement elem) {
+    if (!elem) return 0;
+    size_t count = 0;
+    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+    while (attr) {
+        TaurusStringView nv = attr->name_view;
+        if (nv.length >= 5 && nv.data &&
+            nv.data[0] == 'x' && nv.data[1] == 'm' &&
+            nv.data[2] == 'l' && nv.data[3] == 'n' &&
+            nv.data[4] == 's') {
+            count++;
+        }
+        attr = attr->next;
+    }
+    return count;
+}

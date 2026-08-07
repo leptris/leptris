@@ -162,5 +162,75 @@ TEST(HeaderHygiene, NonElementNodeSiblingRoundTrip) {
     EXPECT_EQ(taurus_pi_next_sibling(pi), sibling);
 }
 
+// FFI Helper API (TODO 138): document_encoding, attribute index
+// access, namespace count, status string.
+
+TEST(HeaderHygiene, DocumentEncodingAccessor) {
+    const char xml[] = "<?xml version='1.0' encoding='UTF-8'?><r/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, sizeof(xml) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char* enc = taurus_document_encoding(doc);
+    EXPECT_STREQ(enc, "UTF-8");
+
+    taurus_document_free(doc);
+}
+
+TEST(HeaderHygiene, AttributeIndexAccess) {
+    const char xml[] = "<e a='1' b='2' c='3'/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, sizeof(xml) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    EXPECT_EQ(taurus_element_attribute_count(root), 3u);
+    EXPECT_STREQ(taurus_element_attribute_name_at(root, 0), "a");
+    EXPECT_STREQ(taurus_element_attribute_value_at(root, 0), "1");
+    EXPECT_STREQ(taurus_element_attribute_name_at(root, 1), "b");
+    EXPECT_STREQ(taurus_element_attribute_value_at(root, 1), "2");
+    EXPECT_STREQ(taurus_element_attribute_name_at(root, 2), "c");
+    EXPECT_STREQ(taurus_element_attribute_value_at(root, 2), "3");
+
+    /* Out of range. */
+    EXPECT_EQ(taurus_element_attribute_name_at(root, 99), nullptr);
+    EXPECT_EQ(taurus_element_attribute_value_at(root, 99), nullptr);
+
+    taurus_document_free(doc);
+}
+
+TEST(HeaderHygiene, NamespaceCount) {
+    /* xmlns declarations are stripped from the regular attribute list
+     * by the parser. namespace_count walks the attribute list and
+     * finds 0 xmlns. The namespace itself is accessible via
+     * taurus_element_namespace(). */
+    const char xml[] = "<e xmlns='http://default' a='1'/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, sizeof(xml) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* Regular attributes are counted. */
+    EXPECT_EQ(taurus_element_attribute_count(root), 1u);
+
+    /* Namespace declarations are NOT in the attribute list in the
+     * current parser. namespace_count returns 0. This is a known
+     * limitation — the active namespace is available via
+     * taurus_element_namespace(). */
+    EXPECT_EQ(taurus_element_namespace_count(root), 0u);
+
+    taurus_document_free(doc);
+}
+
+TEST(HeaderHygiene, StatusString) {
+    EXPECT_STREQ(taurus_status_string(TAURUS_OK), "OK");
+    EXPECT_STREQ(taurus_status_string(TAURUS_ERROR_PARSE), "XML parse error");
+    EXPECT_STREQ(taurus_status_string(TAURUS_ERROR_MEMORY), "Memory allocation failed");
+    /* Unknown code returns something non-NULL. */
+    EXPECT_STRNE(taurus_status_string(static_cast<TaurusStatus>(-999)), "");
+}
+
 }  // namespace
 

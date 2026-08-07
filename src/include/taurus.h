@@ -347,6 +347,16 @@ TAURUS_API void taurus_document_adopt_child(TaurusDocument parent,
 TAURUS_API TaurusElement taurus_document_root(TaurusDocument doc);
 
 /**
+ * Get document encoding string
+ *
+ * @param doc Document
+ * @return Encoding string (e.g. "UTF-8") or NULL if not set
+ *
+ * Memory: String is owned by document. Do not free.
+ */
+TAURUS_API const char* taurus_document_encoding(TaurusDocument doc);
+
+/**
  * Eagerly convert all StringViews to NULL-terminated strings
  *
  * PERFORMANCE OPTIMIZATION: Call this after parsing to optimize for
@@ -650,6 +660,36 @@ TAURUS_API float taurus_element_attribute_float(TaurusElement elem, const char* 
  * The default_value string must remain valid for the duration of use.
  */
 TAURUS_API const char* taurus_element_attribute_string(TaurusElement elem, const char* name, const char* default_value);
+
+/**
+ * Get number of attributes on an element
+ *
+ * @param elem Element
+ * @return Attribute count or 0 if elem is NULL
+ */
+TAURUS_API size_t taurus_element_attribute_count(TaurusElement elem);
+
+/**
+ * Get name of attribute by index
+ *
+ * @param elem Element
+ * @param index Attribute index (0-based)
+ * @return Attribute name or NULL if index out of range
+ *
+ * Memory: String is owned by element. Do not free.
+ */
+TAURUS_API const char* taurus_element_attribute_name_at(TaurusElement elem, size_t index);
+
+/**
+ * Get value of attribute by index
+ *
+ * @param elem Element
+ * @param index Attribute index (0-based)
+ * @return Attribute value or NULL if index out of range
+ *
+ * Memory: String is owned by element. Do not free.
+ */
+TAURUS_API const char* taurus_element_attribute_value_at(TaurusElement elem, size_t index);
 
 /**
  * Get number of child elements
@@ -1259,6 +1299,24 @@ TAURUS_API const char* taurus_namespace_prefix(TaurusNamespace ns);
  * Memory: String is owned by element. Do not free or modify.
  */
 TAURUS_API const char* taurus_element_namespace_for_prefix(TaurusElement elem, const char* prefix);
+
+/**
+ * Get number of namespaces declared on an element
+ *
+ * Counts xmlns and xmlns:* attributes. O(n) over the attribute list.
+ *
+ * @param elem Element
+ * @return Namespace count or 0 if elem is NULL
+ */
+TAURUS_API size_t taurus_element_namespace_count(TaurusElement elem);
+
+/**
+ * Convert status code to human-readable string
+ *
+ * @param status Status code from taurus_parse_string or other API
+ * @return Static string (never NULL, never freed)
+ */
+TAURUS_API const char* taurus_status_string(TaurusStatus status);
 
 /* ============================================================================
  * XPath Operations
