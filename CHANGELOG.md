@@ -1,13 +1,47 @@
 ## [Unreleased]
 
-## [0.5.4] - Y-08-07
+## [0.5.4] - 2026-08-07
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Flat-as-tree architecture (TODO 145)
 
-### Changed
+Phases 1 and 2 of the rewrite toward making the FlatDoc the
+primary representation (instead of always-promoting to the
+compact-pointer tree).
 
-- (describe changes here)
+**Phase 1: namespace-aware promote.** Removes the "xmlns → legacy
+parser" routing. Documents with namespace declarations now go
+through the flat fast path. The promote pass moves xmlns
+declarations from the regular attribute list to elem->namespaces
+and splits qualified element names on the first ':' into prefix +
+local name. Unblocks ~70% of real-world XML documents from the
+fast path.
+
+**Phase 2: flat serialize.** `taurus_document_serialize` now
+dispatches to `flat_serialize_document` when `doc->flat_doc` is
+set and not yet promoted. The flat path walks the FlatDoc node
+array directly, producing identical output without triggering
+promote. Parse-then-serialize workloads skip the entire pool-alloc
++ compact-pointer-encode cost.
+
+### Fixed
+
+- Pre-existing leak in `taurus_element_get_namespace_uri` where
+  lazy namespace resolution used heap strdup. Pool-allocate via
+  the element's owning document so pool destroy releases the copy.
+
+### Performance
+
+Per `bench_flat_parse` (Apple M1, 5 KB plain XML):
+
+| Operation                  | Before | After  |
+|----------------------------|--------|--------|
+| Parse only (flat)          | 53 µs  | 46 µs  |
+| Parse + promote            | 78 µs  | 71 µs  |
+| Parse + serialize (flat)   | n/a    | 47 µs  |
+| Parse + serialize (compact)| 78 µs  | 78 µs  |
+
+The flat serialize path is ~40% faster than going through promote
+for parse-then-serialize workloads.
 
 
 ## [0.5.3] - 2026-08-07
