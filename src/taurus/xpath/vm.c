@@ -387,25 +387,75 @@ struct taurus_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
 /* Recursive subtree walk for descendant / descendant-or-self.
  * Appends matching elements to `out`. No dedup at this layer —
  * the caller decides based on input size. */
+/* Process a single element during a subtree walk: add to out if it
+ * matches the name filter. Inlined for tight loop performance. */
+static inline void descendant_visit(XPathNodeSet* out, TaurusElement elem,
+                                      const char* name, int wild) {
+    if (wild) {
+        xpath_nodeset_add(out, elem);
+    } else {
+        const char* en = taurus_element_get_name(elem);
+        if (en && strcmp(en, name) == 0) {
+            xpath_nodeset_add(out, elem);
+        }
+    }
+}
+
+/* Iterative pre-order subtree walk (TODO 131). Replaces the previous
+ * recursive version which paid function-call overhead per element.
+ *
+ * The walk uses the tree's own parent / first_child / next_sibling
+ * links to track position — no explicit stack needed. For an N-element
+ * subtree, total work is O(N) with constant per-element overhead.
+ *
+ * `name` / `wild` filter which elements get added to `out`.
+ * `include_self`: if 1, visit `elem` itself before descending; if 0,
+ * skip `elem` (it's been handled by the caller, e.g., vm_apply_absolute
+ * adds root separately for descendant-or-self). */
 static void descendant_walk(XPathNodeSet* out, TaurusElement elem,
                               const char* name, int wild, int include_self) {
     if (!elem) return;
 
-    if (include_self) {
-        if (wild) {
-            xpath_nodeset_add(out, elem);
-        } else {
-            const char* en = taurus_element_get_name(elem);
-            if (en && strcmp(en, name) == 0) {
-                xpath_nodeset_add(out, elem);
+    /* Pre-grow the output nodeset to skip the inline→heap transition
+     * that would otherwise trigger on the 17th add. For typical
+     * medium docs (~50 elements) this avoids 1-2 grow operations. */
+    if (out->capacity < 32) {
+        void** new_nodes = (void**)malloc(32 * sizeof(void*));
+        if (new_nodes) {
+            if (out->count > 0) {
+                memcpy(new_nodes, out->nodes, out->count * sizeof(void*));
             }
+            /* Inline storage is part of the struct; nothing to free. */
+            out->nodes = new_nodes;
+            out->capacity = 32;
         }
     }
 
-    TaurusElement child = taurus_element_get_first_child(elem);
-    while (child) {
-        descendant_walk(out, child, name, wild, 1);
-        child = taurus_element_get_next_sibling(child);
+    if (include_self) {
+        descendant_visit(out, elem, name, wild);
+    }
+
+    TaurusElement cur = taurus_element_get_first_child(elem);
+    while (cur) {
+        descendant_visit(out, cur, name, wild);
+
+        TaurusElement next = taurus_element_get_first_child(cur);
+        if (next) {
+            cur = next;
+            continue;
+        }
+
+        /* No child — walk up via parent links until we find a sibling
+         * or reach `elem` (the subtree root). */
+        while (cur && cur != elem) {
+            TaurusElement sib = taurus_element_get_next_sibling(cur);
+            if (sib) {
+                cur = sib;
+                break;
+            }
+            cur = taurus_element_get_parent(cur);
+        }
+        if (cur == elem) break;  /* exhausted subtree */
     }
 }
 
