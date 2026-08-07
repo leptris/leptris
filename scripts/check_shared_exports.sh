@@ -65,6 +65,9 @@ REQUIRED=(
     taurus_xpath_result_string
     taurus_xpath_result_free
     taurus_status_string
+    taurus_document_serialize
+    taurus_element_serialize
+    taurus_document_save_file
     taurus_sax_parse
     taurus_sax_parser_create
     taurus_sax_parser_feed

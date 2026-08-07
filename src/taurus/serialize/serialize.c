@@ -9,6 +9,7 @@
  */
 
 #include "serialize.h"
+#include "../include/taurus.h"     /* TAURUS_API (visibility attribute) */
 #include "../dom/node.h"            /* TaurusNodeVTable + taurus_node_vtable_for */
 #include "../taurus_internal.h"
 /* TaurusSerializeOptions comes from taurus/types.h via taurus_internal.h's
@@ -582,7 +583,7 @@ char* taurus_serialize_document_with_declaration(TaurusElement root,
 struct taurus_document;
 
 /* Serialize document with options */
-char* taurus_document_serialize(struct taurus_document* doc,
+TAURUS_API char* taurus_document_serialize(struct taurus_document* doc,
                                  TaurusSerializeOptions* options) {
     if (!doc) return NULL;
 
@@ -690,7 +691,7 @@ char* taurus_document_serialize(struct taurus_document* doc,
  * ============================================================================ */
 
 /* Serialize element subtree to XML string */
-char* taurus_element_serialize(TaurusElement elem,
+TAURUS_API char* taurus_element_serialize(TaurusElement elem,
                                  TaurusSerializeOptions* options) {
     if (!elem) return NULL;
 
@@ -711,7 +712,7 @@ char* taurus_element_serialize(TaurusElement elem,
 }
 
 /* Save document to file */
-int taurus_document_save_file(struct taurus_document* doc,
+TAURUS_API int taurus_document_save_file(struct taurus_document* doc,
                                const char* filepath,
                                TaurusSerializeOptions* options) {
     if (!doc) return -4;  /* TAURUS_ERROR_NULL_ARG */
