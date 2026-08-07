@@ -1501,6 +1501,41 @@ TAURUS_API const char* taurus_element_namespace_decl_uri(TaurusElement elem,
                                                           size_t index);
 
 /**
+ * Add a namespace declaration to an element (issue #186).
+ *
+ * @param elem Element to receive the declaration
+ * @param prefix Namespace prefix. NULL or "" means default namespace.
+ * @param href Namespace URI (required)
+ * @return TAURUS_OK on success,
+ *         TAURUS_ERROR_NULL_ARG if elem or href is NULL,
+ *         TAURUS_ERROR_MEMORY on allocation failure
+ *
+ * Memory: prefix and href are pool-copied; caller may free or
+ * modify the inputs immediately.
+ */
+TAURUS_API TaurusStatus taurus_element_add_namespace_definition(
+    TaurusElement elem, const char* prefix, const char* href);
+
+/**
+ * Set the default namespace on an element (issue #186).
+ * Equivalent to add_namespace_definition(elem, NULL, href).
+ */
+TAURUS_API TaurusStatus taurus_element_set_default_namespace(
+    TaurusElement elem, const char* href);
+
+/**
+ * Remove the namespace declaration matching prefix (issue #186).
+ *
+ * @param elem Element
+ * @param prefix Prefix to match. NULL means default namespace.
+ * @return TAURUS_OK on success,
+ *         TAURUS_ERROR_NULL_ARG if elem is NULL,
+ *         TAURUS_ERROR_NOT_FOUND if no matching declaration exists
+ */
+TAURUS_API TaurusStatus taurus_element_remove_namespace_definition(
+    TaurusElement elem, const char* prefix);
+
+/**
  * Convert status code to human-readable string
  *
  * @param status Status code from taurus_parse_string or other API

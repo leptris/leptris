@@ -13,6 +13,14 @@
 #include "element.h"
 #include "node.h"
 #include "text.h"
+
+/* Forward decls from taurus_memory.c — avoid pulling taurus_memory.h
+ * directly because it conflicts with pi.h's taurus_pi_free. */
+int taurus_element_add_namespace(struct taurus_element* elem,
+                                  struct taurus_namespace* ns);
+struct taurus_namespace* taurus_namespace_new_pooled(const char* prefix,
+                                                      const char* uri,
+                                                      TaurusMemoryPool* pool);
 #include "cdata.h"
 #include "comment.h"
 #include "pi.h"
@@ -1006,4 +1014,72 @@ TAURUS_API const char* taurus_element_namespace_decl_uri(
     const char* uri = NULL;
     if (!element_namespace_decl_at(elem, index, &prefix, &uri)) return NULL;
     return uri;
+}
+
+/* ============================================================================
+ * Namespace mutation (issue #186).
+ *
+ * Three public entry points wrap the existing internal namespace
+ * list. The internal list lives on elem->namespaces; the parser
+ * populates it during parse. These mutators let callers add/remove
+ * declarations programmatically.
+ * ============================================================================ */
+
+TAURUS_API TaurusStatus taurus_element_add_namespace_definition(
+    TaurusElement elem, const char* prefix, const char* href) {
+    if (!elem || !href) return TAURUS_ERROR_NULL_ARG;
+    taurus_document_ensure_promoted(elem->document);
+
+    /* Normalize empty-string prefix to NULL (default ns). */
+    if (prefix && !*prefix) prefix = NULL;
+
+    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+    struct taurus_namespace* ns;
+    if (pool) {
+        ns = taurus_namespace_new_pooled(prefix, href, pool);
+    } else {
+        /* No pool — fall back to heap-allocating the ns struct + copies. */
+        ns = (struct taurus_namespace*)malloc(sizeof(*ns));
+        if (!ns) return TAURUS_ERROR_MEMORY;
+        ns->prefix = prefix ? strdup(prefix) : NULL;
+        ns->uri = strdup(href);
+        ns->next = NULL;
+        if (!ns->uri || (prefix && !ns->prefix)) {
+            free(ns->prefix);
+            free(ns->uri);
+            free(ns);
+            return TAURUS_ERROR_MEMORY;
+        }
+    }
+    if (!ns) return TAURUS_ERROR_MEMORY;
+
+    taurus_element_add_namespace(elem, ns);
+    return TAURUS_OK;
+}
+
+TAURUS_API TaurusStatus taurus_element_set_default_namespace(
+    TaurusElement elem, const char* href) {
+    return taurus_element_add_namespace_definition(elem, NULL, href);
+}
+
+TAURUS_API TaurusStatus taurus_element_remove_namespace_definition(
+    TaurusElement elem, const char* prefix) {
+    if (!elem) return TAURUS_ERROR_NULL_ARG;
+    /* Normalize empty prefix to NULL. */
+    if (prefix && !*prefix) prefix = NULL;
+
+    struct taurus_namespace** link = &elem->namespaces;
+    while (*link) {
+        struct taurus_namespace* cur = *link;
+        int match = (prefix == NULL) ? (cur->prefix == NULL)
+            : (cur->prefix && strcmp(cur->prefix, prefix) == 0);
+        if (match) {
+            *link = cur->next;
+            /* Don't free cur->prefix / cur->uri — they're pool-owned.
+             * The struct itself may be pool-allocated too; skip free. */
+            return TAURUS_OK;
+        }
+        link = &cur->next;
+    }
+    return TAURUS_ERROR_NOT_FOUND;
 }

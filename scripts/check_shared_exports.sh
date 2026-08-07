@@ -86,6 +86,9 @@ REQUIRED=(
     taurus_c14n_canonicalize_subtree
     taurus_c14n_canonicalize_ex
     taurus_c14n_canonicalize_subtree_ex
+    taurus_element_add_namespace_definition
+    taurus_element_set_default_namespace
+    taurus_element_remove_namespace_definition
     taurus_xpath_eval_with_vars_context
     taurus_sax_parse
     taurus_sax_parser_create
