@@ -109,6 +109,11 @@ if(LIBXML2_AVAILABLE)
     endforeach()
 endif()
 
+# Diagnostic benchmarks — taurus only, used to isolate per-component
+# costs (parse vs eval, cold vs warm cache, setup floor, predicate
+# cost, named-attribute mystery, etc). See TODO 123.
+taurus_add_benchmark(bench_xpath_diagnostic xpath/bench_diagnostic.c)
+
 # XPath vs pugixml — added in TODO 107 to close the pugixml coverage gap.
 if(PUGIXML_AVAILABLE)
     taurus_add_benchmark(bench_xpath_pugixml CXX xpath/bench_pugixml.cpp)
