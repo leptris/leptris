@@ -509,6 +509,55 @@ Taurus is benchmarked against libxml2 and pugixml on every push via CI
 |9% faster
 |===
 
+=== XPath evaluation (vs libxml2)
+
+Taurus's XPath engine uses a bytecode VM with per-axis
+specialization, predicate fast paths, and absolute-path fusion
+(TODO 120, TODO 125–129). Numbers below are from
+`benchmarks/xpath/bench_diagnostic` on a ~5 KB catalog fixture.
+
+[cols="2,>1,>1,>1",options="header"]
+|===
+|Benchmark |Taurus |libxml2 |Advantage
+
+|`self::*` (per-call floor)
+|0.92 µs
+|0.89 µs
+|parity
+
+|`child::*`
+|1.04 µs
+|0.94 µs
+|parity
+
+|`attribute::id`
+|0.99 µs
+|2.52 µs
+|2.5× faster
+
+|`/catalog` (root match)
+|5.0 µs
+|~1 µs
+|5× slower
+
+|`//book` (descendant-or-self)
+|5.0 µs
+|~1 µs
+|5× slower
+
+|`descendant::*[@id]`
+|6.7 µs
+|1.02 µs
+|6.6× slower
+|===
+
+Per-call floor (1 µs) is at libxml2 parity after TODO 125 (lazy
+namespace init). The remaining gap is on subtree traversal
+(descendant / `//`), where the recursive walk cost dominates.
+Function-wrapped paths (`count(//book)`) are slower still because
+the function-arg path uses the AST evaluator instead of the VM —
+pre-evaluating args via the VM is future work.
+
 === DOM writes (vs pugixml + libxml2)
 
 [cols="2,>1,>1,>1",options="header"]
@@ -668,13 +717,27 @@ Shipped in v0.3.0:
 * ✓ Compact-pointer int32 overflow fix for macOS (TODO 121)
 * ✓ Ruby FFI binding (TODO 118)
 
+Shipped post-v0.3.0 (XPath perf track):
+
+* ✓ SAX API exported from shared library (TODO 122 — unblocks Ruby SAX)
+* ✓ XPath diagnostic benchmark suite (TODO 123)
+* ✓ XPath bytecode VM inline dispatch + bytecode cache (TODO 120 Phase F)
+* ✓ Lazy namespace init — 5-9× faster per-eval floor (TODO 125)
+* ✓ Specialized child/attribute/self/parent axes (TODO 126)
+* ✓ Specialized descendant / descendant-or-self axes (TODO 127)
+* ✓ Simple predicate fast paths: `[@attr]`, `[@attr='lit']`, `[N]` (TODO 128)
+* ✓ Specialized absolute paths `/foo` `//foo` with `//name` fusion (TODO 129)
+
 Planned:
 
 * Python bindings via `cffi`.
 * Rust bindings via `bindgen`.
-* XPath VM inline dispatch (replace evaluate_expr delegates with
-  inline handlers for AXIS_STEP, BINARY_OP, FUNC_CALL).
-* SAX function visibility fix (shared library export for Ruby SAX).
+* Ruby SAX binding (now unblocked by TODO 122).
+* XPath function-arg pre-evaluation — make `count(//foo)`,
+  `name(//foo)`, etc. use the bytecode VM for the path argument
+  instead of the AST evaluator. Closes the function-wrapped gap.
+* Iterative subtree walk + pre-allocated result capacity for
+  descendant axis. Closes the remaining 5× gap on `descendant::*`.
 * Doxygen API reference polish.
 
 == Contributing
