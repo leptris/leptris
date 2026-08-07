@@ -38,8 +38,16 @@ static void xpath_context_register_namespace(XPathContext* context,
 static void xpath_context_init_from_document(XPathContext* context);
 
 /* Function call evaluation */
-static struct taurus_xpath_result* evaluate_function_call(XPathContext* ctx,
-                                                          XPathASTNode* ast);
+static struct taurus_xpath_result* evaluate_function_call_impl(XPathContext* ctx,
+                                                                XPathASTNode* ast);
+
+/* Public alias for the VM (TODO 120 Phase F). The VM dispatches
+ * BC_FUNC_CALL by calling this directly, skipping the evaluate_expr
+ * AST-type switch. */
+struct taurus_xpath_result* evaluate_function_call_inline(XPathContext* ctx,
+                                                           XPathASTNode* ast) {
+    return evaluate_function_call_impl(ctx, ast);
+}
 
 /* ============================================================================
  * Context Management
@@ -527,7 +535,7 @@ extern struct taurus_xpath_result* evaluate_operator(XPathContext* ctx,
 /**
  * Evaluate function call AST node
  */
-static struct taurus_xpath_result* evaluate_function_call(XPathContext* ctx,
+static struct taurus_xpath_result* evaluate_function_call_impl(XPathContext* ctx,
                                                           XPathASTNode* ast) {
     if (!ctx || !ast || ast->type != XPATH_AST_FUNCTION_CALL) {
         if (ctx) {
@@ -637,7 +645,7 @@ struct taurus_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast) 
             return evaluate_operator(ctx, ast);
 
         case XPATH_AST_FUNCTION_CALL:
-            return evaluate_function_call(ctx, ast);
+            return evaluate_function_call_impl(ctx, ast);
 
         case XPATH_AST_VARIABLE_REFERENCE: {
             /* Look up variable in context */

@@ -6,17 +6,25 @@
  * the parsed AST eliminates the parse cost on every call after
  * the first.
  *
- * Implementation: fixed 16-slot open-addressed hash by expression
- * string hash. No eviction beyond slot replacement. The ASTs are
- * immutable after parse, so concurrent reads are safe; concurrent
- * first-insert of the same key is a benign race (worst case is a
- * duplicate parse, then last-writer-wins on the slot).
+ * TODO 120 Phase F: the cache now also holds the compiled bytecode
+ * alongside the AST. The bytecode is compiled lazily on first VM
+ * eval and reused thereafter, so repeated evals skip both the
+ * parse and the compile phase.
  *
- * Tradeoff: this leaks ASTs at process exit. Acceptable for a
- * process-global cache of small (~100 byte) ASTs. */
+ * Implementation: fixed 16-slot open-addressed hash by expression
+ * string hash. No eviction beyond slot replacement. The ASTs and
+ * bytecodes are immutable after compile, so concurrent reads are
+ * safe; concurrent first-insert of the same key is a benign race
+ * (worst case is a duplicate parse/compile, then last-writer-wins
+ * on the slot).
+ *
+ * Tradeoff: this leaks ASTs and bytecodes at process exit.
+ * Acceptable for a process-global cache of small (~100 byte) ASTs
+ * and ~1 KB bytecodes. */
 
 #include "xpath_internal.h"
 #include "parser.h"  /* ast_node_free */
+#include "bytecode.h"  /* taurus_xpath_bytecode_free */
 #include "../taurus_internal.h"
 #include <string.h>
 #include <stdio.h>
@@ -28,6 +36,7 @@ typedef struct {
     char* expr_copy;      /* Owned string copy (for re-lookup verification) */
     size_t expr_len;
     XPathASTNode* ast;    /* Owned AST */
+    TaurusXPathBytecode* bc;  /* Owned bytecode (lazy; NULL until first VM eval) */
 } xpath_ast_cache_slot;
 
 static xpath_ast_cache_slot g_cache[XPATH_AST_CACHE_SLOTS];
@@ -90,6 +99,7 @@ void xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast
     if (slot->expr_copy) {
         TAURUS_FREE(slot->expr_copy);
         ast_node_free(slot->ast);
+        if (slot->bc) taurus_xpath_bytecode_free(slot->bc);
     }
     /* Copy the expression string so future lookups can verify. */
     char* copy = TAURUS_ALLOC_N(char, expr_len + 1);
@@ -101,4 +111,55 @@ void xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast
     slot->expr_copy = copy;
     slot->expr_len = expr_len;
     slot->ast = ast;
+    slot->bc = NULL;  /* lazy; compiled on first VM eval */
+}
+
+TaurusXPathBytecode* xpath_ast_cache_get_bc(const char* expr, size_t expr_len) {
+    if (!expr || expr_len == 0) return NULL;
+    unsigned h = xpath_hash(expr, expr_len);
+    for (size_t probe = 0; probe < XPATH_AST_CACHE_SLOTS; probe++) {
+        size_t i = (h + probe) % XPATH_AST_CACHE_SLOTS;
+        xpath_ast_cache_slot* slot = &g_cache[i];
+        if (slot->hash == 0) return NULL;  /* empty */
+        if (slot->hash == h &&
+            slot->expr_len == expr_len &&
+            memcmp(slot->expr_copy, expr, expr_len) == 0) {
+            return slot->bc;
+        }
+    }
+    return NULL;
+}
+
+void xpath_ast_cache_store_bc(const char* expr, size_t expr_len,
+                               TaurusXPathBytecode* bc) {
+    if (!expr || expr_len == 0 || !bc) {
+        if (bc) taurus_xpath_bytecode_free(bc);
+        return;
+    }
+    unsigned h = xpath_hash(expr, expr_len);
+    for (size_t probe = 0; probe < XPATH_AST_CACHE_SLOTS; probe++) {
+        size_t i = (h + probe) % XPATH_AST_CACHE_SLOTS;
+        xpath_ast_cache_slot* slot = &g_cache[i];
+        if (slot->hash == 0) {
+            /* Expression not in the cache. Free the orphan bytecode;
+             * the caller's path (taurus_xpath_eval) should always
+             * insert the AST before storing the bc, so this branch
+             * is defensive. */
+            taurus_xpath_bytecode_free(bc);
+            return;
+        }
+        if (slot->hash == h &&
+            slot->expr_len == expr_len &&
+            memcmp(slot->expr_copy, expr, expr_len) == 0) {
+            /* Race-safe last-writer-wins. If two threads compile
+             * concurrently, the loser frees its bytecode to avoid
+             * a leak. The winner's bytecode stays referenced until
+             * the slot is overwritten. */
+            if (slot->bc) taurus_xpath_bytecode_free(bc);
+            else slot->bc = bc;
+            return;
+        }
+    }
+    /* Not found — defensive free. */
+    taurus_xpath_bytecode_free(bc);
 }

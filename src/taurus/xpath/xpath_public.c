@@ -8,6 +8,7 @@
 #include "../include/taurus.h"
 #include "../taurus_internal.h"
 #include "parser.h"
+#include "bytecode.h"  /* TODO 120: TaurusXPathBytecode + compile */
 #include "evaluator.h"
 #include "evaluator_internal.h"  /* TODO 120: taurus_xpath_vm_eval */
 #include "xpath_variables.h"
@@ -68,21 +69,32 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
         return NULL;
     }
 
-    /* TODO 120 Phase D: try the bytecode VM first.  If it succeeds,
-     * we avoid the AST dispatch overhead on literals.  If it fails
-     * (bug, OOM), fall back to the AST evaluator. */
-    struct taurus_xpath_result* result = taurus_xpath_vm_eval(ast, xpath_ctx);
+    /* TODO 120 Phase F: bytecode cache. Compile once per expression,
+     * reuse on every subsequent eval. Inline dispatch (AXIS_STEP,
+     * BINARY_OP, FUNC_CALL) skips the AST-type switch in
+     * evaluate_expr on the hot path. */
+    TaurusXPathBytecode* bc = xpath_ast_cache_get_bc(expression, expr_len);
+    struct taurus_xpath_result* result = NULL;
+    if (bc) {
+        result = taurus_xpath_vm_run_bc(bc, xpath_ctx);
+    } else {
+        /* Compile + run + cache. taurus_xpath_vm_eval compiles and
+         * runs but does not cache; we cache explicitly here so the
+         * next caller hits the fast path above. */
+        bc = taurus_xpath_compile_ast(ast);
+        if (bc) {
+            result = taurus_xpath_vm_run_bc(bc, xpath_ctx);
+            xpath_ast_cache_store_bc(expression, expr_len, bc);
+            /* cache now owns bc; do not free here. */
+        }
+    }
+    /* If the VM failed for any reason (e.g., unsupported edge case),
+     * fall back to direct AST evaluation. */
     if (!result) {
         result = xpath_evaluate(xpath_ctx, ast);
     }
 
-    /* Check for evaluation errors */
-    const char* eval_error = xpath_context_error(xpath_ctx);
-    if (eval_error && !result) {
-        /* Error already set in context */
-    }
-
-    /* Cleanup. ast is owned by the cache — never free here. */
+    /* Cleanup. ast and bc are owned by the cache — never free here. */
     xpath_context_free(xpath_ctx);
 
     return result;
