@@ -62,10 +62,13 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     context->max_results = 0;
     context->enable_early_exit = 1;
 
-    /* Initialize namespace support (v0.8.0) */
+    /* Initialize namespace support (v0.8.0). Lazy: flag is set
+     * here so the first resolve_prefix call knows to walk the
+     * document. The walk itself is deferred (TODO 125). */
     context->namespace_mappings = NULL;
     context->namespace_count = 0;
     context->namespace_capacity = 0;
+    context->namespaces_collected = 0;
 
     /* Initialize variable support (v1.0.1) — must be NULL so the
      * no-vars evaluation path correctly reports "no variable set". */
@@ -78,9 +81,6 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     /* Initialize function registry: use the shared standard singleton
      * (TODO 113 perf). Skip the ~27 alloc + register ops per eval. */
     context->function_registry = xpath_function_registry_get_standard();
-
-    /* Auto-populate namespace mappings from document (v0.8.0) */
-    xpath_context_init_from_document(context);
 
     return context;
 }
@@ -183,7 +183,18 @@ void xpath_context_register_namespace(XPathContext* context,
  */
 const char* xpath_context_resolve_prefix(XPathContext* context,
                                          const char* prefix) {
-    if (!context || context->namespace_count == 0) return NULL;
+    if (!context) return NULL;
+
+    /* Lazy namespace collection (TODO 125). Walk the document once,
+     * on first prefix lookup, then cache. Expressions that never
+     * resolve a prefix (the common case: self::*, count(//book),
+     * descendant::*[@id], etc.) never pay this cost. */
+    if (!context->namespaces_collected) {
+        xpath_context_init_from_document(context);
+        context->namespaces_collected = 1;
+    }
+
+    if (context->namespace_count == 0) return NULL;
 
     /* Search BACKWARDS for most recent (local) registration first
      * This implements namespace scope override semantics efficiently */
