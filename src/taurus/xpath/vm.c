@@ -96,6 +96,240 @@ static struct taurus_xpath_result* make_singleton_nodeset(void* node) {
     return r;
 }
 
+/* ----------------------------------------------------------------------- *
+ * Specialized axis handlers (TODO 126).
+ *
+ * Each handler pops the input nodeset from the VM stack, walks the
+ * tree inline (bypassing evaluate_step / apply_axis / matches_node_test),
+ * and returns a freshly-allocated result.
+ *
+ * `name` is NULL for wildcards; otherwise a NUL-terminated C string
+ * to match against element names. The compiler only emits these
+ * opcodes for the no-namespace-prefix case (no ':' in test value).
+ * ----------------------------------------------------------------------- */
+
+/* Common preamble: pop input nodeset, detach it from the result
+ * wrapper, free the wrapper. Returns the detached nodeset or NULL
+ * on error (vm->error is set). */
+static XPathNodeSet* vm_detach_input_nodeset(XPathVM* vm) {
+    struct taurus_xpath_result* input = vm_pop(vm);
+    if (!input || input->type != XPATH_RESULT_NODESET) {
+        if (input) xpath_result_free(input);
+        vm->error = 1;
+        return NULL;
+    }
+    XPathNodeSet* ns = input->value.nodeset_value;
+    input->value.nodeset_value = NULL;
+    xpath_result_free(input);
+    return ns;
+}
+
+/* Helper: is this node an element (vs attribute / text / etc.)?
+ * The VM opcodes only accept element input; non-element inputs are
+ * skipped (matches the existing axis behavior for non-element context). */
+static int node_is_element(void* node) {
+    if (!node) return 0;
+    /* Element vs attribute distinguishing: the attribute node struct
+     * begins with TaurusNodeType node_type == TAURUS_NODE_ATTRIBUTE.
+     * Elements begin with the compact header (TaurusCompactHeader)
+     * whose first int is the page offset, never matches the attribute
+     * tag reliably. Use a conservative check that mirrors
+     * evaluator_path.c's node_as_element. */
+    TaurusNodeType first = *(TaurusNodeType*)node;
+    return first != TAURUS_NODE_ATTRIBUTE &&
+           first != TAURUS_NODE_NAMESPACE &&
+           first != TAURUS_NODE_TEXT;
+}
+
+struct taurus_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
+                                                 const char* name, int wild);
+struct taurus_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* vm,
+                                                     const char* name, int wild);
+struct taurus_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
+                                                const char* name, int wild);
+struct taurus_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
+                                                  const char* name, int wild);
+
+struct taurus_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
+                                                 const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        TaurusElement elem = (TaurusElement)input->nodes[i];
+        TaurusElement child = taurus_element_get_first_child(elem);
+        while (child) {
+            if (wild) {
+                xpath_nodeset_add(out, child);
+            } else {
+                const char* cn = taurus_element_get_name(child);
+                if (cn && strcmp(cn, name) == 0) {
+                    xpath_nodeset_add(out, child);
+                }
+            }
+            child = taurus_element_get_next_sibling(child);
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+struct taurus_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* vm,
+                                                     const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    /* Attribute axis produces TaurusAttributeNode* entries. The
+     * result must own them so they're freed when the result is. */
+    out->owns_attributes = 1;
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        TaurusElement elem = (TaurusElement)input->nodes[i];
+        struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+        while (attr) {
+            TaurusStringView nv = attr->name_view;
+            int matches = 0;
+            if (wild) {
+                matches = 1;
+            } else if (name && nv.length > 0 && nv.data) {
+                matches = (strlen(name) == nv.length &&
+                           memcmp(name, nv.data, nv.length) == 0);
+            }
+
+            if (matches) {
+                /* Allocate a TaurusAttributeNode mirroring
+                 * create_attribute_node in evaluator_axes.c. */
+                TaurusAttributeNode* an = TAURUS_ALLOC(TaurusAttributeNode);
+                if (!an) { attr = attr->next; continue; }
+                an->node_type = TAURUS_NODE_ATTRIBUTE;
+
+                /* Copy name */
+                if (attr->name) {
+                    an->name = taurus_strdup(attr->name);
+                } else if (nv.length > 0 && nv.data) {
+                    an->name = (char*)malloc(nv.length + 1);
+                    if (an->name) {
+                        memcpy(an->name, nv.data, nv.length);
+                        an->name[nv.length] = '\0';
+                    }
+                } else {
+                    an->name = NULL;
+                }
+
+                /* Copy value */
+                TaurusStringView vv = attr->value_view;
+                if (attr->value) {
+                    an->value = taurus_strdup(attr->value);
+                } else if (vv.length > 0 && vv.data) {
+                    an->value = (char*)malloc(vv.length + 1);
+                    if (an->value) {
+                        memcpy(an->value, vv.data, vv.length);
+                        an->value[vv.length] = '\0';
+                    }
+                } else {
+                    an->value = NULL;
+                }
+
+                an->namespace_uri = NULL;
+                an->owner = elem;
+
+                xpath_nodeset_add(out, an);
+            }
+            attr = attr->next;
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+struct taurus_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
+                                                const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        TaurusElement elem = (TaurusElement)input->nodes[i];
+        if (wild) {
+            xpath_nodeset_add(out, elem);
+        } else {
+            const char* en = taurus_element_get_name(elem);
+            if (en && strcmp(en, name) == 0) {
+                xpath_nodeset_add(out, elem);
+            }
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+struct taurus_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
+                                                  const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    /* Parent axis can produce duplicates (multiple children → same
+     * parent). Inline a pointer-equality dedup. */
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        TaurusElement elem = (TaurusElement)input->nodes[i];
+        TaurusElement parent = taurus_element_get_parent(elem);
+        if (!parent) continue;
+
+        if (!wild) {
+            const char* pn = taurus_element_get_name(parent);
+            if (!pn || strcmp(pn, name) != 0) continue;
+        }
+
+        /* Dedup */
+        int dup = 0;
+        for (size_t j = 0; j < out->count; j++) {
+            if (out->nodes[j] == parent) { dup = 1; break; }
+        }
+        if (!dup) xpath_nodeset_add(out, parent);
+    }
+
+    xpath_nodeset_free(input);
+
+    struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
 /* Inline binary-operator dispatch. Pops right then left, computes,
  * pushes the result. Returns 0 on success, -1 on error.
  *
@@ -314,6 +548,93 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 xpath_nodeset_free(input_ns);
                 if (!step_result) { vm.error = 1; break; }
                 vm_push(&vm, step_result);
+                break;
+            }
+
+            /* Specialized axis handlers (TODO 126). Each is a tight
+             * loop over the input nodeset that bypasses the
+             * evaluate_step scaffolding. The handlers cover the
+             * common shapes: single name test or wildcard, no
+             * namespace prefix, no predicates. Anything else
+             * stays on BC_AXIS_STEP. */
+
+            case XPATH_BC_AXIS_CHILD_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_child(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_CHILD_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_child(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_ATTRIBUTE_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_attribute(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_ATTRIBUTE_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_attribute(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_SELF_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_self(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_SELF_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_self(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_PARENT_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_parent(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_PARENT_WILD: {
+                struct taurus_xpath_result* r =
+                    vm_apply_axis_parent(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
                 break;
             }
 
