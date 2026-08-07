@@ -5,9 +5,6 @@
 .kilocode/
 .plans/
 
-# Claude AI assistant documentation (not for commits)
-CLAUDE.md
-
 # ============================================================================
 # Build Directories
 # ============================================================================
