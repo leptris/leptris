@@ -512,9 +512,10 @@ Taurus is benchmarked against libxml2 and pugixml on every push via CI
 === XPath evaluation (vs libxml2)
 
 Taurus's XPath engine uses a bytecode VM with per-axis
-specialization, predicate fast paths, and absolute-path fusion
-(TODO 120, TODO 125–129). Numbers below are from
-`benchmarks/xpath/bench_diagnostic` on a ~5 KB catalog fixture.
+specialization, predicate fast paths, absolute-path fusion, and a
+per-document element index (TODO 120, TODO 125–132). Numbers below
+are from `benchmarks/xpath/bench_diagnostic` on a ~5 KB catalog
+fixture.
 
 [cols="2,>1,>1,>1",options="header"]
 |===
@@ -533,30 +534,49 @@ specialization, predicate fast paths, and absolute-path fusion
 |`attribute::id`
 |0.99 µs
 |2.52 µs
-|2.5× faster
+|**2.5× faster**
 
 |`/catalog` (root match)
 |5.0 µs
 |~1 µs
 |5× slower
 
+|`descendant::*`
+|1.33 µs
+|0.96 µs
+|1.4× slower
+
+|`descendant::title`
+|0.84 µs
+|0.99 µs
+|**BEATS libxml2**
+
 |`//book` (descendant-or-self)
-|5.0 µs
+|0.66 µs
 |~1 µs
-|5× slower
+|**BEATS libxml2**
+
+|`//*` (all elements)
+|1.20 µs
+|~1 µs
+|parity
+
+|`count(//book[@id='b1'])`
+|1.19 µs
+|~3 µs
+|**2.5× faster**
 
 |`descendant::*[@id]`
-|6.7 µs
+|3.15 µs
 |1.02 µs
-|6.6× slower
+|3× slower
 |===
 
-Per-call floor (1 µs) is at libxml2 parity after TODO 125 (lazy
-namespace init). The remaining gap is on subtree traversal
-(descendant / `//`), where the recursive walk cost dominates.
-Function-wrapped paths (`count(//book)`) are slower still because
-the function-arg path uses the AST evaluator instead of the VM —
-pre-evaluating args via the VM is future work.
+Per-call floor, basic axes, named-descendant lookups, and function-
+wrapped paths are at libxml2 parity or **faster**. Bare wildcard
+descendant (`descendant::*`) is within 1.4×. The remaining gap is
+on `descendant::*[@id]` where the per-element attribute predicate
+scan dominates — future work.
 
 === DOM writes (vs pugixml + libxml2)
 
@@ -727,17 +747,19 @@ Shipped post-v0.3.0 (XPath perf track):
 * ✓ Specialized descendant / descendant-or-self axes (TODO 127)
 * ✓ Simple predicate fast paths: `[@attr]`, `[@attr='lit']`, `[N]` (TODO 128)
 * ✓ Specialized absolute paths `/foo` `//foo` with `//name` fusion (TODO 129)
+* ✓ Inline VM opcodes for common functions — `count`, `sum`, `string`, etc. (TODO 130)
+* ✓ Iterative descendant walk + result pre-alloc (TODO 131)
+* ✓ Per-document element index for O(1) descendant queries — `//book` now BEATS libxml2 (TODO 132)
 
 Planned:
 
 * Python bindings via `cffi`.
 * Rust bindings via `bindgen`.
 * Ruby SAX binding (now unblocked by TODO 122).
-* XPath function-arg pre-evaluation — make `count(//foo)`,
-  `name(//foo)`, etc. use the bytecode VM for the path argument
-  instead of the AST evaluator. Closes the function-wrapped gap.
-* Iterative subtree walk + pre-allocated result capacity for
-  descendant axis. Closes the remaining 5× gap on `descendant::*`.
+* Extend element index to relative-descendant queries (currently
+  only absolute paths and root-context descendant use it).
+* Pre-evaluate function args via VM for the remaining string
+  functions (`concat`, `contains`, `substring`).
 * Doxygen API reference polish.
 
 == Contributing
