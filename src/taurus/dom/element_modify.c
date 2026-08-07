@@ -29,6 +29,11 @@
 TaurusElement taurus_element_create(TaurusDocument doc, const char* name) {
     if (!doc || !name) return NULL;
 
+    /* Issue #187: trigger lazy promote if the doc was produced by
+     * the flat-parse fast path. The compact-pointer tree must exist
+     * before we can pool-allocate a new element into it. */
+    taurus_document_ensure_promoted(doc);
+
     /* Fast path: use bulk allocation if pool available */
     if (doc->pool) {
         TaurusElement elem = taurus_element_create_pooled(name, doc->pool);
