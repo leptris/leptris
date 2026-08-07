@@ -142,6 +142,31 @@ static void bench_count_via_flat(void* p) {
     taurus_document_free(doc);
 }
 
+/* serialize_via_flat: parse + serialize from FlatDoc directly.
+ * Phase 2 of TODO 145 — no promote. */
+static void bench_serialize_via_flat(void* p) {
+    doc_buf_t* d = (doc_buf_t*)p;
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(d->xml, d->len, &st);
+    if (!doc) return;
+    extern char* flat_serialize_document(struct taurus_document*, int, int, const char*);
+    char* out = flat_serialize_document(doc, 0, 0, NULL);
+    if (out) taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
+/* serialize_via_compact: parse + serialize via the compact tree.
+ * Triggers promote. */
+static void bench_serialize_via_compact(void* p) {
+    doc_buf_t* d = (doc_buf_t*)p;
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(d->xml, d->len, &st);
+    if (!doc) return;
+    char* out = taurus_document_serialize(doc, NULL);
+    if (out) taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
 /* Run a comparison at one doc size. */
 static void run_group(const char* title, size_t target_bytes) {
     doc_buf_t flat_doc = make(target_bytes, 0);
@@ -176,6 +201,15 @@ static void run_group(const char* title, size_t target_bytes) {
 
     r = bench_run("count(//book) via flat fast path (no promote)",
                   bench_count_via_flat, &flat_doc, iters);
+    bench_print_result(&r);
+
+    /* Phase 2: serialize comparison. */
+    r = bench_run("serialize via flat (no promote)",
+                  bench_serialize_via_flat, &flat_doc, iters);
+    bench_print_result(&r);
+
+    r = bench_run("serialize via compact (triggers promote)",
+                  bench_serialize_via_compact, &flat_doc, iters);
     bench_print_result(&r);
 
     free_doc(&flat_doc);

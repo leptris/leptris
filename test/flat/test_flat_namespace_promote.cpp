@@ -153,4 +153,31 @@ TEST(FlatNamespacePromote, NestedNamespacesInherit) {
     taurus_document_free(doc);
 }
 
+TEST(FlatNamespacePromote, SerializeViaFlatPathRoundTrip) {
+    /* TODO 145 Phase 2: serialize should work end-to-end via the
+     * flat fast path (no promote). Verify the output contains the
+     * expected pieces. */
+    const char xml[] =
+        "<root xmlns:foo='http://foo' a='1'>"
+        "<foo:child>text</foo:child>"
+        "<sub/><!-- note --><![CDATA[raw]]>"
+        "</root>";
+    TaurusDocument doc = Parse(xml);
+    ASSERT_NE(doc, nullptr);
+
+    char* out = taurus_document_serialize(doc, NULL);
+    ASSERT_NE(out, nullptr);
+    std::string s(out);
+    EXPECT_NE(s.find("<root"), std::string::npos);
+    EXPECT_NE(s.find("xmlns:foo="), std::string::npos);
+    EXPECT_NE(s.find("<foo:child>"), std::string::npos);
+    EXPECT_NE(s.find("text"), std::string::npos);
+    EXPECT_NE(s.find("<sub"), std::string::npos);
+    EXPECT_NE(s.find("<!-- note -->"), std::string::npos);
+    EXPECT_NE(s.find("<![CDATA[raw]]>"), std::string::npos);
+    taurus_free_string(out);
+
+    taurus_document_free(doc);
+}
+
 }  // namespace
