@@ -45,9 +45,26 @@ REQUIRED=(
     taurus_parse_string
     taurus_document_root
     taurus_document_free
+    taurus_document_encoding
     taurus_element_name
+    taurus_element_text
+    taurus_element_attribute
+    taurus_element_attribute_count
+    taurus_element_attribute_name_at
+    taurus_element_attribute_value_at
+    taurus_element_child_count
+    taurus_element_child
+    taurus_element_parent
+    taurus_element_namespace_count
     taurus_xpath_eval
     taurus_xpath_result_count
+    taurus_xpath_result_type
+    taurus_xpath_result_get
+    taurus_xpath_result_boolean
+    taurus_xpath_result_number
+    taurus_xpath_result_string
+    taurus_xpath_result_free
+    taurus_status_string
     taurus_sax_parse
     taurus_sax_parser_create
     taurus_sax_parser_feed

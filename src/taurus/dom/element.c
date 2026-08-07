@@ -18,6 +18,7 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include "../../include/taurus.h"  /* for TAURUS_API on public exports */
 #include "doctype.h"
 #include "node.h"  /* For taurus_node_get_next_sibling */
 #include "../common/entities.h"
@@ -174,8 +175,10 @@ void taurus_element_set_first_attribute(TaurusElement elem, struct taurus_attrib
     taurus_elem_set_first_attribute(elem, attr);
 }
 
-/* Get attribute count */
-uint8_t taurus_element_attribute_count(TaurusElement elem) {
+/* Get attribute count — returns size_t for public API (TODO 138).
+ * Declared TAURUS_API so the symbol is exported from the shared library
+ * for FFI bindings. */
+TAURUS_API size_t taurus_element_attribute_count(TaurusElement elem) {
     if (!elem) return 0;
     return elem->attr_count;
 }

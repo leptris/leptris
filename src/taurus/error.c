@@ -3,6 +3,7 @@
  */
 
 #include "taurus_internal.h"
+#include "../include/taurus.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -67,5 +68,19 @@ void taurus_extract_context_snippet(
 
     if (out_buffer && buffer_size > 0) {
         out_buffer[0] = '\0';
+    }
+}
+
+TAURUS_API const char* taurus_status_string(TaurusStatus status) {
+    switch (status) {
+        case TAURUS_OK:              return "OK";
+        case TAURUS_ERROR_MEMORY:    return "Memory allocation failed";
+        case TAURUS_ERROR_PARSE:     return "XML parse error";
+        case TAURUS_ERROR_XPATH:     return "XPath evaluation error";
+        case TAURUS_ERROR_NULL_ARG:  return "NULL argument";
+        case TAURUS_ERROR_INVALID_ARG: return "Invalid argument";
+        case TAURUS_ERROR_NOT_FOUND: return "Not found";
+        case TAURUS_ERROR_IO:        return "I/O error";
+        default:                     return "Unknown error";
     }
 }

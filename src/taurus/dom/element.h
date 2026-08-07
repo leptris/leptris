@@ -361,8 +361,8 @@ struct taurus_attribute* taurus_element_get_first_attribute(TaurusElement elem);
 /* Set first attribute in element */
 void taurus_element_set_first_attribute(TaurusElement elem, struct taurus_attribute* attr);
 
-/* Get attribute count */
-uint8_t taurus_element_attribute_count(TaurusElement elem);
+/* Get attribute count (size_t for public API compatibility — TODO 138) */
+size_t taurus_element_attribute_count(TaurusElement elem);
 
 /* Get attribute by index */
 struct taurus_attribute* taurus_element_get_attribute_by_index(TaurusElement elem, uint8_t index);
