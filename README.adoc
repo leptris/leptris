@@ -21,16 +21,27 @@ memory handling matter.
 
 * **XML 1.0 parsing** with UTF-8 validation and optional encoding
   conversion (UTF-16, ISO-8859, Shift-JIS, EBCDIC, and others via
-  iconv).
+  iconv). Zero-copy text nodes — borrowed views into the input buffer,
+  no per-node content copy (TODO 115).
 * **XPath 1.0 engine** implementing all 13 axes, 27 functions, and 15
-  operators.
-* **SAX API** for event-driven streaming on documents that don't fit
-  in a DOM.
+  operators. Bytecode VM for compile-once-eval-many dispatch (TODO 120).
+* **Streaming SAX parser** with an explicit state machine — events emit
+  as chunks arrive, memory bounded by nesting depth, not document size
+  (TODO 116). All SAX parsing routes through one state machine; the
+  legacy recursive parser has been removed (~840 lines deleted).
+* **XInclude 1.0** with ownership-transfer splice — included documents
+  are moved (not deep-copied) into the parent tree. Cycle detection
+  via ancestor-URI tracking (TODO 117).
+* **DTD validation** with content-model memoization — repeated element
+  types with the same children signature skip the matcher on
+  subsequent calls (TODO 119).
 * **Canonical XML (C14N)** for digital signatures and cryptographic
   hashing.
 * **Pool-based memory model** — every allocation reachable from a
   document is released in a single `taurus_document_free` call.  Zero
   leaks across the test suite.
+* **Compact-pointer architecture** — tree edges stored as int32_t byte
+  offsets with overflow-table fallback for macOS ASLR (TODO 121).
 * **Recursion depth guard** — deeply nested input is rejected with a
   parse error rather than crashing.
 * **Per-document strict mode** — strict and lenient parsing can coexist
@@ -39,10 +50,13 @@ memory handling matter.
   additive; no switches to edit.
 * **CLI tool** — `taurus parse`, `taurus xpath`, `taurus format`,
   `taurus version` for command-line XML processing.
+* **Ruby FFI binding** — `Taurus::Document.parse`, XPath, serialize via
+  the `ffi` gem. No C extension compilation needed. See
+  link:bindings/ruby/[Ruby binding].
 * **Zero required runtime dependencies** — utf8proc and iconv are
   optional features, not prerequisites.
-* **Stable C ABI** with a documented FFI contract; bindings planned
-  for Ruby, Python, and Rust.  See <<FFI,FFI Design>>.
+* **Stable C ABI** with a documented FFI contract; bindings shipped
+  for Ruby (Python and Rust planned).  See <<FFI,FFI Design>>.
 
 == When to use libtaurus
 
@@ -384,11 +398,38 @@ ctest --test-dir build -R HeaderHygiene
 [#FFI]
 == FFI design
 
-libtaurus exposes a stable C ABI.  Bindings planned:
+libtaurus exposes a stable C ABI.  Bindings:
 
-* *Ruby* — via `ruby-ffi` (no compilation)
-* *Python* — via `cffi` (header-aware)
-* *Rust* — via `bindgen` + idiomatic wrapper
+* *Ruby* — shipped. Uses `ffi` gem. See link:bindings/ruby/[Ruby binding].
+* *Python* — planned via `cffi` (header-aware)
+* *Rust* — planned via `bindgen` + idiomatic wrapper
+
+=== Ruby quick start
+
+[source,ruby]
+----
+require 'taurus'
+
+doc = Taurus::Document.parse('<root><item id="1">hello</item></root>')
+root = doc.root
+puts root.name                     # => "root"
+puts root.first_child_element['id']  # => "1"
+puts doc.xpath('count(//item)')    # => 1.0
+doc.free
+----
+
+Install: set `TAURUS_LIB_PATH` to your `libtaurus.dylib` / `.so`, or
+install libtaurus system-wide. The `ffi` gem is the only dependency.
+
+[source,bash]
+----
+gem install ffi
+TAURUS_LIB_PATH=/path/to/libtaurus.0.dylib ruby -Ilib -rtaurus -e '
+  doc = Taurus::Document.parse("<r/>")
+  puts doc.root.name
+  doc.free
+'
+----
 
 To parse the headers from a binding tool:
 
@@ -602,25 +643,39 @@ taurus/
       memory/           # pool allocator
       dtd/              # DTD subsystem
     cli/                # command-line tool
-  test/                 # 103 specs across 13 modules
+  test/                 # 345 specs across 14 modules
   benchmark/            # libxml2 / pugixml comparisons
+  bindings/ruby/        # Ruby FFI binding (TODO 118)
   TODO.fix/             # local scratchpad (gitignored)
   archive/              # historical / disabled code
   .github/workflows/    # CI
   docs/                 # README, building guide, FFI design
-==
+====
 
 == Roadmap
 
 See link:archive/README.md[archive/README.md] for historical
 context, and link:docs/FFI.md[docs/FFI.md] for the FFI roadmap.
 
-In-flight:
+Shipped in v0.3.0:
 
-* Ruby / Python / Rust bindings.
+* ✓ Zero-copy borrowed text nodes (TODO 115)
+* ✓ Pool-routed Parser struct (TODO 114 Phase 3)
+* ✓ Streaming SAX state machine (TODO 116 Phases A-C — recursive parser removed)
+* ✓ XInclude ownership transfer + cycle detection (TODO 117 Phases A-C)
+* ✓ DTD content-model memoization (TODO 119)
+* ✓ XPath bytecode VM, complete + wired in (TODO 120 Phases A-E)
+* ✓ Compact-pointer int32 overflow fix for macOS (TODO 121)
+* ✓ Ruby FFI binding (TODO 118)
+
+Planned:
+
+* Python bindings via `cffi`.
+* Rust bindings via `bindgen`.
+* XPath VM inline dispatch (replace evaluate_expr delegates with
+  inline handlers for AXIS_STEP, BINARY_OP, FUNC_CALL).
+* SAX function visibility fix (shared library export for Ruby SAX).
 * Doxygen API reference polish.
-* Split of `taurus.c` (2900 lines → focused modules).
-* Unified string ownership model.
 
 == Contributing
 
