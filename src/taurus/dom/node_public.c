@@ -137,7 +137,10 @@ static char* node_public_pool_strdup(TaurusMemoryPool* pool,
 
 TAURUS_API TaurusNodeRef taurus_text_node_create(TaurusDocument doc,
                                                   const char* content) {
-    if (!doc || !doc->pool) return NULL;
+    if (!doc) return NULL;
+    /* TODO 139 Phase D: trigger lazy promote so doc->pool is set. */
+    taurus_document_ensure_promoted(doc);
+    if (!doc->pool) return NULL;
     if (!content) content = "";
     size_t len = strlen(content);
     TaurusTextNode* n = taurus_text_create_borrowed(content, len, doc->pool);
@@ -155,7 +158,9 @@ TAURUS_API TaurusNodeRef taurus_text_node_create(TaurusDocument doc,
 
 TAURUS_API TaurusNodeRef taurus_comment_node_create(TaurusDocument doc,
                                                      const char* content) {
-    if (!doc || !doc->pool) return NULL;
+    if (!doc) return NULL;
+    taurus_document_ensure_promoted(doc);
+    if (!doc->pool) return NULL;
     if (!content) content = "";
     return (TaurusNodeRef)taurus_comment_create(content, strlen(content),
                                                   doc->pool);
@@ -163,7 +168,9 @@ TAURUS_API TaurusNodeRef taurus_comment_node_create(TaurusDocument doc,
 
 TAURUS_API TaurusNodeRef taurus_cdata_node_create(TaurusDocument doc,
                                                    const char* content) {
-    if (!doc || !doc->pool) return NULL;
+    if (!doc) return NULL;
+    taurus_document_ensure_promoted(doc);
+    if (!doc->pool) return NULL;
     if (!content) content = "";
     return (TaurusNodeRef)taurus_cdata_create(content, strlen(content),
                                                 doc->pool);
@@ -172,7 +179,9 @@ TAURUS_API TaurusNodeRef taurus_cdata_node_create(TaurusDocument doc,
 TAURUS_API TaurusNodeRef taurus_pi_node_create(TaurusDocument doc,
                                                 const char* target,
                                                 const char* data) {
-    if (!doc || !doc->pool || !target) return NULL;
+    if (!doc) return NULL;
+    taurus_document_ensure_promoted(doc);
+    if (!doc->pool || !target) return NULL;
     if (!data) data = "";
     return (TaurusNodeRef)taurus_pi_create(target, strlen(target),
                                              data, strlen(data), doc->pool);

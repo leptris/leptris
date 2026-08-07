@@ -163,7 +163,10 @@ static size_t count_elements(TaurusElement elem) {
 }
 
 TaurusElementIndex* taurus_element_index_build(struct taurus_document* doc) {
-    if (!doc || !doc->new_dom_root) return NULL;
+    if (!doc) return NULL;
+    /* TODO 139 Phase D: lazy promote. */
+    taurus_document_ensure_promoted(doc);
+    if (!doc->new_dom_root) return NULL;
 
     TaurusElement root = (TaurusElement)doc->new_dom_root;
     size_t total = count_elements(root);

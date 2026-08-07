@@ -19,6 +19,9 @@
 #include "dom/doctype.h"
 #include "encoding/utf16.h"
 #include "dtd/model.h"
+#include "flat/flat_doc.h"
+#include "flat/flat_parser.h"
+#include "flat/flat_promote.h"
 #include "common/entities.h"
 #include <string.h>
 #include <math.h>
@@ -29,6 +32,7 @@
 /* Thread-local globals defined in core.c — extern so taurus_parse can
  * read the strict-mode default at document creation time. */
 extern __thread int g_taurus_strict_mode;
+extern __thread int g_taurus_max_depth;
 
 
 /* ============================================================================
@@ -92,8 +96,115 @@ extern void taurus_doctype_free(TaurusDoctypeNode* doctype);
  * PERFORMANCE: Uses in-place parsing to avoid buffer copy.
  * The buffer is stored in the document and freed when document is freed.
  */
+/* TODO 139 Phase D: detect entity references in text/attributes.
+ *
+ * The flat parser passes raw bytes through without expanding
+ * entities. For docs with `&amp;` etc., route to legacy parser. */
+static int taurus_input_has_entities(const char* xml, size_t len) {
+    size_t scan = len < 65536 ? len : 65536;
+    return memchr(xml, '&', scan) != NULL;
+}
+
+/* TODO 139 Phase D: detect xmlns namespace declarations.
+ *
+ * The flat parser stores xmlns attributes but the promote pass does
+ * not yet split them into elem->namespaces or resolve element
+ * prefixes. Route any input containing "xmlns" through the legacy
+ * parser so namespace semantics are correct. The fast path takes
+ * the bulk of plain-XML traffic. */
+static int taurus_input_has_namespaces(const char* xml, size_t len) {
+    size_t scan = len < 65536 ? len : 65536;
+    /* Cheap memchr-based scan for "xmlns". */
+    const char* needle = "xmlns";
+    size_t nl = 5;
+    const char* end = xml + scan - nl + 1;
+    for (const char* p = xml; p < end; p++) {
+        if (*p == 'x' && memcmp(p, needle, nl) == 0) return 1;
+    }
+    return 0;
+}
+
+/* TODO 139 Phase D: detect DOCTYPE with internal subset.
+ *
+ * The flat parser silently strips DTD entity declarations. If the
+ * input has `<!DOCTYPE ... [...]>`, we must route to the legacy
+ * parser so entities expand correctly. The check scans up to 4 KB
+ * of input — sufficient for any reasonable DOCTYPE declaration.
+ *
+ * Returns 1 if the input has a DOCTYPE with internal subset, 0
+ * otherwise (including no DOCTYPE at all). */
+static int taurus_input_has_internal_dtd_subset(const char* xml, size_t len) {
+    size_t scan = len < 4096 ? len : 4096;
+    /* Find "<!DOCTYPE". */
+    for (size_t i = 0; i + 9 <= scan; i++) {
+        if (xml[i] == '<' && xml[i+1] == '!' &&
+            memcmp(xml + i + 2, "DOCTYPE", 7) == 0) {
+            /* Walk forward to the matching '>', tracking '[' depth. */
+            size_t j = i + 9;
+            int seen_bracket = 0;
+            while (j < len) {
+                char c = xml[j++];
+                if (c == '[') seen_bracket = 1;
+                else if (c == ']' && seen_bracket) {
+                    /* Continue to the closing '>'. */
+                } else if (c == '>') return seen_bracket ? 1 : 0;
+                if (j > i + 65536) break;  /* sanity bound */
+            }
+            return 0;
+        }
+    }
+    return 0;
+}
+
 TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
+
+    /* TODO 139 Phase D: flat-parse fast path. Try the flat parser
+     * first; on success, return a doc shell with the FlatDoc stashed
+     * for lazy promote. The compact-pointer tree isn't built until
+     * the caller asks for taurus_document_root, so parse-only paths
+     * (parse + free, parse + count, etc.) skip the pool-alloc cost.
+     *
+     * Skip the fast path when the input has a DOCTYPE with an
+     * internal subset — the flat parser silently strips DTD
+     * entities, so any text containing &entity; would lose its
+     * expansion. The legacy parser handles DTD correctly. */
+    /* Skip flat fast path when the caller has configured a non-default
+     * max_depth — the flat parser uses its own FLAT_MAX_DEPTH=256 cap
+     * and doesn't honor the global setting. */
+    if (!taurus_input_has_internal_dtd_subset(xml, len) &&
+        !taurus_input_has_namespaces(xml, len) &&
+        !taurus_input_has_entities(xml, len) &&
+        g_taurus_max_depth == 0) {
+        FlatDoc* flat = flat_parse(xml, len);
+        if (flat) {
+            /* The caller's buffer may be transient — UTF-16/iconv
+             * conversion paths in taurus_parse_string free their
+             * utf8_buffer as soon as taurus_parse returns. Take
+             * ownership of a private copy so the FlatDoc outlives
+             * the input. */
+            if (flat_doc_dup_xml(flat) != 0) {
+                flat_doc_free(flat);
+                flat = NULL;
+            }
+        }
+        if (flat) {
+            struct taurus_document* doc =
+                (struct taurus_document*)malloc(sizeof(*doc));
+            if (!doc) {
+                flat_doc_free(flat);
+                return NULL;
+            }
+            memset(doc, 0, sizeof(*doc));
+            doc->strict_mode = g_taurus_strict_mode;
+            doc->ref_count = 1;
+            doc->flat_doc = flat;
+            doc->flat_promoted = 0;
+            return doc;
+        }
+        /* Flat parse failed — malformed input or unsupported
+         * construct. Fall through to legacy parser for diagnostics. */
+    }
 
     /* PERFORMANCE: Use heap allocation for XML buffer
      * The buffer must live as long as the document because StringViews point into it.
@@ -719,6 +830,15 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         doc->element_index = NULL;
     }
 
+    /* Free FlatDoc if the document was never promoted (TODO 139
+     * Phase D). When the caller parses-and-frees without ever
+     * calling taurus_document_root, the lazy promote never fires
+     * and the FlatDoc is still owned by the doc. */
+    if (doc->flat_doc) {
+        flat_doc_free(doc->flat_doc);
+        doc->flat_doc = NULL;
+    }
+
     /* Free DTD if present */
     if (doc->dtd) {
         ttdtd_free((TaurusDTD*)doc->dtd);
@@ -785,8 +905,25 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
 /**
  * Get root element of document
  */
+/* TODO 139 Phase D: trigger lazy promote if the doc has a flat_doc
+ * that hasn't been built into the compact-pointer tree yet. Safe to
+ * call multiple times — no-op once promoted. Internal helper used by
+ * taurus_document_root and any other entry point that needs the tree
+ * without going through the public accessor. */
+void taurus_document_ensure_promoted(struct taurus_document* doc) {
+    if (!doc) return;
+    if (doc->flat_doc && !doc->flat_promoted) {
+        flat_promote_into(doc);
+    }
+}
+
 TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {
     if (!doc) return NULL;
+
+    /* TODO 139 Phase D: lazy promote. If the document was produced
+     * by the flat-parse fast path, the compact-pointer tree isn't
+     * built yet. Build it now — the caller is about to traverse. */
+    taurus_document_ensure_promoted(doc);
 
     /* Check new_dom_root first (new parser), then fall back to root (old parser) */
     if (doc->new_dom_root) {

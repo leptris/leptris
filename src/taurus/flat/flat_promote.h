@@ -46,4 +46,17 @@
  */
 struct taurus_document* flat_promote(FlatDoc* flat);
 
+/* Phase D: build the compact-pointer tree into an existing doc shell
+ * that already owns a FlatDoc via doc->flat_doc.
+ *
+ * Pre: doc->flat_doc != NULL, doc->flat_promoted == 0,
+ *      doc->pool == NULL.
+ * Post: doc->pool allocated, tree built into doc->new_dom_root,
+ *       doc->flat_doc freed and set to NULL, doc->flat_promoted == 1.
+ *
+ * Returns 0 on success, -1 on failure. On failure the doc shell is
+ * left in a partially-built state; the caller must release it via
+ * taurus_document_free. */
+int flat_promote_into(struct taurus_document* doc);
+
 #endif /* TAURUS_FLAT_FLAT_PROMOTE_H */

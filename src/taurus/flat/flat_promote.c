@@ -1,21 +1,26 @@
-/* flat/flat_promote.c — FlatDoc → TaurusDocument promote pass (TODO 139 Phase C).
+/* flat/flat_promote.c — FlatDoc → TaurusDocument promote pass
+ * (TODO 139 Phases C + D).
  *
- * Single linear walk over the FlatDoc node array. For each FlatNode,
- * allocate the corresponding pool-owned TaurusNode and wire it into
- * the tree using a parallel mapping array.
+ * Two entry points:
  *
- * Why a mapping array (vs. recursion): the FlatDoc stores tree
- * edges as int32 indices. We need to resolve each index to a
- * pointer when wiring edges. Doing this in a single preorder walk
- * works because parents always appear before children in the flat
- * array (preorder DFS is how the parser built it). So when we
- * reach FlatNode[i], its parent FlatNode[parent] has already been
- * promoted, and mapping[parent] holds the TaurusElement*.
+ *   flat_promote(FlatDoc* flat)
+ *       Convenience for tests and one-shot use: builds a fresh
+ *       TaurusDocument from the FlatDoc, frees the FlatDoc, returns
+ *       the document. The Phase C / Phase F test suite uses this.
  *
- * Memory: the document gets its own writable copy of the XML
- * buffer (the legacy parser path mutates the buffer in-place for
- * NUL termination; we follow the same convention so consumers
- * that hold a TaurusElement see consistent string lifetimes).
+ *   flat_promote_into(struct taurus_document* doc)
+ *       Phase D lazy-promote entry: builds the compact-pointer tree
+ *       into an existing doc shell that already holds flat_doc.
+ *       Used by taurus_parse_string to defer the pool-alloc cost
+ *       until the first call to taurus_document_root.
+ *
+ * Single linear walk over the FlatDoc node array (preorder DFS).
+ * Parents always precede children, so a parallel mapping array
+ * (flat_idx → TaurusNode*) resolves edges in one pass.
+ *
+ * Memory: the document owns its own writable copy of the XML buffer
+ * (taken from the FlatDoc at promote time). The FlatDoc itself is
+ * freed after promote_into.
  */
 #include "flat_promote.h"
 #include "flat_doc.h"
@@ -28,30 +33,8 @@
 
 #include <string.h>
 
-/* Globals from core.c (already declared extern in taurus_internal.h
- * via the path taurus_internal.h → taurus_parse.h chain, but the
- * promote pass is intentionally minimal — re-declare here). */
 extern __thread int g_taurus_strict_mode;
 extern void taurus_compact_set_current_document(struct taurus_document* doc);
-
-/* Allocate and zero-initialize a taurus_document with a pool
- * pre-sized for the FlatDoc's contents. Returns NULL on OOM.
- * Caller must populate root, xml_buffer, etc. */
-static struct taurus_document* flat_promote_new_doc(FlatDoc* flat,
-                                                     TaurusMemoryPool* pool,
-                                                     char* xml_buffer_owned) {
-    struct taurus_document* doc = (struct taurus_document*)malloc(sizeof(*doc));
-    if (!doc) return NULL;
-    memset(doc, 0, sizeof(*doc));
-    doc->strict_mode = g_taurus_strict_mode;
-    doc->pool = pool;
-    doc->page_base = taurus_pool_get_base(pool);
-    doc->ref_count = 1;
-    doc->xml_buffer = xml_buffer_owned;
-    doc->xml_buffer_len = flat->xml_len;
-    doc->xml_buffer_needs_free = 1;
-    return doc;
-}
 
 /* Copy a length-bounded slice of the flat XML buffer into a heap-
  * allocated NUL-terminated string. Use for document-level fields
@@ -85,16 +68,27 @@ static int flat_promote_attrs(FlatDoc* flat, TaurusElement elem,
     return 0;
 }
 
-struct taurus_document* flat_promote(FlatDoc* flat) {
-    if (!flat || !flat->xml_buffer) goto fail_no_doc;
+/* Build the compact-pointer tree into the given doc shell.
+ *
+ * Pre: doc->flat_doc != NULL, doc->flat_promoted == 0,
+ *      doc->pool == NULL (no tree built yet).
+ * Post: doc->pool allocated, tree built and stored in
+ *       doc->new_dom_root, doc->flat_doc freed and cleared,
+ *       doc->flat_promoted == 1.
+ *
+ * Returns 0 on success, -1 on allocation failure (in which case the
+ * caller must free the doc shell + flat_doc itself). */
+static int flat_promote_build_tree(struct taurus_document* doc) {
+    FlatDoc* flat = doc->flat_doc;
+    if (!flat || !flat->xml_buffer) return -1;
 
-    /* Take a writable copy of the XML buffer. The document owns
-     * this copy; the FlatDoc's borrow ends when we free it below. */
+    /* Take a writable copy of the XML buffer. The document owns this
+     * copy; the FlatDoc's borrow ends when we free it below. */
     char* xml_buffer_owned = (char*)malloc(flat->xml_len + 1);
-    if (!xml_buffer_owned) goto fail_no_doc;
+    if (!xml_buffer_owned) return -1;
     memcpy(xml_buffer_owned, flat->xml_buffer, flat->xml_len);
     xml_buffer_owned[flat->xml_len] = '\0';
-    const char* xml_buffer = xml_buffer_owned;  /* read-only alias */
+    const char* xml_buffer = xml_buffer_owned;
 
     /* Pool page size heuristic, matching the legacy parser. */
     size_t page_size;
@@ -105,35 +99,38 @@ struct taurus_document* flat_promote(FlatDoc* flat) {
     TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
     if (!pool) {
         free(xml_buffer_owned);
-        goto fail_no_doc;
+        return -1;
     }
-
     if (flat->xml_len >= 256) {
         pool->string_cache = taurus_hash_table_create(pool, 128);
     }
 
-    struct taurus_document* doc = flat_promote_new_doc(flat, pool, xml_buffer_owned);
-    if (!doc) {
-        taurus_pool_destroy(pool);
-        free(xml_buffer_owned);
-        goto fail_no_doc;
-    }
+    /* Commit pool + xml_buffer to doc so taurus_document_free can
+     * release them on failure past this point. */
+    doc->pool = pool;
+    doc->page_base = taurus_pool_get_base(pool);
+    doc->xml_buffer = xml_buffer_owned;
+    doc->xml_buffer_len = flat->xml_len;
+    doc->xml_buffer_needs_free = 1;
 
     /* Set this document as current for compact-pointer overflow
-     * tracking. All overflow entries created during promote
-     * associate with this doc and are released in
-     * taurus_document_free. */
+     * tracking. Overflow entries created during promote associate
+     * with this doc and are released in taurus_document_free. */
     taurus_compact_set_current_document(doc);
 
-    /* Parallel mapping: flat_idx → TaurusNode*. Used to resolve
-     * parent / sibling edges during the walk. */
+    /* Parallel mapping: flat_idx → TaurusNode*. */
     TaurusNode** mapping = NULL;
     if (flat->node_count > 0) {
         mapping = (TaurusNode**)calloc(flat->node_count, sizeof(TaurusNode*));
-        if (!mapping) goto fail;
+        if (!mapping) return -1;
     }
 
     TaurusElement root_elem = NULL;
+    /* Doc-level PI list (PIs that appeared before the root element).
+     * The legacy parser stores these in doc->pis; promote must do
+     * the same so the serializer emits them. */
+    struct taurus_processing_instruction* pis_head = NULL;
+    struct taurus_processing_instruction* pis_tail = NULL;
 
     for (size_t i = 0; i < flat->node_count; i++) {
         const FlatNode* fn = &flat->nodes[i];
@@ -143,22 +140,21 @@ struct taurus_document* flat_promote(FlatDoc* flat) {
                 TaurusStringView name_view = taurus_sv_from_ptr(
                     xml_buffer + fn->name_offset, fn->name_len);
                 TaurusElement elem = taurus_element_create_with_view(name_view, pool);
-                if (!elem) goto fail;
+                if (!elem) { free(mapping); return -1; }
                 elem->document = doc;
 
                 if (flat_promote_attrs(flat, elem, fn->attr_start,
                                         fn->attr_count, pool, xml_buffer) != 0) {
-                    goto fail;
+                    free(mapping);
+                    return -1;
                 }
 
-                /* Wire into parent. */
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
                         (TaurusElement)mapping[fn->parent];
                     taurus_element_append_child_internal(parent,
                                                           (TaurusNode*)elem);
                 } else {
-                    /* Top-level element. Should match doc->root_index. */
                     if (i == flat->root_index) {
                         root_elem = elem;
                     }
@@ -173,7 +169,7 @@ struct taurus_document* flat_promote(FlatDoc* flat) {
                 uint32_t len = flat_node_text_len(fn);
                 TaurusTextNode* text = taurus_text_create_borrowed(
                     xml_buffer + off, len, pool);
-                if (!text) goto fail;
+                if (!text) { free(mapping); return -1; }
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
@@ -190,7 +186,7 @@ struct taurus_document* flat_promote(FlatDoc* flat) {
                 uint32_t len = flat_node_text_len(fn);
                 TaurusCommentNode* comment = taurus_comment_create(
                     xml_buffer + off, len, pool);
-                if (!comment) goto fail;
+                if (!comment) { free(mapping); return -1; }
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
@@ -207,7 +203,7 @@ struct taurus_document* flat_promote(FlatDoc* flat) {
                 uint32_t len = flat_node_text_len(fn);
                 TaurusCDATANode* cdata = taurus_cdata_create(
                     xml_buffer + off, len, pool);
-                if (!cdata) goto fail;
+                if (!cdata) { free(mapping); return -1; }
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
@@ -225,27 +221,43 @@ struct taurus_document* flat_promote(FlatDoc* flat) {
                 TaurusPINode* pi = taurus_pi_create(
                     xml_buffer + fn->name_offset, fn->name_len,
                     xml_buffer + data_off, data_len, pool);
-                if (!pi) goto fail;
+                if (!pi) { free(mapping); return -1; }
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
                         (TaurusElement)mapping[fn->parent];
                     taurus_element_append_child_internal(parent,
                                                           (TaurusNode*)pi);
+                } else {
+                    /* Doc-level PI (appeared before root element).
+                     * Build a taurus_processing_instruction node and
+                     * chain it onto doc->pis so the serializer
+                     * finds it. The TaurusPINode above stays orphan
+                     * (not in any tree); its content is duplicated
+                     * into the heap-allocated pis node. */
+                    struct taurus_processing_instruction* pi_node =
+                        (struct taurus_processing_instruction*)malloc(sizeof(*pi_node));
+                    if (!pi_node) { free(mapping); return -1; }
+                    pi_node->target = pi->target ? strdup(pi->target) : NULL;
+                    pi_node->data = pi->data ? strdup(pi->data) : NULL;
+                    pi_node->next = NULL;
+                    if (pis_tail) pis_tail->next = pi_node;
+                    else pis_head = pi_node;
+                    pis_tail = pi_node;
                 }
                 mapping[i] = (TaurusNode*)pi;
                 break;
             }
 
             default:
-                /* Unknown node type — should not happen with a
-                 * FlatDoc produced by flat_parse(). */
-                goto fail;
+                free(mapping);
+                return -1;
         }
     }
 
-    /* XML declaration fields. These are heap-allocated (not pool)
-     * because taurus_document_free releases them via free(). */
+    free(mapping);
+
+    /* XML declaration fields (heap-allocated, freed by taurus_document_free). */
     if (flat->version_len > 0) {
         doc->xml_version = flat_promote_strdup(
             xml_buffer, flat->version_offset, flat->version_len);
@@ -256,26 +268,58 @@ struct taurus_document* flat_promote(FlatDoc* flat) {
     }
     doc->standalone      = flat->standalone;
     doc->had_declaration = (flat->version_len > 0) ? 1 : 0;
-    doc->has_bom         = 0;  /* flat_parse strips BOM */
+    doc->has_bom         = 0;
 
     doc->root = NULL;
     doc->new_dom_root = (void*)root_elem;
+    doc->pis = pis_head;
 
-    free(mapping);
+    /* FlatDoc no longer needed; its borrow ends here. */
     flat_doc_free(flat);
-    return doc;
+    doc->flat_doc = NULL;
+    doc->flat_promoted = 1;
 
-fail:
-    free(mapping);
-    /* Tear down: destroy pool (frees all nodes), free xml buffer,
-     * free doc struct, clear current document pointer. */
-    taurus_compact_set_current_document(NULL);
-    if (doc) {
+    /* Match the legacy parser: freeze the tree after parse so COW
+     * semantics see all parsed nodes as immutable. */
+    extern void taurus_document_freeze_tree(struct taurus_document*);
+    taurus_document_freeze_tree(doc);
+    return 0;
+}
+
+/* Phase D entry point: build the tree into the existing doc shell.
+ * Returns 0 on success, -1 on failure (doc is left in a
+ * partially-built state and the caller must free it). */
+int flat_promote_into(struct taurus_document* doc) {
+    if (!doc || !doc->flat_doc || doc->flat_promoted) return -1;
+    return flat_promote_build_tree(doc);
+}
+
+/* Phase C entry point: build a fresh TaurusDocument from a FlatDoc.
+ * Used by the Phase F test suite. Frees the FlatDoc on both success
+ * and failure paths. */
+struct taurus_document* flat_promote(FlatDoc* flat) {
+    if (!flat) return NULL;
+
+    struct taurus_document* doc = (struct taurus_document*)malloc(sizeof(*doc));
+    if (!doc) {
+        flat_doc_free(flat);
+        return NULL;
+    }
+    memset(doc, 0, sizeof(*doc));
+    doc->strict_mode = g_taurus_strict_mode;
+    doc->ref_count = 1;
+    doc->flat_doc = flat;
+    doc->flat_promoted = 0;
+
+    if (flat_promote_build_tree(doc) != 0) {
+        /* Failure: tear down whatever got built. */
         if (doc->pool) taurus_pool_destroy(doc->pool);
         free(doc->xml_buffer);
+        free(doc->xml_version);
+        free(doc->encoding);
+        if (doc->flat_doc) flat_doc_free(doc->flat_doc);
         free(doc);
+        return NULL;
     }
-fail_no_doc:
-    if (flat) flat_doc_free(flat);
-    return NULL;
+    return doc;
 }

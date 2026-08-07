@@ -204,7 +204,10 @@ TEST(FlatParse, ProcessingInstruction) {
     EXPECT_EQ(NameStr(doc, pi), "xml-stylesheet");
     std::string data(doc->xml_buffer + flat_node_pi_data_offset(pi),
                      flat_node_pi_data_len(pi));
-    EXPECT_EQ(data, " href='a.css'");
+    /* Phase D: flat parser strips leading whitespace from PI data
+     * to match the legacy parser's behavior (the serializer adds
+     * its own space between target and data). */
+    EXPECT_EQ(data, "href='a.css'");
     flat_doc_free(doc);
 }
 
