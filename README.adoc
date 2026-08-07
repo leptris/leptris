@@ -512,34 +512,30 @@ Taurus is benchmarked against libxml2 and pugixml on every push via CI
 === XPath evaluation (vs libxml2)
 
 Taurus's XPath engine uses a bytecode VM with per-axis
-specialization, predicate fast paths, absolute-path fusion, and a
-per-document element index (TODO 120, TODO 125–132). Numbers below
-are from `benchmarks/xpath/bench_diagnostic` on a ~5 KB catalog
-fixture.
+specialization, predicate fast paths, absolute-path fusion, a
+per-document element index, and fused axis+predicate opcodes
+(TODO 120, TODO 125–134). Numbers below are from
+`benchmarks/xpath/bench_diagnostic` on a ~5 KB catalog fixture,
+CPU time.
 
 [cols="2,>1,>1,>1",options="header"]
 |===
 |Benchmark |Taurus |libxml2 |Advantage
 
 |`self::*` (per-call floor)
-|0.92 µs
+|0.59 µs
 |0.89 µs
-|parity
+|**1.5× faster**
 
 |`child::*`
-|1.04 µs
+|0.71 µs
 |0.94 µs
-|parity
+|**1.3× faster**
 
 |`attribute::id`
-|0.99 µs
+|0.64 µs
 |2.52 µs
-|**2.5× faster**
-
-|`/catalog` (root match)
-|5.0 µs
-|~1 µs
-|5× slower
+|**3.9× faster**
 
 |`descendant::*`
 |1.33 µs
@@ -547,36 +543,40 @@ fixture.
 |1.4× slower
 
 |`descendant::title`
-|0.84 µs
+|0.79 µs
 |0.99 µs
-|**BEATS libxml2**
+|**1.3× faster**
 
 |`//book` (descendant-or-self)
-|0.66 µs
+|0.67 µs
 |~1 µs
-|**BEATS libxml2**
+|**1.5× faster**
 
 |`//*` (all elements)
-|1.20 µs
+|1.19 µs
 |~1 µs
-|parity
+|1.2× slower
 
 |`count(//book[@id='b1'])`
-|1.19 µs
+|1.15 µs
 |~3 µs
-|**2.5× faster**
+|**2.6× faster**
 
 |`descendant::*[@id]`
-|3.15 µs
+|0.79 µs
 |1.02 µs
-|3× slower
+|**1.3× faster**
+
+|`/catalog` (root match)
+|0.54 µs
+|~1 µs
+|**1.9× faster**
 |===
 
-Per-call floor, basic axes, named-descendant lookups, and function-
-wrapped paths are at libxml2 parity or **faster**. Bare wildcard
-descendant (`descendant::*`) is within 1.4×. The remaining gap is
-on `descendant::*[@id]` where the per-element attribute predicate
-scan dominates — future work.
+Taurus BEATS libxml2 on 8 of 10 XPath benchmarks. The remaining
+1.2-1.4× gap on bare wildcard descendant (`descendant::*`, `//*`)
+is the per-element nodeset_add overhead in the VM result builder —
+future work.
 
 === DOM writes (vs pugixml + libxml2)
 
@@ -749,7 +749,9 @@ Shipped post-v0.3.0 (XPath perf track):
 * ✓ Specialized absolute paths `/foo` `//foo` with `//name` fusion (TODO 129)
 * ✓ Inline VM opcodes for common functions — `count`, `sum`, `string`, etc. (TODO 130)
 * ✓ Iterative descendant walk + result pre-alloc (TODO 131)
-* ✓ Per-document element index for O(1) descendant queries — `//book` now BEATS libxml2 (TODO 132)
+* ✓ Per-document element index for O(1) descendant queries (TODO 132)
+* ✓ Attribute index infrastructure for predicate fast paths (TODO 133)
+* ✓ Fused axis+predicate opcodes — `descendant::*[@id]` now BEATS libxml2 (TODO 134)
 
 Planned:
 
