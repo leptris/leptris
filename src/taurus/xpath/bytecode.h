@@ -58,6 +58,14 @@ typedef enum {
     XPATH_BC_AXIS_PARENT_NAME,      /* u16 operand: const-pool string */
     XPATH_BC_AXIS_PARENT_WILD,      /* no operand */
 
+    /* Descendant / descendant-or-self (TODO 127). Tight recursive
+     * subtree walk inline. Skip dedup when input has 1 element
+     * (the common case for these axes). */
+    XPATH_BC_AXIS_DESCENDANT_NAME,        /* u16 operand: const-pool string */
+    XPATH_BC_AXIS_DESCENDANT_WILD,        /* no operand */
+    XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME,/* u16 operand: const-pool string */
+    XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD,/* no operand */
+
     XPATH_BC_BINARY_OP,        /* u8 operand: XPathOperatorType */
     XPATH_BC_FUNC_CALL,        /* u16 operand: const-pool index (FUNC AST) */
     XPATH_BC_FALLBACK_EVAL,    /* u16 operand: const-pool index (AST) */

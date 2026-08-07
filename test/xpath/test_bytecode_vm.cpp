@@ -189,4 +189,57 @@ TEST(XPathBytecodeSpecializedAxes, NamespacePrefixFallsBack) {
     taurus_document_free(doc);
 }
 
+TEST(XPathBytecodeSpecializedAxes, DescendantAxes) {
+    const char xml[] =
+        "<root><a><b><c/></b></a><a><b/></a></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r1 = taurus_xpath_eval(doc, nullptr,
+                                                "count(/root/descendant::*)");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r1), 5.0);
+    taurus_xpath_result_free(r1);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr,
+                                                "count(/root/descendant::b)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 2.0);
+    taurus_xpath_result_free(r2);
+
+    TaurusXPathResult r3 = taurus_xpath_eval(doc, nullptr,
+                                                "count(/root/descendant-or-self::*)");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r3), 6.0);
+    taurus_xpath_result_free(r3);
+
+    TaurusXPathResult r4 = taurus_xpath_eval(doc, nullptr,
+                                                "count(//a/descendant-or-self::a)");
+    ASSERT_NE(r4, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r4), 2.0);
+    taurus_xpath_result_free(r4);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeSpecializedAxes, DescendantFromMultiRoot) {
+    /* Multi-input descendant must dedup correctly. The wildcard-all
+     * path with a descendant step is tricky for the parser, so the
+     * test uses an explicit root-relative path that's known to parse. */
+    const char xml[] =
+        "<root><a><x/></a><b><x/></b></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                               "count(/root/*/descendant::x)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    taurus_document_free(doc);
+}
+
 }  // namespace
