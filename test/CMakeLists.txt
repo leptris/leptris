@@ -82,6 +82,7 @@ taurus_add_test(test_nokogiri_api abi/test_nokogiri_api.cpp)
 taurus_add_test(test_flat_doc   flat/test_flat_doc.cpp)
 taurus_add_test(test_flat_parser flat/test_flat_parser.cpp)
 taurus_add_test(test_flat_promote flat/test_flat_promote.cpp)
+taurus_add_test(test_flat_fast   flat/test_flat_fast.cpp)
 
 # Shared-library export check (TODO 122).  Runs the bash script that
 # builds a one-off libtaurus.dylib / .so and asserts SAX + DOM + XPath

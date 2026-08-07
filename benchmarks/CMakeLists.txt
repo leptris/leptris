@@ -175,6 +175,14 @@ taurus_add_benchmark(bench_modify_taurus    modification/bench_taurus_modify.c)
 # TODO 18 collapsed into a single entry point; rewrite before re-enabling.
 
 # ----------------------------------------------------------------------------
+# Flat document buffer benchmark (TODO 139 Phase F) — taurus only.
+# Compares parse-only (flat, no promote) vs parse+promote vs parse-legacy.
+# ----------------------------------------------------------------------------
+taurus_add_benchmark(bench_flat_parse       flat/bench_flat_parse.c)
+target_include_directories(bench_flat_parse PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/taurus/flat)
+
+# ----------------------------------------------------------------------------
 # SAX benchmarks (taurus vs libxml2).  TODO 101.
 # ----------------------------------------------------------------------------
 if(LIBXML2_AVAILABLE)

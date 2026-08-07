@@ -88,6 +88,7 @@ set(TAURUS_SOURCES
     taurus/flat/flat_doc.c
     taurus/flat/flat_parser.c
     taurus/flat/flat_promote.c
+    taurus/flat/flat_fast.c
 
     # Core library
     taurus/taurus.c
