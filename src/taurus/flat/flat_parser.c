@@ -87,7 +87,10 @@ static int fp_scan_name(FlatParser* p, uint32_t* out_offset, uint16_t* out_len) 
         return -1;
     }
     const char* start = p->pos;
-    /* ASCII tight loop. */
+    /* ASCII tight loop — fast enough for typical XML name lengths
+     * (10-20 chars). SIMD scan was tried (TODO 144) but added
+     * overhead without payoff; names are too short to amortize
+     * the vector setup cost. */
     while (p->pos < p->end) {
         unsigned char c = (unsigned char)*p->pos;
         if (c >= 0x80) break;
