@@ -46,41 +46,16 @@ TaurusElement taurus_element_create_with_view(
 ) {
     if (taurus_sv_is_empty(&name_view) || !pool) return NULL;
 
-    /* Allocate element from pool */
+    /* Allocate + zero element from pool. memset handles ALL field
+     * initialization to 0/NULL. Only type and name need non-zero
+     * values. This eliminates ~20 redundant stores that the old
+     * per-field init did after memset. */
     TaurusElement elem = (TaurusElement)taurus_pool_alloc(pool, sizeof(struct taurus_element));
     if (!elem) return NULL;
 
-    /* Initialize all fields to zero */
     memset(elem, 0, sizeof(struct taurus_element));
-
-    /* Initialize base node */
     elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
-    elem->base.frozen = 0;
-    elem->base.version = 0;
-
-    /* Store StringViews - ZERO COPY! */
-    /* EAGER: pool-strdup the name (TODO 90: no view staging) */
-
-    /* Initialize cached strings as NULL (lazy conversion) */
     elem->name = taurus_sv_to_cstr_pooled(&name_view, pool);
-    elem->prefix = NULL;
-    elem->namespace_uri = NULL;
-
-    /* Store document pointer - will be set later */
-    elem->document = NULL;
-
-    /* Initialize tree edges (encoded as 0 = NULL) */
-    elem->parent_off = 0;
-    elem->first_child_off = 0;
-    elem->last_child_off = 0;
-    elem->next_sibling_off = 0;
-    /* Initialize attribute-list edges (encoded as 0 = NULL) */
-    elem->first_attribute_off = 0;
-    elem->last_attribute_off = 0;
-
-    /* Initialize counts */
-    elem->attr_count = 0;
-    elem->child_count = 0;
 
     return elem;
 }
