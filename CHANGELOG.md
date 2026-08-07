@@ -1,13 +1,43 @@
 ## [Unreleased]
 
-## [0.5.3] - Y-08-07
+## [0.5.3] - 2026-08-07
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed — Full exclusive C14N (#183, real implementation)
 
-### Changed
+v0.5.2 shipped `taurus_c14n_canonicalize_ex` with the EXCLUSIVE
+mode flag accepted but routed to canonical. That was a stub. This
+release implements the real W3C Exclusive XML Canonicalization
+1.0 algorithm:
 
-- (describe changes here)
+- Compute visibly-used namespace prefixes per element (element's
+  own prefix, attribute prefixes, caller-supplied inclusive list).
+- Emit `xmlns:prefix="uri"` only for prefixes NOT already emitted
+  by an output ancestor — prevents namespace leak when enveloping
+  canonicalized subtrees.
+- Resolve URIs via xmlns-declaration walk up the ancestor chain.
+- Sort emitted declarations lexicographically per spec.
+
+The `inclusive_ns_prefixes` parameter is now honored: prefixes in
+the caller's list are force-included even if not visibly used by
+the subtree.
+
+4 new specs verify the behavior:
+- ExclusiveModeDropsUnusedNamespaces
+- ExclusiveModeKeepsUsedNamespaces
+- InclusiveNsPrefixesForceInclude
+- ExclusiveOnEmptyDoc
+
+### Performance — TODO 141 Phase A
+
+Inline `promote_wire_child` helper in the flat promote pass.
+Bypasses `taurus_element_append_child_internal`'s validation,
+type dispatch, and version increment for the hot path.
+
+| Doc size  | parse+promote before | after   | speedup |
+|----------:|---------------------:|--------:|--------:|
+|     829 B |              25.2 µs | 16.7 µs | 34%     |
+|    4469 B |              78.1 µs | 70.8 µs | 10%     |
+|   18377 B |             441.4 µs | 253.4 µs| 43%     |
 
 
 ## [0.5.2] - 2026-08-07
