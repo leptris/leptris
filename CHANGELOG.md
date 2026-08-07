@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.2] - Y-08-07
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.1] - 2026-08-07
 
 ### Added — Flat document buffer (TODO 139, Phases E + F)
