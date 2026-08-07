@@ -26,13 +26,9 @@ static int grow_ptr_array(void** arr, size_t* cap, size_t elem_size) {
 static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
     if (!elem) return;
 
-    /* Append to flat array. */
-    if (idx->all_count == idx->all_count /* sentinel; capacity tracked separately */) {
-        /* noop */
-    }
     idx->all_elements[idx->all_count++] = elem;
 
-    /* Append to name bucket. */
+    /* Name bucket. */
     const char* name = taurus_element_get_name(elem);
     if (name) {
         TaurusElementIndexBucket* bucket = NULL;
@@ -47,9 +43,7 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
             if (idx->bucket_count >= idx->bucket_capacity) {
                 if (grow_ptr_array((void**)&idx->buckets,
                                     &idx->bucket_capacity,
-                                    sizeof(TaurusElementIndexBucket)) != 0) {
-                    return;
-                }
+                                    sizeof(TaurusElementIndexBucket)) != 0) return;
             }
             bucket = &idx->buckets[idx->bucket_count++];
             bucket->name = strdup(name);
@@ -60,15 +54,95 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
         }
         if (bucket->count >= bucket->capacity) {
             if (grow_ptr_array((void**)&bucket->matches,
-                                &bucket->capacity,
-                                sizeof(TaurusElement)) != 0) {
-                return;
-            }
+                                &bucket->capacity, sizeof(TaurusElement)) != 0) return;
         }
         bucket->matches[bucket->count++] = elem;
     }
 
-    /* Recurse into children. */
+    /* Attribute buckets (TODO 133). */
+    struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+    while (attr) {
+        TaurusStringView nv = attr->name_view;
+        TaurusStringView vv = attr->value_view;
+        if (nv.length > 0 && nv.data) {
+            TaurusElementIndexAttrBucket* abucket = NULL;
+            for (size_t i = 0; i < idx->attr_bucket_count; i++) {
+                if (idx->attr_buckets[i].attr_name_len == nv.length &&
+                    memcmp(idx->attr_buckets[i].attr_name, nv.data, nv.length) == 0) {
+                    abucket = &idx->attr_buckets[i];
+                    break;
+                }
+            }
+            if (!abucket) {
+                if (idx->attr_bucket_count >= idx->attr_bucket_capacity) {
+                    if (grow_ptr_array((void**)&idx->attr_buckets,
+                                        &idx->attr_bucket_capacity,
+                                        sizeof(TaurusElementIndexAttrBucket)) != 0) {
+                        attr = attr->next; continue;
+                    }
+                }
+                abucket = &idx->attr_buckets[idx->attr_bucket_count++];
+                abucket->attr_name = (char*)malloc(nv.length + 1);
+                if (abucket->attr_name) {
+                    memcpy(abucket->attr_name, nv.data, nv.length);
+                    abucket->attr_name[nv.length] = '\0';
+                }
+                abucket->attr_name_len = nv.length;
+                abucket->matches = NULL;
+                abucket->count = 0;
+                abucket->capacity = 0;
+                abucket->values = NULL;
+                abucket->value_count = 0;
+                abucket->value_capacity = 0;
+            }
+            if (abucket->count >= abucket->capacity) {
+                if (grow_ptr_array((void**)&abucket->matches,
+                                    &abucket->capacity, sizeof(TaurusElement)) != 0) {
+                    attr = attr->next; continue;
+                }
+            }
+            abucket->matches[abucket->count++] = elem;
+
+            if (vv.length > 0 && vv.data) {
+                TaurusElementIndexAttrValue* vbucket = NULL;
+                for (size_t i = 0; i < abucket->value_count; i++) {
+                    if (abucket->values[i].value_len == vv.length &&
+                        memcmp(abucket->values[i].value, vv.data, vv.length) == 0) {
+                        vbucket = &abucket->values[i];
+                        break;
+                    }
+                }
+                if (!vbucket) {
+                    if (abucket->value_count >= abucket->value_capacity) {
+                        if (grow_ptr_array((void**)&abucket->values,
+                                            &abucket->value_capacity,
+                                            sizeof(TaurusElementIndexAttrValue)) != 0) {
+                            attr = attr->next; continue;
+                        }
+                    }
+                    vbucket = &abucket->values[abucket->value_count++];
+                    vbucket->value = (char*)malloc(vv.length + 1);
+                    if (vbucket->value) {
+                        memcpy(vbucket->value, vv.data, vv.length);
+                        vbucket->value[vv.length] = '\0';
+                    }
+                    vbucket->value_len = vv.length;
+                    vbucket->matches = NULL;
+                    vbucket->count = 0;
+                    vbucket->capacity = 0;
+                }
+                if (vbucket->count >= vbucket->capacity) {
+                    if (grow_ptr_array((void**)&vbucket->matches,
+                                        &vbucket->capacity, sizeof(TaurusElement)) != 0) {
+                        attr = attr->next; continue;
+                    }
+                }
+                vbucket->matches[vbucket->count++] = elem;
+            }
+        }
+        attr = attr->next;
+    }
+
     TaurusElement child = taurus_element_get_first_child(elem);
     while (child) {
         index_walk(idx, child);
@@ -116,6 +190,16 @@ void taurus_element_index_free(TaurusElementIndex* idx) {
         free(idx->buckets[i].matches);
     }
     free(idx->buckets);
+    for (size_t i = 0; i < idx->attr_bucket_count; i++) {
+        free(idx->attr_buckets[i].attr_name);
+        free(idx->attr_buckets[i].matches);
+        for (size_t j = 0; j < idx->attr_buckets[i].value_count; j++) {
+            free(idx->attr_buckets[i].values[j].value);
+            free(idx->attr_buckets[i].values[j].matches);
+        }
+        free(idx->attr_buckets[i].values);
+    }
+    free(idx->attr_buckets);
     free(idx);
 }
 
@@ -133,6 +217,32 @@ const TaurusElementIndexBucket* taurus_element_index_lookup(
         if (idx->buckets[i].name_len == name_len &&
             memcmp(idx->buckets[i].name, name, name_len) == 0) {
             return &idx->buckets[i];
+        }
+    }
+    return NULL;
+}
+
+const TaurusElementIndexAttrBucket* taurus_element_index_lookup_attr(
+    const TaurusElementIndex* idx, const char* attr_name) {
+    if (!idx || !attr_name) return NULL;
+    size_t name_len = strlen(attr_name);
+    for (size_t i = 0; i < idx->attr_bucket_count; i++) {
+        if (idx->attr_buckets[i].attr_name_len == name_len &&
+            memcmp(idx->attr_buckets[i].attr_name, attr_name, name_len) == 0) {
+            return &idx->attr_buckets[i];
+        }
+    }
+    return NULL;
+}
+
+const TaurusElementIndexAttrValue* taurus_element_index_attr_lookup_value(
+    const TaurusElementIndexAttrBucket* bucket, const char* value) {
+    if (!bucket || !value) return NULL;
+    size_t value_len = strlen(value);
+    for (size_t i = 0; i < bucket->value_count; i++) {
+        if (bucket->values[i].value_len == value_len &&
+            memcmp(bucket->values[i].value, value, value_len) == 0) {
+            return &bucket->values[i];
         }
     }
     return NULL;
