@@ -1,13 +1,57 @@
 ## [Unreleased]
 
-## [0.5.0] - Y-08-07
+## [0.5.0] - 2026-08-07
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Nokogiri-compatible C API (issues #167–#172)
 
-### Changed
+Fourteen new public entry points for the Ruby FFI binding:
 
-- (describe changes here)
+- `taurus_text_node_create`, `taurus_comment_node_create`,
+  `taurus_cdata_node_create`, `taurus_pi_node_create` (#167)
+- `taurus_text_node_set_content`,
+  `taurus_comment_node_set_content`,
+  `taurus_cdata_node_set_content`,
+  `taurus_pi_node_set_target`, `taurus_pi_node_set_data` (#167)
+- `taurus_node_parent`, `taurus_node_unlink` (#168) — work on any
+  node type, not just elements. Required adding `parent_off` to the
+  text/comment/cdata/pi node structs (+4 bytes each).
+- `taurus_c14n_canonicalize_subtree` (#169)
+- `taurus_xpath_eval_with_vars_context` (#170)
+- `taurus_element_namespace_decl_prefix`,
+  `taurus_element_namespace_decl_uri` (#171)
+- `taurus_node_line`, `taurus_node_compare` (#172)
+
+### Added — Flat document buffer (TODO 139, Phases A–D)
+
+Foundational architecture for closing the parse performance gap vs
+pugixml. Plain-XML parses now route through `flat_parse → FlatDoc`
+and only build the compact-pointer tree on first access. New
+internal subsystem under `src/taurus/flat/`:
+
+- `FlatNode` (28 B) + `FlatAttr` (12 B) — zero-copy records into
+  the input buffer.
+- `flat_parse()` — single-pass XML scanner that handles elements,
+  attributes, text, comments, CDATA, PIs, DOCTYPE skipping, BOM.
+- `flat_promote_into(doc)` — lazy promote from FlatDoc to the
+  compact-pointer tree, triggered by `taurus_document_root`,
+  serialize, c14n, or any other tree-accessing entry point.
+
+Parse-only workloads (parse + free, parse + count) skip the
+pool-alloc cost entirely. Documents with DOCTYPE internal subsets,
+namespace declarations, entity references, or custom `max_depth`
+fall back to the legacy parser.
+
+### Fixed
+
+- `taurus_document_serialize`, `taurus_element_serialize`, and
+  `taurus_document_save_file` are now exported from the shared
+  library with `TAURUS_API` (regression in v0.4.4, issue #166).
+- `taurus_element_namespace_count` now correctly counts xmlns
+  declarations (was returning 0 because it only walked the
+  regular attribute list; the parser moves xmlns to
+  `elem->namespaces`).
+- `taurus_element_add_namespace` now appends in source order
+  (was prepending, giving consumers a reversed view).
 
 
 ## [0.4.4] - Y-08-07
