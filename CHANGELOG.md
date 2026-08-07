@@ -1,13 +1,32 @@
 ## [Unreleased]
 
-## [0.5.1] - Y-08-07
+## [0.5.1] - 2026-08-07
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Flat document buffer (TODO 139, Phases E + F)
 
-### Changed
+- `flat_fast_count_elements_all`, `flat_fast_count_elements_named`,
+  `flat_fast_root_name` — internal helpers that answer simple
+  queries directly from the FlatDoc array, bypassing the promote
+  pass. Used by the benchmark suite; future XPath VM optimizations
+  will plug into them.
+- `benchmarks/flat/bench_flat_parse.c` — 5-way comparison harness
+  (parse-only, parse+promote, parse-legacy, count via XPath+promote,
+  count via flat fast path).
+- 9 new FlatFast specs verifying the fast paths match the promote-
+  then-walk path and degrade correctly after promote / for legacy
+  inputs.
 
-- (describe changes here)
+### Performance
+
+On a 5 KB plain-XML document (Apple M1, mean per iteration):
+
+| Operation                       | Time      | vs legacy |
+|---------------------------------|-----------|-----------|
+| Parse only (flat, no promote)   | 53.5 µs   | 2.6×      |
+| Parse + promote (lazy)          | 78.1 µs   | 1.8×      |
+| Parse via legacy parser         | 137.5 µs  | baseline  |
+| `count(//name)` via flat fast   | 47.2 µs   | 2.9×      |
+| `count(//name)` via XPath       | 100.5 µs  | 1.4×      |
 
 
 ## [0.5.0] - 2026-08-07
