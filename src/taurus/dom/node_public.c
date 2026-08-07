@@ -37,20 +37,24 @@ TAURUS_API TaurusNodeRef taurus_node_next_sibling(TaurusNodeRef node) {
 
 TAURUS_API TaurusNodeRef taurus_node_previous_sibling(TaurusNodeRef node) {
     if (!node) return NULL;
-    if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
-        TaurusElement elem = (TaurusElement)node;
-        TaurusElement parent = taurus_element_get_parent(elem);
-        if (!parent) return NULL;
 
-        TaurusNodeRef prev = NULL;
-        TaurusNodeRef child = (TaurusNodeRef)taurus_elem_first_child(parent);
-        while (child && child != node) {
-            prev = child;
-            child = (TaurusNodeRef)taurus_node_get_next_sibling(child);
-        }
-        return prev;
+    /* Issue #182: previous_sibling must work for any node type, not
+     * just elements. taurus_node_parent (added in #168) gives us the
+     * parent for any node; we then walk the parent's child chain to
+     * find the node immediately preceding this one. O(N) over the
+     * number of siblings, which is acceptable for typical docs. */
+    TaurusElement parent = taurus_node_parent(node);
+    if (!parent) return NULL;
+
+    TaurusNodeRef prev = NULL;
+    TaurusNodeRef child = (TaurusNodeRef)taurus_elem_first_child(parent);
+    while (child && child != node) {
+        prev = child;
+        child = (TaurusNodeRef)taurus_node_get_next_sibling(child);
     }
-    return NULL;
+    /* If child == node, we found it; return prev. If child == NULL,
+     * node isn't in parent's chain (corrupt tree) -- return NULL. */
+    return (child == node) ? prev : NULL;
 }
 
 TAURUS_API size_t taurus_node_child_count(TaurusNodeRef node) {
