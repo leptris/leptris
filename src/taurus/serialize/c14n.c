@@ -500,22 +500,289 @@ static void c14n_strip_comments(char* buf, size_t* size) {
     *size = (size_t)(write - buf);
 }
 
+/* ----- Exclusive C14N (W3C exc-c14n 1.0) ----- */
+
+/* Visible-prefix stack: tracks prefixes already emitted by output
+ * ancestors so children don't re-emit them. The spec cap is
+ * realistically < 32 nested namespace contexts. */
+#define C14N_EXCL_STACK_SIZE 64
+
+typedef struct {
+    const char* prefixes[C14N_EXCL_STACK_SIZE];
+    int count;
+} C14nPrefixStack;
+
+static int prefix_stack_find(const C14nPrefixStack* s, const char* p) {
+    if (!p) return 0;
+    for (int i = 0; i < s->count; i++) {
+        if (s->prefixes[i] && strcmp(s->prefixes[i], p) == 0) return 1;
+    }
+    return 0;
+}
+
+static void prefix_stack_push(C14nPrefixStack* s, const char* p) {
+    if (s->count < C14N_EXCL_STACK_SIZE) {
+        s->prefixes[s->count++] = p;
+    }
+}
+
+/* Returns 1 if the prefix is newly-visible (not in `emitted`),
+ * 0 if already covered by an output ancestor. */
+static int mark_visible_prefix(C14nPrefixStack* emitted, const char* prefix) {
+    if (!prefix || !*prefix) return 0;
+    if (prefix_stack_find(emitted, prefix)) return 0;
+    return 1;
+}
+
+/* Recursive exclusive-C14N walker. */
+static void c14n_serialize_element_excl(TaurusElement elem,
+                                         char** buffer, size_t* size,
+                                         size_t* capacity,
+                                         C14nPrefixStack* emitted,
+                                         const char** inclusive) {
+    if (!elem) return;
+
+    const char* name = taurus_element_get_name(elem);
+    const char* elem_prefix = taurus_element_get_prefix(elem);
+    char temp[4096];
+    int len;
+
+    /* Pass 1: collect visibly-used prefixes at this element. */
+    int need_elem_prefix = mark_visible_prefix(emitted, elem_prefix);
+    int inclusive_count = 0;
+    char needed_inclusive[16][64];
+    if (inclusive) {
+        for (const char** p = inclusive; *p && inclusive_count < 16; p++) {
+            if (mark_visible_prefix(emitted, *p)) {
+                strncpy(needed_inclusive[inclusive_count], *p, 63);
+                needed_inclusive[inclusive_count][63] = '\0';
+                inclusive_count++;
+            }
+        }
+    }
+    uint8_t attr_count = taurus_element_attribute_count(elem);
+    char needed_attr_prefix[16][64];
+    int attr_prefix_count = 0;
+    for (uint8_t i = 0; i < attr_count && attr_prefix_count < 16; i++) {
+        struct taurus_attribute* a = taurus_element_get_attribute_by_index(elem, i);
+        if (!a) continue;
+        TaurusStringView nv = a->name_view;
+        if (nv.length > 0 && nv.data) {
+            const char* colon = (const char*)memchr(nv.data, ':', nv.length);
+            if (colon && colon > nv.data) {
+                size_t pl = (size_t)(colon - nv.data);
+                if (pl < 64) {
+                    char prefix[65];
+                    memcpy(prefix, nv.data, pl);
+                    prefix[pl] = '\0';
+                    if (mark_visible_prefix(emitted, prefix)) {
+                        memcpy(needed_attr_prefix[attr_prefix_count], prefix, pl + 1);
+                        attr_prefix_count++;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Push the new prefixes so children see them as inherited. */
+    int pushed_count = 0;
+    if (need_elem_prefix) { prefix_stack_push(emitted, elem_prefix); pushed_count++; }
+    for (int i = 0; i < inclusive_count; i++) {
+        prefix_stack_push(emitted, needed_inclusive[i]); pushed_count++;
+    }
+    for (int i = 0; i < attr_prefix_count; i++) {
+        prefix_stack_push(emitted, needed_attr_prefix[i]); pushed_count++;
+    }
+
+    /* Open tag. */
+    if (elem_prefix && elem_prefix[0]) {
+        len = snprintf(temp, sizeof(temp), "<%s:%s", elem_prefix,
+                       name ? name : "element");
+    } else {
+        len = snprintf(temp, sizeof(temp), "<%s", name ? name : "element");
+    }
+    APPEND_STRING(temp, len);
+
+    /* Emit xmlns:prefix declarations for the newly-visible prefixes,
+     * sorted lexicographically. */
+    const char* to_emit[40];
+    int to_emit_count = 0;
+    if (need_elem_prefix && to_emit_count < 40) to_emit[to_emit_count++] = elem_prefix;
+    for (int i = 0; i < attr_prefix_count && to_emit_count < 40; i++) {
+        to_emit[to_emit_count++] = needed_attr_prefix[i];
+    }
+    for (int i = 0; i < inclusive_count && to_emit_count < 40; i++) {
+        to_emit[to_emit_count++] = needed_inclusive[i];
+    }
+    for (int i = 0; i < to_emit_count; i++) {
+        for (int j = i + 1; j < to_emit_count; j++) {
+            if (strcmp(to_emit[i], to_emit[j]) > 0) {
+                const char* t = to_emit[i]; to_emit[i] = to_emit[j]; to_emit[j] = t;
+            }
+        }
+    }
+    for (int i = 0; i < to_emit_count; i++) {
+        /* Resolve via xmlns declaration walk (not element prefix walk). */
+        const char* uri = NULL;
+        for (TaurusElement p = elem; p && !uri; ) {
+            for (struct taurus_namespace* ns = p->namespaces; ns; ns = ns->next) {
+                if (ns->prefix && strcmp(ns->prefix, to_emit[i]) == 0) {
+                    uri = ns->uri;
+                    break;
+                }
+            }
+            if (!uri) {
+                const char* pp = taurus_element_get_prefix(p);
+                if (pp && strcmp(pp, to_emit[i]) == 0) {
+                    uri = taurus_element_get_namespace_uri(p);
+                }
+            }
+            p = taurus_element_get_parent(p);
+        }
+        if (uri) {
+            len = snprintf(temp, sizeof(temp),
+                           " xmlns:%s=\"%s\"", to_emit[i], uri);
+            APPEND_STRING(temp, len);
+        }
+    }
+
+    /* Attributes (sorted lexicographically as in canonical mode). */
+    struct taurus_attribute** sorted_attrs = NULL;
+    if (attr_count > 0) {
+        sorted_attrs = (struct taurus_attribute**)malloc(
+            attr_count * sizeof(*sorted_attrs));
+        if (sorted_attrs) {
+            for (uint8_t i = 0; i < attr_count; i++) {
+                sorted_attrs[i] = taurus_element_get_attribute_by_index(elem, i);
+            }
+            qsort(sorted_attrs, attr_count, sizeof(*sorted_attrs), compare_attributes);
+            for (size_t i = 0; i < attr_count; i++) {
+                struct taurus_attribute* a = sorted_attrs[i];
+                if (!a) continue;
+                const char* an = !taurus_sv_is_empty(&a->name_view) ? a->name_view.data : a->name;
+                size_t an_len = !taurus_sv_is_empty(&a->name_view) ? a->name_view.length : (an ? strlen(an) : 0);
+                const char* av = a->value;
+                if (!av && !taurus_sv_is_empty(&a->value_view)) {
+                    av = taurus_decode_entities_view(&a->value_view, NULL);
+                }
+                if (an && av) {
+                    char* escaped = c14n_escape_text(av, 1);
+                    if (escaped) {
+                        len = snprintf(temp, sizeof(temp),
+                                       " %.*s=\"%s\"",
+                                       (int)an_len, an, escaped);
+                        APPEND_STRING(temp, len);
+                        free(escaped);
+                    }
+                    if (av != a->value) free((void*)av);
+                }
+            }
+            free(sorted_attrs);
+        }
+    }
+
+    /* Check for empty body. */
+    int has_content = 0;
+    int has_children = 0;
+    TaurusNode* child = (TaurusNode*)taurus_node_first_child_internal((TaurusNode*)elem);
+    while (child) {
+        has_children = 1;
+        if (child->type == TAURUS_NODE_TYPE_TEXT) {
+            const char* text = taurus_text_get_content((TaurusTextNode*)child);
+            if (text && *text) { has_content = 1; break; }
+        }
+        child = taurus_node_get_next_sibling(child);
+    }
+
+    if (!has_children && !has_content) {
+        if (elem_prefix && elem_prefix[0]) {
+            len = snprintf(temp, sizeof(temp), "></%s:%s>",
+                           elem_prefix, name ? name : "element");
+        } else {
+            len = snprintf(temp, sizeof(temp), "></%s>",
+                           name ? name : "element");
+        }
+        APPEND_STRING(temp, len);
+        emitted->count -= pushed_count;
+        return;
+    }
+
+    APPEND_STRING(">", 1);
+
+    /* Walk children. */
+    child = (TaurusNode*)taurus_node_first_child_internal((TaurusNode*)elem);
+    while (child) {
+        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+            c14n_serialize_element_excl((TaurusElement)child, buffer, size,
+                                         capacity, emitted, inclusive);
+        } else if (child->type == TAURUS_NODE_TYPE_TEXT) {
+            const char* text = taurus_text_get_content((TaurusTextNode*)child);
+            if (text) {
+                char* escaped = c14n_escape_text(text, 0);
+                if (escaped) {
+                    APPEND_STRING(escaped, (int)strlen(escaped));
+                    free(escaped);
+                }
+            }
+        } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
+            const char* text = taurus_cdata_get_content((TaurusCDATANode*)child);
+            if (text) {
+                char* escaped = c14n_escape_text(text, 0);
+                if (escaped) {
+                    APPEND_STRING(escaped, (int)strlen(escaped));
+                    free(escaped);
+                }
+            }
+        } else if (child->type == TAURUS_NODE_TYPE_PI) {
+            TaurusPINode* pi = (TaurusPINode*)child;
+            const char* t = taurus_pi_get_target(pi);
+            const char* d = taurus_pi_get_data(pi);
+            if (t) {
+                len = snprintf(temp, sizeof(temp), "<?%s", t);
+                APPEND_STRING(temp, len);
+                if (d && *d) { APPEND_STRING(" ", 1); APPEND_STRING(d, (int)strlen(d)); }
+                APPEND_STRING("?>", 2);
+            }
+        } else if (child->type == TAURUS_NODE_TYPE_COMMENT) {
+            if (c14n_include_comments) {
+                const char* text = taurus_comment_get_content(
+                    (TaurusCommentNode*)child);
+                if (text) {
+                    len = snprintf(temp, sizeof(temp), "<!--%s-->", text);
+                    APPEND_STRING(temp, len);
+                }
+            }
+        }
+        child = taurus_node_get_next_sibling(child);
+    }
+
+    /* Close. */
+    if (elem_prefix && elem_prefix[0]) {
+        len = snprintf(temp, sizeof(temp), "</%s:%s>",
+                       elem_prefix, name ? name : "element");
+    } else {
+        len = snprintf(temp, sizeof(temp), "</%s>", name ? name : "element");
+    }
+    APPEND_STRING(temp, len);
+
+    emitted->count -= pushed_count;
+
+cleanup:
+    return;
+}
+
 TAURUS_API char* taurus_c14n_canonicalize_ex(
     struct taurus_document* doc,
     int version,
     TaurusC14NMode mode,
     const char** inclusive_ns_prefixes,
     int with_comments) {
-    (void)inclusive_ns_prefixes;
-    (void)mode;
-
     if (!doc) return NULL;
-
-    int saved = c14n_include_comments;
-    c14n_include_comments = with_comments ? 1 : 0;
-    char* result = taurus_c14n_canonicalize(doc, version, 0);
-    c14n_include_comments = saved;
-    return result;
+    taurus_document_ensure_promoted(doc);
+    TaurusElement root = (TaurusElement)doc->new_dom_root;
+    if (!root) return NULL;
+    return taurus_c14n_canonicalize_subtree_ex(
+        root, version, mode, inclusive_ns_prefixes, with_comments);
 }
 
 TAURUS_API char* taurus_c14n_canonicalize_subtree_ex(
@@ -524,15 +791,39 @@ TAURUS_API char* taurus_c14n_canonicalize_subtree_ex(
     TaurusC14NMode mode,
     const char** inclusive_ns_prefixes,
     int with_comments) {
-    (void)inclusive_ns_prefixes;
-    (void)mode;
-
+    (void)version;
     if (!elem) return NULL;
+    taurus_document_ensure_promoted(elem->document);
 
     int saved = c14n_include_comments;
     c14n_include_comments = with_comments ? 1 : 0;
-    char* result = taurus_c14n_canonicalize_subtree(elem, version, 0);
+
+    size_t capacity = 4096;
+    size_t size = 0;
+    char* buf = (char*)malloc(capacity);
+    if (!buf) {
+        c14n_include_comments = saved;
+        return NULL;
+    }
+    buf[0] = '\0';
+
+    if (mode == TAURUS_C14N_MODE_EXCLUSIVE) {
+        C14nPrefixStack emitted = {{{0}}, 0};
+        char* buffer = buf;
+        c14n_serialize_element_excl(elem, &buffer, &size, &capacity,
+                                     &emitted, inclusive_ns_prefixes);
+        buf = buffer;
+    } else {
+        char* buffer = buf;
+        c14n_serialize_element(elem, &buffer, &size, &capacity);
+        buf = buffer;
+        if (!with_comments) {
+            c14n_strip_comments(buf, &size);
+        }
+    }
+
+    buf[size] = '\0';
     c14n_include_comments = saved;
-    return result;
+    return buf;
 }
 
