@@ -1,13 +1,20 @@
 ## [Unreleased]
 
-## [0.5.7] - Y-08-08
+## [0.5.7] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — pugixml-style zero-copy promote
 
-### Changed
+Applied pugixml's key optimization: copy the XML input once, then
+write NUL terminators at every name/value boundary in-place. Names
+become zero-copy pointers — no pool_strdup, no string interning.
 
-- (describe changes here)
+Promote cost for 5 KB doc (Apple M1, CPU time):
+78 us (original) -> 60 us (after all optimizations) = 23% faster.
+
+### Fixed
+
+- #201: flat XPath dispatcher over-matched count() in larger
+  expressions (count(//book) > 0 returned Number instead of Boolean).
 
 
 ## [0.5.6] - 2026-08-08
