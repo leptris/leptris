@@ -234,10 +234,10 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     }
 
     /* 3. Estimate element count and bulk-allocate from POOL.
-     * XML typically has 1 element per 20-80 bytes depending on
-     * density. Use a conservative estimate with generous headroom
-     * to avoid the growth path. */
-    size_t est_elems = len / 20 + 64;
+     * Very conservative: some XML has 1 element per 15-20 bytes
+     * (e.g. <a><b/><c/></a> = 3 elements in 14 bytes). Using
+     * len/10 ensures we rarely overflow the estimate. */
+    size_t est_elems = len / 10 + 128;
     TaurusElement elem_block = (TaurusElement)taurus_pool_alloc(
         pool, est_elems * sizeof(struct taurus_element));
     if (!elem_block) {
@@ -334,13 +334,24 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
             elem->document = doc;
 
-            /* Scan name (zero-copy, NUL-terminate in buffer). */
+            /* Scan name (zero-copy). DON'T NUL-terminate yet — the
+             * byte after the name is '>' or whitespace, which
+             * dp_parse_attrs needs to see intact. We NUL-terminate
+             * AFTER dp_parse_attrs returns. */
             p.pos++; /* skip '<' */
             char* name_start = p.pos;
             while (p.pos < p.end && dp_name_char_lut[(unsigned char)*p.pos])
                 p.pos++;
-            *p.pos = '\0';
-            p.pos++; /* skip NUL */
+            size_t name_len = p.pos - name_start;
+            char name_delim = *p.pos; /* save delimiter byte */
+
+            /* Parse attributes (scans from the delimiter position). */
+            int self_closing = dp_parse_attrs(&p, elem);
+            if (self_closing < 0) goto fail;
+
+            /* NOW safe to NUL-terminate the name — dp_parse_attrs
+             * has finished scanning the open tag. */
+            name_start[name_len] = '\0';
 
             /* Split prefix:local. */
             char* colon = strchr(name_start, ':');
@@ -351,10 +362,6 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             } else {
                 elem->name = name_start;
             }
-
-            /* Parse attributes. */
-            int self_closing = dp_parse_attrs(&p, elem);
-            if (self_closing < 0) goto fail;
 
             /* Wire into parent. */
             if (p.depth > 0) {
@@ -373,15 +380,22 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
         else if (next == '/') {
             /* Close tag. */
             p.pos += 2;
-            /* Verify name matches open stack top. */
-            char* name_start = p.pos;
+            /* Scan name. */
+            char* close_start = p.pos;
             while (p.pos < p.end && dp_name_char_lut[(unsigned char)*p.pos])
                 p.pos++;
+            size_t close_len = p.pos - close_start;
             dp_skip_ws(&p);
             if (p.pos >= p.end || *p.pos != '>') goto fail;
             p.pos++;
             if (p.depth == 0) goto fail;
-            /* Verify name match (skip for speed; the flat parser does it). */
+            /* Verify close tag name matches open element. */
+            TaurusElement open = p.open_stack[p.depth - 1];
+            const char* open_name = open->name;
+            size_t open_len = strlen(open_name);
+            if (open_len != close_len ||
+                memcmp(open_name, close_start, close_len) != 0)
+                goto fail;
             p.depth--;
         }
         else if (next == '!') {
