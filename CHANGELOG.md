@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.13] - Y-08-08
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.12] - 2026-08-08
 
 ### Performance — direct parser attribute fast path
