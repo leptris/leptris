@@ -73,6 +73,11 @@ TAURUS_API const char* taurus_xinclude_get_xpointer(TaurusElement include_elem) 
     return get_attr_value(include_elem, "xpointer");
 }
 
+TAURUS_API const char* taurus_xinclude_get_encoding(TaurusElement include_elem) {
+    if (!taurus_xinclude_is_include_element(include_elem)) return NULL;
+    return get_attr_value(include_elem, "encoding");
+}
+
 /* ---- parse="text" processor ---- */
 
 /* Load a file into a malloc'd buffer. Returns NULL on failure.

@@ -347,14 +347,16 @@ TEST(NokogiriApi171, NoNamespacesReturnsZero) {
 // Issue #172 — node_line + node_compare
 // ============================================================================
 
-TEST(NokogiriApi172, NodeLineReturnsZeroForParsedDoc) {
-    // The parser doesn't currently store per-node line numbers; the
-    // documented behavior is to return 0 for parsed nodes. This spec
-    // pins that contract so a future enhancement that adds line
-    // numbers can update the expectation.
+TEST(NokogiriApi172, NodeLineReturnsOneForParsedRoot) {
+    // Issue #223: line is tracked at parse time and frozen into the
+    // node. The root element of a doc starting on line 1 reports 1.
     TaurusDocument doc = Parse("<r>\n  <a/>\n</r>");
     TaurusElement root = taurus_document_root(doc);
-    EXPECT_EQ(taurus_node_line((TaurusNodeRef)root), 0);
+    EXPECT_EQ(taurus_node_line((TaurusNodeRef)root), 1);
+    // Inner element starts on line 2 (after the leading newline).
+    TaurusElement a = taurus_element_first_child(root, "a");
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(taurus_node_line((TaurusNodeRef)a), 2);
     taurus_document_free(doc);
 }
 

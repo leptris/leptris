@@ -39,13 +39,17 @@ typedef struct taurus_node_vtable TaurusNodeVTable;
  * CRITICAL: All node types MUST have this as their first member
  * This allows safe casting between node types
  *
- * Size: 4 bytes (vs 32 bytes in legacy design)
+ * Size: 8 bytes (vs 32 bytes in legacy design)
  * - No parent/sibling pointers (stored in compressed form in node types)
- * - No reference counting (simpler ownership model) */
+ * - No reference counting (simpler ownership model)
+ * - uint32_t line: source line number for error reporting and source
+ *   maps (issue #223). 0 = unknown (e.g. programmatically-created
+ *   nodes or parsers that don't track line). */
 typedef struct taurus_node {
     TaurusNodeTypeEnum type;           /* Node type discriminator (4 bytes) */
     unsigned int frozen : 1;           /* COW: 0 = mutable, 1 = frozen (immutable) */
     unsigned int version : 31;         /* COW 2.2: Node version for tracking modifications */
+    uint32_t line;                     /* Source line (1-based, 0 = unknown). Issue #223 */
     /* NOTE: Parent/sibling pointers stored in compressed form in specific node types */
 } TaurusNode;
 

@@ -371,14 +371,10 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node) {
  * ============================================================================ */
 
 TAURUS_API int taurus_node_line(TaurusNodeRef node) {
-    /* The parser tracks line numbers internally for error reporting
-     * but does not store them per-node in the persistent tree.
-     * Returning 0 (no source info) is the documented behavior for
-     * programmatically-created nodes; for parsed nodes, a future
-     * enhancement would thread line numbers through from the parser
-     * into the node struct. */
-    (void)node;
-    return 0;
+    /* Issue #223: line is tracked at parse time and frozen into the
+     * node's base struct. Programmatically-created nodes default to
+     * line=0 (creators memset the struct). */
+    return node ? (int)node->line : 0;
 }
 
 TAURUS_API int taurus_node_compare(TaurusNodeRef a, TaurusNodeRef b) {

@@ -124,9 +124,11 @@ struct taurus_element {
 
 /* Compile-time element-size tracker (TODO 90).
  *
- * Current layout (Phase 1 + 2a + 2b + 2d complete, 80 bytes):
- *   - 8-byte base + 2-byte header + 1-byte attr_count + 2-byte child_count
- *     packed into the 8-byte alignment slot of base (5 bytes used, 3 pad)
+ * Current layout (Phase 1 + 2a + 2b + 2d complete, 88 bytes):
+ *   - 12-byte base (TaurusNode + uint32_t line for #223)
+ *     + 2-byte header + 1-byte attr_count + 2-byte child_count
+ *     packed into the 4-byte tail of base's alignment slot
+ *     (5 bytes used, 3 pad)
  *   - 24 bytes of cached name/prefix/namespace_uri char* pointers
  *   - 16 bytes of int32_t tree-edge offsets (parent, first/last/next)
  *   - 8 bytes of int32_t attribute-list offsets (first, last)
@@ -135,11 +137,11 @@ struct taurus_element {
  * pugixml compact node: 12 bytes. Phase 2e of TODO 90 may compress
  * the document-context pointers and string pointers further. */
 #ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 80,
-    "taurus_element grew beyond 80 bytes — check for accidental field additions");
+_Static_assert(sizeof(struct taurus_element) <= 88,
+    "taurus_element grew beyond 88 bytes — check for accidental field additions");
 #else
-static_assert(sizeof(struct taurus_element) <= 80,
-    "taurus_element grew beyond 80 bytes");
+static_assert(sizeof(struct taurus_element) <= 88,
+    "taurus_element grew beyond 88 bytes");
 #endif
 
 /* ============================================================================

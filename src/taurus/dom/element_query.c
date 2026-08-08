@@ -170,6 +170,11 @@ TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* 
     return attr->value;
 }
 
+TAURUS_API int taurus_element_has_attribute(TaurusElement elem, const char* name) {
+    if (!elem || !name) return 0;
+    return taurus_element_get_attribute_by_name(elem, name) != NULL;
+}
+
 /**
  * Get attribute value as integer (Public API)
  */
@@ -840,26 +845,16 @@ TAURUS_API const char* taurus_namespace_prefix(TaurusNamespace ns) {
 }
 
 /**
- * Resolve namespace prefix with inheritance
- * Walks up the tree to find an element with matching prefix.
- */
+ * Resolve namespace prefix with inheritance.
+ * Issue #222: previously this only checked the element's OWN prefix
+ * field (e.g. "foo" in <foo:child>) and returned the element's
+ * namespace_uri — which was rarely what callers wanted and ignored
+ * the xmlns:prefix declarations entirely. Now delegates to
+ * taurus_element_lookup_namespace which walks the element's
+ * namespace-declaration list and recurses up the tree. */
 TAURUS_API const char* taurus_element_namespace_for_prefix(TaurusElement elem, const char* prefix) {
     if (!elem) return NULL;
-
-    /* Check this element's prefix */
-    const char* elem_prefix = taurus_element_get_prefix(elem);
-    if (elem_prefix && prefix && strcmp(elem_prefix, prefix) == 0) {
-        /* Prefix matches, return this element's namespace URI */
-        return taurus_element_get_namespace_uri(elem);
-    }
-
-    /* Not found, check parent using compact accessor */
-    TaurusElement parent = taurus_element_get_parent(elem);
-    if (parent) {
-        return taurus_element_namespace_for_prefix(parent, prefix);
-    }
-
-    return NULL;
+    return taurus_element_lookup_namespace(elem, prefix);
 }
 
 
