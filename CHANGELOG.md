@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.6.0] - Y-08-08
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.14] - 2026-08-08
 
 ### Fixed — namespace read API (#222), node line tracking (#223)
