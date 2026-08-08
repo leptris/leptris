@@ -1,13 +1,25 @@
 ## [Unreleased]
 
-## [0.5.8] - Y-08-08
+## [0.5.8] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — flat parser lookup tables (pugixml technique)
 
-### Changed
+Replaced per-byte comparison chains (6 comparisons per name byte)
+with 256-byte lookup table accesses (1 lookup per byte). Also
+replaced the byte-by-byte text scanning loop with libc memchr
+(vectorized on most platforms).
 
-- (describe changes here)
+Parse-only cost for 5 KB doc: 39 µs -> 35 µs (11% faster).
+
+Cumulative optimizations since session start:
+
+| Optimization                  | Parse+promote | Parse-only |
+|-------------------------------|---------------|------------|
+| Original                      | 78 µs         | 53 µs      |
+| + wire_child inline           | 71 µs         |            |
+| + bulk element alloc          | 66 µs         |            |
+| + zero-copy names (NUL-term)  | 60 µs         |            |
+| + lookup tables + memchr      |               | **35 µs**  |
 
 
 ## [0.5.7] - 2026-08-08
