@@ -219,6 +219,24 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
         if (!mapping) return -1;
     }
 
+    /* TODO 146 Phase 4a: bulk-allocate element nodes in one
+     * pool_alloc + memset. Saves N-1 function calls and N-1
+     * memset invocations for the element type (the most common).
+     * Text/comment/cdata/pi stay per-element — they're rarer and
+     * the savings are marginal. */
+    size_t n_elem = 0;
+    for (size_t i = 0; i < flat->node_count; i++) {
+        if ((FlatNodeType)flat->nodes[i].type == FLAT_NODE_ELEMENT) n_elem++;
+    }
+    TaurusElement elem_block = NULL;
+    size_t elem_idx = 0;
+    if (n_elem > 0) {
+        elem_block = (TaurusElement)taurus_pool_alloc(
+            pool, n_elem * sizeof(struct taurus_element));
+        if (!elem_block) { free(mapping); return -1; }
+        memset(elem_block, 0, n_elem * sizeof(struct taurus_element));
+    }
+
     TaurusElement root_elem = NULL;
     /* Doc-level PI list (PIs that appeared before the root element).
      * The legacy parser stores these in doc->pis; promote must do
@@ -247,8 +265,13 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 } else {
                     name_view = taurus_sv_from_ptr(name_start, name_len);
                 }
-                TaurusElement elem = taurus_element_create_with_view(name_view, pool);
-                if (!elem) { free(mapping); return -1; }
+                /* Phase 4a: take from pre-allocated block instead of
+                 * calling taurus_element_create_with_view. The block
+                 * was bulk-allocated and zeroed above. */
+                TaurusElement elem = &elem_block[elem_idx++];
+                elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
+                elem->name = taurus_sv_to_cstr_pooled(&name_view, pool);
+                if (!elem->name) { free(mapping); return -1; }
                 elem->document = doc;
                 if (!taurus_sv_is_empty(&prefix_view)) {
                     elem->prefix = taurus_sv_to_cstr_pooled(&prefix_view, pool);
