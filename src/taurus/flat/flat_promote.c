@@ -318,6 +318,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                  * was bulk-allocated and zeroed above. */
                 TaurusElement elem = &elem_block[elem_idx++];
                 elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
+                elem->base.line = fn->line;
                 /* Zero-copy name: points directly into xml_buffer
                  * (already NUL-terminated above). No pool_strdup,
                  * no hash interning. */
@@ -359,6 +360,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 TaurusTextNode* text = taurus_text_create_borrowed(
                     xml_buffer + off, len, pool);
                 if (!text) { free(mapping); return -1; }
+                text->base.line = fn->line;
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
@@ -375,6 +377,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 TaurusCommentNode* comment = taurus_comment_create(
                     xml_buffer + off, len, pool);
                 if (!comment) { free(mapping); return -1; }
+                comment->base.line = fn->line;
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
@@ -391,6 +394,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 TaurusCDATANode* cdata = taurus_cdata_create(
                     xml_buffer + off, len, pool);
                 if (!cdata) { free(mapping); return -1; }
+                cdata->base.line = fn->line;
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =
@@ -408,6 +412,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                     xml_buffer + fn->name_offset, fn->name_len,
                     xml_buffer + data_off, data_len, pool);
                 if (!pi) { free(mapping); return -1; }
+                pi->base.line = fn->line;
 
                 if (fn->parent != FLAT_INDEX_NULL) {
                     TaurusElement parent =

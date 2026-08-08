@@ -113,6 +113,7 @@ uint32_t flat_doc_append_node(FlatDoc* doc, FlatNodeType type,
     n->attr_start   = FLAT_INDEX_NULL;
     n->attr_count   = 0;
     n->depth        = 0;
+    n->line         = 0;
     doc->node_count++;
     return idx;
 }
