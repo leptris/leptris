@@ -52,31 +52,60 @@ typedef struct {
  * Inline character classification — same conventions as parser_new.c
  * ============================================================================ */
 
+/* Lookup tables for character classification (pugixml technique).
+ *
+ * Replaces 6 per-byte comparisons with a single array lookup. The
+ * tables stay in L1 cache — they're only 256 bytes each.
+ *
+ * For XML name chars: a-z, A-Z, 0-9, '_', ':', '-', '.'
+ * For XML name start: a-z, A-Z, '_', ':'
+ * For whitespace: ' ', '\t', '\n', '\r' */
+static const uint8_t fp_name_char_lut[256] = {
+    ['a']=1,['b']=1,['c']=1,['d']=1,['e']=1,['f']=1,['g']=1,['h']=1,
+    ['i']=1,['j']=1,['k']=1,['l']=1,['m']=1,['n']=1,['o']=1,['p']=1,
+    ['q']=1,['r']=1,['s']=1,['t']=1,['u']=1,['v']=1,['w']=1,['x']=1,
+    ['y']=1,['z']=1,
+    ['A']=1,['B']=1,['C']=1,['D']=1,['E']=1,['F']=1,['G']=1,['H']=1,
+    ['I']=1,['J']=1,['K']=1,['L']=1,['M']=1,['N']=1,['O']=1,['P']=1,
+    ['Q']=1,['R']=1,['S']=1,['T']=1,['U']=1,['V']=1,['W']=1,['X']=1,
+    ['Y']=1,['Z']=1,
+    ['0']=1,['1']=1,['2']=1,['3']=1,['4']=1,['5']=1,['6']=1,['7']=1,
+    ['8']=1,['9']=1,
+    ['_']=1,[':']=1,['-']=1,['.']=1,
+};
+
+static const uint8_t fp_name_start_lut[256] = {
+    ['a']=1,['b']=1,['c']=1,['d']=1,['e']=1,['f']=1,['g']=1,['h']=1,
+    ['i']=1,['j']=1,['k']=1,['l']=1,['m']=1,['n']=1,['o']=1,['p']=1,
+    ['q']=1,['r']=1,['s']=1,['t']=1,['u']=1,['v']=1,['w']=1,['x']=1,
+    ['y']=1,['z']=1,
+    ['A']=1,['B']=1,['C']=1,['D']=1,['E']=1,['F']=1,['G']=1,['H']=1,
+    ['I']=1,['J']=1,['K']=1,['L']=1,['M']=1,['N']=1,['O']=1,['P']=1,
+    ['Q']=1,['R']=1,['S']=1,['T']=1,['U']=1,['V']=1,['W']=1,['X']=1,
+    ['Y']=1,['Z']=1,
+    ['_']=1,[':']=1,
+};
+
+static const uint8_t fp_ws_lut[256] = {
+    [' ']=1,['\t']=1,['\n']=1,['\r']=1,
+};
+
 static inline int fp_is_ws(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    return fp_ws_lut[(unsigned char)c];
 }
 
 static inline void fp_skip_ws(FlatParser* p) {
-    while (p->pos < p->end && fp_is_ws(*p->pos)) p->pos++;
+    while (p->pos < p->end && fp_ws_lut[(unsigned char)*p->pos]) p->pos++;
 }
 
 static inline int fp_is_name_start(unsigned char c) {
-    if (c < 128) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-               c == '_' || c == ':';
-    }
-    /* UTF-8 multibyte start. Validation deferred — we accept any
-     * byte >= 0x80 as a name char to keep the hot loop branch-free.
-     * The legacy parser is the authority for name validity. */
+    if (c < 128) return fp_name_start_lut[c];
+    /* UTF-8 multibyte start. Validation deferred. */
     return c >= 0xC0;
 }
 
 static inline int fp_is_name_char(unsigned char c) {
-    if (c < 128) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-               (c >= '0' && c <= '9') || c == '_' || c == ':' ||
-               c == '-' || c == '.';
-    }
+    if (c < 128) return fp_name_char_lut[c];
     return c >= 0x80;
 }
 
@@ -489,9 +518,12 @@ FlatDoc* flat_parse(const char* xml, size_t len) {
         }
 
         if (*p.pos != '<') {
-            /* Text content. */
+            /* Text content. Use memchr to find the next '<' —
+             * libc's memchr is often vectorized and processes
+             * 16+ bytes per cycle. */
             const char* text_start = p.pos;
-            while (p.pos < p.end && *p.pos != '<') p.pos++;
+            const char* lt = (const char*)memchr(p.pos, '<', p.end - p.pos);
+            p.pos = lt ? lt : p.end;
             size_t len = p.pos - text_start;
             if (len == 0) continue;
 
