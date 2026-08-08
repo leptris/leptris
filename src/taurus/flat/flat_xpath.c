@@ -100,7 +100,13 @@ int flat_xpath_try_eval(struct taurus_document* doc,
 
     const char* p = skip_ws(expression);
 
-    /* Pattern: count(//name) or count(//*) or count(descendant::name) */
+    /* Pattern: count(//name) or count(//*) or count(descendant::name).
+     *
+     * IMPORTANT (issue #201): after the closing ')', verify the
+     * expression is complete. count(//book) > 0 starts with count(
+     * but is a comparison, not a standalone count() call. We must
+     * NOT match it — the compact XPath path handles comparisons
+     * correctly. */
     if (starts_with(p, "count(")) {
         const char* after_open = p + 6;
         const char* name; size_t name_len; int wildcard;
@@ -109,6 +115,9 @@ int flat_xpath_try_eval(struct taurus_document* doc,
         if (!after_arg) return 0;
         after_arg = skip_ws(after_arg);
         if (*after_arg != ')') return 0;
+        /* Verify nothing follows the ')' — full expression match. */
+        const char* after_close = skip_ws(after_arg + 1);
+        if (*after_close != '\0') return 0;
 
         size_t count;
         if (wildcard) {
@@ -140,6 +149,9 @@ int flat_xpath_try_eval(struct taurus_document* doc,
         if (!after_arg) return 0;
         after_arg = skip_ws(after_arg);
         if (*after_arg != ')') return 0;
+        /* Verify nothing follows the ')' (issue #201). */
+        const char* after_close = skip_ws(after_arg + 1);
+        if (*after_close != '\0') return 0;
 
         int found = 0;
         if (wildcard) {
