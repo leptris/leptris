@@ -1,13 +1,53 @@
 ## [Unreleased]
 
-## [0.6.0] - Y-08-08
+## [0.6.0] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Nokogiri-compat C-API gaps (TODO 148)
 
-### Changed
+Four new public primitives unblock commonly-used Nokogiri methods
+in the Ruby binding:
 
-- (describe changes here)
+- **`taurus_element_copy(src, dest_doc)`** — detached deep copy of
+  an element subtree into a destination document. Backs `Node#dup`,
+  `Element#dup`, in-context fragment parsing, and `Node#replace`
+  with markup strings.
+- **`taurus_document_copy(src)`** — full-document deep copy
+  (tree + XML declaration + document-level PIs). Backs
+  `Document#dup` / `#clone`.
+- **`taurus_node_get_xpath(node)`** — canonical unique XPath
+  string identifying a node. Format matches Nokogiri's
+  `Node#path`: `/{qname}[N]` for elements with same-named
+  siblings, `/text()`, `/comment()`, `/processing-instruction()`
+  for typed leaves. Backs `Node#path`, `#css_path`, `#matches?`.
+- **`taurus_parse_fragment(xml, len, dest_doc, status)`** — parses
+  XML fragments (multiple top-level nodes allowed) into a
+  `#document-fragment` synthetic container element owned by the
+  destination document. Backs `Document#fragment`, `Node#fragment`,
+  `Node#parse`, and string-form `Node#add_child` / `#replace`.
+
+### Added — minor API surface
+
+- **`taurus_element_has_attribute(elem, name)`** — boolean form of
+  the `attribute(name) != NULL` idiom.
+
+### Fixed — flat_promote line tracking (TODO 148 Phase 6)
+
+Closed the v0.5.14 known limitation: `taurus_node_line` returned 0
+for documents that fell through the `flat_parse + flat_promote`
+path. `FlatNode` grew from 28 to 32 bytes; `flat_parser` tracks
+source line via an `fp_advance_line` helper and snapshots it at
+each token; `flat_promote` copies `fn->line` into
+`node->base.line` for every node type.
+
+### Reference docs
+
+Two new TODO docs frame the remaining work in this initiative:
+- **TODO 148** — survey of Nokogiri-compat C-API gaps.
+- **TODO 149** — pugixml architecture study (compact 44-byte
+  node, single arena, computed goto, chartype tables) with
+  concrete phase ordering for closing the perf gap.
+
+567/567 specs pass (was 539 at v0.5.14).
 
 
 ## [0.5.14] - 2026-08-08
