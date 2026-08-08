@@ -175,6 +175,14 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
     if (!taurus_input_has_internal_dtd_subset(xml, len) &&
         !taurus_input_has_entities(xml, len) &&
         g_taurus_max_depth == 0) {
+        /* TODO 147 Phase A: try the single-pass direct parser first.
+         * It produces a TaurusElement tree directly — no FlatDoc
+         * intermediate, no promote pass. Falls back to flat_parse +
+         * lazy promote on failure. */
+        extern struct taurus_document* direct_parse(const char*, size_t);
+        struct taurus_document* doc = direct_parse(xml, len);
+        if (doc) return doc;
+        /* Direct parse failed — try flat_parse + lazy promote. */
         FlatDoc* flat = flat_parse(xml, len);
         if (flat) {
             /* The caller's buffer may be transient — UTF-16/iconv
