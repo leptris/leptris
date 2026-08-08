@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.14] - Y-08-08
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.13] - 2026-08-08
 
 ### Fixed — DOM tree mutation bugs (#213, #216, #217)
