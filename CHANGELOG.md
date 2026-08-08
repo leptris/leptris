@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.9] - Y-08-08
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.8] - 2026-08-08
 
 ### Performance — flat parser lookup tables (pugixml technique)
