@@ -1,13 +1,29 @@
 ## [Unreleased]
 
-## [0.5.11] - Y-08-08
+## [0.5.11] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — breakthrough: parse+promote 78 to 32 µs (59% faster)
 
-### Changed
+Pre-warmed the direct_parse pool with a page sized from estimated
+node count. All per-node allocations (text, comment, attr, namespace
+structs) now hit the bump-pointer fast path.
 
-- (describe changes here)
+The direct parser now produces a complete TaurusElement tree in a
+single pass — no FlatDoc intermediate, no separate promote pass.
+Combined with all prior optimizations:
+
+| Step | parse+promote (5 KB) |
+|------|---------------------:|
+| Session start | 78 µs |
+| + wire_child inline | 71 µs |
+| + bulk element alloc | 66 µs |
+| + zero-copy names | 60 µs |
+| + direct parser | 55 µs |
+| + lookup tables + memchr | 53 µs |
+| + pre-warmed pool | **32 µs** |
+
+Parse + promote is now within 6× of pugixml (~5 µs) on the same
+hardware, down from 16× at session start.
 
 
 ## [0.5.10] - 2026-08-08
