@@ -225,19 +225,24 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     memcpy(buf, xml, len);
     buf[len] = '\0';
 
-    /* 2. Create pool for attrs/non-element nodes/namespaces. */
-    size_t page_size = (len < 4096) ? 4096 : (len < 65536) ? 16384 : 32768;
+    /* 2. Create pool for attrs/non-element nodes/namespaces.
+     * Pre-warm with a large page so ALL per-node allocations hit the
+     * bump-pointer fast path (no page traversal or malloc during parse).
+     * Estimate: each element generates ~3 non-element allocations
+     * (text + attrs), averaging ~60 bytes each. */
+    size_t est_elems = len / 10 + 128;
+    size_t est_pool_bytes = est_elems * 3 * 60;
+    size_t page_size = est_pool_bytes;
+    if (page_size < 4096) page_size = 4096;
+    if (page_size > 131072) page_size = 131072;
     TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
     if (!pool) { free(buf); return NULL; }
     if (len >= 256) {
         pool->string_cache = taurus_hash_table_create(pool, 128);
     }
 
-    /* 3. Estimate element count and bulk-allocate from POOL.
-     * Very conservative: some XML has 1 element per 15-20 bytes
-     * (e.g. <a><b/><c/></a> = 3 elements in 14 bytes). Using
-     * len/10 ensures we rarely overflow the estimate. */
-    size_t est_elems = len / 10 + 128;
+    /* 3. Bulk-allocate element block from POOL. est_elems was
+     * computed above for pool sizing. */
     TaurusElement elem_block = (TaurusElement)taurus_pool_alloc(
         pool, est_elems * sizeof(struct taurus_element));
     if (!elem_block) {
