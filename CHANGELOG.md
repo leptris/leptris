@@ -1,13 +1,28 @@
 ## [Unreleased]
 
-## [0.5.6] - Y-08-08
+## [0.5.6] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — TODO 146 Phase 4a
 
-### Changed
+Bulk element allocation in the flat promote pass. Pre-allocates all
+element nodes in a single `pool_alloc + memset` instead of calling
+`taurus_element_create_with_view` per element.
 
-- (describe changes here)
+| Operation       | Before  | After   | Speedup |
+|-----------------|---------|---------|---------|
+| parse_promote   | 71 µs   | 66 µs   | 7%      |
+| parse_only      | 45 µs   | 41 µs   | 9%      |
+
+The dominant remaining cost is per-element string interning (hash
+table lookup + insert), not pool allocation.
+
+### Architecture — TODO 145 + 146 plan documents
+
+Full design for Phase 4 (mutation without mandatory promote)
+documented in `TODO.fix/146-phase-4-mutation-without-promote.md`.
+Covers three implementation approaches with tradeoffs:
+mutable/growable FlatDoc, mixed tagged-pointer representation, and
+orphan tracking.
 
 
 ## [0.5.5] - 2026-08-08
