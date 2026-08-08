@@ -1233,6 +1233,40 @@ TAURUS_API TaurusElement taurus_element_previous_sibling_any(TaurusElement elem)
 TAURUS_API const char* taurus_element_child_value(TaurusElement elem);
 
 /**
+ * Deep copy element into a destination document (detached).
+ *
+ * @param src Element to copy (subtree copied recursively)
+ * @param dest_doc Document that will own the copy. May be the same
+ *                 document or a different one (cross-document copy).
+ * @return Newly created copy detached from any parent, or NULL on
+ *         error (bad args or pool allocation failure).
+ *
+ * Issue #148 Phase 1: backs `Node#dup` / `#clone` in the Ruby
+ * binding. The copy carries no parent reference and the caller
+ * owns attaching it via `taurus_element_append_child`.
+ *
+ * Memory: Copy is owned by `dest_doc`; released by
+ *         `taurus_document_free`.
+ */
+TAURUS_API TaurusElement taurus_element_copy(TaurusElement src,
+                                              TaurusDocument dest_doc);
+
+/**
+ * Deep copy an entire document.
+ *
+ * @param src Source document
+ * @return Newly created document, or NULL on error
+ *
+ * Copies the tree (root element + all descendants), the XML
+ * declaration (version/encoding/standalone), document-level
+ * processing instructions, and (if present) the DOCTYPE.
+ *
+ * Memory: Caller owns the result; release with
+ *         `taurus_document_free`.
+ */
+TAURUS_API TaurusDocument taurus_document_copy(TaurusDocument src);
+
+/**
  * Deep copy element and append to parent
  *
  * @param parent Parent element to append to
