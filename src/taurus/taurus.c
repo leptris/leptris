@@ -683,6 +683,112 @@ TAURUS_API TaurusDocument taurus_parse_string_inplace(char* xml, size_t length, 
     return doc;
 }
 
+TAURUS_API TaurusElement taurus_parse_fragment(const char* xml,
+                                                size_t length,
+                                                TaurusDocument dest_doc,
+                                                TaurusStatus* status) {
+    if (status) *status = TAURUS_OK;
+    if (!xml || length == 0 || !dest_doc) {
+        if (status) *status = TAURUS_ERROR_NULL_ARG;
+        return NULL;
+    }
+
+    /* Wrap the fragment in a synthetic root so the parser sees a
+     * well-formed single-rooted document. Use a name with characters
+     * that can never appear in real XML names so collisions are
+     * impossible. */
+    static const char frag_open[] = "<__taurus_frag__>";
+    static const char frag_close[] = "</__taurus_frag__>";
+    size_t open_len = sizeof(frag_open) - 1;
+    size_t close_len = sizeof(frag_close) - 1;
+
+    size_t total = open_len + length + close_len;
+    char* wrapped = (char*)malloc(total + 1);
+    if (!wrapped) {
+        if (status) *status = TAURUS_ERROR_MEMORY;
+        return NULL;
+    }
+    memcpy(wrapped, frag_open, open_len);
+    memcpy(wrapped + open_len, xml, length);
+    memcpy(wrapped + open_len + length, frag_close, close_len);
+    wrapped[total] = '\0';
+
+    TaurusStatus parse_st = TAURUS_OK;
+    TaurusDocument tmp_doc = taurus_parse_string(wrapped, total, &parse_st);
+    free(wrapped);
+    if (!tmp_doc) {
+        if (status) *status = parse_st;
+        return NULL;
+    }
+
+    /* Force lazy promotion so we can read the tree. */
+    taurus_document_ensure_promoted(tmp_doc);
+    TaurusElement tmp_root = taurus_document_root(tmp_doc);
+    if (!tmp_root) {
+        taurus_document_free(tmp_doc);
+        if (status) *status = TAURUS_ERROR_PARSE;
+        return NULL;
+    }
+
+    /* Build the synthetic container in dest_doc and move children. */
+    TaurusElement frag = taurus_element_create(dest_doc, "#document-fragment");
+    if (!frag) {
+        taurus_document_free(tmp_doc);
+        if (status) *status = TAURUS_ERROR_MEMORY;
+        return NULL;
+    }
+
+    /* Walk children of tmp_root; copy each into dest_doc via
+     * taurus_element_append_copy on a temp parent, then detach.
+     * (TODO 148 Phase 1 will add taurus_element_copy which makes
+     * this a one-liner; until that lands we use the well-tested
+     * append_copy path.) */
+    TaurusElement tmp_holder = taurus_element_create(dest_doc, "__frag_holder__");
+    if (!tmp_holder) {
+        taurus_document_free(tmp_doc);
+        if (status) *status = TAURUS_ERROR_MEMORY;
+        return NULL;
+    }
+    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(tmp_root));
+    while (child) {
+        TaurusNodeRef next = taurus_node_next_sibling(child);
+        int t = taurus_node_get_type(child);
+        if (t == 0 /* ELEMENT */) {
+            TaurusElement copy = taurus_element_append_copy(tmp_holder,
+                                                             (TaurusElement)child);
+            if (copy) {
+                /* Detach from tmp_holder, attach to frag. */
+                taurus_node_unlink(taurus_element_as_node(copy));
+                taurus_element_append_child(frag, copy);
+            }
+        } else if (t == 1 /* TEXT */) {
+            const char* s = taurus_text_node_get_content(child);
+            TaurusNodeRef n = taurus_text_node_create(dest_doc, s ? s : "");
+            if (n) taurus_element_append_child(frag, (TaurusElement)n);
+        } else if (t == 2 /* COMMENT */) {
+            const char* s = taurus_comment_node_get_content(child);
+            TaurusNodeRef n = taurus_comment_node_create(dest_doc, s ? s : "");
+            if (n) taurus_element_append_child(frag, (TaurusElement)n);
+        } else if (t == 3 /* CDATA */) {
+            const char* s = taurus_cdata_node_get_content(child);
+            TaurusNodeRef n = taurus_cdata_node_create(dest_doc, s ? s : "");
+            if (n) taurus_element_append_child(frag, (TaurusElement)n);
+        } else if (t == 4 /* PI */) {
+            const char* tgt = taurus_pi_node_get_target(child);
+            const char* data = taurus_pi_node_get_data(child);
+            TaurusNodeRef n = taurus_pi_node_create(dest_doc,
+                                                     tgt ? tgt : "",
+                                                     data ? data : "");
+            if (n) taurus_element_append_child(frag, (TaurusElement)n);
+        }
+        child = next;
+    }
+    /* tmp_holder is pool-allocated; taurus_document_free reclaims it. */
+
+    taurus_document_free(tmp_doc);
+    return frag;
+}
+
 
 /**
  * Parse XML with custom options

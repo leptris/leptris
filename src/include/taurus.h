@@ -380,6 +380,36 @@ TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, Ta
 TAURUS_API TaurusDocument taurus_parse_string_inplace(char* xml, size_t length, TaurusStatus* status);
 
 /**
+ * Parse an XML fragment (multiple top-level children allowed) into
+ * a synthetic container element owned by `dest_doc` (TODO 148
+ * Phase 4).
+ *
+ * @param xml Fragment source (NUL-terminated not required; length used)
+ * @param length Byte length of `xml`
+ * @param dest_doc Document that will own the synthetic container
+ *                 and its children. May NOT be NULL.
+ * @param status Output status (may be NULL)
+ * @return Newly created synthetic element named `#document-fragment`,
+ *         or NULL on error. The synthetic has no parent reference;
+ *         caller may attach or discard it.
+ *
+ * The synthetic container's children are the parsed top-level
+ * nodes. Fragment parsing differs from full-document parsing in
+ * that multiple top-level elements are allowed (e.g. `"<a/><b/>"`).
+ *
+ * Backs `Document#fragment` and `Node#fragment` in the Ruby
+ * binding. Caller moves children via `taurus_element_append_child`
+ * (which unlinks from the synthetic, see #217).
+ *
+ * Memory: Synthetic + children are owned by `dest_doc`; released
+ *         by `taurus_document_free`.
+ */
+TAURUS_API TaurusElement taurus_parse_fragment(const char* xml,
+                                                size_t length,
+                                                TaurusDocument dest_doc,
+                                                TaurusStatus* status);
+
+/**
  * Parse XML string with automatic encoding detection and conversion
  *
  * This function automatically detects the encoding from:
