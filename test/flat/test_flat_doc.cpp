@@ -33,7 +33,7 @@ TEST(FlatDoc, StructSizeContract) {
     // If either of these breaks, the _Static_assert in flat_doc.h
     // will already have failed the build — this test documents the
     // invariant for the spec suite.
-    EXPECT_EQ(sizeof(FlatNode), 28u);
+    EXPECT_EQ(sizeof(FlatNode), 32u);
     EXPECT_EQ(sizeof(FlatAttr), 12u);
 }
 

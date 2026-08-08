@@ -36,6 +36,10 @@ typedef struct {
     uint16_t encoding_len;
     int saw_xml_decl;
     int has_bom;
+    /* Source line counter (1-based). Issue #223: bumped as the
+     * scanner crosses '\n' bytes; frozen into each FlatNode at
+     * creation so flat_promote can copy it to TaurusNode.base.line. */
+    uint32_t line;
 
     /* Open-element stack. The N-th entry is the FlatDoc node index
      * of the currently-open element at depth N. depth 0 = root. */
@@ -95,7 +99,19 @@ static inline int fp_is_ws(char c) {
 }
 
 static inline void fp_skip_ws(FlatParser* p) {
-    while (p->pos < p->end && fp_ws_lut[(unsigned char)*p->pos]) p->pos++;
+    while (p->pos < p->end && fp_ws_lut[(unsigned char)*p->pos]) {
+        if (*p->pos == '\n') p->line++;
+        p->pos++;
+    }
+}
+
+/* Tally '\n' bytes in [from, to) and fold into p->line. Used after
+ * bulk scans (memchr for text, multi-char literal matches). */
+static inline void fp_advance_line(FlatParser* p,
+                                    const char* from, const char* to) {
+    for (const char* c = from; c < to; c++) {
+        if (*c == '\n') p->line++;
+    }
 }
 
 static inline int fp_is_name_start(unsigned char c) {
@@ -178,11 +194,12 @@ static int fp_scan_quoted(FlatParser* p, uint32_t* out_offset, uint16_t* out_len
 
 static int fp_scan_comment(FlatParser* p, FlatDoc* doc) {
     /* Assumes p->pos is at the `!` of `<!--`. */
-    /* Verify the `<!--` prefix. */
     if (p->end - p->pos < 4 ||
         p->pos[1] != '!' || p->pos[2] != '-' || p->pos[3] != '-') {
         return -1;
     }
+    uint32_t markup_line = p->line;
+    const char* markup_start = p->pos;
     p->pos += 4;
     const char* start = p->pos;
     /* Find `-->`. */
@@ -193,11 +210,14 @@ static int fp_scan_comment(FlatParser* p, FlatDoc* doc) {
             uint32_t idx = flat_doc_append_node(doc, FLAT_NODE_COMMENT, 0, 0);
             if (idx == FLAT_INDEX_NULL) return -1;
             flat_node_set_text(&doc->nodes[idx], text_offset, text_len);
+            doc->nodes[idx].line = markup_line;
             p->pos += 3;
+            fp_advance_line(p, markup_start, p->pos);
             return (int)idx;
         }
         p->pos++;
     }
+    fp_advance_line(p, markup_start, p->pos);
     return -1;  /* unterminated comment */
 }
 
@@ -208,6 +228,8 @@ static int fp_scan_cdata(FlatParser* p, FlatDoc* doc) {
         memcmp(p->pos + 1, kCdataMarker, sizeof(kCdataMarker) - 1) != 0) {
         return -1;
     }
+    uint32_t markup_line = p->line;
+    const char* markup_start = p->pos;
     p->pos += sizeof(kCdataMarker);  /* past `<![CDATA[` */
     const char* start = p->pos;
     /* Find `]]>`. */
@@ -218,17 +240,22 @@ static int fp_scan_cdata(FlatParser* p, FlatDoc* doc) {
             uint32_t idx = flat_doc_append_node(doc, FLAT_NODE_CDATA, 0, 0);
             if (idx == FLAT_INDEX_NULL) return -1;
             flat_node_set_text(&doc->nodes[idx], text_offset, text_len);
+            doc->nodes[idx].line = markup_line;
             p->pos += 3;
+            fp_advance_line(p, markup_start, p->pos);
             return (int)idx;
         }
         p->pos++;
     }
+    fp_advance_line(p, markup_start, p->pos);
     return -1;
 }
 
 static int fp_scan_pi(FlatParser* p, FlatDoc* doc) {
     /* Assumes p->pos is at the `?` of `<?`. */
     if (p->pos[1] != '?') return -1;
+    uint32_t pi_line = p->line;
+    const char* pi_start = p->pos;
     p->pos += 2;
     /* PI target = XML name. */
     uint32_t target_offset;
@@ -289,6 +316,7 @@ static int fp_scan_pi(FlatParser* p, FlatDoc* doc) {
         p->end = saved_end;
         p->saw_xml_decl = 1;
         p->pos += 2;  /* skip `?>` */
+        fp_advance_line(p, pi_start, p->pos);
         return -2;  /* sentinel: handled, no node */
     }
 
@@ -298,7 +326,9 @@ static int fp_scan_pi(FlatParser* p, FlatDoc* doc) {
                                          target_offset, target_len);
     if (idx == FLAT_INDEX_NULL) return -1;
     flat_node_set_pi_data(&doc->nodes[idx], data_offset, data_len);
+    doc->nodes[idx].line = pi_line;
     p->pos += 2;  /* skip `?>` */
+    fp_advance_line(p, pi_start, p->pos);
     return (int)idx;
 }
 
@@ -343,6 +373,9 @@ static int fp_skip_doctype(FlatParser* p) {
 
 static int fp_scan_element_start(FlatParser* p, FlatDoc* doc) {
     if (p->pos >= p->end || *p->pos != '<') return -1;
+    /* Snapshot the line where `<` appeared. Issue #223. */
+    uint32_t elem_line = p->line;
+    const char* elem_start = p->pos;
     p->pos++;
 
     uint32_t name_offset;
@@ -399,6 +432,10 @@ static int fp_scan_element_start(FlatParser* p, FlatDoc* doc) {
     flat_node_set_attrs(&doc->nodes[elem_idx], attr_start,
                          (uint16_t)attrs_appended);
     flat_node_set_depth(&doc->nodes[elem_idx], (uint16_t)p->depth);
+    doc->nodes[elem_idx].line = elem_line;
+    /* Fold any newlines crossed while scanning the open tag into
+     * p->line so the next sibling/child starts on the right line. */
+    fp_advance_line(p, elem_start, p->pos);
 
     /* Link into parent. */
     if (p->depth > 0) {
@@ -497,6 +534,7 @@ FlatDoc* flat_parse(const char* xml, size_t len) {
     p.saw_xml_decl = 0;
     p.has_bom = 0;
     p.depth = 0;
+    p.line = 1;
 
     /* BOM. */
     if (len >= 3 &&
@@ -525,6 +563,11 @@ FlatDoc* flat_parse(const char* xml, size_t len) {
             const char* lt = (const char*)memchr(p.pos, '<', p.end - p.pos);
             p.pos = lt ? lt : p.end;
             size_t len = p.pos - text_start;
+            /* Snapshot the line where the text started; advance the
+             * counter across the consumed range so the NEXT token
+             * starts on the correct line. Issue #223. */
+            uint32_t text_line = p.line;
+            fp_advance_line(&p, text_start, p.pos);
             if (len == 0) continue;
 
             /* Text at the document level (no open element) is only
@@ -543,6 +586,7 @@ FlatDoc* flat_parse(const char* xml, size_t len) {
             flat_node_set_text(&doc->nodes[idx],
                                 (uint32_t)(text_start - p.xml_start),
                                 (uint32_t)len);
+            doc->nodes[idx].line = text_line;
             fp_link_child(&p, doc, idx);
             continue;
         }

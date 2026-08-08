@@ -107,15 +107,21 @@ typedef struct flat_node {
     uint32_t attr_start;        /* Index into attrs[] (or FLAT_INDEX_NULL) */
     uint16_t attr_count;        /* Number of attributes on this element */
     uint16_t depth;             /* Nesting depth (0 = root element) */
+
+    /* Source line (1-based, 0 = unknown). Issue #223: tracked by
+     * flat_parser and copied to TaurusNode.base.line by flat_promote
+     * so taurus_node_line returns the right value on the entity/DTD
+     * fallback path. */
+    uint32_t line;
 } FlatNode;
 
 /* Static size guarantee — the promote pass and the parser both rely
- * on the exact 28-byte layout for memcpy-friendly traversal. */
+ * on the exact 32-byte layout for memcpy-friendly traversal. */
 /* cppcheck-suppress unusedFunction */
 #ifdef __cplusplus
-static_assert(sizeof(FlatNode) == 28, "FlatNode must be 28 bytes");
+static_assert(sizeof(FlatNode) == 32, "FlatNode must be 32 bytes");
 #else
-_Static_assert(sizeof(FlatNode) == 28, "FlatNode must be 28 bytes");
+_Static_assert(sizeof(FlatNode) == 32, "FlatNode must be 32 bytes");
 #endif
 
 /* FlatAttr — one attribute, 12 bytes.
