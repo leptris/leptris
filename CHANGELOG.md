@@ -1,13 +1,26 @@
 ## [Unreleased]
 
-## [0.5.13] - Y-08-08
+## [0.5.13] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed — DOM tree mutation bugs (#213, #216, #217)
 
-### Changed
-
-- (describe changes here)
+- **#213**: `taurus_element_child_count` / `taurus_node_child_count`
+  always returned 0 on parsed documents because `direct_parse` and
+  `flat_promote` (the parse hot paths) never incremented
+  `elem->child_count`. Counter is now maintained for element children
+  in both parsers, matching the man-page contract.
+- **#216**: `taurus_element_insert_after` / `_before` silently rejected
+  any non-element `new_node` (text/comment/cdata/pi). Now supports all
+  child node types via type-dispatched parent and sibling setters.
+- **#217**: `taurus_element_append_child_internal` (and the related
+  prepend/insert paths) spliced the child into the new parent without
+  unlinking it from its current parent, corrupting both trees. Now
+  unlinks via `taurus_node_unlink` before re-parenting.
+- Latent crash surfaced by the #217 fix: `taurus_comment_create`,
+  `taurus_cdata_create`, `taurus_pi_create`, and `taurus_text_create`
+  did not initialize `parent_off`. Pool reuse left stale values that
+  decoded into wild pointers. All five creators now initialize
+  `parent_off = 0` alongside `next_sibling_off`.
 
 
 ## [0.5.12] - 2026-08-08
