@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.5] - Y-08-08
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.4] - 2026-08-07
 
 ### Added — Flat-as-tree architecture (TODO 145)
