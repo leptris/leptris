@@ -116,7 +116,7 @@ static char* flat_promote_strdup(const char* xml_buffer,
 static int flat_promote_attrs(FlatDoc* flat, TaurusElement elem,
                                uint32_t start, uint16_t count,
                                TaurusMemoryPool* pool,
-                               const char* xml_buffer) {
+                               char* xml_buffer) {
     for (uint16_t i = 0; i < count; i++) {
         const FlatAttr* a = &flat->attrs[start + i];
         TaurusStringView name_view = taurus_sv_from_ptr(
@@ -129,32 +129,34 @@ static int flat_promote_attrs(FlatDoc* flat, TaurusElement elem,
             name_view.data[0] == 'x' && name_view.data[1] == 'm' &&
             name_view.data[2] == 'l' && name_view.data[3] == 'n' &&
             name_view.data[4] == 's') {
-            /* Either "xmlns" (default ns) or "xmlns:prefix". */
+            /* Either "xmlns" (default ns) or "xmlns:prefix".
+             * Zero-copy: pointers into the already-NUL-terminated
+             * xml_buffer. No pool_strdup needed. */
             const char* prefix = NULL;
             if (name_view.length > 5) {
-                /* Skip "xmlns:" — record the prefix portion. */
+                /* "xmlns:foo" — prefix is "foo" at offset +6.
+                 * NUL-terminated at name_offset + name_len by the
+                 * pre-pass. For xmlns: declarations, also NUL-terminate
+                 * at the ':' position so prefix is standalone. */
+                xml_buffer[a->name_offset + 5] = '\0';
                 prefix = xml_buffer + a->name_offset + 6;
-                size_t prefix_len = name_view.length - 6;
-                /* Pool-copy the prefix so it's NUL-terminated. */
-                char* pbuf = (char*)taurus_pool_alloc(pool, prefix_len + 1);
-                if (!pbuf) return -1;
-                memcpy(pbuf, prefix, prefix_len);
-                pbuf[prefix_len] = '\0';
-                prefix = pbuf;
             }
-            /* Pool-copy the URI. */
-            char* uri_buf = (char*)taurus_pool_alloc(pool, value_view.length + 1);
-            if (!uri_buf) return -1;
-            memcpy(uri_buf, value_view.data, value_view.length);
-            uri_buf[value_view.length] = '\0';
+            const char* uri = xml_buffer + a->value_offset;
 
             struct taurus_namespace* ns =
-                taurus_namespace_new_pooled(prefix, uri_buf, pool);
-            if (ns) taurus_element_add_namespace(elem, ns);
+                (struct taurus_namespace*)taurus_pool_alloc(
+                    pool, sizeof(struct taurus_namespace));
+            if (!ns) return -1;
+            ns->prefix = (char*)prefix;
+            ns->uri = (char*)uri;
+            ns->next = NULL;
+            taurus_element_add_namespace(elem, ns);
             continue;
         }
 
-        /* Regular attribute. */
+        /* Regular attribute. StringView data is already NUL-terminated
+         * from the pre-pass; lazy materialization in the accessor will
+         * use it directly without pool_strdup. */
         if (taurus_element_add_attribute(elem, name_view, value_view, pool) != 0) {
             return -1;
         }
@@ -182,7 +184,47 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
     if (!xml_buffer_owned) return -1;
     memcpy(xml_buffer_owned, flat->xml_buffer, flat->xml_len);
     xml_buffer_owned[flat->xml_len] = '\0';
-    const char* xml_buffer = xml_buffer_owned;
+    char* xml_buffer = xml_buffer_owned;
+
+    /* pugixml trick: NUL-terminate every name and value in-place in
+     * the buffer copy. Then element/attr names become zero-copy
+     * pointers — no pool_strdup, no string interning hash lookups.
+     *
+     * Safety: each name/value in XML is followed by a delimiter byte
+     * (space, '>', '=', quote, etc.) that's never part of any name.
+     * Writing NUL there is safe because the flat parser has already
+     * extracted all offsets. */
+    for (size_t i = 0; i < flat->node_count; i++) {
+        const FlatNode* fn = &flat->nodes[i];
+        FlatNodeType ft = (FlatNodeType)fn->type;
+        if (fn->name_len > 0 && fn->name_offset + fn->name_len < flat->xml_len) {
+            xml_buffer_owned[fn->name_offset + fn->name_len] = '\0';
+        }
+        if (ft == FLAT_NODE_TEXT || ft == FLAT_NODE_COMMENT ||
+            ft == FLAT_NODE_CDATA) {
+            uint32_t to = flat_node_text_offset(fn);
+            uint32_t tl = flat_node_text_len(fn);
+            if (tl > 0 && to + tl < flat->xml_len) {
+                xml_buffer_owned[to + tl] = '\0';
+            }
+        }
+        if (ft == FLAT_NODE_PI) {
+            uint32_t dl = flat_node_pi_data_len(fn);
+            uint32_t dof = flat_node_pi_data_offset(fn);
+            if (dl > 0 && dof + dl < flat->xml_len) {
+                xml_buffer_owned[dof + dl] = '\0';
+            }
+        }
+    }
+    for (size_t i = 0; i < flat->attr_count; i++) {
+        const FlatAttr* a = &flat->attrs[i];
+        if (a->name_len > 0 && a->name_offset + a->name_len < flat->xml_len) {
+            xml_buffer_owned[a->name_offset + a->name_len] = '\0';
+        }
+        if (a->value_len > 0 && a->value_offset + a->value_len < flat->xml_len) {
+            xml_buffer_owned[a->value_offset + a->value_len] = '\0';
+        }
+    }
 
     /* Pool page size heuristic, matching the legacy parser. */
     size_t page_size;
@@ -270,12 +312,20 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                  * was bulk-allocated and zeroed above. */
                 TaurusElement elem = &elem_block[elem_idx++];
                 elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
-                elem->name = taurus_sv_to_cstr_pooled(&name_view, pool);
+                /* Zero-copy name: points directly into xml_buffer
+                 * (already NUL-terminated above). No pool_strdup,
+                 * no hash interning. */
+                elem->name = (char*)(xml_buffer + fn->name_offset);
+                /* If name has a colon, split into prefix + local. */
+                if (colon && colon > name_start) {
+                    /* NUL-terminate at the colon position. */
+                    xml_buffer_owned[fn->name_offset +
+                        (size_t)(colon - name_start)] = '\0';
+                    elem->prefix = (char*)(name_start);
+                    elem->name = (char*)(colon + 1);
+                }
                 if (!elem->name) { free(mapping); return -1; }
                 elem->document = doc;
-                if (!taurus_sv_is_empty(&prefix_view)) {
-                    elem->prefix = taurus_sv_to_cstr_pooled(&prefix_view, pool);
-                }
 
                 if (flat_promote_attrs(flat, elem, fn->attr_start,
                                         fn->attr_count, pool, xml_buffer) != 0) {
