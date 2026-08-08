@@ -1,13 +1,36 @@
 ## [Unreleased]
 
-## [0.5.9] - Y-08-08
+## [0.5.9] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Single-pass direct parser (TODO 147 Phase A)
 
-### Changed
+New `direct_parse` function: parses XML directly into TaurusElement
+records in a single pass — no FlatDoc intermediate, no promote pass.
+`taurus_parse` tries direct_parse first, falling back to flat_parse +
+lazy promote on failure.
 
-- (describe changes here)
+Key pugixml techniques applied:
+- Bulk element allocation from pool (single alloc for all elements)
+- Zero-copy names via in-place NUL termination
+- Direct compact-pointer edge offsets via pointer arithmetic
+- Lookup tables for char classification
+- memchr for text scanning
+
+### Performance — flat parser lookup tables (from v0.5.8)
+
+Replaced per-byte comparison chains with 256-byte lookup table
+accesses. Parse-only: 53 µs → 35 µs (34% faster since session start).
+
+### Cumulative parse+promote improvement
+
+| Optimization                  | 5 KB parse+promote |
+|-------------------------------|-------------------:|
+| Original (session start)      | 78 µs              |
+| + wire_child inline           | 71 µs              |
+| + bulk element alloc          | 66 µs              |
+| + zero-copy names (NUL-term)  | 60 µs              |
+| + lookup tables + memchr      | 56 µs              |
+| + direct parser               | ~55 µs             |
 
 
 ## [0.5.8] - 2026-08-08
