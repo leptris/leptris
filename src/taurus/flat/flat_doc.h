@@ -112,7 +112,11 @@ typedef struct flat_node {
 /* Static size guarantee — the promote pass and the parser both rely
  * on the exact 28-byte layout for memcpy-friendly traversal. */
 /* cppcheck-suppress unusedFunction */
+#ifdef __cplusplus
+static_assert(sizeof(FlatNode) == 28, "FlatNode must be 28 bytes");
+#else
 _Static_assert(sizeof(FlatNode) == 28, "FlatNode must be 28 bytes");
+#endif
 
 /* FlatAttr — one attribute, 12 bytes.
  *
@@ -134,7 +138,11 @@ typedef struct flat_attr {
     uint16_t value_len;
 } FlatAttr;
 
+#ifdef __cplusplus
+static_assert(sizeof(FlatAttr) == 12, "FlatAttr must be 12 bytes");
+#else
 _Static_assert(sizeof(FlatAttr) == 12, "FlatAttr must be 12 bytes");
+#endif
 
 /* FlatDoc — the flat document. Owns node/attr arrays. Borrows or
  * owns the XML buffer (see xml_buffer_owned). */
