@@ -1,13 +1,29 @@
 ## [Unreleased]
 
-## [0.5.12] - Y-08-08
+## [0.5.12] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — direct parser attribute fast path
 
-### Changed
+Bulk-allocated the attribute block upfront from the pool so each
+attribute takes the next slot off the block (bump pointer, no
+per-attr pool_alloc). Names and values are zero-copied — names
+NUL-terminated in-place after `=` is consumed, values already
+NUL-terminated at the closing quote. Skips name interning, value
+pool_strdup, and the per-attr entity memchr.
 
-- (describe changes here)
+Medium (~24 KB, ~2300 attrs): 166 µs → 140 µs (15% faster)
+Medium (~5 KB, ~50 attrs):   37 µs → 34 µs (8% faster)
+
+### Fixed
+
+- `taurus_document_encoding` and `taurus_document_xml_version`
+  returned NULL on documents produced via the direct-parse fast
+  path. The direct parser now scans the XML declaration for
+  version/encoding/standalone (previously discarded after noting
+  the declaration was present).
+- `_Static_assert` in `flat_doc.h` was not C++-compatible and
+  broke the Linux ASAN build (the test_flat_* tests are C++).
+  Wrapped in `#ifdef __cplusplus`.
 
 
 ## [0.5.11] - 2026-08-08
