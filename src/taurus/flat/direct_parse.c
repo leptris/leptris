@@ -553,8 +553,44 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             /* XML declaration handling. */
             if (strcmp(target_start, "xml") == 0) {
                 p.had_declaration = 1;
-                /* Parse version/encoding/standandalone from data. */
-                /* For simplicity, just note we saw it. */
+                /* Parse version/encoding/standalone from data. Values
+                 * are NUL-terminated in-place by overwriting the
+                 * closing quote; the final heap-strdup is required
+                 * because taurus_document_free calls TAURUS_FREE on
+                 * these fields. */
+                char* scan = data_start;
+                while (*scan) {
+                    while (*scan == ' ' || *scan == '\t' ||
+                           *scan == '\n' || *scan == '\r') scan++;
+                    if (!*scan) break;
+                    char* pname = scan;
+                    while (*scan && *scan != '=' && *scan != ' ' &&
+                           *scan != '\t' && *scan != '\n' && *scan != '\r')
+                        scan++;
+                    size_t pname_len = scan - pname;
+                    while (*scan == ' ' || *scan == '\t' ||
+                           *scan == '\n' || *scan == '\r') scan++;
+                    if (*scan != '=') break;
+                    scan++;
+                    while (*scan == ' ' || *scan == '\t' ||
+                           *scan == '\n' || *scan == '\r') scan++;
+                    if (*scan != '"' && *scan != '\'') break;
+                    char q = *scan++;
+                    char* pval = scan;
+                    while (*scan && *scan != q) scan++;
+                    if (*scan != q) break;
+                    *scan = '\0';
+                    scan++;
+
+                    if (pname_len == 7 && memcmp(pname, "version", 7) == 0) {
+                        p.version = pval;
+                    } else if (pname_len == 8 && memcmp(pname, "encoding", 8) == 0) {
+                        p.encoding = pval;
+                    } else if (pname_len == 10 && memcmp(pname, "standalone", 10) == 0) {
+                        if (strcmp(pval, "yes") == 0) p.standalone = 1;
+                        else if (strcmp(pval, "no") == 0) p.standalone = 0;
+                    }
+                }
                 continue;
             }
 
@@ -590,7 +626,17 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     doc->flat_promoted = 1; /* No FlatDoc, tree is ready */
     doc->pis = p.pis_head;
     doc->had_declaration = p.had_declaration;
-    doc->standalone = -1;
+    doc->standalone = p.standalone;
+    /* encoding and xml_version are borrowed pointers into doc->xml_buffer.
+     * taurus_document_free calls TAURUS_FREE on them, so we must heap-strdup. */
+    if (p.encoding) {
+        doc->encoding = strdup(p.encoding);
+        if (!doc->encoding) goto fail;
+    }
+    if (p.version) {
+        doc->xml_version = strdup(p.version);
+        if (!doc->xml_version) goto fail;
+    }
 
     /* 7. Freeze tree (match legacy parser behavior). */
     taurus_document_freeze_tree(doc);
