@@ -1,13 +1,35 @@
 ## [Unreleased]
 
-## [0.5.5] - Y-08-08
+## [0.5.5] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Flat XPath (TODO 145 Phase 3)
 
-### Changed
+`taurus_xpath_eval` now tries a flat fast-path dispatcher before
+falling back to the compact-tree XPath evaluation. For primitive-
+returning query patterns on documents that haven't been promoted,
+the dispatcher walks FlatDoc directly and skips promote entirely.
 
-- (describe changes here)
+**Supported patterns:**
+- `count(//name)` — flat count by element name
+- `count(//*)` — flat count all elements
+- `count(descendant::name)` / `count(descendant-or-self::name)`
+- `boolean(//name)` — flat exists check
+
+Complex expressions (predicates, multi-step paths, nodeset-returning
+queries) fall back to the compact path. The dispatcher returns
+"not handled" for anything it can't pattern-match, so existing
+XPath semantics are preserved.
+
+For the common "parse and count elements" workload, the flat path
+matches the cost of `flat_fast_count_elements_named` (~12 µs on a
+1 KB doc vs ~22 µs via the compact path).
+
+### Fixed
+
+- **#194**: exclusive C14N emitted duplicate `xmlns:` declarations
+  when a prefix was both visibly used AND in the caller's
+  inclusive namespace list. The output was invalid XML. Fixed by
+  deduplicating the emit list before serializing.
 
 
 ## [0.5.4] - 2026-08-07
