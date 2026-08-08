@@ -1316,4 +1316,115 @@ TaurusElement taurus_element_append_copy_bulk(TaurusElement parent, TaurusElemen
     return copy;
 }
 
+/* Issue #148 Phase 1: detached deep copy.
+ *
+ * Extracts the "copy subtree into dest pool" core from
+ * taurus_element_append_copy_bulk. Returns a copy with no parent
+ * reference; the caller is responsible for attaching it.
+ *
+ * The subtree is copied recursively (elements, text, comment,
+ * cdata, pi, attributes, namespace declarations). All allocations
+ * come from dest_doc->pool so a single taurus_document_free
+ * releases them. */
+TAURUS_API TaurusElement taurus_element_copy(TaurusElement src,
+                                              TaurusDocument dest_doc) {
+    if (!src || !dest_doc) return NULL;
+    if (!dest_doc->pool) return NULL;
+
+    /* Trigger lazy promote on dest so the pool is initialized. */
+    taurus_document_ensure_promoted(dest_doc);
+
+    /* Strategy: build the copy in a temporary root, then unlink.
+     * The temporary is itself a pool-allocated element we never
+     * expose; taurus_document_free will reclaim it. The
+     * taurus_element_append_copy path is the well-tested deep-copy
+     * route (handles cross-doc name/attr pool duplication, namespace
+     * declarations, mixed-content children). Using it directly
+     * avoids re-implementing the recursive walk. */
+    TaurusElement tmp_parent = taurus_element_create(dest_doc, "__copy_root__");
+    if (!tmp_parent) return NULL;
+
+    TaurusElement copy = taurus_element_append_copy(tmp_parent, src);
+    if (!copy) {
+        /* Pool owns tmp_parent; nothing to free here. */
+        return NULL;
+    }
+
+    /* Detach from tmp_parent so the caller owns the result. */
+    taurus_node_unlink(taurus_element_as_node(copy));
+    return copy;
+}
+
+
+/* Full-document deep copy (Issue #148 Phase 1).
+ *
+ * Builds a fresh TaurusDocument then uses taurus_element_copy to
+ * duplicate the root. Carries the XML declaration
+ * (version/encoding/standalone) and the document-level PIs.
+ */
+TAURUS_API TaurusDocument taurus_document_copy(TaurusDocument src) {
+    if (!src) return NULL;
+
+    /* Force lazy promotion so src->new_dom_root is populated. */
+    taurus_document_ensure_promoted(src);
+
+    TaurusDocument dest = (TaurusDocument)calloc(1, sizeof(*dest));
+    if (!dest) return NULL;
+    dest->strict_mode = src->strict_mode;
+    dest->ref_count = 1;
+
+    /* Pool — sized to source pool's used bytes for one-shot alloc. */
+    size_t page_size = 4096;
+    if (src->pool) {
+        /* Estimate: same size as source's current page. */
+        page_size = src->pool->page_size;
+    }
+    dest->pool = taurus_pool_create_with_page_size(page_size);
+    if (!dest->pool) { free(dest); return NULL; }
+    dest->page_base = taurus_pool_get_base(dest->pool);
+
+    /* XML declaration fields — heap-strdup; freed by taurus_document_free. */
+    if (src->encoding) {
+        dest->encoding = strdup(src->encoding);
+        if (!dest->encoding) goto fail;
+    }
+    if (src->xml_version) {
+        dest->xml_version = strdup(src->xml_version);
+        if (!dest->xml_version) goto fail;
+    }
+    dest->standalone = src->standalone;
+    dest->had_declaration = src->had_declaration;
+
+    /* Root tree. */
+    if (src->new_dom_root) {
+        TaurusElement root_copy = taurus_element_copy(
+            (TaurusElement)src->new_dom_root, dest);
+        if (!root_copy) goto fail;
+        dest->new_dom_root = root_copy;
+        dest->flat_promoted = 1;
+    }
+
+    /* Document-level PIs (linked list, heap-strdup target+data). */
+    struct taurus_processing_instruction* pi = src->pis;
+    struct taurus_processing_instruction* tail = NULL;
+    while (pi) {
+        struct taurus_processing_instruction* dup =
+            (struct taurus_processing_instruction*)malloc(sizeof(*dup));
+        if (!dup) goto fail;
+        dup->target = pi->target ? strdup(pi->target) : NULL;
+        dup->data = pi->data ? strdup(pi->data) : NULL;
+        dup->next = NULL;
+        if (tail) tail->next = dup;
+        else dest->pis = dup;
+        tail = dup;
+        pi = pi->next;
+    }
+
+    return dest;
+
+fail:
+    taurus_document_free(dest);
+    return NULL;
+}
+
 
