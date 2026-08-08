@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.5.12] - Y-08-08
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.5.11] - 2026-08-08
 
 ### Performance — breakthrough: parse+promote 78 to 32 µs (59% faster)
