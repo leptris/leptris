@@ -179,18 +179,18 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     attr->name_hash = h;
 
     /* Append via cached last_attribute offset (TODO 106).
-     * Direct offset write — attr and elem share the pre-warmed pool
-     * page, so offsets are within int32 range and we can skip the
-     * overflow-table encode/decode call path. Same trick as
-     * dp_wire_child for tree edges. */
-    if (elem->last_attribute_off != 0) {
-        struct taurus_attribute* last =
-            (struct taurus_attribute*)((char*)elem + elem->last_attribute_off);
+     * Use the safe compact_int32 encode/decode — attr_block and elem
+     * may land on different pool pages for small inputs (pre-warmed
+     * page is sized for typical docs but elem_block + attr_block can
+     * exceed it), so the raw byte difference can overflow int32. The
+     * encode function falls back to the overflow table in that case. */
+    struct taurus_attribute* last = taurus_elem_last_attribute(elem);
+    if (last) {
         last->next = attr;
     } else {
-        elem->first_attribute_off = (int32_t)((char*)attr - (char*)elem);
+        taurus_elem_set_first_attribute(elem, attr);
     }
-    elem->last_attribute_off = (int32_t)((char*)attr - (char*)elem);
+    taurus_elem_set_last_attribute(elem, attr);
     elem->attr_count++;
     return 0;
 }
