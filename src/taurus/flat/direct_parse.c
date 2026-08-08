@@ -83,6 +83,9 @@ typedef struct {
     char* version;
     char* encoding;
     int standalone;
+    /* Source line tracking (issue #223). Updated as the scanner
+     * crosses '\n' bytes. Frozen into each node at creation. */
+    uint32_t line;
     int had_declaration;
     /* Bulk-allocated attribute block. Pre-allocated from pool so the
      * common case is a bump-pointer off the block — no per-attr
@@ -94,7 +97,19 @@ typedef struct {
 } DParser;
 
 static inline void dp_skip_ws(DParser* p) {
-    while (p->pos < p->end && dp_ws_lut[(unsigned char)*p->pos]) p->pos++;
+    while (p->pos < p->end && dp_ws_lut[(unsigned char)*p->pos]) {
+        if (*p->pos == '\n') p->line++;
+        p->pos++;
+    }
+}
+
+/* Tally '\n' bytes in [from, to) and fold into p->line. Used after
+ * bulk scans (memchr for text, multi-char literal matches) where the
+ * per-byte scanner can't update line inline. */
+static inline void dp_advance_line(DParser* p, char* from, char* to) {
+    for (char* c = from; c < to; c++) {
+        if (*c == '\n') p->line++;
+    }
 }
 
 /* Wire child into parent's child chain. Direct pointer arithmetic
@@ -369,6 +384,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     p.attr_block = attr_block;
     p.attr_idx = 0;
     p.attr_capacity = attr_capacity;
+    p.line = 1;
 
     /* Skip BOM. */
     if (len >= 3 && (unsigned char)buf[0] == 0xEF &&
@@ -391,6 +407,11 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             char* lt = (char*)memchr(p.pos, '<', p.end - p.pos);
             p.pos = lt ? lt : p.end;
             size_t tlen = p.pos - text_start;
+            /* Snapshot line at the text start, then fold newlines in
+             * the consumed range so the NEXT token starts on the
+             * correct line. Issue #223. */
+            uint32_t text_line = p.line;
+            dp_advance_line(&p, text_start, p.pos);
             if (tlen == 0) continue;
             if (p.depth == 0) {
                 /* Whitespace-only between root and PIs. */
@@ -406,6 +427,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             TaurusTextNode* tn = taurus_text_create_borrowed(
                 text_start, tlen, pool);
             if (!tn) goto fail;
+            tn->base.line = text_line;
             dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)tn);
             continue;
         }
@@ -415,13 +437,16 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
         char next = p.pos[1];
 
         if (dp_name_start_lut[(unsigned char)next]) {
-            /* Element. */
+            /* Element. Snapshot line BEFORE scanning the open tag so
+             * the element reports the line where '<' appeared. */
+            uint32_t elem_line = p.line;
             if (elem_idx >= est_elems) {
                 /* Grow: realloc + adjust offsets. Complex; for now fail. */
                 goto fail;
             }
             TaurusElement elem = &elem_block[elem_idx++];
             elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
+            elem->base.line = elem_line;
             elem->document = doc;
 
             /* Scan name (zero-copy). DON'T NUL-terminate yet — the
@@ -490,6 +515,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
         }
         else if (next == '!') {
             /* Comment, CDATA, or DOCTYPE. */
+            uint32_t markup_line = p.line;
             if (p.end - p.pos >= 4 && p.pos[2] == '-' && p.pos[3] == '-') {
                 /* Comment: <!-- ... --> */
                 p.pos += 4;
@@ -500,14 +526,17 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                         TaurusCommentNode* cn = taurus_comment_create(
                             start, p.pos - start, pool);
                         if (!cn) goto fail;
+                        cn->base.line = markup_line;
                         if (p.depth > 0) {
                             dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cn);
                         }
                         p.pos += 3;
                         break;
                     }
+                    if (*p.pos == '\n') p.line++;
                     p.pos++;
                 }
+                dp_advance_line(&p, start, p.pos);
             } else if (p.end - p.pos >= 9 &&
                        memcmp(p.pos + 2, "[CDATA[", 7) == 0) {
                 /* CDATA: <![CDATA[ ... ]]> */
@@ -519,16 +548,20 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                         TaurusCDATANode* cd = taurus_cdata_create(
                             start, p.pos - start, pool);
                         if (!cd) goto fail;
+                        cd->base.line = markup_line;
                         if (p.depth > 0) {
                             dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cd);
                         }
                         p.pos += 3;
                         break;
                     }
+                    if (*p.pos == '\n') p.line++;
                     p.pos++;
                 }
+                dp_advance_line(&p, start, p.pos);
             } else {
                 /* DOCTYPE: skip to matching '>' with bracket counting. */
+                char* doctype_start = p.pos;
                 p.pos += 2;
                 int bd = 0;
                 while (p.pos < p.end) {
@@ -537,10 +570,13 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                     else if (c == ']') { if (bd > 0) bd--; }
                     else if (c == '>' && bd == 0) break;
                 }
+                dp_advance_line(&p, doctype_start, p.pos);
             }
         }
         else if (next == '?') {
             /* PI: <?target data?> or XML declaration. */
+            uint32_t pi_line = p.line;
+            char* pi_start = p.pos;
             p.pos += 2;
             char* target_start = p.pos;
             if (!dp_name_start_lut[(unsigned char)*p.pos]) goto fail;
@@ -555,6 +591,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             *p.pos = '\0'; /* NUL-terminate data */
             size_t data_len = p.pos - data_start;
             p.pos += 2;
+            dp_advance_line(&p, pi_start, p.pos);
 
             /* XML declaration handling. */
             if (strcmp(target_start, "xml") == 0) {
@@ -604,6 +641,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                 target_start, strlen(target_start),
                 data_start, data_len, pool);
             if (!pi) goto fail;
+            pi->base.line = pi_line;
             if (p.depth > 0) {
                 dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)pi);
             } else {

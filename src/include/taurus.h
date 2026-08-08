@@ -699,6 +699,20 @@ TAURUS_API int taurus_element_text_bool(TaurusElement elem, int default_value);
 TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* name);
 
 /**
+ * Test whether an attribute is present on this element.
+ *
+ * @param elem Element
+ * @param name Attribute name
+ * @return 1 if the attribute exists, 0 otherwise
+ *
+ * Memory: None. Convenient alternative to
+ * `taurus_element_attribute(elem, name) != NULL` for callers that
+ * only need the boolean answer (issue #166-class visibility gap
+ * reported in the v0.5.13 audit).
+ */
+TAURUS_API int taurus_element_has_attribute(TaurusElement elem, const char* name);
+
+/**
  * Get attribute value as integer
  *
  * @param elem Element
