@@ -84,6 +84,13 @@ typedef struct {
     char* encoding;
     int standalone;
     int had_declaration;
+    /* Bulk-allocated attribute block. Pre-allocated from pool so the
+     * common case is a bump-pointer off the block — no per-attr
+     * pool_alloc, no name interning, no value pool_strdup. Overflow
+     * falls back to per-attr pool_alloc. */
+    struct taurus_attribute* attr_block;
+    size_t attr_idx;
+    size_t attr_capacity;
 } DParser;
 
 static inline void dp_skip_ws(DParser* p) {
@@ -133,11 +140,65 @@ static inline void dp_wire_child(TaurusElement parent, TaurusNode* child) {
     parent->last_child_off = child_off;
 }
 
-/* Parse attributes for an element. Writes attr structs into pool.
- * Uses StringViews (pointer+length) — does NOT NUL-terminate names
- * during scanning (that would destroy the '=' delimiter). Values
- * ARE NUL-terminated (they're bounded by quotes, safe to overwrite
- * the closing quote with NUL). */
+/* Inline attribute allocation. Takes the next slot from the
+ * pre-allocated attr_block (bump pointer) when capacity remains,
+ * else falls back to a per-attr pool_alloc. Both name and value
+ * are zero-copy pointers into the buffer copy (already NUL-
+ * terminated in-place by the caller). Skips name interning and
+ * value pool_strdup entirely — direct_parse path excludes entity
+ * inputs, so has_entities is always 0. */
+static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
+                                      char* name, size_t name_len,
+                                      char* val, size_t val_len) {
+    struct taurus_attribute* attr;
+    if (p->attr_idx < p->attr_capacity) {
+        attr = &p->attr_block[p->attr_idx++];
+    } else {
+        attr = (struct taurus_attribute*)taurus_pool_alloc(
+            p->pool, sizeof(struct taurus_attribute));
+        if (!attr) return -1;
+    }
+
+    attr->name_view = taurus_sv_from_ptr(name, name_len);
+    attr->value_view = taurus_sv_from_ptr(val, val_len);
+    attr->prefix_view = taurus_sv_empty();
+    attr->namespace_uri_view = taurus_sv_empty();
+    attr->name = name;            /* zero-copy, NUL-terminated in buffer */
+    attr->value = val;            /* zero-copy, NUL-terminated in buffer */
+    attr->prefix = NULL;
+    attr->namespace_uri = NULL;
+    attr->next = NULL;
+    attr->has_entities = 0;       /* direct_parse excludes entity inputs */
+
+    /* FNV-1a hash inline — used by attribute-index lookups. */
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < name_len; i++) {
+        h ^= (unsigned char)name[i];
+        h *= 16777619u;
+    }
+    attr->name_hash = h;
+
+    /* Append via cached last_attribute offset (TODO 106).
+     * Direct offset write — attr and elem share the pre-warmed pool
+     * page, so offsets are within int32 range and we can skip the
+     * overflow-table encode/decode call path. Same trick as
+     * dp_wire_child for tree edges. */
+    if (elem->last_attribute_off != 0) {
+        struct taurus_attribute* last =
+            (struct taurus_attribute*)((char*)elem + elem->last_attribute_off);
+        last->next = attr;
+    } else {
+        elem->first_attribute_off = (int32_t)((char*)attr - (char*)elem);
+    }
+    elem->last_attribute_off = (int32_t)((char*)attr - (char*)elem);
+    elem->attr_count++;
+    return 0;
+}
+
+/* Parse attributes for an element. Writes attr structs into the
+ * pre-allocated attr_block (zero-copy name/value, no interning).
+ * Names are NUL-terminated in-place AFTER '=' is consumed; values
+ * are NUL-terminated in-place at the closing quote. */
 static int dp_parse_attrs(DParser* p, TaurusElement elem) {
     while (p->pos < p->end) {
         dp_skip_ws(p);
@@ -156,13 +217,18 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
         p->pos++;
         while (p->pos < p->end && dp_name_char_lut[(unsigned char)*p->pos])
             p->pos++;
-        size_t name_len = p->pos - name_start;
-        /* Do NOT write NUL here — the delimiter (=, space) must stay. */
+        char* name_end = p->pos;
+        size_t name_len = name_end - name_start;
+        /* Defer NUL-termination until after '=' is consumed — the
+         * delimiter byte (whitespace or '=') is needed for the scan. */
 
         /* Skip = and whitespace. */
         dp_skip_ws(p);
         if (p->pos >= p->end || *p->pos != '=') return -1;
         p->pos++;
+        /* '=' consumed — the delimiter byte at name_end is no longer
+         * needed. Safe to NUL-terminate the name in-place now. */
+        *name_end = '\0';
         dp_skip_ws(p);
 
         /* Quoted value. */
@@ -181,14 +247,13 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
         if (name_len >= 5 && name_start[0] == 'x' &&
             name_start[1] == 'm' && name_start[2] == 'l' &&
             name_start[3] == 'n' && name_start[4] == 's') {
-            /* xmlns or xmlns:prefix. Value is already NUL-terminated
-             * (closing quote replaced with NUL above). For prefix,
-             * the name is "xmlns:foo" — we need "foo" as the prefix.
-             * Since we didn't NUL-terminate the name, we pool-strdup
-             * just the prefix portion. */
+            /* xmlns or xmlns:prefix. Name was NUL-terminated at
+             * name_end above; value at val_start (closing quote
+             * replaced with NUL). For "xmlns:foo" the prefix
+             * portion is name_start+6 .. name_end; pool-alloc +
+             * memcpy because we can't split the name in-place. */
             const char* ns_prefix = NULL;
             if (name_len > 6) {
-                /* "xmlns:foo" — prefix is name_start + 6, length name_len - 6 */
                 size_t plen = name_len - 6;
                 ns_prefix = (char*)taurus_pool_alloc(p->pool, plen + 1);
                 if (!ns_prefix) return -1;
@@ -206,11 +271,9 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
             continue;
         }
 
-        /* Regular attribute — pass as StringView (no NUL-term needed
-         * for name; value is already NUL-terminated). */
-        TaurusStringView nv = taurus_sv_from_ptr(name_start, name_len);
-        TaurusStringView vv = taurus_sv_from_ptr(val_start, val_len);
-        if (taurus_element_add_attribute(elem, nv, vv, p->pool) != 0)
+        /* Regular attribute — zero-copy name/value, bulk-allocated struct. */
+        if (dp_add_attr_inline(p, elem, name_start, name_len,
+                                val_start, val_len) != 0)
             return -1;
     }
     return -1;
@@ -253,6 +316,19 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     memset(elem_block, 0, est_elems * sizeof(struct taurus_element));
     size_t elem_idx = 0;
 
+    /* 3b. Bulk-allocate attribute block. Heuristic: ~6 attrs per
+     * element covers typical XML with room to spare. Overflow falls
+     * back to per-attr pool_alloc in dp_add_attr_inline. */
+    size_t attr_capacity = est_elems * 6;
+    struct taurus_attribute* attr_block = (struct taurus_attribute*)taurus_pool_alloc(
+        pool, attr_capacity * sizeof(struct taurus_attribute));
+    if (!attr_block) {
+        taurus_pool_destroy(pool);
+        free(buf);
+        return NULL;
+    }
+    /* No memset — every field is initialized by dp_add_attr_inline. */
+
     /* 4. Create document. */
     struct taurus_document* doc = (struct taurus_document*)calloc(1, sizeof(*doc));
     if (!doc) {
@@ -284,6 +360,9 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     p.encoding = NULL;
     p.standalone = -1;
     p.had_declaration = 0;
+    p.attr_block = attr_block;
+    p.attr_idx = 0;
+    p.attr_capacity = attr_capacity;
 
     /* Skip BOM. */
     if (len >= 3 && (unsigned char)buf[0] == 0xEF &&
