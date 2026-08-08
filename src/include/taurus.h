@@ -279,6 +279,28 @@ TAURUS_API int taurus_node_line(TaurusNodeRef node);
 TAURUS_API int taurus_node_compare(TaurusNodeRef a, TaurusNodeRef b);
 
 /**
+ * Build a canonical unique XPath string identifying `node` within
+ * its document (TODO 148 Phase 3).
+ *
+ * Format matches Nokogiri's `Node#path`:
+ *   - Element: `/{qname}[N]` where N is 1-based position among
+ *     same-named element siblings. If the qname is unique among
+ *     siblings, `[N]` is omitted.
+ *   - Text / CDATA: `/text()`
+ *   - Comment: `/comment()`
+ *   - Processing Instruction: `/processing-instruction()`
+ *   - Root: `/` (a single slash)
+ *
+ * @param node Node to identify (must not be NULL)
+ * @return Newly allocated NUL-terminated string. Caller frees via
+ *         `taurus_free_string`. Returns NULL on NULL node or
+ *         allocation failure.
+ *
+ * Memory: Caller-owned; release with `taurus_free_string`.
+ */
+TAURUS_API char* taurus_node_get_xpath(TaurusNodeRef node);
+
+/**
  * Get comment content
  *
  * @param node Node handle (must be TAURUS_NODE_TYPE_COMMENT)
