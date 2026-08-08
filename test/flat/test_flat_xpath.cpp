@@ -116,6 +116,32 @@ TEST(FlatXPath, ComplexExpressionFallsBack) {
     taurus_document_free(doc);
 }
 
+TEST(FlatXPath, CountComparisonDoesNotMatchFlat) {
+    /* Issue #201: count(//book) > 0 must NOT be matched by the flat
+     * dispatcher. It starts with "count(" but is a comparison
+     * expression, not a standalone count() call. The flat dispatcher
+     * must return 0 (not handled) so the compact XPath path handles
+     * it correctly with proper Boolean result. */
+    const char xml[] = "<r><book/><book/></r>";
+    TaurusDocument doc = Parse(xml);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "count(//book) > 0");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_type(r), TAURUS_XPATH_BOOLEAN);
+    EXPECT_EQ(taurus_xpath_result_boolean(r), 1);
+    taurus_xpath_result_free(r);
+
+    /* count(//book) > 5 should return false. */
+    r = taurus_xpath_eval(doc, nullptr, "count(//book) > 5");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_type(r), TAURUS_XPATH_BOOLEAN);
+    EXPECT_EQ(taurus_xpath_result_boolean(r), 0);
+    taurus_xpath_result_free(r);
+
+    taurus_document_free(doc);
+}
+
 TEST(FlatXPath, FlatPathLeavesDocUnpromoted) {
     /* After a flat-eligible query, doc->flat_doc should still be
      * set (no promote happened). We verify indirectly: a second
