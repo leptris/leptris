@@ -1,13 +1,32 @@
 ## [Unreleased]
 
-## [0.5.14] - Y-08-08
+## [0.5.14] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed — namespace read API (#222), node line tracking (#223)
 
-### Changed
+- **#222**: `taurus_element_namespace` returned NULL for default-namespace
+  elements because the lazy resolver only triggered when the element
+  had a prefix. `taurus_element_namespace_for_prefix` checked only the
+  element's own prefix field instead of searching the `xmlns`
+  declarations. Both now route through `taurus_element_lookup_namespace`,
+  which walks the declarations list and inherits up the tree.
+- **#223**: `taurus_node_line` was hardcoded to return 0. Added a
+  `uint32_t line` field to `TaurusNode` (base struct, inherited by
+  every node type). `direct_parse` snapshots the source line at each
+  token and folds newlines crossed by memchr-driven text scans.
+  Programmatic nodes still report 0 (creators memset the struct).
+  Element size budget bumped 80 → 88 bytes. The `flat_promote` fallback
+  path (entities/DTD inputs) doesn't carry line through `FlatNode` yet
+  — plain XML (the common case) is fully tracked.
 
-- (describe changes here)
+### Added — minor visibility gaps from the v0.5.13 audit
+
+- `taurus_xinclude_get_encoding` was declared in the public header but
+  had no implementation, so the symbol was missing from the shared
+  library export table. Body added (returns the `encoding=` attribute
+  of an `xi:include` element).
+- `taurus_element_has_attribute` (new). Natural boolean form of the
+  existing `taurus_element_attribute(name) != NULL` idiom.
 
 
 ## [0.5.13] - 2026-08-08
