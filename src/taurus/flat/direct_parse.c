@@ -138,6 +138,12 @@ static inline void dp_wire_child(TaurusElement parent, TaurusNode* child) {
         parent->first_child_off = child_off;
     }
     parent->last_child_off = child_off;
+
+    /* Issue #213: maintain child_count for element children, matching
+     * the convention used by taurus_element_append_child_internal. */
+    if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+        parent->child_count++;
+    }
 }
 
 /* Inline attribute allocation. Takes the next slot from the

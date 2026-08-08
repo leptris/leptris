@@ -91,6 +91,12 @@ static inline void promote_wire_child(TaurusElement parent,
         taurus_elem_set_first_child(parent, child);
     }
     taurus_elem_set_last_child(parent, child);
+
+    /* Issue #213: maintain child_count for element children, matching
+     * the convention used by taurus_element_append_child_internal. */
+    if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+        parent->child_count++;
+    }
 }
 
 /* Copy a length-bounded slice of the flat XML buffer into a heap-
