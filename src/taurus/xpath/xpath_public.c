@@ -26,6 +26,19 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
 ) {
     if (!doc || !expression) return NULL;
 
+    /* TODO 145 Phase 3: try the flat fast path first for primitive-
+     * returning queries (count, boolean). Skips promote entirely. */
+    if (!context && doc->flat_doc && !doc->flat_promoted) {
+        extern int flat_xpath_try_eval(struct taurus_document*,
+                                        const char*,
+                                        struct taurus_xpath_result**);
+        struct taurus_xpath_result* flat_result = NULL;
+        if (flat_xpath_try_eval(doc, expression, &flat_result)) {
+            return flat_result;
+        }
+        /* Pattern didn't match — fall through to normal path. */
+    }
+
     /* Use context element if provided, otherwise use root */
     TaurusElement context_elem = context ? context : taurus_document_root(doc);
     if (!context_elem) return NULL;

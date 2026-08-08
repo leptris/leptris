@@ -90,6 +90,7 @@ set(TAURUS_SOURCES
     taurus/flat/flat_promote.c
     taurus/flat/flat_fast.c
     taurus/flat/flat_serialize.c
+    taurus/flat/flat_xpath.c
 
     # Core library
     taurus/taurus.c
