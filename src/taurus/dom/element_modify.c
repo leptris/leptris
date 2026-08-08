@@ -14,7 +14,9 @@
 #include "compact.h"
 #include "node.h"
 #include "text.h"
+#include "comment.h"
 #include "cdata.h"
+#include "pi.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -84,7 +86,9 @@ TaurusStatus taurus_element_prepend_child(TaurusElement parent, TaurusElement ch
 
 /**
  * Insert new node before a sibling (Public API)
- * COMPACT MODE: Simplified implementation - only handles element insertion
+ * Issue #216: supports all child node types (element, text, comment,
+ * cdata, pi), not just elements. The TaurusElement signature is kept
+ * for ABI stability; callers cast non-element node pointers.
  */
 TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement new_node) {
     if (!sibling || !new_node) return TAURUS_ERROR_NULL_ARG;
@@ -92,67 +96,81 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
     TaurusNode* new_node_ptr = (TaurusNode*)new_node;
     TaurusNode* sibling_ptr = (TaurusNode*)sibling;
 
-    /* Get parent using accessor function */
-    TaurusElement parent = taurus_element_parent(sibling);
+    /* Validate new_node type. */
+    if (new_node_ptr->type != TAURUS_NODE_TYPE_ELEMENT &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_TEXT &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_CDATA &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_COMMENT &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_PI) {
+        return TAURUS_ERROR_INVALID_ARG;
+    }
+
+    /* Get parent using the type-dispatching accessor — sibling may
+     * be any child node type. */
+    TaurusElement parent = taurus_node_parent(sibling_ptr);
     if (!parent) return TAURUS_ERROR_INVALID_ARG;
 
-    /* For element children, we need to handle the linked list properly */
-    if (new_node_ptr->type != TAURUS_NODE_TYPE_ELEMENT) {
-        return TAURUS_ERROR_INVALID_ARG;
+    /* Issue #217: unlink new_node from any current parent so we
+     * don't corrupt the old tree. */
+    TaurusElement new_old_parent = taurus_node_parent(new_node_ptr);
+    if (new_old_parent && new_old_parent != parent) {
+        taurus_node_unlink(new_node_ptr);
     }
 
-    /* Remove new node from old parent if attached */
-    if (taurus_element_parent(new_node)) {
-        /* For now, return error if new_node already has a parent */
-        return TAURUS_ERROR_INVALID_ARG;
-    }
-
-    /* CRITICAL FIX: Use generic node API to find previous sibling
-     * The element-only API skips text nodes, which causes text to be lost
-     * when inserting elements. We must use taurus_node_first_child_internal and
-     * taurus_node_get_next_sibling to preserve all node types. */
+    /* Walk the parent's true child chain (including non-element
+     * children) to find the node before sibling. */
     TaurusNode* prev_child = NULL;
     TaurusNode* current = taurus_node_first_child_internal((TaurusNode*)parent);
     while (current && current != sibling_ptr) {
         prev_child = current;
         current = taurus_node_get_next_sibling(current);
     }
+    if (!current) return TAURUS_ERROR_INVALID_ARG;
 
-    if (!current) {
-        /* Sibling not found */
-        return TAURUS_ERROR_INVALID_ARG;
-    }
-
-    /* Insert new_node before sibling
-     * Set prev_child's next_sibling via the type-dispatching setter —
-     * each node type encodes the field as int32_t offset (TODO 90
-     * Phase 2c); the previous struct-pun predates the compact
-     * encoding and corrupted PI data when used on non-text nodes. */
+    /* Splice new_node in between prev_child and sibling. */
     if (prev_child) {
-        taurus_node_set_next_sibling(prev_child, (TaurusNode*)new_node);
+        taurus_node_set_next_sibling(prev_child, new_node_ptr);
     } else {
-        /* new_node becomes first child */
-        taurus_elem_set_first_child(parent, (TaurusNode*)new_node);
+        taurus_elem_set_first_child(parent, new_node_ptr);
     }
-    taurus_elem_set_next_sibling(new_node, (TaurusNode*)sibling);
+    taurus_node_set_next_sibling(new_node_ptr, sibling_ptr);
 
-    /* Set parent and document */
-    taurus_elem_set_parent(new_node, parent);
-    new_node->document = parent->document;
+    /* Set parent (type-dispatching) and document. */
+    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
+        taurus_element_set_parent((TaurusElement)new_node_ptr, parent);
+        ((TaurusElement)new_node_ptr)->document = parent->document;
+    } else {
+        switch (new_node_ptr->type) {
+            case TAURUS_NODE_TYPE_TEXT:
+                taurus_textnode_set_parent((TaurusTextNode*)new_node_ptr, parent);
+                break;
+            case TAURUS_NODE_TYPE_COMMENT:
+                taurus_comment_set_parent((TaurusCommentNode*)new_node_ptr, parent);
+                break;
+            case TAURUS_NODE_TYPE_CDATA:
+                taurus_cdata_set_parent((TaurusCDATANode*)new_node_ptr, parent);
+                break;
+            case TAURUS_NODE_TYPE_PI:
+                taurus_pi_set_parent((TaurusPINode*)new_node_ptr, parent);
+                break;
+            default: break;
+        }
+    }
 
-    /* Increment child count */
-    parent->child_count++;
+    /* Issue #213: maintain child_count for element children only,
+     * matching taurus_element_append_child_internal. */
+    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
+        parent->child_count++;
+    }
 
-    /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
-
     taurus_element_invalidate_child_cache(parent);
     return TAURUS_OK;
 }
 
 /**
  * Insert new node after a sibling (Public API)
- * COMPACT MODE: Properly handles mixed content
+ * Issue #216: supports all child node types.
  */
 TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement new_node) {
     if (!sibling || !new_node) return TAURUS_ERROR_NULL_ARG;
@@ -160,47 +178,64 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
     TaurusNode* new_node_ptr = (TaurusNode*)new_node;
     TaurusNode* sibling_ptr = (TaurusNode*)sibling;
 
-    /* Get parent using accessor function */
-    TaurusElement parent = taurus_element_parent(sibling);
+    if (new_node_ptr->type != TAURUS_NODE_TYPE_ELEMENT &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_TEXT &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_CDATA &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_COMMENT &&
+        new_node_ptr->type != TAURUS_NODE_TYPE_PI) {
+        return TAURUS_ERROR_INVALID_ARG;
+    }
+
+    TaurusElement parent = taurus_node_parent(sibling_ptr);
     if (!parent) return TAURUS_ERROR_INVALID_ARG;
 
-    if (new_node_ptr->type != TAURUS_NODE_TYPE_ELEMENT) {
-        return TAURUS_ERROR_INVALID_ARG;
+    /* Issue #217: unlink new_node from any current parent first. */
+    TaurusElement new_old_parent = taurus_node_parent(new_node_ptr);
+    if (new_old_parent && new_old_parent != parent) {
+        taurus_node_unlink(new_node_ptr);
     }
 
-    /* Check if new_node already has a parent */
-    if (taurus_element_parent(new_node)) {
-        return TAURUS_ERROR_INVALID_ARG;
-    }
-
-    /* CRITICAL FIX: Use generic node API to get next sibling
-     * The element-only API skips text nodes, which breaks insertion order.
-     * Use taurus_node_get_next_sibling to get the true next sibling. */
     TaurusNode* next_sibling = taurus_node_get_next_sibling(sibling_ptr);
 
-    /* Link sibling to new_node */
-    taurus_elem_set_next_sibling(sibling, (TaurusNode*)new_node);
+    /* Splice new_node between sibling and next_sibling. Use the
+     * type-dispatching setter on new_node — taurus_elem_set_next_sibling
+     * only writes the element-form of the field. */
+    taurus_node_set_next_sibling(sibling_ptr, new_node_ptr);
+    taurus_node_set_next_sibling(new_node_ptr, next_sibling);
 
-    /* Link new_node to next_sibling */
-    taurus_elem_set_next_sibling(new_node, (TaurusNode*)next_sibling);
-
-    /* Set parent */
-    taurus_elem_set_parent(new_node, parent);
-    new_node->document = parent->document;
-
-    /* Update last_child if needed - use generic node API */
-    TaurusNode* last = taurus_node_last_child_internal((TaurusNode*)parent);
-    if (last == sibling_ptr) {
-        /* new_node is always an element (checked above) */
-        taurus_elem_set_last_child(parent, (TaurusNode*)new_node);
+    /* Set parent (type-dispatching) and document. */
+    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
+        taurus_element_set_parent((TaurusElement)new_node_ptr, parent);
+        ((TaurusElement)new_node_ptr)->document = parent->document;
+    } else {
+        switch (new_node_ptr->type) {
+            case TAURUS_NODE_TYPE_TEXT:
+                taurus_textnode_set_parent((TaurusTextNode*)new_node_ptr, parent);
+                break;
+            case TAURUS_NODE_TYPE_COMMENT:
+                taurus_comment_set_parent((TaurusCommentNode*)new_node_ptr, parent);
+                break;
+            case TAURUS_NODE_TYPE_CDATA:
+                taurus_cdata_set_parent((TaurusCDATANode*)new_node_ptr, parent);
+                break;
+            case TAURUS_NODE_TYPE_PI:
+                taurus_pi_set_parent((TaurusPINode*)new_node_ptr, parent);
+                break;
+            default: break;
+        }
     }
 
-    /* Increment child count */
-    parent->child_count++;
+    /* Update last_child if sibling was the last child. */
+    TaurusNode* last = taurus_node_last_child_internal((TaurusNode*)parent);
+    if (last == sibling_ptr) {
+        taurus_elem_set_last_child(parent, new_node_ptr);
+    }
 
-    /* COW: Increment version */
+    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
+        parent->child_count++;
+    }
+
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
-
     taurus_element_invalidate_child_cache(parent);
     return TAURUS_OK;
 }
