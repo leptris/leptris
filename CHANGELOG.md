@@ -1,13 +1,14 @@
 ## [Unreleased]
 
-## [0.5.10] - Y-08-08
+## [0.5.10] - 2026-08-08
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed — direct parser bugs
 
-### Changed
-
-- (describe changes here)
+- Element name NUL-termination destroyed `>` delimiter for elements
+  without attributes. Fixed by NUL-terminating AFTER dp_parse_attrs.
+- Close tag name not verified. `<a></b>` was accepted. Fixed with
+  name comparison.
+- Element count estimate too low for dense docs. Fixed with len/10+128.
 
 
 ## [0.5.9] - 2026-08-08
