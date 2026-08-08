@@ -13,6 +13,8 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include <stdio.h>
+#include <string.h>
 
 TAURUS_API int taurus_node_get_type(TaurusNodeRef node) {
     if (!node) return 0; /* TAURUS_NODE_TYPE_ELEMENT */
@@ -389,4 +391,180 @@ TAURUS_API int taurus_node_compare(TaurusNodeRef a, TaurusNodeRef b) {
      * enhancement. */
     if (a < b) return -1;
     return 1;
+}
+
+/* ----- taurus_node_get_xpath helpers (TODO 148 Phase 3) ----- */
+
+/* Count element siblings with the same name that appear at or before
+ * `elem` in document order. Returns the 1-based position and writes
+ * the total same-named count to *total (so the caller can decide
+ * whether the [N] suffix is needed). */
+static uint32_t count_same_name_element_position(TaurusElement elem,
+                                                  uint32_t* total) {
+    uint32_t pos = 0;
+    uint32_t same = 0;
+    const char* name = taurus_element_name(elem);
+    TaurusElement parent = taurus_element_parent(elem);
+    if (!parent) {
+        if (total) *total = 1;
+        return 1;
+    }
+    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(parent));
+    while (child) {
+        if (taurus_node_get_type(child) == 0 /* ELEMENT */) {
+            TaurusElement e = (TaurusElement)child;
+            const char* cn = taurus_element_name(e);
+            if (cn && name && strcmp(cn, name) == 0) {
+                same++;
+                if (e == elem) pos = same;
+            }
+        }
+        child = taurus_node_next_sibling(child);
+    }
+    if (total) *total = same;
+    return pos;
+}
+
+/* Append "name[index]" to buffer if index > 1 OR total > 1. Nokogiri
+ * omits [1] when the element is the only same-named sibling but
+ * emits [N] when there are multiple even if N=1. */
+static void append_path_segment(char** buf, size_t* len, size_t* cap,
+                                 const char* name, uint32_t index,
+                                 uint32_t total) {
+    size_t name_len = strlen(name);
+    /* +1 for '/', up to 11 for "[N]" (uint32 max = 10 digits + brackets) */
+    size_t need = *len + 1 + name_len + (total > 1 ? 12 : 0) + 1;
+    if (need > *cap) {
+        while (*cap < need) *cap *= 2;
+        char* new_buf = (char*)realloc(*buf, *cap);
+        if (!new_buf) { /* alloc failure — leave buf as-is */ return; }
+        *buf = new_buf;
+    }
+    (*buf)[(*len)++] = '/';
+    memcpy(*buf + *len, name, name_len);
+    *len += name_len;
+    if (total > 1) {
+        int written = snprintf(*buf + *len, *cap - *len, "[%u]", index);
+        if (written > 0) *len += (size_t)written;
+    }
+    (*buf)[*len] = '\0';
+}
+
+TAURUS_API char* taurus_node_get_xpath(TaurusNodeRef node) {
+    if (!node) return NULL;
+
+    /* Walk up collecting ancestors; the path is built deepest-first
+     * then reversed. The buffer is heap-grown as needed. */
+    char* buf = (char*)malloc(64);
+    if (!buf) return NULL;
+    size_t len = 0;
+    size_t cap = 64;
+    buf[0] = '\0';
+
+    /* For non-element nodes, render the type-test marker as the
+     * DEEPEST segment. We walk up the element chain from the parent
+     * and append the marker last (after the reverse concat). */
+    TaurusNodeRef cur = node;
+    int leaf_type = taurus_node_get_type(cur);
+    TaurusNodeRef start_elem;
+    if (leaf_type == 0 /* ELEMENT */) {
+        start_elem = cur;
+    } else {
+        TaurusElement parent = taurus_node_parent(cur);
+        if (!parent) {
+            /* Detached non-element node — emit just the marker. */
+            const char* marker = "text()";
+            if (leaf_type == 2) marker = "comment()";
+            else if (leaf_type == 4) marker = "processing-instruction()";
+            size_t mlen = strlen(marker);
+            if (mlen + 2 > cap) {
+                free(buf);
+                buf = (char*)malloc(mlen + 2);
+                if (!buf) return NULL;
+                cap = mlen + 2;
+            }
+            buf[len++] = '/';
+            memcpy(buf + len, marker, mlen);
+            len += mlen;
+            buf[len] = '\0';
+            return buf;
+        }
+        start_elem = taurus_element_as_node(parent);
+    }
+
+    /* Walk up the element chain, rendering each segment into a
+     * temp list, then concat in reverse. */
+    char* segs[256];
+    size_t seg_lens[256];
+    int nseg = 0;
+    TaurusNodeRef walk = start_elem;
+    while (walk && nseg < 256) {
+        TaurusElement e = (TaurusElement)walk;
+        uint32_t total = 0;
+        uint32_t pos = count_same_name_element_position(e, &total);
+        const char* name = taurus_element_name(e);
+        if (!name) break;
+
+        char tmp[256];
+        int written;
+        if (total > 1) {
+            written = snprintf(tmp, sizeof(tmp), "/%s[%u]", name, pos);
+        } else {
+            written = snprintf(tmp, sizeof(tmp), "/%s", name);
+        }
+        if (written < 0) break;
+        size_t sl = (size_t)written;
+        char* seg = (char*)malloc(sl + 1);
+        if (!seg) {
+            for (int i = 0; i < nseg; i++) free(segs[i]);
+            free(buf);
+            return NULL;
+        }
+        memcpy(seg, tmp, sl + 1);
+        segs[nseg] = seg;
+        seg_lens[nseg] = sl;
+        nseg++;
+
+        TaurusElement parent = taurus_element_parent(e);
+        if (!parent) break;
+        walk = taurus_element_as_node(parent);
+    }
+
+    /* Concat in reverse order (root first). */
+    for (int i = nseg - 1; i >= 0; i--) {
+        if (len + seg_lens[i] + 1 > cap) {
+            while (cap < len + seg_lens[i] + 1) cap *= 2;
+            char* new_buf = (char*)realloc(buf, cap);
+            if (!new_buf) {
+                for (int j = 0; j < nseg; j++) free(segs[j]);
+                free(buf);
+                return NULL;
+            }
+            buf = new_buf;
+        }
+        memcpy(buf + len, segs[i], seg_lens[i]);
+        len += seg_lens[i];
+        buf[len] = '\0';
+        free(segs[i]);
+    }
+
+    /* Append the leaf marker for non-element nodes. */
+    if (leaf_type != 0) {
+        const char* marker = "text()";
+        if (leaf_type == 2) marker = "comment()";
+        else if (leaf_type == 4) marker = "processing-instruction()";
+        size_t mlen = strlen(marker);
+        if (len + mlen + 2 > cap) {
+            while (cap < len + mlen + 2) cap *= 2;
+            char* new_buf = (char*)realloc(buf, cap);
+            if (!new_buf) return buf;  /* best-effort: return what we have */
+            buf = new_buf;
+        }
+        buf[len++] = '/';
+        memcpy(buf + len, marker, mlen);
+        len += mlen;
+        buf[len] = '\0';
+    }
+
+    return buf;
 }
