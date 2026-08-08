@@ -167,6 +167,30 @@ static void bench_serialize_via_compact(void* p) {
     taurus_document_free(doc);
 }
 
+/* xpath_count_via_flat: count(//book) via the Phase 3 flat XPath
+ * dispatch. No promote. */
+static void bench_xpath_count_via_flat(void* p) {
+    doc_buf_t* d = (doc_buf_t*)p;
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(d->xml, d->len, &st);
+    if (!doc) return;
+    TaurusXPathResult r = taurus_xpath_eval(doc, NULL, "count(//book)");
+    if (r) taurus_xpath_result_free(r);
+    taurus_document_free(doc);
+}
+
+/* xpath_count_via_compact: same query, but force promote first. */
+static void bench_xpath_count_via_compact(void* p) {
+    doc_buf_t* d = (doc_buf_t*)p;
+    TaurusStatus st;
+    TaurusDocument doc = taurus_parse_string(d->xml, d->len, &st);
+    if (!doc) return;
+    (void)taurus_document_root(doc);  /* triggers promote */
+    TaurusXPathResult r = taurus_xpath_eval(doc, NULL, "count(//book)");
+    if (r) taurus_xpath_result_free(r);
+    taurus_document_free(doc);
+}
+
 /* Run a comparison at one doc size. */
 static void run_group(const char* title, size_t target_bytes) {
     doc_buf_t flat_doc = make(target_bytes, 0);
@@ -210,6 +234,15 @@ static void run_group(const char* title, size_t target_bytes) {
 
     r = bench_run("serialize via compact (triggers promote)",
                   bench_serialize_via_compact, &flat_doc, iters);
+    bench_print_result(&r);
+
+    /* Phase 3: XPath count comparison. */
+    r = bench_run("count(//book) via flat XPath (no promote)",
+                  bench_xpath_count_via_flat, &flat_doc, iters);
+    bench_print_result(&r);
+
+    r = bench_run("count(//book) via compact XPath (promote)",
+                  bench_xpath_count_via_compact, &flat_doc, iters);
     bench_print_result(&r);
 
     free_doc(&flat_doc);

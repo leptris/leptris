@@ -604,16 +604,25 @@ static void c14n_serialize_element_excl(TaurusElement elem,
     APPEND_STRING(temp, len);
 
     /* Emit xmlns:prefix declarations for the newly-visible prefixes,
-     * sorted lexicographically. */
+     * sorted lexicographically. Issue #194: deduplicate — the same
+     * prefix may be both visibly-used AND in the inclusive list, in
+     * which case it must be emitted exactly once. */
     const char* to_emit[40];
     int to_emit_count = 0;
-    if (need_elem_prefix && to_emit_count < 40) to_emit[to_emit_count++] = elem_prefix;
-    for (int i = 0; i < attr_prefix_count && to_emit_count < 40; i++) {
-        to_emit[to_emit_count++] = needed_attr_prefix[i];
-    }
-    for (int i = 0; i < inclusive_count && to_emit_count < 40; i++) {
-        to_emit[to_emit_count++] = needed_inclusive[i];
-    }
+    /* Helper: push if not already present. */
+    #define EMIT_ONCE(p) do { \
+        if ((p) && to_emit_count < 40) { \
+            int dup = 0; \
+            for (int k = 0; k < to_emit_count; k++) { \
+                if (to_emit[k] && strcmp(to_emit[k], (p)) == 0) { dup = 1; break; } \
+            } \
+            if (!dup) to_emit[to_emit_count++] = (p); \
+        } \
+    } while (0)
+    if (need_elem_prefix) EMIT_ONCE(elem_prefix);
+    for (int i = 0; i < attr_prefix_count; i++) EMIT_ONCE(needed_attr_prefix[i]);
+    for (int i = 0; i < inclusive_count; i++) EMIT_ONCE(needed_inclusive[i]);
+    #undef EMIT_ONCE
     for (int i = 0; i < to_emit_count; i++) {
         for (int j = i + 1; j < to_emit_count; j++) {
             if (strcmp(to_emit[i], to_emit[j]) > 0) {

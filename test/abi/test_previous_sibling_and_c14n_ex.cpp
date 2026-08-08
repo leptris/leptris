@@ -230,6 +230,36 @@ TEST(C14NEx, InclusiveNsPrefixesForceInclude) {
     taurus_document_free(doc);
 }
 
+TEST(C14NEx, InclusiveAndVisibleNoDuplicate) {
+    // Issue #194: when a prefix is BOTH visibly used AND in the
+    // inclusive list, the output must emit it exactly ONCE. The old
+    // implementation emitted it twice, producing invalid XML.
+    const char xml[] =
+        "<SignedRoot xmlns:ds='http://ds'>"
+        "<ds:Signature/></SignedRoot>";
+    TaurusDocument doc = Parse(xml);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(root));
+    TaurusElement sig = taurus_node_as_element(child);
+
+    /* Pass "ds" in the inclusive list — it's also visibly used by
+     * the element name. */
+    const char* prefixes[] = {"ds", nullptr};
+    char* excl = taurus_c14n_canonicalize_subtree_ex(
+        sig, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, prefixes, 1);
+    ASSERT_NE(excl, nullptr);
+    std::string s(excl);
+    /* Must contain exactly ONE xmlns:ds declaration. */
+    size_t first = s.find("xmlns:ds=");
+    EXPECT_NE(first, std::string::npos);
+    size_t second = s.find("xmlns:ds=", first + 1);
+    EXPECT_EQ(second, std::string::npos)
+        << "duplicate xmlns:ds in output: " << s;
+    taurus_free_string(excl);
+    taurus_document_free(doc);
+}
+
 TEST(C14NEx, ExclusiveOnEmptyDoc) {
     // Exclusive mode on a doc without namespaces — should produce
     // the same output as canonical (no ns filtering needed).
