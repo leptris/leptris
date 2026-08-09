@@ -88,13 +88,10 @@ taurus_add_test(test_node_get_xpath abi/test_node_get_xpath.cpp)
 taurus_add_test(test_parse_fragment abi/test_parse_fragment.cpp)
 taurus_add_test(test_doctype_api abi/test_doctype_api.cpp)
 taurus_add_test(test_xpath_custom_fns abi/test_xpath_custom_fns.cpp)
-taurus_add_test(test_flat_promote_line abi/test_flat_promote_line.cpp)
-taurus_add_test(test_flat_doc   flat/test_flat_doc.cpp)
-taurus_add_test(test_flat_parser flat/test_flat_parser.cpp)
-taurus_add_test(test_flat_promote flat/test_flat_promote.cpp)
-taurus_add_test(test_flat_fast   flat/test_flat_fast.cpp)
-taurus_add_test(test_flat_ns_promote flat/test_flat_namespace_promote.cpp)
-taurus_add_test(test_flat_xpath   flat/test_flat_xpath.cpp)
+
+# FlatDoc + lazy-promote tests removed — direct_parse is the sole
+# parser and builds the TaurusElement tree eagerly. The flat/
+# subsystem (TODO 139) has been deleted.
 
 # Shared-library export check (TODO 122).  Runs the bash script that
 # builds a one-off libtaurus.dylib / .so and asserts SAX + DOM + XPath

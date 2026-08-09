@@ -82,14 +82,10 @@ set(TAURUS_SOURCES
     # XInclude
     taurus/xinclude/xinclude.c
 
-    # Flat document buffer (TODO 139) — fast parse representation
-    # that converts to the compact-pointer tree lazily on first access.
-    taurus/flat/flat_doc.c
-    taurus/flat/flat_parser.c
-    taurus/flat/flat_promote.c
-    taurus/flat/flat_fast.c
-    taurus/flat/flat_serialize.c
-    taurus/flat/flat_xpath.c
+    # The sole XML parser: direct_parse (single-pass, zero-copy,
+    # bulk-alloc, DTD-aware, UTF-8 names). See flat/direct_parse.c.
+    # The FlatDoc + lazy-promote architecture (TODO 139) and the
+    # legacy parser (TODO 90 Phase 1) have been removed.
     taurus/flat/direct_parse.c
 
     # Core library

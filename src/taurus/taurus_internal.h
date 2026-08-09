@@ -24,7 +24,6 @@
 struct taurus_element;  /* typedef in dom/element.h */
 struct taurus_compact_overflow_entry;  /* typedef in dom/compact.h */
 struct taurus_element_index;  /* typedef in dom/element_index.h */
-struct flat_doc;  /* typedef in flat/flat_doc.h (TODO 139) */
 
 /* ============================================================================
  * Error Codes (Internal)
@@ -115,16 +114,11 @@ struct taurus_document {
      * NULL until first descendant-axis query touches it. */
     struct taurus_element_index* element_index;
 
-    /* Flat document buffer (TODO 139 Phase D) — when non-NULL, the
-     * document has a parsed-but-not-yet-promoted FlatDoc. The first
-     * call to taurus_document_root triggers flat_promote_into which
-     * builds the compact-pointer tree and frees the FlatDoc.
-     *
-     * flat_promoted flips to 1 after a successful promote (or stays
-     * 0 for documents produced by the legacy parser, where it has
-     * no effect). */
-    struct flat_doc* flat_doc;
-    int flat_promoted;
+    /* FlatDoc + lazy-promote removed — direct_parse builds the
+     * TaurusElement tree eagerly. Retained as an always-zero field
+     * so taurus_document_ensure_promoted (a public-facing no-op
+     * chokepoint) can stay in the API without ABI churn. */
+    int _unused_post_flat_removal;
 
     /* TODO 117: adopted child documents from xi:include parse="xml".
      * The included doc's pool is owned by this document -- the

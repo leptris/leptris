@@ -1,6 +1,6 @@
 /* common/chartype.c — Shared character classification table.
  *
- * The table packs XML name-start, name-char, and whitespace
+ * The table packs XML name-start, name-char, whitespace, and UTF-8
  * classification into bitflags so callers can test multiple
  * properties in one indexed access (pugixml technique).
  *
@@ -8,7 +8,11 @@
 
 #include "chartype.h"
 
-const uint8_t taurus_chartype_table[256] = {
+/* The table is non-const so the constructor can OR in CT_UTF8 for
+ * bytes >= 0x80 at load time. 256 bytes in .data (writable) is
+ * negligible vs the .rodata savings of not enumerating 128 entries
+ * by hand. Callers treat it as logically const after initialization. */
+uint8_t taurus_chartype_table[256] = {
     /* ASCII letters */
     ['a']=CT_NAME_START|CT_NAME, ['b']=CT_NAME_START|CT_NAME,
     ['c']=CT_NAME_START|CT_NAME, ['d']=CT_NAME_START|CT_NAME,
@@ -46,3 +50,13 @@ const uint8_t taurus_chartype_table[256] = {
     /* Whitespace */
     [' ']=CT_WS, ['\t']=CT_WS, ['\n']=CT_WS, ['\r']=CT_WS,
 };
+
+/* Set CT_UTF8 on bytes 0x80-0xFF. Runs once before main() via the
+ * constructor attribute. This is cheaper than enumerating 128
+ * designated initializers and keeps the table human-readable. */
+__attribute__((constructor))
+static void taurus_chartype_init(void) {
+    for (int i = 0x80; i < 0x100; i++) {
+        ((uint8_t*)taurus_chartype_table)[i] |= CT_UTF8;
+    }
+}

@@ -1406,7 +1406,6 @@ TAURUS_API TaurusDocument taurus_document_copy(TaurusDocument src) {
             (TaurusElement)src->new_dom_root, dest);
         if (!root_copy) goto fail;
         dest->new_dom_root = root_copy;
-        dest->flat_promoted = 1;
     }
 
     /* Document-level PIs (linked list, heap-strdup target+data). */
