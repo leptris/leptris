@@ -111,6 +111,60 @@ static char* flat_promote_strdup(const char* xml_buffer,
     return s;
 }
 
+/* Inline attribute allocation helper. Mirrors direct_parse's
+ * dp_add_attr_inline: takes the next slot off a pre-allocated
+ * block, zero-copies name and value (both already NUL-terminated
+ * in xml_buffer by the pre-pass above), computes the FNV hash
+ * inline, and wires the attr-list offsets directly. Skips the
+ * name interning + value pool_strdup + entity memchr that
+ * taurus_element_add_attribute does per call.
+ *
+ * Fallbacks to per-attr pool_alloc if attr_idx >= attr_capacity
+ * (the heuristic underestimated; rare in practice). */
+static int promote_add_attr_inline(TaurusElement elem,
+                                    struct taurus_attribute* attr_block,
+                                    size_t* attr_idx, size_t attr_capacity,
+                                    char* name, size_t name_len,
+                                    char* val, size_t val_len,
+                                    TaurusMemoryPool* pool) {
+    struct taurus_attribute* attr;
+    if (*attr_idx < attr_capacity) {
+        attr = &attr_block[(*attr_idx)++];
+    } else {
+        attr = (struct taurus_attribute*)taurus_pool_alloc(
+            pool, sizeof(struct taurus_attribute));
+        if (!attr) return -1;
+    }
+
+    attr->name_view = taurus_sv_from_ptr(name, name_len);
+    attr->value_view = taurus_sv_from_ptr(val, val_len);
+    attr->prefix_view = taurus_sv_empty();
+    attr->namespace_uri_view = taurus_sv_empty();
+    attr->name = name;
+    attr->value = val;
+    attr->prefix = NULL;
+    attr->namespace_uri = NULL;
+    attr->next = NULL;
+    attr->has_entities = 0;
+
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < name_len; i++) {
+        h ^= (unsigned char)name[i];
+        h *= 16777619u;
+    }
+    attr->name_hash = h;
+
+    struct taurus_attribute* last = taurus_elem_last_attribute(elem);
+    if (last) {
+        last->next = attr;
+    } else {
+        taurus_elem_set_first_attribute(elem, attr);
+    }
+    taurus_elem_set_last_attribute(elem, attr);
+    elem->attr_count++;
+    return 0;
+}
+
 /* Promote all FlatAttr records in [start, start+count) into
  * attributes on the given element. Returns 0 on success, -1 on
  * alloc failure.
@@ -118,52 +172,60 @@ static char* flat_promote_strdup(const char* xml_buffer,
  * TODO 145: handles xmlns / xmlns:prefix declarations — moves
  * them from the regular attribute list to elem->namespaces, and
  * splits the element name on ':' for prefix:local form. Mirrors
- * what the legacy parser does inline during parse. */
+ * what the legacy parser does inline during parse.
+ *
+ * TODO 148 Phase 7: bulk-allocates attr structs from the shared
+ * attr_block (sized from flat->attr_count) instead of calling
+ * taurus_element_add_attribute per attr. Inline add skips name
+ * interning + value pool_strdup + entity memchr. */
 static int flat_promote_attrs(FlatDoc* flat, TaurusElement elem,
                                uint32_t start, uint16_t count,
                                TaurusMemoryPool* pool,
-                               char* xml_buffer) {
+                               char* xml_buffer,
+                               struct taurus_attribute* attr_block,
+                               size_t* attr_idx, size_t attr_capacity) {
     for (uint16_t i = 0; i < count; i++) {
         const FlatAttr* a = &flat->attrs[start + i];
-        TaurusStringView name_view = taurus_sv_from_ptr(
-            xml_buffer + a->name_offset, a->name_len);
-        TaurusStringView value_view = taurus_sv_from_ptr(
-            xml_buffer + a->value_offset, a->value_len);
+        char* name = xml_buffer + a->name_offset;
+        size_t name_len = a->name_len;
+        char* val = xml_buffer + a->value_offset;
+        size_t val_len = a->value_len;
 
         /* Detect xmlns declarations. */
-        if (name_view.length >= 5 && name_view.data &&
-            name_view.data[0] == 'x' && name_view.data[1] == 'm' &&
-            name_view.data[2] == 'l' && name_view.data[3] == 'n' &&
-            name_view.data[4] == 's') {
+        if (name_len >= 5 &&
+            name[0] == 'x' && name[1] == 'm' && name[2] == 'l' &&
+            name[3] == 'n' && name[4] == 's') {
             /* Either "xmlns" (default ns) or "xmlns:prefix".
              * Zero-copy: pointers into the already-NUL-terminated
              * xml_buffer. No pool_strdup needed. */
             const char* prefix = NULL;
-            if (name_view.length > 5) {
-                /* "xmlns:foo" — prefix is "foo" at offset +6.
-                 * NUL-terminated at name_offset + name_len by the
-                 * pre-pass. For xmlns: declarations, also NUL-terminate
-                 * at the ':' position so prefix is standalone. */
+            if (name_len > 5) {
+                /* "xmlns:foo" — NUL-terminate at ':' and read
+                 * prefix from +6. The pre-pass above already
+                 * NUL-terminated at name_offset + name_len; we
+                 * additionally punch a NUL at the colon. */
                 xml_buffer[a->name_offset + 5] = '\0';
                 prefix = xml_buffer + a->name_offset + 6;
             }
-            const char* uri = xml_buffer + a->value_offset;
 
             struct taurus_namespace* ns =
                 (struct taurus_namespace*)taurus_pool_alloc(
                     pool, sizeof(struct taurus_namespace));
             if (!ns) return -1;
             ns->prefix = (char*)prefix;
-            ns->uri = (char*)uri;
+            ns->uri = val;
             ns->next = NULL;
             taurus_element_add_namespace(elem, ns);
             continue;
         }
 
-        /* Regular attribute. StringView data is already NUL-terminated
-         * from the pre-pass; lazy materialization in the accessor will
-         * use it directly without pool_strdup. */
-        if (taurus_element_add_attribute(elem, name_view, value_view, pool) != 0) {
+        /* Regular attribute. Name and value are already NUL-terminated
+         * in xml_buffer by the pre-pass; zero-copy pointers + inline
+         * alloc from the bulk block. */
+        if (promote_add_attr_inline(elem, attr_block, attr_idx,
+                                     attr_capacity,
+                                     name, name_len, val, val_len,
+                                     pool) != 0) {
             return -1;
         }
     }
@@ -285,6 +347,23 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
         memset(elem_block, 0, n_elem * sizeof(struct taurus_element));
     }
 
+    /* TODO 148 Phase 7: bulk-allocate attribute structs from
+     * flat->attr_count. Each non-xmlns attr takes the next slot
+     * off the block (bump pointer). xmlns attrs go via the
+     * namespace path, not the regular attr list, so the block
+     * is sized for the worst case but a few slots go unused when
+     * the doc has xmlns declarations. Per-attr pool_alloc
+     * fallback handles the rare overflow. */
+    struct taurus_attribute* attr_block = NULL;
+    size_t attr_idx = 0;
+    size_t attr_capacity = flat->attr_count;
+    if (attr_capacity > 0) {
+        attr_block = (struct taurus_attribute*)taurus_pool_alloc(
+            pool, attr_capacity * sizeof(struct taurus_attribute));
+        if (!attr_block) { free(mapping); return -1; }
+        /* No memset — promote_add_attr_inline initializes every field. */
+    }
+
     TaurusElement root_elem = NULL;
     /* Doc-level PI list (PIs that appeared before the root element).
      * The legacy parser stores these in doc->pis; promote must do
@@ -335,7 +414,9 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                 elem->document = doc;
 
                 if (flat_promote_attrs(flat, elem, fn->attr_start,
-                                        fn->attr_count, pool, xml_buffer) != 0) {
+                                        fn->attr_count, pool, xml_buffer,
+                                        attr_block, &attr_idx,
+                                        attr_capacity) != 0) {
                     free(mapping);
                     return -1;
                 }
