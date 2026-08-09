@@ -364,8 +364,6 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
         p.pos += 3;
     }
 
-    int root_seen = 0;
-
     while (p.pos < p.end) {
         /* Skip top-level whitespace. */
         if (p.depth == 0) {
@@ -430,7 +428,6 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
                 p.pos++;
             size_t name_len = p.pos - name_start;
-            char name_delim = *p.pos; /* save delimiter byte */
 
             /* Parse attributes (scans from the delimiter position). */
             int self_closing = dp_parse_attrs(&p, elem);
@@ -462,7 +459,6 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                 if (p.depth >= DP_MAX_DEPTH) goto fail;
                 p.open_stack[p.depth++] = elem;
             }
-            root_seen = 1;
         }
         else if (next == '/') {
             /* Close tag. */

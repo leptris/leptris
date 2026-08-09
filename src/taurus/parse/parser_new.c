@@ -1294,7 +1294,7 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
      *
      * TODO 25: use p->pool (always non-NULL during parsing) rather
      * than elem->document->pool (NULL until parsing completes).
-    /* Name already pool-strdup'd by create_with_view (TODO 90: no
+     * Name already pool-strdup'd by create_with_view (TODO 90: no
      * name_view field on the struct — conversion is eager). */
 
     /* Set prefix if present. Zero-copy path defers prefix finalization

@@ -64,7 +64,7 @@ static char* dtd_parse_name(DTDParser* p) {
         unsigned char c = (unsigned char)dtd_peek(p);
         if (isalnum(c) || c == '_' || c == ':' || c == '-' ||
             c == '.' || c == 0xA0 || /* No-break space */
-            (c >= 0x80 && c <= 0xFF)) { /* Allow extended chars */
+            c >= 0x80) { /* Allow extended chars */
             dtd_advance(p);
         } else {
             break;
