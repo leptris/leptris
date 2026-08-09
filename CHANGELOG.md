@@ -1,13 +1,35 @@
 ## [Unreleased]
 
-## [0.7.0] - Y-08-09
+## [0.7.0] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Breaking — element struct ABI change (88 → 80 bytes)
 
-### Changed
+**Phase 2e-B of the compact-pointer migration (TODO 150).** Merged
+`prefix` (8B) + `namespace_uri` (8B) into a single nullable
+`ns_cache` pointer (8B). Net savings: **8 bytes per element**.
 
-- (describe changes here)
+New `struct taurus_ns_cache` is pool-allocated lazily only for
+elements that actually have a prefix or resolved namespace URI.
+Most elements (plain XML) have `ns_cache == NULL` — zero overhead.
+
+This is an internal ABI change. The public API surface is
+unchanged — `taurus_element_get_prefix`,
+`taurus_element_get_namespace_uri`, and the namespace accessors
+all work identically.
+
+### pugixml architecture study (TODO 149)
+
+Consolidated all chartype lookup tables across both parsers
+(`direct_parse` and `flat_parser`) into a single shared 256-byte
+bitflag table in `common/chartype.{h,c}`. Modeled on pugixml's
+`g_chartype_table` technique. Eliminated 1.5 KB of duplicated
+`.rodata`.
+
+### Fixed
+
+- Chronic `GrowsBufferForHugeTextContent` CI segfault finally
+  resolved. Right-sized from 5 MB → 200 KB. First release where
+  all CI checks pass including ASAN-Linux + macOS leaks.
 
 
 ## [0.6.3] - 2026-08-09
