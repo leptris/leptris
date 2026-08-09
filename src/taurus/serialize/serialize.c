@@ -198,13 +198,19 @@ static void buffer_append_attribute_value(SerializeBuffer* buf, const char* str)
  * ============================================================================ */
 
 void serialize_text_internal(TaurusTextNode* text, SerializeBuffer* buf) {
-    if (!text || !text->content) return;
+    if (!text) return;
 
-    const char* content = text->content;
-    /* content_len is authoritative: a borrowed text node's content is
-     * NOT NUL-terminated (TODO 115 Phase B). Don't pay for a materialize
-     * + strlen round-trip here. */
-    for (size_t i = 0; i < text->content_len; i++) {
+    /* Materialize + expand entities on first access. For borrowed
+     * text nodes (the direct_parse fast path), this expands
+     * predefined entities (&amp; → &) and, when a DTD is present
+     * on the document, custom entities (&foo; → declared value).
+     * Without this call the serializer reads raw borrowed bytes
+     * and emits unexpanded entity references. */
+    const char* content = taurus_text_get_content(text);
+    if (!content) return;
+    size_t content_len = text->content_len;
+
+    for (size_t i = 0; i < content_len; i++) {
         /* Check if this is start of entity reference */
         if (content[i] == '&') {
             /* Look ahead for ';' to detect entity reference */
