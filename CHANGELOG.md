@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.11.0] - Y-08-09
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.10.0] - 2026-08-09
 
 ### Breaking — legacy parser DELETED (3092 lines removed)
