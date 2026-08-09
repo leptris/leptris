@@ -42,6 +42,7 @@ set(TAURUS_SOURCES
     # Common utilities
     taurus/common/string_view.c
     taurus/common/entities.c
+    taurus/common/chartype.c
 
     # Encoding (UTF-16 support - always available)
     taurus/encoding/utf16.c

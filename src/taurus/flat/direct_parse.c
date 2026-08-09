@@ -27,6 +27,7 @@
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
 #include "../common/string_view.h"
+#include "../common/chartype.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -36,35 +37,6 @@ extern __thread int g_taurus_strict_mode;
 extern void taurus_compact_set_current_document(struct taurus_document* doc);
 int taurus_element_add_namespace(struct taurus_element* elem,
                                   struct taurus_namespace* ns);
-
-/* Lookup tables (shared with flat_parser.c — same definitions). */
-static const uint8_t dp_name_char_lut[256] = {
-    ['a']=1,['b']=1,['c']=1,['d']=1,['e']=1,['f']=1,['g']=1,['h']=1,
-    ['i']=1,['j']=1,['k']=1,['l']=1,['m']=1,['n']=1,['o']=1,['p']=1,
-    ['q']=1,['r']=1,['s']=1,['t']=1,['u']=1,['v']=1,['w']=1,['x']=1,
-    ['y']=1,['z']=1,
-    ['A']=1,['B']=1,['C']=1,['D']=1,['E']=1,['F']=1,['G']=1,['H']=1,
-    ['I']=1,['J']=1,['K']=1,['L']=1,['M']=1,['N']=1,['O']=1,['P']=1,
-    ['Q']=1,['R']=1,['S']=1,['T']=1,['U']=1,['V']=1,['W']=1,['X']=1,
-    ['Y']=1,['Z']=1,
-    ['0']=1,['1']=1,['2']=1,['3']=1,['4']=1,['5']=1,['6']=1,['7']=1,
-    ['8']=1,['9']=1,
-    ['_']=1,[':']=1,['-']=1,['.']=1,
-};
-static const uint8_t dp_name_start_lut[256] = {
-    ['a']=1,['b']=1,['c']=1,['d']=1,['e']=1,['f']=1,['g']=1,['h']=1,
-    ['i']=1,['j']=1,['k']=1,['l']=1,['m']=1,['n']=1,['o']=1,['p']=1,
-    ['q']=1,['r']=1,['s']=1,['t']=1,['u']=1,['v']=1,['w']=1,['x']=1,
-    ['y']=1,['z']=1,
-    ['A']=1,['B']=1,['C']=1,['D']=1,['E']=1,['F']=1,['G']=1,['H']=1,
-    ['I']=1,['J']=1,['K']=1,['L']=1,['M']=1,['N']=1,['O']=1,['P']=1,
-    ['Q']=1,['R']=1,['S']=1,['T']=1,['U']=1,['V']=1,['W']=1,['X']=1,
-    ['Y']=1,['Z']=1,
-    ['_']=1,[':']=1,
-};
-static const uint8_t dp_ws_lut[256] = {
-    [' ']=1,['\t']=1,['\n']=1,['\r']=1,
-};
 
 #define DP_MAX_DEPTH 256
 
@@ -97,7 +69,7 @@ typedef struct {
 } DParser;
 
 static inline void dp_skip_ws(DParser* p) {
-    while (p->pos < p->end && dp_ws_lut[(unsigned char)*p->pos]) {
+    while (p->pos < p->end && IS_WS(*p->pos)) {
         if (*p->pos == '\n') p->line++;
         p->pos++;
     }
@@ -234,9 +206,9 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
 
         /* Attribute name — scan as (pointer, length), no NUL-term. */
         char* name_start = p->pos;
-        if (!dp_name_start_lut[(unsigned char)*p->pos]) return -1;
+        if (!IS_NAME_START(*p->pos)) return -1;
         p->pos++;
-        while (p->pos < p->end && dp_name_char_lut[(unsigned char)*p->pos])
+        while (p->pos < p->end && IS_NAME_CHAR(*p->pos))
             p->pos++;
         char* name_end = p->pos;
         size_t name_len = name_end - name_start;
@@ -416,7 +388,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             if (p.depth == 0) {
                 /* Whitespace-only between root and PIs. */
                 for (char* c = text_start; c < p.pos; c++) {
-                    if (!dp_ws_lut[(unsigned char)*c]) goto fail;
+                    if (!IS_WS(*c)) goto fail;
                 }
                 continue;
             }
@@ -436,7 +408,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
         if (p.end - p.pos < 2) goto fail;
         char next = p.pos[1];
 
-        if (dp_name_start_lut[(unsigned char)next]) {
+        if (IS_NAME_START(next)) {
             /* Element. Snapshot line BEFORE scanning the open tag so
              * the element reports the line where '<' appeared. */
             uint32_t elem_line = p.line;
@@ -455,7 +427,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
              * AFTER dp_parse_attrs returns. */
             p.pos++; /* skip '<' */
             char* name_start = p.pos;
-            while (p.pos < p.end && dp_name_char_lut[(unsigned char)*p.pos])
+            while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
                 p.pos++;
             size_t name_len = p.pos - name_start;
             char name_delim = *p.pos; /* save delimiter byte */
@@ -497,7 +469,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             p.pos += 2;
             /* Scan name. */
             char* close_start = p.pos;
-            while (p.pos < p.end && dp_name_char_lut[(unsigned char)*p.pos])
+            while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
                 p.pos++;
             size_t close_len = p.pos - close_start;
             dp_skip_ws(&p);
@@ -579,9 +551,9 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             char* pi_start = p.pos;
             p.pos += 2;
             char* target_start = p.pos;
-            if (!dp_name_start_lut[(unsigned char)*p.pos]) goto fail;
+            if (!IS_NAME_START(*p.pos)) goto fail;
             p.pos++;
-            while (p.pos < p.end && dp_name_char_lut[(unsigned char)*p.pos])
+            while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
                 p.pos++;
             *p.pos = '\0';
             p.pos++;
