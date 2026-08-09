@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.6.1] - Y-08-09
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.6.0] - 2026-08-08
 
 ### Added — Nokogiri-compat C-API gaps (TODO 148)
