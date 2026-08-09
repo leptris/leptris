@@ -50,8 +50,6 @@ set(TAURUS_SOURCES
     taurus/encoding/wrapper.c
 
     # Parser and Serializer
-    taurus/parse/parser_new.c
-    taurus/parse/compact_parser.c
     taurus/serialize/serialize.c
     taurus/serialize/c14n.c
 

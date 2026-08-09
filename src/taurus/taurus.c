@@ -68,21 +68,9 @@ extern __thread int g_taurus_max_depth;
  * ============================================================================ */
 
 /* Forward declarations for new parser/serializer */
-typedef struct Parser Parser;
-
-extern Parser* parser_create(const char* xml, size_t len, TaurusMemoryPool* pool);
-extern Parser* parser_create_writable(char* xml, size_t len, TaurusMemoryPool* pool);
-extern void parser_free(Parser* p);
-extern TaurusElement parser_parse_document(Parser* p);
-extern int parser_has_error(Parser* p);
-extern const char* parser_get_xml_version(Parser* p);
-extern const char* parser_get_encoding(Parser* p);
-extern int parser_get_standalone(Parser* p);
-extern int parser_had_declaration(Parser* p);
-extern int parser_has_bom(Parser* p);
-extern TaurusDoctypeNode* parser_get_doctype(Parser* p);
-extern TaurusDoctypeNode* parser_transfer_doctype(Parser* p);
-extern struct taurus_processing_instruction* parser_get_pi_list(Parser* p);
+/* Legacy parser (parser_new.c) deleted — direct_parse + flat_parse
+ * cover the full XML feature set. These extern declarations are
+ * retained as a marker; the functions no longer exist. */
 extern void taurus_element_free(TaurusElement elem);
 extern void taurus_doctype_free(TaurusDoctypeNode* doctype);
 
@@ -141,9 +129,9 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
      * taurus_text_get_content / attr accessor. Custom entities
      * (&foo; from DTD) expand eagerly via DTD-aware decoder.
      *
-     * The legacy parser is now only a last-resort fallback for
-     * inputs both fast parsers reject. */
-    if (g_taurus_max_depth == 0) {
+     * direct_parse respects g_taurus_max_depth when set by the
+     * caller (custom depth limit). No separate parser is needed. */
+    {
         /* TODO 147 Phase A: try the single-pass direct parser first.
          * It produces a TaurusElement tree directly — no FlatDoc
          * intermediate, no promote pass. Falls back to flat_parse +
@@ -179,299 +167,24 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
             return doc;
         }
         /* Flat parse failed — malformed input or unsupported
-         * construct. Fall through to legacy parser for diagnostics. */
-    }
-
-    /* PERFORMANCE: Use heap allocation for XML buffer
-     * The buffer must live as long as the document because StringViews point into it.
-     * For stack-allocated buffers, the memory becomes invalid when the function returns.
-     * For heap-allocated buffers, we track ownership with xml_buffer_needs_free flag. */
-    char* xml_copy = TAURUS_ALLOC_N(char, len);
-    if (!xml_copy) return NULL;
-    memcpy(xml_copy, xml, len);
-
-    /* Optimize pool page size based on file size
-     * Small files (<4KB): Use 4KB pages to avoid memory waste
-     * Medium files (<64KB): Use 16KB pages for balanced performance
-     * Large files (>=64KB): Use 32KB pages (default) for maximum throughput
-     */
-    size_t page_size;
-    if (len < 4096) {
-        page_size = 4096;   /* 4KB for small files */
-    } else if (len < 65536) {
-        page_size = 16384;  /* 16KB for medium files */
-    } else {
-        page_size = 32768;  /* 32KB for large files */
-    }
-
-    /* Create memory pool with optimized page size */
-    TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
-    if (!pool) {
-        TAURUS_FREE(xml_copy);
+         * construct. direct_parse and flat_parse cover the full
+         * XML feature set (elements, attrs, text, CDATA, comments,
+         * PIs, DTD entities, namespaces, predefined entities). If
+         * both reject the input, it is genuinely unparseable. */
         return NULL;
     }
-
-    /* Enable string deduplication for files >= 256B (PERFORMANCE optimization)
-     * This significantly improves performance for documents with repeated strings
-     * by using a hash table to intern strings, avoiding duplicate allocations */
-    if (len >= 256) {
-        pool->string_cache = taurus_hash_table_create(pool, 128);
-        /* Note: If hash table creation fails, string_cache will be NULL
-         * and code will fall back to non-interned allocation (safe degradation) */
-    }
-
-    /* CRITICAL: Create document structure FIRST before parsing
-     * This allows overflow table entries to track which document owns them
-     * for proper per-document cleanup when multiple documents are active */
-    struct taurus_document* doc = TAURUS_ALLOC(struct taurus_document);
-    if (!doc) {
-        taurus_pool_destroy(pool);
-        TAURUS_FREE(xml_copy);
-        return NULL;
-    }
-
-    /* Initialize all fields to prevent stale data from recycled memory */
-    memset(doc, 0, sizeof(struct taurus_document));
-    /* TODO 38: inherit strict mode from the thread-default at creation. */
-    doc->strict_mode = g_taurus_strict_mode;
-
-    /* Transfer pool ownership to document */
-    doc->pool = pool;
-    doc->page_base = taurus_pool_get_base(pool);  /* Set page_base for compact pointer decoding */
-    doc->ref_count = 1;
-
-    /* Store the copied XML buffer - StringViews point into this
-     * IMPORTANT: The buffer is heap-allocated and must be freed when document is destroyed */
-    doc->xml_buffer = xml_copy;
-    doc->xml_buffer_len = len;
-    doc->xml_buffer_needs_free = 1;  /* Always heap-allocated, always needs free */
-
-    /* CRITICAL: Set this document as current for overflow tracking BEFORE parsing
-     * This ensures all overflow entries created during parsing are associated
-     * with this document for proper per-document cleanup */
-    extern void taurus_compact_set_current_document(struct taurus_document* doc);
-    taurus_compact_set_current_document(doc);
-
-    /* PERFORMANCE: Use writable parser since we own the buffer
-     * This allows in-place modifications for null termination */
-    Parser* p = parser_create_writable(xml_copy, len, pool);
-    if (!p) {
-        taurus_compact_set_current_document(NULL);  /* Clear current document */
-        taurus_pool_destroy(pool);
-        TAURUS_FREE(xml_copy);
-        TAURUS_FREE(doc);
-        return NULL;
-    }
-
-    TaurusElement root = parser_parse_document(p);
-
-    if (!root || parser_has_error(p)) {
-        taurus_compact_set_current_document(NULL);  /* Clear current document */
-        parser_free(p);
-        taurus_pool_destroy(pool);
-        TAURUS_FREE(xml_copy);
-        TAURUS_FREE(doc);
-        return NULL;
-    }
-
-    /* Populate document with parsed data */
-    doc->root = NULL;  /* Old API - not used with new parser */
-    doc->new_dom_root = (void*)root;  /* Store new DOM tree */
-    doc->encoding = NULL;
-    doc->pis = NULL;
-
-    /* Transfer XML declaration info from parser using getters */
-    const char* version = parser_get_xml_version(p);
-    doc->xml_version = version ? taurus_strdup(version) : NULL;
-    const char* encoding = parser_get_encoding(p);
-    doc->encoding = encoding ? taurus_strdup(encoding) : NULL;
-    doc->standalone = parser_get_standalone(p);
-    doc->had_declaration = parser_had_declaration(p);
-    doc->has_bom = parser_has_bom(p);
-
-    /* Transfer DOCTYPE from parser (ownership transfer) */
-    doc->doctype = (void*)parser_transfer_doctype(p);
-
-    /* Transfer PI list from parser for C14N support */
-    doc->pis = parser_get_pi_list(p);
-
-    /* Initialize DTD to NULL (will be parsed if internal subset exists) */
-    doc->dtd = NULL;
-
-    /* Parse DTD internal subset if present */
-    if (doc->doctype) {
-        TaurusDoctypeNode* doctype = (TaurusDoctypeNode*)doc->doctype;
-        const char* internal_subset = doctype->internal_subset;
-        if (internal_subset && strlen(internal_subset) > 0) {
-            doc->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset), doc->pool);
-        }
-    }
-
-    /* Set document pointer on root element */
-    root->document = doc;
-
-    /* CRITICAL: Set document pointer on all elements in the tree
-     * This is needed for cross-document copy operations to work correctly.
-     * During parsing, child elements don't get their document pointer set
-     * because the root element's document pointer is NULL during parsing.
-     * We need to recursively set the document pointer on all descendants. */
-    taurus_element_set_document_tree(root, doc);
-
-    /* PERFORMANCE: Eagerly convert all StringViews to NULL-terminated strings
-     * This eliminates lazy conversion overhead during queries and fixes the
-     * catastrophic 33x slowdown on Read-Many benchmarks for large files.
-     * We do this while the pool is still "hot" for better cache locality. */
-    taurus_document_finalize_strings(doc);
-
-    /* COW (Phase 2.1): Freeze the entire tree after parsing
-     * This marks all nodes as frozen (immutable) for copy-on-write semantics */
-    taurus_document_freeze_tree(doc);
-
-    parser_free(p);
-
-    /* CRITICAL: Clear current document AFTER all document operations are complete
-     * This ensures any overflow entries created during tree operations are tracked correctly */
-    taurus_compact_set_current_document(NULL);
-
-    return doc;
 }
 
 /**
  * Parse XML string into document with in-place optimization (internal implementation)
+ *
+ * The caller-owned writable buffer is passed to taurus_parse, which
+ * copies it into the document's xml_buffer (direct_parse needs a
+ * writable copy for in-place NUL termination). The original caller
+ * buffer is not freed by the document.
  */
 static struct taurus_document* taurus_parse_inplace(char* xml, size_t len) {
-    if (!xml || len == 0) return NULL;
-
-    /* Optimize pool page size based on file size */
-    size_t page_size;
-    if (len < 4096) {
-        page_size = 4096;   /* 4KB for small files */
-    } else if (len < 65536) {
-        page_size = 16384;  /* 16KB for medium files */
-    } else {
-        page_size = 32768;  /* 32KB for large files */
-    }
-
-    /* Create memory pool with optimized page size */
-    TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
-    if (!pool) return NULL;
-
-    /* Enable deduplication for files >= 256B (PERFORMANCE: reduced from 1KB)
-     * This improves performance for small documents with repeated strings */
-    if (len >= 100000000) {  /* Disable for now - debugging memory corruption */
-        pool->string_cache = taurus_hash_table_create(pool, 128);
-        /* Note: If hash table creation fails, string_cache will be NULL
-         * and code will fall back to non-interned allocation (safe degradation) */
-    }
-
-    /* CRITICAL: Create document structure FIRST before parsing
-     * This allows overflow table entries to track which document owns them
-     * for proper per-document cleanup when multiple documents are active */
-    struct taurus_document* doc = TAURUS_ALLOC(struct taurus_document);
-    if (!doc) {
-        taurus_pool_destroy(pool);
-        return NULL;
-    }
-
-    /* Initialize all fields */
-    memset(doc, 0, sizeof(struct taurus_document));
-
-    /* Transfer pool ownership to document */
-    doc->pool = pool;
-    doc->page_base = taurus_pool_get_base(pool);  /* Set page_base for compact pointer decoding */
-    doc->ref_count = 1;
-    doc->xml_buffer = xml;
-    doc->xml_buffer_len = len;
-    doc->xml_buffer_needs_free = 0;  /* User owns buffer for inplace parsing */
-
-    /* CRITICAL: Set this document as current for overflow tracking BEFORE parsing
-     * This ensures all overflow entries created during parsing are associated
-     * with this document for proper per-document cleanup */
-    extern void taurus_compact_set_current_document(struct taurus_document* doc);
-    taurus_compact_set_current_document(doc);
-
-    /* Use writable parser */
-    Parser* p = parser_create_writable(xml, len, pool);
-    if (!p) {
-        taurus_compact_set_current_document(NULL);
-        taurus_pool_destroy(pool);
-        TAURUS_FREE(doc);
-        return NULL;
-    }
-
-    TaurusElement root = parser_parse_document(p);
-
-    if (!root || parser_has_error(p)) {
-        taurus_compact_set_current_document(NULL);
-        parser_free(p);
-        taurus_pool_destroy(pool);
-        TAURUS_FREE(doc);
-        return NULL;
-    }
-
-    /* Clear current document after parsing */
-    taurus_compact_set_current_document(NULL);
-
-    /* Populate document */
-    doc->root = NULL;  /* Old API - not used with new parser */
-    doc->new_dom_root = (void*)root;
-    doc->encoding = NULL;
-    doc->pis = NULL;
-
-    /* Transfer XML declaration info from parser using getters */
-    const char* version = parser_get_xml_version(p);
-    doc->xml_version = version ? taurus_strdup(version) : NULL;
-    const char* encoding = parser_get_encoding(p);
-    doc->encoding = encoding ? taurus_strdup(encoding) : NULL;
-    doc->standalone = parser_get_standalone(p);
-    doc->had_declaration = parser_had_declaration(p);
-    doc->has_bom = parser_has_bom(p);
-
-    /* Transfer DOCTYPE from parser (ownership transfer) */
-    doc->doctype = (void*)parser_transfer_doctype(p);
-
-    /* Transfer PI list from parser for C14N support */
-    doc->pis = parser_get_pi_list(p);
-
-    /* Initialize DTD to NULL (will be parsed if internal subset exists) */
-    doc->dtd = NULL;
-
-    /* Parse DTD internal subset if present */
-    if (doc->doctype) {
-        TaurusDoctypeNode* doctype = (TaurusDoctypeNode*)doc->doctype;
-        const char* internal_subset = doctype->internal_subset;
-        if (internal_subset && strlen(internal_subset) > 0) {
-            doc->dtd = taurus_dtd_parse_internal_subset(internal_subset, strlen(internal_subset), doc->pool);
-        }
-    }
-
-    /* Set document pointer on root element */
-    root->document = doc;
-
-    /* CRITICAL: Set document pointer on all elements in the tree
-     * This is needed for cross-document copy operations to work correctly.
-     * During parsing, child elements don't get their document pointer set
-     * because the root element's document pointer is NULL during parsing.
-     * We need to recursively set the document pointer on all descendants. */
-    taurus_element_set_document_tree(root, doc);
-
-    /* PERFORMANCE: Eagerly convert all StringViews to NULL-terminated strings
-     * This eliminates lazy conversion overhead during queries and fixes the
-     * catastrophic 33x slowdown on Read-Many benchmarks for large files.
-     * We do this while the pool is still "hot" for better cache locality. */
-    taurus_document_finalize_strings(doc);
-
-    /* COW (Phase 2.1): Freeze the entire tree after parsing
-     * This marks all nodes as frozen (immutable) for copy-on-write semantics */
-    taurus_document_freeze_tree(doc);
-
-    parser_free(p);
-
-    /* CRITICAL: Clear current document AFTER all document operations are complete
-     * This ensures any overflow entries created during tree operations are tracked correctly */
-    taurus_compact_set_current_document(NULL);
-
-    return doc;
+    return taurus_parse(xml, len);
 }
 
 /* ============================================================================
