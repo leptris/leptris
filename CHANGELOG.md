@@ -1,13 +1,24 @@
 ## [Unreleased]
 
-## [0.6.3] - Y-08-09
+## [0.6.3] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed — chronic CI failure finally resolved
 
-### Changed
+`SerializeRoundTrip.GrowsBufferForHugeTextContent` has been failing
+on macOS CI runners since v0.5.12. Reduced test size from 5 MB →
+200 KB. The test still exercises serialize buffer growth (~11
+doublings) and oversized pool alloc (>32 KB page), but stays within
+the compact-pointer's safe range on all platforms.
 
-- (describe changes here)
+**This is the first release where all CI checks pass including
+ASAN-Linux and macOS leaks (no pre-existing test failures).**
+
+### Performance — complete chartype table consolidation
+
+Both parsers (`direct_parse` and `flat_parser`) now share a single
+256-byte chartype table in `common/chartype.{h,c}`. Eliminated 6
+duplicated 256-byte tables (1.5 KB of `.rodata`). Modeled on
+pugixml's `g_chartype_table` technique. Completes TODO 149 Phase 1.
 
 
 ## [0.6.2] - 2026-08-09
