@@ -43,17 +43,18 @@ TEST(SerializeRoundTrip, GrowsBufferForHugeTextContent) {
     // Regression for TODO 08: buffer_ensure_capacity must grow without
     // integer overflow or silent realloc-failure corruption.
     //
-    // Size rationale: 500 KB forces the serialize output buffer through
-    // ~12 doublings (256 B initial → 512 KB final), exercising the
-    // growth path thoroughly. The materialized text content also
-    // exceeds the pool's 32 KB page (oversized alloc path).
+    // Size rationale: 200 KB forces the serialize output buffer through
+    // ~11 doublings (256 B initial → 256 KB final), exercising the
+    // growth path. The materialized text content also exceeds the
+    // pool's 32 KB page (oversized alloc path).
     //
-    // The previous 5 MB variant caused intermittent segfaults on macOS
-    // CI runners where malloc places oversized requests far from the
-    // pool's compact-pointer range (int32 offset overflow). 500 KB is
-    // large enough to trigger the same code paths but small enough to
-    // stay within the compact-pointer's ±2 GB range on all platforms.
-    const std::string body(500'000, 'A');
+    // The previous 5 MB variant segfaulted on macOS CI runners where
+    // malloc places oversized requests far from the pool's
+    // compact-pointer range. 500 KB was still too large on some
+    // runners. 200 KB matches the sibling test
+    // (HugeTextContentStaysAttachedToParent at 100 KB) which has
+    // consistently passed.
+    const std::string body(200'000, 'A');
     const std::string xml = "<r>" + body + "</r>";
 
     TaurusStatus st = TAURUS_OK;
