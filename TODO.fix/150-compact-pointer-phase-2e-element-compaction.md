@@ -105,4 +105,30 @@ With alignment, the struct might be 72 or 80 bytes. Either way,
 
 ## Status
 
-Documented, not started. Each sub-phase ships as a separate PR.
+Phase 2e-B (ns_cache merge) shipped in v0.7.0 — element 88 → 80 bytes.
+
+Phase 2e-A (drop `document` field) and Phase 2e-B-original (drop
+`namespaces` field) are **deferred**:
+
+- **2e-A**: Removing the `document` field requires an alternative
+  O(1) doc-lookup mechanism. Parent-walk to root doesn't help — the
+  field on root still costs 8 bytes (struct is uniform). Pool
+  back-pointer (page header → pool → owner_doc) adds page-list walk
+  overhead. Side-table (hash elem→doc) adds global-state complexity.
+  None of these cleanly trade 8 bytes of field for less overhead.
+  The existing `element_owning_document()` helper in element_query.c
+  already walks the parent chain for callers that need robustness;
+  direct field access on hot paths is preserved for speed.
+
+- **2e-B-original** (`namespaces` head pointer → attr flag): the
+  linked list is deeply integrated into c14n (`serialize/c14n.c:192`,
+  `:637`), serialize (`serialize/serialize.c:357`), and the
+  `taurus_namespace_*` public API (`element_query.c:920-1066`).
+  Migrating to attr-flag semantics is a multi-file refactor with
+  high regression risk on canonicalization conformance, which is
+  W3C-xml-c14n-test-suite gated. Worth doing only with dedicated
+  test-coverage bandwidth.
+
+Net: element stays at 80 bytes. To reach 72, revisit 2e-A after
+adding a page-header pool back-pointer (O(1) pool lookup), or
+revisit 2e-B-original after decoupling c14n from the linked list.
