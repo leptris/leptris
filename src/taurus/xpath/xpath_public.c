@@ -11,6 +11,7 @@
 #include "bytecode.h"  /* TODO 120: TaurusXPathBytecode + compile */
 #include "evaluator.h"
 #include "evaluator_internal.h"  /* TODO 120: taurus_xpath_vm_eval */
+#include "functions.h"  /* TODO 148 Phase 5 */
 #include "xpath_variables.h"
 #include "../dom/element.h"
 #include <string.h>
@@ -351,4 +352,171 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars_context(
     ast_node_free(ast);
 
     return result;
+}
+
+/* ---- Custom XPath function registration (TODO 148 Phase 5) ----
+ *
+ * Registered functions live on the document. The evaluator merges
+ * them with the standard XPath 1.0 library when building the
+ * per-context function registry. Standard functions win name
+ * collisions.
+ *
+ * State is captured via XPathFunctionDef.user_data (set on
+ * registration). The evaluator saves/restores that user_data on
+ * ctx->current_fn_user_data around each handler invocation, so
+ * custom-fn recursion is safe.
+ */
+
+/* Per-doc custom function entry. */
+struct taurus_custom_xpath_fn {
+    char* name;
+    TaurusXPathFn fn;
+    void* user_data;
+    struct taurus_custom_xpath_fn* next;
+};
+
+/* Thunk bridging the internal XPathFunctionHandler signature to
+ * the public TaurusXPathFn. Each arg AST is evaluated, converted
+ * to a string, and passed to the user callback. The callback's
+ * returned string is wrapped as a string-typed result.
+ *
+ * The per-call user_data slot (ctx->current_fn_user_data) carries
+ * the (TaurusXPathFn, void* user_data) pair, packed into a small
+ * heap struct on registration. */
+struct taurus_custom_fn_state {
+    TaurusXPathFn fn;
+    void* user_data;
+};
+
+static struct taurus_xpath_result* custom_xpath_thunk(
+    XPathContext* context,
+    XPathASTNode** args,
+    size_t arg_count) {
+    if (!context) return NULL;
+    struct taurus_custom_fn_state* state =
+        (struct taurus_custom_fn_state*)context->current_fn_user_data;
+    if (!state || !state->fn) return NULL;
+
+    extern struct taurus_xpath_result* evaluate_expr(XPathContext*, XPathASTNode*);
+
+    const char** str_args = NULL;
+    char** owned = NULL;
+    size_t owned_count = 0;
+    if (arg_count > 0) {
+        str_args = (const char**)calloc(arg_count, sizeof(char*));
+        owned = (char**)calloc(arg_count, sizeof(char*));
+        if (!str_args || !owned) {
+            free(str_args); free(owned);
+            return NULL;
+        }
+    }
+
+    struct taurus_xpath_result* result = NULL;
+    for (size_t i = 0; i < arg_count; i++) {
+        struct taurus_xpath_result* r = evaluate_expr(context, args[i]);
+        if (!r) goto cleanup;
+        char* s = xpath_to_string(r);
+        xpath_result_free(r);
+        if (!s) s = strdup("");
+        owned[owned_count++] = s;
+        str_args[i] = s;
+    }
+
+    char* result_str = state->fn(str_args, (int)arg_count, state->user_data);
+    if (result_str) {
+        result = xpath_result_new(XPATH_RESULT_STRING);
+        if (result) {
+            result->value.string_value = result_str;
+        } else {
+            free(result_str);
+        }
+    }
+
+cleanup:
+    for (size_t i = 0; i < owned_count; i++) free(owned[i]);
+    free(owned);
+    free(str_args);
+    return result;
+}
+
+TAURUS_API TaurusStatus taurus_xpath_register_function(
+    TaurusDocument doc,
+    const char* name,
+    TaurusXPathFn fn,
+    void* user_data) {
+    if (!doc || !name || !fn) return TAURUS_ERROR_NULL_ARG;
+
+    /* Each registration owns a heap-allocated (fn, user_data) pair
+     * that the evaluator packs onto the XPathFunctionDef.user_data
+     * slot. The thunk unpacks it via ctx->current_fn_user_data. */
+    struct taurus_custom_fn_state* state =
+        (struct taurus_custom_fn_state*)calloc(1, sizeof(*state));
+    if (!state) return TAURUS_ERROR_MEMORY;
+
+    struct taurus_custom_xpath_fn* entry =
+        (struct taurus_custom_xpath_fn*)calloc(1, sizeof(*entry));
+    if (!entry) { free(state); return TAURUS_ERROR_MEMORY; }
+
+    entry->name = strdup(name);
+    if (!entry->name) {
+        free(entry); free(state);
+        return TAURUS_ERROR_MEMORY;
+    }
+    entry->fn = fn;
+    entry->user_data = user_data;
+    /* Stash the (fn, user_data) state on the entry so the
+     * registry builder can pass it through to the thunk via the
+     * XPathFunctionDef.user_data slot. Use the `user_data` field
+     * of the entry itself — the public API `user_data` arg is
+     * what the user wants back, and we pack both into `state`. */
+    state->fn = fn;
+    state->user_data = user_data;
+    /* Override the entry's user_data with the packed state so the
+     * registry builder picks it up. */
+    entry->user_data = state;
+    entry->next = doc->custom_xpath_fns;
+    doc->custom_xpath_fns = entry;
+    return TAURUS_OK;
+}
+
+/* Build a per-context function registry that merges standard
+ * XPath 1.0 functions with the document's custom fns. Returns
+ * NULL if the doc has no custom fns (the context then uses the
+ * shared standard singleton). Caller frees via the registry's
+ * normal lifecycle. */
+XPathFunctionRegistry* taurus_xpath_build_custom_registry(struct taurus_document* doc) {
+    if (!doc || !doc->custom_xpath_fns) return NULL;
+
+    XPathFunctionRegistry* reg = xpath_function_registry_new();
+    if (!reg) return NULL;
+    xpath_function_registry_init_standard(reg);
+
+    for (struct taurus_custom_xpath_fn* e = doc->custom_xpath_fns;
+         e; e = e->next) {
+        /* min=0 max=32: the user callback is responsible for
+         * validating its own arity. */
+        xpath_function_registry_register(reg, e->name, custom_xpath_thunk, 0, 32);
+        /* Patch the just-added entry's user_data. The standard
+         * register helper doesn't take user_data; walk to the
+         * last entry and set it. */
+        if (reg->count > 0) {
+            reg->functions[reg->count - 1].user_data = e->user_data;
+        }
+    }
+    return reg;
+}
+
+/* Release the doc's custom-fn list. Called from
+ * taurus_document_free. */
+void taurus_xpath_free_custom_fns(struct taurus_document* doc) {
+    if (!doc) return;
+    struct taurus_custom_xpath_fn* e = doc->custom_xpath_fns;
+    while (e) {
+        struct taurus_custom_xpath_fn* next = e->next;
+        free(e->name);
+        free(e->user_data);  /* the packed state */
+        free(e);
+        e = next;
+    }
+    doc->custom_xpath_fns = NULL;
 }

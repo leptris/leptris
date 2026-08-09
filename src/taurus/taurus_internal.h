@@ -137,6 +137,13 @@ struct taurus_document {
     struct taurus_document* child_docs;
     struct taurus_document* child_docs_tail;  /* Append in O(1). */
     struct taurus_document* next_adopted;    /* Singly-linked sibling. */
+
+    /* Custom XPath function registrations (TODO 148 Phase 5).
+     * Each entry stores a (name, fn, user_data) triple; the
+     * evaluator merges them with the standard XPath 1.0 library
+     * when building the per-context function registry. Standard
+     * functions win name collisions. */
+    struct taurus_custom_xpath_fn* custom_xpath_fns;
 };
 
 /* Parse options structure */
@@ -385,6 +392,12 @@ typedef struct xpath_context {
     int to_boolean;              /* Only checking existence */
     int max_results;             /* Stop after N results (0 = unlimited) */
     int enable_early_exit;       /* Master switch for early termination */
+
+    /* TODO 148 Phase 5: per-call user_data for custom XPath fns.
+     * Set by the dispatch (evaluate_function_call_impl) before
+     * invoking the handler; restored after so recursion works.
+     * Standard handlers ignore the slot. */
+    void* current_fn_user_data;
 } XPathContext;
 
 /* XPath operator types - From ext/taurus/xpath.h */

@@ -47,6 +47,11 @@ typedef struct {
     XPathFunctionHandler handler; /* Handler function */
     int min_args;               /* Minimum arguments */
     int max_args;               /* Maximum arguments (-1 = unlimited) */
+    /* Per-function opaque state. TODO 148 Phase 5: passed back to
+     * the handler via the dispatch TLS slot so custom (user) fns
+     * can carry a callback + closure. Standard XPath 1.0 fns leave
+     * this NULL and ignore the slot. */
+    void* user_data;
 } XPathFunctionDef;
 
 /* ============================================================================
