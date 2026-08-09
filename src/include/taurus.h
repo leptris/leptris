@@ -1744,6 +1744,56 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
 );
 
 /**
+ * Custom XPath function handler (string-valued).
+ *
+ * The handler receives the string representations of each XPath
+ * argument (XPath node-sets are flattened to concatenated text
+ * content; numbers and booleans are stringified). It returns a
+ * newly-allocated NUL-terminated string, or NULL on error.
+ *
+ * The caller (libtaurus) frees the returned string. The `args`
+ * array is owned by libtaurus; do not free or modify.
+ *
+ * Use this with `taurus_xpath_register_function` to expose Ruby
+ * callbacks via `Searchable#xpath(expr, ..., handler)` in the
+ * Nokogiri-compatible API.
+ */
+typedef char* (*TaurusXPathFn)(const char* const* args,
+                                int argc,
+                                void* user_data);
+
+/**
+ * Register a custom XPath function on a document.
+ *
+ * @param doc Document that will own the registration
+ * @param name Function name as it appears in XPath expressions.
+ *             Must not conflict with the standard XPath 1.0
+ *             function names (count, position, last, etc.) — the
+ *             standard library wins ties.
+ * @param fn Handler. Must not be NULL.
+ * @param user_data Opaque pointer passed back to `fn` on each
+ *                  call. May be NULL.
+ * @return TAURUS_OK on success, TAURUS_ERROR_NULL_ARG on NULL
+ *         doc/name/fn.
+ *
+ * Registered functions are scoped to `doc`; they live for the
+ * document's lifetime and are released by
+ * `taurus_document_free`. Within an XPath expression they are
+ * callable by name — no namespace prefix needed. The handler
+ * runs only when the function is invoked during
+ * `taurus_xpath_eval` against this document.
+ *
+ * Memory: the document owns the registration; user_data is owned
+ *         by the caller.
+ */
+TAURUS_API TaurusStatus taurus_xpath_register_function(
+    TaurusDocument doc,
+    const char* name,
+    TaurusXPathFn fn,
+    void* user_data
+);
+
+/**
  * Get XPath result type
  *
  * @param result XPath result

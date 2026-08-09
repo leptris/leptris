@@ -87,8 +87,16 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     context->input_len = 0;
 
     /* Initialize function registry: use the shared standard singleton
-     * (TODO 113 perf). Skip the ~27 alloc + register ops per eval. */
-    context->function_registry = xpath_function_registry_get_standard();
+     * (TODO 113 perf). Skip the ~27 alloc + register ops per eval.
+     * TODO 148 Phase 5: if the document has custom fns registered,
+     * build a per-context registry that merges standard + custom. */
+    extern XPathFunctionRegistry* taurus_xpath_build_custom_registry(struct taurus_document*);
+    context->function_registry = taurus_xpath_build_custom_registry(document);
+    if (!context->function_registry) {
+        context->function_registry = xpath_function_registry_get_standard();
+    }
+
+    context->current_fn_user_data = NULL;
 
     return context;
 }
@@ -105,8 +113,15 @@ void xpath_context_free(XPathContext* context) {
         TAURUS_FREE(context->namespace_mappings);
     }
 
-    /* Function registry is now the shared singleton (TODO 113 perf).
-     * Do NOT free it here — it lives for the process lifetime. */
+    /* Function registry: usually the shared singleton (TODO 113
+     * perf) — do NOT free it. But if the doc had custom XPath
+     * functions registered (TODO 148 Phase 5), the context owns a
+     * freshly-built per-context registry that needs freeing. */
+    extern XPathFunctionRegistry* xpath_function_registry_get_standard(void);
+    if (context->function_registry &&
+        context->function_registry != xpath_function_registry_get_standard()) {
+        xpath_function_registry_free((XPathFunctionRegistry*)context->function_registry);
+    }
 
     TAURUS_FREE(context);
 }
@@ -624,8 +639,14 @@ static struct taurus_xpath_result* evaluate_function_call_impl(XPathContext* ctx
         return NULL;
     }
 
-    /* Call function handler */
-    return func_def->handler(ctx, ast->children, arg_count);
+    /* Call function handler. TODO 148 Phase 5: save/restore the
+     * per-call user_data slot so the handler can read it via the
+     * accessor — supports recursion (nested function calls). */
+    void* saved_user_data = ctx->current_fn_user_data;
+    ctx->current_fn_user_data = func_def->user_data;
+    struct taurus_xpath_result* r = func_def->handler(ctx, ast->children, arg_count);
+    ctx->current_fn_user_data = saved_user_data;
+    return r;
 }
 
 /**

@@ -937,6 +937,10 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         taurus_doctype_free((TaurusDoctypeNode*)doc->doctype);
     }
 
+    /* Free custom XPath function registrations (TODO 148 Phase 5). */
+    extern void taurus_xpath_free_custom_fns(struct taurus_document*);
+    taurus_xpath_free_custom_fns(doc);
+
     /* Free element index (TODO 132) */
     if (doc->element_index) {
         taurus_element_index_free(doc->element_index);
