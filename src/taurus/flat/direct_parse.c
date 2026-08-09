@@ -239,8 +239,12 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
         if (quote != '"' && quote != '\'') return -1;
         p->pos++;
         char* val_start = p->pos;
-        while (p->pos < p->end && *p->pos != quote) p->pos++;
-        if (p->pos >= p->end) return -1;
+        /* memchr for closing quote — libc vectorized (SSE2/AVX),
+         * processes 16-32 bytes/iteration vs 1 byte/iteration for
+         * the sequential loop. Big win for URL/long-text values. */
+        char* val_end = (char*)memchr(p->pos, quote, p->end - p->pos);
+        if (!val_end) return -1;
+        p->pos = val_end;
         *p->pos = '\0'; /* Safe: overwrites closing quote, not a delimiter */
         size_t val_len = p->pos - val_start;
         p->pos++; /* skip the NUL */
@@ -497,44 +501,53 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                 /* Comment: <!-- ... --> */
                 p.pos += 4;
                 char* start = p.pos;
-                while (p.pos + 2 < p.end) {
-                    if (p.pos[0] == '-' && p.pos[1] == '-' && p.pos[2] == '>') {
-                        *p.pos = '\0'; /* NUL-terminate content */
-                        TaurusCommentNode* cn = taurus_comment_create(
-                            start, p.pos - start, pool);
-                        if (!cn) goto fail;
-                        cn->base.line = markup_line;
-                        if (p.depth > 0) {
-                            dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cn);
-                        }
-                        p.pos += 3;
+                /* memchr for '-' to fast-skip large comment bodies,
+                 * then verify "−−>" at each candidate. libc memchr
+                 * processes 16-32 bytes/iteration. */
+                for (;;) {
+                    char* dash = (char*)memchr(p.pos, '-', p.end - p.pos);
+                    if (!dash || dash + 2 >= p.end) goto fail;
+                    if (dash[1] == '-' && dash[2] == '>') {
+                        p.pos = dash;
                         break;
                     }
-                    if (*p.pos == '\n') p.line++;
-                    p.pos++;
+                    p.pos = dash + 1;
                 }
+                *p.pos = '\0'; /* NUL-terminate content */
+                TaurusCommentNode* cn = taurus_comment_create(
+                    start, p.pos - start, pool);
+                if (!cn) goto fail;
+                cn->base.line = markup_line;
+                if (p.depth > 0) {
+                    dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cn);
+                }
+                p.pos += 3;
                 dp_advance_line(&p, start, p.pos);
             } else if (p.end - p.pos >= 9 &&
                        memcmp(p.pos + 2, "[CDATA[", 7) == 0) {
                 /* CDATA: <![CDATA[ ... ]]> */
                 p.pos += 9;
                 char* start = p.pos;
-                while (p.pos + 2 < p.end) {
-                    if (p.pos[0] == ']' && p.pos[1] == ']' && p.pos[2] == '>') {
-                        *p.pos = '\0';
-                        TaurusCDATANode* cd = taurus_cdata_create(
-                            start, p.pos - start, pool);
-                        if (!cd) goto fail;
-                        cd->base.line = markup_line;
-                        if (p.depth > 0) {
-                            dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cd);
-                        }
-                        p.pos += 3;
+                /* memchr for ']' to fast-skip large CDATA bodies,
+                 * then verify "]]>" at each candidate. */
+                for (;;) {
+                    char* bracket = (char*)memchr(p.pos, ']', p.end - p.pos);
+                    if (!bracket || bracket + 2 >= p.end) goto fail;
+                    if (bracket[1] == ']' && bracket[2] == '>') {
+                        p.pos = bracket;
                         break;
                     }
-                    if (*p.pos == '\n') p.line++;
-                    p.pos++;
+                    p.pos = bracket + 1;
                 }
+                *p.pos = '\0';
+                TaurusCDATANode* cd = taurus_cdata_create(
+                    start, p.pos - start, pool);
+                if (!cd) goto fail;
+                cd->base.line = markup_line;
+                if (p.depth > 0) {
+                    dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cd);
+                }
+                p.pos += 3;
                 dp_advance_line(&p, start, p.pos);
             } else {
                 /* DOCTYPE: skip to matching '>' with bracket counting. */
@@ -563,7 +576,12 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             *p.pos = '\0';
             p.pos++;
             char* data_start = p.pos;
-            while (p.pos < p.end && *p.pos != '?') p.pos++;
+            /* memchr for '?' — fast-skip PI data bodies. */
+            {
+                char* q = (char*)memchr(p.pos, '?', p.end - p.pos);
+                if (!q) goto fail;
+                p.pos = q;
+            }
             if (p.pos + 1 >= p.end || p.pos[1] != '>') goto fail;
             *p.pos = '\0'; /* NUL-terminate data */
             size_t data_len = p.pos - data_start;
