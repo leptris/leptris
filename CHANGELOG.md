@@ -1,13 +1,49 @@
 ## [Unreleased]
 
-## [0.9.0] - Y-08-09
+## [0.9.0] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### `direct_parse` handles DTD entities — path to deleting legacy parser
 
-### Changed
+The legacy parser (`parser_new.c`, 1955 lines) existed primarily to
+handle DTD internal subsets with custom entity declarations. This
+release makes `direct_parse` DTD-aware, enabling deletion of the
+legacy parser in a future release.
 
-- (describe changes here)
+#### Changes
+
+- **DOCTYPE extraction**: when `direct_parse` encounters
+  `<!DOCTYPE name [subset]>`, it extracts the internal subset and
+  parses it via `taurus_dtd_parse_internal_subset` (reusing the
+  existing DTD parser). A DOCTYPE node is created so
+  `taurus_document_internal_subset` exposes the name.
+
+- **Entity expansion**: when a DTD is present and text/attr content
+  contains `&`, entities are eagerly expanded via
+  `taurus_decode_entities_view_with_dtd`. Predefined entities
+  (`&amp;` etc.) still use the lazy expansion path when no DTD.
+
+- **Parse-path gate**: the DTD internal-subset gate in `taurus_parse`
+  is removed. `direct_parse` now handles DTD inputs directly —
+  no more forced legacy-parser fallback for `<!DOCTYPE>` inputs.
+
+- **Serializer**: `serialize_text_internal` now routes through
+  `taurus_text_get_content` so borrowed text nodes with entities
+  are materialized + expanded before output.
+
+#### Verified
+
+`<!DOCTYPE root [<!ENTITY foo "Hello">]><root>&foo;</root>` parses
+via `direct_parse` with text content `"Hello"` (was `"&foo;"`
+before this change).
+
+#### Next steps (future releases)
+
+Once confidence builds that `direct_parse` handles all real-world
+DTD inputs:
+- Remove `flat_parse` fallback from `taurus_parse`.
+- Delete the legacy parser (`parser_new.c`, ~1955 lines).
+- Delete `flat_parser.c` + `flat_promote.c` (~1245 lines).
+- Total: ~3200 lines of parser code removed.
 
 
 ## [0.8.0] - 2026-08-09
