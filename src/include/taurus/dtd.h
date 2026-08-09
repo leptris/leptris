@@ -19,6 +19,7 @@ extern "C" {
 #ifndef TAURUS_INTERNAL_TYPES_DEFINED
 #define TAURUS_INTERNAL_TYPES_DEFINED
 typedef struct taurus_document* TaurusDocument;
+typedef struct taurus_doctype*  TaurusDoctype;
 #endif
 
 /* TaurusDTD is opaque to the public API.  Guard matches the internal
