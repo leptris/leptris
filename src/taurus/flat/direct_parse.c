@@ -26,8 +26,11 @@
 #include "../dom/comment.h"
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
+#include "../dom/doctype.h"
 #include "../common/string_view.h"
 #include "../common/chartype.h"
+#include "../common/entities.h"
+#include "../dtd/model.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -66,6 +69,12 @@ typedef struct {
     struct taurus_attribute* attr_block;
     size_t attr_idx;
     size_t attr_capacity;
+    /* DTD parsed from the DOCTYPE internal subset. NULL when the
+     * document has no DTD (or only an external subset). When non-NULL,
+     * text/attr entity expansion routes through
+     * taurus_decode_entities_view_with_dtd so custom entities
+     * (&foo; where foo is declared in the DTD) resolve correctly. */
+    TaurusDTD* dtd;
 } DParser;
 
 static inline void dp_skip_ws(DParser* p) {
@@ -157,13 +166,29 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     attr->prefix_view = taurus_sv_empty();
     attr->namespace_uri_view = taurus_sv_empty();
     attr->name = name;            /* zero-copy, NUL-terminated in buffer */
-    /* For values containing '&', leave value NULL so the accessor
-     * (taurus_element_attribute / _get_attribute_legacy) expands
-     * predefined entities lazily via taurus_decode_entities_view.
-     * Entity-free values are safe to return zero-copy. */
+    /* Entity handling for attr values:
+     * - DTD present + value has '&': eagerly expand via DTD-aware
+     *   decoder (custom entities &foo; need the DTD table). Result
+     *   is pool-allocated; has_entities=0 (already resolved).
+     * - No DTD + value has '&': leave value NULL, has_entities=1.
+     *   Accessor expands predefined entities lazily on first read.
+     * - No '&': zero-copy, no expansion needed. */
     if (val_len > 0 && memchr(val, '&', val_len) != NULL) {
-        attr->value = NULL;
-        attr->has_entities = 1;
+        if (p->dtd) {
+            TaurusStringView dsv = taurus_sv_from_ptr(val, val_len);
+            char* expanded = taurus_decode_entities_view_with_dtd(
+                &dsv, p->dtd, p->pool);
+            if (expanded) {
+                attr->value = expanded;
+                attr->has_entities = 0;
+            } else {
+                attr->value = NULL;
+                attr->has_entities = 1;
+            }
+        } else {
+            attr->value = NULL;
+            attr->has_entities = 1;
+        }
     } else {
         attr->value = val;
         attr->has_entities = 0;
@@ -369,6 +394,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     p.attr_block = attr_block;
     p.attr_idx = 0;
     p.attr_capacity = attr_capacity;
+    p.dtd = NULL;
     p.line = 1;
 
     /* Skip BOM. */
@@ -403,12 +429,26 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                 }
                 continue;
             }
-            /* Text node: borrowed pointer + length. NOT NUL-terminated
-             * here — taurus_text_get_content lazily materializes on
-             * first access. Writing NUL would corrupt the '<' the
-             * scanner needs to see next iteration. */
-            TaurusTextNode* tn = taurus_text_create_borrowed(
-                text_start, tlen, pool);
+            /* Text node. When a DTD is present (custom entity
+             * declarations), eagerly expand entities into a pool-
+             * allocated string — borrowed storage can't resolve
+             * &foo; without the DTD at access time. Without a DTD,
+             * stay borrowed and let taurus_text_get_content expand
+             * predefined entities lazily. */
+            TaurusTextNode* tn;
+            if (p.dtd && tlen > 0 &&
+                memchr(text_start, '&', tlen) != NULL) {
+                TaurusStringView sv = taurus_sv_from_ptr(text_start, tlen);
+                char* expanded = taurus_decode_entities_view_with_dtd(
+                    &sv, p.dtd, pool);
+                if (expanded) {
+                    tn = taurus_text_create(expanded, strlen(expanded), pool);
+                } else {
+                    tn = taurus_text_create_borrowed(text_start, tlen, pool);
+                }
+            } else {
+                tn = taurus_text_create_borrowed(text_start, tlen, pool);
+            }
             if (!tn) goto fail;
             tn->base.line = text_line;
             dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)tn);
@@ -550,15 +590,70 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                 p.pos += 3;
                 dp_advance_line(&p, start, p.pos);
             } else {
-                /* DOCTYPE: skip to matching '>' with bracket counting. */
+                /* DOCTYPE: extract name + internal subset. Build a
+                 * DOCTYPE node so taurus_document_internal_subset
+                 * returns the name, and parse entities from the
+                 * internal subset for custom entity expansion. */
                 char* doctype_start = p.pos;
-                p.pos += 2;
-                int bd = 0;
-                while (p.pos < p.end) {
-                    char c = *p.pos++;
-                    if (c == '[') bd++;
-                    else if (c == ']') { if (bd > 0) bd--; }
-                    else if (c == '>' && bd == 0) break;
+                p.pos += 2; /* skip "<!" */
+                /* Match "DOCTYPE" keyword (case-sensitive per XML spec). */
+                if (p.end - p.pos < 7 ||
+                    memcmp(p.pos, "DOCTYPE", 7) != 0) {
+                    while (p.pos < p.end && *p.pos != '>') p.pos++;
+                    if (p.pos < p.end) p.pos++;
+                    dp_advance_line(&p, doctype_start, p.pos);
+                    continue;
+                }
+                p.pos += 7;
+                while (p.pos < p.end && IS_WS(*p.pos)) {
+                    if (*p.pos == '\n') p.line++;
+                    p.pos++;
+                }
+                /* Scan DOCTYPE name. */
+                char* dt_name_start = p.pos;
+                while (p.pos < p.end && IS_NAME_CHAR(*p.pos)) p.pos++;
+                size_t dt_name_len = p.pos - dt_name_start;
+
+                /* Skip to '[' (internal subset) or '>' (no subset). */
+                char* subset_start = NULL;
+                char* subset_end = NULL;
+                while (p.pos < p.end && *p.pos != '>' && *p.pos != '[') {
+                    p.pos++;
+                }
+                if (p.pos < p.end && *p.pos == '[') {
+                    subset_start = ++p.pos;
+                    /* Find matching ']'. Nested brackets aren't legal
+                     * in DTD internal subsets, so no depth tracking. */
+                    while (p.pos < p.end && *p.pos != ']') p.pos++;
+                    subset_end = p.pos;
+                    if (p.pos < p.end) p.pos++; /* skip ']' */
+                    /* Skip to '>'. */
+                    while (p.pos < p.end && *p.pos != '>') p.pos++;
+                    if (p.pos < p.end) p.pos++; /* skip '>' */
+                } else {
+                    /* No internal subset, skip to '>'. */
+                    while (p.pos < p.end && *p.pos != '>') p.pos++;
+                    if (p.pos < p.end) p.pos++;
+                }
+
+                /* Create DOCTYPE node with the extracted name. */
+                if (dt_name_len > 0) {
+                    TaurusDoctypeNode* dt = taurus_doctype_create(
+                        dt_name_start, dt_name_len, pool);
+                    if (dt) {
+                        doc->doctype = dt;
+                    }
+                }
+
+                /* Parse internal subset if non-empty — builds the
+                 * entity table used for custom entity expansion. */
+                if (subset_start && subset_end > subset_start) {
+                    TaurusDTD* dtd = taurus_dtd_parse_internal_subset(
+                        subset_start, (size_t)(subset_end - subset_start),
+                        pool);
+                    if (dtd) {
+                        p.dtd = dtd;
+                    }
                 }
                 dp_advance_line(&p, doctype_start, p.pos);
             }
@@ -664,6 +759,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     doc->new_dom_root = p.root;
     doc->flat_promoted = 1; /* No FlatDoc, tree is ready */
     doc->pis = p.pis_head;
+    doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */
     doc->had_declaration = p.had_declaration;
     doc->standalone = p.standalone;
     /* encoding and xml_version are borrowed pointers into doc->xml_buffer.

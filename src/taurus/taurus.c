@@ -131,27 +131,19 @@ static int taurus_input_has_internal_dtd_subset(const char* xml, size_t len) {
 TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
 
-    /* TODO 139 Phase D: flat-parse fast path. Try the flat parser
-     * first; on success, return a doc shell with the FlatDoc stashed
-     * for lazy promote. The compact-pointer tree isn't built until
-     * the caller asks for taurus_document_root, so parse-only paths
-     * (parse + free, parse + count, etc.) skip the pool-alloc cost.
+    /* Fast path: try direct_parse first. It now handles DTD internal
+     * subsets (custom entity declarations) via taurus_dtd_parse_-
+     * internal_subset, so the DTD gate is removed. The flat_parse
+     * + lazy promote fallback remains for inputs direct_parse
+     * rejects (malformed constructs, edge cases).
      *
-     * Skip the fast path when the input has a DOCTYPE with an
-     * internal subset — the flat parser silently strips DTD
-     * entities, so any text containing &entity; would lose its
-     * expansion. The legacy parser handles DTD correctly.
+     * Predefined entities (&amp;, &lt;, etc.) expand lazily via
+     * taurus_text_get_content / attr accessor. Custom entities
+     * (&foo; from DTD) expand eagerly via DTD-aware decoder.
      *
-     * Predefined entities (&amp;, &lt;, &gt;, &quot;, &apos;) and
-     * numeric character references (&#65;, &#x42;) are handled by
-     * the fast path via lazy expansion in taurus_text_get_content
-     * and the attr accessor. Only DTD-defined custom entities need
-     * the legacy parser. */
-    /* TODO 145: namespace handling now lives in promote, so the
-     * flat fast path covers xmlns docs too. Keep the DTD-entity
-     * fallbacks (the flat parser still strips those silently). */
-    if (!taurus_input_has_internal_dtd_subset(xml, len) &&
-        g_taurus_max_depth == 0) {
+     * The legacy parser is now only a last-resort fallback for
+     * inputs both fast parsers reject. */
+    if (g_taurus_max_depth == 0) {
         /* TODO 147 Phase A: try the single-pass direct parser first.
          * It produces a TaurusElement tree directly — no FlatDoc
          * intermediate, no promote pass. Falls back to flat_parse +
