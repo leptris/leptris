@@ -21,6 +21,7 @@ typedef struct taurus_node*            TaurusNodeRef;
 typedef struct taurus_document*        TaurusDocument;
 typedef struct taurus_element*         TaurusElement;
 typedef struct taurus_attribute*       TaurusAttribute;
+typedef struct taurus_doctype*         TaurusDoctype;
 typedef const char*                    TaurusNamespace;
 typedef struct taurus_xpath_result*    TaurusXPathResult;
 #endif

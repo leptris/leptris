@@ -525,6 +525,79 @@ TAURUS_API TaurusElement taurus_document_root(TaurusDocument doc);
 TAURUS_API const char* taurus_document_encoding(TaurusDocument doc);
 
 /**
+ * Get the document's internal DTD subset — the DOCTYPE declaration
+ * (TODO 148 Phase 2).
+ *
+ * @param doc Document handle
+ * @return Opaque `TaurusDoctype` handle, or NULL if the document
+ *         has no DOCTYPE.
+ *
+ * Use the `taurus_doctype_*` accessors below to read the name,
+ * public identifier, system identifier, and internal subset.
+ *
+ * Memory: Handle is owned by the document; released by
+ *         `taurus_document_free`.
+ */
+TAURUS_API TaurusDoctype taurus_document_internal_subset(TaurusDocument doc);
+
+/**
+ * Get the DOCTYPE's root element name (the name following
+ * `<!DOCTYPE`).
+ *
+ * For `<!DOCTYPE html ...>`, returns `"html"`.
+ *
+ * @param dt DOCTYPE handle (must not be NULL)
+ * @return Root element name, or NULL if `dt` is NULL
+ *
+ * Memory: String is owned by the document; do not free.
+ */
+TAURUS_API const char* taurus_doctype_get_name(TaurusDoctype dt);
+
+/**
+ * Get the DOCTYPE's root element name (alias matching the libxml2
+ * / Nokogiri `DocType#name` convention).
+ *
+ * @param dt DOCTYPE handle
+ * @return Same value as `taurus_doctype_get_name`
+ */
+TAURUS_API const char* taurus_doctype_get_root_name(TaurusDoctype dt);
+
+/**
+ * Get the DOCTYPE's PUBLIC identifier.
+ *
+ * For `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0//EN" "...">`
+ * returns `"-//W3C//DTD XHTML 1.0//EN"`. Returns NULL for SYSTEM
+ * declarations and bare `<!DOCTYPE html>` declarations.
+ *
+ * @param dt DOCTYPE handle
+ * @return Public identifier, or NULL if not declared
+ */
+TAURUS_API const char* taurus_doctype_get_public_id(TaurusDoctype dt);
+
+/**
+ * Get the DOCTYPE's SYSTEM identifier.
+ *
+ * For `<!DOCTYPE html SYSTEM "html.dtd">` returns `"html.dtd"`.
+ * Returns NULL if not declared.
+ *
+ * @param dt DOCTYPE handle
+ * @return System identifier, or NULL if not declared
+ */
+TAURUS_API const char* taurus_doctype_get_system_id(TaurusDoctype dt);
+
+/**
+ * Get the DOCTYPE's internal DTD subset — the contents of the
+ * `[...]` block following the name and external identifiers.
+ *
+ * For `<!DOCTYPE root [<!ENTITY foo "bar">]>` returns
+ * `<!ENTITY foo "bar">`. Returns NULL if no internal subset.
+ *
+ * @param dt DOCTYPE handle
+ * @return Internal subset source, or NULL if empty
+ */
+TAURUS_API const char* taurus_doctype_get_internal_subset(TaurusDoctype dt);
+
+/**
  * Eagerly convert all StringViews to NULL-terminated strings
  *
  * PERFORMANCE OPTIMIZATION: Call this after parsing to optimize for

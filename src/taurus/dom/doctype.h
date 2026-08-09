@@ -9,8 +9,11 @@
 
 #include "node.h"
 
-/* DOCTYPE node - inherits from TaurusNode */
-typedef struct taurus_doctype_node {
+/* DOCTYPE node - inherits from TaurusNode.
+ * Tagged `taurus_doctype` so the public opaque typedef
+ * (TaurusDoctype = struct taurus_doctype*) matches. The struct is
+ * internal-only; the public API only sees the opaque pointer. */
+typedef struct taurus_doctype {
     TaurusNode base;                   /* MUST be first */
     char* name;                        /* DOCTYPE name (e.g., "html") */
     char* public_id;                   /* Public identifier (optional) */

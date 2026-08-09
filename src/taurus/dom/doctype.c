@@ -2,6 +2,7 @@
  * Copyright (c) 2024, Ribose Inc.
  */
 
+#include "../../include/taurus.h"
 #include "doctype.h"
 #include "../memory/pool.h"
 #include <stdlib.h>
@@ -51,7 +52,7 @@ void taurus_doctype_free(TaurusDoctypeNode* doctype) {
     (void)doctype;
 }
 
-const char* taurus_doctype_get_name(TaurusDoctypeNode* doctype) {
+TAURUS_API const char* taurus_doctype_get_name(TaurusDoctypeNode* doctype) {
     return doctype ? doctype->name : NULL;
 }
 
@@ -83,4 +84,32 @@ void taurus_doctype_set_internal_subset(TaurusDoctypeNode* doctype,
     doctype->internal_subset = subset && pool
         ? taurus_pool_strdup(pool, subset)
         : NULL;
+}
+
+/* ---- Public API wrappers (TODO 148 Phase 2) ----
+ *
+ * Thin re-exports of the internal accessors under the public
+ * `TaurusDoctype` opaque typedef + a document-level entry point
+ * that returns the doctype handle.
+ */
+
+TAURUS_API TaurusDoctype taurus_document_internal_subset(TaurusDocument doc) {
+    if (!doc) return NULL;
+    return (TaurusDoctype)doc->doctype;
+}
+
+TAURUS_API const char* taurus_doctype_get_root_name(TaurusDoctype dt) {
+    return dt ? dt->name : NULL;
+}
+
+TAURUS_API const char* taurus_doctype_get_public_id(TaurusDoctype dt) {
+    return dt ? dt->public_id : NULL;
+}
+
+TAURUS_API const char* taurus_doctype_get_system_id(TaurusDoctype dt) {
+    return dt ? dt->system_id : NULL;
+}
+
+TAURUS_API const char* taurus_doctype_get_internal_subset(TaurusDoctype dt) {
+    return dt ? dt->internal_subset : NULL;
 }
