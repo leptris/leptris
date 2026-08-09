@@ -1,13 +1,40 @@
 ## [Unreleased]
 
-## [0.10.0] - Y-08-09
+## [0.10.0] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Breaking — legacy parser DELETED (3092 lines removed)
 
-### Changed
+The legacy parser (`parser_new.c`, 1956 lines) is gone. `direct_parse`
+(with DTD entity support from v0.9.0) now covers the full XML feature
+set. The three-parser architecture collapses to two.
 
-- (describe changes here)
+#### Deleted
+- `src/taurus/parse/parser_new.c` — 1956 lines
+- `src/taurus/parse/parser_new.h` — 175 lines
+- `src/taurus/parse/compact_parser.c` — 654 lines (was dead code)
+- Legacy parser fallback in `taurus_parse` — 319 lines
+- Legacy parser path in `taurus_parse_inplace` — delegates to `taurus_parse`
+
+The `src/taurus/parse/` directory is now empty.
+
+#### Changes
+- `taurus_parse`: when `direct_parse` and `flat_parse` both fail,
+  returns NULL. No legacy fallback.
+- `taurus_parse_inplace`: delegates to `taurus_parse` (direct_parse
+  copies the caller's buffer for in-place NUL termination).
+- `direct_parse` and `flat_parser`: now respect `g_taurus_max_depth`
+  (custom depth limit) via `__thread extern`. Falls back to
+  `DP_MAX_DEPTH` (256) / `FLAT_MAX_DEPTH` when the limit is 0.
+
+#### Architecture after this release
+Two parsers instead of three:
+1. `flat/direct_parse.c` — single-pass, zero-copy, bulk-alloc,
+   DTD-aware (primary).
+2. `flat/flat_parser.c` — FlatDoc intermediate + lazy promote
+   (fallback for edge cases `direct_parse` rejects).
+
+This is an internal ABI change (no public API surface change).
+576/576 tests pass; ASAN clean.
 
 
 ## [0.9.0] - 2026-08-09
