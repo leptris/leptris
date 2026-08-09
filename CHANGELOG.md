@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.10.0] - Y-08-09
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.9.0] - 2026-08-09
 
 ### `direct_parse` handles DTD entities — path to deleting legacy parser
