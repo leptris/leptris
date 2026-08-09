@@ -1,13 +1,43 @@
 ## [Unreleased]
 
-## [0.11.0] - Y-08-09
+## [0.11.0] - 2026-08-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### ONE parser architecture — flat subsystem DELETED (4479 lines removed)
 
-### Changed
+`direct_parse` is now the sole XML parser. The entire flat/
+subsystem (flat_parser, flat_promote, flat_doc, flat_fast,
+flat_serialize, flat_xpath) is deleted. One parser, like pugixml.
 
-- (describe changes here)
+#### Changes
+
+- **UTF-8 name support**: Added `CT_UTF8` flag to the shared
+  chartype table for bytes >= 0x80. `IS_NAME_CHAR` and
+  `IS_NAME_START` now include `CT_UTF8`, so UTF-8 multibyte names
+  (`<café>`) scan without truncation.
+
+- **Close tag prefix:local fix**: Close tag verification now
+  strips the prefix from `</ns:elem>` before comparing with the
+  open element's local name. This was a latent bug that surfaced
+  when the flat_parser fallback was removed.
+
+- **Deleted flat subsystem** (~4479 lines):
+  - `flat_doc.c/h`, `flat_parser.c/h`, `flat_promote.c/h`,
+    `flat_fast.c/h`, `flat_serialize.c/h`, `flat_xpath.c/h`
+  - `test/flat/` directory + `test_flat_promote_line.cpp`
+  - `benchmarks/flat/bench_flat_parse.c`
+  - `flat_doc`/`flat_promoted` fields from `struct taurus_document`
+  - Flat fast-path checks in `xpath_public.c` and `serialize.c`
+
+- `taurus_parse` calls `direct_parse` directly — no fallback chain.
+- `taurus_document_ensure_promoted` is now a no-op chokepoint.
+
+#### Architecture
+
+- `src/taurus/parse/` — empty (legacy parser deleted v0.10.0)
+- `src/taurus/flat/` — only `direct_parse.c` and `direct_parse.h`
+
+One parser, one codebase, ~7500 lines of parser code removed across
+v0.10.0 + v0.11.0.
 
 
 ## [0.10.0] - 2026-08-09
