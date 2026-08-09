@@ -17,6 +17,7 @@
 #include "../taurus_internal.h"
 #include "../dom/element.h"
 #include "../common/string_view.h"
+#include "../common/chartype.h"
 #include "../common/entities.h"
 #include "../dtd/model.h"
 #include "../simd_helpers.h"
@@ -309,7 +310,7 @@ static inline char parser_peek_ahead_inline(Parser* p, int offset) {
 }
 
 static inline int parser_is_whitespace_inline(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    return IS_WS(c);
 }
 
 /* CLEAN OPTIMIZATION: Make frequently called functions static inline
@@ -399,28 +400,25 @@ static int is_utf8_multibyte_start(unsigned char c) {
 }
 
 /* PERFORMANCE: Inline name validation - called MILLIONS of times during parsing
- * These are the hottest functions in the parser - must be as fast as possible */
+ * These are the hottest functions in the parser - must be as fast as possible.
+ *
+ * Routed through the shared taurus_chartype_table (TODO 149 Phase 3) for
+ * the ASCII fast path — one indexed load, no branch chain. UTF-8
+ * multibyte starts still fall through to the legacy range check so
+ * Unicode-letter names continue to parse. */
 static inline int parser_is_name_start_inline(char c) {
-    /* Fast path for ASCII (most common case) */
     unsigned char uc = (unsigned char)c;
     if (uc < 128) {
-        /* ASCII: letters, underscore, colon */
-        return (uc >= 'a' && uc <= 'z') || (uc >= 'A' && uc <= 'Z') || uc == '_' || uc == ':';
+        return IS_NAME_START(c);
     }
-    /* UTF-8 multi-byte sequences (Unicode letters) */
     return is_utf8_multibyte_start(uc);
 }
 
 static inline int parser_is_name_char_inline(char c) {
-    /* Fast path for ASCII (most common case) */
     unsigned char uc = (unsigned char)c;
     if (uc < 128) {
-        /* ASCII: alnum, underscore, colon, hyphen, period */
-        return (uc >= 'a' && uc <= 'z') || (uc >= 'A' && uc <= 'Z') ||
-               (uc >= '0' && uc <= '9') || uc == '_' || uc == ':' ||
-               uc == '-' || uc == '.';
+        return IS_NAME_CHAR(c);
     }
-    /* UTF-8 multi-byte sequences */
     return is_utf8_multibyte_start(uc);
 }
 

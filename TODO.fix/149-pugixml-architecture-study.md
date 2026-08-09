@@ -144,13 +144,28 @@ Measured on 24 KB plain XML, ~2300 attrs:
 
 ## Phase ordering
 
-1. **TODO 150** — Consolidate chartype tables (small, high DRY value).
-2. **TODO 151** — Computed-goto dispatch experiment.
-3. **TODO 90 Phase 2e** — Compress element struct from 88 → 72 bytes
-   (drop per-node `document` pointer; use side-table).
-4. **TODO 152** — Bulk attr allocation in flat_promote (mirror
-   direct_parse).
-5. **TODO 153** — PCH + LTO for the parser TUs.
+1. **Phase 1 — Chartype consolidation** (DONE v0.6.2): shared
+   `taurus_chartype_table` with CT_NAME_START / CT_NAME / CT_WS flags.
+   direct_parse and flat_parser migrated; binary shrinks by 3 × 256 B
+   per TU.
+2. **Phase 2 — Computed-goto dispatch** (ANALYZED, DEFERRED): the
+   `<`-dispatch in direct_parse has only 5 cases (NAME_START, `/`,
+   `!`, `?`, default). For a 21K-line doc (~5K tags), that's ~25K
+   dispatches ≈ 8 µs total at 1 cycle/dispatch. Computed-goto would
+   save at most 0.5 cycle/dispatch ≈ 12 µs — unmeasurable. The hot
+   paths (name scan via LUT, text scan via memchr) are already faster
+   than scalar computed-goto. Not worth the complexity.
+3. **Phase 3 — Legacy parser chartype migration** (DONE): parser_new.c
+   now routes ASCII fast-path of `parser_is_name_start_inline` /
+   `parser_is_name_char_inline` / `parser_is_whitespace_inline`
+   through the shared table. UTF-8 multibyte fallback preserved.
+4. **TODO 150 Phase 2e** — Compress element struct from 80 → 72 bytes.
+   See TODO 150 for the deferral rationale (Phase 2e-A needs an
+   alternative O(1) doc-lookup mechanism; Phase 2e-B requires
+   namespace-on-attrs refactor with c14n regression risk).
 
-Items 3-5 are each multi-week and out of session scope. Items 1-2
-are achievable in one PR each.
+## Status
+
+Phases 1 and 3 shipped. Phase 2 deferred with measured justification
+(the dispatch is too narrow and the hot paths already use faster
+techniques). Phase 4 tracked under TODO 150.
