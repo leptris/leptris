@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.7.0] - Y-08-09
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.6.3] - 2026-08-09
 
 ### Fixed — chronic CI failure finally resolved
