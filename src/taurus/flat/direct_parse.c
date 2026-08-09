@@ -509,7 +509,13 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             }
 
             if (!self_closing) {
-                if (p.depth >= DP_MAX_DEPTH) goto fail;
+                /* Respect custom depth limit (g_taurus_max_depth)
+                 * when set by the caller; fall back to the
+                 * compile-time default otherwise. */
+                extern __thread int g_taurus_max_depth;
+                int max_depth = g_taurus_max_depth > 0
+                    ? g_taurus_max_depth : DP_MAX_DEPTH;
+                if (p.depth >= max_depth) goto fail;
                 p.open_stack[p.depth++] = elem;
             }
         }

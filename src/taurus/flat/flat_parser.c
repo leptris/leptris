@@ -364,7 +364,11 @@ static int fp_scan_element_start(FlatParser* p, FlatDoc* doc) {
     uint16_t name_len;
     if (fp_scan_name(p, &name_offset, &name_len) != 0) return -1;
 
-    if (p->depth >= FLAT_MAX_DEPTH) return -1;
+    /* Respect custom depth limit (g_taurus_max_depth) when set by
+     * the caller; fall back to the compile-time default otherwise. */
+    extern __thread int g_taurus_max_depth;
+    int max_depth = g_taurus_max_depth > 0 ? g_taurus_max_depth : FLAT_MAX_DEPTH;
+    if (p->depth >= max_depth) return -1;
 
     /* Snapshot the attr_start BEFORE appending attrs so we can
      * record (attr_start, attr_count) on the element. */
