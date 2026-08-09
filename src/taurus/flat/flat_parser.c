@@ -105,7 +105,6 @@ static inline int fp_is_name_char(unsigned char c) {
     /* UTF-8 continuation or start bytes — accept as potential
      * name chars. The promote pass validates via utf8proc. */
     return c >= 0x80;
-    return c >= 0x80;
 }
 
 /* Scan one XML name. Returns length via *out_len and offset via
