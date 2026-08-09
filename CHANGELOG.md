@@ -1,13 +1,41 @@
 ## [Unreleased]
 
-## [0.6.1] - Y-08-09
+## [0.6.1] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — DOCTYPE public access API (TODO 148 Phase 2)
 
-### Changed
+- `taurus_document_internal_subset(doc)` → opaque `TaurusDoctype`
+  handle (or NULL when no DOCTYPE, or when direct_parse skipped it
+  on plain-XML input)
+- `taurus_doctype_get_name` / `_get_root_name` (alias matching the
+  Nokogiri `DocType#name` convention)
+- `taurus_doctype_get_public_id`
+- `taurus_doctype_get_system_id`
+- `taurus_doctype_get_internal_subset`
 
-- (describe changes here)
+New opaque typedef `TaurusDoctype` in `taurus/types.h`. Backs
+`Document#internal_subset`, `#doctype`, and the `DocType#name` /
+`#public_id` / `#system_id` / `#internal_subset` family in the
+Ruby binding.
+
+### Added — Custom XPath function handlers (TODO 148 Phase 5)
+
+- `taurus_xpath_register_function(doc, name, fn, user_data)`
+- `typedef char* (*TaurusXPathFn)(const char* const* args, int argc, void* user_data)`
+
+Registered functions live on the document and are merged AFTER
+the standard XPath 1.0 library in the per-context registry, so
+standard names win collisions. Backs Nokogiri's
+`Searchable#xpath(expr, handler)` extension.
+
+### Performance — flat_promote bulk attr allocation (TODO 148 Phase 7)
+
+Mirrors `direct_parse`'s `dp_add_attr_inline` in the promote pass.
+Pre-allocates the entire attr block upfront from
+`flat->attr_count`; each attr takes the next slot off the block
+(bump pointer). The inline path skips name interning + value
+pool_strdup + per-attr entity memchr. Closes the long-deferred
+TODO 114 Phase 4.
 
 
 ## [0.6.0] - 2026-08-08
