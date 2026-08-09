@@ -59,7 +59,7 @@ TEST(CustomXPath, RegisteredFunctionInvocable) {
     TaurusElement root = taurus_document_root(doc);
     TaurusXPathResult r = taurus_xpath_eval(doc, root, "concat-text(//a, //b)");
     ASSERT_NE(r, nullptr);
-    EXPECT_STREQ(taurus_xpath_result_string(r), "helloworld");
+    { char* s = taurus_xpath_result_string(r); EXPECT_STREQ(s, "helloworld"); free(s); }
     taurus_xpath_result_free(r);
     taurus_document_free(doc);
 }
@@ -72,7 +72,7 @@ TEST(CustomXPath, UserDataPassedThrough) {
     TaurusElement root = taurus_document_root(doc);
     TaurusXPathResult r = taurus_xpath_eval(doc, root, "literal()");
     ASSERT_NE(r, nullptr);
-    EXPECT_STREQ(taurus_xpath_result_string(r), "the-answer");
+    { char* s = taurus_xpath_result_string(r); EXPECT_STREQ(s, "the-answer"); free(s); }
     taurus_xpath_result_free(r);
     taurus_document_free(doc);
 }
