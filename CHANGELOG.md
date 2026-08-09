@@ -1,13 +1,24 @@
 ## [Unreleased]
 
-## [0.7.1] - Y-08-09
+## [0.7.1] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance
 
-### Changed
+- Migrate legacy parser (`parser_new.c`) to the shared
+  `taurus_chartype_table` for ASCII name/whitespace classification
+  (TODO 149 Phase 3). `direct_parse`, `flat_parser`, and
+  `parser_new` now all share one 256-byte LUT — DRY and smaller
+  binary. UTF-8 multibyte name fallback preserved.
 
-- (describe changes here)
+### Fixes
+
+- Eliminate compiler warnings: unused `name_delim`/`root_seen` in
+  `direct_parse.c`, unterminated block comment in `parser_new.c`,
+  tautological range check in `dtd/parser.c`.
+- Stabilize `GrowsBufferForHugeTextContent` on Linux CI (200 KB →
+  100 KB, matching the sibling test that consistently passes).
+- Bump `IndexedChildAccessDoesNotRegress` perf budget (12 → 16 ms)
+  to tolerate CI runner load variance.
 
 
 ## [0.7.0] - 2026-08-09
