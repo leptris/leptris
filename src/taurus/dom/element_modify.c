@@ -1145,9 +1145,14 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
 
     /* Copy prefix and namespace as StringView (TODO 90) */
     /* prefix_view removed (TODO 90) — prefix is copied as char* below */;
-    /* namespace_uri_view removed from struct — the cached char* was
-     * already set by the recursive deep_copy_element call. */
-    copy->namespace_uri = source->namespace_uri;
+    /* Phase 2e-B: copy namespace_uri through ns_cache. */
+    {
+        char* src_uri = taurus_elem_ns_uri(source);
+        if (src_uri) {
+            TaurusMemoryPool* p = copy->document ? copy->document->pool : NULL;
+            taurus_elem_set_ns_uri(copy, src_uri, p);
+        }
+    }
 
     /* Set parent pointer */
     taurus_elem_set_parent(copy, parent_copy);

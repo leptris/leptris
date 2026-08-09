@@ -1237,7 +1237,8 @@ static void finalize_zero_copy_open_tag(TaurusElement elem,
     }
     if (prefix_view->data && prefix_view->length > 0) {
         ((char*)prefix_view->data)[prefix_view->length] = '\0';
-        elem->prefix = (char*)prefix_view->data;
+        TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+        taurus_elem_set_prefix(elem, (char*)prefix_view->data, pool);
     }
     for (struct taurus_attribute* a = taurus_elem_first_attribute(elem);
          a != NULL; a = a->next) {
@@ -1302,7 +1303,7 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
      * to finalize_zero_copy_open_tag (TODO 113 Phase 5). */
     if (!taurus_sv_is_empty(&prefix_view)) {
         if (!p->writable) {
-            elem->prefix = taurus_sv_to_cstr_pooled(&prefix_view, p->pool);
+            taurus_elem_set_prefix(elem, taurus_sv_to_cstr_pooled(&prefix_view, p->pool), p->pool);
         }
         p->has_namespace_prefixes = 1;
     }
@@ -1325,9 +1326,9 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
             /* STRICT MODE VALIDATION: Check for undeclared namespace prefix
              * Per XML Namespaces spec, a prefix used in an element name must be declared
              * For self-closing elements, we check this before returning */
-            if (p->strict_mode && elem->prefix && elem->prefix[0]) {
-                /* Check if prefix is "xml" - reserved prefix that's always valid */
-                const char* pfx = elem->prefix;
+            if (p->strict_mode) {
+                const char* pfx = taurus_elem_prefix(elem);
+                if (pfx && pfx[0]) {
                 int is_xml_prefix = (strlen(pfx) == 3) &&
                                    (pfx[0] == 'x' || pfx[0] == 'X') &&
                                    (pfx[1] == 'm' || pfx[1] == 'M') &&
@@ -1352,6 +1353,7 @@ static TaurusElement parser_parse_element_impl(Parser* p) {
                         parser_set_error(p, error_msg);
                         return NULL;
                     }
+                }
                 }
             }
 
@@ -1728,12 +1730,14 @@ static void resolve_namespaces_recursive_impl(TaurusElement elem, int depth) {
      * TODO 15: route the prefix conversion through the document pool
      * so we don't rely on manual free() (which previously leaked on
      * early-return paths). */
-    /* LAZY NAMESPACE RESOLUTION (TODO 90: prefix_view removed,
-     * use cached elem->prefix char* directly). */
-    if (elem->prefix && elem->prefix[0] && elem->namespace_uri == NULL) {
-        const char* uri = taurus_element_lookup_namespace(elem, elem->prefix);
-        if (uri) {
-            taurus_element_set_namespace_uri_view(elem, taurus_sv_from_cstr(uri));
+    /* LAZY NAMESPACE RESOLUTION */
+    {
+        const char* pfx = taurus_elem_prefix(elem);
+        if (pfx && pfx[0] && taurus_elem_ns_uri(elem) == NULL) {
+            const char* uri = taurus_element_lookup_namespace(elem, pfx);
+            if (uri) {
+                taurus_element_set_namespace_uri_view(elem, taurus_sv_from_cstr(uri));
+            }
         }
     }
 }
