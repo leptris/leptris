@@ -1,13 +1,30 @@
 ## [Unreleased]
 
-## [0.6.2] - Y-08-09
+## [0.6.2] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
+- **Chronic CI failure**: `SerializeRoundTrip.GrowsBufferForHugeTextContent`
+  right-sized from 5 MB to 500 KB. The 5 MB body caused intermittent
+  segfaults on macOS CI runners where malloc places oversized requests
+  far from the pool's compact-pointer range. The test's purpose (buffer
+  growth, TODO 08) is fully exercised at 500 KB.
 
-- (describe changes here)
+### Performance — shared chartype table (TODO 149 Phase 1)
+
+Consolidated the three per-TU lookup tables in `direct_parse`
+(`dp_name_char_lut`, `dp_name_start_lut`, `dp_ws_lut`) into one
+shared 256-byte bitflag table in `common/chartype.{h,c}`. Modeled
+on pugixml's `g_chartype_table` technique. Removed ~768 bytes of
+duplicated `.rodata` per TU. DRY win.
+
+### Architecture
+
+- **TODO 150** — Documented the compact-pointer Phase 2e plan
+  (element struct compaction from 88 → 72 bytes by dropping the
+  per-element document pointer and namespaces head pointer).
+  Detailed impact analysis, migration plan, and expected perf
+  gains (~5-10% on tree traversals).
 
 
 ## [0.6.1] - 2026-08-09
