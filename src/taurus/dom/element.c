@@ -848,8 +848,14 @@ static size_t calculate_text_length_recursive(TaurusNode* node) {
     while (child) {
         if (child->type == TAURUS_NODE_TYPE_TEXT) {
             TaurusTextNode* text = (TaurusTextNode*)child;
-            if (text->content) {
-                len += text->content_len;
+            /* Route through taurus_text_get_content so entity-
+             * containing borrowed text (the fast-parse path) is
+             * expanded before measuring. After the call the node
+             * is materialized, so the copy pass can use
+             * text->content_len directly. */
+            const char* content = taurus_text_get_content(text);
+            if (content) {
+                len += strlen(content);
             }
         } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
             TaurusCDATANode* cdata = (TaurusCDATANode*)child;
@@ -875,9 +881,11 @@ static void copy_text_content_recursive(TaurusNode* node, char* result, size_t* 
     while (child) {
         if (child->type == TAURUS_NODE_TYPE_TEXT) {
             TaurusTextNode* text = (TaurusTextNode*)child;
-            if (text->content) {
-                memcpy(result + *offset, text->content, text->content_len);
-                *offset += text->content_len;
+            const char* content = taurus_text_get_content(text);
+            if (content) {
+                size_t clen = strlen(content);
+                memcpy(result + *offset, content, clen);
+                *offset += clen;
             }
         } else if (child->type == TAURUS_NODE_TYPE_CDATA) {
             TaurusCDATANode* cdata = (TaurusCDATANode*)child;
