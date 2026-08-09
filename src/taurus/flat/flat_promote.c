@@ -407,7 +407,7 @@ static int flat_promote_build_tree(struct taurus_document* doc) {
                     /* NUL-terminate at the colon position. */
                     xml_buffer_owned[fn->name_offset +
                         (size_t)(colon - name_start)] = '\0';
-                    elem->prefix = (char*)(name_start);
+                    taurus_elem_set_prefix(elem, (char*)(name_start), pool);
                     elem->name = (char*)(colon + 1);
                 }
                 if (!elem->name) { free(mapping); return -1; }

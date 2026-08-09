@@ -83,44 +83,86 @@ struct taurus_attribute {
  * - 4-byte base node (vs 32 bytes in legacy) - no redundant pointers
  * - Falls back to hash table for large offsets
  */
+/* Phase 2e-B (TODO 150): merged prefix + namespace_uri into a single
+ * nullable ns_cache pointer. Most elements have no prefix and no
+ * namespace_uri → ns_cache is NULL, zero overhead. Only elements that
+ * have a prefix (qualified name like foo:bar) or resolved namespace_uri
+ * pay the 16-byte pool allocation for the cache struct.
+ *
+ * Saves 8 bytes per element (88 → 80). */
+struct taurus_ns_cache {
+    char* prefix;
+    char* namespace_uri;
+};
+
 struct taurus_element {
-    /* Compact base node (8 bytes) - MUST be first for casting.
-     * TaurusNode is 8 bytes (4-byte enum + 4-byte bitfield word). */
+    /* Compact base node (12 bytes) - MUST be first for casting. */
     TaurusNode base;
 
     /* Packed header + counts (5 bytes, fills the 8-byte tail of base's
-     * alignment slot). Phase 2a of TODO 90 — eliminated 8 bytes of
-     * padding that the previous layout wasted. */
+     * alignment slot). Phase 2a of TODO 90. */
     TaurusCompactHeader header;        /* 2 bytes */
     uint8_t attr_count;                /* 1 byte */
     uint16_t child_count;              /* 2 bytes */
 
-    /* Cached NULL-terminated strings (24 bytes).
-     * Phase 1 of TODO 90 removed the parallel StringView fields. */
+    /* Cached NULL-terminated strings (16 bytes).
+     * Phase 2e-B: prefix + namespace_uri merged into ns_cache (8 bytes
+     * instead of 16). name stays inline — it's accessed on every
+     * serialize/XPath hit. */
     char* name;                        /* NULL until first access */
-    char* prefix;                      /* NULL until first access */
-    char* namespace_uri;               /* NULL until first access */
+    struct taurus_ns_cache* ns_cache;  /* NULL for non-namespaced elements */
 
-    /* Tree edges (16 bytes). Stored as int32_t byte-offsets relative
-     * to this element's own address (Phase 2b of TODO 90). Offset 0
-     * encodes NULL. Access via the inline accessors below — never
-     * dereference these fields directly. */
-    int32_t parent_off;                /* target is always an element */
-    int32_t first_child_off;           /* target may be any node type */
-    int32_t last_child_off;            /* target may be any node type */
-    int32_t next_sibling_off;          /* target may be any node type */
+    /* Tree edges (16 bytes). */
+    int32_t parent_off;
+    int32_t first_child_off;
+    int32_t last_child_off;
+    int32_t next_sibling_off;
 
-    /* Attribute list (8 bytes). Phase 2d of TODO 90: first/last
-     * attribute pointers are stored as int32_t offsets relative to
-     * this element's own address, encoded exactly like the tree
-     * edges. The inline accessors below decode/encode them. */
+    /* Attribute list (8 bytes). */
     int32_t first_attribute_off;
     int32_t last_attribute_off;
 
     /* Document context (16 bytes). */
-    struct taurus_namespace* namespaces; /* Linked list of declarations */
-    struct taurus_document* document;    /* NULL if detached */
+    struct taurus_namespace* namespaces;
+    struct taurus_document* document;
 };
+
+/* Inline accessors — use these instead of direct field access. */
+static inline char* taurus_elem_prefix(const TaurusElement e) {
+    return e && e->ns_cache ? e->ns_cache->prefix : NULL;
+}
+static inline char* taurus_elem_ns_uri(const TaurusElement e) {
+    return e && e->ns_cache ? e->ns_cache->namespace_uri : NULL;
+}
+
+/* Allocate ns_cache if needed, then set prefix. Pool required for
+ * the one-time 16-byte alloc. */
+static inline void taurus_elem_set_prefix(TaurusElement e, char* prefix,
+                                           TaurusMemoryPool* pool) {
+    if (!e) return;
+    if (!e->ns_cache) {
+        if (!pool) return;
+        e->ns_cache = (struct taurus_ns_cache*)
+            taurus_pool_alloc(pool, sizeof(struct taurus_ns_cache));
+        if (!e->ns_cache) return;
+        e->ns_cache->prefix = NULL;
+        e->ns_cache->namespace_uri = NULL;
+    }
+    e->ns_cache->prefix = prefix;
+}
+
+static inline void taurus_elem_set_ns_uri(TaurusElement e, char* uri,
+                                            TaurusMemoryPool* pool) {
+    if (!e) return;
+    if (!e->ns_cache) {
+        if (!pool) return;
+        e->ns_cache = (struct taurus_ns_cache*)
+            taurus_pool_alloc(pool, sizeof(struct taurus_ns_cache));
+        if (!e->ns_cache) return;
+        e->ns_cache->prefix = NULL;
+    }
+    e->ns_cache->namespace_uri = uri;
+}
 
 
 /* Compile-time element-size tracker (TODO 90).
@@ -138,11 +180,11 @@ struct taurus_element {
  * pugixml compact node: 12 bytes. Phase 2e of TODO 90 may compress
  * the document-context pointers and string pointers further. */
 #ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 88,
-    "taurus_element grew beyond 88 bytes — check for accidental field additions");
+_Static_assert(sizeof(struct taurus_element) <= 80,
+    "taurus_element grew beyond 80 bytes — check for accidental field additions");
 #else
-static_assert(sizeof(struct taurus_element) <= 88,
-    "taurus_element grew beyond 88 bytes");
+static_assert(sizeof(struct taurus_element) <= 80,
+    "taurus_element grew beyond 80 bytes");
 #endif
 
 /* ============================================================================
@@ -428,17 +470,14 @@ static inline TaurusStringView taurus_element_name_view(TaurusElement elem) {
 
 /* Get element prefix as StringView (NO conversion, O(1) access) */
 static inline TaurusStringView taurus_element_prefix_view(TaurusElement elem) {
-    return elem && elem->prefix ? taurus_sv_from_ptr(elem->prefix, strlen(elem->prefix)) : taurus_sv_empty();
+    char* p = taurus_elem_prefix(elem);
+    return p ? taurus_sv_from_ptr(p, strlen(p)) : taurus_sv_empty();
 }
 
-/* Get element namespace URI as StringView (derived from cached char*).
- * TODO 90: namespace_uri_view removed from struct; this accessor
- * reconstructs the view on demand. Safe because namespace_uri is
- * always NUL-terminated and pool-owned. */
+/* Get element namespace URI as StringView (derived from cached char*). */
 static inline TaurusStringView taurus_element_namespace_view(TaurusElement elem) {
-    return elem && elem->namespace_uri
-        ? taurus_sv_from_ptr(elem->namespace_uri, strlen(elem->namespace_uri))
-        : taurus_sv_empty();
+    char* u = taurus_elem_ns_uri(elem);
+    return u ? taurus_sv_from_ptr(u, strlen(u)) : taurus_sv_empty();
 }
 
 /* Get attribute name as StringView (NO conversion, O(1) access) */

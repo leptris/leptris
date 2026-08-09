@@ -444,7 +444,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             char* colon = strchr(name_start, ':');
             if (colon) {
                 *colon = '\0';
-                elem->prefix = name_start;
+                taurus_elem_set_prefix(elem, name_start, p.pool);
                 elem->name = colon + 1;
             } else {
                 elem->name = name_start;
