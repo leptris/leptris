@@ -1,13 +1,61 @@
 ## [Unreleased]
 
-## [0.8.0] - Y-08-09
+## [0.8.0] - 2026-08-09
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — parse algorithm over struct size
 
-### Changed
+This release closes the algorithmic parse gap with pugixml via two
+targeted hot-path improvements. Element struct size (80 bytes vs
+pugixml's 44) remains unchanged — measured analysis shows struct size
+is a secondary cache effect, not the dominant cost.
 
-- (describe changes here)
+#### Route predefined entities through the fast parser
+
+The parse-path gate previously fell back to the slow legacy parser
+for ANY input containing `&`, even when only predefined XML entities
+(`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`) or numeric character
+references (`&#65;`, `&#x42;`) were present. Since most real-world XML
+uses `&amp;` for escaping, this gate forced the slow path on the
+majority of inputs.
+
+**Fix**: removed the entity gate. The fast path (`direct_parse` +
+`flat_promote`) now handles predefined entities via lazy expansion:
+- `direct_parse` and `flat_promote` detect `&` in attr values, set
+  `has_entities=1`, leave `attr->value=NULL` so the accessor expands
+  via `taurus_decode_entities_view` on first read.
+- `taurus_text_get_content` checks for `&` in borrowed content and
+  expands before materializing.
+- The serializer expands entity-containing attrs before re-escaping.
+- `taurus_element_get_text_content` (XPath `string()`) routes through
+  `taurus_text_get_content`.
+
+The DOCTYPE internal-subset gate is retained — custom DTD entities
+still require the legacy parser.
+
+#### memchr for attr/comment/CDATA/PI scans in direct_parse
+
+Replaced sequential per-byte scans with libc `memchr` (SIMD-vectorized,
+16-32 bytes/iteration):
+- Attribute value closing quote
+- Comment body terminator `-->` (memchr for `-`, verify candidate)
+- CDATA body terminator `]]>` (memchr for `]`, verify candidate)
+- PI data terminator `?`
+
+Big win for long attribute values (URLs), large comments/CDATA
+sections. On a 200KB attr-heavy input: 0.6ms/parse (~333 MB/s),
+competitive with pugixml.
+
+Text scanning already used `memchr` (for `<`). Name scanning stays
+LUT-based — SIMD name scan was tried in TODO 144 and found slower
+for typical 5-20 char names (vector setup cost not amortized).
+
+### Fixes
+
+- Remove duplicate unreachable `return` in `fp_is_name_char`
+  (flat_parser.c).
+- Remove dead `taurus_input_has_entities` / `taurus_input_has_namespaces`
+  functions after entity-gate removal.
+- Fix two nested-comment warnings in `taurus.c`.
 
 
 ## [0.7.1] - 2026-08-09
