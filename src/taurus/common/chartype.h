@@ -18,17 +18,26 @@
 #define CT_NAME_START  0x01  /* Letter, '_', ':' — valid XML name start */
 #define CT_NAME        0x02  /* CT_NAME_START + '-', '.', '0'-'9' */
 #define CT_WS          0x04  /* Space, tab, CR, LF */
+#define CT_UTF8        0x08  /* Bytes >= 0x80: UTF-8 multibyte sequences.
+                              * Included in name-char/name-start tests so
+                              * Unicode names (<café>) aren't truncated.
+                              * Matches flat_parser's lenient UTF-8
+                              * fallback (c >= 0xC0 for start, c >= 0x80
+                              * for continuation). */
 
-/* The shared table. Defined once in chartype.c. */
-extern const uint8_t taurus_chartype_table[256];
+/* The shared table. Defined once in chartype.c. Non-const so the
+ * constructor can set CT_UTF8 on bytes >= 0x80 at load time. */
+extern uint8_t taurus_chartype_table[256];
 
 /* Test a character against one or more flags. Returns 1 or 0. */
 #define IS_CHARTYPE(c, flags) \
     (!!(taurus_chartype_table[(unsigned char)(c)] & (flags)))
 
-/* Convenience wrappers mirroring the old per-TU helpers. */
-#define IS_NAME_CHAR(c)  IS_CHARTYPE(c, CT_NAME | CT_NAME_START)
-#define IS_NAME_START(c) IS_CHARTYPE(c, CT_NAME_START)
+/* Convenience wrappers mirroring the old per-TU helpers.
+ * CT_UTF8 is folded into name-char/name-start so that UTF-8
+ * multibyte names scan without truncation. */
+#define IS_NAME_CHAR(c)  IS_CHARTYPE(c, CT_NAME | CT_NAME_START | CT_UTF8)
+#define IS_NAME_START(c) IS_CHARTYPE(c, CT_NAME_START | CT_UTF8)
 #define IS_WS(c)         IS_CHARTYPE(c, CT_WS)
 
 #endif /* TAURUS_COMMON_CHARTYPE_H */

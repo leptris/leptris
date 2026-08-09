@@ -19,9 +19,9 @@
 #include "dom/doctype.h"
 #include "encoding/utf16.h"
 #include "dtd/model.h"
-#include "flat/flat_doc.h"
-#include "flat/flat_parser.h"
-#include "flat/flat_promote.h"
+/* The flat/ headers are no longer included — flat_parser and
+ * flat_promote are deleted. direct_parse (flat/direct_parse.c)
+ * is the sole parser. */
 #include "common/entities.h"
 #include <string.h>
 #include <math.h>
@@ -131,48 +131,22 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
      *
      * direct_parse respects g_taurus_max_depth when set by the
      * caller (custom depth limit). No separate parser is needed. */
-    {
-        /* TODO 147 Phase A: try the single-pass direct parser first.
-         * It produces a TaurusElement tree directly — no FlatDoc
-         * intermediate, no promote pass. Falls back to flat_parse +
-         * lazy promote on failure. */
-        extern struct taurus_document* direct_parse(const char*, size_t);
-        struct taurus_document* doc = direct_parse(xml, len);
-        if (doc) return doc;
-        /* Direct parse failed — try flat_parse + lazy promote. */
-        FlatDoc* flat = flat_parse(xml, len);
-        if (flat) {
-            /* The caller's buffer may be transient — UTF-16/iconv
-             * conversion paths in taurus_parse_string free their
-             * utf8_buffer as soon as taurus_parse returns. Take
-             * ownership of a private copy so the FlatDoc outlives
-             * the input. */
-            if (flat_doc_dup_xml(flat) != 0) {
-                flat_doc_free(flat);
-                flat = NULL;
-            }
-        }
-        if (flat) {
-            struct taurus_document* doc =
-                (struct taurus_document*)malloc(sizeof(*doc));
-            if (!doc) {
-                flat_doc_free(flat);
-                return NULL;
-            }
-            memset(doc, 0, sizeof(*doc));
-            doc->strict_mode = g_taurus_strict_mode;
-            doc->ref_count = 1;
-            doc->flat_doc = flat;
-            doc->flat_promoted = 0;
-            return doc;
-        }
-        /* Flat parse failed — malformed input or unsupported
-         * construct. direct_parse and flat_parse cover the full
-         * XML feature set (elements, attrs, text, CDATA, comments,
-         * PIs, DTD entities, namespaces, predefined entities). If
-         * both reject the input, it is genuinely unparseable. */
-        return NULL;
-    }
+    /* direct_parse is the sole parser. It handles:
+     * - Elements, attributes, text, CDATA, comments, PIs
+     * - XML declaration, DOCTYPE (with DTD entity expansion)
+     * - Namespaces (xmlns, prefix:local splitting)
+     * - Predefined entities (&amp;, &lt;, etc.) via lazy expansion
+     * - Custom DTD entities (&foo;) via DTD-aware expansion
+     * - UTF-8 multibyte names (<café>) via CT_UTF8 chartype flag
+     * - BOM detection, encoding passthrough
+     * - Custom depth limits (g_taurus_max_depth)
+     *
+     * The flat_parser + lazy-promote path (TODO 139) and the legacy
+     * parser (parser_new.c) have been removed. One parser, like
+     * pugixml. If direct_parse returns NULL, the input is genuinely
+     * malformed. */
+    extern struct taurus_document* direct_parse(const char*, size_t);
+    return direct_parse(xml, len);
 }
 
 /**
@@ -629,14 +603,8 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         doc->element_index = NULL;
     }
 
-    /* Free FlatDoc if the document was never promoted (TODO 139
-     * Phase D). When the caller parses-and-frees without ever
-     * calling taurus_document_root, the lazy promote never fires
-     * and the FlatDoc is still owned by the doc. */
-    if (doc->flat_doc) {
-        flat_doc_free(doc->flat_doc);
-        doc->flat_doc = NULL;
-    }
+    /* FlatDoc is no longer used — direct_parse builds the
+     * TaurusElement tree eagerly. doc->flat_doc is always NULL. */
 
     /* Free DTD if present */
     if (doc->dtd) {
@@ -704,16 +672,12 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
 /**
  * Get root element of document
  */
-/* TODO 139 Phase D: trigger lazy promote if the doc has a flat_doc
- * that hasn't been built into the compact-pointer tree yet. Safe to
- * call multiple times — no-op once promoted. Internal helper used by
- * taurus_document_root and any other entry point that needs the tree
- * without going through the public accessor. */
+/* No-op — direct_parse builds the TaurusElement tree eagerly. The
+ * FlatDoc + lazy-promote path (TODO 139) has been removed. Retained
+ * as a single mutation-site chokepoint so callers don't need to
+ * change; future lazy-construction strategies can plug in here. */
 void taurus_document_ensure_promoted(struct taurus_document* doc) {
-    if (!doc) return;
-    if (doc->flat_doc && !doc->flat_promoted) {
-        flat_promote_into(doc);
-    }
+    (void)doc;
 }
 
 TAURUS_API TaurusElement taurus_document_root(struct taurus_document* doc) {

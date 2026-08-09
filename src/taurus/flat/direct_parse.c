@@ -522,7 +522,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
         else if (next == '/') {
             /* Close tag. */
             p.pos += 2;
-            /* Scan name. */
+            /* Scan name (includes prefix:local). */
             char* close_start = p.pos;
             while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
                 p.pos++;
@@ -531,12 +531,22 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
             if (p.pos >= p.end || *p.pos != '>') goto fail;
             p.pos++;
             if (p.depth == 0) goto fail;
-            /* Verify close tag name matches open element. */
+            /* Verify close tag matches open element. The open
+             * element's name is the LOCAL part (prefix stripped).
+             * Compare the local part of the close tag, which is
+             * everything after ':' (or the whole name if no ':'). */
             TaurusElement open = p.open_stack[p.depth - 1];
             const char* open_name = open->name;
             size_t open_len = strlen(open_name);
-            if (open_len != close_len ||
-                memcmp(open_name, close_start, close_len) != 0)
+            const char* close_local = close_start;
+            size_t close_local_len = close_len;
+            const char* colon = (const char*)memchr(close_start, ':', close_len);
+            if (colon) {
+                close_local = colon + 1;
+                close_local_len = close_len - (colon + 1 - close_start);
+            }
+            if (open_len != close_local_len ||
+                memcmp(open_name, close_local, close_local_len) != 0)
                 goto fail;
             p.depth--;
         }
@@ -763,7 +773,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
 
     /* 6. Commit to doc. */
     doc->new_dom_root = p.root;
-    doc->flat_promoted = 1; /* No FlatDoc, tree is ready */
+    /* Tree is eagerly built — no FlatDoc, no lazy promote. */
     doc->pis = p.pis_head;
     doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */
     doc->had_declaration = p.had_declaration;
