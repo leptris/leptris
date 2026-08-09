@@ -141,11 +141,18 @@ static int promote_add_attr_inline(TaurusElement elem,
     attr->prefix_view = taurus_sv_empty();
     attr->namespace_uri_view = taurus_sv_empty();
     attr->name = name;
-    attr->value = val;
+    /* Leave value NULL for entity-containing attrs so the accessor
+     * expands lazily. Non-entity values are zero-copy. */
+    if (val_len > 0 && memchr(val, '&', val_len) != NULL) {
+        attr->value = NULL;
+        attr->has_entities = 1;
+    } else {
+        attr->value = val;
+        attr->has_entities = 0;
+    }
     attr->prefix = NULL;
     attr->namespace_uri = NULL;
     attr->next = NULL;
-    attr->has_entities = 0;
 
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < name_len; i++) {

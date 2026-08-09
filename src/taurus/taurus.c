@@ -96,34 +96,6 @@ extern void taurus_doctype_free(TaurusDoctypeNode* doctype);
  * PERFORMANCE: Uses in-place parsing to avoid buffer copy.
  * The buffer is stored in the document and freed when document is freed.
  */
-/* TODO 139 Phase D: detect entity references in text/attributes.
- *
- * The flat parser passes raw bytes through without expanding
- * entities. For docs with `&amp;` etc., route to legacy parser. */
-static int taurus_input_has_entities(const char* xml, size_t len) {
-    size_t scan = len < 65536 ? len : 65536;
-    return memchr(xml, '&', scan) != NULL;
-}
-
-/* TODO 139 Phase D: detect xmlns namespace declarations.
- *
- * The flat parser stores xmlns attributes but the promote pass does
- * not yet split them into elem->namespaces or resolve element
- * prefixes. Route any input containing "xmlns" through the legacy
- * parser so namespace semantics are correct. The fast path takes
- * the bulk of plain-XML traffic. */
-static int taurus_input_has_namespaces(const char* xml, size_t len) {
-    size_t scan = len < 65536 ? len : 65536;
-    /* Cheap memchr-based scan for "xmlns". */
-    const char* needle = "xmlns";
-    size_t nl = 5;
-    const char* end = xml + scan - nl + 1;
-    for (const char* p = xml; p < end; p++) {
-        if (*p == 'x' && memcmp(p, needle, nl) == 0) return 1;
-    }
-    return 0;
-}
-
 /* TODO 139 Phase D: detect DOCTYPE with internal subset.
  *
  * The flat parser silently strips DTD entity declarations. If the
@@ -168,12 +140,17 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
      * Skip the fast path when the input has a DOCTYPE with an
      * internal subset — the flat parser silently strips DTD
      * entities, so any text containing &entity; would lose its
-     * expansion. The legacy parser handles DTD correctly. */
+     * expansion. The legacy parser handles DTD correctly.
+     *
+     * Predefined entities (&amp;, &lt;, &gt;, &quot;, &apos;) and
+     * numeric character references (&#65;, &#x42;) are handled by
+     * the fast path via lazy expansion in taurus_text_get_content
+     * and the attr accessor. Only DTD-defined custom entities need
+     * the legacy parser. */
     /* TODO 145: namespace handling now lives in promote, so the
      * flat fast path covers xmlns docs too. Keep the DTD-entity
      * fallbacks (the flat parser still strips those silently). */
     if (!taurus_input_has_internal_dtd_subset(xml, len) &&
-        !taurus_input_has_entities(xml, len) &&
         g_taurus_max_depth == 0) {
         /* TODO 147 Phase A: try the single-pass direct parser first.
          * It produces a TaurusElement tree directly — no FlatDoc
@@ -1111,8 +1088,8 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
     /* Convert element name StringView to NULL-terminated string.
      *
      * TODO 25: pool is always non-NULL when called from
-    /* name_view removed (TODO 90) — name is set eagerly by create_with_view. */
-    /* namespace_uri_view + prefix_view removed (TODO 90) — both are now
+     * name_view removed (TODO 90) — name is set eagerly by create_with_view.
+     * namespace_uri_view + prefix_view removed (TODO 90) — both are now
      * set eagerly by the parser via pool-strdup. */
 
     /* Convert all attribute StringViews */

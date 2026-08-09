@@ -4,6 +4,8 @@
 
 #include "text.h"
 #include "../memory/pool.h"
+#include "../common/entities.h"
+#include "../common/string_view.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,6 +93,31 @@ const char* taurus_text_get_content(TaurusTextNode* text) {
     if (!text) return NULL;
 
     if (text->borrowed && text->pool) {
+        /* Entity expansion: if the borrowed content contains '&',
+         * expand predefined XML entities (&amp;, &lt;, etc.) and
+         * numeric character references (&#65;, &#x42;) into a new
+         * pool allocation. DTD-defined entities are NOT expanded
+         * here — inputs with DOCTYPE internal subsets are routed to
+         * the legacy parser which handles them eagerly. This lazy
+         * path lets the fast direct_parse/flat_parse parsers handle
+         * the common case of predefined-entity-only inputs at full
+         * speed (zero entity cost on the parse hot path; expansion
+         * only happens when text content is actually read). */
+        if (text->content_len > 0 &&
+            memchr(text->content, '&', text->content_len) != NULL) {
+            TaurusStringView sv = taurus_sv_from_ptr(text->content,
+                                                      text->content_len);
+            char* expanded = taurus_decode_entities_view(&sv, text->pool);
+            if (expanded) {
+                text->content = expanded;
+                text->content_len = strlen(expanded);
+                text->borrowed = 0;
+                return text->content;
+            }
+            /* Expansion failed (malformed entity, OOM) — fall
+             * through to raw materialization so callers still get
+             * a NUL-terminated string. */
+        }
         char* storage = (char*)taurus_pool_alloc(text->pool, text->content_len + 1);
         if (!storage) return text->content;  /* Out of pool; return what we have. */
         if (text->content_len > 0) {

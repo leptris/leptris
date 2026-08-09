@@ -157,11 +157,20 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     attr->prefix_view = taurus_sv_empty();
     attr->namespace_uri_view = taurus_sv_empty();
     attr->name = name;            /* zero-copy, NUL-terminated in buffer */
-    attr->value = val;            /* zero-copy, NUL-terminated in buffer */
+    /* For values containing '&', leave value NULL so the accessor
+     * (taurus_element_attribute / _get_attribute_legacy) expands
+     * predefined entities lazily via taurus_decode_entities_view.
+     * Entity-free values are safe to return zero-copy. */
+    if (val_len > 0 && memchr(val, '&', val_len) != NULL) {
+        attr->value = NULL;
+        attr->has_entities = 1;
+    } else {
+        attr->value = val;
+        attr->has_entities = 0;
+    }
     attr->prefix = NULL;
     attr->namespace_uri = NULL;
     attr->next = NULL;
-    attr->has_entities = 0;       /* direct_parse excludes entity inputs */
 
     /* FNV-1a hash inline — used by attribute-index lookups. */
     uint32_t h = 2166136261u;

@@ -12,6 +12,8 @@
 #include "../include/taurus.h"     /* TAURUS_API (visibility attribute) */
 #include "../dom/node.h"            /* TaurusNodeVTable + taurus_node_vtable_for */
 #include "../taurus_internal.h"
+#include "../common/entities.h"
+#include "../common/string_view.h"
 /* TaurusSerializeOptions comes from taurus/types.h via taurus_internal.h's
  * pool.h include.  No local redefinition — it would conflict with the
  * public type. */
@@ -346,10 +348,27 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
     for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem); attr != NULL; attr = attr->next) {
         if (!attr || !attr->name) continue;
 
+        /* Expand entity-containing values lazily before re-escaping.
+         * direct_parse/flat_promote store raw attr values zero-copy
+         * and leave value=NULL when '&' is present so the accessor
+         * path knows to expand. The serializer must follow the same
+         * contract — otherwise '&' in the raw value double-escapes. */
+        const char* val = attr->value;
+        if (!val) {
+            struct taurus_document* doc = elem->document;
+            TaurusMemoryPool* pool = doc ? doc->pool : NULL;
+            if (attr->has_entities && pool) {
+                val = taurus_decode_entities_view(&attr->value_view, pool);
+            } else if (pool) {
+                val = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
+            }
+            if (val) attr->value = val;  /* cache for subsequent reads */
+        }
+
         buffer_append_char(buf, ' ');
         buffer_append(buf, attr->name);
         buffer_append(buf, "=\"");
-        buffer_append_attribute_value(buf, attr->value ? attr->value : "");
+        buffer_append_attribute_value(buf, val ? val : "");
         buffer_append_char(buf, '"');
     }
 

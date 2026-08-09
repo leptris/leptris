@@ -80,9 +80,11 @@ TEST(TextBorrowed, RoundTripsThroughSerialize) {
     taurus_document_free(doc);
 }
 
-TEST(TextBorrowed, EntityTextIsNotBorrowed) {
-    /* Text with entities must take the resolve-and-copy path; the
-     * borrowed optimization only fires when there are no entities. */
+TEST(TextBorrowed, EntityTextIsExpandedOnAccess) {
+    /* Text with entities is stored borrowed on the fast parse path
+     * and expanded lazily when taurus_text_get_content reads it.
+     * This keeps entity-containing inputs on the zero-copy parse
+     * path instead of forcing legacy-parser fallback. */
     const char xml[] = "<r>a&amp;b</r>";
     TaurusStatus st = TAURUS_OK;
     TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
@@ -93,8 +95,9 @@ TEST(TextBorrowed, EntityTextIsNotBorrowed) {
     ASSERT_EQ(child->type, TAURUS_NODE_TYPE_TEXT);
 
     TaurusTextNode* text = (TaurusTextNode*)child;
-    EXPECT_EQ(text->borrowed, 0) << "entity text must take the resolve path";
-    EXPECT_STREQ(text->content, "a&b");
+    const char* content = taurus_text_get_content(text);
+    ASSERT_NE(content, nullptr);
+    EXPECT_STREQ(content, "a&b");
 
     taurus_document_free(doc);
 }
