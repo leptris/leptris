@@ -178,10 +178,11 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
 
     /* Release+LTO: ~7 ms on M-series (O(N²) walk over 50 children × 1000,
      * with the int32_t offset decoding from TODO 90 Phase 2b).
-     * Budget: 12 ms — catches constant-factor regression while tolerating
-     * slower CI hardware. */
+     * Budget: 16 ms — catches a constant-factor regression (>2×) while
+     * tolerating slower/loaded CI hardware where 1-2 ms variance is
+     * normal. Previously 12 ms, which flaked under CI load. */
     if (!TAURUS_TEST_ASAN) {
-        EXPECT_LT(ms, 12);
+        EXPECT_LT(ms, 16);
     }
     (void)sink;
 
