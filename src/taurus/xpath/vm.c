@@ -223,8 +223,8 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
 
     if (idx) {
         if (wild) {
-            /* Mode 2 (//*): result = all_elements.
-             * Mode 1 (descendant::*): result = all_elements[1..]. */
+            /* Mode 2 (double-slash wildcard): result = all_elements.
+             * Mode 1 (descendant wildcard): result = all_elements[1..]. */
             void** src = (void**)idx->all_elements;
             size_t n = idx->all_count;
             if (mode == 1 && n > 0) { src++; n--; }
@@ -1241,7 +1241,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
             }
 
             case XPATH_BC_ABSOLUTE_ROOT_MATCH_WILD: {
-                /* `/*` = root. */
+                /* Absolute root with wildcard match = root node. */
                 struct taurus_xpath_result* r =
                     vm_apply_absolute(ctx, NULL, 1, 0);
                 if (!r) { vm.error = 1; break; }

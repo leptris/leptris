@@ -817,7 +817,7 @@ TAURUS_API char* taurus_c14n_canonicalize_subtree_ex(
     buf[0] = '\0';
 
     if (mode == TAURUS_C14N_MODE_EXCLUSIVE) {
-        C14nPrefixStack emitted = {{{0}}, 0};
+        C14nPrefixStack emitted = {0};
         char* buffer = buf;
         c14n_serialize_element_excl(elem, &buffer, &size, &capacity,
                                      &emitted, inclusive_ns_prefixes);
