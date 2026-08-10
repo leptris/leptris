@@ -1,13 +1,37 @@
 ## [Unreleased]
 
-## [0.11.3] - Y-08-10
+## [0.11.3] - 2026-08-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fix — benchmark-ips segfault with 15,000+ alive documents (#261)
 
-### Changed
+`direct_parse` used a shared thread-local overflow hash table for
+compact pointer encoding of `next_sibling` and attribute edges.
+Under benchmark-ips (which keeps every return value alive), the
+table accumulated entries from 15,000+ simultaneously-alive
+documents. Combined with malloc address reuse, this caused
+cross-document pointer corruption and a segfault in
+`taurus_node_freeze`.
 
-- (describe changes here)
+Three-part fix (all in `direct_parse.c`):
+
+1. **Overflow-table-free wiring**: all compact pointer edges
+   (parent, child, sibling, attribute) now use direct offset
+   arithmetic. `direct_parse` never touches the thread-local
+   overflow state — it's fully self-contained.
+
+2. **Contiguous elem+attr allocation**: `elem_block` and
+   `attr_block` are now ONE combined `pool_alloc` call. Offsets
+   between elements and attributes are bounded by the allocation
+   size (<4MB), always fitting in int32.
+
+3. **Right-sized pool pages**: `page_size` is set to
+   `elem_bytes + attr_bytes + text_headroom` (capped at 4MB).
+   This keeps the bulk allocation and text/comment/CDATA nodes
+   on the same pool page, within int32 offset range.
+
+Verified: 15,000 simultaneously-alive 38KB documents parsed,
+child_count-verified, and freed — zero crashes, zero corruption
+(both plain and ASAN).
 
 
 ## [0.11.2] - 2026-08-10
