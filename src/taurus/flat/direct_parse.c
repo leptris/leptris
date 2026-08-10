@@ -756,8 +756,17 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                 (void)id_scan; /* position preserved for clarity */
 
                 /* Parse internal subset if non-empty — builds the
-                 * entity table used for custom entity expansion. */
+                 * entity table for custom entity expansion, and
+                 * stores the raw text on the DOCTYPE node so the
+                 * public API (taurus_doctype_get_internal_subset)
+                 * returns it (#253). */
                 if (subset_start && subset_end > subset_start) {
+                    /* NUL-terminate the subset text in the buffer. */
+                    *subset_end = '\0';
+                    if (dt) {
+                        taurus_doctype_set_internal_subset(
+                            dt, subset_start, pool);
+                    }
                     TaurusDTD* dtd = taurus_dtd_parse_internal_subset(
                         subset_start, (size_t)(subset_end - subset_start),
                         pool);

@@ -150,6 +150,21 @@ TAURUS_API TaurusElement taurus_xpath_result_get(TaurusXPathResult result, size_
     return (TaurusElement)node;
 }
 
+TAURUS_API size_t taurus_xpath_result_get_nodes(
+    TaurusXPathResult result, TaurusElement* out_nodes, size_t max_count) {
+    if (!result || !out_nodes || max_count == 0) return 0;
+    if (result->type != XPATH_RESULT_NODESET) return 0;
+    if (!result->value.nodeset_value) return 0;
+
+    size_t count = result->value.nodeset_value->count;
+    if (count > max_count) count = max_count;
+
+    for (size_t i = 0; i < count; i++) {
+        out_nodes[i] = (TaurusElement)result->value.nodeset_value->nodes[i];
+    }
+    return count;
+}
+
 TAURUS_API int taurus_xpath_result_boolean(TaurusXPathResult result) {
     if (!result) return 0;
 
