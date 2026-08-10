@@ -1,13 +1,27 @@
 ## [Unreleased]
 
-## [0.11.5] - Y-08-10
+## [0.11.5] - 2026-08-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Quality — warning-free build
 
-### Changed
+Eliminated all 9 compiler warnings across the codebase:
+- Nested `/*` in block comments (element_index.h, vm.c)
+- Unused functions (node_public.c `append_path_segment`,
+  taurus.c `taurus_input_has_internal_dtd_subset`)
+- Const qualifier discard (serialize.c attr caching)
+- Scalar initializer style (c14n.c, dtd/validator.c)
 
-- (describe changes here)
+The build is now completely `-Wall -Wextra` clean.
+
+### Documentation — remaining work TODOs
+
+- TODO 151: in-place parsing (eliminate buffer copy)
+- TODO 152: per-node `user_data` for FFI wrapper caching (#262)
+- TODO 153: high-document-count stress test for CI
+
+### Issues closed
+
+- #253, #217, #223, #216 — verified fixed in v0.11.4, closed.
 
 
 ## [0.11.4] - 2026-08-10
