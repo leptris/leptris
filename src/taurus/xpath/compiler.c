@@ -533,12 +533,12 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step);
  * fallback.
  *
  * Match: step is the first child of an ABSOLUTE_PATH, axis is
- * CHILD / DESCENDANT / DESCENDANT_OR_SELF, test is a name (no `:`)
+ * CHILD / DESCENDANT / DESCENDANT_OR_SELF, test is a name (no colon)
  * or wildcard, no predicates. The compiler emits:
- *   - BC_ABSOLUTE_ROOT_MATCH_NAME / WILD          for `/foo`, `/*`
- *   - BC_ABSOLUTE_DESCENDANT_NAME / WILD          for `/descendant::foo`
- *   - BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME / WILD  for `//foo`, `//*`,
- *     `/descendant-or-self::foo`
+ *   - BC_ABSOLUTE_ROOT_MATCH_NAME / WILD          for root-level name
+ *   - BC_ABSOLUTE_DESCENDANT_NAME / WILD          for descendant axis
+ *   - BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME / WILD  for double-slash
+ *     descendant-or-self axis
  *
  * For shapes we don't match (predicate on first step, namespace
  * prefix, multi-axis), caller falls back to BC_FALLBACK_EVAL on
@@ -637,7 +637,7 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
     /* Fusion: `//foo` parses to `/descendant-or-self::node()/child::foo`.
      * Detect this two-step shape and lower it to a single
      * BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME / WILD opcode that walks
-     * the subtree once. Same for `//*`.
+     * the subtree once. Same for double-slash wildcard.
      *
      * Match: first step is descendant-or-self axis with wildcard or
      * node() test (no predicates), second step is child axis with

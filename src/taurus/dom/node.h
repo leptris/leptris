@@ -50,6 +50,10 @@ typedef struct taurus_node {
     unsigned int frozen : 1;           /* COW: 0 = mutable, 1 = frozen (immutable) */
     unsigned int version : 31;         /* COW 2.2: Node version for tracking modifications */
     uint32_t line;                     /* Source line (1-based, 0 = unknown). Issue #223 */
+    void* binding_wrapper;             /* FFI wrapper cache (#262). NULL when no binding
+                                        * is attached. Set by the language binding on
+                                        * first node wrap; subsequent traversals find
+                                        * the cached wrapper without FFI call overhead. */
     /* NOTE: Parent/sibling pointers stored in compressed form in specific node types */
 } TaurusNode;
 

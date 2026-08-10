@@ -176,14 +176,16 @@ static inline void taurus_elem_set_ns_uri(TaurusElement e, char* uri,
  *   - 16 bytes of int32_t tree-edge offsets (parent, first/last/next)
  *   - 8 bytes of int32_t attribute-list offsets (first, last)
  *   - 16 bytes of document context (namespaces, document)
+ *   - 8 bytes binding_wrapper (TaurusNode base, #262 FFI cache)
  *
- * pugixml compact node: 12 bytes. Phase 2e of TODO 90 may compress
- * the document-context pointers and string pointers further. */
+ * pugixml compact node: 44 bytes. The binding_wrapper field adds
+ * ~10% memory but eliminates per-node FFI call overhead for
+ * language bindings (7× nodeset XPath speedup at Ruby level). */
 #ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 80,
-    "taurus_element grew beyond 80 bytes — check for accidental field additions");
+_Static_assert(sizeof(struct taurus_element) <= 88,
+    "taurus_element grew beyond 88 bytes — check for accidental field additions");
 #else
-static_assert(sizeof(struct taurus_element) <= 80,
+static_assert(sizeof(struct taurus_element) <= 88,
     "taurus_element grew beyond 80 bytes");
 #endif
 

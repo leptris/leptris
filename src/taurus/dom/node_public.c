@@ -373,10 +373,15 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node) {
  * ============================================================================ */
 
 TAURUS_API int taurus_node_line(TaurusNodeRef node) {
-    /* Issue #223: line is tracked at parse time and frozen into the
-     * node's base struct. Programmatically-created nodes default to
-     * line=0 (creators memset the struct). */
     return node ? (int)node->line : 0;
+}
+
+TAURUS_API void* taurus_node_get_binding_wrapper(TaurusNodeRef node) {
+    return node ? node->binding_wrapper : NULL;
+}
+
+TAURUS_API void taurus_node_set_binding_wrapper(TaurusNodeRef node, void* wrapper) {
+    if (node) node->binding_wrapper = wrapper;
 }
 
 TAURUS_API int taurus_node_compare(TaurusNodeRef a, TaurusNodeRef b) {
