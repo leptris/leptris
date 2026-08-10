@@ -1821,6 +1821,23 @@ TAURUS_API size_t taurus_xpath_result_count(TaurusXPathResult result);
 TAURUS_API TaurusElement taurus_xpath_result_get(TaurusXPathResult result, size_t index);
 
 /**
+ * Batch-copy all nodes from a nodeset result into a caller-provided array.
+ *
+ * Eliminates per-node FFI call overhead for bindings that iterate
+ * large nodesets (e.g., //book returning 100+ nodes). One call
+ * instead of N calls (#262).
+ *
+ * @param result XPath result (must be NODESET type)
+ * @param out_nodes Caller-allocated array of TaurusElement
+ * @param max_count Capacity of out_nodes
+ * @return Number of nodes copied (min of result count and max_count)
+ *
+ * Memory: Elements are owned by document. Do not free separately.
+ */
+TAURUS_API size_t taurus_xpath_result_get_nodes(
+    TaurusXPathResult result, TaurusElement* out_nodes, size_t max_count);
+
+/**
  * Get boolean value (for BOOLEAN results or type conversion)
  *
  * @param result XPath result

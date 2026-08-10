@@ -675,11 +675,11 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
     }
 
     /* Issue #217: if child is already attached to a parent, unlink
-     * it first. Without this, splicing into the new parent corrupts
-     * both trees: the old parent's child chain still references the
-     * node, and the node's parent pointer is overwritten. */
+     * it first — even if the parent is the SAME element (re-ordering
+     * within the same parent). Without this, the child appears twice
+     * in the chain and child_count is inflated. */
     TaurusElement old_parent = taurus_node_parent(child);
-    if (old_parent && old_parent != elem) {
+    if (old_parent) {
         taurus_node_unlink(child);
     }
 
@@ -768,11 +768,11 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
     }
 
     /* Issue #217: if child is already attached to a parent, unlink
-     * it first. Without this, splicing into the new parent corrupts
-     * both trees: the old parent's child chain still references the
-     * node, and the node's parent pointer is overwritten. */
+     * it first — even if the parent is the SAME element (re-ordering
+     * within the same parent). Without this, the child appears twice
+     * in the chain and child_count is inflated. */
     TaurusElement old_parent = taurus_node_parent(child);
-    if (old_parent && old_parent != elem) {
+    if (old_parent) {
         taurus_node_unlink(child);
     }
 
