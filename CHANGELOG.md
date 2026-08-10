@@ -1,13 +1,25 @@
 ## [Unreleased]
 
-## [0.11.4] - Y-08-10
+## [0.11.4] - 2026-08-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixes
 
-### Changed
+- **#253**: `taurus_doctype_get_internal_subset` now returns the raw
+  DTD internal subset text. Previously `direct_parse` extracted the
+  subset for entity parsing but didn't store it on the DOCTYPE node.
 
-- (describe changes here)
+- **#217**: `taurus_element_append_child` correctly unlinks a child
+  before re-appending, even when the parent is the same element
+  (re-ordering). The old `old_parent != elem` check skipped
+  unlinking for same-parent moves, causing duplicate children and
+  inflated `child_count`.
+
+### New API
+
+- **#262**: `taurus_xpath_result_get_nodes(result, out, max)` —
+  batch-copy all nodes from a nodeset result in one call. Eliminates
+  per-node FFI overhead for bindings iterating large nodesets
+  (100+ nodes).
 
 
 ## [0.11.3] - 2026-08-10
