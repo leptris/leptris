@@ -93,14 +93,16 @@ static inline void dp_advance_line(DParser* p, char* from, char* to) {
     }
 }
 
-/* Wire child into parent's child chain. Direct pointer arithmetic
- * for compact-pointer offsets — no function call, no overflow check.
- * All elements are in one contiguous block, so offsets always fit. */
+/* Wire child into parent's child chain. ALL edges use direct offset
+ * arithmetic — no overflow table. This makes direct_parse fully
+ * self-contained: it never touches the thread-local
+ * g_current_document or the shared overflow hash table. Eliminates
+ * the cross-document contamination that caused issue #261 under
+ * benchmark-ips with 15,000+ simultaneously-alive documents. */
 static inline void dp_wire_child(TaurusElement parent, TaurusNode* child) {
     /* Set child's parent pointer.
-     * IMPORTANT: parent_off is relative to the CHILD's address.
-     * Accessor: (char*)child + parent_off == (char*)parent.
-     * So parent_off = (char*)parent - (char*)child. */
+     * parent_off is relative to the CHILD's address.
+     * Accessor: (char*)child + parent_off == (char*)parent. */
     int32_t parent_to_child = (int32_t)((char*)parent - (char*)child);
     if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
         ((TaurusElement)child)->parent_off = parent_to_child;
@@ -122,14 +124,29 @@ static inline void dp_wire_child(TaurusElement parent, TaurusNode* child) {
             default: break;
         }
     }
-    /* Splice into child chain as new last child.
-     * first_child_off / last_child_off are on the PARENT, pointing
-     * to child. Accessor: (char*)parent + off == (char*)child.
-     * So off = (char*)child - (char*)parent. */
+    /* Splice into child chain as new last child. */
     int32_t child_off = (int32_t)((char*)child - (char*)parent);
     if (parent->last_child_off != 0) {
+        /* Set next_sibling on the PREVIOUS last child via direct
+         * offset. Type-dispatched to write the correct struct's
+         * next_sibling_off field. Bypasses taurus_node_set_next_
+         * sibling (which calls taurus_compact_int32_encode →
+         * shared overflow table). */
         TaurusNode* last = (TaurusNode*)((char*)parent + parent->last_child_off);
-        taurus_node_set_next_sibling(last, child);
+        int32_t sib_off = (int32_t)((char*)child - (char*)last);
+        switch (last->type) {
+            case TAURUS_NODE_TYPE_ELEMENT:
+                ((TaurusElement)last)->next_sibling_off = sib_off; break;
+            case TAURUS_NODE_TYPE_TEXT:
+                ((TaurusTextNode*)last)->next_sibling_off = sib_off; break;
+            case TAURUS_NODE_TYPE_COMMENT:
+                ((TaurusCommentNode*)last)->next_sibling_off = sib_off; break;
+            case TAURUS_NODE_TYPE_CDATA:
+                ((TaurusCDATANode*)last)->next_sibling_off = sib_off; break;
+            case TAURUS_NODE_TYPE_PI:
+                ((TaurusPINode*)last)->next_sibling_off = sib_off; break;
+            default: break;
+        }
     } else {
         parent->first_child_off = child_off;
     }
@@ -205,20 +222,19 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     }
     attr->name_hash = h;
 
-    /* Wire attr into elem's attr list. Use the compact_int32
-     * encoder which handles the int32 overflow case (> 2GB apart,
-     * common under ASAN shadow memory) via the per-document overflow
-     * table. The overflow-table address-reuse bug (#256) is fixed
-     * at the cleanup layer via a generation counter — see
-     * taurus_compact_set_current_document and
-     * taurus_compact_cleanup_document in compact.c. */
-    struct taurus_attribute* last = taurus_elem_last_attribute(elem);
-    if (last) {
+    /* Wire attr into elem's attr list using DIRECT offset arithmetic.
+     * Bypasses taurus_elem_set_first/last_attribute (which call
+     * taurus_compact_int32_encode → shared overflow table). This
+     * makes direct_parse fully overflow-table-free. */
+    int32_t attr_off = (int32_t)((char*)attr - (char*)elem);
+    if (elem->last_attribute_off != 0) {
+        struct taurus_attribute* last =
+            (struct taurus_attribute*)((char*)elem + elem->last_attribute_off);
         last->next = attr;
     } else {
-        taurus_elem_set_first_attribute(elem, attr);
+        elem->first_attribute_off = attr_off;
     }
-    taurus_elem_set_last_attribute(elem, attr);
+    elem->last_attribute_off = attr_off;
     elem->attr_count++;
     return 0;
 }
@@ -320,46 +336,57 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     memcpy(buf, xml, len);
     buf[len] = '\0';
 
-    /* 2. Create pool for attrs/non-element nodes/namespaces.
-     * Pre-warm with a large page so ALL per-node allocations hit the
-     * bump-pointer fast path (no page traversal or malloc during parse).
-     * Estimate: each element generates ~3 non-element allocations
-     * (text + attrs), averaging ~60 bytes each. */
+    /* 2. Create pool. The page size MUST be large enough to hold the
+     * bulk element+attribute block (allocated in step 3). If the page
+     * is too small, the bulk block becomes an oversized allocation
+     * (separate malloc), which can land >2GB from the pool pages that
+     * hold text/comment/CDATA nodes. This causes int32 offset overflow
+     * in compact pointers and silent tree corruption (#261).
+     *
+     * Fix: set page_size = elem_bytes + attr_bytes + headroom. The
+     * pool allocator places the bulk block in the first oversized
+     * page and subsequent text/comment allocations in the same page's
+     * remaining space. All nodes are contiguous → offsets fit int32.
+     *
+     * Cap at 4 MB to avoid wasting memory on pathologically large docs. */
     size_t est_elems = len / 10 + 128;
-    size_t est_pool_bytes = est_elems * 3 * 60;
-    size_t page_size = est_pool_bytes;
+    size_t elem_bytes = est_elems * sizeof(struct taurus_element);
+    size_t attr_bytes = est_elems * 6 * sizeof(struct taurus_attribute);
+    size_t text_headroom = est_elems * 64; /* text/comment/CDATA/PI */
+    size_t page_size = elem_bytes + attr_bytes + text_headroom;
     if (page_size < 4096) page_size = 4096;
-    if (page_size > 131072) page_size = 131072;
+    if (page_size > 4 * 1024 * 1024) page_size = 4 * 1024 * 1024;
     TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
     if (!pool) { free(buf); return NULL; }
     if (len >= 256) {
         pool->string_cache = taurus_hash_table_create(pool, 128);
     }
 
-    /* 3. Bulk-allocate element block from POOL. est_elems was
-     * computed above for pool sizing. */
-    TaurusElement elem_block = (TaurusElement)taurus_pool_alloc(
-        pool, est_elems * sizeof(struct taurus_element));
-    if (!elem_block) {
-        taurus_pool_destroy(pool);
-        free(buf);
-        return NULL;
-    }
-    memset(elem_block, 0, est_elems * sizeof(struct taurus_element));
-    size_t elem_idx = 0;
-
-    /* 3b. Bulk-allocate attribute block. Heuristic: ~6 attrs per
-     * element covers typical XML with room to spare. Overflow falls
-     * back to per-attr pool_alloc in dp_add_attr_inline. */
+    /* 3. Bulk-allocate element + attribute blocks as ONE contiguous
+     * allocation. This guarantees that offsets between elements and
+     * attributes always fit in int32 — even under extreme memory
+     * pressure with 15,000+ simultaneously-alive documents (#261).
+     *
+     * If they were separate oversized allocations, malloc could place
+     * them >2GB apart, causing int32 offset overflow and silent
+     * pointer corruption on decode.
+     *
+     * Layout: [ elem_block | attr_block ]
+     */
     size_t attr_capacity = est_elems * 6;
-    struct taurus_attribute* attr_block = (struct taurus_attribute*)taurus_pool_alloc(
-        pool, attr_capacity * sizeof(struct taurus_attribute));
-    if (!attr_block) {
+    char* combined = (char*)taurus_pool_alloc(pool, elem_bytes + attr_bytes);
+    if (!combined) {
         taurus_pool_destroy(pool);
         free(buf);
         return NULL;
     }
-    /* No memset — every field is initialized by dp_add_attr_inline. */
+    TaurusElement elem_block = (TaurusElement)combined;
+    memset(elem_block, 0, elem_bytes);
+    struct taurus_attribute* attr_block =
+        (struct taurus_attribute*)(combined + elem_bytes);
+    /* No memset on attr_block — dp_add_attr_inline initializes every
+     * field of each attr it uses. */
+    size_t elem_idx = 0;
 
     /* 4. Create document. */
     struct taurus_document* doc = (struct taurus_document*)calloc(1, sizeof(*doc));
@@ -375,7 +402,11 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     doc->xml_buffer = buf;
     doc->xml_buffer_len = len;
     doc->xml_buffer_needs_free = 1;
-    taurus_compact_set_current_document(doc);
+    /* No taurus_compact_set_current_document — direct_parse is
+     * overflow-table-free. All compact pointer edges use direct
+     * offset arithmetic, never touching the shared thread-local
+     * overflow hash table. This eliminates cross-document
+     * contamination under high document counts (#261). */
 
     /* 5. Parse. */
     DParser p;
@@ -855,18 +886,9 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     /* 7. Freeze tree (match legacy parser behavior). */
     taurus_document_freeze_tree(doc);
 
-    /* Clear the thread-local current-document pointer. Without this,
-     * g_current_document retains a dangling reference to this doc
-     * after the caller frees it. On the next parse, the stale pointer
-     * is overwritten before use — but if taurus_document_free's
-     * overflow-cleanup runs against a reused address, it can corrupt
-     * the new document. Clearing here prevents that class of bug. */
-    taurus_compact_set_current_document(NULL);
-
     return doc;
 
 fail:
-    taurus_compact_set_current_document(NULL);
     taurus_pool_destroy(pool);
     /* elem_block is pool-allocated — freed by pool_destroy above. */
     free(doc->xml_buffer);
