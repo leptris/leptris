@@ -205,26 +205,20 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     }
     attr->name_hash = h;
 
-    /* Wire attr into elem's attr list using DIRECT offset arithmetic
-     * (same technique as dp_wire_child for tree edges). This avoids
-     * the thread-local overflow table (taurus_compact_int32_encode),
-     * which tags entries by doc pointer and corrupts under tight
-     * parse/free cycles when malloc reuses a freed doc's address —
-     * the cleanup for the old doc removes the new doc's entries.
-     *
-     * All attrs and elements in direct_parse come from the same pool,
-     * so offsets are within int32 range on any realistic document.
-     * If an overflow DID occur (elem and attr > 2GB apart, only
-     * possible with pathological ASLR + oversized allocations), the
-     * truncated offset would be caught on decode. Fail-safe. */
-    if (elem->last_attribute_off != 0) {
-        struct taurus_attribute* last =
-            (struct taurus_attribute*)((char*)elem + elem->last_attribute_off);
+    /* Wire attr into elem's attr list. Use the compact_int32
+     * encoder which handles the int32 overflow case (> 2GB apart,
+     * common under ASAN shadow memory) via the per-document overflow
+     * table. The overflow-table address-reuse bug (#256) is fixed
+     * at the cleanup layer via a generation counter — see
+     * taurus_compact_set_current_document and
+     * taurus_compact_cleanup_document in compact.c. */
+    struct taurus_attribute* last = taurus_elem_last_attribute(elem);
+    if (last) {
         last->next = attr;
     } else {
-        elem->first_attribute_off = (int32_t)((char*)attr - (char*)elem);
+        taurus_elem_set_first_attribute(elem, attr);
     }
-    elem->last_attribute_off = (int32_t)((char*)attr - (char*)elem);
+    taurus_elem_set_last_attribute(elem, attr);
     elem->attr_count++;
     return 0;
 }
