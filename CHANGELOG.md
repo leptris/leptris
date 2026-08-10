@@ -1,13 +1,30 @@
 ## [Unreleased]
 
-## [0.11.2] - Y-08-10
+## [0.11.2] - 2026-08-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fix — DOCTYPE PUBLIC/SYSTEM identifiers (#253)
 
-### Changed
+`direct_parse`'s DOCTYPE handler extracted the name and internal
+subset but silently dropped PUBLIC/SYSTEM external identifiers.
+After the name scan, the parser skipped straight to `[` or `>`,
+bypassing the external ID declarations.
 
-- (describe changes here)
+Fix: re-scan the region between name and `[` / `>` for `PUBLIC` or
+`SYSTEM` keywords followed by quoted identifiers. Set `public_id` /
+`system_id` on the DOCTYPE node. Verified with all DOCTYPE variants:
+bare name, SYSTEM, PUBLIC, PUBLIC+subset, name+subset.
+
+### Fix — iterative tree freeze (#256, deeper investigation)
+
+The v0.11.1 fix (clearing `g_current_document`) addressed the
+thread-local stale pointer but the crash persisted for some inputs.
+`taurus_node_freeze` was **recursive** — under tight parse loops
+on deeply nested documents, the unbounded recursion could exhaust
+the thread stack.
+
+Fix: converted to an iterative depth-first walk with a fixed
+256-deep explicit stack, eliminating the stack-overflow crash
+vector entirely.
 
 
 ## [0.11.1] - 2026-08-10
