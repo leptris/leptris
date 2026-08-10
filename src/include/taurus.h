@@ -271,6 +271,28 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node);
 TAURUS_API int taurus_node_line(TaurusNodeRef node);
 
 /**
+ * Get the binding wrapper pointer cached on this node (#262).
+ *
+ * Language bindings (Ruby FFI, Python ctypes, etc.) set this on
+ * first node wrap so subsequent traversals find the cached wrapper
+ * without per-node FFI call overhead. Returns NULL when no binding
+ * is attached.
+ *
+ * Memory: The pointer is owned by the binding. libtaurus never
+ * dereferences or frees it. Cleared to NULL on node creation.
+ */
+TAURUS_API void* taurus_node_get_binding_wrapper(TaurusNodeRef node);
+
+/**
+ * Set the binding wrapper pointer on this node (#262).
+ *
+ * The binding must ensure the wrapper object outlives the document
+ * (or clear the pointer before the document is freed). libtaurus
+ * treats this as opaque — it never reads or frees the value.
+ */
+TAURUS_API void taurus_node_set_binding_wrapper(TaurusNodeRef node, void* wrapper);
+
+/**
  * Document-order comparison (issue #172).
  *
  * @return -1 if a precedes b, 0 if equal, 1 if a follows b.
