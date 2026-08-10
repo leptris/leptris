@@ -25,5 +25,6 @@ only manifest under high document counts.
 
 ## Status
 
-Documented. High priority — would have caught #256 and #261 before
-release.
+Completed (v0.12.1). `test/perf/test_stress_high_doc_count.cpp`
+runs 5,000 docs (500 per batch × 10 rounds) in ~2 seconds. Part of
+the permanent CI suite.
