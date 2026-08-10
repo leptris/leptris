@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.11.5] - Y-08-10
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.11.4] - 2026-08-10
 
 ### Fixes
