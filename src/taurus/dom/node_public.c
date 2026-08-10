@@ -425,31 +425,6 @@ static uint32_t count_same_name_element_position(TaurusElement elem,
     return pos;
 }
 
-/* Append "name[index]" to buffer if index > 1 OR total > 1. Nokogiri
- * omits [1] when the element is the only same-named sibling but
- * emits [N] when there are multiple even if N=1. */
-static void append_path_segment(char** buf, size_t* len, size_t* cap,
-                                 const char* name, uint32_t index,
-                                 uint32_t total) {
-    size_t name_len = strlen(name);
-    /* +1 for '/', up to 11 for "[N]" (uint32 max = 10 digits + brackets) */
-    size_t need = *len + 1 + name_len + (total > 1 ? 12 : 0) + 1;
-    if (need > *cap) {
-        while (*cap < need) *cap *= 2;
-        char* new_buf = (char*)realloc(*buf, *cap);
-        if (!new_buf) { /* alloc failure — leave buf as-is */ return; }
-        *buf = new_buf;
-    }
-    (*buf)[(*len)++] = '/';
-    memcpy(*buf + *len, name, name_len);
-    *len += name_len;
-    if (total > 1) {
-        int written = snprintf(*buf + *len, *cap - *len, "[%u]", index);
-        if (written > 0) *len += (size_t)written;
-    }
-    (*buf)[*len] = '\0';
-}
-
 TAURUS_API char* taurus_node_get_xpath(TaurusNodeRef node) {
     if (!node) return NULL;
 

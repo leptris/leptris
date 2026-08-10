@@ -5,8 +5,8 @@
  *   - per-name buckets pointing into the flat array
  *
  * Queries:
- *   - descendant::* / //* (all elements): return flat array slice.
- *   - descendant::name / //name (named): return name bucket.
+ *   - descendant or self (all elements): return flat array slice.
+ *   - descendant or self (named): return name bucket.
  *
  * Build cost: O(N) walk. Amortized across queries — typical workload
  * runs many XPath expressions against the same document, so the

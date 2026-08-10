@@ -93,29 +93,6 @@ extern void taurus_doctype_free(TaurusDoctypeNode* doctype);
  *
  * Returns 1 if the input has a DOCTYPE with internal subset, 0
  * otherwise (including no DOCTYPE at all). */
-static int taurus_input_has_internal_dtd_subset(const char* xml, size_t len) {
-    size_t scan = len < 4096 ? len : 4096;
-    /* Find "<!DOCTYPE". */
-    for (size_t i = 0; i + 9 <= scan; i++) {
-        if (xml[i] == '<' && xml[i+1] == '!' &&
-            memcmp(xml + i + 2, "DOCTYPE", 7) == 0) {
-            /* Walk forward to the matching '>', tracking '[' depth. */
-            size_t j = i + 9;
-            int seen_bracket = 0;
-            while (j < len) {
-                char c = xml[j++];
-                if (c == '[') seen_bracket = 1;
-                else if (c == ']' && seen_bracket) {
-                    /* Continue to the closing '>'. */
-                } else if (c == '>') return seen_bracket ? 1 : 0;
-                if (j > i + 65536) break;  /* sanity bound */
-            }
-            return 0;
-        }
-    }
-    return 0;
-}
-
 TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
 

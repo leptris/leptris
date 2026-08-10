@@ -599,7 +599,7 @@ int taurus_dtd_validate(TaurusDocument doc, TaurusDTD* dtd, TaurusDTDError* erro
     }
     /* TODO 119: per-validation memo cache.  Stack-allocated; no
      * malloc; freed when this function returns. */
-    ContentModelMemo memo = {{{0}}};
+    ContentModelMemo memo = {0};
     memo.next = 0;
 
     int rc = validate_element_recursive(root, dtd, error, id_table, &memo);

@@ -363,12 +363,16 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         if (!val) {
             struct taurus_document* doc = elem->document;
             TaurusMemoryPool* pool = doc ? doc->pool : NULL;
+            char* resolved = NULL;
             if (attr->has_entities && pool) {
-                val = taurus_decode_entities_view(&attr->value_view, pool);
+                resolved = taurus_decode_entities_view(&attr->value_view, pool);
             } else if (pool) {
-                val = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
+                resolved = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
             }
-            if (val) attr->value = val;  /* cache for subsequent reads */
+            if (resolved) {
+                attr->value = resolved;
+                val = resolved;
+            }
         }
 
         buffer_append_char(buf, ' ');
