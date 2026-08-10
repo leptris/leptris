@@ -1,13 +1,22 @@
 ## [Unreleased]
 
-## [0.11.1] - Y-08-10
+## [0.11.1] - 2026-08-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fix — segfault under tight parse loops (#256)
 
-### Changed
+`taurus_parse_string` could segfault under tight parse/free cycles
+(Ruby benchmark-ips with delayed GC). Root cause: the thread-local
+`g_current_document` retained a dangling pointer to the returned
+document after the caller freed it, corrupting overflow-table
+cleanup for subsequent parses.
 
-- (describe changes here)
+Fix: clear `g_current_document` (call
+`taurus_compact_set_current_document(NULL)`) on the `direct_parse`
+success path, not just on failure. The thread-local is now NULL
+between parse cycles, preventing stale-pointer contamination of
+the compact-pointer overflow table.
+
+483/483 tests pass on macOS + Linux; ASAN clean.
 
 
 ## [0.11.0] - 2026-08-10
