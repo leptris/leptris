@@ -225,19 +225,38 @@ size_t taurus_node_child_count_internal(TaurusNode* node) {
     return (size_t)taurus_element_child_count(elem);
 }
 
-/* COW: Freeze node and all descendants */
+/* COW: Freeze node and all descendants.
+ * Iterative implementation (issue #256) — the recursive version
+ * could stack-overflow on deeply nested documents under tight parse
+ * loops where the thread stack is constrained. Uses an explicit
+ * stack to avoid unbounded recursion. */
 void taurus_node_freeze(TaurusNode* node) {
     if (!node) return;
 
-    node->frozen = 1;
+    /* Simple iterative depth-first walk: freeze current, push
+     * children, repeat. The sibling walk is handled inline (no
+     * stack push needed for siblings). */
+    TaurusElement stack[256];
+    int depth = 0;
 
-    /* Recursively freeze children if element */
+    node->frozen = 1;
     if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
-        TaurusElement elem = (TaurusElement)node;
-        TaurusElement child = taurus_element_get_first_child(elem);
-        while (child) {
-            taurus_node_freeze((TaurusNode*)child);
-            child = taurus_element_get_next_sibling(child);
+        TaurusElement child = taurus_element_get_first_child((TaurusElement)node);
+        while (child || depth > 0) {
+            if (child) {
+                child->base.frozen = 1;
+                TaurusElement next = taurus_element_get_first_child(child);
+                if (next) {
+                    if (depth < 256) {
+                        stack[depth++] = taurus_element_get_next_sibling(child);
+                    }
+                    child = next;
+                } else {
+                    child = taurus_element_get_next_sibling(child);
+                }
+            } else {
+                child = stack[--depth];
+            }
         }
     }
 }
