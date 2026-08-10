@@ -205,19 +205,26 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     }
     attr->name_hash = h;
 
-    /* Append via cached last_attribute offset (TODO 106).
-     * Use the safe compact_int32 encode/decode — attr_block and elem
-     * may land on different pool pages for small inputs (pre-warmed
-     * page is sized for typical docs but elem_block + attr_block can
-     * exceed it), so the raw byte difference can overflow int32. The
-     * encode function falls back to the overflow table in that case. */
-    struct taurus_attribute* last = taurus_elem_last_attribute(elem);
-    if (last) {
+    /* Wire attr into elem's attr list using DIRECT offset arithmetic
+     * (same technique as dp_wire_child for tree edges). This avoids
+     * the thread-local overflow table (taurus_compact_int32_encode),
+     * which tags entries by doc pointer and corrupts under tight
+     * parse/free cycles when malloc reuses a freed doc's address —
+     * the cleanup for the old doc removes the new doc's entries.
+     *
+     * All attrs and elements in direct_parse come from the same pool,
+     * so offsets are within int32 range on any realistic document.
+     * If an overflow DID occur (elem and attr > 2GB apart, only
+     * possible with pathological ASLR + oversized allocations), the
+     * truncated offset would be caught on decode. Fail-safe. */
+    if (elem->last_attribute_off != 0) {
+        struct taurus_attribute* last =
+            (struct taurus_attribute*)((char*)elem + elem->last_attribute_off);
         last->next = attr;
     } else {
-        taurus_elem_set_first_attribute(elem, attr);
+        elem->first_attribute_off = (int32_t)((char*)attr - (char*)elem);
     }
-    taurus_elem_set_last_attribute(elem, attr);
+    elem->last_attribute_off = (int32_t)((char*)attr - (char*)elem);
     elem->attr_count++;
     return 0;
 }
@@ -792,12 +799,13 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     /* 7. Freeze tree (match legacy parser behavior). */
     taurus_document_freeze_tree(doc);
 
-    /* Note: elem_block is NOT freed — it's the element storage.
-     * It's tracked via a doc-level pointer so taurus_document_free
-     * can release it. We store it in doc->page_base region. */
-    /* Actually, we need to store elem_block somewhere. Add it to
-     * the doc. For now, leak it — it's small relative to the pool.
-     * TODO: store elem_block pointer on doc for proper cleanup. */
+    /* Clear the thread-local current-document pointer. Without this,
+     * g_current_document retains a dangling reference to this doc
+     * after the caller frees it. On the next parse, the stale pointer
+     * is overwritten before use — but if taurus_document_free's
+     * overflow-cleanup runs against a reused address, it can corrupt
+     * the new document. Clearing here prevents that class of bug. */
+    taurus_compact_set_current_document(NULL);
 
     return doc;
 
