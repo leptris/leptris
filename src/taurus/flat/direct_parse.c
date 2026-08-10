@@ -654,13 +654,75 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
                 }
 
                 /* Create DOCTYPE node with the extracted name. */
+                TaurusDoctypeNode* dt = NULL;
                 if (dt_name_len > 0) {
-                    TaurusDoctypeNode* dt = taurus_doctype_create(
+                    dt = taurus_doctype_create(
                         dt_name_start, dt_name_len, pool);
                     if (dt) {
                         doc->doctype = dt;
                     }
                 }
+
+                /* Parse PUBLIC/SYSTEM identifiers (issue #253).
+                 * DOCTYPE grammar (XML 1.0 §2.8):
+                 *   <!DOCTYPE name (SYSTEM quoted | PUBLIC quoted quoted)? subset?>
+                 * The keywords and quoted strings sit between the name
+                 * and the '[' or '>'. We need to re-scan that region
+                 * because the initial skip on line 637 skipped past
+                 * them without extracting values. */
+                char* id_scan = p.pos;  /* save position after name */
+                /* Re-scan from after the name to find PUBLIC/SYSTEM. */
+                char* scan = dt_name_start + dt_name_len;
+                /* Skip whitespace after name. */
+                while (scan < p.end && IS_WS(*scan)) scan++;
+                char* public_id = NULL;
+                size_t public_id_len = 0;
+                char* system_id = NULL;
+                size_t system_id_len = 0;
+                if (scan + 6 <= p.end && memcmp(scan, "SYSTEM", 6) == 0) {
+                    scan += 6;
+                    while (scan < p.end && IS_WS(*scan)) scan++;
+                    if (scan < p.end && (*scan == '"' || *scan == '\'')) {
+                        char q = *scan++;
+                        system_id = scan;
+                        while (scan < p.end && *scan != q) scan++;
+                        system_id_len = scan - system_id;
+                        if (scan < p.end) scan++; /* skip closing quote */
+                    }
+                } else if (scan + 6 <= p.end && memcmp(scan, "PUBLIC", 6) == 0) {
+                    scan += 6;
+                    while (scan < p.end && IS_WS(*scan)) scan++;
+                    /* Public ID (quoted) */
+                    if (scan < p.end && (*scan == '"' || *scan == '\'')) {
+                        char q = *scan++;
+                        public_id = scan;
+                        while (scan < p.end && *scan != q) scan++;
+                        public_id_len = scan - public_id;
+                        if (scan < p.end) scan++; /* skip closing quote */
+                    }
+                    /* System ID (quoted, after whitespace) */
+                    while (scan < p.end && IS_WS(*scan)) scan++;
+                    if (scan < p.end && (*scan == '"' || *scan == '\'')) {
+                        char q = *scan++;
+                        system_id = scan;
+                        while (scan < p.end && *scan != q) scan++;
+                        system_id_len = scan - system_id;
+                        if (scan < p.end) scan++; /* skip closing quote */
+                    }
+                }
+                /* NUL-terminate and set on the DOCTYPE node. The
+                 * values point into the mutable buffer copy. */
+                if (dt) {
+                    if (public_id && public_id_len > 0) {
+                        public_id[public_id_len] = '\0';
+                        taurus_doctype_set_public_id(dt, public_id, pool);
+                    }
+                    if (system_id && system_id_len > 0) {
+                        system_id[system_id_len] = '\0';
+                        taurus_doctype_set_system_id(dt, system_id, pool);
+                    }
+                }
+                (void)id_scan; /* position preserved for clarity */
 
                 /* Parse internal subset if non-empty — builds the
                  * entity table used for custom entity expansion. */
