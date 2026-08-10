@@ -89,6 +89,10 @@ taurus_add_test(test_parse_fragment abi/test_parse_fragment.cpp)
 taurus_add_test(test_doctype_api abi/test_doctype_api.cpp)
 taurus_add_test(test_xpath_custom_fns abi/test_xpath_custom_fns.cpp)
 
+# High-document-count stress test (issues #256, #261). Parses 5,000
+# docs in batches of 500, verifying tree integrity on each.
+taurus_add_test(test_stress_high_doc_count perf/test_stress_high_doc_count.cpp)
+
 # FlatDoc + lazy-promote tests removed — direct_parse is the sole
 # parser and builds the TaurusElement tree eagerly. The flat/
 # subsystem (TODO 139) has been deleted.
