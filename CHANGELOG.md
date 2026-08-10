@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.11.4] - Y-08-10
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.11.3] - 2026-08-10
 
 ### Fix — benchmark-ips segfault with 15,000+ alive documents (#261)

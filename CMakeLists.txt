@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(taurus
-    VERSION 0.11.3
+    VERSION 0.11.4
     DESCRIPTION "Fast XML parser and XPath evaluator in pure C"
     LANGUAGES C CXX
 )
