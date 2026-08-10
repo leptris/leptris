@@ -1,13 +1,38 @@
 ## [Unreleased]
 
-## [0.12.0] - Y-08-10
+## [0.12.0] - 2026-08-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### New API — per-node binding_wrapper (#262)
 
-### Changed
+Added `void* binding_wrapper` to `TaurusNode` base struct. Language
+bindings (Ruby FFI, Python, etc.) can cache their native wrapper
+object on first node access, eliminating per-node FFI call overhead
+on subsequent traversals.
 
-- (describe changes here)
+**New functions:**
+- `taurus_node_get_binding_wrapper(node)` → `void*`
+- `taurus_node_set_binding_wrapper(node, void* wrapper)`
+
+**ABI change:** TaurusNode grows from 12→20 bytes. Element struct
+grows from 80→88 bytes. Minor version bump.
+
+**Measured impact** (from #262 benchmark data):
+
+| Query | Before (Ruby) | With cache | Nokogiri |
+|-------|-------------|------------|----------|
+| `//book` (100 nodes) | 88 µs | ~13 µs | 13 µs |
+| Union (200 nodes) | 188 µs | ~27 µs | 27 µs |
+
+The binding eliminates 100+ FFI calls per nodeset traversal. On
+first traversal, the binding wraps each node and caches the wrapper.
+On subsequent traversals, the cached wrapper is found with zero FFI
+calls.
+
+The field is opaque to libtaurus — never dereferenced or freed.
+Initialized to NULL on node creation.
+
+Combined with the batch accessor (`taurus_xpath_result_get_nodes`,
+shipped in v0.11.4), this addresses the complete #262 proposal.
 
 
 ## [0.11.5] - 2026-08-10
