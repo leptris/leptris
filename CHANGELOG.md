@@ -1,13 +1,83 @@
 ## [Unreleased]
 
-## [0.14.0] - Y-08-11
+## [0.14.0] - 2026-08-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### New API — `taurus_node_traverse` (#273)
 
-### Changed
+Added `taurus_node_traverse(root, order, callback, user_data)` — a
+single-FFI-boundary subtree walk that lets language bindings implement
+`Node#traverse` / `Node#each` without crossing the FFI boundary once
+per node. Iterative DFS with a 256-deep explicit stack, zero heap
+allocations. Supports pre-order and post-order. Returns count of
+nodes visited (or -1 on bad args); callback may return non-zero to
+stop early.
 
-- (describe changes here)
+For Ruby bindings: collapses 1000+ FFI calls per traversal into one.
+Expected ~400 µs vs Nokogiri's ~500 µs on a 1000-node subtree.
+
+### Performance — parse fast path (TODO 154 + parse hot path)
+
+`taurus_parse_string` on a 37-byte input was 0.86 µs vs pugixml's
+0.10 µs. Three changes close about half the gap:
+
+1. **Encoding-detection fast path** in `taurus_parse_string` that
+   bypasses iconv auto-convert for the overwhelmingly common case
+   (input starts with `<`, no `<?xml` declaration, no UTF-16 BOM,
+   no embedded NULs). Mirrors pugixml's parse_fast check.
+2. **Tighter `est_elems` formula** in direct_parse (`len/10 + 8`
+   instead of `len/10 + 128`). Element overflow now falls back to
+   `taurus_pool_alloc` instead of failing.
+3. **Single-arena per-parse allocation** (TODO 154 Phases A+B).
+   Pool struct + first memory_page + page data live in one malloc
+   (was two). Doc struct pool-allocated (was calloc). Cuts per-parse
+   malloc count from 4 to 2.
+
+Measured: Tiny (37 B) 0.86 → 0.41 µs (5.1× gap → 5.1× gap, but
+absolute time halved). Small (512 B) 6.6 → 2.8 µs. Medium (24 KB)
+210 → 132 µs.
+
+### Platform support — MSVC / Windows CI
+
+libtaurus now builds cleanly under MSVC. Windows-latest added to the
+CI matrix on both `build.yml` and `test.yml`. The Windows job uses
+the Visual Studio generator, disables utf8proc/iconv to stay
+hermetic, and runs the full ctest suite under MSVC.
+
+Fixes:
+
+- `src/CMakeLists.txt`: warning flags split per-compiler via
+  generator expressions. GCC/Clang keep `-Wall -Wextra`; MSVC gets
+  `/W4` with noise suppressions. `_CRT_*_NO_WARNINGS` defines
+  silence strdup/strncpy deprecation. `libm` link guarded by
+  `TAURUS_MATH_LIBS` (empty on Windows/macOS).
+- New `src/taurus/common/port.h` centralizes compiler-specific
+  shims: `TAURUS_CTZ`, `TAURUS_CONSTRUCTOR`, `TAURUS_THREAD_LOCAL`,
+  `TAURUS_STATIC_ASSERT`. MSVC shims for `strdup`/`strndup`/
+  `strcasecmp`/`strncasecmp`/`strtok_r`. POSIX path: includes
+  `<strings.h>` for `strcasecmp`.
+- All 11 `__thread` sites → `TAURUS_THREAD_LOCAL`. 4 `__builtin_ctz`
+  → `TAURUS_CTZ`. chartype.c constructor → `TAURUS_CONSTRUCTOR`.
+  `_Static_assert` → `TAURUS_STATIC_ASSERT`.
+- `xpath/vm.c` GCC statement-expression macro → static helper
+  function. `xpath_variables.c` `(0.0/0.0)` → `NAN`.
+- C standard bumped from C99 to C11 (`_Static_assert` standard
+  there; MSVC requires C11 to recognize it as keyword).
+- `cli/error.h` `__attribute__((format(...)))` → `TAURUS_PRINTF`
+  macro. `cli/output.c` `<unistd.h>` → `<io.h>` on Windows.
+
+### Architecture — TODOs 154-160 added
+
+Multi-phase plan to fully close the gap to pugixml:
+
+- 154: single-arena allocation (this release — Phases A+B done)
+- 155: element struct compaction 88 → 64 bytes
+- 156: compact pointer for attribute list
+- 157: SIMD-accelerated parse loops
+- 158: inline tree-walk helpers
+- 159: XPath engine algorithmic improvements
+- 160: pugixml architecture study (reference)
+
+
 
 
 ## [0.13.0] - 2026-08-11
