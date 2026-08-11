@@ -145,7 +145,7 @@ static void xml_print_element_recursive(
     }
 
     /* Namespace declarations stored on this element (xmlns:prefix="uri") */
-    struct taurus_namespace* ns = elem->namespaces;
+    struct taurus_namespace* ns = taurus_elem_namespaces(elem);
     while (ns) {
         fprintf(out, " xmlns");
         if (ns->prefix) {

@@ -117,7 +117,7 @@ struct taurus_namespace* taurus_namespace_find(struct taurus_element* elem, cons
     if (!elem) return NULL;
 
     /* Check current element */
-    ns = elem->namespaces;
+    ns = taurus_elem_namespaces(elem);
     while (ns) {
         if ((prefix == NULL && ns->prefix == NULL) ||
             (prefix && ns->prefix && strcmp(prefix, ns->prefix) == 0)) {
@@ -144,11 +144,16 @@ int taurus_element_add_namespace(struct taurus_element* elem, struct taurus_name
     if (!elem || !ns) return -1;
 
     ns->next = NULL;
-    if (!elem->namespaces) {
-        elem->namespaces = ns;
+    /* ns_cache is required to hold the declarations head. Allocate
+     * on demand from the document's pool. TODO 155 Phase B. */
+    struct taurus_memory_pool* pool = elem->document ? elem->document->pool : NULL;
+    struct taurus_namespace** head_ptr = taurus_elem_namespaces_ptr(elem, pool);
+    if (!head_ptr) return -1;
+    if (!*head_ptr) {
+        *head_ptr = ns;
         return 0;
     }
-    struct taurus_namespace* tail = elem->namespaces;
+    struct taurus_namespace* tail = *head_ptr;
     while (tail->next) tail = tail->next;
     tail->next = ns;
     return 0;

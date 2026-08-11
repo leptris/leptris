@@ -383,7 +383,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
     }
 
     /* Namespaces - serialize as xmlns attributes */
-    for (struct taurus_namespace* ns = elem->namespaces; ns != NULL; ns = ns->next) {
+    for (struct taurus_namespace* ns = taurus_elem_namespaces(elem); ns != NULL; ns = ns->next) {
         if (!ns) continue;
 
         buffer_append_char(buf, ' ');
