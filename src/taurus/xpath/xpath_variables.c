@@ -17,7 +17,7 @@
  * Constants
  * ============================================================================ */
 
-#define NAN_VALUE (0.0 / 0.0)  /* NaN value */
+#define NAN_VALUE NAN  /* C99 <math.h> NaN — MSVC rejects 0.0/0.0 as div-by-zero */
 
 /* Initial capacity for variable set */
 #define VARIABLE_SET_INITIAL_CAPACITY 8
