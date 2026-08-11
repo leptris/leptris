@@ -14,6 +14,7 @@
  */
 
 #include "element.h"
+#include "../common/port.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -27,7 +28,7 @@ typedef struct taurus_document taurus_document_struct;
 extern void* taurus_pool_alloc(TaurusMemoryPool* pool, size_t size);
 
 /* Thread-local document for fast element creation */
-static __thread TaurusDocument g_fast_doc = NULL;
+static TAURUS_THREAD_LOCAL TaurusDocument g_fast_doc = NULL;
 
 /* ============================================================================
  * Element Creation

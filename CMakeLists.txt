@@ -8,8 +8,11 @@ project(taurus
     LANGUAGES C CXX
 )
 
-# C99 standard required
-set(CMAKE_C_STANDARD 99)
+# C11 standard required (was C99; bumped for _Static_assert, which
+# MSVC's C99 mode doesn't recognize as a keyword. C11 makes it
+# standard. VS2019 16.8+ supports C11; older MSVC fails the
+# CMAKE_C_STANDARD_REQUIRED check rather than silently building.)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 

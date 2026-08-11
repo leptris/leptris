@@ -11,6 +11,7 @@
 
 #include "../../include/taurus.h"
 #include "../taurus_internal.h"
+#include "common/port.h"
 
 /* Library version.  Single source of truth; CMakeLists.txt should
  * keep this in sync with project(taurus VERSION ...). */
@@ -24,8 +25,8 @@
  * When non-NULL, these override the system malloc/free for all
  * taurus-side allocations.  Per-document overrides live on the
  * TaurusDocument struct (alloc_hook / dealloc_hook fields). */
-__thread taurus_allocation_function  g_taurus_alloc_function   = NULL;
-__thread taurus_deallocation_function g_taurus_dealloc_function = NULL;
+TAURUS_THREAD_LOCAL taurus_allocation_function  g_taurus_alloc_function   = NULL;
+TAURUS_THREAD_LOCAL taurus_deallocation_function g_taurus_dealloc_function = NULL;
 
 /* The alloc/free hooks that the rest of the library calls.  These
  * are the public face of the thread-local overrides.  Defined here
@@ -82,8 +83,8 @@ TAURUS_API TaurusStatus taurus_document_set_allocators(
 
 /* Thread-local defaults for strict mode and max depth.
  * Documents inherit these at creation; callers can override per-document. */
-__thread int g_taurus_strict_mode = 0;
-__thread int g_taurus_max_depth   = 0;
+TAURUS_THREAD_LOCAL int g_taurus_strict_mode = 0;
+TAURUS_THREAD_LOCAL int g_taurus_max_depth   = 0;
 
 /* Internal accessor — called from parser_new.c to read the thread-default. */
 int taurus_get_max_depth_default(void) {

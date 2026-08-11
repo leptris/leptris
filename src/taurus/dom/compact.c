@@ -9,6 +9,7 @@
  */
 
 #include "compact.h"
+#include "../common/port.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -144,8 +145,8 @@ void* taurus_compact_overflow_get(TaurusCompactOverflowTable* table,
  * Global Overflow Table (Thread-local for thread safety)
  * ============================================================================ */
 
-static __thread TaurusCompactOverflowTable* g_overflow_table = NULL;
-static __thread size_t g_overflow_table_refcount = 0;
+static TAURUS_THREAD_LOCAL TaurusCompactOverflowTable* g_overflow_table = NULL;
+static TAURUS_THREAD_LOCAL size_t g_overflow_table_refcount = 0;
 
 static TaurusCompactOverflowTable* get_overflow_table(void) {
     if (!g_overflow_table) {
@@ -193,7 +194,7 @@ void taurus_compact_cleanup_document(struct taurus_document* doc) {
     }
 }
 
-static __thread struct taurus_document* g_current_document = NULL;
+static TAURUS_THREAD_LOCAL struct taurus_document* g_current_document = NULL;
 
 void taurus_compact_set_current_document(struct taurus_document* doc) {
     g_current_document = doc;

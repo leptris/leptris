@@ -74,6 +74,15 @@ static __inline int taurus_port_ctz(uint32_t mask) {
        static void fn##_unused(void) { (void)fn; }
 #endif
 
+/* ---- Thread-local storage --------------------------------------------- */
+/* GCC/Clang accept __thread directly; MSVC's C compiler doesn't
+ * recognize __thread (use __declspec(thread) instead). */
+#if defined(_MSC_VER)
+#  define TAURUS_THREAD_LOCAL __declspec(thread)
+#else
+#  define TAURUS_THREAD_LOCAL __thread
+#endif
+
 /* ---- POSIX string functions ------------------------------------------- */
 
 #if defined(_MSC_VER)

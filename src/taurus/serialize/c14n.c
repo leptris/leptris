@@ -13,6 +13,7 @@
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
 #include "../common/string_view.h"
+#include "../common/port.h"
 #include "../common/entities.h"
 #include <string.h>
 #include <stdlib.h>
@@ -130,7 +131,7 @@ static int compare_attributes(const void* a, const void* b) {
 /* Issue #183: thread-local with_comments flag for the extended API.
  * Default 0 = strip comments (matches C14N 1.0 canonical spec). The
  * _ex variants flip this around their call to the walk. */
-static __thread int c14n_include_comments = 0;
+static TAURUS_THREAD_LOCAL int c14n_include_comments = 0;
 
 /**
  * Recursive helper to serialize element in C14N format
