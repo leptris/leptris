@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "common/port.h"
+
 /* Detect platform and include appropriate SIMD headers */
 #if defined(__x86_64__) || defined(_M_X64)
     #define TAURUS_SIMD_SSE2 1
@@ -70,7 +72,7 @@ inline static const char* simd_skip_whitespace(const char* pos, const char* end)
         int mask = _mm_movemask_epi8(is_ws);
         if (mask != 0xFFFF) {  /* Found non-whitespace */
             /* Count leading whitespace bytes */
-            int leading = __builtin_ctz(~mask & 0xFFFF);
+            int leading = TAURUS_CTZ(~mask & 0xFFFF);
             return p + leading;
         }
 
@@ -193,7 +195,7 @@ inline static const char* simd_scan_name(const char* start, const char* end) {
         /* Find first invalid character */
         int mask = _mm_movemask_epi8(is_valid);
         if (mask != 0xFFFF) {  /* Found invalid char */
-            int valid_count = __builtin_ctz(~mask & 0xFFFF);
+            int valid_count = TAURUS_CTZ(~mask & 0xFFFF);
             return p + valid_count;
         }
 
@@ -295,7 +297,7 @@ inline static int simd_memcmp(const char* s1, const char* s2, size_t n) {
         int mask = _mm_movemask_epi8(cmp);
         if (mask != 0xFFFF) {  /* Found difference */
             /* Find first differing byte */
-            int diff_pos = __builtin_ctz(~mask & 0xFFFF);
+            int diff_pos = TAURUS_CTZ(~mask & 0xFFFF);
             return (unsigned char)p1[diff_pos] - (unsigned char)p2[diff_pos];
         }
 
@@ -404,7 +406,7 @@ inline static const char* simd_find_char(const char* s, const char* end, char ta
 
         int mask = _mm_movemask_epi8(cmp);
         if (mask != 0) {  /* Found target */
-            int pos = __builtin_ctz(mask);
+            int pos = TAURUS_CTZ(mask);
             return p + pos;
         }
 

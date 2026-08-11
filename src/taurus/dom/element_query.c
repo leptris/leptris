@@ -26,8 +26,8 @@ struct taurus_namespace* taurus_namespace_new_pooled(const char* prefix,
 #include "pi.h"
 #include "../common/string_view.h"
 #include "../common/entities.h"
+#include "../common/port.h"
 #include <string.h>
-#include <strings.h>  /* strcasecmp, strncasecmp */
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>

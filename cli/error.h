@@ -15,6 +15,16 @@
 #ifndef TAURUS_CLI_ERROR_H
 #define TAURUS_CLI_ERROR_H
 
+/* GCC/Clang get format-string checks; MSVC silently ignores them. */
+#if defined(__GNUC__) || defined(__clang__)
+#  define TAURUS_PRINTF(fmt_idx, args_idx) \
+       __attribute__((format(printf, fmt_idx, args_idx)))
+#  define TAURUS_NORETURN __attribute__((noreturn))
+#else
+#  define TAURUS_PRINTF(fmt_idx, args_idx)
+#  define TAURUS_NORETURN
+#endif
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -139,7 +149,7 @@ void cli_error_print(const cli_error_t* error, FILE* out);
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_fatal(const char* fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
+void cli_fatal(const char* fmt, ...) TAURUS_NORETURN TAURUS_PRINTF(1, 2);
 
 /**
  * Print error message
@@ -149,7 +159,7 @@ void cli_fatal(const char* fmt, ...) __attribute__((noreturn, format(printf, 1, 
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_error(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void cli_error(const char* fmt, ...) TAURUS_PRINTF(1, 2);
 
 /**
  * Print warning message
@@ -159,7 +169,7 @@ void cli_error(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_warning(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void cli_warning(const char* fmt, ...) TAURUS_PRINTF(1, 2);
 
 /**
  * Print info message
@@ -169,7 +179,7 @@ void cli_warning(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_info(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void cli_info(const char* fmt, ...) TAURUS_PRINTF(1, 2);
 
 /**
  * Print debug message
@@ -179,7 +189,7 @@ void cli_info(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_debug(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void cli_debug(const char* fmt, ...) TAURUS_PRINTF(1, 2);
 
 /* ------------------------------------------------------------------------- */
 /* Error Categories                                                          */

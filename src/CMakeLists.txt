@@ -132,11 +132,14 @@ target_link_libraries(taurus_objects PUBLIC m)
 target_compile_definitions(taurus_objects PUBLIC _POSIX_C_SOURCE=200809L)
 
 target_compile_options(taurus_objects PRIVATE
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-    $<$<CONFIG:Release>:-O3>
-    $<$<CONFIG:Debug>:-g -O0>
+    $<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:
+        -Wall -Wextra -Wno-unused-parameter>
+    $<$<C_COMPILER_ID:MSVC>:
+        /W4 /wd4100 /wd4201 /wd4204 /wd4244 /wd4267>
+    $<$<AND:$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>,$<CONFIG:Release>>:-O3>
+    $<$<AND:$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>,$<CONFIG:Debug>>:-g -O0>
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>
+    $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Od /Zi>
 )
 
 # ============================================================================
