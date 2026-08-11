@@ -7,6 +7,7 @@
  * See chartype.h for the IS_CHARTYPE / IS_NAME_CHAR / IS_WS macros. */
 
 #include "chartype.h"
+#include "port.h"
 
 /* The table is non-const so the constructor can OR in CT_UTF8 for
  * bytes >= 0x80 at load time. 256 bytes in .data (writable) is
@@ -51,12 +52,14 @@ uint8_t taurus_chartype_table[256] = {
     [' ']=CT_WS, ['\t']=CT_WS, ['\n']=CT_WS, ['\r']=CT_WS,
 };
 
-/* Set CT_UTF8 on bytes 0x80-0xFF. Runs once before main() via the
- * constructor attribute. This is cheaper than enumerating 128
+/* Set CT_UTF8 on bytes 0x80-0xFF. Runs once before main() via
+ * TAURUS_CONSTRUCTOR (GCC/Clang: constructor attribute; MSVC: CRT
+ * initializer section). This is cheaper than enumerating 128
  * designated initializers and keeps the table human-readable. */
-__attribute__((constructor))
 static void taurus_chartype_init(void) {
     for (int i = 0x80; i < 0x100; i++) {
         ((uint8_t*)taurus_chartype_table)[i] |= CT_UTF8;
     }
 }
+
+TAURUS_CONSTRUCTOR(taurus_chartype_init)

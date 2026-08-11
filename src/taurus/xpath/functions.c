@@ -9,8 +9,8 @@
 #include "evaluator.h"
 #include "../include/taurus.h"
 #include "../dom/element.h"
+#include "../common/port.h"
 #include <string.h>
-#include <strings.h>  /* strcasecmp, strncasecmp */
 #include <stdlib.h>
 #include <math.h>
 #include <ctype.h>

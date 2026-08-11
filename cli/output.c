@@ -7,7 +7,13 @@
 #include "error.h"
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
+#if defined(_WIN32)
+#  include <io.h>
+#  define isatty(fd) _isatty(fd)
+#else
+#  include <unistd.h>
+#endif
 
 /* Need access to internal structures for formatters */
 #include "../src/taurus/taurus_internal.h"

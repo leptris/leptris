@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout code
@@ -42,16 +42,31 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake ninja utf8proc
 
-      - name: Configure
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      - name: Configure (non-Windows)
+        if: runner.os != 'Windows'
         run: cmake -B build -S . -G Ninja -DTAURUS_BUILD_CLI=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release -DTAURUS_ENABLE_ICONV=OFF
+
+      - name: Configure (Windows / MSVC)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build -S . `
+            -DTAURUS_BUILD_CLI=ON `
+            -DBUILD_TESTING=ON `
+            -DTAURUS_ENABLE_UTF8PROC=OFF `
+            -DTAURUS_ENABLE_ICONV=OFF
 
       - name: Build
         run: cmake --build build --config Release
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --build-config Release
 
       - name: Test CLI - parse
+        if: runner.os != 'Windows'
         run: |
           echo '<root><item id="1">Test</item><item id="2">Data</item></root>' > /tmp/test.xml
           ./build/cli/taurus parse /tmp/test.xml
