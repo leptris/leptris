@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.15.0] - Y-08-11
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.14.0] - 2026-08-11
 
 ### New API — `taurus_node_traverse` (#273)
