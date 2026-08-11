@@ -682,6 +682,11 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         taurus_compact_cleanup_document(doc);
     }
 
+    /* Cache the pool-allocated flag BEFORE destroying the pool —
+     * pool-allocated docs are freed by taurus_pool_destroy, so
+     * reading doc->doc_pool_allocated AFTER destroy is UAF. TODO 154. */
+    int doc_pool_allocated = doc->doc_pool_allocated;
+
     /* Destroy memory pool (frees all DOM nodes allocated from it) */
     if (doc->pool) {
         taurus_pool_destroy(doc->pool);
@@ -692,7 +697,7 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
      * reclaimed its memory. Freeing again would be a double-free.
      * taurus_document_copy and taurus_parse_fragment use calloc and
      * leave doc_pool_allocated=0, so they still get TAURUS_FREE'd. */
-    if (!doc->doc_pool_allocated) {
+    if (!doc_pool_allocated) {
         TAURUS_FREE(doc);
     }
 }
