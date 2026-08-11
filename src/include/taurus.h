@@ -56,18 +56,23 @@ extern "C" {
 /* ABI sanity asserts — catches accidental struct-field exposure
  * that would change opaque-handle sizes.  See TODO 84.
  * Uses _Static_assert (works on GCC/Clang as extension in C99,
- * standard in C11, and in C++ via static_assert). */
-#ifdef __cplusplus
-static_assert(sizeof(TaurusDocument)  == sizeof(void*), "ABI");
-static_assert(sizeof(TaurusElement)   == sizeof(void*), "ABI");
-static_assert(sizeof(TaurusAttribute) == sizeof(void*), "ABI");
-static_assert(sizeof(TaurusXPathResult) == sizeof(void*), "ABI");
-#else
-_Static_assert(sizeof(TaurusDocument)  == sizeof(void*), "ABI");
-_Static_assert(sizeof(TaurusElement)   == sizeof(void*), "ABI");
-_Static_assert(sizeof(TaurusAttribute) == sizeof(void*), "ABI");
-_Static_assert(sizeof(TaurusXPathResult) == sizeof(void*), "ABI");
+ * standard in C11, and in C++ via static_assert). MSVC supports
+ * static_assert as a C keyword too — preferred over _Static_assert
+ * which only became a keyword in /std:c11 mode. */
+#ifndef TAURUS_STATIC_ASSERT
+#  ifdef __cplusplus
+#    define TAURUS_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#  elif defined(_MSC_VER)
+#    define TAURUS_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#  else
+#    define TAURUS_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#  endif
 #endif
+
+TAURUS_STATIC_ASSERT(sizeof(TaurusDocument)  == sizeof(void*), "ABI");
+TAURUS_STATIC_ASSERT(sizeof(TaurusElement)   == sizeof(void*), "ABI");
+TAURUS_STATIC_ASSERT(sizeof(TaurusAttribute) == sizeof(void*), "ABI");
+TAURUS_STATIC_ASSERT(sizeof(TaurusXPathResult) == sizeof(void*), "ABI");
 
 /* ============================================================================
  * Node Operations
