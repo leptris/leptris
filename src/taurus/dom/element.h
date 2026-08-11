@@ -181,13 +181,18 @@ static inline void taurus_elem_set_ns_uri(TaurusElement e, char* uri,
  * pugixml compact node: 44 bytes. The binding_wrapper field adds
  * ~10% memory but eliminates per-node FFI call overhead for
  * language bindings (7× nodeset XPath speedup at Ruby level). */
-#ifndef __cplusplus
-_Static_assert(sizeof(struct taurus_element) <= 88,
-    "taurus_element grew beyond 88 bytes — check for accidental field additions");
-#else
-static_assert(sizeof(struct taurus_element) <= 88,
-    "taurus_element grew beyond 80 bytes");
+#ifndef TAURUS_STATIC_ASSERT
+#  ifdef __cplusplus
+#    define TAURUS_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#  elif defined(_MSC_VER)
+#    define TAURUS_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#  else
+#    define TAURUS_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#  endif
 #endif
+
+TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) <= 88,
+    "taurus_element grew beyond 88 bytes — check for accidental field additions");
 
 /* ============================================================================
  * Compact tree-edge accessors (Phase 2b of TODO 90)
