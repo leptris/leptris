@@ -1,13 +1,25 @@
 ## [Unreleased]
 
-## [0.15.1] - Y-08-11
+## [0.15.1] - 2026-08-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — pool-allocate input buf copy (TODO 154 Phase C)
 
-### Changed
+`direct_parse` previously did `malloc(len+1); memcpy; parse; free(buf)`
+separately from the doc's pool. Now the buf copy lives inside the
+doc's pool, reclaimed by `pool_destroy` alongside everything else.
 
-- (describe changes here)
+Saves one malloc+free pair per `taurus_parse_string` call. Combined
+with TODO 154 Phases A+B (single-arena pool + pool-allocated doc
+struct), per-parse malloc count is now **1** (was 4 before v0.14).
+
+The fail-path now uses three-valued `owns_buffer`:
+- `0`: caller owns the buf (in-place parse path)
+- `1`: we malloc'd the buf (legacy path; retained for compat)
+- `2`: copy the input into the pool then parse (new default)
+
+Page-size calculation accounts for the extra `(len+1)` bytes so the
+buf lands in the first pool page alongside the elem+attr bulk block,
+preserving the #261 contiguity guarantee.
 
 
 ## [0.15.0] - 2026-08-11
