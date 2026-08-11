@@ -1,5 +1,14 @@
 # TODO 155 — Element struct compaction (88 → 64 bytes)
 
+## Status
+
+**Phase B DONE** in v0.15.0 (88→80 bytes).
+**Phase C DONE** in v0.16.0 (80→72 bytes).
+**Phase A pending** (drop `document` field, 72→64 bytes).
+**Phase D pending** (line: uint32 → uint16, save 2 bytes — modest).
+
+Current: **72 bytes** (was 88). Target: **64 bytes** (fits one cache line).
+
 ## Why
 
 Each element is **88 bytes** today; pugixml's node is **44 bytes**.
