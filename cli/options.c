@@ -6,6 +6,7 @@
 #include "options.h"
 #include "cli.h"
 #include "error.h"
+#include "../src/taurus/common/port.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
