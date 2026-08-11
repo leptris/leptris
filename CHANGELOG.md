@@ -1,13 +1,44 @@
 ## [Unreleased]
 
-## [0.16.0] - Y-08-11
+## [0.16.0] - 2026-08-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — drop last_child_off + last_attribute_off (TODO 155 Phase C)
 
-### Changed
+Element struct: **80 → 72 bytes**. Removed two int32 fields that
+were O(1) caches for "find last child/attribute".
 
-- (describe changes here)
+- `int32_t last_child_off` — REMOVED
+- `int32_t last_attribute_off` — REMOVED
+
+**Parse path**: `DParser` now tracks `last_child_stack[depth]` per
+open element. `dp_wire_child` takes a `DParser*` parameter and
+reads/updates this cache. O(1) per wire, same as before.
+
+**Mutation paths**: `taurus_elem_last_child()` /
+`taurus_elem_last_attribute()` now walk the list to find the tail.
+O(N) where N is child/attr count. For typical elements (≤ 10
+children/attrs) this is fast.
+
+The setters (`taurus_elem_set_last_child`, `_set_last_attribute`)
+are retained as no-ops for ABI compatibility.
+
+### Bug fix in dp_add_attr_inline
+
+Careful fix: when `first_attribute_off == 0`, the decoded pointer
+is `elem` itself (non-NULL) — so the empty-list check must inspect
+the offset field, not the decoded pointer. The initial
+implementation got this wrong and broke XInclude attribute lookup
+under `-O2` (Debug passed because the optimizer didn't expose the
+UB).
+
+### Other
+
+`node.h` gained `extern "C"` wrappers — `taurus_elem_last_child`
+now calls `taurus_node_get_next_sibling` inline, and C++ consumers
+(`test_abi`) need C linkage for symbol resolution.
+
+**ABI break**: element struct size changes (80 → 72 bytes). Minor
+version bump.
 
 
 ## [0.15.1] - 2026-08-11
