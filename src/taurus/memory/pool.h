@@ -86,6 +86,13 @@ struct taurus_memory_pool {
     size_t page_size;             /* Page size for this pool */
     void* page_base;              /* Base pointer for compact pointer decoding */
 
+    /* When set, the first page is allocated INLINE with the pool
+     * struct (single malloc for both). taurus_pool_destroy must
+     * skip freeing the first page in this case — the pool-struct
+     * free at the end of destroy reclaims both. Saves one malloc
+     * per parse (TODO 154). */
+    int first_page_inline;
+
     /* Per-pool allocator hooks (TODO 74) — if non-NULL, override the
      * thread-default globals.  When set, every page and oversized
      * allocation goes through these instead. */

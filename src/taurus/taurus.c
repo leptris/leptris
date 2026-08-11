@@ -687,8 +687,14 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         taurus_pool_destroy(doc->pool);
     }
 
-    /* Free document */
-    TAURUS_FREE(doc);
+    /* Free document — UNLESS it was pool-allocated (TODO 154).
+     * When pool_alloc allocated the doc, pool_destroy above already
+     * reclaimed its memory. Freeing again would be a double-free.
+     * taurus_document_copy and taurus_parse_fragment use calloc and
+     * leave doc_pool_allocated=0, so they still get TAURUS_FREE'd. */
+    if (!doc->doc_pool_allocated) {
+        TAURUS_FREE(doc);
+    }
 }
 
 /**
