@@ -1,13 +1,34 @@
 ## [Unreleased]
 
-## [0.15.0] - Y-08-11
+## [0.15.0] - 2026-08-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — element struct compaction (TODO 155 Phase B)
 
-### Changed
+Element struct: **88 → 80 bytes**. Merged the parallel `namespaces`
+linked-list head pointer into the existing `ns_cache` struct.
 
-- (describe changes here)
+`ns_cache` now carries three fields:
+- `prefix` (existing — this element's prefix from `<p:local>`)
+- `namespace_uri` (existing — resolved URI)
+- `declarations` (new — xmlns:* declarations on this element)
+
+Most elements have no namespace activity → `ns_cache` is NULL, zero
+overhead. Elements that declare namespaces OR have a prefix pay one
+16-byte pool allocation for the cache struct.
+
+Two new inline accessors in `element.h`:
+- `taurus_elem_namespaces(elem)` — read the declarations list (NULL-safe)
+- `taurus_elem_namespaces_ptr(elem, pool)` — writable handle for append
+
+Updated 7 read/write sites in taurus_memory.c, serialize.c, c14n.c,
+element.c, element_query.c, output.c.
+
+`taurus_element_add_namespace` now allocates ns_cache on demand from
+`elem->document->pool`. `taurus_element_remove_namespace_definition`
+returns NOT_FOUND early when no ns_cache exists.
+
+**ABI break**: element struct size changes (88 → 80 bytes). Minor
+version bump.
 
 
 ## [0.14.0] - 2026-08-11
