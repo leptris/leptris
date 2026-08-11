@@ -701,6 +701,31 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
  *
  * `value_match`: if 0, presence check (attr exists). If 1, equality
  * check (attr value == attr_value). */
+
+/* Attribute-predicate matcher — pulled out of the previous macro so
+ * the file compiles under MSVC (which rejects GCC statement-expression
+ * extension `({ ... })`). Walks the element's attribute list once. */
+static int attr_pred_match(TaurusElement e,
+                           const char* attr_name, size_t attr_name_len,
+                           int value_match,
+                           const char* attr_value, size_t value_len) {
+    struct taurus_attribute* a = taurus_element_get_first_attribute(e);
+    while (a) {
+        TaurusStringView nv = a->name_view;
+        if (attr_name && nv.length == attr_name_len && nv.length > 0 && nv.data &&
+            memcmp(attr_name, nv.data, nv.length) == 0) {
+            if (!value_match) return 1;
+            TaurusStringView vv = a->value_view;
+            if (vv.length == value_len && vv.length > 0 && vv.data &&
+                memcmp(attr_value, vv.data, vv.length) == 0) {
+                return 1;
+            }
+        }
+        a = a->next;
+    }
+    return 0;
+}
+
 static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
     XPathContext* ctx, XPathVM* vm,
     const char* attr_name, const char* attr_value,
@@ -763,23 +788,10 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
     size_t attr_name_len = attr_name ? strlen(attr_name) : 0;
     size_t value_len = attr_value ? strlen(attr_value) : 0;
 
-    /* Helper macro: check if `e` has the matching attr. */
-    #define ATTR_MATCHES(e) ({ \
-        struct taurus_attribute* _a = taurus_element_get_first_attribute(e); \
-        int _m = 0; \
-        while (_a) { \
-            TaurusStringView _nv = _a->name_view; \
-            if (attr_name && _nv.length == attr_name_len && _nv.length > 0 && _nv.data && \
-                memcmp(attr_name, _nv.data, _nv.length) == 0) { \
-                if (!value_match) { _m = 1; break; } \
-                TaurusStringView _vv = _a->value_view; \
-                if (_vv.length == value_len && _vv.length > 0 && _vv.data && \
-                    memcmp(attr_value, _vv.data, _vv.length) == 0) { _m = 1; break; } \
-            } \
-            _a = _a->next; \
-        } \
-        _m; \
-    })
+    /* Helper: check if `e` has the matching attr. */
+    #define ATTR_MATCHES(e) \
+        attr_pred_match((e), attr_name, attr_name_len, \
+                        value_match, attr_value, value_len)
 
     for (size_t i = 0; i < input->count; i++) {
         if (!node_is_element(input->nodes[i])) continue;
