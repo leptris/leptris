@@ -121,7 +121,14 @@ target_include_directories(taurus_objects
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
 )
 
-target_link_libraries(taurus_objects PUBLIC m)
+# Link libm only on platforms where it's a separate library (Linux, BSD).
+# Windows/MSVC pulls math from the regular CRT; macOS folds it into libc.
+if(NOT WIN32 AND NOT APPLE)
+    target_link_libraries(taurus_objects PUBLIC m)
+elseif(APPLE)
+    # macOS folds libm into libc; no separate -lm needed but harmless.
+    target_link_libraries(taurus_objects PUBLIC m)
+endif()
 
 # Define _POSIX_C_SOURCE so strdup() and other POSIX functions are
 # properly declared by <string.h>. Without this, strict C99 mode
