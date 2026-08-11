@@ -636,7 +636,7 @@ const char* taurus_element_lookup_namespace(TaurusElement elem,
     if (!elem) return NULL;
 
     /* Search namespaces linked list on current element */
-    struct taurus_namespace* ns = elem->namespaces;
+    struct taurus_namespace* ns = taurus_elem_namespaces(elem);
     while (ns) {
         if ((prefix == NULL && ns->prefix == NULL) ||
             (prefix && ns->prefix && strcmp(prefix, ns->prefix) == 0)) {

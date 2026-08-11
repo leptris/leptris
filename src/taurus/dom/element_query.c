@@ -922,7 +922,7 @@ TAURUS_API size_t taurus_element_namespace_count(TaurusElement elem) {
     size_t count = 0;
     /* The parser strips xmlns declarations from the regular attribute
      * list and moves them to elem->namespaces. Walk THAT list. */
-    for (struct taurus_namespace* ns = elem->namespaces; ns; ns = ns->next) {
+    for (struct taurus_namespace* ns = taurus_elem_namespaces(elem); ns; ns = ns->next) {
         count++;
     }
     /* Backward compat: also count xmlns attributes in case any caller
@@ -950,7 +950,7 @@ static int element_namespace_decl_at(TaurusElement elem, size_t index,
                                       const char** out_uri) {
     if (!elem) return 0;
     size_t i = 0;
-    for (struct taurus_namespace* ns = elem->namespaces; ns; ns = ns->next) {
+    for (struct taurus_namespace* ns = taurus_elem_namespaces(elem); ns; ns = ns->next) {
         if (i == index) {
             *out_prefix = ns->prefix;
             *out_uri = ns->uri;
@@ -1063,7 +1063,10 @@ TAURUS_API TaurusStatus taurus_element_remove_namespace_definition(
     /* Normalize empty prefix to NULL. */
     if (prefix && !*prefix) prefix = NULL;
 
-    struct taurus_namespace** link = &elem->namespaces;
+    /* No ns_cache = no namespace declarations on this element. */
+    if (!elem->ns_cache) return TAURUS_ERROR_NOT_FOUND;
+
+    struct taurus_namespace** link = &elem->ns_cache->declarations;
     while (*link) {
         struct taurus_namespace* cur = *link;
         int match = (prefix == NULL) ? (cur->prefix == NULL)

@@ -90,9 +90,18 @@ struct taurus_attribute {
  * pay the 16-byte pool allocation for the cache struct.
  *
  * Saves 8 bytes per element (88 → 80). */
+/* Phase 2e-B + TODO 155 Phase B: ns_cache holds BOTH the element's
+ * own prefix/URI AND the linked list of xmlns:* declarations parsed
+ * on this element. Merging the parallel `namespaces` head pointer
+ * into ns_cache saves 8 bytes per element (88 → 80).
+ *
+ * Most elements have no namespace activity → ns_cache is NULL,
+ * zero overhead. Elements that declare namespaces OR have a prefix
+ * pay one 16-byte pool allocation for the cache struct. */
 struct taurus_ns_cache {
-    char* prefix;
-    char* namespace_uri;
+    char* prefix;                       /* This element's prefix (from `<p:loc>`) */
+    char* namespace_uri;                /* Resolved URI for this element's prefix */
+    struct taurus_namespace* declarations;  /* xmlns:* declared on this element */
 };
 
 struct taurus_element {
@@ -122,8 +131,8 @@ struct taurus_element {
     int32_t first_attribute_off;
     int32_t last_attribute_off;
 
-    /* Document context (16 bytes). */
-    struct taurus_namespace* namespaces;
+    /* Document context (8 bytes; was 16 before TODO 155 Phase B).
+     * The `namespaces` linked-list head moved into ns_cache above. */
     struct taurus_document* document;
 };
 
@@ -136,7 +145,8 @@ static inline char* taurus_elem_ns_uri(const TaurusElement e) {
 }
 
 /* Allocate ns_cache if needed, then set prefix. Pool required for
- * the one-time 16-byte alloc. */
+ * the one-time allocation. The cache struct is zeroed so all three
+ * fields (prefix, namespace_uri, declarations) start as NULL. */
 static inline void taurus_elem_set_prefix(TaurusElement e, char* prefix,
                                            TaurusMemoryPool* pool) {
     if (!e) return;
@@ -147,6 +157,7 @@ static inline void taurus_elem_set_prefix(TaurusElement e, char* prefix,
         if (!e->ns_cache) return;
         e->ns_cache->prefix = NULL;
         e->ns_cache->namespace_uri = NULL;
+        e->ns_cache->declarations = NULL;
     }
     e->ns_cache->prefix = prefix;
 }
@@ -160,8 +171,35 @@ static inline void taurus_elem_set_ns_uri(TaurusElement e, char* uri,
             taurus_pool_alloc(pool, sizeof(struct taurus_ns_cache));
         if (!e->ns_cache) return;
         e->ns_cache->prefix = NULL;
+        e->ns_cache->namespace_uri = NULL;
+        e->ns_cache->declarations = NULL;
     }
     e->ns_cache->namespace_uri = uri;
+}
+
+/* Get the linked list of xmlns:* declarations on this element.
+ * Returns NULL when the element has no namespace declarations
+ * (the overwhelmingly common case). TODO 155 Phase B. */
+static inline struct taurus_namespace* taurus_elem_namespaces(const TaurusElement e) {
+    return e && e->ns_cache ? e->ns_cache->declarations : NULL;
+}
+
+/* Ensure ns_cache exists (allocating if needed) and return a
+ * writable pointer to the declarations head. Used by mutation
+ * paths that append xmlns:* declarations. */
+static inline struct taurus_namespace** taurus_elem_namespaces_ptr(
+    TaurusElement e, TaurusMemoryPool* pool) {
+    if (!e) return NULL;
+    if (!e->ns_cache) {
+        if (!pool) return NULL;
+        e->ns_cache = (struct taurus_ns_cache*)
+            taurus_pool_alloc(pool, sizeof(struct taurus_ns_cache));
+        if (!e->ns_cache) return NULL;
+        e->ns_cache->prefix = NULL;
+        e->ns_cache->namespace_uri = NULL;
+        e->ns_cache->declarations = NULL;
+    }
+    return &e->ns_cache->declarations;
 }
 
 
@@ -191,8 +229,8 @@ static inline void taurus_elem_set_ns_uri(TaurusElement e, char* uri,
 #  endif
 #endif
 
-TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) <= 88,
-    "taurus_element grew beyond 88 bytes — check for accidental field additions");
+TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) <= 80,
+    "taurus_element grew beyond 80 bytes — check for accidental field additions");
 
 /* ============================================================================
  * Compact tree-edge accessors (Phase 2b of TODO 90)

@@ -190,7 +190,7 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
     APPEND_STRING(temp, len);
 
     /* Add namespace declarations */
-    struct taurus_namespace* ns = elem->namespaces;
+    struct taurus_namespace* ns = taurus_elem_namespaces(elem);
     while (ns) {
         /* Serialize namespace as xmlns:prefix="uri" or xmlns="uri" for default */
         if (ns->prefix) {
@@ -635,7 +635,7 @@ static void c14n_serialize_element_excl(TaurusElement elem,
         /* Resolve via xmlns declaration walk (not element prefix walk). */
         const char* uri = NULL;
         for (TaurusElement p = elem; p && !uri; ) {
-            for (struct taurus_namespace* ns = p->namespaces; ns; ns = ns->next) {
+            for (struct taurus_namespace* ns = taurus_elem_namespaces(p); ns; ns = ns->next) {
                 if (ns->prefix && strcmp(ns->prefix, to_emit[i]) == 0) {
                     uri = ns->uri;
                     break;
