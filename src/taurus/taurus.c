@@ -23,6 +23,7 @@
  * flat_promote are deleted. direct_parse (flat/direct_parse.c)
  * is the sole parser. */
 #include "common/entities.h"
+#include "common/port.h"
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
@@ -31,8 +32,8 @@
 
 /* Thread-local globals defined in core.c — extern so taurus_parse can
  * read the strict-mode default at document creation time. */
-extern __thread int g_taurus_strict_mode;
-extern __thread int g_taurus_max_depth;
+extern TAURUS_THREAD_LOCAL int g_taurus_strict_mode;
+extern TAURUS_THREAD_LOCAL int g_taurus_max_depth;
 
 
 /* ============================================================================

@@ -30,13 +30,14 @@
 #include "../common/string_view.h"
 #include "../common/chartype.h"
 #include "../common/entities.h"
+#include "../common/port.h"
 #include "../dtd/model.h"
 
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-extern __thread int g_taurus_strict_mode;
+extern TAURUS_THREAD_LOCAL int g_taurus_strict_mode;
 extern void taurus_compact_set_current_document(struct taurus_document* doc);
 int taurus_element_add_namespace(struct taurus_element* elem,
                                   struct taurus_namespace* ns);
@@ -540,7 +541,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 /* Respect custom depth limit (g_taurus_max_depth)
                  * when set by the caller; fall back to the
                  * compile-time default otherwise. */
-                extern __thread int g_taurus_max_depth;
+                extern TAURUS_THREAD_LOCAL int g_taurus_max_depth;
                 int max_depth = g_taurus_max_depth > 0
                     ? g_taurus_max_depth : DP_MAX_DEPTH;
                 if (p.depth >= max_depth) goto fail;
