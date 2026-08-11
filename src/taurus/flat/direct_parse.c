@@ -331,6 +331,14 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
 /* Internal: parse from a writable, NUL-terminated buffer.
  * owns_buffer: 1 = document frees buf on taurus_document_free,
  *              0 = caller owns buf (in-place mode). */
+/* owns_buffer values:
+ *   0 — caller owns the buf (in-place parse). Don't free.
+ *   1 — direct_parse_internal owns the buf via separate malloc.
+ *       Free on failure.
+ *   2 — buf should be copied into the pool (TODO 154 Phase C).
+ *       The input `buf` is const; we pool-alloc a copy. Pool owns
+ *       the copy. No separate free.
+ */
 static struct taurus_document* direct_parse_internal(char* buf, size_t len, int owns_buffer) {
 
     /* 2. Create pool. The page size MUST be large enough to hold the
@@ -366,13 +374,47 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     size_t elem_bytes = est_elems * sizeof(struct taurus_element);
     size_t attr_bytes = est_elems * 6 * sizeof(struct taurus_attribute);
     size_t text_headroom = est_elems * 64; /* text/comment/CDATA/PI */
-    size_t page_size = elem_bytes + attr_bytes + text_headroom;
+    /* 2. Create pool. The page size MUST be large enough to hold the
+     * bulk element+attribute block (allocated in step 3). If the page
+     * is too small, the bulk block becomes an oversized allocation
+     * (separate malloc), which can land >2GB from the pool pages that
+     * hold text/comment/CDATA nodes. This causes int32 offset overflow
+     * in compact pointers and silent tree corruption (#261).
+     *
+     * Fix: set page_size = elem_bytes + attr_bytes + headroom. The
+     * pool allocator places the bulk block in the first oversized
+     * page and subsequent text/comment allocations in the same page's
+     * remaining space. All nodes are contiguous → offsets fit int32.
+     *
+     * Cap at 4 MB to avoid wasting memory on pathologically large docs.
+     *
+     * When owns_buffer == 2 (TODO 154 Phase C), also account for the
+     * input copy that we'll allocate from this same pool. */
+    size_t buf_extra = (owns_buffer == 2) ? (len + 1) : 0;
+    size_t page_size = elem_bytes + attr_bytes + text_headroom + buf_extra;
     if (page_size < 4096) page_size = 4096;
     if (page_size > 4 * 1024 * 1024) page_size = 4 * 1024 * 1024;
     TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
-    if (!pool) { free(buf); return NULL; }
+    if (!pool) {
+        if (owns_buffer == 1) free(buf);
+        return NULL;
+    }
     if (len >= 256) {
         pool->string_cache = taurus_hash_table_create(pool, 128);
+    }
+
+    /* If owns_buffer == 2, copy the input into the pool now. The
+     * caller's `buf` is const — we promised not to modify it. */
+    if (owns_buffer == 2) {
+        char* pool_buf = (char*)taurus_pool_alloc(pool, len + 1);
+        if (!pool_buf) {
+            taurus_pool_destroy(pool);
+            return NULL;
+        }
+        memcpy(pool_buf, buf, len);
+        pool_buf[len] = '\0';
+        buf = pool_buf;
+        owns_buffer = 0;  /* Pool owns the copy now. */
     }
 
     /* 3. Bulk-allocate element + attribute blocks as ONE contiguous
@@ -390,7 +432,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     char* combined = (char*)taurus_pool_alloc(pool, elem_bytes + attr_bytes);
     if (!combined) {
         taurus_pool_destroy(pool);
-        free(buf);
+        if (owns_buffer == 1) free(buf);
         return NULL;
     }
     TaurusElement elem_block = (TaurusElement)combined;
@@ -409,7 +451,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         taurus_pool_alloc(pool, sizeof(struct taurus_document));
     if (!doc) {
         taurus_pool_destroy(pool);
-        free(buf);
+        if (owns_buffer == 1) free(buf);
         return NULL;
     }
     memset(doc, 0, sizeof(*doc));
@@ -931,18 +973,24 @@ fail:
     taurus_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't TAURUS_FREE(doc) (TODO 154). */
-    if (owns_buffer) free(buf);  /* Only free our own copy, not caller's */
+    if (owns_buffer == 1) free(buf);  /* Only free our own copy, not caller's */
     return NULL;
 }
 
-/* Public: copy the input then parse (standard path). */
+/* Public: copy the input then parse (standard path).
+ *
+ * The input copy is allocated FROM THE POOL (not via malloc) so the
+ * document owns exactly one allocation that's freed in one shot at
+ * taurus_document_free. Saves one malloc+free per parse call vs the
+ * old pattern of malloc(buf) + pool_alloc(everything else).
+ *
+ * TODO 154 Phase C. */
 struct taurus_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
-    char* buf = (char*)malloc(len + 1);
-    if (!buf) return NULL;
-    memcpy(buf, xml, len);
-    buf[len] = '\0';
-    return direct_parse_internal(buf, len, 1);
+    /* The pool-allocate-then-parse path lives in
+     * direct_parse_internal. owns_buffer=2 signals "copy the input
+     * into the pool, then parse." */
+    return direct_parse_internal((char*)xml, len, 2);
 }
 
 /* Public: parse a caller-owned writable buffer without copying. */
