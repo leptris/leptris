@@ -130,12 +130,14 @@ TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len) {
  * Parse XML string into document with in-place optimization (internal implementation)
  *
  * The caller-owned writable buffer is passed to taurus_parse, which
- * copies it into the document's xml_buffer (direct_parse needs a
- * writable copy for in-place NUL termination). The original caller
- * buffer is not freed by the document.
+ * The caller's writable buffer is parsed IN-PLACE — no copy. The
+ * buffer is modified (NUL-terminated at name/value boundaries).
+ * The document does NOT free the buffer — caller must ensure it
+ * outlives the document.
  */
 static struct taurus_document* taurus_parse_inplace(char* xml, size_t len) {
-    return taurus_parse(xml, len);
+    extern struct taurus_document* direct_parse_inplace(char*, size_t);
+    return direct_parse_inplace(xml, len);
 }
 
 /* ============================================================================

@@ -28,4 +28,14 @@
  */
 struct taurus_document* direct_parse(const char* xml, size_t len);
 
+/* In-place variant: parse a caller-owned WRITABLE buffer without
+ * copying. The buffer is modified in-place (NUL-terminated at
+ * name/value boundaries). The document does NOT free the buffer —
+ * caller must ensure it outlives the document.
+ *
+ * The buffer must have at least len+1 writable bytes (for the NUL
+ * at buf[len]).
+ */
+struct taurus_document* direct_parse_inplace(char* buf, size_t len);
+
 #endif /* TAURUS_FLAT_DIRECT_PARSE_H */

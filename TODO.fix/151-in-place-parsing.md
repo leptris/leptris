@@ -34,4 +34,7 @@ The C API contract is clear: caller owns the buffer, document borrows.
 
 ## Status
 
-Documented. Medium priority — ~5% parse speedup for tight loops.
+Completed. `direct_parse_inplace(char* buf, size_t len)` added —
+parses a caller-owned writable buffer without copying. `taurus_parse_
+inplace` now calls it directly (was delegating to taurus_parse which
+copies).

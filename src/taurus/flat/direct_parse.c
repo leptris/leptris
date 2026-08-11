@@ -327,14 +327,10 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
     return -1;
 }
 
-struct taurus_document* direct_parse(const char* xml, size_t len) {
-    if (!xml || len == 0) return NULL;
-
-    /* 1. Copy XML buffer (writable for in-place NUL termination). */
-    char* buf = (char*)malloc(len + 1);
-    if (!buf) return NULL;
-    memcpy(buf, xml, len);
-    buf[len] = '\0';
+/* Internal: parse from a writable, NUL-terminated buffer.
+ * owns_buffer: 1 = document frees buf on taurus_document_free,
+ *              0 = caller owns buf (in-place mode). */
+static struct taurus_document* direct_parse_internal(char* buf, size_t len, int owns_buffer) {
 
     /* 2. Create pool. The page size MUST be large enough to hold the
      * bulk element+attribute block (allocated in step 3). If the page
@@ -401,7 +397,7 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
     doc->ref_count = 1;
     doc->xml_buffer = buf;
     doc->xml_buffer_len = len;
-    doc->xml_buffer_needs_free = 1;
+    doc->xml_buffer_needs_free = owns_buffer;
     /* No taurus_compact_set_current_document — direct_parse is
      * overflow-table-free. All compact pointer edges use direct
      * offset arithmetic, never touching the shared thread-local
@@ -900,7 +896,24 @@ struct taurus_document* direct_parse(const char* xml, size_t len) {
 fail:
     taurus_pool_destroy(pool);
     /* elem_block is pool-allocated — freed by pool_destroy above. */
-    free(doc->xml_buffer);
+    if (owns_buffer) free(buf);  /* Only free our own copy, not caller's */
     free(doc);
     return NULL;
+}
+
+/* Public: copy the input then parse (standard path). */
+struct taurus_document* direct_parse(const char* xml, size_t len) {
+    if (!xml || len == 0) return NULL;
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, xml, len);
+    buf[len] = '\0';
+    return direct_parse_internal(buf, len, 1);
+}
+
+/* Public: parse a caller-owned writable buffer without copying. */
+struct taurus_document* direct_parse_inplace(char* buf, size_t len) {
+    if (!buf || len == 0) return NULL;
+    buf[len] = '\0';  /* Ensure NUL termination */
+    return direct_parse_internal(buf, len, 0);
 }
