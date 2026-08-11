@@ -121,13 +121,20 @@ target_include_directories(taurus_objects
         ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
 )
 
-# Link libm only on platforms where it's a separate library (Linux, BSD).
-# Windows/MSVC pulls math from the regular CRT; macOS folds it into libc.
-if(NOT WIN32 AND NOT APPLE)
-    target_link_libraries(taurus_objects PUBLIC m)
+# Math library: libm is separate on Linux/BSD, folded into libc on
+# macOS, and folded into the regular CRT on Windows. Set a list that
+# downstream targets link against; on Windows it's empty.
+if(WIN32)
+    set(TAURUS_MATH_LIBS "")
 elseif(APPLE)
-    # macOS folds libm into libc; no separate -lm needed but harmless.
-    target_link_libraries(taurus_objects PUBLIC m)
+    set(TAURUS_MATH_LIBS "")
+else()
+    set(TAURUS_MATH_LIBS m)
+endif()
+
+# Link libm only on platforms where it's a separate library.
+if(TAURUS_MATH_LIBS)
+    target_link_libraries(taurus_objects PUBLIC ${TAURUS_MATH_LIBS})
 endif()
 
 # Define _POSIX_C_SOURCE so strdup() and other POSIX functions are
@@ -260,7 +267,9 @@ if(TAURUS_BUILD_STATIC)
     # propagate OBJECT-library link deps to the static lib's consumers
     # (CMake issue #16093), so we re-state them here as PUBLIC to ensure
     # `taurus::taurus` consumers link iconv/utf8proc/m automatically.
-    target_link_libraries(taurus_static PUBLIC m)
+    if(TAURUS_MATH_LIBS)
+        target_link_libraries(taurus_static PUBLIC ${TAURUS_MATH_LIBS})
+    endif()
     if(TAURUS_ENABLE_UTF8PROC)
         target_link_libraries(taurus_static PUBLIC ${TAURUS_UTF8PROC_TARGET})
     endif()
@@ -313,7 +322,9 @@ if(TAURUS_BUILD_SHARED)
     )
 
     # See note on taurus_static above.
-    target_link_libraries(taurus_shared PUBLIC m)
+    if(TAURUS_MATH_LIBS)
+        target_link_libraries(taurus_shared PUBLIC ${TAURUS_MATH_LIBS})
+    endif()
     if(TAURUS_ENABLE_UTF8PROC)
         target_link_libraries(taurus_shared PUBLIC ${TAURUS_UTF8PROC_TARGET})
     endif()
