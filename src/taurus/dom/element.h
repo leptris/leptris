@@ -121,15 +121,18 @@ struct taurus_element {
     char* name;                        /* NULL until first access */
     struct taurus_ns_cache* ns_cache;  /* NULL for non-namespaced elements */
 
-    /* Tree edges (16 bytes). */
+    /* Tree edges (12 bytes; was 16 before TODO 155 Phase C).
+     * last_child_off is GONE — append operations walk the child list
+     * (O(child_count)) or use the parser-local cache during parse.
+     * Saves 4 bytes per element. */
     int32_t parent_off;
     int32_t first_child_off;
-    int32_t last_child_off;
     int32_t next_sibling_off;
 
-    /* Attribute list (8 bytes). */
+    /* Attribute list (4 bytes; was 8 before TODO 155 Phase C).
+     * last_attribute_off is GONE — same reasoning. Append walks the
+     * list. Saves 4 bytes per element. */
     int32_t first_attribute_off;
-    int32_t last_attribute_off;
 
     /* Document context (8 bytes; was 16 before TODO 155 Phase B).
      * The `namespaces` linked-list head moved into ns_cache above. */
@@ -229,8 +232,8 @@ static inline struct taurus_namespace** taurus_elem_namespaces_ptr(
 #  endif
 #endif
 
-TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) <= 80,
-    "taurus_element grew beyond 80 bytes — check for accidental field additions");
+TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) <= 72,
+    "taurus_element grew beyond 72 bytes — check for accidental field additions");
 
 /* ============================================================================
  * Compact tree-edge accessors (Phase 2b of TODO 90)
@@ -262,9 +265,19 @@ static inline TaurusNode* taurus_elem_first_child(const TaurusElement e) {
 }
 
 static inline TaurusNode* taurus_elem_last_child(const TaurusElement e) {
-    return (e)
-        ? (TaurusNode*)taurus_compact_int32_decode((void*)e, e->last_child_off, &e->last_child_off)
-        : NULL;
+    /* TODO 155 Phase C: last_child_off removed. Walk the child list
+     * to find the tail. O(child_count); the typical element has few
+     * children, and cold paths (mutation, traversal) tolerable.
+     * Parse path uses a parser-local cache (DParser.last_child_of_depth)
+     * to avoid this walk during the hot parse loop. */
+    if (!e) return NULL;
+    TaurusNode* c = taurus_elem_first_child(e);
+    if (!c) return NULL;
+    while (1) {
+        TaurusNode* next = taurus_node_get_next_sibling(c);
+        if (!next) return c;
+        c = next;
+    }
 }
 
 static inline TaurusNode* taurus_elem_next_sibling(const TaurusElement e) {
@@ -288,8 +301,11 @@ static inline void taurus_elem_set_first_child(TaurusElement e, TaurusNode* chil
 }
 
 static inline void taurus_elem_set_last_child(TaurusElement e, TaurusNode* child) {
-    if (!e) return;
-    e->last_child_off = taurus_compact_int32_encode(e, child, &e->last_child_off);
+    /* TODO 155 Phase C: last_child_off removed. This setter is now a
+     * no-op retained for ABI compatibility. Callers that need to
+     * append a child use taurus_element_append_child_internal, which
+     * walks the child list (or uses the parser-local cache). */
+    (void)e; (void)child;
 }
 
 static inline void taurus_elem_set_next_sibling(TaurusElement e, TaurusNode* sibling) {
@@ -308,9 +324,13 @@ static inline struct taurus_attribute* taurus_elem_first_attribute(const TaurusE
 }
 
 static inline struct taurus_attribute* taurus_elem_last_attribute(const TaurusElement e) {
-    return (e)
-        ? (struct taurus_attribute*)taurus_compact_int32_decode((void*)e, e->last_attribute_off, &e->last_attribute_off)
-        : NULL;
+    /* TODO 155 Phase C: last_attribute_off removed. Walk the attr
+     * list to find the tail. O(attr_count) — typically ≤ 10. */
+    if (!e) return NULL;
+    struct taurus_attribute* a = taurus_elem_first_attribute(e);
+    if (!a) return NULL;
+    while (a->next) a = a->next;
+    return a;
 }
 
 static inline void taurus_elem_set_first_attribute(TaurusElement e, struct taurus_attribute* attr) {
@@ -319,8 +339,10 @@ static inline void taurus_elem_set_first_attribute(TaurusElement e, struct tauru
 }
 
 static inline void taurus_elem_set_last_attribute(TaurusElement e, struct taurus_attribute* attr) {
-    if (!e) return;
-    e->last_attribute_off = taurus_compact_int32_encode(e, attr, &e->last_attribute_off);
+    /* TODO 155 Phase C: last_attribute_off removed. No-op retained
+     * for ABI compatibility. Callers should use the append helpers
+     * (taurus_elem_last_attribute walks the list to find the tail). */
+    (void)e; (void)attr;
 }
 
 /* TaurusElement typedef comes from the public include/taurus/types.h

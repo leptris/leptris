@@ -51,6 +51,11 @@ typedef struct {
     TaurusMemoryPool* pool;
     struct taurus_document* doc;
     TaurusElement open_stack[DP_MAX_DEPTH];
+    /* TODO 155 Phase C: per-depth last-child cache. Replaces the
+     * last_child_off field on element. last_child_stack[i] holds
+     * the most recently wired child of open_stack[i], or NULL when
+     * no child has been wired yet at that depth. */
+    TaurusNode* last_child_stack[DP_MAX_DEPTH];
     int depth;
     TaurusElement root;
     struct taurus_processing_instruction* pis_head;
@@ -99,8 +104,13 @@ static inline void dp_advance_line(DParser* p, char* from, char* to) {
  * self-contained: it never touches the thread-local
  * g_current_document or the shared overflow hash table. Eliminates
  * the cross-document contamination that caused issue #261 under
- * benchmark-ips with 15,000+ simultaneously-alive documents. */
-static inline void dp_wire_child(TaurusElement parent, TaurusNode* child) {
+ * benchmark-ips with 15,000+ simultaneously-alive documents.
+ *
+ * TODO 155 Phase C: last_child_off was removed from element. The
+ * parser tracks the last-wired child per open element via
+ * p->last_child_stack[depth-1]. Pass DParser* so we can read/update
+ * this cache. Mutation paths (post-parse) walk the child list. */
+static inline void dp_wire_child(DParser* p, TaurusElement parent, TaurusNode* child) {
     /* Set child's parent pointer.
      * parent_off is relative to the CHILD's address.
      * Accessor: (char*)child + parent_off == (char*)parent. */
@@ -125,33 +135,34 @@ static inline void dp_wire_child(TaurusElement parent, TaurusNode* child) {
             default: break;
         }
     }
-    /* Splice into child chain as new last child. */
+    /* Splice into child chain as new last child. The previous last
+     * child is in p->last_child_stack[depth-1] (NULL means this is
+     * the first child). */
     int32_t child_off = (int32_t)((char*)child - (char*)parent);
-    if (parent->last_child_off != 0) {
+    TaurusNode* prev_last = p->last_child_stack[p->depth - 1];
+    if (prev_last) {
         /* Set next_sibling on the PREVIOUS last child via direct
          * offset. Type-dispatched to write the correct struct's
-         * next_sibling_off field. Bypasses taurus_node_set_next_
-         * sibling (which calls taurus_compact_int32_encode →
-         * shared overflow table). */
-        TaurusNode* last = (TaurusNode*)((char*)parent + parent->last_child_off);
-        int32_t sib_off = (int32_t)((char*)child - (char*)last);
-        switch (last->type) {
+         * next_sibling_off field. */
+        int32_t sib_off = (int32_t)((char*)child - (char*)prev_last);
+        switch (prev_last->type) {
             case TAURUS_NODE_TYPE_ELEMENT:
-                ((TaurusElement)last)->next_sibling_off = sib_off; break;
+                ((TaurusElement)prev_last)->next_sibling_off = sib_off; break;
             case TAURUS_NODE_TYPE_TEXT:
-                ((TaurusTextNode*)last)->next_sibling_off = sib_off; break;
+                ((TaurusTextNode*)prev_last)->next_sibling_off = sib_off; break;
             case TAURUS_NODE_TYPE_COMMENT:
-                ((TaurusCommentNode*)last)->next_sibling_off = sib_off; break;
+                ((TaurusCommentNode*)prev_last)->next_sibling_off = sib_off; break;
             case TAURUS_NODE_TYPE_CDATA:
-                ((TaurusCDATANode*)last)->next_sibling_off = sib_off; break;
+                ((TaurusCDATANode*)prev_last)->next_sibling_off = sib_off; break;
             case TAURUS_NODE_TYPE_PI:
-                ((TaurusPINode*)last)->next_sibling_off = sib_off; break;
+                ((TaurusPINode*)prev_last)->next_sibling_off = sib_off; break;
             default: break;
         }
     } else {
         parent->first_child_off = child_off;
     }
-    parent->last_child_off = child_off;
+    /* Update the parser-local last-child cache. */
+    p->last_child_stack[p->depth - 1] = child;
 
     /* Issue #213: maintain child_count for element children, matching
      * the convention used by taurus_element_append_child_internal. */
@@ -223,19 +234,23 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     }
     attr->name_hash = h;
 
-    /* Wire attr into elem's attr list using DIRECT offset arithmetic.
-     * Bypasses taurus_elem_set_first/last_attribute (which call
-     * taurus_compact_int32_encode → shared overflow table). This
-     * makes direct_parse fully overflow-table-free. */
+    /* Wire attr into elem's attr list. TODO 155 Phase C: last_attribute_off
+     * was removed. Walk from first_attribute to find the tail. For typical
+     * elements with ≤ 10 attrs this is fast. The hot path (parse) adds
+     * attrs in source order, so the walk visits each existing attr once.
+     *
+     * Careful: first_attribute_off == 0 means empty list. We can't decode
+     * the pointer and check for NULL — at offset 0 the decoded pointer
+     * is `elem` itself, which is non-NULL. Check the offset field. */
     int32_t attr_off = (int32_t)((char*)attr - (char*)elem);
-    if (elem->last_attribute_off != 0) {
-        struct taurus_attribute* last =
-            (struct taurus_attribute*)((char*)elem + elem->last_attribute_off);
-        last->next = attr;
+    if (elem->first_attribute_off != 0) {
+        struct taurus_attribute* tail =
+            (struct taurus_attribute*)((char*)elem + elem->first_attribute_off);
+        while (tail->next) tail = tail->next;
+        tail->next = attr;
     } else {
         elem->first_attribute_off = attr_off;
     }
-    elem->last_attribute_off = attr_off;
     elem->attr_count++;
     return 0;
 }
@@ -544,7 +559,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             }
             if (!tn) goto fail;
             tn->base.line = text_line;
-            dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)tn);
+            dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)tn);
             continue;
         }
 
@@ -606,7 +621,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
 
             /* Wire into parent. */
             if (p.depth > 0) {
-                dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)elem);
+                dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)elem);
             } else {
                 if (p.root) goto fail; /* multiple top-level elements */
                 p.root = elem;
@@ -621,6 +636,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                     ? g_taurus_max_depth : DP_MAX_DEPTH;
                 if (p.depth >= max_depth) goto fail;
                 p.open_stack[p.depth++] = elem;
+                /* Initialize last_child_stack for the new depth. */
+                p.last_child_stack[p.depth - 1] = NULL;
             }
         }
         else if (next == '/') {
@@ -679,7 +696,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 if (!cn) goto fail;
                 cn->base.line = markup_line;
                 if (p.depth > 0) {
-                    dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cn);
+                    dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)cn);
                 }
                 p.pos += 3;
                 dp_advance_line(&p, start, p.pos);
@@ -705,7 +722,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 if (!cd) goto fail;
                 cd->base.line = markup_line;
                 if (p.depth > 0) {
-                    dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)cd);
+                    dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)cd);
                 }
                 p.pos += 3;
                 dp_advance_line(&p, start, p.pos);
@@ -924,7 +941,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             if (!pi) goto fail;
             pi->base.line = pi_line;
             if (p.depth > 0) {
-                dp_wire_child(p.open_stack[p.depth - 1], (TaurusNode*)pi);
+                dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)pi);
             } else {
                 /* Doc-level PI. */
                 struct taurus_processing_instruction* pi_node =

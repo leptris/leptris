@@ -16,6 +16,10 @@
 
 #include "../taurus_internal.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Node type enumeration - extended from taurus_internal.h */
 typedef enum {
     TAURUS_NODE_TYPE_ELEMENT = 0,
@@ -154,5 +158,9 @@ TaurusNode* taurus_node_get_next_sibling(TaurusNode* node);
 /* Generic next_sibling setter - handles all node types correctly
  * Sets the next_sibling pointer for any node type. */
 void taurus_node_set_next_sibling(TaurusNode* node, TaurusNode* sibling);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* TAURUS_DOM_NODE_H */
