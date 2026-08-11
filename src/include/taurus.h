@@ -322,6 +322,36 @@ TAURUS_API int taurus_node_compare(TaurusNodeRef a, TaurusNodeRef b);
  */
 TAURUS_API char* taurus_node_get_xpath(TaurusNodeRef node);
 
+/* Traversal order for taurus_node_traverse. */
+typedef enum {
+    TAURUS_TRAVERSE_PRE_ORDER = 0,   /* Parent before children */
+    TAURUS_TRAVERSE_POST_ORDER = 1  /* Children before parent */
+} TaurusTraverseOrder;
+
+/**
+ * Traverse all descendant nodes of `root` in the specified order,
+ * invoking `callback` once per node.
+ *
+ * Crossing the FFI boundary once per traversal (not once per node)
+ * eliminates per-node call overhead — the main bottleneck for
+ * language bindings implementing Node#traverse, Node#each, etc.
+ *
+ * @param root     Starting node (included in traversal)
+ * @param order    TAURUS_TRAVERSE_PRE_ORDER or POST_ORDER
+ * @param callback Called once per node. Return 0 to continue,
+ *                 non-zero to stop early.
+ * @param user_data Opaque pointer passed to callback (may be NULL)
+ *
+ * @return Number of nodes visited, or -1 on error.
+ *
+ * Memory: Node handles passed to callback are document-owned.
+ */
+TAURUS_API int taurus_node_traverse(TaurusNodeRef root,
+                                     TaurusTraverseOrder order,
+                                     int (*callback)(TaurusNodeRef node,
+                                                     void* user_data),
+                                     void* user_data);
+
 /**
  * Get comment content
  *
