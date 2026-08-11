@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.16.0] - Y-08-11
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.15.1] - 2026-08-11
 
 ### Performance — pool-allocate input buf copy (TODO 154 Phase C)
