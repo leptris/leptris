@@ -548,3 +548,65 @@ TAURUS_API char* taurus_node_get_xpath(TaurusNodeRef node) {
 
     return buf;
 }
+
+TAURUS_API int taurus_node_traverse(TaurusNodeRef root,
+                                     TaurusTraverseOrder order,
+                                     int (*callback)(TaurusNodeRef node,
+                                                     void* user_data),
+                                     void* user_data) {
+    if (!root || !callback) return -1;
+    if (order != TAURUS_TRAVERSE_PRE_ORDER &&
+        order != TAURUS_TRAVERSE_POST_ORDER) {
+        return -1;
+    }
+
+    /* Iterative DFS with an explicit 256-deep stack (matches
+     * taurus_node_freeze). Each frame carries a "done" flag:
+     *   false → still need to descend into first child
+     *   true  → children exhausted, ready to visit (post-order) or pop
+     * Stack depth is bounded by tree depth, not branching factor —
+     * siblings are visited via next-sibling on pop, not pushed eagerly.
+     * This keeps a 4KB stack frame regardless of fan-out. */
+    typedef struct { TaurusNode* node; int done; } TraverseFrame;
+    TraverseFrame stack[256];
+    int depth = 0;
+    stack[depth].node = (TaurusNode*)root;
+    stack[depth].done = 0;
+    depth++;
+
+    int count = 0;
+    while (depth > 0) {
+        TraverseFrame* f = &stack[depth - 1];
+        if (!f->done) {
+            if (order == TAURUS_TRAVERSE_PRE_ORDER) {
+                if (callback((TaurusNodeRef)f->node, user_data) != 0) {
+                    return count;
+                }
+                count++;
+            }
+            f->done = 1;
+            TaurusNode* child = taurus_node_first_child_internal(f->node);
+            if (child && depth < 256) {
+                stack[depth].node = child;
+                stack[depth].done = 0;
+                depth++;
+            }
+        } else {
+            if (order == TAURUS_TRAVERSE_POST_ORDER) {
+                if (callback((TaurusNodeRef)f->node, user_data) != 0) {
+                    return count;
+                }
+                count++;
+            }
+            TaurusNode* sib = taurus_node_get_next_sibling(f->node);
+            depth--;
+            if (sib && depth < 256) {
+                stack[depth].node = sib;
+                stack[depth].done = 0;
+                depth++;
+            }
+        }
+    }
+
+    return count;
+}

@@ -739,3 +739,121 @@ TEST(ZeroCopyParse, EmptyElementRoundTrips) {
 
     taurus_document_free(doc);
 }
+
+namespace {
+
+struct TraverseCollector {
+    std::string names_pre;
+    std::string names_post;
+    int stop_after;
+    int calls;
+};
+
+static int collect_pre(TaurusNodeRef node, void* ud) {
+    auto* c = static_cast<TraverseCollector*>(ud);
+    c->calls++;
+    if (c->stop_after > 0 && c->calls > c->stop_after) return 1;
+    if (taurus_node_get_type(node) == kNodeTypeElement) {
+        if (!c->names_pre.empty()) c->names_pre += ",";
+        c->names_pre += taurus_element_name((TaurusElement)node);
+    }
+    return 0;
+}
+
+static int collect_post(TaurusNodeRef node, void* ud) {
+    auto* c = static_cast<TraverseCollector*>(ud);
+    c->calls++;
+    if (c->stop_after > 0 && c->calls > c->stop_after) return 1;
+    if (taurus_node_get_type(node) == kNodeTypeElement) {
+        if (!c->names_post.empty()) c->names_post += ",";
+        c->names_post += taurus_element_name((TaurusElement)node);
+    }
+    return 0;
+}
+
+}  // namespace
+
+TEST(NodeTraverse, PreOrderVisitsParentBeforeChildren) {
+    const char xml[] =
+        "<a><b><d/></b><c/></a>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    TraverseCollector col{ "", "", 0, 0 };
+    int n = taurus_node_traverse(taurus_element_as_node(root),
+                                 TAURUS_TRAVERSE_PRE_ORDER,
+                                 collect_pre, &col);
+    EXPECT_EQ(n, 4);
+    EXPECT_EQ(col.names_pre, "a,b,d,c");
+    taurus_document_free(doc);
+}
+
+TEST(NodeTraverse, PostOrderVisitsChildrenBeforeParent) {
+    const char xml[] =
+        "<a><b><d/></b><c/></a>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    TraverseCollector col{ "", "", 0, 0 };
+    int n = taurus_node_traverse(taurus_element_as_node(root),
+                                 TAURUS_TRAVERSE_POST_ORDER,
+                                 collect_post, &col);
+    EXPECT_EQ(n, 4);
+    EXPECT_EQ(col.names_post, "d,b,c,a");
+    taurus_document_free(doc);
+}
+
+TEST(NodeTraverse, IncludesTextAndElementChildren) {
+    const char xml[] = "<r>hello<x/>world</r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    int calls = 0;
+    taurus_node_traverse(taurus_element_as_node(root),
+                         TAURUS_TRAVERSE_PRE_ORDER,
+                         [](TaurusNodeRef, void* p) -> int {
+                             (*static_cast<int*>(p))++;
+                             return 0;
+                         }, &calls);
+    /* root + text("hello") + x + text("world") = 4 */
+    EXPECT_EQ(calls, 4);
+    taurus_document_free(doc);
+}
+
+TEST(NodeTraverse, EarlyStopReturnsCountVisited) {
+    const char xml[] = "<a><b/><c/><d/></a>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    TraverseCollector col{ "", "", 2, 0 };
+    int n = taurus_node_traverse(taurus_element_as_node(root),
+                                 TAURUS_TRAVERSE_PRE_ORDER,
+                                 collect_pre, &col);
+    /* stop_after=2 → callback returns non-zero on its 3rd invocation */
+    EXPECT_EQ(n, 2);
+    taurus_document_free(doc);
+}
+
+TEST(NodeTraverse, NullArgsReturnNegativeOne) {
+    const char xml[] = "<r/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    EXPECT_EQ(taurus_node_traverse(nullptr,
+                                   TAURUS_TRAVERSE_PRE_ORDER,
+                                   collect_pre, nullptr), -1);
+    EXPECT_EQ(taurus_node_traverse(taurus_element_as_node(root),
+                                   TAURUS_TRAVERSE_PRE_ORDER,
+                                   nullptr, nullptr), -1);
+    taurus_document_free(doc);
+}
