@@ -382,8 +382,8 @@ struct taurus_xpath_result* evaluate_step(XPathContext* ctx,
 
                 /* Special case: parent axis from attribute should return owner directly */
                 if (strcmp(axis_name, "parent") == 0) {
-                    if (attr_node->owner && matches_node_test(ctx, attr_node->owner, node_test)) {
-                        xpath_nodeset_add(result, attr_node->owner);
+                    if (attr_node->owner && matches_node_test(ctx, (TaurusNode*)attr_node->owner, node_test)) {
+                        xpath_nodeset_add(result, (TaurusNode*)attr_node->owner);
                     }
                     continue;  /* Skip normal axis processing */
                 }
@@ -415,7 +415,7 @@ struct taurus_xpath_result* evaluate_step(XPathContext* ctx,
         DEBUG_LOG("      node->name = %s",
                  taurus_element_get_name(node) ? taurus_element_get_name(node) : "(null)");
 
-        XPathNodeSet* axis_result = apply_axis(ctx, node, axis_name, node_test);
+        XPathNodeSet* axis_result = apply_axis(ctx, (TaurusNode*)node, axis_name, node_test);
         DEBUG_LOG("      axis_result count = %zu", axis_result ? xpath_nodeset_count(axis_result) : 0);
 
         if (axis_result) {
