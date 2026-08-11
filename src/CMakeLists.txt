@@ -135,12 +135,24 @@ target_compile_options(taurus_objects PRIVATE
     $<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:
         -Wall -Wextra -Wno-unused-parameter>
     $<$<C_COMPILER_ID:MSVC>:
-        /W4 /wd4100 /wd4201 /wd4204 /wd4244 /wd4267>
+        /W4 /wd4100 /wd4201 /wd4204 /wd4244 /wd4267 /wd4210 /wd4996>
     $<$<AND:$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>,$<CONFIG:Release>>:-O3>
     $<$<AND:$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>,$<CONFIG:Debug>>:-g -O0>
     $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>
     $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/Od /Zi>
 )
+
+# MSVC's CRT deprecates strdup/strncpy/sprintf as "unsafe" (C4996).
+# Project-wide defines silence the noise — these functions are used
+# safely throughout, and the *_s variants have different signatures
+# that would be a much bigger portability headache.
+if(MSVC)
+    target_compile_definitions(taurus_objects PRIVATE
+        _CRT_NONSTDC_NO_DEPRECATE
+        _CRT_SECURE_NO_WARNINGS
+        _CRT_SECURE_NO_DEPRECATE
+    )
+endif()
 
 # ============================================================================
 # Optional Dependencies

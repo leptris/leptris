@@ -105,6 +105,9 @@ static __inline char* taurus_strndup(const char* s, size_t n) {
 /* MSVC lacks POSIX strcasecmp/strncasecmp. Map to _stricmp/_strnicmp. */
 #  define strcasecmp(s1, s2) _stricmp((s1), (s2))
 #  define strncasecmp(s1, s2, n) _strnicmp((s1), (s2), (n))
+
+/* MSVC's strtok_s has the same three-arg signature as POSIX strtok_r. */
+#  define strtok_r(s, delim, ctx) strtok_s((s), (delim), (ctx))
 #else
 /* POSIX: strcasecmp/strncasecmp live in <strings.h>. */
 #  include <strings.h>
