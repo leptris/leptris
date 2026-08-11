@@ -173,6 +173,48 @@ TAURUS_API void taurus_parse_options_init(taurus_parse_options* opts) {
 TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, TaurusStatus* status) {
     if (status) *status = TAURUS_OK;
 
+    /* Fast path: skip encoding detection for the overwhelmingly common
+     * case — pure UTF-8 (or ASCII subset) input with no XML declaration.
+     * Saves two malloc+memcpy per call (iconv auto-convert + direct_parse
+     * internal copy) by going straight to direct_parse, which is the
+     * only path that needs to copy. Mirrors pugixml's parse_fast path.
+     *
+     * Triggers when ALL of:
+     *   - First non-WS byte is '<' (so it's likely XML).
+     *   - Not the UTF-16 BOM byte sequence.
+     *   - No NULL byte in the prefix (which would indicate UTF-16).
+     *   - Doesn't start with "<?xml" (declaration may specify a
+     *     non-UTF-8 encoding → fall through to iconv). */
+    if (xml && length > 0) {
+        const unsigned char* d = (const unsigned char*)xml;
+        size_t i = 0;
+        while (i < length && (d[i] == ' ' || d[i] == '\t' ||
+                              d[i] == '\n' || d[i] == '\r')) {
+            i++;
+        }
+        /* UTF-16 BOM? */
+        if (length - i >= 2 &&
+            ((d[i] == 0xFF && d[i + 1] == 0xFE) ||
+             (d[i] == 0xFE && d[i + 1] == 0xFF))) {
+            /* Fall through to slow path. */
+        } else if (i < length && d[i] == '<' &&
+                   !(length >= 5 && d[i + 1] == '?' &&
+                     d[i + 2] == 'x' && d[i + 3] == 'm' && d[i + 4] == 'l')) {
+            /* Not a "<?xml" declaration. Check for embedded NUL bytes
+             * in the first 64 bytes (UTF-16 without BOM indicator). */
+            int has_nul = 0;
+            size_t check = (length < 64) ? length : 64;
+            for (size_t j = i; j < check; j++) {
+                if (d[j] == 0) { has_nul = 1; break; }
+            }
+            if (!has_nul) {
+                struct taurus_document* doc = taurus_parse(xml, length);
+                if (!doc && status) *status = TAURUS_ERROR_PARSE;
+                return doc;
+            }
+        }
+    }
+
     /* Try native UTF-16 detection first (works without iconv) */
     #include "encoding/utf16.h"
 

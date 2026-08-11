@@ -346,7 +346,23 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * remaining space. All nodes are contiguous → offsets fit int32.
      *
      * Cap at 4 MB to avoid wasting memory on pathologically large docs. */
-    size_t est_elems = len / 10 + 128;
+    /* Estimate element count from input size. Tuned to avoid
+     * over-allocation on tiny docs (where pool page malloc dominates
+     * parse time) while still keeping headroom for moderately
+     * attribute-heavy inputs.
+     *
+     * The "+128" floor in earlier revisions allocated ~50 KB per
+     * parse even for 37-byte inputs — pugixml does ~0.1 µs on such
+     * docs because it allocates O(actual-size). The lower floor
+     * here costs a few ns of fallback pool_alloc on pathological
+     * inputs but saves 100+ ns of malloc on the common case.
+     *
+     * Worst-case element is `<a/>` = 4 bytes, but the typical
+     * element with attributes and text averages ~10 bytes. len/10
+     * is a reasonable estimate; +8 is a small safety margin (vs
+     * the prior +128). The element overflow path falls back to
+     * pool_alloc, so underestimates don't break parsing. */
+    size_t est_elems = len / 10 + 8;
     size_t elem_bytes = est_elems * sizeof(struct taurus_element);
     size_t attr_bytes = est_elems * 6 * sizeof(struct taurus_attribute);
     size_t text_headroom = est_elems * 64; /* text/comment/CDATA/PI */
@@ -492,11 +508,22 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             /* Element. Snapshot line BEFORE scanning the open tag so
              * the element reports the line where '<' appeared. */
             uint32_t elem_line = p.line;
-            if (elem_idx >= est_elems) {
-                /* Grow: realloc + adjust offsets. Complex; for now fail. */
-                goto fail;
+            TaurusElement elem;
+            if (elem_idx < est_elems) {
+                elem = &elem_block[elem_idx++];
+            } else {
+                /* Bulk block exhausted — fall back to pool_alloc.
+                 * Pool pages are contiguous, so compact-pointer
+                 * offsets remain valid as long as the pool's first
+                 * page is large enough to hold both the bulk block
+                 * and these overflow elements. direct_parse sizes
+                 * the first page for exactly this (see page_size
+                 * calculation above). */
+                elem = (TaurusElement)taurus_pool_alloc(
+                    pool, sizeof(struct taurus_element));
+                if (!elem) goto fail;
+                memset(elem, 0, sizeof(struct taurus_element));
             }
-            TaurusElement elem = &elem_block[elem_idx++];
             elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
             elem->base.line = elem_line;
             elem->document = doc;
