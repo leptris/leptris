@@ -401,13 +401,19 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * field of each attr it uses. */
     size_t elem_idx = 0;
 
-    /* 4. Create document. */
-    struct taurus_document* doc = (struct taurus_document*)calloc(1, sizeof(*doc));
+    /* 4. Create document. Pool-allocated to save one malloc per
+     * parse (TODO 154 Phase B). The doc_pool_allocated flag tells
+     * taurus_document_free to skip the TAURUS_FREE(doc) — pool
+     * destroy reclaims it. */
+    struct taurus_document* doc = (struct taurus_document*)
+        taurus_pool_alloc(pool, sizeof(struct taurus_document));
     if (!doc) {
         taurus_pool_destroy(pool);
         free(buf);
         return NULL;
     }
+    memset(doc, 0, sizeof(*doc));
+    doc->doc_pool_allocated = 1;
     doc->strict_mode = g_taurus_strict_mode;
     doc->pool = pool;
     doc->page_base = taurus_pool_get_base(pool);
@@ -923,9 +929,9 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
 
 fail:
     taurus_pool_destroy(pool);
-    /* elem_block is pool-allocated — freed by pool_destroy above. */
+    /* elem_block AND doc are pool-allocated — both freed by
+     * pool_destroy above. Don't TAURUS_FREE(doc) (TODO 154). */
     if (owns_buffer) free(buf);  /* Only free our own copy, not caller's */
-    free(doc);
     return NULL;
 }
 

@@ -138,6 +138,13 @@ struct taurus_document {
      * when building the per-context function registry. Standard
      * functions win name collisions. */
     struct taurus_custom_xpath_fn* custom_xpath_fns;
+
+    /* Set when this doc struct was allocated from the document's
+     * own pool. taurus_document_free must skip the TAURUS_FREE(doc)
+     * call in that case — the pool destroy reclaims it. Heap-
+     * allocated docs (taurus_document_copy, taurus_parse_fragment)
+     * leave this 0 and get freed via TAURUS_FREE. TODO 154. */
+    int doc_pool_allocated;
 };
 
 /* Parse options structure */

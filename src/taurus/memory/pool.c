@@ -91,15 +91,29 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
     /* Round up to alignment */
     page_size = (page_size + TAURUS_POOL_ALIGNMENT - 1) & ~(TAURUS_POOL_ALIGNMENT - 1);
 
-    TaurusMemoryPool* pool = (TaurusMemoryPool*)taurus_alloc_hook(sizeof(TaurusMemoryPool));
-    if (!pool) return NULL;
+    /* Allocate pool struct + first page header + first page data in
+     * ONE malloc. Cuts per-parse malloc count from 2 to 1 (TODO 154).
+     *
+     * Layout:
+     *   [ TaurusMemoryPool | MemoryPage header | page data ... ]
+     *
+     * The pool's `first_page_inline` flag tells taurus_pool_destroy
+     * to free the pool struct (which owns everything) and skip the
+     * first-page free (which would otherwise double-free). */
+    size_t header_size = sizeof(TaurusMemoryPool) + sizeof(struct memory_page) - 1;
+    /* Keep pool struct and page header aligned so the page data
+     * starts on an 8-byte boundary. */
+    header_size = (header_size + TAURUS_POOL_ALIGNMENT - 1) &
+                  ~(TAURUS_POOL_ALIGNMENT - 1);
+    size_t total_size = header_size + page_size;
+    char* block = (char*)taurus_alloc_hook(total_size);
+    if (!block) return NULL;
 
-    /* Allocate first page */
-    MemoryPage* page = allocate_new_page(page_size);
-    if (!page) {
-        taurus_free_hook(pool);
-        return NULL;
-    }
+    TaurusMemoryPool* pool = (TaurusMemoryPool*)block;
+    struct memory_page* page = (struct memory_page*)(block + sizeof(TaurusMemoryPool));
+    page->next = NULL;
+    page->page_size = page_size;
+    page->busy_size = 0;
 
     pool->first_page = page;
     pool->current_page = page;
@@ -108,6 +122,7 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
     pool->strict_mode = 0;
     pool->page_size = page_size;
     pool->page_base = page->data;  /* Initialize page_base for compact pointer decoding */
+    pool->first_page_inline = 1;
 
     /* No oversized allocations yet — list starts empty. */
     pool->first_big_alloc = NULL;
@@ -149,14 +164,25 @@ void taurus_pool_destroy(TaurusMemoryPool* pool) {
         big = next;
     }
 
-    /* Free all pages */
+    /* Free pages. The first page may be inline with the pool struct
+     * (when first_page_inline is set) — in that case, skip freeing
+     * it directly; the pool-struct free below reclaims both. */
+    int first_inline = pool->first_page_inline;
     MemoryPage* page = pool->first_page;
-    while (page) {
-        MemoryPage* next = page->next;
-        taurus_free_hook(page);
-        page = next;
+    if (page) {
+        /* Skip the first page if it's inline. */
+        if (first_inline) {
+            page = page->next;
+        }
+        while (page) {
+            MemoryPage* next = page->next;
+            taurus_free_hook(page);
+            page = next;
+        }
     }
 
+    /* When the first page was inline, freeing the pool struct frees
+     * both the pool and the first page (they share one malloc). */
     taurus_free_hook(pool);
 }
 
