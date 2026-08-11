@@ -34,9 +34,6 @@ would find the cached wrapper without any FFI call.
 
 ## Status
 
-Documented. The batch accessor (`taurus_xpath_result_get_nodes`)
-shipped in v0.11.4 addresses the same problem with lower complexity
-(no struct change). This is a further optimization for bindings that
-traverse the same nodeset multiple times.
-
-Medium priority — ABI-impacting change, needs careful rollout.
+Completed (v0.12.0). Shipped as `binding_wrapper` field on
+TaurusNode base struct. `taurus_node_get/set_binding_wrapper`
+public API. Element struct: 80→88 bytes.
