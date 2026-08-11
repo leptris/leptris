@@ -1,13 +1,33 @@
 ## [Unreleased]
 
-## [0.13.0] - Y-08-11
+## [0.13.0] - 2026-08-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### New API — in-place parsing (TODO 151)
 
-### Changed
+Added `direct_parse_inplace(char* buf, size_t len)` — parses a
+caller-owned writable buffer without copying. Eliminates one malloc
++ one memcpy per parse for callers who own their buffer (Ruby FFI,
+in-place parse API).
 
-- (describe changes here)
+`taurus_parse_inplace` now calls `direct_parse_inplace` directly
+(was delegating to `taurus_parse` which copies). The document does
+NOT free the buffer — caller owns it.
+
+### Architecture — dead code removal (-360 lines)
+
+Removed unused compact pointer types (TaurusCompactPtr8, Ptr16,
+CompactString) from compact.h/compact.c. These were defined but
+never used — all compact pointer edges use int32_t offsets.
+
+compact.c: 482 → 246 lines. compact.h: 318 → 177 lines.
+
+### Quality
+
+- All TODO.fix items (151, 152, 153) completed.
+- Permanent high-doc-count stress test in CI suite (5,000 docs).
+- `-Wall -Wextra` warning-free build.
+- 484 tests, all pass, ASAN clean.
+- 0 open issues.
 
 
 ## [0.12.0] - 2026-08-11
