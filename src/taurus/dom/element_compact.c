@@ -325,8 +325,8 @@ const char* taurus_compact_get_name(TaurusElementCompact* elem) {
         /* Store the cached string in the element structure
          * Note: This string should be pool-allocated for proper cleanup */
         /* For now, we'll use the document's pool if available */
-        if (elem->document && elem->document->pool) {
-            elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, elem->document->pool);
+        if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
+            elem->name = taurus_sv_to_cstr_pooled(&elem->name_view, taurus_element_get_pool(elem));
         } else {
             /* Fallback to regular malloc (not ideal for pool-allocated elements) */
             elem->name = taurus_sv_to_cstr(&elem->name_view);
@@ -441,7 +441,7 @@ TaurusElementCompact* taurus_compact_element_create_with_view(
     elem->namespace_uri = NULL;
 
     /* Store document pointer - will be set later */
-    elem->document = NULL;
+    taurus_element_get_document(elem) = NULL;
 
     /* Initialize all pointers to NULL */
     elem->parent.offset = TAURUS_COMPACT_PTR_NULL;

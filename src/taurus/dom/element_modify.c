@@ -12,6 +12,7 @@
 #include "element.h"
 #include "element_index.h"
 #include "compact.h"
+#include "root_doc_map.h"
 #include "node.h"
 #include "text.h"
 #include "comment.h"
@@ -40,7 +41,10 @@ TaurusElement taurus_element_create(TaurusDocument doc, const char* name) {
     if (doc->pool) {
         TaurusElement elem = taurus_element_create_pooled(name, doc->pool);
         if (elem) {
-            elem->document = doc;  /* Set document pointer */
+            /* TODO 155 Phase A: register elem as a root in the thread-local
+             * root→doc map so descendants (and pre-attach ops) can reach
+             * the doc via walk + lookup. */
+            taurus_root_doc_register(elem, doc);
         }
         return elem;
     }
@@ -48,7 +52,7 @@ TaurusElement taurus_element_create(TaurusDocument doc, const char* name) {
     /* Fallback: use regular internal creation if no pool */
     TaurusElement elem = taurus_element_create_pooled(name, doc->pool);
     if (elem) {
-        elem->document = doc;  /* Set document pointer */
+        taurus_root_doc_register(elem, doc);
     }
     return elem;
 }
@@ -66,8 +70,8 @@ TaurusStatus taurus_element_append_child(TaurusElement parent, TaurusElement chi
     /* Invalidate element index (TODO 132): the new child changes
      * the document's element set. The index will be rebuilt lazily
      * on the next descendant-axis query. */
-    if (parent->document) {
-        taurus_element_index_invalidate(parent->document);
+    if (taurus_element_get_document(parent)) {
+        taurus_element_index_invalidate(taurus_element_get_document(parent));
     }
     return TAURUS_OK;
 }
@@ -135,10 +139,10 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
     }
     taurus_node_set_next_sibling(new_node_ptr, sibling_ptr);
 
-    /* Set parent (type-dispatching) and document. */
+    /* Set parent (type-dispatching). TODO 155 Phase A: document field
+     * removed; non-root elements reach doc via walk to root. */
     if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
         taurus_element_set_parent((TaurusElement)new_node_ptr, parent);
-        ((TaurusElement)new_node_ptr)->document = parent->document;
     } else {
         switch (new_node_ptr->type) {
             case TAURUS_NODE_TYPE_TEXT:
@@ -203,10 +207,10 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
     taurus_node_set_next_sibling(sibling_ptr, new_node_ptr);
     taurus_node_set_next_sibling(new_node_ptr, next_sibling);
 
-    /* Set parent (type-dispatching) and document. */
+    /* Set parent (type-dispatching). TODO 155 Phase A: document field
+     * removed; non-root elements reach doc via walk to root. */
     if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
         taurus_element_set_parent((TaurusElement)new_node_ptr, parent);
-        ((TaurusElement)new_node_ptr)->document = parent->document;
     } else {
         switch (new_node_ptr->type) {
             case TAURUS_NODE_TYPE_TEXT:
@@ -335,9 +339,9 @@ TaurusStatus taurus_element_set_name(TaurusElement elem, const char* name) {
      * If we free() a pool-allocated string, we get undefined behavior. */
 
     /* Set new name - prefer pool allocation if document is available */
-    if (elem->document && elem->document->pool) {
+    if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
         /* Use pool allocation for consistency with parsing */
-        elem->name = taurus_pool_strdup(elem->document->pool, name);
+        elem->name = taurus_pool_strdup(taurus_element_get_pool(elem), name);
     } else {
         /* Fallback to malloc for standalone elements */
         elem->name = taurus_strdup(name);
@@ -361,7 +365,7 @@ TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
 
     if (text) {
         /* Create new text node (even if empty to match pugixml behavior) */
-        TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+        TaurusMemoryPool* pool = taurus_element_get_pool(elem);
         TaurusTextNode* text_node = taurus_text_create(text, strlen(text), pool);
         if (!text_node) {
             return TAURUS_ERROR_MEMORY;
@@ -393,8 +397,8 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
     if (existing) {
         /* Update existing attribute's value */
         TaurusMemoryPool* pool = NULL;
-        if (elem->document && elem->document->pool) {
-            pool = elem->document->pool;
+        if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
+            pool = taurus_element_get_pool(elem);
         }
 
         if (pool) {
@@ -424,8 +428,8 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
     } else {
         /* Get the memory pool from the document */
         TaurusMemoryPool* pool = NULL;
-        if (elem->document && elem->document->pool) {
-            pool = elem->document->pool;
+        if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
+            pool = taurus_element_get_pool(elem);
         } else {
             /* CRITICAL: No pool available - cannot allocate attributes without memory pool */
             return TAURUS_ERROR_MEMORY;
@@ -564,7 +568,7 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
 
     /* CRITICAL: Check document pointer FIRST before any other access!
      * Use volatile to prevent compiler from reordering this check. */
-    volatile struct taurus_document* parent_doc = parent->document;
+    volatile struct taurus_document* parent_doc = taurus_element_get_document(parent);
     if (!parent_doc) {
         return NULL;
     }
@@ -574,7 +578,7 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
     }
 
     /* Verify source has document too */
-    if (!source->document) {
+    if (!taurus_element_get_document(source)) {
         return NULL;  /* Source element must have a document */
     }
 
@@ -583,26 +587,26 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
     if (taurus_sv_is_empty(&name_view)) return NULL;
 
     /* Check if this is a cross-document copy */
-    int is_cross_doc = (source->document != parent->document);
+    int is_cross_doc = (taurus_element_get_document(source) != taurus_element_get_document(parent));
 
     /* For cross-document copies, we need to copy the name string data
      * because the StringView points to the source document's XML buffer */
     TaurusStringView name_copy_view = name_view;  /* Default: use original StringView */
     if (is_cross_doc) {
         /* Double-check that target pool is valid before allocating */
-        if (!parent->document->pool) {
+        if (!taurus_element_get_pool(parent)) {
             return NULL;  /* Pool became NULL somehow */
         }
 
         /* Allocate and copy name string to target document's pool */
-        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, parent->document->pool);
+        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, taurus_element_get_pool(parent));
         if (!name_copy) return NULL;
         name_copy_view = taurus_sv_from_cstr(name_copy);
     }
 
     /* Fast path: Simple element (no attributes, no children) - skip all loops */
     if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
-        TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+        TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
         if (!copy) return NULL;
         if (taurus_element_append_child(parent, copy) != TAURUS_OK) {
             return NULL;
@@ -611,12 +615,12 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
     }
 
     /* Create new element with StringView (no C string conversion!) */
-    TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+    TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
     if (!copy) return NULL;
 
-    /* CRITICAL: Set document field before recursive child copying!
-     * The recursive calls to taurus_element_append_copy need this field set. */
-    copy->document = parent->document;
+    /* TODO 155 Phase A: register copy as a temporary root so recursive
+     * child-copy calls can reach the pool via taurus_element_get_pool. */
+    taurus_root_doc_register(copy, taurus_element_get_document(parent));
 
     /* Copy attributes - optimized: direct StringView copy when same document */
     uint8_t attr_count = taurus_element_attribute_count(source);
@@ -629,12 +633,12 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
             /* For cross-document copies, copy the attribute string data */
             if (is_cross_doc) {
                 /* Double-check that target pool is valid */
-                if (!parent->document->pool) {
+                if (!taurus_element_get_pool(parent)) {
                     continue;  /* Skip this attribute if pool is invalid */
                 }
 
-                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, parent->document->pool);
-                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, parent->document->pool);
+                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, taurus_element_get_pool(parent));
+                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, taurus_element_get_pool(parent));
                 if (!name_copy || !value_copy) {
                     /* Allocation failed - skip this attribute */
                     if (name_copy) /* Nothing to free, pool-allocated */
@@ -647,8 +651,8 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
 
             /* Use pool-based fast path if available, otherwise fallback to set_attribute
              * Pool path is 2-3x faster (no hash lookup, no string conversion) */
-            if (parent->document->pool) {
-                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, parent->document->pool);
+            if (taurus_element_get_pool(parent)) {
+                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
                 /* Fallback: use cached strings if available, otherwise convert from StringView */
                 const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
@@ -695,7 +699,7 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
             if ((uintptr_t)text > 0x1000) {
                 TaurusTextNode* text_copy = taurus_text_create(text->content,
                     text->content_len,
-                    copy->document ? copy->document->pool : NULL);
+                    taurus_element_get_pool(copy));
                 if (text_copy) {
                     taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
                 }
@@ -705,7 +709,7 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
             if ((uintptr_t)cdata > 0x1000) {
                 TaurusCDATANode* cdata_copy = taurus_cdata_create(cdata->content,
                     cdata->content ? strlen(cdata->content) : 0,
-                    copy->document ? copy->document->pool : NULL);
+                    taurus_element_get_pool(copy));
                 if (cdata_copy) {
                     taurus_element_append_child_internal(copy, (TaurusNode*)cdata_copy);
                 }
@@ -746,21 +750,21 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
     if (taurus_sv_is_empty(&name_view)) return NULL;
 
     /* Check if this is a cross-document copy */
-    int is_cross_doc = (source->document != parent->document);
+    int is_cross_doc = (taurus_element_get_document(source) != taurus_element_get_document(parent));
 
     /* For cross-document copies, we need to copy the name string data
      * because the StringView points to the source document's XML buffer */
     TaurusStringView name_copy_view = name_view;  /* Default: use original StringView */
     if (is_cross_doc) {
         /* Allocate and copy name string to target document's pool */
-        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, parent->document->pool);
+        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, taurus_element_get_pool(parent));
         if (!name_copy) return NULL;
         name_copy_view = taurus_sv_from_cstr(name_copy);
     }
 
     /* Fast path: Simple element (no attributes, no children) */
     if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
-        TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+        TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
         if (!copy) return NULL;
         if (taurus_element_prepend_child(parent, copy) != TAURUS_OK) {
             return NULL;
@@ -769,12 +773,12 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
     }
 
     /* Create new element with StringView (no C string conversion!) */
-    TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+    TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
     if (!copy) return NULL;
 
-    /* CRITICAL: Set document field before recursive child copying!
-     * The recursive calls to taurus_element_append_copy need this field set. */
-    copy->document = parent->document;
+    /* TODO 155 Phase A: register copy as a temporary root so recursive
+     * child-copy calls can reach the pool via taurus_element_get_pool. */
+    taurus_root_doc_register(copy, taurus_element_get_document(parent));
 
     /* Copy attributes - optimized: direct StringView copy when same document */
     uint8_t attr_count = taurus_element_attribute_count(source);
@@ -786,8 +790,8 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
 
             /* For cross-document copies, copy the attribute string data */
             if (is_cross_doc) {
-                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, parent->document->pool);
-                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, parent->document->pool);
+                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, taurus_element_get_pool(parent));
+                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, taurus_element_get_pool(parent));
                 if (!name_copy || !value_copy) {
                     /* Allocation failed - skip this attribute */
                     if (name_copy) /* Nothing to free, pool-allocated */
@@ -800,8 +804,8 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
 
             /* Use pool-based fast path if available, otherwise fallback to set_attribute
              * Pool path is 2-3x faster (no hash lookup, no string conversion) */
-            if (parent->document->pool) {
-                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, parent->document->pool);
+            if (taurus_element_get_pool(parent)) {
+                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
                 /* Fallback: use cached strings if available, otherwise convert from StringView */
                 const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
@@ -827,7 +831,7 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
                 text->content_len,
-                copy->document ? copy->document->pool : NULL);
+                taurus_element_get_pool(copy));
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
             }
@@ -861,21 +865,21 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
     if (taurus_sv_is_empty(&name_view)) return NULL;
 
     /* Check if this is a cross-document copy */
-    int is_cross_doc = (source->document != parent->document);
+    int is_cross_doc = (taurus_element_get_document(source) != taurus_element_get_document(parent));
 
     /* For cross-document copies, we need to copy the name string data
      * because the StringView points to the source document's XML buffer */
     TaurusStringView name_copy_view = name_view;  /* Default: use original StringView */
     if (is_cross_doc) {
         /* Allocate and copy name string to target document's pool */
-        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, parent->document->pool);
+        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, taurus_element_get_pool(parent));
         if (!name_copy) return NULL;
         name_copy_view = taurus_sv_from_cstr(name_copy);
     }
 
     /* Fast path: Simple element (no attributes, no children) */
     if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
-        TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+        TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
         if (!copy) return NULL;
         if (taurus_element_insert_after(sibling, copy) != TAURUS_OK) {
             return NULL;
@@ -884,12 +888,12 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
     }
 
     /* Create new element with StringView (no C string conversion!) */
-    TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+    TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
     if (!copy) return NULL;
 
-    /* CRITICAL: Set document field before recursive child copying!
-     * The recursive calls to taurus_element_append_copy need this field set. */
-    copy->document = parent->document;
+    /* TODO 155 Phase A: register copy as a temporary root so recursive
+     * child-copy calls can reach the pool via taurus_element_get_pool. */
+    taurus_root_doc_register(copy, taurus_element_get_document(parent));
 
     /* Copy attributes - optimized: direct StringView copy when same document */
     uint8_t attr_count = taurus_element_attribute_count(source);
@@ -901,8 +905,8 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
 
             /* For cross-document copies, copy the attribute string data */
             if (is_cross_doc) {
-                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, parent->document->pool);
-                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, parent->document->pool);
+                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, taurus_element_get_pool(parent));
+                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, taurus_element_get_pool(parent));
                 if (!name_copy || !value_copy) {
                     /* Allocation failed - skip this attribute */
                     if (name_copy) /* Nothing to free, pool-allocated */
@@ -915,8 +919,8 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
 
             /* Use pool-based fast path if available, otherwise fallback to set_attribute
              * Pool path is 2-3x faster (no hash lookup, no string conversion) */
-            if (parent->document->pool) {
-                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, parent->document->pool);
+            if (taurus_element_get_pool(parent)) {
+                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
                 /* Fallback: use cached strings if available, otherwise convert from StringView */
                 const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
@@ -942,7 +946,7 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
                 text->content_len,
-                copy->document ? copy->document->pool : NULL);
+                taurus_element_get_pool(copy));
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
             }
@@ -976,21 +980,21 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
     if (taurus_sv_is_empty(&name_view)) return NULL;
 
     /* Check if this is a cross-document copy */
-    int is_cross_doc = (source->document != parent->document);
+    int is_cross_doc = (taurus_element_get_document(source) != taurus_element_get_document(parent));
 
     /* For cross-document copies, we need to copy the name string data
      * because the StringView points to the source document's XML buffer */
     TaurusStringView name_copy_view = name_view;  /* Default: use original StringView */
     if (is_cross_doc) {
         /* Allocate and copy name string to target document's pool */
-        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, parent->document->pool);
+        char* name_copy = taurus_sv_to_cstr_pooled(&name_view, taurus_element_get_pool(parent));
         if (!name_copy) return NULL;
         name_copy_view = taurus_sv_from_cstr(name_copy);
     }
 
     /* Fast path: Simple element (no attributes, no children) */
     if (!taurus_element_get_first_attribute(source) && !taurus_elem_first_child(source)) {
-        TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+        TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
         if (!copy) return NULL;
         if (taurus_element_insert_before(sibling, copy) != TAURUS_OK) {
             return NULL;
@@ -999,12 +1003,12 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
     }
 
     /* Create new element with StringView (no C string conversion!) */
-    TaurusElement copy = taurus_element_create_with_view(name_copy_view, parent->document->pool);
+    TaurusElement copy = taurus_element_create_with_view(name_copy_view, taurus_element_get_pool(parent));
     if (!copy) return NULL;
 
-    /* CRITICAL: Set document field before recursive child copying!
-     * The recursive calls to taurus_element_append_copy need this field set. */
-    copy->document = parent->document;
+    /* TODO 155 Phase A: register copy as a temporary root so recursive
+     * child-copy calls can reach the pool via taurus_element_get_pool. */
+    taurus_root_doc_register(copy, taurus_element_get_document(parent));
 
     /* Copy attributes - optimized: direct StringView copy when same document */
     uint8_t attr_count = taurus_element_attribute_count(source);
@@ -1016,8 +1020,8 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
 
             /* For cross-document copies, copy the attribute string data */
             if (is_cross_doc) {
-                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, parent->document->pool);
-                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, parent->document->pool);
+                char* name_copy = taurus_sv_to_cstr_pooled(&attr->name_view, taurus_element_get_pool(parent));
+                char* value_copy = taurus_sv_to_cstr_pooled(&attr->value_view, taurus_element_get_pool(parent));
                 if (!name_copy || !value_copy) {
                     /* Allocation failed - skip this attribute */
                     if (name_copy) /* Nothing to free, pool-allocated */
@@ -1030,8 +1034,8 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
 
             /* Use pool-based fast path if available, otherwise fallback to set_attribute
              * Pool path is 2-3x faster (no hash lookup, no string conversion) */
-            if (parent->document->pool) {
-                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, parent->document->pool);
+            if (taurus_element_get_pool(parent)) {
+                taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
                 /* Fallback: use cached strings if available, otherwise convert from StringView */
                 const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
@@ -1057,7 +1061,7 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
                 text->content_len,
-                copy->document ? copy->document->pool : NULL);
+                taurus_element_get_pool(copy));
             if (text_copy) {
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
             }
@@ -1149,7 +1153,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
     {
         char* src_uri = taurus_elem_ns_uri(source);
         if (src_uri) {
-            TaurusMemoryPool* p = copy->document ? copy->document->pool : NULL;
+            TaurusMemoryPool* p = taurus_element_get_pool(copy);
             taurus_elem_set_ns_uri(copy, src_uri, p);
         }
     }
@@ -1234,7 +1238,7 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
             TaurusTextNode* text = (TaurusTextNode*)child;
             TaurusTextNode* text_copy = taurus_text_create(text->content,
                 text->content_len,
-                copy->document ? copy->document->pool : NULL);
+                taurus_element_get_pool(copy));
             if (text_copy) {
                 /* Link as child using internal function */
                 taurus_element_append_child_internal(copy, (TaurusNode*)text_copy);
@@ -1279,12 +1283,12 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
  */
 TaurusElement taurus_element_append_copy_bulk(TaurusElement parent, TaurusElement source) {
     if (!parent || !source) return NULL;
-    if (!parent->document || !parent->document->pool) {
+    if (!taurus_element_get_document(parent) || !taurus_element_get_pool(parent)) {
         /* Fallback to regular copy if no pool */
         return taurus_element_append_copy(parent, source);
     }
 
-    TaurusMemoryPool* pool = parent->document->pool;
+    TaurusMemoryPool* pool = taurus_element_get_pool(parent);
 
     /* Count subtree nodes to determine allocation size */
     TaurusSubtreeStats stats;
@@ -1310,8 +1314,8 @@ TaurusElement taurus_element_append_copy_bulk(TaurusElement parent, TaurusElemen
         return NULL;
     }
 
-    /* Set document pointer on the entire copied subtree */
-    copy->document = parent->document;
+    /* TODO 155 Phase A: document field removed; copy reaches doc
+     * via parent chain once appended below. */
 
     /* Attach to parent */
     if (taurus_element_append_child(parent, copy) != TAURUS_OK) {

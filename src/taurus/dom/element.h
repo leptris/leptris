@@ -134,10 +134,13 @@ struct taurus_element {
      * list. Saves 4 bytes per element. */
     int32_t first_attribute_off;
 
-    /* Document context (8 bytes; was 16 before TODO 155 Phase B).
-     * The `namespaces` linked-list head moved into ns_cache above. */
-    struct taurus_document* document;
+    /* TODO 155 Phase A: `document` field is GONE — element now fits
+     * one 64-byte cache line. Non-root elements reach their document
+     * via taurus_element_get_document() in dom/root_doc_map.h. */
 };
+
+struct taurus_document* taurus_element_get_document(TaurusElement elem);
+TaurusMemoryPool* taurus_element_get_pool(TaurusElement elem);
 
 /* Inline accessors — use these instead of direct field access. */
 static inline char* taurus_elem_prefix(const TaurusElement e) {
@@ -232,8 +235,8 @@ static inline struct taurus_namespace** taurus_elem_namespaces_ptr(
 #  endif
 #endif
 
-TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) <= 72,
-    "taurus_element grew beyond 72 bytes — check for accidental field additions");
+TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) == 64,
+    "taurus_element must fit one cache line (TODO 155 Phase A)");
 
 /* ============================================================================
  * Compact tree-edge accessors (Phase 2b of TODO 90)

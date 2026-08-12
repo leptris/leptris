@@ -53,7 +53,7 @@ TAURUS_API const char* taurus_element_name(TaurusElement elem) {
  * subtrees still reach an attached ancestor through `parent`. */
 static struct taurus_document* element_owning_document(TaurusElement elem) {
     for (; elem; elem = taurus_elem_parent(elem)) {
-        if (elem->document) return elem->document;
+        if (taurus_element_get_document(elem)) return taurus_element_get_document(elem);
     }
     return NULL;
 }
@@ -155,7 +155,7 @@ TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* 
     /* Lazy convert value to NULL-terminated and resolve entities */
     if (!attr->value) {
         /* Get pool from document for string conversion */
-        TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+        TaurusMemoryPool* pool = taurus_element_get_pool(elem);
 
         /* PERFORMANCE: Use pre-computed has_entities flag */
         if (attr->has_entities) {
@@ -1023,12 +1023,12 @@ TAURUS_API const char* taurus_element_namespace_decl_uri(
 TAURUS_API TaurusStatus taurus_element_add_namespace_definition(
     TaurusElement elem, const char* prefix, const char* href) {
     if (!elem || !href) return TAURUS_ERROR_NULL_ARG;
-    taurus_document_ensure_promoted(elem->document);
+    taurus_document_ensure_promoted(taurus_element_get_document(elem));
 
     /* Normalize empty-string prefix to NULL (default ns). */
     if (prefix && !*prefix) prefix = NULL;
 
-    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+    TaurusMemoryPool* pool = taurus_element_get_pool(elem);
     struct taurus_namespace* ns;
     if (pool) {
         ns = taurus_namespace_new_pooled(prefix, href, pool);
