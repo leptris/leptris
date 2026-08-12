@@ -1,5 +1,12 @@
 # TODO 156 — Compact pointer for attribute linked list
 
+## Status
+
+**Deferred.** Investigation shows 32 call sites across the codebase
+need migration. The savings (4 bytes per attribute) are modest vs the
+risk of breaking XPath, serialize, c14n, mutation, and xinclude paths.
+Not recommended as a standalone change.
+
 ## Why
 
 `struct taurus_attribute` uses a `struct taurus_attribute* next`

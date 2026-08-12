@@ -2,12 +2,11 @@
 
 ## Status
 
-**Phase B DONE** in v0.15.0 (88→80 bytes).
-**Phase C DONE** in v0.16.0 (80→72 bytes).
-**Phase A pending** — design refined below; estimated 2-3 days.
-**Phase D pending** (line: uint32 → uint16, save 2 bytes — modest).
+**ALL PHASES COMPLETE.** Element is now 64 bytes — fits one cache line.
 
-Current: **72 bytes** (was 88). Target: **64 bytes** (fits one cache line).
+- Phase B: v0.15.0 (88→80, merged namespaces into ns_cache)
+- Phase C: v0.16.0 (80→72, dropped last_child_off + last_attribute_off)
+- Phase A: v0.17.0 (72→64, dropped document field + root→doc hash)
 
 ## Phase A — Drop `document` field (72 → 64 bytes, fits one cache line)
 
