@@ -90,6 +90,66 @@ if(TAURUS_ENABLE_FUZZING)
     message(STATUS "libFuzzer: ENABLED (implies ASAN)")
 endif()
 
+# Profile-guided optimization (TODO 159 Phase F).
+#
+# Three-step build process:
+#   1. cmake -B build-pgo -DTAURUS_ENABLE_PGO=GENERATE ...
+#      cmake --build build-pgo
+#   2. Run a representative workload against the instrumented binary
+#      (e.g. `ctest --test-dir build-pgo` or your app's test suite).
+#      For clang: `llvm-profdata merge build-pgo/pgo-data/*.profraw
+#      -o build-pgo/pgo-data/default.profdata` between steps 2 and 3.
+#      GCC and MSVC generate the profile directly.
+#   3. cmake -B build-pgo -DTAURUS_ENABLE_PGO=USE ...
+#      cmake --build build-pgo
+#
+# Closes the switch-dispatch gap vs computed-goto without GCC-isms.
+# Clang, GCC, and MSVC all support PGO.
+#
+# Defaults to OFF because it's a two-pass build and most users won't
+# bother. Distributions / packagers who want the last ~10-15% on the
+# XPath VM dispatch loop should enable it.
+set(TAURUS_ENABLE_PGO "OFF" CACHE STRING "Profile-guided optimization phase: OFF, GENERATE, or USE")
+set_property(CACHE TAURUS_ENABLE_PGO PROPERTY STRINGS OFF GENERATE USE)
+set(TAURUS_PGO_DIR "${CMAKE_BINARY_DIR}/pgo-data" CACHE PATH "PGO profile directory")
+
+if(NOT TAURUS_ENABLE_PGO STREQUAL "OFF")
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        if(TAURUS_ENABLE_PGO STREQUAL "GENERATE")
+            add_compile_options(-fprofile-instr-generate=${TAURUS_PGO_DIR}/default.profraw)
+            add_link_options(-fprofile-instr-generate=${TAURUS_PGO_DIR}/default.profraw)
+            file(MAKE_DIRECTORY ${TAURUS_PGO_DIR})
+            message(STATUS "PGO (clang): GENERATE → ${TAURUS_PGO_DIR}")
+        elseif(TAURUS_ENABLE_PGO STREQUAL "USE")
+            add_compile_options(-fprofile-instr-use=${TAURUS_PGO_DIR}/default.profdata)
+            message(STATUS "PGO (clang): USE ← ${TAURUS_PGO_DIR}/default.profdata")
+        endif()
+    elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        if(TAURUS_ENABLE_PGO STREQUAL "GENERATE")
+            add_compile_options(-fprofile-generate=${TAURUS_PGO_DIR})
+            add_link_options(-fprofile-generate=${TAURUS_PGO_DIR})
+            file(MAKE_DIRECTORY ${TAURUS_PGO_DIR})
+            message(STATUS "PGO (gcc): GENERATE → ${TAURUS_PGO_DIR}")
+        elseif(TAURUS_ENABLE_PGO STREQUAL "USE")
+            add_compile_options(-fprofile-use=${TAURUS_PGO_DIR} -Wno-coverage-mismatch)
+            message(STATUS "PGO (gcc): USE ← ${TAURUS_PGO_DIR}")
+        endif()
+    elseif(MSVC)
+        if(TAURUS_ENABLE_PGO STREQUAL "GENERATE")
+            add_compile_options(/GL)
+            add_link_options(/GENPROFILE:${TAURUS_PGO_DIR} /LTCG)
+            file(MAKE_DIRECTORY ${TAURUS_PGO_DIR})
+            message(STATUS "PGO (MSVC): GENERATE → ${TAURUS_PGO_DIR}")
+        elseif(TAURUS_ENABLE_PGO STREQUAL "USE")
+            add_compile_options(/GL)
+            add_link_options(/USEPROFILE:${TAURUS_PGO_DIR} /LTCG)
+            message(STATUS "PGO (MSVC): USE ← ${TAURUS_PGO_DIR}")
+        endif()
+    else()
+        message(WARNING "TAURUS_ENABLE_PGO=${TAURUS_ENABLE_PGO} not supported for ${CMAKE_C_COMPILER_ID}; ignoring")
+    endif()
+endif()
+
 # Doxygen API docs — see TODO 63.
 if(TAURUS_BUILD_DOCS)
     find_package(Doxygen)
