@@ -100,74 +100,49 @@ static inline void dp_advance_line(DParser* p, char* from, char* to) {
     }
 }
 
-/* Wire child into parent's child chain. ALL edges use direct offset
- * arithmetic — no overflow table. This makes direct_parse fully
- * self-contained: it never touches the thread-local
- * g_current_document or the shared overflow hash table. Eliminates
- * the cross-document contamination that caused issue #261 under
- * benchmark-ips with 15,000+ simultaneously-alive documents.
- *
- * TODO 155 Phase C: last_child_off was removed from element. The
- * parser tracks the last-wired child per open element via
- * p->last_child_stack[depth-1]. Pass DParser* so we can read/update
- * this cache. Mutation paths (post-parse) walk the child list. */
-static inline void dp_wire_child(DParser* p, TaurusElement parent, TaurusNode* child) {
-    /* Set child's parent pointer.
-     * parent_off is relative to the CHILD's address.
-     * Accessor: (char*)child + parent_off == (char*)parent. */
+/* Compile-time offset tables for next_sibling_off and parent_off
+ * across all node types. Eliminates the type-dispatched switch in
+ * dp_wire_child — one array lookup + one store replaces 5-way branch.
+ * TODO 158: branchless tree wiring. */
+static const size_t dp_ns_off[5] = {
+    offsetof(struct taurus_element,  next_sibling_off),
+    offsetof(TaurusTextNode,        next_sibling_off),
+    offsetof(TaurusCommentNode,     next_sibling_off),
+    offsetof(TaurusCDATANode,       next_sibling_off),
+    offsetof(TaurusPINode,          next_sibling_off),
+};
+static const size_t dp_par_off[5] = {
+    offsetof(struct taurus_element,  parent_off),
+    offsetof(TaurusTextNode,        parent_off),
+    offsetof(TaurusCommentNode,     parent_off),
+    offsetof(TaurusCDATANode,       parent_off),
+    offsetof(TaurusPINode,          parent_off),
+};
+
+/* Wire child into parent's child chain. Uses compile-time offset
+ * tables for branchless type dispatch — no switch, no branch predict. */
+static inline void dp_wire_child(DParser* p, TaurusElement parent,
+                                  TaurusNode* child) {
     int32_t parent_to_child = (int32_t)((char*)parent - (char*)child);
-    if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-        ((TaurusElement)child)->parent_off = parent_to_child;
-        /* TODO 155 Phase A: document field removed; non-root walks to root. */
-    } else {
-        switch (child->type) {
-            case TAURUS_NODE_TYPE_TEXT:
-                ((TaurusTextNode*)child)->parent_off = parent_to_child;
-                break;
-            case TAURUS_NODE_TYPE_COMMENT:
-                ((TaurusCommentNode*)child)->parent_off = parent_to_child;
-                break;
-            case TAURUS_NODE_TYPE_CDATA:
-                ((TaurusCDATANode*)child)->parent_off = parent_to_child;
-                break;
-            case TAURUS_NODE_TYPE_PI:
-                ((TaurusPINode*)child)->parent_off = parent_to_child;
-                break;
-            default: break;
-        }
+    unsigned t = (unsigned)child->type;
+    if (t < 5) {
+        *(int32_t*)((char*)child + dp_par_off[t]) = parent_to_child;
     }
-    /* Splice into child chain as new last child. The previous last
-     * child is in p->last_child_stack[depth-1] (NULL means this is
-     * the first child). */
+
     int32_t child_off = (int32_t)((char*)child - (char*)parent);
     TaurusNode* prev_last = p->last_child_stack[p->depth - 1];
     if (prev_last) {
-        /* Set next_sibling on the PREVIOUS last child via direct
-         * offset. Type-dispatched to write the correct struct's
-         * next_sibling_off field. */
         int32_t sib_off = (int32_t)((char*)child - (char*)prev_last);
-        switch (prev_last->type) {
-            case TAURUS_NODE_TYPE_ELEMENT:
-                ((TaurusElement)prev_last)->next_sibling_off = sib_off; break;
-            case TAURUS_NODE_TYPE_TEXT:
-                ((TaurusTextNode*)prev_last)->next_sibling_off = sib_off; break;
-            case TAURUS_NODE_TYPE_COMMENT:
-                ((TaurusCommentNode*)prev_last)->next_sibling_off = sib_off; break;
-            case TAURUS_NODE_TYPE_CDATA:
-                ((TaurusCDATANode*)prev_last)->next_sibling_off = sib_off; break;
-            case TAURUS_NODE_TYPE_PI:
-                ((TaurusPINode*)prev_last)->next_sibling_off = sib_off; break;
-            default: break;
+        unsigned pt = (unsigned)prev_last->type;
+        if (pt < 5) {
+            *(int32_t*)((char*)prev_last + dp_ns_off[pt]) = sib_off;
         }
     } else {
         parent->first_child_off = child_off;
     }
-    /* Update the parser-local last-child cache. */
     p->last_child_stack[p->depth - 1] = child;
 
-    /* Issue #213: maintain child_count for element children, matching
-     * the convention used by taurus_element_append_child_internal. */
-    if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+    if (t == TAURUS_NODE_TYPE_ELEMENT) {
         parent->child_count++;
     }
 }
