@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.17.0] - Y-08-12
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.16.0] - 2026-08-12
 
 ### Performance — drop last_child_off + last_attribute_off (TODO 155 Phase C)
