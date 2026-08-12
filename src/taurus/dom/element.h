@@ -108,9 +108,14 @@ struct taurus_element {
     /* Compact base node (12 bytes) - MUST be first for casting. */
     TaurusNode base;
 
-    /* Packed header + counts (5 bytes, fills the 8-byte tail of base's
-     * alignment slot). Phase 2a of TODO 90. */
+    /* Packed header + counts + name_hash (7 bytes, fills the 8-byte
+     * tail of base's alignment slot). The name_hash is a 16-bit FNV-1a
+     * of the element's local name, computed at parse time. Used by
+     * XPath child-axis lookups and close-tag comparison to reject
+     * non-matching names via 2-byte hash compare before strcmp.
+     * Phase 2a of TODO 90 + TODO 159 fast-child-lookup. */
     TaurusCompactHeader header;        /* 2 bytes */
+    uint16_t name_hash;               /* 2 bytes — FNV-1a of local name */
     uint8_t attr_count;                /* 1 byte */
     uint16_t child_count;              /* 2 bytes */
 
@@ -141,6 +146,27 @@ struct taurus_element {
 
 struct taurus_document* taurus_element_get_document(TaurusElement elem);
 TaurusMemoryPool* taurus_element_get_pool(TaurusElement elem);
+
+/* Compute 16-bit FNV-1a hash of an element name string. Used
+ * together with elem->name_hash for fast pre-filtering in child-
+ * axis lookups. TODO 159: fast child-name matching. */
+static inline uint16_t taurus_name_hash_compute(const char* name) {
+    uint16_t h = 0x811C;
+    for (const char* c = name; *c; c++) {
+        h ^= (unsigned char)*c;
+        h *= 0x0193;
+    }
+    return h;
+}
+
+/* Fast element-name equality check: compare 2-byte hash first,
+ * fall back to strcmp only on hash match. Rejects non-matching
+ * names in ~1ns vs ~5ns for strcmp on short names. */
+static inline int taurus_elem_name_is(TaurusElement e, const char* name,
+                                       uint16_t target_hash) {
+    if (!e || !e->name || e->name_hash != target_hash) return 0;
+    return strcmp(e->name, name) == 0;
+}
 
 /* Inline accessors — use these instead of direct field access. */
 static inline char* taurus_elem_prefix(const TaurusElement e) {

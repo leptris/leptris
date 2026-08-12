@@ -346,6 +346,7 @@ TaurusStatus taurus_element_set_name(TaurusElement elem, const char* name) {
         /* Fallback to malloc for standalone elements */
         elem->name = taurus_strdup(name);
     }
+    elem->name_hash = taurus_name_hash_compute(elem->name);
 
     /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
