@@ -4,10 +4,99 @@
 
 **Phase B DONE** in v0.15.0 (88→80 bytes).
 **Phase C DONE** in v0.16.0 (80→72 bytes).
-**Phase A pending** (drop `document` field, 72→64 bytes).
+**Phase A pending** — design refined below; estimated 2-3 days.
 **Phase D pending** (line: uint32 → uint16, save 2 bytes — modest).
 
 Current: **72 bytes** (was 88). Target: **64 bytes** (fits one cache line).
+
+## Phase A — Drop `document` field (72 → 64 bytes, fits one cache line)
+
+### Why it's hard
+
+The field is read in ~53 sites across 14 files. Most reads are
+simple (`elem->document` → `taurus_element_get_document(elem)`), but
+the `taurus_element_*_copy` family in element_modify.c recurses
+deeply, reading `parent->document->pool` on every iteration.
+
+### Refined design (after two failed attempts)
+
+**Architecture**:
+
+```
+struct taurus_element {
+    /* ... 56 bytes of existing fields ... */
+    /* NO document field. 64 bytes total. */
+};
+
+/* New file: dom/root_doc_map.{c,h} */
+struct taurus_document* taurus_element_get_document(TaurusElement);
+TaurusMemoryPool*        taurus_element_get_pool(TaurusElement);
+```
+
+Internally, `taurus_element_get_document(elem)` walks `parent_off`
+to the root element, then looks up the root in a thread-local hash
+table (`g_root_doc_buckets[256]`).
+
+**Registration lifecycle**:
+- Parse: `taurus_root_doc_register(root, doc)` at end of `direct_parse_internal`.
+- `taurus_element_create_doc`: register the new element as a "root"
+  of its doc. When later attached to a tree via `append_child`, the
+  registration becomes stale but is never consulted (walks go past
+  this element to the actual tree root).
+- `taurus_document_free`: `taurus_root_doc_unregister(root)` before
+  destroying pool.
+
+**Copy-function refactor** (the hard part):
+
+The `taurus_element_append_copy`, `prepend_copy`, `insert_copy_*`
+functions recurse and read `parent->document->pool` on every step.
+With the field gone, each recursion would walk to root — O(depth)
+per node, O(N × depth) total.
+
+Refactor: add internal recursive helpers that take an explicit
+`pool` parameter:
+
+```c
+static TaurusElement element_copy_internal(
+    TaurusElement parent, TaurusElement source,
+    TaurusMemoryPool* pool, struct taurus_document* doc);
+```
+
+The PUBLIC API computes `pool` and `doc` ONCE via
+`taurus_element_get_pool(parent)`, then threads them through.
+
+### Migration plan (sub-PRs)
+
+Each sub-PR is independently testable. Land in sequence:
+
+**Sub-PR 1**: Add `dom/root_doc_map.{c,h}` with helpers that
+_initially_ just return `elem->document`. No field removal yet.
+Migrate the simple read sites (element.c, element_query.c,
+element_compact.c, node_public.c, serialize.c, c14n.c,
+taurus_memory.c, taurus.c). No behavior change. ~25 sites.
+
+**Sub-PR 2**: Refactor `taurus_element_*_copy` in element_modify.c
+to use internal helpers with explicit pool/doc parameters. ~12
+sites in the copy family + ~10 other writes in element_modify.c.
+
+**Sub-PR 3**: Add register/unregister calls (parse, create_doc,
+document_free). Switch `taurus_element_get_document` from returning
+`elem->document` to walk + hash lookup. Field stays for now;
+both old and new paths work.
+
+**Sub-PR 4**: Remove the field. All reads go through helpers.
+Static assert: `sizeof(taurus_element) == 64`. Minor version bump.
+
+### Estimated impact
+
+For a 1000-element doc, walking the tree touches each element once.
+With 72-byte elements, each spans 2 cache lines (1.13 lines). With
+64-byte elements, each fits in 1 line. Cache line fetches drop from
+~1130 to 1000 per traversal. ~12% reduction in cache traffic.
+
+Combined with single-arena allocation (TODO 154) and SIMD parse
+loops (TODO 157), the medium-doc parse target is ~25 µs (vs
+pugixml's 18 µs) — within 1.4× of pugixml.
 
 ## Why
 
