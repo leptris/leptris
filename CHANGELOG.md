@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.18.0] - Y-08-12
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.17.2] - 2026-08-12
 
 ### Performance — branchless tree wiring (TODO 158 Phase A)
