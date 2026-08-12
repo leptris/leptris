@@ -1,13 +1,34 @@
 ## [Unreleased]
 
-## [0.17.0] - Y-08-12
+## [0.17.0] - 2026-08-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — element struct now 64 bytes, one cache line (TODO 155 Phase A)
 
-### Changed
+Element struct: **72 → 64 bytes**. Fits exactly one 64-byte cache line.
+The `document` field (8 bytes) is removed. Non-root elements reach
+their document via `taurus_element_get_document(elem)` which walks
+`parent_off` to the root, then looks up the root in a thread-local
+256-bucket hash table (`dom/root_doc_map.c`).
 
-- (describe changes here)
+**Cumulative element size reduction since v0.13.0: 88 → 64 bytes (27%).**
+
+New files:
+- `dom/root_doc_map.h` / `dom/root_doc_map.c`: thread-local
+  root→document hash table with `taurus_element_get_document()` and
+  `taurus_element_get_pool()` accessors.
+
+Registration lifecycle:
+- `direct_parse_internal`: register root on parse commit.
+- `taurus_element_create_doc`: register as a temporary root.
+- `taurus_element_*_copy`: register copy for recursive child-copy.
+- `taurus_document_free`: unregister root before pool destroy.
+
+The migration touched 16 files and ~60 reference sites. A Python
+helper script handled the bulk read→accessor transformation. The
+XPathContext->document accesses were manually restored (the script
+couldn't distinguish TaurusElement from XPathContext).
+
+**ABI break**: element struct size changes (72 → 64 bytes).
 
 
 ## [0.16.0] - 2026-08-12
