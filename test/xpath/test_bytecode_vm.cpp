@@ -420,6 +420,37 @@ TEST(XPathBytecodeSimplePredicates, ChildNumberCompareNoChild) {
     taurus_document_free(doc);
 }
 
+TEST(XPathBytecodeSimplePredicates, NumberChildComparePredicate) {
+    /* [number(child::n) OP num] lowers to BC_PRED_CHILD_NUM_CMP (TODO 159 D2).
+     * number() is semantically equivalent to reading text and parsing
+     * via strtod, which is what the fused handler does. */
+    const char xml[] =
+        "<root>"
+        "  <book><price>10</price></book>"
+        "  <book><price>30</price></book>"
+        "  <book><price>40</price></book>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* number(price) > 25 → 2 (30, 40). */
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                              "count(//book[number(price) > 25])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    /* number(price) < 20 → 1 (10). */
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr,
+                                               "count(//book[number(price) < 20])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 1.0);
+    taurus_xpath_result_free(r2);
+
+    taurus_document_free(doc);
+}
+
 TEST(XPathBytecodeSimplePredicates, ComplexPredicateFallsBack) {
     /* Predicates with general expressions stay on the apply_predicates
      * path. Ensures the compiler's predicate classifier doesn't

@@ -115,3 +115,15 @@ remaining 21 µs is dominated by the descendant axis traversal
 to find `//book` candidates; the predicate filter itself is
 now a tight inline loop.
 
+**Phase D2 DONE** — extend classifier to recognise `number()`
+wrapping the child step. `[number(child::n) OP num]` lowers to
+the same `BC_PRED_CHILD_NUM_CMP` opcode because `number()` is
+semantically equivalent to "read text content + strtod", which
+is exactly what the handler does.
+
+Benchmark impact (Release + LTO, `bench_xpath_taurus`):
+Complex Query `//book[number(price) > 30]/title` 18.65 µs →
+2.70 µs (6.9× speedup). Previously this fell back to the
+generic `apply_predicates` path that re-evaluated the AST
+per input node.
+
