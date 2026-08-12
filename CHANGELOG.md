@@ -1,13 +1,24 @@
 ## [Unreleased]
 
-## [0.18.1] - Y-08-12
+## [0.18.1] - 2026-08-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — unwrap `number()` in child-num-cmp predicate (TODO 159 Phase D2)
 
-### Changed
+The fused `[child::n OP num]` predicate opcode (introduced in v0.18.0)
+now also recognises `[number(child::n) OP num]`. The XPath `number()`
+function wrapping a child step is semantically equivalent to "read
+text content + `strtod`", which is exactly what the existing
+`XPATH_BC_PRED_CHILD_NUM_CMP` handler does — so the same opcode covers
+both shapes with no VM changes.
 
-- (describe changes here)
+Benchmark impact (Release + LTO, `bench_xpath_taurus`):
+
+| Query                                              | Before   | After   | Speedup |
+|----------------------------------------------------|----------|---------|---------|
+| Complex Query `//book[number(price) > 30]/title`   | 18.65 µs | 2.70 µs | 6.9×    |
+
+Previously this query fell back to the generic `apply_predicates`
+path that re-evaluated the predicate AST per input node.
 
 
 ## [0.18.0] - 2026-08-13
