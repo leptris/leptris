@@ -314,6 +314,19 @@ static const char* pred_child_step_name(XPathASTNode* pred) {
     return test->value;
 }
 
+/* Match `number(child::n)` — XPath function wrapping a bare child step.
+ * The function semantics (convert string-typed node-set to number) are
+ * equivalent to reading the child's text content and parsing via strtod,
+ * which is exactly what the BC_PRED_CHILD_NUM_CMP handler does. So we
+ * can treat `[number(child::n) OP num]` the same as `[child::n OP num]`
+ * and lower it to the same opcode. TODO 159 Phase D2. */
+static const char* pred_number_child_step_name(XPathASTNode* pred) {
+    if (!pred || pred->type != XPATH_AST_FUNCTION_CALL) return NULL;
+    if (!pred->value || strcmp(pred->value, "number") != 0) return NULL;
+    if (pred->child_count != 1) return NULL;
+    return pred_child_step_name(pred->children[0]);
+}
+
 static PredKind classify_predicate(XPathASTNode* pred,
                                      const char** out_attr_name,
                                      const char** out_attr_value,
@@ -355,17 +368,23 @@ static PredKind classify_predicate(XPathASTNode* pred,
         }
     }
 
-    /* [child::n OP num] — comparison with a child element's text
-     * content on the left and a numeric literal on the right.
-     * TODO 159 Phase D. Operator + RHS number are read directly
-     * from the predicate AST in the emit pass. */
+    /* [child::n OP num] or [number(child::n) OP num] — comparison
+     * with a child element's text content on the LHS and a numeric
+     * literal on the right. TODO 159 Phase D + D2.
+     *
+     * number() is semantically equivalent to reading text and strtod'ing
+     * it, which is exactly what the BC_PRED_CHILD_NUM_CMP handler does.
+     * Operator + RHS number are read directly from the predicate AST in
+     * the emit pass. */
     if (pred->type == XPATH_AST_OPERATOR && pred->child_count == 2) {
         XPathOperatorType op = (XPathOperatorType)pred->number_value;
         if (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL ||
             op == XPATH_OP_LESS || op == XPATH_OP_LESS_EQUAL ||
             op == XPATH_OP_GREATER || op == XPATH_OP_GREATER_EQUAL) {
-            const char* child_name = pred_child_step_name(pred->children[0]);
+            XPathASTNode* lhs = pred->children[0];
             XPathASTNode* rhs = pred->children[1];
+            const char* child_name = pred_child_step_name(lhs);
+            if (!child_name) child_name = pred_number_child_step_name(lhs);
             if (child_name && rhs && rhs->type == XPATH_AST_NUMBER) {
                 *out_attr_name = child_name;  /* reused as child name */
                 return PRED_KIND_CHILD_NUM_CMP;
