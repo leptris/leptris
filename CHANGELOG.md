@@ -1,13 +1,14 @@
 ## [Unreleased]
 
-## [0.17.1] - Y-08-12
+## [0.17.1] - 2026-08-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — free-list for root_doc_map entries
 
-### Changed
-
-- (describe changes here)
+`taurus_root_doc_register` previously `malloc`'d a `RootDocEntry` on
+every parse. `taurus_root_doc_unregister` freed it on every
+`document_free`. Now uses a thread-local free-list: register pops
+from the free-list (or mallocs on first use), unregister pushes back.
+After warmup, zero heap ops per parse cycle.
 
 
 ## [0.17.0] - 2026-08-12
