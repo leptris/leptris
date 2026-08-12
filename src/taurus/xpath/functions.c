@@ -1650,7 +1650,7 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
         while (attr && !lang_attr) {
             if (!attr) continue;
 
-            TaurusMemoryPool* pool = taurus_element_get_pool(context);
+            TaurusMemoryPool* pool = context->document ? context->document->pool : NULL;
 
             /* Get namespace URI */
             const char* ns_uri = attr->namespace_uri;
@@ -1691,7 +1691,7 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
                 else {
                     const char* prefix = attr->prefix;
                     if (!prefix && !taurus_sv_is_empty(&attr->prefix_view)) {
-                        TaurusMemoryPool* pool2 = taurus_element_get_pool(context);
+                        TaurusMemoryPool* pool2 = context->document ? context->document->pool : NULL;
                         prefix = pool2
                             ? taurus_sv_to_cstr_pooled(&attr->prefix_view, pool2)
                             : taurus_sv_to_cstr(&attr->prefix_view);
@@ -1711,7 +1711,7 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
                 if (is_xml_lang) {
                     lang_attr = attr->value;
                     if (!lang_attr && !taurus_sv_is_empty(&attr->value_view)) {
-                        TaurusMemoryPool* pool3 = taurus_element_get_pool(context);
+                        TaurusMemoryPool* pool3 = context->document ? context->document->pool : NULL;
                         lang_attr = pool3
                             ? taurus_sv_to_cstr_pooled(&attr->value_view, pool3)
                             : taurus_sv_to_cstr(&attr->value_view);
@@ -1721,7 +1721,7 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
 
             /* Pool-routed conversions (TODO 34) don't need free.
              * Only legacy calloc'd intermediates need explicit free. */
-            TaurusMemoryPool* free_pool = taurus_element_get_pool(context);
+            TaurusMemoryPool* free_pool = context->document ? context->document->pool : NULL;
             if (!free_pool) {
                 if (attr->name != attr_name && attr_name) free((char*)attr_name);
                 if (attr->namespace_uri != ns_uri && ns_uri) free((char*)ns_uri);
