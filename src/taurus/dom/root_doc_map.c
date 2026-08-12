@@ -3,7 +3,10 @@
  * TODO 155 Phase A: the `document` field was removed from struct
  * taurus_element to fit it in one 64-byte cache line. Non-root
  * elements reach their document by walking parent_off to the root,
- * then looking up the root in this thread-local hash table. */
+ * then looking up the root in this thread-local hash table.
+ *
+ * TODO 157 (perf): uses a free-list to avoid per-parse malloc/free.
+ * After warmup, register and unregister are O(1) with zero heap ops. */
 #include "root_doc_map.h"
 #include "../common/port.h"
 #include <stdlib.h>
@@ -18,6 +21,10 @@ typedef struct root_doc_entry {
 
 static TAURUS_THREAD_LOCAL RootDocEntry* g_root_doc_buckets[ROOT_DOC_BUCKETS];
 
+/* Free-list: recycled entries from unregistered roots. Eliminates
+ * malloc/free churn on the parse→free cycle. */
+static TAURUS_THREAD_LOCAL RootDocEntry* g_free_list;
+
 static size_t bucket_index(TaurusElement root) {
     uintptr_t v = (uintptr_t)root;
     v ^= v >> 16;
@@ -31,8 +38,14 @@ void taurus_root_doc_register(TaurusElement root, struct taurus_document* doc) {
     for (RootDocEntry* e = g_root_doc_buckets[idx]; e; e = e->next) {
         if (e->root == root) { e->doc = doc; return; }
     }
-    RootDocEntry* e = (RootDocEntry*)malloc(sizeof(*e));
-    if (!e) return;
+    /* Pop from free-list, or malloc if empty. */
+    RootDocEntry* e = g_free_list;
+    if (e) {
+        g_free_list = e->next;
+    } else {
+        e = (RootDocEntry*)malloc(sizeof(*e));
+        if (!e) return;
+    }
     e->root = root; e->doc = doc;
     e->next = g_root_doc_buckets[idx];
     g_root_doc_buckets[idx] = e;
@@ -44,9 +57,11 @@ void taurus_root_doc_unregister(TaurusElement root) {
     RootDocEntry** pp = &g_root_doc_buckets[idx];
     while (*pp) {
         if ((*pp)->root == root) {
-            RootDocEntry* to_free = *pp;
-            *pp = to_free->next;
-            free(to_free);
+            RootDocEntry* freed = *pp;
+            *pp = freed->next;
+            /* Push to free-list instead of free(). */
+            freed->next = g_free_list;
+            g_free_list = freed;
             return;
         }
         pp = &(*pp)->next;
