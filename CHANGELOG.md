@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.18.1] - Y-08-12
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.18.0] - 2026-08-13
 
 ### Performance — 16-bit FNV-1a element name hash (TODO 159 Phase A0)
