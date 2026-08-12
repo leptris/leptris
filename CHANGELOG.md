@@ -1,13 +1,46 @@
 ## [Unreleased]
 
-## [0.18.0] - Y-08-12
+## [0.18.0] - 2026-08-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — 16-bit FNV-1a element name hash (TODO 159 Phase A0)
 
-### Changed
+Added a `name_hash` field (uint16 FNV-1a of the element's local
+name) to `struct taurus_element`. Fits in existing padding; the
+struct stays 64 bytes (one cache line). Populated at every
+creation path: `direct_parse` bulk-alloc, `taurus_element_create_*
+`, `taurus_element_set_name`, deep-copy. New inline helpers
+`taurus_name_hash_compute()` and `taurus_elem_name_is()` compare
+2 bytes before falling back to `strcmp`.
 
-- (describe changes here)
+`taurus_element_first_child(elem, name)` and the new fused
+predicate opcode (below) pre-filter via the hash, rejecting
+non-matching children in ~1 ns.
+
+With LTO enabled, the XPath gap vs pugixml tightens from 5-13×
+to 1.6-4.4× on `bench_xpath_pugixml`.
+
+### Performance — fused `[child::n OP number]` predicate (TODO 159 Phase D)
+
+New bytecode opcode `XPATH_BC_PRED_CHILD_NUM_CMP` fuses the common
+`[child::name OP number]` predicate shape (operators EQ, NEQ, LT,
+LTE, GT, GTE) into a single opcode. Previously this shape fell back
+to the generic `apply_predicates` path which re-evaluated the entire
+predicate AST per input node.
+
+The VM handler walks each input element's child list with the 16-bit
+hash pre-filter (Phase A0), reads the matching child's text via a
+fast inline path (single text child, no allocation), parses via
+`strtod`, applies the operator against the literal RHS, and filters
+in place with a two-pointer algorithm.
+
+Benchmark impact (Release + LTO, `bench_xpath_pugixml`):
+
+| Query                      | Before | After | Speedup |
+|----------------------------|--------|-------|---------|
+| `//book[price > 30]`       | 27.7 µs| 21.1 µs| 1.3×    |
+
+Adds unit tests `ChildNumberComparePredicate` and
+`ChildNumberCompareNoChild`.
 
 
 ## [0.17.2] - 2026-08-12
