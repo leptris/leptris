@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.17.2] - Y-08-12
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.17.1] - 2026-08-12
 
 ### Performance — free-list for root_doc_map entries
