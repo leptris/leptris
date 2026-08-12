@@ -131,10 +131,18 @@ typedef enum {
      *   - [@attr]              → BC_PRED_ATTR_EXISTS
      *   - [@attr = 'literal']  → BC_PRED_ATTR_EQ_STRING
      *   - [N]                  → BC_PRED_POSITION
+     *   - [child::n OP num]    → BC_PRED_CHILD_NUM_CMP (TODO 159)
      * Anything else stays on the existing apply_predicates path. */
     XPATH_BC_PRED_ATTR_EXISTS,       /* u16 operand: const-pool attr name */
     XPATH_BC_PRED_ATTR_EQ_STRING,    /* u16 operand: const-pool (name, value) pair encoded as two consecutive const-pool indices */
     XPATH_BC_PRED_POSITION,          /* u8 operand: position (1-based) */
+    /* Fused child-axis numeric comparison (TODO 159 Phase D).
+     * Operands: u8 operator (XPathOperatorType), u16 child name idx,
+     * double literal RHS. Filters input nodeset by walking each
+     * element's child list (hash-pre-filtered), parsing the matching
+     * child's text as a number, and applying OP against RHS. Inline
+     * two-pointer filter; no AST re-evaluation. */
+    XPATH_BC_PRED_CHILD_NUM_CMP,
 
     XPATH_BC_BINARY_OP,        /* u8 operand: XPathOperatorType */
     XPATH_BC_FUNC_CALL,        /* u16 operand: const-pool index (FUNC AST) */
