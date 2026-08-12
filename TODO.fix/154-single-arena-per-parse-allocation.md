@@ -1,5 +1,9 @@
 # TODO 154 — Single-arena per-parse allocation
 
+## Status
+
+**Phase A+B+C DONE.** Shipped across v0.14.0 (A+B), v0.15.1 (C).
+
 ## Why
 
 `taurus_parse_string` does **4 mallocs** per call:
