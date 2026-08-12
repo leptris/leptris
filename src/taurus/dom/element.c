@@ -14,6 +14,7 @@
 
 #include "element.h"
 #include "compact.h"
+#include "root_doc_map.h"
 #include "text.h"
 #include "comment.h"
 #include "cdata.h"
@@ -431,7 +432,7 @@ void taurus_element_set_namespace_uri_view(TaurusElement elem, TaurusStringView 
         if (elem->ns_cache) elem->ns_cache->namespace_uri = NULL;
         return;
     }
-    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+    TaurusMemoryPool* pool = taurus_element_get_pool(elem);
     if (pool) {
         char* storage = (char*)taurus_pool_alloc(pool, uri_view.length + 1);
         if (!storage) return;
@@ -459,7 +460,7 @@ const char* taurus_element_get_namespace_uri(TaurusElement elem) {
     const char* prefix = taurus_elem_prefix(elem);
     const char* uri = taurus_element_lookup_namespace(elem, prefix);
     if (uri) {
-        TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+        TaurusMemoryPool* pool = taurus_element_get_pool(elem);
         if (pool) {
             size_t len = strlen(uri);
             char* copy = (char*)taurus_pool_alloc(pool, len + 1);
@@ -482,7 +483,7 @@ void taurus_element_set_prefix(TaurusElement elem, const char* prefix) {
     char* old = taurus_elem_prefix(elem);
     if (old) free(old);
     char* copy = prefix ? taurus_strdup(prefix) : NULL;
-    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+    TaurusMemoryPool* pool = taurus_element_get_pool(elem);
     taurus_elem_set_prefix(elem, copy, pool);
 }
 
@@ -491,7 +492,7 @@ void taurus_element_set_namespace_uri(TaurusElement elem, const char* uri) {
     char* old = taurus_elem_ns_uri(elem);
     if (old) free(old);
     char* copy = uri ? taurus_strdup(uri) : NULL;
-    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+    TaurusMemoryPool* pool = taurus_element_get_pool(elem);
     taurus_elem_set_ns_uri(elem, copy, pool);
 }
 
@@ -535,7 +536,7 @@ void taurus_element_add_attribute_legacy(
     TaurusStringView value_view = taurus_sv_from_cstr(value ? value : "");
 
     /* For now, we need a pool. Use element's document pool if available */
-    TaurusMemoryPool* pool = elem->document ? elem->document->pool : NULL;
+    TaurusMemoryPool* pool = taurus_element_get_pool(elem);
     if (!pool) {
         /* No pool available - can't add attribute in compact mode */
         return;
@@ -585,12 +586,12 @@ const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* 
 
     /* Lazy convert value_view to C string */
     if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
-        if (elem->document && elem->document->pool) {
+        if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
             if (attr->has_entities) {
-                attr->value = taurus_decode_entities_view(&attr->value_view, elem->document->pool);
+                attr->value = taurus_decode_entities_view(&attr->value_view, taurus_element_get_pool(elem));
             }
             if (!attr->value) {
-                attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, elem->document->pool);
+                attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, taurus_element_get_pool(elem));
             }
         } else {
             attr->value = taurus_sv_to_cstr(&attr->value_view);
@@ -690,9 +691,7 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
         /* Set parent relationship */
         taurus_element_set_parent(child_elem, elem);
 
-        /* Set document pointer */
-        child_elem->document = elem->document;
-
+        /* TODO 155 Phase A: document field removed; non-root walks to root. */
         /* Append to end of children list.
          * last_child may point to any node type (text/comment/etc.) so
          * we set its next_sibling via the type-dispatching setter. */
@@ -783,9 +782,7 @@ void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child
         /* Set parent relationship */
         taurus_element_set_parent(child_elem, elem);
 
-        /* Set document pointer */
-        child_elem->document = elem->document;
-
+        /* TODO 155 Phase A: document field removed; non-root walks to root. */
         /* Insert at beginning of children list.
          * first_child may point to a non-element node; the new element's
          * next_sibling is set via the compact-offset setter. */
@@ -928,21 +925,11 @@ char* taurus_element_get_text_content(TaurusElement elem) {
 
 /* Document tree operations */
 void taurus_element_set_document_tree(TaurusElement elem, struct taurus_document* doc) {
+    /* TODO 155 Phase A: the document field is removed. We only need
+     * to register the ROOT in the thread-local root→doc map; non-root
+     * elements walk parent_off to find the root and look up there. */
     if (!elem) return;
-
-    elem->document = doc;
-
-    /* Recursively set document pointer on all element children
-     * CRITICAL: Only recurse on element nodes, not text/comment/CDATA/etc.
-     * Use generic node navigation to handle mixed content correctly. */
-    TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)elem);
-    while (child) {
-        /* Check if child is an element node before recursing */
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            taurus_element_set_document_tree((TaurusElement)child, doc);
-        }
-        child = taurus_node_get_next_sibling(child);
-    }
+    taurus_root_doc_register(elem, doc);
 }
 
 /* Remove all attributes from an element */

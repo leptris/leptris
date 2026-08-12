@@ -124,10 +124,10 @@ TAURUS_API const char* taurus_pi_node_get_data(TaurusNodeRef node) {
 static TaurusDocument node_public_document(TaurusNodeRef node) {
     if (!node) return NULL;
     if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
-        return ((TaurusElement)node)->document;
+        return taurus_element_get_document((TaurusElement)node);
     }
     TaurusElement parent = taurus_node_parent(node);
-    return parent ? parent->document : NULL;
+    return parent ? taurus_element_get_document(parent) : NULL;
 }
 
 /* Pool-strdup helper scoped to this TU. */
@@ -362,8 +362,8 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node) {
         if (parent->child_count > 0) parent->child_count--;
     }
     /* Invalidate element index (mutation). */
-    if (parent->document) {
-        taurus_element_index_invalidate(parent->document);
+    if (taurus_element_get_document(parent)) {
+        taurus_element_index_invalidate(taurus_element_get_document(parent));
     }
     return TAURUS_OK;
 }

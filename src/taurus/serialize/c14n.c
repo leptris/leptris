@@ -803,7 +803,7 @@ TAURUS_API char* taurus_c14n_canonicalize_subtree_ex(
     int with_comments) {
     (void)version;
     if (!elem) return NULL;
-    taurus_document_ensure_promoted(elem->document);
+    taurus_document_ensure_promoted(taurus_element_get_document(elem));
 
     int saved = c14n_include_comments;
     c14n_include_comments = with_comments ? 1 : 0;

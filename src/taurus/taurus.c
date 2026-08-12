@@ -682,6 +682,13 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         taurus_compact_cleanup_document(doc);
     }
 
+    /* TODO 155 Phase A: unregister root→doc mapping before the pool
+     * is destroyed (so the root pointer is still valid for lookup). */
+    if (doc->new_dom_root) {
+        extern void taurus_root_doc_unregister(TaurusElement);
+        taurus_root_doc_unregister((TaurusElement)doc->new_dom_root);
+    }
+
     /* Cache the pool-allocated flag BEFORE destroying the pool —
      * pool-allocated docs are freed by taurus_pool_destroy, so
      * reading doc->doc_pool_allocated AFTER destroy is UAF. TODO 154. */

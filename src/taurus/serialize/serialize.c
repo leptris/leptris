@@ -361,7 +361,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
          * contract — otherwise '&' in the raw value double-escapes. */
         const char* val = attr->value;
         if (!val) {
-            struct taurus_document* doc = elem->document;
+            struct taurus_document* doc = taurus_element_get_document(elem);
             TaurusMemoryPool* pool = doc ? doc->pool : NULL;
             char* resolved = NULL;
             if (attr->has_entities && pool) {

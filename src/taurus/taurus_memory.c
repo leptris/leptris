@@ -146,7 +146,7 @@ int taurus_element_add_namespace(struct taurus_element* elem, struct taurus_name
     ns->next = NULL;
     /* ns_cache is required to hold the declarations head. Allocate
      * on demand from the document's pool. TODO 155 Phase B. */
-    struct taurus_memory_pool* pool = elem->document ? elem->document->pool : NULL;
+    struct taurus_memory_pool* pool = taurus_element_get_pool(elem);
     struct taurus_namespace** head_ptr = taurus_elem_namespaces_ptr(elem, pool);
     if (!head_ptr) return -1;
     if (!*head_ptr) {

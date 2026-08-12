@@ -22,6 +22,7 @@
  */
 #include "direct_parse.h"
 #include "../dom/element.h"
+#include "../dom/root_doc_map.h"
 #include "../dom/text.h"
 #include "../dom/comment.h"
 #include "../dom/cdata.h"
@@ -117,7 +118,7 @@ static inline void dp_wire_child(DParser* p, TaurusElement parent, TaurusNode* c
     int32_t parent_to_child = (int32_t)((char*)parent - (char*)child);
     if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
         ((TaurusElement)child)->parent_off = parent_to_child;
-        ((TaurusElement)child)->document = parent->document;
+        /* TODO 155 Phase A: document field removed; non-root walks to root. */
     } else {
         switch (child->type) {
             case TAURUS_NODE_TYPE_TEXT:
@@ -331,7 +332,19 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
             ns->prefix = (char*)ns_prefix;
             ns->uri = val_start; /* already NUL-terminated */
             ns->next = NULL;
-            taurus_element_add_namespace(elem, ns);
+            /* TODO 155 Phase A: parser has the pool directly; use it
+             * to allocate ns_cache without going through the
+             * (not-yet-registered) document. */
+            struct taurus_namespace** head_ptr =
+                taurus_elem_namespaces_ptr(elem, p->pool);
+            if (!head_ptr) return -1;
+            if (!*head_ptr) {
+                *head_ptr = ns;
+            } else {
+                struct taurus_namespace* tail = *head_ptr;
+                while (tail->next) tail = tail->next;
+                tail->next = ns;
+            }
             continue;
         }
 
@@ -589,7 +602,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             }
             elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
             elem->base.line = elem_line;
-            elem->document = doc;
+            /* TODO 155 Phase A: document field removed; root registered
+             * below via taurus_root_doc_register. */
 
             /* Scan name (zero-copy). DON'T NUL-terminate yet — the
              * byte after the name is '>' or whitespace, which
@@ -965,6 +979,9 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
 
     /* 6. Commit to doc. */
     doc->new_dom_root = p.root;
+    /* TODO 155 Phase A: register root→doc mapping in the thread-local
+     * hash so non-root elements can reach the doc via walk + lookup. */
+    taurus_root_doc_register(p.root, doc);
     /* Tree is eagerly built — no FlatDoc, no lazy promote. */
     doc->pis = p.pis_head;
     doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */

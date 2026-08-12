@@ -471,7 +471,7 @@ static int process_element_xinclude(TaurusElement elem,
             /* The substitute was allocated from doc->pool but its
              * document pointer (and the document pointers of every
              * descendant) is still NULL.  Re-stamp them so future
-             * callers can reach the pool through element->document. */
+             * callers can reach the pool through taurus_element_get_document(element). */
             if (substitute->type == TAURUS_NODE_TYPE_ELEMENT) {
                 taurus_element_set_document_tree((TaurusElement)substitute, doc);
             }
