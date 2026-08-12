@@ -127,3 +127,25 @@ Complex Query `//book[number(price) > 30]/title` 18.65 µs →
 generic `apply_predicates` path that re-evaluated the AST
 per input node.
 
+**Phase B + E + cache-combine DONE** — three small per-call
+optimisations bundled together:
+
+- **Phase B (thread-local nodeset free-list):** `xpath_nodeset_new`
+  pops from a thread-local free-list (cap 64) instead of malloc'ing.
+  `xpath_nodeset_free` pushes back instead of free'ing. After
+  warmup, zero heap ops per nodeset. Reuses `inline_data[0]` as
+  the singly-linked next pointer — no struct size change.
+- **Phase E (attr predicate hot path):** `BC_PRED_ATTR_EXISTS` and
+  `BC_PRED_ATTR_EQ_STRING` now hoist `strlen(attr_name)` /
+  `strlen(expected)` out of the inner attr-walk loop and add a
+  32-bit FNV-1a hash pre-filter using the existing
+  `taurus_attribute->name_hash` field.
+- **Drive-by (combined AST+BC cache lookup):** new
+  `xpath_ast_cache_get` returns both AST and bytecode in a single
+  hash + scan. Replaces the previous two-call pattern in
+  `taurus_xpath_eval` that hashed the expression twice.
+
+These don't move the needle visibly on `bench_xpath_pugixml`
+because parse dominates there, but they shave per-call overhead
+for high-frequency XPath workloads.
+

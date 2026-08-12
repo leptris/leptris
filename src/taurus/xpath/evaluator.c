@@ -10,6 +10,7 @@
 #include "functions.h"
 #include "xpath_variables.h"
 #include "../dom/element.h"  /* For TaurusElement structure */
+#include "../common/port.h"  /* TAURUS_THREAD_LOCAL */
 #include "lexer.h"
 #include "parser.h"
 #include "../include/taurus.h"
@@ -366,18 +367,45 @@ void xpath_context_init_from_document(XPathContext* context) {
  * NodeSet Management
  * ============================================================================ */
 
+/* Thread-local free-list for XPathNodeSet structs (TODO 159 Phase B).
+ * Each taurus_xpath_eval call allocates and frees 2–5 nodesets. The
+ * inline_data small-buffer optimisation already eliminates the inner
+ * array malloc for small results; this free-list eliminates the struct
+ * malloc/free churn too. After warmup, zero heap ops per nodeset.
+ *
+ * Bounded at NODESET_FREE_LIST_CAP to avoid unbounded growth on
+ * pathological queries. The free-list owns XPathNodeSet structs only;
+ * spilled nodes arrays are freed before push. */
+#define NODESET_FREE_LIST_CAP 64
+static TAURUS_THREAD_LOCAL XPathNodeSet* xpath_nodeset_free_list;
+static TAURUS_THREAD_LOCAL size_t xpath_nodeset_free_list_count;
+
 XPathNodeSet* xpath_nodeset_new(void) {
     return xpath_nodeset_new_with_capacity(XPATH_NODESET_INLINE_CAPACITY);
 }
 
 XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
-    XPathNodeSet* nodeset = TAURUS_ALLOC(XPathNodeSet);
-    if (!nodeset) return NULL;
+    XPathNodeSet* nodeset = NULL;
+
+    /* Fast path: pop from thread-local free-list. The cached structs
+     * have count=0 and inline_data already zeroed, so the only setup
+     * work is the spill-array allocation when capacity > inline.
+     * The next-pointer is stashed in inline_data[0] (a void* slot
+     * that is unused while the struct is on the free-list). */
+    if (xpath_nodeset_free_list) {
+        nodeset = xpath_nodeset_free_list;
+        xpath_nodeset_free_list = (XPathNodeSet*)nodeset->inline_data[0];
+        xpath_nodeset_free_list_count--;
+        nodeset->inline_data[0] = NULL;
+    } else {
+        nodeset = TAURUS_ALLOC(XPathNodeSet);
+        if (!nodeset) return NULL;
+        memset(nodeset->inline_data, 0, sizeof(nodeset->inline_data));
+    }
 
     nodeset->count = 0;
     nodeset->owns_attributes = 0;
     nodeset->owns_namespaces = 0;
-    memset(nodeset->inline_data, 0, sizeof(nodeset->inline_data));
 
     /* TODO 113 Phase 2: small-buffer optimization. For capacity ≤ the
      * inline buffer size, point `nodes` at the inline array. This
@@ -389,7 +417,10 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
     } else if (capacity > 0) {
         nodeset->nodes = TAURUS_ALLOC_N(void*, capacity);
         if (!nodeset->nodes) {
-            TAURUS_FREE(nodeset);
+            /* On failure, push back to free-list instead of freeing. */
+            nodeset->inline_data[0] = (void*)xpath_nodeset_free_list;
+            xpath_nodeset_free_list = nodeset;
+            xpath_nodeset_free_list_count++;
             return NULL;
         }
         memset(nodeset->nodes, 0, sizeof(void*) * capacity);
@@ -432,11 +463,27 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
         }
     }
 
-    /* Free the nodes array unless it's the inline buffer (TODO 113). */
+    /* Free the spill array unless it's the inline buffer (TODO 113). */
     if (nodeset->nodes && nodeset->nodes != nodeset->inline_data) {
         TAURUS_FREE(nodeset->nodes);
     }
-    TAURUS_FREE(nodeset);
+
+    /* Push struct onto thread-local free-list (TODO 159 Phase B).
+     * Cap prevents unbounded growth. inline_data[0] is reused as the
+     * next-pointer for the singly-linked free-list; it is reset by
+     * xpath_nodeset_new_with_capacity on pop. */
+    if (xpath_nodeset_free_list_count < NODESET_FREE_LIST_CAP) {
+        nodeset->count = 0;
+        nodeset->capacity = 0;
+        nodeset->owns_attributes = 0;
+        nodeset->owns_namespaces = 0;
+        nodeset->nodes = NULL;
+        nodeset->inline_data[0] = (void*)xpath_nodeset_free_list;
+        xpath_nodeset_free_list = nodeset;
+        xpath_nodeset_free_list_count++;
+    } else {
+        TAURUS_FREE(nodeset);
+    }
 }
 
 size_t xpath_nodeset_count(XPathNodeSet* nodeset) {

@@ -38,15 +38,19 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
     /* Call internal implementation with string length */
     size_t expr_len = strlen(expression);
 
-    /* AST cache (TODO 113 perf): repeated evaluations of the same
-     * expression skip the parse phase. 16-entry LRU keyed by FNV-1a
-     * hash of the expression string. For single-threaded use; the
-     * race on concurrent first-insert is benign (worst case is a
-     * duplicate parse, then last-writer-wins on the cache slot).
+    /* AST + bytecode cache (TODO 113 + TODO 120 Phase F): repeated
+     * evaluations of the same expression skip both the parse and the
+     * compile phase. 16-entry LRU keyed by FNV-1a hash of the
+     * expression string. Single hash + scan via xpath_ast_cache_get
+     * (TODO 159 Phase E drive-by: was two separate lookups).
      *
-     * Ownership: the cache owns the AST after first parse. Subsequent
-     * calls borrow it for the duration of one evaluate; never free. */
-    XPathASTNode* ast = xpath_ast_cache_lookup(expression, expr_len);
+     * Ownership: the cache owns the AST and BC after first parse /
+     * compile. Subsequent calls borrow them for the duration of one
+     * evaluate; never free. */
+    XPathCacheEntry ce;
+    int cached = xpath_ast_cache_get(expression, expr_len, &ce);
+    XPathASTNode* ast = cached ? ce.ast : NULL;
+    TaurusXPathBytecode* bc = cached ? ce.bc : NULL;
 
     if (!ast) {
         XPathParser* parser = xpath_parser_new(expression, expr_len);
@@ -65,6 +69,7 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
         /* Hand ownership to the cache. The cache returns the same
          * pointer on subsequent lookups. */
         xpath_ast_cache_insert(expression, expr_len, ast);
+        bc = NULL;  /* not yet compiled */
     }
 
     /* Create evaluation context with TaurusElement directly - NO CONVERSION! */
@@ -74,11 +79,6 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
         return NULL;
     }
 
-    /* TODO 120 Phase F: bytecode cache. Compile once per expression,
-     * reuse on every subsequent eval. Inline dispatch (AXIS_STEP,
-     * BINARY_OP, FUNC_CALL) skips the AST-type switch in
-     * evaluate_expr on the hot path. */
-    TaurusXPathBytecode* bc = xpath_ast_cache_get_bc(expression, expr_len);
     struct taurus_xpath_result* result = NULL;
     if (bc) {
         result = taurus_xpath_vm_run_bc(bc, xpath_ctx);
