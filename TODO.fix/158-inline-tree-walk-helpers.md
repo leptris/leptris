@@ -1,5 +1,11 @@
 # TODO 158 — Inline tree-walk helpers across TU boundaries
 
+## Status
+
+**Phase A DONE** in v0.17.2. Branchless tree wiring via compile-time
+offset tables (`dp_ns_off[5]` and `dp_par_off[5]`) in direct_parse.c.
+Replaces two 5-way type-dispatched switches with two array lookups.
+
 ## Why
 
 `taurus_node_first_child_internal`, `taurus_node_get_next_sibling`,
