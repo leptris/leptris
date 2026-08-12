@@ -340,6 +340,86 @@ TEST(XPathBytecodeSimplePredicates, ChainedPredicates) {
     taurus_document_free(doc);
 }
 
+TEST(XPathBytecodeSimplePredicates, ChildNumberComparePredicate) {
+    /* [child::n OP num] lowers to BC_PRED_CHILD_NUM_CMP (TODO 159). */
+    const char xml[] =
+        "<root>"
+        "  <book><price>10</price><title>A</title></book>"
+        "  <book><price>30</price><title>B</title></book>"
+        "  <book><price>35.50</price><title>C</title></book>"
+        "  <book><price>40</price><title>D</title></book>"
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* GT: price > 30 -> 2 (35.50, 40). */
+    TaurusXPathResult r_gt = taurus_xpath_eval(doc, nullptr,
+                                                "count(//book[price > 30])");
+    ASSERT_NE(r_gt, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r_gt), 2.0);
+    taurus_xpath_result_free(r_gt);
+
+    /* GTE: price >= 30 -> 3 (30, 35.50, 40). */
+    TaurusXPathResult r_gte = taurus_xpath_eval(doc, nullptr,
+                                                 "count(//book[price >= 30])");
+    ASSERT_NE(r_gte, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r_gte), 3.0);
+    taurus_xpath_result_free(r_gte);
+
+    /* LT: price < 35 -> 2 (10, 30). */
+    TaurusXPathResult r_lt = taurus_xpath_eval(doc, nullptr,
+                                                "count(//book[price < 35])");
+    ASSERT_NE(r_lt, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r_lt), 2.0);
+    taurus_xpath_result_free(r_lt);
+
+    /* EQ: price = 30 -> 1. */
+    TaurusXPathResult r_eq = taurus_xpath_eval(doc, nullptr,
+                                                "count(//book[price = 30])");
+    ASSERT_NE(r_eq, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r_eq), 1.0);
+    taurus_xpath_result_free(r_eq);
+
+    /* NEQ: price != 30 -> 3. */
+    TaurusXPathResult r_neq = taurus_xpath_eval(doc, nullptr,
+                                                 "count(//book[price != 30])");
+    ASSERT_NE(r_neq, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r_neq), 3.0);
+    taurus_xpath_result_free(r_neq);
+
+    /* Verify the title of the matched book (predicate + step). */
+    TaurusXPathResult r_title = taurus_xpath_eval(doc, nullptr,
+                                                   "string(//book[price > 39]/title)");
+    ASSERT_NE(r_title, nullptr);
+    char* s = taurus_xpath_result_string(r_title);
+    EXPECT_STREQ(s, "D");
+    taurus_free_string(s);
+    taurus_xpath_result_free(r_title);
+
+    taurus_document_free(doc);
+}
+
+TEST(XPathBytecodeSimplePredicates, ChildNumberCompareNoChild) {
+    /* If an element doesn't have the named child, predicate is false. */
+    const char xml[] =
+        "<root>"
+        "  <a><price>40</price></a>"
+        "  <a><other>40</other></a>"  /* no <price> child */
+        "</root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr,
+                                              "count(//a[price > 30])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 1.0);
+    taurus_xpath_result_free(r);
+
+    taurus_document_free(doc);
+}
+
 TEST(XPathBytecodeSimplePredicates, ComplexPredicateFallsBack) {
     /* Predicates with general expressions stay on the apply_predicates
      * path. Ensures the compiler's predicate classifier doesn't

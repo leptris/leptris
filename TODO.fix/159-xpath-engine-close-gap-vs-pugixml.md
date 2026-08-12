@@ -99,3 +99,19 @@ With LTO the gap tightens from 5-13× to 1.6-4.4× on the
 `bench_xpath_pugixml` suite. Phases A-E below target the
 remaining gap.
 
+**Phase D (partial) DONE** — fused `child::n OP number` predicate.
+New opcode `XPATH_BC_PRED_CHILD_NUM_CMP` (compiler + VM). The
+predicate classifier recognises `[child::name > 30]` and
+similar (EQ, NEQ, LT, LTE, GT, GTE). The VM handler walks each
+input element's child list (hash-pre-filtered), reads the
+matching child's text content via a fast inline path (single
+text node, no allocation), parses as a number, applies OP
+against the literal RHS, and keeps/discards in a two-pointer
+in-place filter.
+
+Benchmark impact (Release + LTO, `bench_xpath_pugixml`):
+`//book[price > 30]` 27.7 µs → 21.1 µs (1.3× speedup). The
+remaining 21 µs is dominated by the descendant axis traversal
+to find `//book` candidates; the predicate filter itself is
+now a tight inline loop.
+

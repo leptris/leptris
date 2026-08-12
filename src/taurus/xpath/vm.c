@@ -39,6 +39,8 @@
 #include "../taurus_internal.h"
 #include "../dom/element.h"
 #include "../dom/element_index.h"
+#include "../dom/text.h"
+#include "../dom/node.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -78,6 +80,13 @@ static uint8_t read_u8(const unsigned char** pc) {
 static uint16_t read_u16(const unsigned char** pc) {
     uint16_t v = ((uint16_t)(*pc)[0] << 8) | (*pc)[1];
     *pc += 2;
+    return v;
+}
+
+static double read_double(const unsigned char** pc) {
+    double v;
+    memcpy(&v, *pc, sizeof(double));
+    *pc += sizeof(double);
     return v;
 }
 
@@ -1417,6 +1426,97 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                     input->nodes[0] = keep;
                     input->count = 1;
                 }
+
+                struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PRED_CHILD_NUM_CMP: {
+                /* Fused child-axis numeric comparison (TODO 159).
+                 * Inline encoding: u8 op, u16 name idx, f64 RHS. */
+                uint8_t op_type = read_u8(&pc);
+                uint16_t name_idx = read_u16(&pc);
+                double rhs = read_double(&pc);
+                const char* child_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input || !child_name) {
+                    if (input) xpath_nodeset_free(input);
+                    vm.error = 1;
+                    break;
+                }
+
+                /* Pre-compute the target hash so we can compare 2 bytes
+                 * before strcmp on every child. */
+                uint16_t target_hash = taurus_name_hash_compute(child_name);
+                XPathOperatorType op = (XPathOperatorType)op_type;
+                size_t child_name_len = strlen(child_name);
+
+                size_t write = 0;
+                for (size_t read = 0; read < input->count; read++) {
+                    void* node = input->nodes[read];
+                    if (!node_is_element(node)) continue;
+                    TaurusElement elem = (TaurusElement)node;
+
+                    /* Walk this element's children looking for a
+                     * child::name match. Hash pre-filter rejects
+                     * non-matching children in ~1ns. */
+                    TaurusNode* child = (TaurusNode*)taurus_elem_first_child(elem);
+                    TaurusElement match = NULL;
+                    while (child) {
+                        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+                            TaurusElement ce = (TaurusElement)child;
+                            if (ce->name_hash == target_hash && ce->name &&
+                                strlen(ce->name) == child_name_len &&
+                                memcmp(ce->name, child_name, child_name_len) == 0) {
+                                match = ce;
+                                break;
+                            }
+                        }
+                        child = taurus_node_get_next_sibling(child);
+                    }
+                    if (!match) continue;
+
+                    /* Fast path: single text child is the common shape
+                     * for <price>42.50</price>. Read its content view
+                     * without allocating. */
+                    double lhs;
+                    TaurusNode* tn = (TaurusNode*)taurus_elem_first_child(match);
+                    if (tn && tn->type == TAURUS_NODE_TYPE_TEXT &&
+                        taurus_elem_next_sibling(match) == NULL) {
+                        const char* s =
+                            taurus_text_get_content((TaurusTextNode*)tn);
+                        lhs = s ? strtod(s, NULL) : NAN;
+                    } else {
+                        char* s = taurus_element_get_text_content(match);
+                        if (s) {
+                            lhs = strtod(s, NULL);
+                            taurus_free(s);
+                        } else {
+                            lhs = NAN;
+                        }
+                    }
+
+                    int match_flag = 0;
+                    switch (op) {
+                        case XPATH_OP_EQUAL:         match_flag = (lhs == rhs); break;
+                        case XPATH_OP_NOT_EQUAL:     match_flag = (lhs != rhs); break;
+                        case XPATH_OP_LESS:          match_flag = (lhs <  rhs); break;
+                        case XPATH_OP_LESS_EQUAL:    match_flag = (lhs <= rhs); break;
+                        case XPATH_OP_GREATER:       match_flag = (lhs >  rhs); break;
+                        case XPATH_OP_GREATER_EQUAL: match_flag = (lhs >= rhs); break;
+                        default: break;
+                    }
+                    if (match_flag) {
+                        if (write != read) input->nodes[write] = node;
+                        write++;
+                    }
+                }
+                input->count = write;
 
                 struct taurus_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
                 if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }

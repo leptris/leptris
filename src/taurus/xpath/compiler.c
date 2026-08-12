@@ -269,12 +269,17 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step);
  *       Operator EQUAL with @attr on the left and a string literal
  *       on the right.
  *   - [N]                → PRED_KIND_POSITION
- *       Predicate is a numeric literal. */
+ *       Predicate is a numeric literal.
+ *   - [child::n OP num]  → PRED_KIND_CHILD_NUM_CMP (TODO 159)
+ *       Predicate compares a child element's text content (parsed
+ *       as a number) against a numeric literal. OP ∈ {EQ, NEQ,
+ *       LT, LTE, GT, GTE}. */
 typedef enum {
     PRED_KIND_NONE,
     PRED_KIND_ATTR_EXISTS,
     PRED_KIND_ATTR_EQ_STRING,
-    PRED_KIND_POSITION
+    PRED_KIND_POSITION,
+    PRED_KIND_CHILD_NUM_CMP
 } PredKind;
 
 static const char* pred_attr_name(XPathASTNode* pred) {
@@ -289,6 +294,23 @@ static const char* pred_attr_name(XPathASTNode* pred) {
     XPathASTNode* test = step->children[0];
     if (!test || test->type != XPATH_AST_NODE_TEST_NAME) return NULL;
     if (!test->value || strchr(test->value, ':')) return NULL;  /* no prefix */
+    return test->value;
+}
+
+/* Like pred_attr_name but for a CHILD axis step (`child::n` or bare `n`).
+ * Returns the unqualified child name, or NULL if not a child::name step.
+ * Used by the [child::n OP num] fused predicate (TODO 159). */
+static const char* pred_child_step_name(XPathASTNode* pred) {
+    XPathASTNode* step = pred;
+    if (step->type == XPATH_AST_PATH_EXPR && step->child_count == 1) {
+        step = step->children[0];
+    }
+    if (!step || step->type != XPATH_AST_STEP) return NULL;
+    if (step->axis_id != XPATH_AXIS_CHILD) return NULL;
+    if (step->child_count != 1) return NULL;
+    XPathASTNode* test = step->children[0];
+    if (!test || test->type != XPATH_AST_NODE_TEST_NAME) return NULL;
+    if (!test->value || strchr(test->value, ':')) return NULL;
     return test->value;
 }
 
@@ -330,6 +352,24 @@ static PredKind classify_predicate(XPathASTNode* pred,
             *out_attr_name = attr;
             *out_attr_value = rhs->value;
             return PRED_KIND_ATTR_EQ_STRING;
+        }
+    }
+
+    /* [child::n OP num] — comparison with a child element's text
+     * content on the left and a numeric literal on the right.
+     * TODO 159 Phase D. Operator + RHS number are read directly
+     * from the predicate AST in the emit pass. */
+    if (pred->type == XPATH_AST_OPERATOR && pred->child_count == 2) {
+        XPathOperatorType op = (XPathOperatorType)pred->number_value;
+        if (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL ||
+            op == XPATH_OP_LESS || op == XPATH_OP_LESS_EQUAL ||
+            op == XPATH_OP_GREATER || op == XPATH_OP_GREATER_EQUAL) {
+            const char* child_name = pred_child_step_name(pred->children[0]);
+            XPathASTNode* rhs = pred->children[1];
+            if (child_name && rhs && rhs->type == XPATH_AST_NUMBER) {
+                *out_attr_name = child_name;  /* reused as child name */
+                return PRED_KIND_CHILD_NUM_CMP;
+            }
         }
     }
 
@@ -490,6 +530,23 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
                     return 0;
                 }
                 break;
+            case PRED_KIND_CHILD_NUM_CMP: {
+                /* Inline: u8 op, u16 child-name idx, f64 RHS.
+                 * Op and RHS number are read directly from the
+                 * predicate AST. */
+                XPathOperatorType op = (XPathOperatorType)pred->number_value;
+                double rhs = pred->children[1]->number_value;
+                uint16_t name_idx = add_const_string(st, a);
+                if (reserve_code(st, 12) == 0) {
+                    st->bc->code[st->bc->code_len++] = (unsigned char)XPATH_BC_PRED_CHILD_NUM_CMP;
+                    st->bc->code[st->bc->code_len++] = (unsigned char)op;
+                    st->bc->code[st->bc->code_len++] = (name_idx >> 8) & 0xFF;
+                    st->bc->code[st->bc->code_len++] = name_idx & 0xFF;
+                    memcpy(&st->bc->code[st->bc->code_len], &rhs, sizeof(double));
+                    st->bc->code_len += sizeof(double);
+                }
+                break;
+            }
             default:
                 return 0;  /* unreachable due to gating above */
         }
@@ -674,7 +731,8 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                         PredKind pk = classify_predicate(
                             second_step->children[1 + i], &a, &v, &p);
                         if (pk != PRED_KIND_ATTR_EXISTS &&
-                            pk != PRED_KIND_ATTR_EQ_STRING) {
+                            pk != PRED_KIND_ATTR_EQ_STRING &&
+                            pk != PRED_KIND_CHILD_NUM_CMP) {
                             preds_ok = 0;
                             break;
                         }
@@ -689,12 +747,13 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                                         add_const_string(st, ctest->value));
                         }
                         /* Emit predicate opcodes. Only attr predicates
-                         * are eligible (see preds_ok check above). */
+                         * and child-num-cmp predicates are eligible
+                         * (see preds_ok check above). */
                         for (size_t i = 0; i < cpred; i++) {
                             const char *a, *v;
                             long p;
-                            PredKind k = classify_predicate(second_step->children[1 + i],
-                                                              &a, &v, &p);
+                            XPathASTNode* pred_ast = second_step->children[1 + i];
+                            PredKind k = classify_predicate(pred_ast, &a, &v, &p);
                             if (k == PRED_KIND_ATTR_EXISTS) {
                                 emit_op_u16(st, XPATH_BC_PRED_ATTR_EXISTS,
                                             add_const_string(st, a));
@@ -707,6 +766,18 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                                     st->bc->code[st->bc->code_len++] = n & 0xFF;
                                     st->bc->code[st->bc->code_len++] = (v2 >> 8) & 0xFF;
                                     st->bc->code[st->bc->code_len++] = v2 & 0xFF;
+                                }
+                            } else if (k == PRED_KIND_CHILD_NUM_CMP) {
+                                XPathOperatorType op = (XPathOperatorType)pred_ast->number_value;
+                                double rhs = pred_ast->children[1]->number_value;
+                                uint16_t name_idx = add_const_string(st, a);
+                                if (reserve_code(st, 12) == 0) {
+                                    st->bc->code[st->bc->code_len++] = (unsigned char)XPATH_BC_PRED_CHILD_NUM_CMP;
+                                    st->bc->code[st->bc->code_len++] = (unsigned char)op;
+                                    st->bc->code[st->bc->code_len++] = (name_idx >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = name_idx & 0xFF;
+                                    memcpy(&st->bc->code[st->bc->code_len], &rhs, sizeof(double));
+                                    st->bc->code_len += sizeof(double);
                                 }
                             }
                             /* PRED_KIND_POSITION is excluded by preds_ok. */
