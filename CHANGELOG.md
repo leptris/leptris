@@ -1,13 +1,16 @@
 ## [Unreleased]
 
-## [0.17.2] - Y-08-12
+## [0.17.2] - 2026-08-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — branchless tree wiring (TODO 158 Phase A)
 
-### Changed
+Replaces two 5-way type-dispatched switches in `dp_wire_child` with
+compile-time `offsetof`-based lookup tables (`dp_ns_off[5]` and
+`dp_par_off[5]`). Each switch was 5 cases × 2 writes = 10 branches.
+Now 2 array lookups + 2 stores.
 
-- (describe changes here)
+Wall-clock impact neutral (compiler already optimized the switches
+under LTO), but the code is cleaner: no switch, no cast-per-type.
 
 
 ## [0.17.1] - 2026-08-12
