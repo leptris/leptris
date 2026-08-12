@@ -72,6 +72,21 @@ extern const char* xpath_token_type_names[];
 XPathASTNode* xpath_ast_cache_lookup(const char* expr, size_t expr_len);
 void xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast);
 
+/* Combined lookup (TODO 159 Phase E drive-by): single hash + scan
+ * that returns both the AST and the bytecode in one pass. Replaces
+ * the previous two-call pattern (xpath_ast_cache_lookup +
+ * xpath_ast_cache_get_bc) which hashed the expression twice.
+ *
+ * Returns 1 if the expression is cached (out->ast is non-NULL);
+ * returns 0 otherwise. out->bc may still be NULL on a cache hit if
+ * the bytecode has not been compiled yet. */
+typedef struct {
+    XPathASTNode* ast;
+    struct TaurusXPathBytecode* bc;
+} XPathCacheEntry;
+int xpath_ast_cache_get(const char* expr, size_t expr_len,
+                         XPathCacheEntry* out);
+
 /* Bytecode cache (TODO 120 Phase F). Look up the compiled bytecode
  * for an expression that has already been parsed and cached as an
  * AST. Returns NULL if the bytecode has not yet been compiled or if

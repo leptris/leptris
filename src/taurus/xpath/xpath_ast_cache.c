@@ -69,6 +69,31 @@ XPathASTNode* xpath_ast_cache_lookup(const char* expr, size_t expr_len) {
     return NULL;
 }
 
+/* Combined lookup (TODO 159 Phase E drive-by): single hash + scan
+ * that returns both AST and bytecode. Replaces the previous pattern
+ * of calling xpath_ast_cache_lookup + xpath_ast_cache_get_bc which
+ * hashed the expression twice per taurus_xpath_eval call. */
+int xpath_ast_cache_get(const char* expr, size_t expr_len,
+                         XPathCacheEntry* out) {
+    if (!expr || expr_len == 0 || !out) return 0;
+    out->ast = NULL;
+    out->bc = NULL;
+    unsigned h = xpath_hash(expr, expr_len);
+    for (size_t probe = 0; probe < XPATH_AST_CACHE_SLOTS; probe++) {
+        size_t i = (h + probe) % XPATH_AST_CACHE_SLOTS;
+        xpath_ast_cache_slot* slot = &g_cache[i];
+        if (slot->hash == 0) return 0;  /* empty */
+        if (slot->hash == h &&
+            slot->expr_len == expr_len &&
+            memcmp(slot->expr_copy, expr, expr_len) == 0) {
+            out->ast = slot->ast;
+            out->bc = slot->bc;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast) {
     if (!expr || expr_len == 0 || !ast) return;
     unsigned h = xpath_hash(expr, expr_len);

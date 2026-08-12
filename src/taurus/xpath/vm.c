@@ -77,6 +77,19 @@ static uint8_t read_u8(const unsigned char** pc) {
     return v;
 }
 
+/* Compute 32-bit FNV-1a hash matching the one stored on
+ * taurus_attribute->name_hash. Used by the fused attribute predicate
+ * handlers to pre-filter attrs via integer compare before memcmp.
+ * (TODO 159 Phase E.) */
+static inline uint32_t xpath_fnv1a_32(const char* s, size_t len) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (unsigned char)s[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
 static uint16_t read_u16(const unsigned char** pc) {
     uint16_t v = ((uint16_t)(*pc)[0] << 8) | (*pc)[1];
     *pc += 2;
@@ -1326,12 +1339,13 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 XPathNodeSet* input = vm_detach_input_nodeset(&vm);
                 if (!input) { vm.error = 1; break; }
 
-                /* In-place two-pointer filter. Walks each element's
-                 * attribute list. For docs where most elements have
-                 * the queried attribute, this is faster than set-
-                 * membership against the (also large) attr_bucket.
-                 * The element index (TODO 133) is built for future
-                 * fusion opportunities but not used here. */
+                /* TODO 159 Phase E: hoist strlen + hash out of the
+                 * inner attribute-walk loop. Previous code called
+                 * strlen(attr_name) inside the loop body, redundant
+                 * per-attr. */
+                size_t name_len = attr_name ? strlen(attr_name) : 0;
+                uint32_t name_hash = attr_name ? xpath_fnv1a_32(attr_name, name_len) : 0;
+
                 size_t write = 0;
                 for (size_t read = 0; read < input->count; read++) {
                     void* node = input->nodes[read];
@@ -1341,10 +1355,12 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                         taurus_element_get_first_attribute(elem);
                     int found = 0;
                     while (a) {
-                        TaurusStringView nv = a->name_view;
-                        if (attr_name && nv.length > 0 && nv.data &&
-                            strlen(attr_name) == nv.length &&
-                            memcmp(attr_name, nv.data, nv.length) == 0) {
+                        /* Hash pre-filter first; only fall through to
+                         * length + memcmp on hash match. */
+                        if (attr_name && a->name_hash == name_hash &&
+                            a->name_view.length == name_len &&
+                            a->name_view.data &&
+                            memcmp(attr_name, a->name_view.data, name_len) == 0) {
                             found = 1;
                             break;
                         }
@@ -1377,6 +1393,13 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 XPathNodeSet* input = vm_detach_input_nodeset(&vm);
                 if (!input) { vm.error = 1; break; }
 
+                /* TODO 159 Phase E: hoist strlen's out of the inner
+                 * loop. Previous code called strlen(attr_name) and
+                 * strlen(expected) once per attribute per element. */
+                size_t name_len = attr_name ? strlen(attr_name) : 0;
+                size_t value_len = expected ? strlen(expected) : 0;
+                uint32_t name_hash = attr_name ? xpath_fnv1a_32(attr_name, name_len) : 0;
+
                 size_t write = 0;
                 for (size_t read = 0; read < input->count; read++) {
                     void* node = input->nodes[read];
@@ -1386,14 +1409,14 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                         taurus_element_get_first_attribute(elem);
                     int match = 0;
                     while (a) {
-                        TaurusStringView nv = a->name_view;
-                        TaurusStringView vv = a->value_view;
+                        /* Hash + length pre-filter before memcmp. */
                         if (attr_name && expected &&
-                            nv.length > 0 && nv.data &&
-                            strlen(attr_name) == nv.length &&
-                            memcmp(attr_name, nv.data, nv.length) == 0 &&
-                            strlen(expected) == vv.length &&
-                            memcmp(expected, vv.data, vv.length) == 0) {
+                            a->name_hash == name_hash &&
+                            a->name_view.length == name_len &&
+                            a->value_view.length == value_len &&
+                            a->name_view.data && a->value_view.data &&
+                            memcmp(attr_name, a->name_view.data, name_len) == 0 &&
+                            memcmp(expected, a->value_view.data, value_len) == 0) {
                             match = 1;
                             break;
                         }
