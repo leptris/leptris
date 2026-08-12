@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.18.2] - Y-08-12
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.18.1] - 2026-08-13
 
 ### Performance — unwrap `number()` in child-num-cmp predicate (TODO 159 Phase D2)
