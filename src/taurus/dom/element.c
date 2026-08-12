@@ -57,6 +57,7 @@ TaurusElement taurus_element_create_with_view(
     memset(elem, 0, sizeof(struct taurus_element));
     elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
     elem->name = taurus_sv_to_cstr_pooled(&name_view, pool);
+    elem->name_hash = taurus_name_hash_compute(elem->name);
 
     return elem;
 }

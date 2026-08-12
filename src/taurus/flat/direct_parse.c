@@ -608,6 +608,18 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 elem->name = name_start;
             }
 
+            /* Compute 16-bit FNV-1a hash of local name for fast
+             * child-axis lookups in XPath (TODO 159). Compares
+             * 2 bytes before falling back to strcmp. */
+            {
+                uint16_t h = 0x811C;
+                for (const char* c = elem->name; *c; c++) {
+                    h ^= (unsigned char)*c;
+                    h *= 0x0193;
+                }
+                elem->name_hash = h;
+            }
+
             /* Wire into parent. */
             if (p.depth > 0) {
                 dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)elem);

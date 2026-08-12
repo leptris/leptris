@@ -496,10 +496,10 @@ TAURUS_API TaurusElement taurus_element_first_child(TaurusElement elem, const ch
     TaurusElement child = taurus_element_get_first_child(elem);
     if (!name) return child;
 
-    /* Find first child with matching name */
+    /* Find first child with matching name via hash pre-filter (TODO 159) */
+    uint16_t target_hash = taurus_name_hash_compute(name);
     while (child) {
-        const char* child_name = taurus_element_name(child);
-        if (child_name && strcmp(child_name, name) == 0) {
+        if (taurus_elem_name_is(child, name, target_hash)) {
             return child;
         }
         child = taurus_element_get_next_sibling(child);

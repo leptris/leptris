@@ -87,4 +87,15 @@ compaction (155) which speeds up tree walks → ~10 µs target.
 
 ## Status
 
-Pending. Phase A is the highest-leverage starting point.
+**Phase A0 DONE** — element `name_hash` field + fast child-name lookup.
+Added 16-bit FNV-1a hash of local name to `struct taurus_element`
+(fits in existing padding; struct stays 64 bytes). All element
+creation paths (`taurus_element_create_with_view`,
+`taurus_element_create_pooled`, parser bulk-alloc, copy/mutate)
+populate the hash. `taurus_element_first_child(elem, name)` now
+pre-filters via 2-byte hash compare before falling back to strcmp.
+
+With LTO the gap tightens from 5-13× to 1.6-4.4× on the
+`bench_xpath_pugixml` suite. Phases A-E below target the
+remaining gap.
+
