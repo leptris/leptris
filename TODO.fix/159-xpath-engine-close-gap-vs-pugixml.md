@@ -149,3 +149,16 @@ These don't move the needle visibly on `bench_xpath_pugixml`
 because parse dominates there, but they shave per-call overhead
 for high-frequency XPath workloads.
 
+**Phase F (PGO build mode) DONE** — new CMake option
+`TAURUS_ENABLE_PGO = OFF | GENERATE | USE`. Cross-platform:
+clang `-fprofile-instr-generate` / `-fprofile-instr-use`, GCC
+`-fprofile-generate` / `-fprofile-use`, MSVC `/GENPROFILE` /
+`/USEPROFILE`. Lets the compiler specialise the VM dispatch
+switch and parser scan loops based on real workload data —
+closes most of the gap vs computed-goto without GCC-isms.
+
+Benchmark impact (clang on macOS arm64, `bench_xpath_taurus`):
+total wall 6.31 µs → 5.82 µs (~8% improvement). Documented in
+`docs/guide/building.md` with the three-step GENERATE → run
+workload → merge profraw → USE workflow.
+
