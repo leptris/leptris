@@ -1,13 +1,53 @@
 ## [Unreleased]
 
-## [0.18.2] - Y-08-12
+## [0.18.2] - 2026-08-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — thread-local nodeset free-list (TODO 159 Phase B)
 
-### Changed
+XPath evaluation allocates and frees 2–5 `XPathNodeSet` structs per
+call. The inline-data small-buffer optimisation already eliminates
+the inner array malloc for small results; this release also
+eliminates the struct malloc/free churn via a thread-local
+free-list (cap 64). After warmup, zero heap ops per nodeset.
 
-- (describe changes here)
+### Performance — attribute-predicate hot path (TODO 159 Phase E)
+
+`BC_PRED_ATTR_EXISTS` and `BC_PRED_ATTR_EQ_STRING` previously
+called `strlen(attr_name)` and `strlen(expected)` *inside* the
+inner attribute-walk loop. Now hoisted out, plus a 32-bit FNV-1a
+hash pre-filter using the existing `taurus_attribute->name_hash`
+field rejects non-matching attrs in one integer compare before
+`memcmp`.
+
+### Performance — combined AST + bytecode cache lookup
+
+`taurus_xpath_eval` previously called `xpath_ast_cache_lookup`
+and `xpath_ast_cache_get_bc` — same FNV-1a hash computed twice.
+New `xpath_ast_cache_get(expr, len, &out)` returns both pointers
+in a single hash + scan.
+
+### Build — PGO CMake option (TODO 159 Phase F)
+
+New `TAURUS_ENABLE_PGO = OFF | GENERATE | USE` option for
+profile-guided optimisation. Cross-platform (clang, GCC, MSVC)
+— lets the compiler specialise the bytecode VM dispatch switch
+and parser scan loops based on real workload data, without
+GCC-specific extensions.
+
+Benchmark impact (clang on macOS arm64, `bench_xpath_taurus`,
+LTO+PGO vs LTO-only):
+
+| Query                                              | LTO     | LTO+PGO | Δ     |
+|----------------------------------------------------|---------|---------|-------|
+| Simple Path `//book`                               | 0.78 µs | 0.78 µs | same  |
+| Predicate `//book[@id='101']`                      | 1.01 µs | 0.96 µs | -5%   |
+| Function `count(//book)`                           | 0.79 µs | 0.80 µs | same  |
+| Complex Query `//book[number(price) > 30]/title`   | 2.71 µs | 2.36 µs | -13%  |
+| Union `//book \| //magazine`                       | 0.94 µs | 0.91 µs | -3%   |
+| **total wall**                                     | **6.31 µs** | **5.82 µs** | **-8%** |
+
+Defaults to `OFF`; documented three-step workflow in
+`docs/guide/building.md`.
 
 
 ## [0.18.1] - 2026-08-13
