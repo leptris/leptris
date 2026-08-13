@@ -1,5 +1,41 @@
 ## [Unreleased]
 
+## [0.19.3] - 2026-08-14
+
+### Performance — inline entity check for short attr values (TODO 174)
+
+libc `memchr` has ~10ns setup cost even for 1-byte scans. For attr
+values ≤ 16 bytes (the common case — typical attr values are 5-15
+bytes), a tight inline byte loop is faster.
+
+`dp_add_attr_inline` in `flat/direct_parse.c` now uses an inline
+scan for values ≤ 16 bytes, falling back to `memchr` for longer
+values.
+
+#### Measured impact (benchmark_many_attrs K=100, median, 7 runs)
+
+| build | v0.19.2 | v0.19.3 |
+|---|---|---|
+| default Release | 4568 µs | **4194 µs** (8% improvement) |
+| fast preset (-O3+march+LTO) | 3313 µs | **2022 µs** (38% improvement) |
+
+The fast preset improvement is dramatic — the compiler vectorizes
+the inline loop using AVX2, displacing both `memchr` setup cost
+and the function-call overhead.
+
+#### Cumulative vs v0.18.4 baseline (K=100, fast preset)
+
+| version | K=100 median | gap to pugixml |
+|---|---|---|
+| v0.18.4 | 6885 µs | 7.8× |
+| v0.19.0 (build flags) | 3209 µs | 4.5× |
+| v0.19.1 (lazy hash) | 3098 µs | 4.5× |
+| v0.19.2 (attr shrink) | 3313 µs | 4.5× |
+| **v0.19.3 (inline amp)** | **2022 µs** | **3.06×** |
+
+All 464 tests pass.
+
+
 ## [0.19.2] - 2026-08-13
 
 ### Performance — attr struct shrink 112 → 72 bytes (TODO 173)
