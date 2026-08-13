@@ -50,6 +50,25 @@ else()
 endif()
 option(TAURUS_ENABLE_LTO "Enable link-time optimization (default ON for Release)" ${TAURUS_ENABLE_LTO_DEFAULT})
 
+# Optimization level (TODO 167 Phase A). CMake's default for Release is
+# -O2; -O3 enables more aggressive inlining, loop transforms, and
+# auto-vectorization. Trade-off: larger binary, longer compile, occasionally
+# exposes latent UB.
+#
+#   default      — use CMake's choice (-O2 for Release)
+#   aggressive   — force -O3 for Release/RelWithDebInfo
+set(TAURUS_OPT_LEVEL "default" CACHE STRING "Optimization level: default (-O2) or aggressive (-O3)")
+set_property(CACHE TAURUS_OPT_LEVEL PROPERTY STRINGS default aggressive)
+
+# Target architecture (TODO 167 Phase B). -march=native lets the compiler use
+# the host's full ISA (AVX2, AVX-512, BMI2, etc). The resulting binary is NOT
+# portable to older CPUs — keep opt-in.
+#
+#   default   — baseline (runs on any x86-64 / ARM64)
+#   native    — -march=native (gcc/clang) or /arch:AVX2 (MSVC)
+set(TAURUS_TARGET_ARCH "default" CACHE STRING "Target CPU arch: default (portable) or native (host ISA)")
+set_property(CACHE TAURUS_TARGET_ARCH PROPERTY STRINGS default native)
+
 # AddressSanitizer — see TODO 35.
 if(TAURUS_ENABLE_ASAN)
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
@@ -80,6 +99,70 @@ if(TAURUS_ENABLE_LTO)
         message(STATUS "Link-time optimization: ENABLED")
     else()
         message(WARNING "TAURUS_ENABLE_LTO requested but not supported: ${lto_error}")
+    endif()
+endif()
+
+# Optimization level (TODO 167 Phase A).
+if(TAURUS_OPT_LEVEL STREQUAL "aggressive")
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang"
+       OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        # CMake sets -O2 by default for Release; -O3 replaces it.
+        # Apply to both C and CXX so benchmarks get the same flag.
+        foreach(_lang C CXX)
+            foreach(_cfg RELEASE RELWITHDEBINFO)
+                string(REPLACE "-O2" "-O3"
+                    CMAKE_${_lang}_FLAGS_${_cfg}
+                    "${CMAKE_${_lang}_FLAGS_${_cfg}}")
+                # If -O2 wasn't there (rare), append -O3 explicitly.
+                if(NOT CMAKE_${_lang}_FLAGS_${_cfg} MATCHES "-O3")
+                    set(CMAKE_${_lang}_FLAGS_${_cfg} "${CMAKE_${_lang}_FLAGS_${_cfg}} -O3")
+                endif()
+            endforeach()
+        endforeach()
+        message(STATUS "Optimization level: -O3 (aggressive)")
+    elseif(MSVC)
+        # /O2 is the Release default; /O3 doesn't exist as a separate flag in
+        # MSVC (the equivalent aggressiveness is /O2 + /GL + /Gw + /Gy). LTO
+        # already covers /GL. Add the others.
+        add_compile_options(/Gw /Gy)
+        message(STATUS "Optimization level: /O2 + /Gw + /Gy (MSVC aggressive)")
+    endif()
+else()
+    message(STATUS "Optimization level: default (-O2)")
+endif()
+
+# Target architecture (TODO 167 Phase B).
+if(TAURUS_TARGET_ARCH STREQUAL "native")
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang"
+       OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        add_compile_options(-march=native)
+        message(STATUS "Target architecture: native (-march=native)")
+    elseif(MSVC)
+        add_compile_options(/arch:AVX2)
+        message(STATUS "Target architecture: AVX2 (/arch:AVX2)")
+    endif()
+else()
+    message(STATUS "Target architecture: default (portable)")
+endif()
+
+# -fno-semantic-interposition for shared libs (TODO 167 Phase C).
+# Allows GCC/Clang to inline exported symbols into callers within the same
+# shared object, and lets LLVM's optimizer treat the public API as
+# non-interposable. ~5% on shared builds. No effect on static builds.
+if(BUILD_SHARED_LIBS)
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fno-semantic-interposition)
+        message(STATUS "Semantic interposition: disabled (shared-lib build)")
+    elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        # Clang defaults to -fno-semantic-interposition behavior (it doesn't
+        # allow interposition of defined symbols anyway), but explicitly
+        # setting -fvisibility-no-protects the inlining decision.
+        # Apple Clang ignores the flag; suppress the warning.
+        check_c_compiler_flag("-fno-semantic-interposition" _taurus_fsi_supported)
+        if(_taurus_fsi_supported)
+            add_compile_options(-fno-semantic-interposition)
+            message(STATUS "Semantic interposition: disabled (shared-lib build)")
+        endif()
     endif()
 endif()
 
@@ -176,6 +259,9 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 # Configuration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Check for compile flag support (TODO 167 Phase C uses check_c_compiler_flag).
+include(CheckCCompilerFlag)
 
 # Add cmake modules path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
@@ -277,6 +363,8 @@ message(STATUS "Taurus ${PROJECT_VERSION} Configuration:")
 message(STATUS "  C Compiler: ${CMAKE_C_COMPILER}")
 message(STATUS "  C Standard: C${CMAKE_C_STANDARD}")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Optimization Level: ${TAURUS_OPT_LEVEL}")
+message(STATUS "  Target Architecture: ${TAURUS_TARGET_ARCH}")
 message(STATUS "  Shared Libraries: ${BUILD_SHARED_LIBS}")
 message(STATUS "  Build Tests: ${BUILD_TESTING}")
 message(STATUS "  Build Examples: ${BUILD_EXAMPLES}")
