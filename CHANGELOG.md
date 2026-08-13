@@ -1,5 +1,43 @@
 ## [Unreleased]
 
+## [0.19.2] - 2026-08-13
+
+### Performance — attr struct shrink 112 → 72 bytes (TODO 173)
+
+Moved `prefix` / `namespace_uri` (both StringView and cached-cstr
+forms, 48 bytes total) out of `struct taurus_attribute` into a
+side cache struct (`taurus_attr_ns_cache`) allocated only when one
+of them is set. The common case (attr has no namespace activity)
+has `ns_cache == NULL` — zero overhead. Attrs that do have a
+namespace prefix or resolved namespace_uri pay one 48-byte pool
+allocation for the cache struct.
+
+Attr struct size: 112 → 72 bytes (36% reduction). For 100,000
+attrs at K=100 attrs/element, that's 4.8 MB less memory pressure
+and corresponding cache-traffic savings.
+
+New accessor helpers in `element.h`: `attr_get_prefix`,
+`attr_get_namespace_uri`, `attr_get_prefix_view`,
+`attr_get_namespace_uri_view`. Readers use these; writers allocate
+the cache via `taurus_pool_alloc`.
+
+25 call sites updated across `element.c`, `element_modify.c`,
+`direct_parse.c`, `xpath/functions.c`, `xpath/evaluator_axes.c`,
+`taurus.c`, `taurus_memory.c`.
+
+#### Measured impact (benchmark_many_attrs K=100, median, 7 runs)
+
+| build | v0.18.4 | v0.19.1 | v0.19.2 |
+|---|---|---|---|
+| default Release | 6885 µs | 6284 µs | **4568 µs** |
+| fast preset (-O3+march+LTO) | — | 3098 µs | 3313 µs (noise) |
+
+Default-build improvement is 33% vs v0.18.4 baseline. Fast preset
+within noise — LTO already reorders fields effectively.
+
+All 464 tests pass.
+
+
 ## [0.19.1] - 2026-08-13
 
 ### Performance — lazy FNV attr hash (TODO 172)
