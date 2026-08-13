@@ -828,9 +828,12 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
                 }
             }
         }
-        if (!attr->namespace_uri && !taurus_sv_is_empty(&attr->namespace_uri_view)) {
-            if ((uintptr_t)attr->namespace_uri_view.data >= 0x1000) {
-                attr->namespace_uri = taurus_sv_to_cstr_pooled(&attr->namespace_uri_view, pool);
+        /* TODO 173: namespace_uri lives in attr->ns_cache side table. */
+        if (attr->ns_cache && !attr->ns_cache->namespace_uri &&
+            !taurus_sv_is_empty(&attr->ns_cache->namespace_uri_view)) {
+            if ((uintptr_t)attr->ns_cache->namespace_uri_view.data >= 0x1000) {
+                attr->ns_cache->namespace_uri =
+                    taurus_sv_to_cstr_pooled(&attr->ns_cache->namespace_uri_view, pool);
             }
         }
     }

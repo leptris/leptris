@@ -34,29 +34,45 @@ typedef struct taurus_xpath_result*    TaurusXPathResult;
 #include "../common/string_view.h"
 #include "compact.h"  /* Compressed pointer types */
 
+/* Forward decl: TaurusMemoryPool is defined in memory/pool.h. */
+struct taurus_memory_pool;
+
 /* Attribute structure - inline storage for minimal memory footprint
  *
  * Instead of storing pointers to attribute structures, we store attributes
  * as a linked list with inline StringView storage. This eliminates pointer
  * indirection and improves cache locality.
  *
- * Size: ~32 bytes vs 64 bytes for legacy attribute design
- */
+ * Size: 72 bytes (was 112 before TODO 173).
+ *
+ * TODO 173: prefix / namespace_uri (views + pointers) moved into a side
+ * cache struct (taurus_attr_ns_cache) allocated only when actually needed.
+ * The common case (no namespace activity) has ns_cache == NULL — saves
+ * 48 bytes per attribute. For 100,000 attrs that's 4.8 MB less memory
+ * pressure and better cache locality. */
+struct taurus_attr_ns_cache {
+    TaurusStringView prefix_view;
+    TaurusStringView namespace_uri_view;
+    char* prefix;                /* NULL until first access */
+    char* namespace_uri;         /* NULL until first access */
+};
+
 struct taurus_attribute {
     /* StringView storage (zero-copy, points into XML buffer) */
     TaurusStringView name_view;
     TaurusStringView value_view;
-    TaurusStringView prefix_view;
-    TaurusStringView namespace_uri_view;
 
     /* Cached NULL-terminated (lazy conversion from pool) */
     char* name;                  /* NULL until first access */
     char* value;                 /* NULL until first access */
-    char* prefix;                /* NULL until first access */
-    char* namespace_uri;         /* NULL until first access */
 
     /* Next attribute in linked list */
     struct taurus_attribute* next;
+
+    /* Side cache for namespace activity. NULL when the attr has no prefix
+     * and no namespace_uri (the common case). Allocated from the pool on
+     * first set via attr_ensure_ns_cache(). TODO 173. */
+    struct taurus_attr_ns_cache* ns_cache;
 
     /* Performance: Pre-computed entity flag (set during parsing) */
     unsigned char has_entities;  /* 1 if value_view contains '&', 0 otherwise */
@@ -88,6 +104,26 @@ static inline uint32_t attr_name_hash(struct taurus_attribute* a) {
         a->name_hash = h;
     }
     return a->name_hash;
+}
+
+/* Attribute namespace-cache accessors (TODO 173). The prefix and
+ * namespace_uri (both view and cstr form) live in a side cache struct
+ * that's only allocated when one of them is set. The common case (attr
+ * without prefix, no namespace_uri) has ns_cache == NULL.
+ *
+ * Readers use these helpers — they return NULL / empty when no cache.
+ * Writers use attr_ensure_ns_cache() to allocate the cache lazily. */
+static inline const char* attr_get_prefix(const struct taurus_attribute* a) {
+    return a->ns_cache ? a->ns_cache->prefix : NULL;
+}
+static inline const char* attr_get_namespace_uri(const struct taurus_attribute* a) {
+    return a->ns_cache ? a->ns_cache->namespace_uri : NULL;
+}
+static inline TaurusStringView attr_get_prefix_view(const struct taurus_attribute* a) {
+    return a->ns_cache ? a->ns_cache->prefix_view : taurus_sv_empty();
+}
+static inline TaurusStringView attr_get_namespace_uri_view(const struct taurus_attribute* a) {
+    return a->ns_cache ? a->ns_cache->namespace_uri_view : taurus_sv_empty();
 }
 
 /* Element node - compact architecture

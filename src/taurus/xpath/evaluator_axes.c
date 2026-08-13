@@ -119,7 +119,10 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
         attr_node->value = NULL;
     }
 
-    attr_node->namespace_uri = attr->namespace_uri ? taurus_strdup(attr->namespace_uri) : NULL;
+    {
+        const char* src_ns = attr_get_namespace_uri(attr);
+        attr_node->namespace_uri = src_ns ? taurus_strdup(src_ns) : NULL;
+    }
     attr_node->owner = owner;
 
     return attr_node;

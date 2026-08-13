@@ -25,8 +25,7 @@ struct taurus_attribute* taurus_attribute_new(const char* name, const char* valu
         return NULL;
     }
 
-    attr->prefix = NULL;
-    attr->namespace_uri = NULL;
+    attr->ns_cache = NULL;  /* TODO 173 */
     attr->value = value ? taurus_strdup(value) : NULL;
 
     if (value && !attr->value) {
@@ -42,8 +41,11 @@ void taurus_attribute_free(struct taurus_attribute* attr) {
     if (!attr) return;
 
     if (attr->name) free(attr->name);
-    if (attr->prefix) free(attr->prefix);
-    if (attr->namespace_uri) free(attr->namespace_uri);
+    if (attr->ns_cache) {
+        if (attr->ns_cache->prefix) free(attr->ns_cache->prefix);
+        if (attr->ns_cache->namespace_uri) free(attr->ns_cache->namespace_uri);
+        free(attr->ns_cache);
+    }
     if (attr->value) free(attr->value);
 
     free(attr);
