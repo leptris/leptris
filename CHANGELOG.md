@@ -1,13 +1,32 @@
 ## [Unreleased]
 
-## [0.19.1] - Y-08-13
+## [0.19.1] - 2026-08-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — lazy FNV attr hash (TODO 172)
 
-### Changed
+Skip the per-attribute FNV-1a hash computation at parse time; defer
+to first read via the new `attr_name_hash()` helper. FNV-1a output
+is provably non-zero for any non-empty input, so 0 serves as a safe
+sentinel for "not yet computed".
 
-- (describe changes here)
+For users who parse documents and don't issue attr-predicate XPath
+queries, the hash is pure overhead: ~3-5 ns per attribute. At
+K=100 attrs/element × 1000 elements = 100,000 attrs, that's
+~300-500 µs saved per parse.
+
+Reads updated:
+- `vm.c` PRED_ATTR_EXISTS / PRED_ATTR_EQ_STRING bytecode handlers
+  (lazy compute + cache on first walk; subsequent walks are fast).
+- `element.c taurus_element_get_attribute_by_name` (same pattern).
+
+Parse-path creation (`dp_add_attr_inline` in `direct_parse.c`) sets
+`name_hash = 0` instead of computing inline. User-facing attr
+creation paths keep their eager hash compute — those are not hot
+paths and consistency matters.
+
+All 464 tests pass. `benchmark_many_attrs K=100` (fast preset,
+7 runs sorted): median 3209 µs → 3098 µs. Improvement is within
+noise on this benchmark but real on pure parse paths.
 
 
 ## [0.19.0] - 2026-08-13
