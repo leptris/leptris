@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.18.5] - Y-08-13
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.18.4] - 2026-08-13
 
 ### Performance — stack-allocated XPathContext (TODO 163)
