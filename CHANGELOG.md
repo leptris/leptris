@@ -1,13 +1,50 @@
 ## [Unreleased]
 
-## [0.18.5] - Y-08-13
+## [0.18.5] - 2026-08-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — pugixml-inspired parse-path cleanups (TODO 166)
 
-### Changed
+Post-v0.18.4 research pass on pugixml's "Parsing XML at the Speed of
+Light" article and modern SIMD XML parser literature (Bun.XML, simdxml,
+ARM HTML scanning). Landed the realistic, non-regressing changes;
 
-- (describe changes here)
+kept the rest as documented decisions.
+
+- **Phase A — cold-path extraction.** Added portable `TAURUS_NOINLINE`
+  and `TAURUS_ALWAYS_INLINE` macros to `common/port.h` (GCC/Clang/MSVC).
+  Extracted the DOCTYPE handling body (~140 lines covering PUBLIC/SYSTEM
+  ID re-scan, internal-subset extraction, DTD construction) from
+  `direct_parse_internal` into a new `dp_parse_doctype` helper marked
+  `TAURUS_NOINLINE`. The hot parse loop's instruction-cache footprint
+  no longer carries the DOCTYPE code.
+- **Phase C — IS_WS DRY cleanup.** Replaced 6 ad-hoc
+  `*scan == ' ' || *scan == '\t' || *scan == '\n' || *scan == '\r'`
+  chains in the XML-declaration scanner with `IS_WS(*scan)`. Single
+  chartype-table lookup beats the 3-branch chain on every architecture.
+  Behavior identical — the table includes exactly space/tab/CR/LF.
+- **Phase B — 4-byte ASCII name-scan fast path (reverted).** Prototyped
+  the `(w & 0x80808080u) == 0` guard + 4 chartype checks per iteration.
+  Measured ~25% regression on `benchmark_many_attrs` K=50 attrs/element
+  (median 3328µs → ~4100µs across 3 runs). The memcpy + mask + 4 byte
+  extractions cost more than 4 byte loads, while modern branch predictors
+  already make the byte loop nearly free for typical 5–10 char XML names.
+  Kept `dp_scan_name` as a `TAURUS_ALWAYS_INLINE` DRY wrapper for the
+  6 name-scan call sites in `direct_parse.c`.
+- **Phase D — digit trick (skipped).** No applicable call sites in the
+  parser (version/standalone already use `memcmp` / `strcmp`).
+
+### Techniques considered but not pursued
+
+Computed-goto dispatch (GCC-only — PGO covers it); SIMD 16-byte ASCII
+classify (TODO 157 — overhead exceeded gain for short tokens); boolean
+template specialization for parse flags (4× code size for <5% win);
+null-terminator trick (correctness risk); compact 1-byte in-page
+pointers (multi-week refactor — taurus's int32 compact pointers are
+already on parity for our cache-line-sized element struct).
+
+No measurable perf delta on `bench_dom_taurus` / `bench_xpath_taurus`
+(within noise). Best read: this is a code-quality + architecture
+release, not a measurable perf release.
 
 
 ## [0.18.4] - 2026-08-13
