@@ -101,6 +101,26 @@ static inline void dp_skip_ws(DParser* p) {
     }
 }
 
+/* Phase B (TODO 166): name-char scan helper.
+ *
+ * Originally prototyped a 4-byte ASCII fast path
+ * (`(w & 0x80808080u) == 0` guard + 4 IS_NAME_CHAR checks per
+ * iteration). On the many-attrs benchmark (avg attr-name length
+ * 7), the fast path added MORE work per 4 chars than the byte
+ * loop saved: the memcpy + mask check + 4 byte extractions cost
+ * more than 4 byte loads, while modern branch predictors already
+ * make the byte loop nearly free. Measured ~25% regression at
+ * K=50 attrs/element. Reverted to the plain byte loop.
+ *
+ * Kept as a thin TAURUS_ALWAYS_INLINE wrapper — preserves the
+ * call-site DRY (six name-scan loops collapse to one helper)
+ * and guarantees no call-site regression vs the original
+ * inline loop. */
+static TAURUS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
+    while (p->pos < p->end && IS_NAME_CHAR(*p->pos))
+        p->pos++;
+}
+
 /* Tally '\n' bytes in [from, to) and fold into p->line. Used after
  * bulk scans (memchr for text, multi-char literal matches) where the
  * per-byte scanner can't update line inline. */
@@ -247,6 +267,152 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     return 0;
 }
 
+/* Handle `<!DOCTYPE ...>` markup. Extracted as a cold path
+ * (TODO 166 Phase A): runs 0–1 times per document, but the body is
+ * ~140 lines including PUBLIC/SYSTEM re-scan, internal-subset
+ * extraction, and DTD parsing. Keeping it inline bloats the hot
+ * parse loop's i-cache footprint for no benefit.
+ *
+ * Returns:
+ *   0  — handled, caller should `continue` the parse loop.
+ *  -1  — parse error, caller should fail. */
+static TAURUS_NOINLINE int dp_parse_doctype(DParser* p,
+                                             uint32_t markup_line) {
+    (void)markup_line;
+    char* doctype_start = p->pos;
+    p->pos += 2; /* skip "<!" */
+    /* Match "DOCTYPE" keyword (case-sensitive per XML spec). */
+    if (p->end - p->pos < 7 ||
+        memcmp(p->pos, "DOCTYPE", 7) != 0) {
+        while (p->pos < p->end && *p->pos != '>') p->pos++;
+        if (p->pos < p->end) p->pos++;
+        dp_advance_line(p, doctype_start, p->pos);
+        return 0;
+    }
+    p->pos += 7;
+    while (p->pos < p->end && IS_WS(*p->pos)) {
+        if (*p->pos == '\n') p->line++;
+        p->pos++;
+    }
+    /* Scan DOCTYPE name. */
+    char* dt_name_start = p->pos;
+    dp_scan_name(p);
+    size_t dt_name_len = p->pos - dt_name_start;
+
+    /* Skip to '[' (internal subset) or '>' (no subset). */
+    char* subset_start = NULL;
+    char* subset_end = NULL;
+    while (p->pos < p->end && *p->pos != '>' && *p->pos != '[') {
+        p->pos++;
+    }
+    if (p->pos < p->end && *p->pos == '[') {
+        subset_start = ++p->pos;
+        /* Find matching ']'. Nested brackets aren't legal
+         * in DTD internal subsets, so no depth tracking. */
+        while (p->pos < p->end && *p->pos != ']') p->pos++;
+        subset_end = p->pos;
+        if (p->pos < p->end) p->pos++; /* skip ']' */
+        /* Skip to '>'. */
+        while (p->pos < p->end && *p->pos != '>') p->pos++;
+        if (p->pos < p->end) p->pos++; /* skip '>' */
+    } else {
+        /* No internal subset, skip to '>'. */
+        while (p->pos < p->end && *p->pos != '>') p->pos++;
+        if (p->pos < p->end) p->pos++; /* skip '>' */
+    }
+
+    /* Create DOCTYPE node with the extracted name. */
+    TaurusDoctypeNode* dt = NULL;
+    if (dt_name_len > 0) {
+        dt = taurus_doctype_create(
+            dt_name_start, dt_name_len, p->pool);
+        if (dt) {
+            p->doc->doctype = dt;
+        }
+    }
+
+    /* Parse PUBLIC/SYSTEM identifiers (issue #253).
+     * DOCTYPE grammar (XML 1.0 §2.8):
+     *   <!DOCTYPE name (SYSTEM quoted | PUBLIC quoted quoted)? subset?>
+     * The keywords and quoted strings sit between the name
+     * and the '[' or '>'. We need to re-scan that region
+     * because the initial skip above skipped past them
+     * without extracting values. */
+    /* Re-scan from after the name to find PUBLIC/SYSTEM. */
+    char* scan = dt_name_start + dt_name_len;
+    /* Skip whitespace after name. */
+    while (scan < p->end && IS_WS(*scan)) scan++;
+    char* public_id = NULL;
+    size_t public_id_len = 0;
+    char* system_id = NULL;
+    size_t system_id_len = 0;
+    if (scan + 6 <= p->end && memcmp(scan, "SYSTEM", 6) == 0) {
+        scan += 6;
+        while (scan < p->end && IS_WS(*scan)) scan++;
+        if (scan < p->end && (*scan == '"' || *scan == '\'')) {
+            char q = *scan++;
+            system_id = scan;
+            while (scan < p->end && *scan != q) scan++;
+            system_id_len = scan - system_id;
+            if (scan < p->end) scan++; /* skip closing quote */
+        }
+    } else if (scan + 6 <= p->end && memcmp(scan, "PUBLIC", 6) == 0) {
+        scan += 6;
+        while (scan < p->end && IS_WS(*scan)) scan++;
+        /* Public ID (quoted) */
+        if (scan < p->end && (*scan == '"' || *scan == '\'')) {
+            char q = *scan++;
+            public_id = scan;
+            while (scan < p->end && *scan != q) scan++;
+            public_id_len = scan - public_id;
+            if (scan < p->end) scan++; /* skip closing quote */
+        }
+        /* System ID (quoted, after whitespace) */
+        while (scan < p->end && IS_WS(*scan)) scan++;
+        if (scan < p->end && (*scan == '"' || *scan == '\'')) {
+            char q = *scan++;
+            system_id = scan;
+            while (scan < p->end && *scan != q) scan++;
+            system_id_len = scan - system_id;
+            if (scan < p->end) scan++; /* skip closing quote */
+        }
+    }
+    /* NUL-terminate and set on the DOCTYPE node. The
+     * values point into the mutable buffer copy. */
+    if (dt) {
+        if (public_id && public_id_len > 0) {
+            public_id[public_id_len] = '\0';
+            taurus_doctype_set_public_id(dt, public_id, p->pool);
+        }
+        if (system_id && system_id_len > 0) {
+            system_id[system_id_len] = '\0';
+            taurus_doctype_set_system_id(dt, system_id, p->pool);
+        }
+    }
+
+    /* Parse internal subset if non-empty — builds the
+     * entity table for custom entity expansion, and
+     * stores the raw text on the DOCTYPE node so the
+     * public API (taurus_doctype_get_internal_subset)
+     * returns it (#253). */
+    if (subset_start && subset_end > subset_start) {
+        /* NUL-terminate the subset text in the buffer. */
+        *subset_end = '\0';
+        if (dt) {
+            taurus_doctype_set_internal_subset(
+                dt, subset_start, p->pool);
+        }
+        TaurusDTD* dtd = taurus_dtd_parse_internal_subset(
+            subset_start, (size_t)(subset_end - subset_start),
+            p->pool);
+        if (dtd) {
+            p->dtd = dtd;
+        }
+    }
+    dp_advance_line(p, doctype_start, p->pos);
+    return 0;
+}
+
 /* Parse attributes for an element. Writes attr structs into the
  * pre-allocated attr_block (zero-copy name/value, no interning).
  * Names are NUL-terminated in-place AFTER '=' is consumed; values
@@ -271,8 +437,7 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
         char* name_start = p->pos;
         if (!IS_NAME_START(*p->pos)) return -1;
         p->pos++;
-        while (p->pos < p->end && IS_NAME_CHAR(*p->pos))
-            p->pos++;
+        dp_scan_name(p);
         char* name_end = p->pos;
         size_t name_len = name_end - name_start;
         /* Defer NUL-termination until after '=' is consumed — the
@@ -614,8 +779,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
              * AFTER dp_parse_attrs returns. */
             p.pos++; /* skip '<' */
             char* name_start = p.pos;
-            while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
-                p.pos++;
+            dp_scan_name(&p);
             size_t name_len = p.pos - name_start;
 
             /* Parse attributes (scans from the delimiter position). */
@@ -674,8 +838,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             p.pos += 2;
             /* Scan name (includes prefix:local). */
             char* close_start = p.pos;
-            while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
-                p.pos++;
+            dp_scan_name(&p);
             size_t close_len = p.pos - close_start;
             dp_skip_ws(&p);
             if (p.pos >= p.end || *p.pos != '>') goto fail;
@@ -756,143 +919,10 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 p.pos += 3;
                 dp_advance_line(&p, start, p.pos);
             } else {
-                /* DOCTYPE: extract name + internal subset. Build a
-                 * DOCTYPE node so taurus_document_internal_subset
-                 * returns the name, and parse entities from the
-                 * internal subset for custom entity expansion. */
-                char* doctype_start = p.pos;
-                p.pos += 2; /* skip "<!" */
-                /* Match "DOCTYPE" keyword (case-sensitive per XML spec). */
-                if (p.end - p.pos < 7 ||
-                    memcmp(p.pos, "DOCTYPE", 7) != 0) {
-                    while (p.pos < p.end && *p.pos != '>') p.pos++;
-                    if (p.pos < p.end) p.pos++;
-                    dp_advance_line(&p, doctype_start, p.pos);
-                    continue;
-                }
-                p.pos += 7;
-                while (p.pos < p.end && IS_WS(*p.pos)) {
-                    if (*p.pos == '\n') p.line++;
-                    p.pos++;
-                }
-                /* Scan DOCTYPE name. */
-                char* dt_name_start = p.pos;
-                while (p.pos < p.end && IS_NAME_CHAR(*p.pos)) p.pos++;
-                size_t dt_name_len = p.pos - dt_name_start;
-
-                /* Skip to '[' (internal subset) or '>' (no subset). */
-                char* subset_start = NULL;
-                char* subset_end = NULL;
-                while (p.pos < p.end && *p.pos != '>' && *p.pos != '[') {
-                    p.pos++;
-                }
-                if (p.pos < p.end && *p.pos == '[') {
-                    subset_start = ++p.pos;
-                    /* Find matching ']'. Nested brackets aren't legal
-                     * in DTD internal subsets, so no depth tracking. */
-                    while (p.pos < p.end && *p.pos != ']') p.pos++;
-                    subset_end = p.pos;
-                    if (p.pos < p.end) p.pos++; /* skip ']' */
-                    /* Skip to '>'. */
-                    while (p.pos < p.end && *p.pos != '>') p.pos++;
-                    if (p.pos < p.end) p.pos++; /* skip '>' */
-                } else {
-                    /* No internal subset, skip to '>'. */
-                    while (p.pos < p.end && *p.pos != '>') p.pos++;
-                    if (p.pos < p.end) p.pos++;
-                }
-
-                /* Create DOCTYPE node with the extracted name. */
-                TaurusDoctypeNode* dt = NULL;
-                if (dt_name_len > 0) {
-                    dt = taurus_doctype_create(
-                        dt_name_start, dt_name_len, pool);
-                    if (dt) {
-                        doc->doctype = dt;
-                    }
-                }
-
-                /* Parse PUBLIC/SYSTEM identifiers (issue #253).
-                 * DOCTYPE grammar (XML 1.0 §2.8):
-                 *   <!DOCTYPE name (SYSTEM quoted | PUBLIC quoted quoted)? subset?>
-                 * The keywords and quoted strings sit between the name
-                 * and the '[' or '>'. We need to re-scan that region
-                 * because the initial skip on line 637 skipped past
-                 * them without extracting values. */
-                char* id_scan = p.pos;  /* save position after name */
-                /* Re-scan from after the name to find PUBLIC/SYSTEM. */
-                char* scan = dt_name_start + dt_name_len;
-                /* Skip whitespace after name. */
-                while (scan < p.end && IS_WS(*scan)) scan++;
-                char* public_id = NULL;
-                size_t public_id_len = 0;
-                char* system_id = NULL;
-                size_t system_id_len = 0;
-                if (scan + 6 <= p.end && memcmp(scan, "SYSTEM", 6) == 0) {
-                    scan += 6;
-                    while (scan < p.end && IS_WS(*scan)) scan++;
-                    if (scan < p.end && (*scan == '"' || *scan == '\'')) {
-                        char q = *scan++;
-                        system_id = scan;
-                        while (scan < p.end && *scan != q) scan++;
-                        system_id_len = scan - system_id;
-                        if (scan < p.end) scan++; /* skip closing quote */
-                    }
-                } else if (scan + 6 <= p.end && memcmp(scan, "PUBLIC", 6) == 0) {
-                    scan += 6;
-                    while (scan < p.end && IS_WS(*scan)) scan++;
-                    /* Public ID (quoted) */
-                    if (scan < p.end && (*scan == '"' || *scan == '\'')) {
-                        char q = *scan++;
-                        public_id = scan;
-                        while (scan < p.end && *scan != q) scan++;
-                        public_id_len = scan - public_id;
-                        if (scan < p.end) scan++; /* skip closing quote */
-                    }
-                    /* System ID (quoted, after whitespace) */
-                    while (scan < p.end && IS_WS(*scan)) scan++;
-                    if (scan < p.end && (*scan == '"' || *scan == '\'')) {
-                        char q = *scan++;
-                        system_id = scan;
-                        while (scan < p.end && *scan != q) scan++;
-                        system_id_len = scan - system_id;
-                        if (scan < p.end) scan++; /* skip closing quote */
-                    }
-                }
-                /* NUL-terminate and set on the DOCTYPE node. The
-                 * values point into the mutable buffer copy. */
-                if (dt) {
-                    if (public_id && public_id_len > 0) {
-                        public_id[public_id_len] = '\0';
-                        taurus_doctype_set_public_id(dt, public_id, pool);
-                    }
-                    if (system_id && system_id_len > 0) {
-                        system_id[system_id_len] = '\0';
-                        taurus_doctype_set_system_id(dt, system_id, pool);
-                    }
-                }
-                (void)id_scan; /* position preserved for clarity */
-
-                /* Parse internal subset if non-empty — builds the
-                 * entity table for custom entity expansion, and
-                 * stores the raw text on the DOCTYPE node so the
-                 * public API (taurus_doctype_get_internal_subset)
-                 * returns it (#253). */
-                if (subset_start && subset_end > subset_start) {
-                    /* NUL-terminate the subset text in the buffer. */
-                    *subset_end = '\0';
-                    if (dt) {
-                        taurus_doctype_set_internal_subset(
-                            dt, subset_start, pool);
-                    }
-                    TaurusDTD* dtd = taurus_dtd_parse_internal_subset(
-                        subset_start, (size_t)(subset_end - subset_start),
-                        pool);
-                    if (dtd) {
-                        p.dtd = dtd;
-                    }
-                }
-                dp_advance_line(&p, doctype_start, p.pos);
+                /* DOCTYPE: extract name + internal subset. Cold path
+                 * extracted to dp_parse_doctype (TODO 166 Phase A). */
+                if (dp_parse_doctype(&p, markup_line) != 0) goto fail;
+                continue;
             }
         }
         else if (next == '?') {
@@ -903,8 +933,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             char* target_start = p.pos;
             if (!IS_NAME_START(*p.pos)) goto fail;
             p.pos++;
-            while (p.pos < p.end && IS_NAME_CHAR(*p.pos))
-                p.pos++;
+            dp_scan_name(&p);
             *p.pos = '\0';
             p.pos++;
             char* data_start = p.pos;
@@ -930,20 +959,15 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                  * these fields. */
                 char* scan = data_start;
                 while (*scan) {
-                    while (*scan == ' ' || *scan == '\t' ||
-                           *scan == '\n' || *scan == '\r') scan++;
+                    while (IS_WS(*scan)) scan++;
                     if (!*scan) break;
                     char* pname = scan;
-                    while (*scan && *scan != '=' && *scan != ' ' &&
-                           *scan != '\t' && *scan != '\n' && *scan != '\r')
-                        scan++;
+                    while (*scan && !IS_WS(*scan) && *scan != '=') scan++;
                     size_t pname_len = scan - pname;
-                    while (*scan == ' ' || *scan == '\t' ||
-                           *scan == '\n' || *scan == '\r') scan++;
+                    while (IS_WS(*scan)) scan++;
                     if (*scan != '=') break;
                     scan++;
-                    while (*scan == ' ' || *scan == '\t' ||
-                           *scan == '\n' || *scan == '\r') scan++;
+                    while (IS_WS(*scan)) scan++;
                     if (*scan != '"' && *scan != '\'') break;
                     char q = *scan++;
                     char* pval = scan;
