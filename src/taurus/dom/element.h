@@ -61,12 +61,34 @@ struct taurus_attribute {
     /* Performance: Pre-computed entity flag (set during parsing) */
     unsigned char has_entities;  /* 1 if value_view contains '&', 0 otherwise */
 
-    /* Performance: FNV-1a hash of the attribute name. Pre-computed at
-     * creation so lookup can compare 4-byte hashes before touching
-     * the string data. Turns O(N × strlen) into O(N × uint32) for the
-     * non-matching case. TODO 113 Phase 4. */
+    /* Performance: FNV-1a hash of the attribute name. LAZY: 0 means
+     * "not yet computed"; the first read via attr_name_hash() computes
+     * and caches. The parse path skips this work entirely (saves ~5ns
+     * per attr on attr-heavy inputs); query paths pay it on first
+     * access, then cached for subsequent walks. FNV-1a output is never
+     * 0 for non-empty input, so 0 is a safe sentinel. TODO 172. */
     uint32_t name_hash;
 };
+
+/* Lazy FNV-1a hash accessor (TODO 172). Computes and caches on first call.
+ * Thread-unsafe in the strict sense (racy writes), but the worst case is
+ * two threads both writing the same value (idempotent). Documents are
+ * single-threaded by contract. */
+static inline uint32_t attr_name_hash(struct taurus_attribute* a) {
+    if (a->name_hash == 0) {
+        const char* s = a->name_view.data;
+        size_t len = a->name_view.length;
+        uint32_t h = 2166136261u;
+        for (size_t i = 0; i < len; i++) {
+            h ^= (unsigned char)s[i];
+            h *= 16777619u;
+        }
+        /* h is provably non-zero for any non-empty input. Empty input
+         * would give the offset basis (also non-zero). Sentinel safe. */
+        a->name_hash = h;
+    }
+    return a->name_hash;
+}
 
 /* Element node - compact architecture
  *

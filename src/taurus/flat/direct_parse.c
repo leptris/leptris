@@ -232,13 +232,10 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     attr->namespace_uri = NULL;
     attr->next = NULL;
 
-    /* FNV-1a hash inline — used by attribute-index lookups. */
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < name_len; i++) {
-        h ^= (unsigned char)name[i];
-        h *= 16777619u;
-    }
-    attr->name_hash = h;
+    /* FNV-1a hash deferred to first read via attr_name_hash() (TODO 172).
+     * Saves ~5ns per attr on attr-heavy parse paths where XPath attr
+     * predicates are never used. The first read computes and caches. */
+    attr->name_hash = 0;
 
     /* Wire attr into elem's attr list. TODO 159 Phase G: use the
      * parser-local last-attr cache for O(1) wiring instead of walking
