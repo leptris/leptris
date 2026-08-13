@@ -61,36 +61,39 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     XPathContext* context = TAURUS_ALLOC(XPathContext);
     if (!context) return NULL;
 
+    xpath_context_init(context, document, context_node);
+    return context;
+}
+
+/* Stack-allocatable init/cleanup pair (TODO 163). Lets callers
+ * that hold the context for the duration of one eval (the common
+ * case — both taurus_xpath_eval and taurus_xpath_eval_with_vars)
+ * skip the malloc/free pair. */
+void xpath_context_init(XPathContext* context,
+                        struct taurus_document* document,
+                        TaurusElement context_node) {
+    if (!context || !document || !context_node) return;
+
     context->document = document;
     context->context_node = context_node;
     context->context_position = 1;
     context->context_size = 1;
     context->error_msg[0] = '\0';
-    context->current_predicate_node = NULL;  /* Initialize to NULL */
+    context->current_predicate_node = NULL;
     context->to_boolean = 0;
     context->max_results = 0;
     context->enable_early_exit = 1;
 
-    /* Initialize namespace support (v0.8.0). Lazy: flag is set
-     * here so the first resolve_prefix call knows to walk the
-     * document. The walk itself is deferred (TODO 125). */
     context->namespace_mappings = NULL;
     context->namespace_count = 0;
     context->namespace_capacity = 0;
     context->namespaces_collected = 0;
 
-    /* Initialize variable support (v1.0.1) — must be NULL so the
-     * no-vars evaluation path correctly reports "no variable set". */
     context->variable_set = NULL;
 
-    /* Initialize error context (v1.0.0) */
     context->input = NULL;
     context->input_len = 0;
 
-    /* Initialize function registry: use the shared standard singleton
-     * (TODO 113 perf). Skip the ~27 alloc + register ops per eval.
-     * TODO 148 Phase 5: if the document has custom fns registered,
-     * build a per-context registry that merges standard + custom. */
     extern XPathFunctionRegistry* taurus_xpath_build_custom_registry(struct taurus_document*);
     context->function_registry = taurus_xpath_build_custom_registry(document);
     if (!context->function_registry) {
@@ -98,11 +101,18 @@ XPathContext* xpath_context_new(struct taurus_document* document,
     }
 
     context->current_fn_user_data = NULL;
-
-    return context;
 }
 
 void xpath_context_free(XPathContext* context) {
+    if (!context) return;
+    xpath_context_cleanup(context);
+    TAURUS_FREE(context);
+}
+
+/* Release owned resources without freeing the struct (TODO 163).
+ * Use after xpath_context_init when the storage is caller-owned
+ * (typically stack-allocated). */
+void xpath_context_cleanup(XPathContext* context) {
     if (!context) return;
 
     /* Free namespace mappings (v0.8.0) */
@@ -123,8 +133,6 @@ void xpath_context_free(XPathContext* context) {
         context->function_registry != xpath_function_registry_get_standard()) {
         xpath_function_registry_free((XPathFunctionRegistry*)context->function_registry);
     }
-
-    TAURUS_FREE(context);
 }
 
 const char* xpath_context_error(XPathContext* context) {

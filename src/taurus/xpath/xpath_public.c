@@ -72,10 +72,14 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
         bc = NULL;  /* not yet compiled */
     }
 
-    /* Create evaluation context with TaurusElement directly - NO CONVERSION! */
-    XPathContext* xpath_ctx = xpath_context_new(doc, context_elem);
-    if (!xpath_ctx) {
-        /* Don't free ast — owned by the cache. */
+    /* Create evaluation context. TODO 163: stack-allocate the
+     * struct (the storage lives in this function's frame and is
+     * released on return). Saves one malloc/free pair per eval. */
+    XPathContext ctx_storage;
+    XPathContext* xpath_ctx = &ctx_storage;
+    xpath_context_init(xpath_ctx, doc, context_elem);
+    if (!xpath_ctx->document) {
+        /* init refuses to populate when args are invalid. */
         return NULL;
     }
 
@@ -99,8 +103,11 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval(
         result = xpath_evaluate(xpath_ctx, ast);
     }
 
-    /* Cleanup. ast and bc are owned by the cache — never free here. */
-    xpath_context_free(xpath_ctx);
+    /* Cleanup. ast and bc are owned by the cache — never free here.
+     * xpath_context_cleanup releases the namespace_mappings and the
+     * per-call function registry if any; the storage itself is on
+     * the stack and goes away when this function returns. */
+    xpath_context_cleanup(xpath_ctx);
 
     return result;
 }
@@ -340,9 +347,11 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars_context(
 
     xpath_parser_free(parser);
 
-    /* Create evaluation context with the resolved context element. */
-    XPathContext* xpath_ctx = xpath_context_new(doc, context_elem);
-    if (!xpath_ctx) {
+    /* Create evaluation context. TODO 163: stack-allocated. */
+    XPathContext ctx_storage;
+    XPathContext* xpath_ctx = &ctx_storage;
+    xpath_context_init(xpath_ctx, doc, context_elem);
+    if (!xpath_ctx->document) {
         ast_node_free(ast);
         return NULL;
     }
@@ -354,7 +363,7 @@ TAURUS_API TaurusXPathResult taurus_xpath_eval_with_vars_context(
     struct taurus_xpath_result* result = xpath_evaluate(xpath_ctx, ast);
 
     /* Cleanup */
-    xpath_context_free(xpath_ctx);
+    xpath_context_cleanup(xpath_ctx);
     ast_node_free(ast);
 
     return result;

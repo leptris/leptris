@@ -53,6 +53,16 @@ XPathContext* xpath_context_new(struct taurus_document* document,
  */
 void xpath_context_free(XPathContext* context);
 
+/* TODO 163: stack-allocatable init/cleanup pair. Use these when
+ * the caller holds the context for the duration of one eval and
+ * can place the struct on the stack — eliminates one malloc/free
+ * pair per taurus_xpath_eval. Storage must outlive any pointers
+ * derived from `context` until cleanup is called. */
+void xpath_context_init(XPathContext* storage,
+                        struct taurus_document* document,
+                        TaurusElement context_node);
+void xpath_context_cleanup(XPathContext* context);
+
 /**
  * Get error message from context
  *
