@@ -76,6 +76,16 @@ typedef struct {
     struct taurus_attribute* attr_block;
     size_t attr_idx;
     size_t attr_capacity;
+    /* TODO 159 Phase G: parser-local last-attr cache for the element
+     * currently being parsed. Eliminates the O(N) walk-to-find-tail
+     * in dp_add_attr_inline — O(1) wiring per attr instead of O(N),
+     * removing the O(N²) per-element-attrs cost. Reset to NULL at
+     * the start of each dp_parse_attrs call.
+     *
+     * Also caches the last xmlns ns-node for the same reason — the
+     * old code walked the ns list to find the tail on every xmlns. */
+    struct taurus_attribute* current_elem_last_attr;
+    struct taurus_namespace* current_elem_last_ns;
     /* DTD parsed from the DOCTYPE internal subset. NULL when the
      * document has no DTD (or only an external subset). When non-NULL,
      * text/attr entity expansion routes through
@@ -210,23 +220,29 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     }
     attr->name_hash = h;
 
-    /* Wire attr into elem's attr list. TODO 155 Phase C: last_attribute_off
-     * was removed. Walk from first_attribute to find the tail. For typical
-     * elements with ≤ 10 attrs this is fast. The hot path (parse) adds
-     * attrs in source order, so the walk visits each existing attr once.
+    /* Wire attr into elem's attr list. TODO 159 Phase G: use the
+     * parser-local last-attr cache for O(1) wiring instead of walking
+     * to find the tail (was O(N) per attr, O(N²) per element).
      *
      * Careful: first_attribute_off == 0 means empty list. We can't decode
      * the pointer and check for NULL — at offset 0 the decoded pointer
      * is `elem` itself, which is non-NULL. Check the offset field. */
     int32_t attr_off = (int32_t)((char*)attr - (char*)elem);
     if (elem->first_attribute_off != 0) {
-        struct taurus_attribute* tail =
-            (struct taurus_attribute*)((char*)elem + elem->first_attribute_off);
-        while (tail->next) tail = tail->next;
-        tail->next = attr;
+        /* Cache should always be valid mid-parse. Fall back to walk
+         * only if cache is NULL (defensive — shouldn't happen). */
+        struct taurus_attribute* tail = p->current_elem_last_attr;
+        if (tail) {
+            tail->next = attr;
+        } else {
+            tail = (struct taurus_attribute*)((char*)elem + elem->first_attribute_off);
+            while (tail->next) tail = tail->next;
+            tail->next = attr;
+        }
     } else {
         elem->first_attribute_off = attr_off;
     }
+    p->current_elem_last_attr = attr;
     elem->attr_count++;
     return 0;
 }
@@ -236,6 +252,10 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
  * Names are NUL-terminated in-place AFTER '=' is consumed; values
  * are NUL-terminated in-place at the closing quote. */
 static int dp_parse_attrs(DParser* p, TaurusElement elem) {
+    /* Reset the per-element caches so dp_add_attr_inline and the
+     * xmlns wiring below can both run in O(1) per attr. */
+    p->current_elem_last_attr = NULL;
+    p->current_elem_last_ns = NULL;
     while (p->pos < p->end) {
         dp_skip_ws(p);
         if (p->pos >= p->end) return -1;
@@ -316,10 +336,18 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
             if (!*head_ptr) {
                 *head_ptr = ns;
             } else {
-                struct taurus_namespace* tail = *head_ptr;
-                while (tail->next) tail = tail->next;
-                tail->next = ns;
+                /* TODO 159 Phase G: use cached last-ns pointer for
+                 * O(1) wiring instead of walking to the tail. */
+                struct taurus_namespace* tail = p->current_elem_last_ns;
+                if (tail) {
+                    tail->next = ns;
+                } else {
+                    tail = *head_ptr;
+                    while (tail->next) tail = tail->next;
+                    tail->next = ns;
+                }
             }
+            p->current_elem_last_ns = ns;
             continue;
         }
 

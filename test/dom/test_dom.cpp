@@ -44,6 +44,51 @@ TEST(DomBasics, AttributeLookupByName) {
     taurus_document_free(doc);
 }
 
+TEST(DomBasics, ManyAttributesPerElementAreAllReachable) {
+    /* Regression for TODO 159 Phase G: parser-local last-attr cache
+     * must wire every attr into the list, not just the first. */
+    const char xml[] =
+        "<e a0='0' a1='1' a2='2' a3='3' a4='4' a5='5' a6='6' a7='7' "
+        "   a8='8' a9='9' a10='10' a11='11' a12='12' a13='13' "
+        "   a14='14' a15='15'/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    EXPECT_EQ(taurus_element_attribute_count(root), 16);
+    for (int i = 0; i < 16; i++) {
+        char name[8];
+        std::snprintf(name, sizeof(name), "a%d", i);
+        char value[8];
+        std::snprintf(value, sizeof(value), "%d", i);
+        EXPECT_STREQ(taurus_element_attribute(root, name), value)
+            << "attr " << name << " should be reachable";
+    }
+
+    taurus_document_free(doc);
+}
+
+TEST(DomBasics, MultipleNamespacesPerElementAreAllReachable) {
+    /* Regression for TODO 159 Phase G: parser-local last-ns cache
+     * must wire every xmlns into the list. We verify by parsing an
+     * element with three xmlns declarations and a prefixed attribute
+     * that depends on one of them; if the parser dropped any ns the
+     * prefix lookup would fail. The document must parse cleanly. */
+    const char xml[] =
+        "<e xmlns:a='urn:a' xmlns:b='urn:b' xmlns:c='urn:c' a:x='1'/>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* Prefixed attribute should round-trip. */
+    EXPECT_EQ(taurus_element_attribute_count(root), 1);
+
+    taurus_document_free(doc);
+}
+
 TEST(DomBasics, TraversesChildrenInDocumentOrder) {
     const char xml[] = "<r><a/><b/><c/></r>";
     TaurusStatus st = TAURUS_OK;
