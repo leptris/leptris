@@ -205,8 +205,24 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
      *   is pool-allocated; has_entities=0 (already resolved).
      * - No DTD + value has '&': leave value NULL, has_entities=1.
      *   Accessor expands predefined entities lazily on first read.
-     * - No '&': zero-copy, no expansion needed. */
-    if (val_len > 0 && memchr(val, '&', val_len) != NULL) {
+     * - No '&': zero-copy, no expansion needed.
+     *
+     * Short-value fast path (TODO 174): libc memchr has ~10ns setup
+     * cost even for 1-byte scans. For values <= 16 bytes (the common
+     * case — most attr values are 5-15 bytes), an inline byte loop is
+     * faster. Threshold tuned to L1 cache line size. */
+    int has_amp = 0;
+    if (val_len <= 16) {
+        const char* vp = val;
+        const char* vend = val + val_len;
+        while (vp < vend) {
+            if (*vp == '&') { has_amp = 1; break; }
+            vp++;
+        }
+    } else {
+        has_amp = memchr(val, '&', val_len) != NULL;
+    }
+    if (val_len > 0 && has_amp) {
         if (p->dtd) {
             TaurusStringView dsv = taurus_sv_from_ptr(val, val_len);
             char* expanded = taurus_decode_entities_view_with_dtd(
