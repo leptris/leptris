@@ -1,13 +1,40 @@
 ## [Unreleased]
 
-## [0.18.3] - Y-08-13
+## [0.18.3] - 2026-08-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — parser-local last-attr / last-ns caches (TODO 159 Phase G)
 
-### Changed
+`dp_add_attr_inline` and the xmlns wiring inside `dp_parse_attrs`
+both walked the existing list to find the tail on every insertion —
+O(K²) per element with K attrs. Add two parser-local caches
+(`current_elem_last_attr`, `current_elem_last_ns`) to DParser so
+each wiring is O(1). For typical web XML (K ≤ 5) the cost was
+small; for SVG / XSLT / config files (K = 20+) it was significant.
 
-- (describe changes here)
+Defensive walk fallback preserved for the impossible "cache NULL
+mid-parse" case. Correctness unchanged.
+
+### Performance — `xpath_result` struct free-list (TODO 162)
+
+Mirror of the nodeset free-list (v0.18.2 Phase B) but for
+`struct taurus_xpath_result`. Thread-local singly-linked free-list
+(cap 32). After warmup, zero heap ops per `taurus_xpath_eval` for
+the result struct. The value union is reused as the next-pointer
+slot while the struct is on the free-list — no struct size change.
+
+### Documentation — TODO 161 survey + TODO 162–165 scoping
+
+`TODO.fix/161-pugixml-gap-closure-survey.md` is an honest survey
+of the realistic remaining perf gap vs pugixml. The headline:
+taurus is already ahead on pure XPath (sub-µs simple, 2.7 µs
+complex) and competitive on full cycle (~3× slower than pugixml
+with the gap dominated by per-attr parse work, which is structural
+— pugixml ships fewer features per attr).
+
+`TODO.fix/162–165` capture the medium-leverage remaining items
+(result free-list, stack-allocated XPathContext, direct-pointer
+tree walk in VM, high-attr-count parse benchmark) so the next
+implementer can pick one without re-deriving context.
 
 
 ## [0.18.2] - 2026-08-13
