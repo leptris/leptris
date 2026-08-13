@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.18.3] - Y-08-13
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.18.2] - 2026-08-13
 
 ### Performance — thread-local nodeset free-list (TODO 159 Phase B)
