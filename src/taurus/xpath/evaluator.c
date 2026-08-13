@@ -380,6 +380,15 @@ void xpath_context_init_from_document(XPathContext* context) {
 static TAURUS_THREAD_LOCAL XPathNodeSet* xpath_nodeset_free_list;
 static TAURUS_THREAD_LOCAL size_t xpath_nodeset_free_list_count;
 
+/* Thread-local free-list for taurus_xpath_result structs (TODO 162).
+ * One result per taurus_xpath_eval call. Pattern matches the nodeset
+ * free-list. The struct's value union is reused as the next-pointer
+ * slot while on the free-list (smaller than adding a real next field
+ * to the struct). */
+#define XPATH_RESULT_FREE_LIST_CAP 32
+static TAURUS_THREAD_LOCAL struct taurus_xpath_result* xpath_result_free_list;
+static TAURUS_THREAD_LOCAL size_t xpath_result_free_list_count;
+
 XPathNodeSet* xpath_nodeset_new(void) {
     return xpath_nodeset_new_with_capacity(XPATH_NODESET_INLINE_CAPACITY);
 }
@@ -582,8 +591,21 @@ void xpath_nodeset_add_fast(XPathNodeSet* nodeset, void* node) {
 }
 
 struct taurus_xpath_result* xpath_result_new(XPathResultType type) {
-    struct taurus_xpath_result* result = TAURUS_ALLOC(struct taurus_xpath_result);
-    if (!result) return NULL;
+    struct taurus_xpath_result* result = NULL;
+
+    /* Fast path: pop from thread-local free-list (TODO 162). The
+     * value union is reused as the next-pointer slot while the
+     * struct is on the free-list — its lifetime is finished and
+     * no live value occupies the union. */
+    if (xpath_result_free_list) {
+        result = xpath_result_free_list;
+        xpath_result_free_list = (struct taurus_xpath_result*)
+            result->value.nodeset_value;  /* next pointer */
+        xpath_result_free_list_count--;
+    } else {
+        result = TAURUS_ALLOC(struct taurus_xpath_result);
+        if (!result) return NULL;
+    }
 
     result->type = type;
 
@@ -626,7 +648,18 @@ void xpath_result_free(struct taurus_xpath_result* result) {
             break;
     }
 
-    TAURUS_FREE(result);
+    /* Push onto thread-local free-list (TODO 162). Cap prevents
+     * unbounded growth. The value union is safe to overwrite with
+     * the next-pointer because the live payload has just been
+     * released above. */
+    if (xpath_result_free_list_count < XPATH_RESULT_FREE_LIST_CAP) {
+        result->type = (XPathResultType)0;
+        result->value.nodeset_value = (XPathNodeSet*)xpath_result_free_list;
+        xpath_result_free_list = result;
+        xpath_result_free_list_count++;
+    } else {
+        TAURUS_FREE(result);
+    }
 }
 
 /* ============================================================================
