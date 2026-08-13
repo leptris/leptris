@@ -2,8 +2,30 @@
 
 ## Status
 
-Pending. Identified in [[161-pugixml-gap-closure-survey]] as
-TODO 159 Phase C — direct-pointer tree walk in the bytecode VM.
+**Investigated, deferred.** Two factors pushed this out:
+
+1. The existing `taurus_compact_int32_decode` already has the
+   fast path inline in its body. With LTO (the default for
+   Release) the compiler inlines the function across TUs, so the
+   call overhead disappears. The inline-fast-path version would
+   only help non-LTO builds — uncommon in production.
+
+2. Touching 5+ DOM headers (element.h, text.h, comment.h, cdata.h,
+   pi.h) for a no-op-under-LTO change risks introducing subtle
+   sentinel-value mismatches. The current `INT32_MIN` sentinel
+   lives in compact.c as `TAURUS_INT32_OVERFLOW_SENTINEL`; an
+   inline version in compact.h must match exactly.
+
+If a future profile shows the compact decode as a hot spot
+(likely only on non-LTO builds or with a much smaller working
+set), revisit by:
+- Moving `TAURUS_INT32_OVERFLOW_SENTINEL` from compact.c to compact.h
+- Adding `static inline taurus_compact_int32_decode_inline` with
+  the same fast-path/slow-path split
+- Updating the 13 call sites in element.h/text.h/comment.h/cdata.h/pi.h
+
+For now, the existing inline accessors plus LTO cover the common
+case.
 
 ## Why
 
