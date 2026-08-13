@@ -1,5 +1,75 @@
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-13
+
+### Performance — ABI constraint removed; aggressive build flags + amalgamation
+
+User explicitly removed the ABI-stability constraint, opening up
+build-system techniques that were previously off-limits. Result:
+**3-4× speedup** on parse-heavy workloads via opt-in flags, plus
+amalgamation build mode as an additional cross-TU inlining path.
+
+#### TODO 167 — Build-system wins
+
+- `TAURUS_OPT_LEVEL=aggressive` opt-in for `-O3` (default stays `-O2`).
+- `TAURUS_TARGET_ARCH=native` opt-in for `-march=native` (gcc/clang)
+  or `/arch:AVX2` (MSVC).
+- `-fno-semantic-interposition` auto-applied on shared-library builds
+  when supported (~5% on shared lib builds).
+- `CMakePresets.json` with five presets: `default`, `fast`, `pgo-generate`,
+  `pgo-use`, `debug`. The `fast` preset bundles -O3 + march=native + LTO
+  + static linking — recommended for maximum single-machine throughput.
+
+**Measured impact** (default Release vs `fast` preset on this machine):
+
+| benchmark | default (-O2) | fast (-O3+march+LTO) | speedup |
+|---|---|---|---|
+| Parse + Root | 30.37 µs | 9.22 µs | **3.3×** |
+| Tree Traversal | 8.28 µs | 2.08 µs | **4.0×** |
+| Attribute Access | 2.33 µs | 1.44 µs | 1.6× |
+| Complex XPath | 5.13 µs | 2.41 µs | **2.1×** |
+
+benchmark_many_attrs (median, gap to pugixml):
+
+| K attrs/elem | default taurus | fast taurus | default ratio | fast ratio |
+|---|---|---|---|---|
+| 5 | 329 µs | 148 µs | 10.05× | **4.34×** |
+| 50 | 2505 µs | 1078 µs | 8.48× | **2.78×** |
+| 100 | 6885 µs | 3209 µs | 13.44× | **4.50×** |
+
+#### TODO 170 — Amalgamation build
+
+- `TAURUS_AMALGAMATED=ON` generates a single `taurus_amalgamated.c`
+  that #includes all 55 internal sources as one translation unit.
+  The compiler sees the whole library at once and inlines across
+  what would otherwise be TU boundaries — same effect as LTO but at
+  compile time.
+- Use cases: toolchains without reliable LTO, distribution as a
+  single .c file, or incremental speedup on top of LTO.
+- **Amalgamation at -O2 alone is competitive with the fast preset**
+  (single-TU visibility recovers most of what -O3+march+LTO buy).
+
+#### Drive-by — dead code removal
+
+Removed dead declarations of `taurus_pi_free` / `taurus_pi_free_chain`
+for doc-level PIs from `taurus_memory.h`. These were never implemented
+(doc-level PIs are malloc'd/freed inline in `direct_parse.c` and
+`taurus.c`). Their names collided with the tree-node version in
+`dom/pi.h` under amalgamation.
+
+### Deferred (documented in TODO.fix/)
+
+- **TODO 168 — Computed-goto VM dispatch.** ~5% gain on dispatch-heavy
+  queries vs ~150 hand-edits in vm.c. PGO via TODO 167 captures most
+  of the per-handler dispatch prediction win without code churn.
+- **TODO 169 — Compact 1-byte in-page pointers.** Multi-week refactor
+  (5 phases). Would deliver another 1.5-2× on cache-bound workloads.
+  Documented scope; Phase A (encoding primitives) is the recommended
+  starting point.
+- **TODO 171 — Gap-based text accumulation.** Marginal for taurus's
+  typical workload (mostly plain-text XML, sparse CDATA).
+
+
 ## [0.18.5] - 2026-08-13
 
 ### Performance — pugixml-inspired parse-path cleanups (TODO 166)
