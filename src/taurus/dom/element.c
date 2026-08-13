@@ -261,14 +261,10 @@ int taurus_element_add_attribute(TaurusElement elem,
         attr->name_hash *= 16777619u;
     }
 
-    /* CRITICAL FIX: Initialize namespace/prefix fields to prevent stale data
-     * These fields are not set during attribute creation, but they are accessed
-     * during finalize_element_strings. Without initialization, they contain
-     * garbage data from pool allocation, causing crashes when memory is reused. */
-    attr->prefix_view = taurus_sv_empty();
-    attr->namespace_uri_view = taurus_sv_empty();
-    attr->prefix = NULL;
-    attr->namespace_uri = NULL;
+    /* CRITICAL FIX: Initialize namespace/prefix fields to prevent stale data.
+     * TODO 173: these now live in the side-cache struct (attr->ns_cache).
+     * NULL ns_cache = no prefix / namespace_uri = empty/NULL. */
+    attr->ns_cache = NULL;
 
     /* EAGER STRING CONVERSION: Convert attribute name and value to NULL-terminated C-strings.
      *
@@ -363,10 +359,7 @@ int taurus_element_add_attribute_zero_copy(TaurusElement elem,
         attr->name_hash *= 16777619u;
     }
 
-    attr->prefix_view = taurus_sv_empty();
-    attr->namespace_uri_view = taurus_sv_empty();
-    attr->namespace_uri = NULL;
-    attr->prefix = NULL;
+    attr->ns_cache = NULL;  /* TODO 173: side cache allocated on demand. */
 
     if (memchr(value_view.data, '&', value_view.length) != NULL) {
         char* value_storage = (char*)taurus_pool_alloc(pool, value_view.length + 1);

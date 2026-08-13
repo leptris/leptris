@@ -472,10 +472,7 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
             attr->value_view = taurus_sv_empty();
         }
 
-        attr->namespace_uri = NULL;
-        attr->prefix = NULL;
-        attr->namespace_uri_view = taurus_sv_empty();
-        attr->prefix_view = taurus_sv_empty();
+        attr->ns_cache = NULL;  /* TODO 173 */
         attr->has_entities = 0;
         attr->next = NULL;
 
@@ -1181,9 +1178,8 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
         /* Copy StringView data (zero-copy) */
         dst_attr->name_view = src_attr->name_view;
         dst_attr->value_view = src_attr->value_view;
-        dst_attr->prefix_view = src_attr->prefix_view;
-        dst_attr->namespace_uri_view = src_attr->namespace_uri_view;
         dst_attr->name_hash = src_attr->name_hash;
+        dst_attr->ns_cache = NULL;  /* set below if source has cache */
 
         /* Copy cached strings if they exist */
         if (src_attr->name) {
@@ -1192,11 +1188,21 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
         if (src_attr->value) {
             dst_attr->value = taurus_pool_strdup(pool, src_attr->value);
         }
-        if (src_attr->prefix) {
-            dst_attr->prefix = taurus_pool_strdup(pool, src_attr->prefix);
-        }
-        if (src_attr->namespace_uri) {
-            dst_attr->namespace_uri = taurus_pool_strdup(pool, src_attr->namespace_uri);
+
+        /* Copy namespace cache if present (TODO 173). */
+        if (src_attr->ns_cache) {
+            struct taurus_attr_ns_cache* dst_ns =
+                (struct taurus_attr_ns_cache*)taurus_pool_alloc(
+                    pool, sizeof(struct taurus_attr_ns_cache));
+            if (dst_ns) {
+                dst_ns->prefix_view = src_attr->ns_cache->prefix_view;
+                dst_ns->namespace_uri_view = src_attr->ns_cache->namespace_uri_view;
+                dst_ns->prefix = src_attr->ns_cache->prefix
+                    ? taurus_pool_strdup(pool, src_attr->ns_cache->prefix) : NULL;
+                dst_ns->namespace_uri = src_attr->ns_cache->namespace_uri
+                    ? taurus_pool_strdup(pool, src_attr->ns_cache->namespace_uri) : NULL;
+                dst_attr->ns_cache = dst_ns;
+            }
         }
 
         /* Copy entity flag */

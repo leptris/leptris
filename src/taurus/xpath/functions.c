@@ -1652,12 +1652,15 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
 
             TaurusMemoryPool* pool = context->document ? context->document->pool : NULL;
 
-            /* Get namespace URI */
-            const char* ns_uri = attr->namespace_uri;
-            if (!ns_uri && !taurus_sv_is_empty(&attr->namespace_uri_view)) {
-                ns_uri = pool
-                    ? taurus_sv_to_cstr_pooled(&attr->namespace_uri_view, pool)
-                    : taurus_sv_to_cstr(&attr->namespace_uri_view);
+            /* Get namespace URI (TODO 173: via ns_cache side table) */
+            const char* ns_uri = attr_get_namespace_uri(attr);
+            if (!ns_uri) {
+                TaurusStringView ns_view = attr_get_namespace_uri_view(attr);
+                if (!taurus_sv_is_empty(&ns_view)) {
+                    ns_uri = pool
+                        ? taurus_sv_to_cstr_pooled(&ns_view, pool)
+                        : taurus_sv_to_cstr(&ns_view);
+                }
             }
 
             /* Get attribute name */
@@ -1689,12 +1692,15 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
                 }
                 /* Also check if the prefix is "xml" (for compatibility) */
                 else {
-                    const char* prefix = attr->prefix;
-                    if (!prefix && !taurus_sv_is_empty(&attr->prefix_view)) {
-                        TaurusMemoryPool* pool2 = context->document ? context->document->pool : NULL;
-                        prefix = pool2
-                            ? taurus_sv_to_cstr_pooled(&attr->prefix_view, pool2)
-                            : taurus_sv_to_cstr(&attr->prefix_view);
+                    const char* prefix = attr_get_prefix(attr);
+                    if (!prefix) {
+                        TaurusStringView pfx_view = attr_get_prefix_view(attr);
+                        if (!taurus_sv_is_empty(&pfx_view)) {
+                            TaurusMemoryPool* pool2 = context->document ? context->document->pool : NULL;
+                            prefix = pool2
+                                ? taurus_sv_to_cstr_pooled(&pfx_view, pool2)
+                                : taurus_sv_to_cstr(&pfx_view);
+                        }
                     }
                     if (prefix && strcmp(prefix, "xml") == 0) {
                         is_xml_lang = 1;
@@ -1724,7 +1730,7 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
             TaurusMemoryPool* free_pool = context->document ? context->document->pool : NULL;
             if (!free_pool) {
                 if (attr->name != attr_name && attr_name) free((char*)attr_name);
-                if (attr->namespace_uri != ns_uri && ns_uri) free((char*)ns_uri);
+                if (attr_get_namespace_uri(attr) != ns_uri && ns_uri) free((char*)ns_uri);
             }
             /* Pool-allocated: pool will reclaim on document free. */
 

@@ -198,8 +198,6 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
 
     attr->name_view = taurus_sv_from_ptr(name, name_len);
     attr->value_view = taurus_sv_from_ptr(val, val_len);
-    attr->prefix_view = taurus_sv_empty();
-    attr->namespace_uri_view = taurus_sv_empty();
     attr->name = name;            /* zero-copy, NUL-terminated in buffer */
     /* Entity handling for attr values:
      * - DTD present + value has '&': eagerly expand via DTD-aware
@@ -228,8 +226,7 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
         attr->value = val;
         attr->has_entities = 0;
     }
-    attr->prefix = NULL;
-    attr->namespace_uri = NULL;
+    attr->ns_cache = NULL;  /* TODO 173: side cache allocated on demand */
     attr->next = NULL;
 
     /* FNV-1a hash deferred to first read via attr_name_hash() (TODO 172).
