@@ -197,9 +197,9 @@ struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     while (attr) {
         /* Hash pre-filter: reject most non-matching attrs in one
-         * integer comparison. Only when hash AND length match do
-         * we do the full memcmp. */
-        if (attr->name_hash == name_hash &&
+         * integer comparison. Lazy compute on first read (TODO 172).
+         * Only when hash AND length match do we do the full memcmp. */
+        if (attr_name_hash(attr) == name_hash &&
             attr->name_view.length == name_len) {
             if (attr->name && memcmp(attr->name, name, name_len) == 0) {
                 return attr;

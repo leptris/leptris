@@ -1356,8 +1356,9 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                     int found = 0;
                     while (a) {
                         /* Hash pre-filter first; only fall through to
-                         * length + memcmp on hash match. */
-                        if (attr_name && a->name_hash == name_hash &&
+                         * length + memcmp on hash match. Lazy compute
+                         * on first read (TODO 172). */
+                        if (attr_name && attr_name_hash(a) == name_hash &&
                             a->name_view.length == name_len &&
                             a->name_view.data &&
                             memcmp(attr_name, a->name_view.data, name_len) == 0) {
@@ -1409,9 +1410,9 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                         taurus_element_get_first_attribute(elem);
                     int match = 0;
                     while (a) {
-                        /* Hash + length pre-filter before memcmp. */
+                        /* Hash + length pre-filter before memcmp. Lazy hash. */
                         if (attr_name && expected &&
-                            a->name_hash == name_hash &&
+                            attr_name_hash(a) == name_hash &&
                             a->name_view.length == name_len &&
                             a->value_view.length == value_len &&
                             a->name_view.data && a->value_view.data &&
