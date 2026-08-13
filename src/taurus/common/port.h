@@ -48,6 +48,40 @@ static __inline int taurus_port_ctz(uint32_t mask) {
 #  define TAURUS_CTZ(mask) taurus_port_ctz((uint32_t)(mask))
 #endif
 
+/* ---- Inline / noinline hints ------------------------------------------ */
+/* TAURUS_NOINLINE keeps cold paths (DOCTYPE, entity expansion, error
+ * recovery) out of the hot path's i-cache working set. The hot parse
+ * loop shares a translation unit with code that runs 0–1 times per
+ * document; without noinline the compiler may inline rarely-used
+ * branches into the loop body, polluting the instruction cache.
+ *
+ * TAURUS_ALWAYS_INLINE is the inverse — use sparingly, only on helpers
+ * that are proven hot and too small for the call overhead. */
+#if defined(__GNUC__) || defined(__clang__)
+#  define TAURUS_NOINLINE __attribute__((noinline))
+#  define TAURUS_ALWAYS_INLINE __attribute__((always_inline)) inline
+#elif defined(_MSC_VER)
+#  define TAURUS_NOINLINE __declspec(noinline)
+#  define TAURUS_ALWAYS_INLINE __forceinline
+#else
+#  define TAURUS_NOINLINE
+#  define TAURUS_ALWAYS_INLINE inline
+#endif
+
+/* ---- Unaligned-load safety -------------------------------------------- */
+/* TAURUS_UNALIGNED_OK is set on platforms where unaligned loads of
+ * 32-bit values are safe and cheap (x86, ARM64, most 64-bit targets).
+ * Used to guard 4-byte ASCII fast paths in parse loops. On strict
+ * alignment architectures (older ARMs, some MIPS) the guard falls
+ * back to the byte-at-a-time loop. */
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86) \
+    || defined(__aarch64__) || defined(_M_ARM64) || defined(__powerpc64__) \
+    || defined(__riscv_xlen) && (__riscv_xlen >= 64)
+#  define TAURUS_UNALIGNED_OK 1
+#else
+#  define TAURUS_UNALIGNED_OK 0
+#endif
+
 /* ---- Library-load constructor ----------------------------------------- */
 /* Runs a function once at DLL/EXE load. GCC/Clang use the constructor
  * attribute; MSVC uses the .CRT$XCU section with a function pointer.
