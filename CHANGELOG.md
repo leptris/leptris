@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.19.1] - Y-08-13
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.19.0] - 2026-08-13
 
 ### Performance — ABI constraint removed; aggressive build flags + amalgamation
