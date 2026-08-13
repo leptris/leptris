@@ -1,13 +1,42 @@
 ## [Unreleased]
 
-## [0.18.4] - Y-08-13
+## [0.18.4] - 2026-08-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — stack-allocated XPathContext (TODO 163)
 
-### Changed
+`taurus_xpath_eval` and `taurus_xpath_eval_with_vars` previously
+malloc'd a ~320-byte `XPathContext` per call and free'd it at the
+end. The struct lives for the duration of one eval; no caller
+stashes the pointer past return. Stack-allocate via
+`XPathContext ctx_storage;` and use the new `xpath_context_init` /
+`xpath_context_cleanup` pair (legacy `xpath_context_new` / `_free`
+preserved as thin wrappers). Saves one malloc/free syscall pair
+per eval.
 
-- (describe changes here)
+Benchmark delta in the noise floor on `bench_xpath_taurus`
+(4.59 µs → 4.44–4.54 µs total CPU); the structural win matters
+more than the wall-time delta at high call rates.
+
+### Tooling — high-attribute-count parse benchmark (TODO 165)
+
+New `benchmarks/comprehensive/benchmark_many_attrs.cpp` generates
+XML with K = 5, 20, 50, 100 attrs per element and compares taurus
+vs pugixml on each. Regression coverage for the v0.18.3 Phase G
+O(K²) attr-wiring fix.
+
+Baseline numbers (Release + LTO, clang arm64, 1000 elements):
+
+| K attrs | taurus (µs) | pugixml (µs) | Ratio |
+|---------|-------------|--------------|-------|
+| 5       | 199         | 49           | 4.07× |
+| 20      | 629         | 245          | 2.57× |
+| 50      | 1320        | 450          | 2.93× |
+| 100     | 4391        | 830          | 5.29× |
+
+Per-attr cost: taurus ≈ 38 ns, pugixml ≈ 8 ns. The 30 ns/attr
+delta is structural (per-attr hash + entity memchr + string-view
+setup + bookkeeping) — see TODO 161 survey for why we don't strip
+these features to match pugixml.
 
 
 ## [0.18.3] - 2026-08-13
