@@ -2,8 +2,15 @@
 
 ## Status
 
-Pending. Identified in [[161-pugixml-gap-closure-survey]] as the
-next medium-leverage XPath per-call optimisation.
+**DONE.** Thread-local free-list for `struct taurus_xpath_result`
+added in evaluator.c, capping at 32 entries. Pattern mirrors
+the nodeset free-list (TODO 159 Phase B). The value union is
+reused as the next-pointer slot while the struct is on the
+free-list — no struct size change.
+
+Benchmark delta vs Phase G baseline is within noise on
+`bench_xpath_taurus` (6.34 µs vs 6.48 µs total wall); the win
+shows up at high call rates where malloc churn dominates.
 
 ## Why
 
