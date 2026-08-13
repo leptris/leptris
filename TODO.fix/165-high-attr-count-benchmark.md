@@ -2,7 +2,25 @@
 
 ## Status
 
-Pending. Identified while writing TODO 159 Phase G regression tests.
+**DONE.** `benchmarks/comprehensive/benchmark_many_attrs.cpp`
+added; registered in `benchmarks/CMakeLists.txt`.
+
+Benchmark output (Release + LTO, clang arm64, 1000 elements):
+
+| K attrs | taurus (µs) | pugixml (µs) | Ratio |
+|---------|-------------|--------------|-------|
+| 5       | 199         | 49           | 4.07× |
+| 20      | 629         | 245          | 2.57× |
+| 50      | 1320        | 450          | 2.93× |
+| 100     | 4391        | 830          | 5.29× |
+
+Per-attr cost computed: taurus ≈ 38 ns/attr, pugixml ≈ 8 ns/attr.
+The 30 ns/attr delta is structural (FNV-1a hash + entity memchr +
+string-view setup + per-attr bookkeeping) — see TODO 161 survey
+for why we don't strip these features to match pugixml.
+
+The K=100 case is the most sensitive regression target — any
+per-attr cost increase should show up here first.
 
 ## Why
 

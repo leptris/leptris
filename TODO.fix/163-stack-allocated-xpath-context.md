@@ -2,8 +2,17 @@
 
 ## Status
 
-Pending. Identified in [[161-pugixml-gap-closure-survey]] as a
-medium-leverage per-call XPath overhead reduction.
+**DONE.** Added `xpath_context_init` / `xpath_context_cleanup` to
+`evaluator.h` / `evaluator.c`. Updated `taurus_xpath_eval` and
+`taurus_xpath_eval_with_vars` in `xpath_public.c` to stack-allocate
+the context via `XPathContext ctx_storage;` instead of malloc'ing.
+Legacy `xpath_context_new` / `xpath_context_free` preserved as
+thin wrappers (malloc + init / cleanup + free) for any external
+callers.
+
+Benchmark delta is in the noise floor (4.59 µs → 4.44–4.54 µs
+total CPU on `bench_xpath_taurus`). Structural win: one fewer
+malloc/free syscall per `taurus_xpath_eval` call.
 
 ## Why
 
