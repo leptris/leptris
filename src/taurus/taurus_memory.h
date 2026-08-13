@@ -171,16 +171,10 @@ void taurus_xpath_result_free_internal(struct taurus_xpath_result* result);
  */
 struct taurus_processing_instruction* taurus_pi_new(const char* target, const char* data);
 
-/**
- * Free processing instruction (single, doesn't free next)
- * @param pi Processing instruction to free
- */
-void taurus_pi_free(struct taurus_processing_instruction* pi);
-
-/**
- * Free processing instruction chain (recursive, frees entire linked list)
- * @param pi First processing instruction in chain
- */
-void taurus_pi_free_chain(struct taurus_processing_instruction* pi);
+/* taurus_pi_free / taurus_pi_free_chain for doc-level PIs were declared
+ * here historically but never implemented (doc-level PIs are malloc'd/
+ * freed inline in direct_parse.c and taurus.c). The names collide with
+ * the tree-node version in dom/pi.h under the amalgamation build (TODO 170).
+ * Dead declarations removed. */
 
 #endif /* TAURUS_MEMORY_H */

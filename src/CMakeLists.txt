@@ -6,6 +6,7 @@
 
 option(TAURUS_BUILD_STATIC "Build static library" ON)
 option(TAURUS_BUILD_SHARED "Build shared library" OFF)
+option(TAURUS_AMALGAMATED "Build the library from a single generated .c (TODO 170)" OFF)
 
 # Ensure at least one library type is built
 if(NOT TAURUS_BUILD_STATIC AND NOT TAURUS_BUILD_SHARED)
@@ -95,10 +96,52 @@ set(TAURUS_SOURCES
 )
 
 # ============================================================================
+# Amalgamation build (TODO 170)
+# ============================================================================
+# Generate a single .c file that #includes all internal sources, then build
+# the library from this one TU instead of the per-file object library. Gets
+# cross-TU inlining without requiring LTO; useful for toolchains that lack
+# reliable LTO, or for distribution as a single source file.
+#
+# This is the pugixml approach (one 13,800-line .cpp). When TAURUS_AMALGAMATED
+# is ON, the object library wraps the single generated file instead of the
+# per-file source list.
+if(TAURUS_AMALGAMATED)
+    set(TAURUS_AMALGAMATED_C "${CMAKE_CURRENT_BINARY_DIR}/taurus_amalgamated.c")
+    file(WRITE "${TAURUS_AMALGAMATED_C}"
+"/* Auto-generated amalgamation build (TODO 170). Do not edit.\n"
+" * Generated from ${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt at configure time.\n"
+" * Build with -DTAURUS_AMALGAMATED=ON. The whole library compiles as one\n"
+" * translation unit so static helpers inline across what would otherwise be\n"
+" * TU boundaries — the same effect as LTO but at compile time.\n"
+" */\n\n")
+
+    # Append #include for every source. Paths are relative to src/ so the
+    # file's own #include directives resolve identically to the per-file build.
+    foreach(_src ${TAURUS_SOURCES})
+        file(APPEND "${TAURUS_AMALGAMATED_C}" "#include \"${_src}\"\n")
+    endforeach()
+
+    # Replace the source list with the amalgamated file so the object
+    # library wraps a single TU.
+    set(TAURUS_SOURCES_AMALGAMATED "${TAURUS_AMALGAMATED_C}")
+    message(STATUS "Amalgamation build: ENABLED → ${TAURUS_AMALGAMATED_C}")
+else()
+    set(TAURUS_SOURCES_AMALGAMATED "${TAURUS_SOURCES}")
+endif()
+
+# ============================================================================
 # Object Library (shared between static and shared)
 # ============================================================================
 
-add_library(taurus_objects OBJECT ${TAURUS_SOURCES})
+if(TAURUS_AMALGAMATED)
+    add_library(taurus_objects OBJECT ${TAURUS_SOURCES_AMALGAMATED})
+    # The amalgamated TU needs the include search paths from src/ downward.
+    target_include_directories(taurus_objects PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+else()
+    add_library(taurus_objects OBJECT ${TAURUS_SOURCES})
+endif()
 
 set_target_properties(taurus_objects PROPERTIES
     C_STANDARD 99
