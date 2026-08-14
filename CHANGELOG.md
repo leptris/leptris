@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.19.5] - Y-08-14
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.19.4] - 2026-08-14
 
 ### Foundation for compact-pointer migration (TODOs 178–182)
