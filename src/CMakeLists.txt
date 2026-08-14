@@ -36,6 +36,7 @@ set(TAURUS_SOURCES
 
     # Memory management
     taurus/memory/pool.c
+    taurus/memory/arena.c
     taurus/memory/compact_allocator.c
     taurus/dom/compact.c
     taurus/dom/root_doc_map.c
