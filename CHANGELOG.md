@@ -1,13 +1,57 @@
 ## [Unreleased]
 
-## [0.19.5] - Y-08-14
+## [0.19.5] - 2026-08-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — AOT SIMD framework (TODO 175)
 
-### Changed
+simdjson-pattern AOT SIMD: hand-written AVX2/NEON intrinsics compiled
+ahead-of-time with per-file flags, runtime dispatch via
+`__builtin_cpu_supports` (x86) / architectural baseline (arm64 NEON).
+No JIT, no LLVM dependency, zero runtime deps.
 
-- (describe changes here)
+New `common/cpu.{h,c}` (ISA macros + `taurus_cpu_detect()`) and
+`common/simd_text.{h,c}` (`taurus_text_contains`/`find`/`find3`
+primitives, function-pointer dispatch). `simd_text_avx2.c` compiled
+with `-mavx2`; `simd_text_neon.c` baseline on aarch64. CMake wires
+per-ISA TUs and reports at configure time.
+
+### Performance — SIMD find3 for comment/CDATA end detection (TODO 177)
+
+First real consumer of the framework. The comment (`-->`) and CDATA
+(`]]>`) end scans in `direct_parse.c` now locate 3-byte terminators
+in one SIMD pass instead of memchr-anchor + per-candidate verify:
+
+- NEON: `cand[i] = eq0[i] & eq1[i+1] & eq2[i+2]` via `vextq_u8` shifts
+- AVX2: `match = m0 & (m1 >> 1) & (m2 >> 2)` in movemask space
+
+Chunks advance width−2 so boundary-straddling triples re-check;
+scalar tail covers remainders. PI's single-char `?` scan stays on
+`memchr` (already optimal). Dash-run-heavy bodies (adoc `----`
+separator comments) no longer re-verify at every candidate byte.
+
+#### Correctness hardening
+
+Two defects caught and fixed by CI + new specs: MSVC rejects
+`-mavx2` (Windows link failure → `TAURUS_HAS_AVX2_BUILD` build guard
+dispatches to scalar there), and an inverted `vextq_u8` operand order
+made the NEON vector loop silently miss matches — the existing specs
+only exercised the scalar tail. New specs pin the vector-loop region:
+`Find3LongBodyEveryPosition` (match at every offset in 80-byte body),
+`Find3DashRunHeavyBody` (200-dash run), `Find3TerminatorAtVeryEnd`.
+
+#### Measured impact
+
+K=100 many-attrs median 4137 µs — within noise of v0.19.4 (4172–4490);
+that benchmark has few comments. The find3 win scales with
+comment/CDATA body length and anchor-byte density.
+
+### Planning — compact-pointer Phases C/D blocked
+
+TODO 180/181 marked blocked: pool's 32 KB pages are independent
+mallocs that land megabytes apart (macOS ASLR / Linux glibc), so
+cp16's ±256 KB range silently truncates cross-page tree edges.
+TODO 183 (contiguous per-document arena, pugixml-style allocator)
+written as the prerequisite. All 486 tests pass.
 
 
 ## [0.19.4] - 2026-08-14
