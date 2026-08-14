@@ -182,10 +182,18 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
 void taurus_pool_destroy(TaurusMemoryPool* pool) {
     if (!pool) return;
 
-    /* Arena mode: everything handed out (pages of nothing, string-cache
-     * entries, node structs, content buffers) lives inside the single
-     * arena allocation. Destroy it (when owned) and the pool struct. */
+    /* Arena mode: everything handed out during PARSE lives inside the
+     * single arena allocation. Post-parse mutation overflow went to
+     * tracked extension blocks — free those, then the arena (when
+     * owned) and the pool struct. */
     if (pool->arena) {
+        TaurusBigAlloc* big = pool->first_big_alloc;
+        while (big) {
+            TaurusBigAlloc* next = big->next;
+            taurus_free_hook(big->ptr);
+            taurus_free_hook(big);
+            big = next;
+        }
         if (pool->arena_owned) {
             taurus_arena_destroy(pool->arena);
         }
@@ -277,14 +285,42 @@ static void* pool_alloc_oversized(TaurusMemoryPool* pool, size_t size) {
     return ptr;
 }
 
+/* Arena-mode extension: a request that doesn't fit in the sized span
+ * (post-parse mutation growth — element_create/append after the parse
+ * sized the arena from the document) is satisfied by a tracked malloc
+ * block, restoring the pool's never-fail contract. Parse-time
+ * allocations stay inside the contiguous span; extensions only exist
+ * for overflow. The tracking node itself comes from taurus_alloc_hook
+ * directly (NOT a recursive pool_alloc) so a near-full arena can't
+ * loop. Freed by taurus_pool_destroy via the big-alloc list. */
+static void* pool_alloc_arena_extension(TaurusMemoryPool* pool, size_t size) {
+    void* ptr = taurus_alloc_hook(ALIGN_SIZE(size));
+    if (!ptr) return NULL;
+    TaurusBigAlloc* node =
+        (TaurusBigAlloc*)taurus_alloc_hook(sizeof(TaurusBigAlloc));
+    if (!node) {
+        taurus_free_hook(ptr);
+        return NULL;
+    }
+    node->ptr  = ptr;
+    node->size = size;
+    node->next = NULL;
+    *pool->last_big_alloc_link = node;
+    pool->last_big_alloc_link  = &node->next;
+    return ptr;
+}
+
 void* taurus_pool_alloc(TaurusMemoryPool* pool, size_t size) {
     if (!pool || size == 0) return NULL;
 
-    /* Arena mode: one contiguous span, hard-NULL exhaustion. Never
-     * reaches the oversized path — a request that doesn't fit simply
-     * fails (the TODO 183 contract). */
+    /* Arena mode: parse-time allocations live in the one contiguous
+     * span. Overflow (post-parse mutation growth) extends via a
+     * tracked block — the pool never hard-fails, matching the page
+     * pool's contract; only the SPAN's contiguity is parse-scoped. */
     if (pool->arena) {
-        return taurus_arena_alloc(pool->arena, size);
+        void* p = taurus_arena_alloc(pool->arena, size);
+        if (p) return p;
+        return pool_alloc_arena_extension(pool, size);
     }
 
     /* Align size to 8 bytes for performance and alignment requirements */
@@ -338,9 +374,11 @@ void* taurus_pool_alloc_batch(TaurusMemoryPool* pool, size_t item_size, size_t c
     if (!pool || item_size == 0 || count == 0) return NULL;
 
     /* Arena mode: one bump for the whole batch — contiguous by
-     * construction. */
+     * construction. Overflow extends (mutation growth). */
     if (pool->arena) {
-        return taurus_arena_alloc(pool->arena, item_size * count);
+        void* p = taurus_arena_alloc(pool->arena, item_size * count);
+        if (p) return p;
+        return pool_alloc_arena_extension(pool, item_size * count);
     }
 
     /* Align item size */
@@ -393,10 +431,17 @@ void* taurus_pool_alloc_node_with_content(TaurusMemoryPool* pool,
      * oversized content. This is strictly better than the page-mode
      * split (which parks big content in a separate oversized malloc);
      * here the content stays inside the span, so nothing an edge could
-     * point at ever leaves it. */
+     * point at ever leaves it. Overflow extends via two pool allocs. */
     if (pool->arena) {
-        return taurus_arena_alloc_node_with_content(
+        void* node = taurus_arena_alloc_node_with_content(
             pool->arena, struct_size, content_size, content_out);
+        if (node) return node;
+        char* struct_ptr = (char*)taurus_pool_alloc(pool, struct_size);
+        if (!struct_ptr) return NULL;
+        char* content = (char*)taurus_pool_alloc(pool, content_size + 1);
+        if (!content) return NULL;
+        *content_out = content;
+        return struct_ptr;
     }
 
     size_t aligned_struct = ALIGN_SIZE(struct_size);
