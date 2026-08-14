@@ -1,13 +1,45 @@
 ## [Unreleased]
 
-## [0.19.7] - Y-08-14
+## [0.19.7] - 2026-08-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Foundation — arena-backed pool mode (TODO 183 Phase 2)
 
-### Changed
+The pool can now route every allocation through one contiguous
+arena: `taurus_pool_create_arena_backed(arena, owns_arena)`.
+With `pool->arena` set, `alloc`/`calloc`/`alloc_batch`/`strdup`/
+string-interning and `alloc_node_with_content` all bump-allocate
+inside the single arena span — every pointer the pool hands out
+lies within `[arena->base, +size)`, and exhaustion is a hard NULL
+(never a scattered fallback malloc).
 
-- (describe changes here)
+`alloc_node_with_content` is strictly better in arena mode:
+oversized content stays in-span in one contiguous bump, where page
+mode parks it in a separate oversized malloc — the exact layout
+that silently truncated compact-pointer tree edges during the
+TODO 180 Phase C attempt.
+
+`owns_arena=0`: a caller-managed arena survives pool destroy —
+the shape the parser will use in Phase 3. Page mode is completely
+untouched; zero behavioral change for existing callers.
+
+Routing: `taurus_pool_alloc` → `taurus_arena_alloc`;
+`alloc_batch` → single arena bump; `node_with_content` → arena
+node+content; `get_base` → arena base; `total_size`/`used_size`/
+`page_count` → arena size/used/1; `destroy` → arena (when owned).
+
+9 new specs in `test/memory/test_pool_arena.cpp`: span containment
+across 200 allocations, hard-null exhaustion (no fallback), strdup
+routing, 40 KB node+content contiguity in-span, string-interning
+dedup on the arena, stats reflection, borrowed-arena lifetime,
+page-mode pool not arena-backed.
+
+All 506 tests pass (497 + 9 new).
+
+Next: Phase 3 — `direct_parse` pre-sizes the arena (element count
+from document length, attr count from a quote pre-scan) and creates
+the pool arena-backed, making every parse allocation contiguous.
+Then Phase 5 retries compact-pointer Phases C/D on the contiguous
+layout.
 
 
 ## [0.19.6] - 2026-08-14
