@@ -201,7 +201,8 @@ static inline void dp_wire_child(DParser* p, TaurusElement parent,
  * inputs, so has_entities is always 0. */
 static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
                                       char* name, size_t name_len,
-                                      char* val, size_t val_len) {
+                                      char* val, size_t val_len,
+                                      int has_amp) {
     struct taurus_attribute* attr;
     if (p->attr_idx < p->attr_capacity) {
         attr = &p->attr_block[p->attr_idx++];
@@ -214,29 +215,15 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
     attr->name_view = taurus_sv_from_ptr(name, name_len);
     attr->value_view = taurus_sv_from_ptr(val, val_len);
     attr->name = name;            /* zero-copy, NUL-terminated in buffer */
-    /* Entity handling for attr values:
+    /* Entity handling for attr values (has_amp comes from the caller's
+     * fused value scan — TODO 184: one pass finds the closing quote AND
+     * flags '&', replacing the two-pass quote-memchr + amp scan):
      * - DTD present + value has '&': eagerly expand via DTD-aware
      *   decoder (custom entities &foo; need the DTD table). Result
      *   is pool-allocated; has_entities=0 (already resolved).
      * - No DTD + value has '&': leave value NULL, has_entities=1.
      *   Accessor expands predefined entities lazily on first read.
-     * - No '&': zero-copy, no expansion needed.
-     *
-     * Short-value fast path (TODO 174): libc memchr has ~10ns setup
-     * cost even for 1-byte scans. For values <= 16 bytes (the common
-     * case — most attr values are 5-15 bytes), an inline byte loop is
-     * faster. Threshold tuned to L1 cache line size. */
-    int has_amp = 0;
-    if (val_len <= 16) {
-        const char* vp = val;
-        const char* vend = val + val_len;
-        while (vp < vend) {
-            if (*vp == '&') { has_amp = 1; break; }
-            vp++;
-        }
-    } else {
-        has_amp = memchr(val, '&', val_len) != NULL;
-    }
+     * - No '&': zero-copy, no expansion needed. */
     if (val_len > 0 && has_amp) {
         if (p->dtd) {
             TaurusStringView dsv = taurus_sv_from_ptr(val, val_len);
@@ -483,17 +470,43 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
         *name_end = '\0';
         dp_skip_ws(p);
 
-        /* Quoted value. */
+        /* Quoted value — FUSED scan (TODO 184): one pass finds the
+         * closing quote AND flags '&' for entity routing. Replaces
+         * quote-memchr + separate amp check (two passes; memchr pays
+         * ~10ns setup even on 6-byte values — the TODO 174 finding,
+         * applied to the quote scan too).
+         *
+         * First 48 bytes inline (byte loop beats memchr setup — the
+         * common case: values are 5-15 bytes). Longer values fall
+         * back to SIMD: memchr for the quote, taurus_text_contains
+         * for '&' over the scanned prefix. pugixml's single-table
+         * ct_parse_attr loop is the model; this is its shape with a
+         * SIMD tail. */
         if (p->pos >= p->end) return -1;
         char quote = *p->pos;
         if (quote != '"' && quote != '\'') return -1;
         p->pos++;
         char* val_start = p->pos;
-        /* memchr for closing quote — libc vectorized (SSE2/AVX),
-         * processes 16-32 bytes/iteration vs 1 byte/iteration for
-         * the sequential loop. Big win for URL/long-text values. */
-        char* val_end = (char*)memchr(p->pos, quote, p->end - p->pos);
-        if (!val_end) return -1;
+        int has_amp = 0;
+        char* val_end = NULL;
+        {
+            const char* q = p->pos;
+            const char* probe_end = (p->end - q > 48) ? q + 48 : p->end;
+            while (q < probe_end) {
+                char c = *q;
+                if (c == quote) { val_end = (char*)q; goto value_done; }
+                if (c == '&') has_amp = 1;
+                q++;
+            }
+            if (q >= p->end) return -1; /* unterminated */
+            val_end = (char*)memchr(q, quote, p->end - q);
+            if (!val_end) return -1;
+            if (q < val_end) {
+                has_amp = has_amp ||
+                          taurus_text_contains(q, (size_t)(val_end - q), '&');
+            }
+        }
+    value_done:
         p->pos = val_end;
         *p->pos = '\0'; /* Safe: overwrites closing quote, not a delimiter */
         size_t val_len = p->pos - val_start;
@@ -549,7 +562,7 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
 
         /* Regular attribute — zero-copy name/value, bulk-allocated struct. */
         if (dp_add_attr_inline(p, elem, name_start, name_len,
-                                val_start, val_len) != 0)
+                                val_start, val_len, has_amp) != 0)
             return -1;
     }
     return -1;
