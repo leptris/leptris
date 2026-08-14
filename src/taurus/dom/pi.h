@@ -8,19 +8,19 @@
 #define TAURUS_DOM_PI_H
 
 #include "node.h"
-#include "compact.h"  /* int32 compact-pointer helpers (TODO 121) */
+#include "compact.h"  /* compact-pointer helpers (TODO 121, TODO 178) */
 
 /* Forward declaration */
 struct taurus_memory_pool;
 
 /* Processing Instruction node - inherits from TaurusNode.
- * Phase 2c of TODO 90: next_sibling is a 4-byte offset (0=NULL).
+ * TODO 179 Phase B: next_sibling is a 2-byte compact pointer (cp16).
  * Issue #168: parent_off mirrors next_sibling_off. */
 typedef struct taurus_pi_node {
     TaurusNode base;                   /* MUST be first */
     char* target;                      /* PI target (e.g., "xml-stylesheet") */
     char* data;                        /* PI data/content */
-    int32_t next_sibling_off;          /* Byte offset to next sibling (0=NULL) */
+    int16_t next_sibling_cp;           /* 2-byte compact ptr to next sibling (0=NULL) */
     int32_t parent_off;                /* Byte offset to parent element (0=NULL) */
 } TaurusPINode;
 
@@ -45,16 +45,16 @@ const char* taurus_pi_get_data(TaurusPINode* pi);
 #define TAURUS_PI_AS_NODE(pi) \
     ((TaurusNode*)(pi))
 
-/* Compact next_sibling accessors (TODO 90 Phase 2c). */
+/* Compact next_sibling accessors (TODO 179 Phase B — cp16). */
 static inline TaurusNode* taurus_pi_next_sibling(const TaurusPINode* p) {
     return (p)
-        ? (TaurusNode*)taurus_compact_int32_decode((void*)p, p->next_sibling_off, &p->next_sibling_off)
+        ? (TaurusNode*)taurus_compact_ptr16_decode((void*)p, p->next_sibling_cp, 3, &p->next_sibling_cp)
         : NULL;
 }
 
 static inline void taurus_pi_set_next_sibling(TaurusPINode* p, TaurusNode* sibling) {
     if (!p) return;
-    p->next_sibling_off = taurus_compact_int32_encode(p, sibling, &p->next_sibling_off);
+    p->next_sibling_cp = taurus_compact_ptr16_encode(p, sibling, 3, &p->next_sibling_cp);
 }
 
 /* Compact parent accessors (issue #168). */

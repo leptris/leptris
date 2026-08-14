@@ -9,11 +9,11 @@
 #define TAURUS_DOM_TEXT_H
 
 #include "node.h"
-#include "compact.h"  /* int32 compact-pointer helpers (TODO 121) */
+#include "compact.h"  /* compact-pointer helpers (TODO 121, TODO 178) */
 
 /* Text node - inherits from TaurusNode.
- * Phase 2c of TODO 90: next_sibling is a 4-byte offset to the next
- * sibling (byte distance from this node's address). 0 means NULL.
+ * TODO 179 Phase B: next_sibling is a 2-byte compact pointer (cp16,
+ * scaled by 8). Covers ±256 KB — never overflows for realistic docs.
  *
  * TODO 115 Phase A: content_len is the byte length of `content`,
  * excluding the NUL terminator.
@@ -33,7 +33,7 @@ typedef struct taurus_text_node {
     size_t content_len;               /* Byte length of content (excl. NUL) */
     TaurusMemoryPool* pool;           /* Pool for lazy materialization (NULL if content is NUL-term'd) */
     int borrowed;                     /* 1 = content is borrowed (non-NUL-term'd) */
-    int32_t next_sibling_off;         /* Byte offset to next sibling (0=NULL) */
+    int16_t next_sibling_cp;          /* 2-byte compact ptr to next sibling (0=NULL) */
     int32_t parent_off;               /* Byte offset to parent element (0=NULL) */
 } TaurusTextNode;
 
@@ -81,20 +81,18 @@ void taurus_text_set_content(TaurusTextNode* text, const char* content);
 #define TAURUS_TEXT_AS_NODE(text) \
     ((TaurusNode*)(text))
 
-/* Compact next_sibling accessors (TODO 90 Phase 2c).
- * next_sibling is stored as a 4-byte byte-offset relative to this
- * node's own address; 0 encodes NULL. Pool-allocated text nodes and
- * their siblings live within +/-2GB of each other on any realistic
- * document. */
+/* Compact next_sibling accessors (TODO 179 Phase B — cp16).
+ * Stored as 2-byte offset scaled by 8 (align_log2=3). NULL = 0.
+ * Range: ±32767 * 8 = ±256 KB — never overflows for realistic docs. */
 static inline TaurusNode* taurus_textnode_next_sibling(const TaurusTextNode* t) {
     return (t)
-        ? (TaurusNode*)taurus_compact_int32_decode((void*)t, t->next_sibling_off, &t->next_sibling_off)
+        ? (TaurusNode*)taurus_compact_ptr16_decode((void*)t, t->next_sibling_cp, 3, &t->next_sibling_cp)
         : NULL;
 }
 
 static inline void taurus_textnode_set_next_sibling(TaurusTextNode* t, TaurusNode* sibling) {
     if (!t) return;
-    t->next_sibling_off = taurus_compact_int32_encode(t, sibling, &t->next_sibling_off);
+    t->next_sibling_cp = taurus_compact_ptr16_encode(t, sibling, 3, &t->next_sibling_cp);
 }
 
 /* Compact parent accessors (issue #168). */

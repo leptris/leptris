@@ -130,16 +130,21 @@ static inline void dp_advance_line(DParser* p, char* from, char* to) {
     }
 }
 
-/* Compile-time offset tables for next_sibling_off and parent_off
+/* Compile-time offset tables for next_sibling and parent_off
  * across all node types. Eliminates the type-dispatched switch in
  * dp_wire_child — one array lookup + one store replaces 5-way branch.
- * TODO 158: branchless tree wiring. */
-static const size_t dp_ns_off[5] = {
+ * TODO 158: branchless tree wiring.
+ *
+ * TODO 179 Phase B: text/comment/cdata/pi siblings migrated to cp16
+ * (2-byte compact pointer). Element still uses int32 — split tables. */
+static const size_t dp_ns_off_int32[1] = {
     offsetof(struct taurus_element,  next_sibling_off),
-    offsetof(TaurusTextNode,        next_sibling_off),
-    offsetof(TaurusCommentNode,     next_sibling_off),
-    offsetof(TaurusCDATANode,       next_sibling_off),
-    offsetof(TaurusPINode,          next_sibling_off),
+};
+static const size_t dp_ns_off_cp16[4] = {
+    offsetof(TaurusTextNode,        next_sibling_cp),
+    offsetof(TaurusCommentNode,     next_sibling_cp),
+    offsetof(TaurusCDATANode,       next_sibling_cp),
+    offsetof(TaurusPINode,          next_sibling_cp),
 };
 static const size_t dp_par_off[5] = {
     offsetof(struct taurus_element,  parent_off),
@@ -159,15 +164,24 @@ static inline void dp_wire_child(DParser* p, TaurusElement parent,
         *(int32_t*)((char*)child + dp_par_off[t]) = parent_to_child;
     }
 
-    int32_t child_off = (int32_t)((char*)child - (char*)parent);
     TaurusNode* prev_last = p->last_child_stack[p->depth - 1];
     if (prev_last) {
-        int32_t sib_off = (int32_t)((char*)child - (char*)prev_last);
         unsigned pt = (unsigned)prev_last->type;
-        if (pt < 5) {
-            *(int32_t*)((char*)prev_last + dp_ns_off[pt]) = sib_off;
+        if (pt == TAURUS_NODE_TYPE_ELEMENT) {
+            /* Element siblings: int32 byte offset. */
+            int32_t sib_off = (int32_t)((char*)child - (char*)prev_last);
+            *(int32_t*)((char*)prev_last + dp_ns_off_int32[0]) = sib_off;
+        } else if (pt >= TAURUS_NODE_TYPE_TEXT && pt <= TAURUS_NODE_TYPE_PI) {
+            /* text/comment/cdata/pi siblings: cp16 compact pointer.
+             * Direct store (no overflow table) — direct_parse is
+             * overflow-free by design; cp16's ±256 KB range covers
+             * any realistic document. */
+            int16_t* field = (int16_t*)((char*)prev_last + dp_ns_off_cp16[pt - 1]);
+            ptrdiff_t d = (char*)child - (char*)prev_last;
+            *field = (int16_t)(d >> 3);
         }
     } else {
+        int32_t child_off = (int32_t)((char*)child - (char*)parent);
         parent->first_child_off = child_off;
     }
     p->last_child_stack[p->depth - 1] = child;
