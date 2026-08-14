@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.19.8] - Y-08-14
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.19.7] - 2026-08-14
 
 ### Foundation — arena-backed pool mode (TODO 183 Phase 2)
