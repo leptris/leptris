@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.20.0] - Y-08-14
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.19.9] - 2026-08-14
 
 ### Performance — attribute struct 72 → 64 bytes via cp16 list edge (TODO 181 Phase D / TODO 183 Phase 5)
