@@ -1,13 +1,42 @@
 ## [Unreleased]
 
-## [0.19.9] - Y-08-14
+## [0.19.9] - 2026-08-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — attribute struct 72 → 64 bytes via cp16 list edge (TODO 181 Phase D / TODO 183 Phase 5)
 
-### Changed
+The first compact-pointer migration enabled by the contiguous arena
+(v0.19.8). `struct taurus_attribute`'s 8-byte `next` pointer becomes
+a 2-byte cp16 edge: the attr `next` edge only connects attrs of the
+SAME element, which the parser allocates as adjacent attr_block
+slots — contiguous by construction since the arena migration;
+distance ≤ K × 64 B (~4 KB at K=100), always within cp16's ±256 KB.
+Mutation-created attrs route through the encoder's overflow-table
+path.
 
-- (describe changes here)
+Field reorder packs `next_cp` + `has_entities` + `name_hash` into
+one 8-byte tail: sizeof 72 → 64. Attr and element are now both
+exactly one cache line. 12.5% less attr memory (800 KB less on the
+K=100 document). 46 call sites across 14 files migrated to
+`taurus_attr_next`/`taurus_attr_set_next`; the parser hot path wires
+the edge with a direct cp16 store (no encoder call). No raw list
+pointers remain in the tree.
+
+#### Measured impact (controlled Release A/B, fresh build dirs, 7 runs)
+
+| build | K=100 median |
+|---|---|
+| v0.19.8 (72 B attr) | 1986 µs |
+| **v0.19.9 (64 B attr)** | **1985 µs** — parity |
+
+Honest finding: the shrink banks the memory and layout milestone but
+does not move K=100. An amalgamated single-TU build was also
+measured (2037 µs) — cross-TU inlining is not the lever either.
+With bulk allocation and lazy hashing already shipped, the remaining
+~3× to pugixml (K=100 medians: 1986 vs 711 µs) lives in the
+parse-loop structure itself — chartype dispatch and value-scan
+shape. That work is precisely scoped for the next round.
+
+All 508 tests pass.
 
 
 ## [0.19.8] - 2026-08-14
