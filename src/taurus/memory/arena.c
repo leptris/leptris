@@ -56,8 +56,11 @@ void* taurus_arena_alloc_node_with_content(TaurusArena* arena,
                                             size_t content_size,
                                             char** content_out) {
     /* One combined bump keeps struct + content contiguous. The NUL
-     * terminator slot is included in the content region. */
-    size_t total = align_up(struct_size) + content_size + 1;
+     * terminator slot is included in the content region. Both parts
+     * are aligned so the NEXT bump stays on the 8-byte grid — an
+     * unaligned tail here would misalign every subsequent allocation
+     * (pool parity: ALIGN_SIZE(content_size + 1)). */
+    size_t total = align_up(struct_size) + align_up(content_size + 1);
     if (!arena || !content_out) return NULL;
     if (total > arena->size - arena->used) {
         arena->failed = 1;

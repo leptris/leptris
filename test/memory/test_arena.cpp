@@ -134,6 +134,26 @@ TEST(Arena, NodeWithContentIsContiguous) {
     taurus_arena_destroy(a);
 }
 
+TEST(Arena, NodeWithContentKeepsNextAllocAligned) {
+    /* Regression: content_size+1 must round up to the 8-byte grid,
+     * else every allocation after an odd-sized node+content bump
+     * lands misaligned (caught live when direct_parse moved onto the
+     * arena — comments/PIs mangled downstream). */
+    TaurusArena* a = taurus_arena_create(8192);
+    ASSERT_NE(a, nullptr);
+    for (int i = 0; i < 50; i++) {
+        char* content = nullptr;
+        void* node = taurus_arena_alloc_node_with_content(
+            a, 24, (size_t)(i % 2 ? 13 : 40), &content);  /* odd sizes */
+        ASSERT_NE(node, nullptr) << "i=" << i;
+        EXPECT_EQ((uintptr_t)node % 8, 0u) << "i=" << i;
+        void* next = taurus_arena_alloc(a, 8);
+        ASSERT_NE(next, nullptr) << "i=" << i;
+        EXPECT_EQ((uintptr_t)next % 8, 0u) << "i=" << i;
+    }
+    taurus_arena_destroy(a);
+}
+
 TEST(Arena, NodeWithContentFailsWhenTooLarge) {
     TaurusArena* a = taurus_arena_create(128);
     ASSERT_NE(a, nullptr);

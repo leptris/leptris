@@ -72,4 +72,28 @@ ptrdiff_t taurus_text_find3_neon(const char* s, size_t len,
     return -1;
 }
 
+/* Byte-population count. vceqq gives 0xFF per match, but ADDV.16b
+ * accumulates in a BYTE register — the raw sum overflows mod 256
+ * (density ≥2 per chunk truncates to garbage). Widen pairwise first
+ * (vpaddlq_u8 → u16 lanes ≤510), then vaddvq_u16 (u16 accumulator,
+ * max 4080) — sum/255 is the match count. Scalar tail. */
+size_t taurus_text_count_char_neon(const char* s, size_t len, char c) {
+    const char* p = s;
+    const char* end = s + len;
+    const uint8x16_t needle = vdupq_n_u8((uint8_t)c);
+    size_t n = 0;
+
+    while (end - p >= 16) {
+        uint8x16_t v = vld1q_u8((const uint8_t*)p);
+        uint8x16_t eq = vceqq_u8(v, needle);
+        n += (size_t)(vaddvq_u16(vpaddlq_u8(eq)) / 255);
+        p += 16;
+    }
+    while (p < end) {
+        if (*p == c) n++;
+        p++;
+    }
+    return n;
+}
+
 #endif /* TAURUS_ARCH_ARM && __aarch64__ */

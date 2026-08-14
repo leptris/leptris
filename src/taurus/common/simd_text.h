@@ -32,6 +32,13 @@ ptrdiff_t taurus_text_find(const char* s, size_t len, char c);
 ptrdiff_t taurus_text_find3(const char* s, size_t len,
                              char c0, char c1, char c2);
 
+/* Count occurrences of c in [s, s+len). SIMD-accelerated where
+ * available (32/16 bytes per chunk via movemask popcount / vaddvq);
+ * scalar memchr-hop fallback. Used for content-derived arena sizing
+ * (TODO 183 Phase 3) where occurrence counts can reach ~10^5 —
+ * memchr-hopping per hit costs ~10ns each there. */
+size_t taurus_text_count_char(const char* s, size_t len, char c);
+
 #ifdef __cplusplus
 }
 #endif
