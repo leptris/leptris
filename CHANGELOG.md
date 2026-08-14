@@ -1,13 +1,84 @@
 ## [Unreleased]
 
-## [0.19.4] - Y-08-14
+## [0.19.4] - 2026-08-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Foundation for compact-pointer migration (TODOs 178–182)
 
-### Changed
+This release ships the first two phases of the compact-pointer
+migration that will close the remaining 3× gap to pugixml on the
+K=100 attr-heavy benchmark. No user-visible behavior change —
+all 474 tests pass; K=100 benchmark within noise of v0.19.3.
 
-- (describe changes here)
+Research basis: Parabix ARM report
+(https://mdsz.ca/experience/parabix-arm-project-report/) confirms
+SIMD wins are real (32% on icgrep via NEON) but require LLVM JIT —
+too heavy for a C99 library. The simdjson model (AOT intrinsics +
+runtime dispatch) captures the same wins without JIT dependency.
+TODOs 175–177 scope the AOT SIMD workstream.
+
+The remaining 3× gap to pugixml is structural cache pressure, not
+algorithmic — element struct 64 B vs pugixml's 20–24 B. Closing it
+requires shrinking tree-edge storage from 4-byte int32 offsets to
+2-byte compact pointers. TODOs 178–182 scope the migration.
+
+### Performance — compact pointer encoding primitives (TODO 178)
+
+Adds `taurus_compact_ptr8_encode/decode` and
+`taurus_compact_ptr16_encode/decode` to `dom/compact.{h,c}`,
+alongside the existing int32 path. Same overflow-table mechanism;
+no migrations yet. Pure additive infrastructure.
+
+- 1-byte (cp1): ±127 * 8 = ±1016 bytes — for very-near pointers.
+- 2-byte (cp16): ±32767 * 8 = ±256 KB — covers any realistic document.
+
+10 new specs in `test/dom/test_compact.cpp` cover null round-trip,
+positive/negative offsets, overflow detection, misalignment, and
+distinct-fields-on-same-base.
+
+### Performance — migrate text/comment/cdata/pi sibling to cp16 (TODO 179)
+
+First consumer of the TODO 178 primitives. `TaurusTextNode`,
+`TaurusCommentNode`, `TaurusCDATANode`, `TaurusPINode` `next_sibling`
+field migrated from 4-byte int32 offset to 2-byte cp16 compact
+pointer. Saves 2 bytes per non-element node.
+
+Element sibling pointer stays int32 — migrated in TODO 180 Phase C.
+
+Why cp16 not cp1: `direct_parse.c` is overflow-table-free by design
+(avoids cross-document contamination under high doc counts per
+issue #261). cp1 would force overflow on sibling chains longer
+than ~25 nodes (1 KB reach). cp16 covers ±256 KB — never overflows
+for realistic docs, preserves the overflow-free property.
+
+`direct_parse.c`'s `dp_wire_child` updated: split `dp_ns_off` into
+`dp_ns_off_int32[1]` (element) and `dp_ns_off_cp16[4]` (non-element
+types), with branch on `prev_last->type`. Element fast path stays
+branchless; non-element path is one extra arithmetic op.
+
+#### Measured impact (benchmark_many_attrs K=100, median, 7 runs)
+
+| build | v0.19.3 | v0.19.4 |
+|---|---|---|
+| default Release | 4194 µs | ~4289 µs (range 4172–4490) |
+
+Within noise — K=100 is element/attr-heavy, doesn't exercise
+text/comment/cdata/pi sibling chains. Wins will show on mixed-content
+docs with many text nodes.
+
+### Planning — TODOs 175–182
+
+Eight new TODOs in `TODO.fix/`:
+- 175: AOT SIMD framework (simdjson pattern — runtime CPU dispatch).
+- 176: SWAR byte-classification (LUT-free scan loops).
+- 177: Multi-byte literal matchers (`-->`, `]]>`, `?>`).
+- 178: Compact pointer Phase A — encoding primitives (this release).
+- 179: Compact pointer Phase B — text/comment/cdata/pi (this release).
+- 180: Compact pointer Phase C — element tree (next, biggest lever).
+- 181: Compact pointer Phase D — attribute list.
+- 182: Compact pointer Phase E — compact_string for names.
+
+Estimated cumulative gain when all phases ship: 1.5–2× on tree-walk
+heavy workloads, closing the structural cache pressure gap to pugixml.
 
 
 ## [0.19.3] - 2026-08-14
