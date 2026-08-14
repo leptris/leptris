@@ -351,7 +351,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
     buffer_append_len(buf, elem_name, elem_name_len);
 
     /* Attributes - iterate through linked list */
-    for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem); attr != NULL; attr = attr->next) {
+    for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem); attr != NULL; attr = taurus_attr_next(attr)) {
         if (!attr || !attr->name) continue;
 
         /* Expand entity-containing values lazily before re-escaping.

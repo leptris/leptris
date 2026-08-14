@@ -392,7 +392,7 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
         /* Walk the attribute linked list to get the i-th attribute */
         struct taurus_attribute* attr = taurus_element_get_first_attribute(node);
         for (size_t j = 0; j < i && attr; j++) {
-            attr = attr->next;
+            attr = taurus_attr_next(attr);
         }
 
         /* Validate attribute pointer before accessing */

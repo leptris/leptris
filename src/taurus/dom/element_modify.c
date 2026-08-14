@@ -474,14 +474,14 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
 
         attr->ns_cache = NULL;  /* TODO 173 */
         attr->has_entities = 0;
-        attr->next = NULL;
+        taurus_attr_set_next(attr, NULL);
 
         /* Append via cached last_attribute offset — O(1) instead of
          * the old O(N) walk to find the tail.  Decode the offset to
          * access the struct, then re-encode (TODO 90 Phase 2d). */
         struct taurus_attribute* last = taurus_elem_last_attribute(elem);
         if (last) {
-            last->next = attr;
+            taurus_attr_set_next(last, attr);
         } else {
             taurus_elem_set_first_attribute(elem, attr);
         }
@@ -524,11 +524,11 @@ TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* nam
         if (match) {
             /* Found - remove from linked list */
             if (prev) {
-                prev->next = attr->next;
+                taurus_attr_set_next(prev, taurus_attr_next(attr));
             } else {
                 /* Was first attribute - update first_attribute pointer */
-                if (attr->next) {
-                    taurus_element_set_first_attribute(elem, attr->next);
+                if (taurus_attr_next(attr)) {
+                    taurus_element_set_first_attribute(elem, taurus_attr_next(attr));
                 } else {
                     /* No more attributes */
                     taurus_element_set_first_attribute(elem, NULL);
@@ -552,7 +552,7 @@ TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* nam
         }
 
         prev = attr;
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
 
     return TAURUS_ERROR_NOT_FOUND;  /* Attribute not found */
@@ -1212,11 +1212,11 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
         if (!prev_dst_attr) {
             taurus_elem_set_first_attribute(copy, dst_attr);
         } else {
-            prev_dst_attr->next = dst_attr;
+            taurus_attr_set_next(prev_dst_attr, dst_attr);
         }
         taurus_elem_set_last_attribute(copy, dst_attr);
         prev_dst_attr = dst_attr;
-        src_attr = src_attr->next;
+        src_attr = taurus_attr_next(src_attr);
     }
 
     /* Copy children recursively and link them */

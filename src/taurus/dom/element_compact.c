@@ -217,7 +217,7 @@ struct taurus_compact_attribute* taurus_compact_get_attribute_by_index(TaurusEle
     /* Walk the linked list to find the attribute at index */
     struct taurus_compact_attribute* attr = taurus_compact_get_first_attribute(elem);
     for (uint8_t i = 0; i < index && attr; i++) {
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
 
     return attr;
@@ -248,7 +248,7 @@ struct taurus_compact_attribute* taurus_compact_get_attribute_by_name(TaurusElem
                 return attr;
             }
         }
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
 
     return NULL;

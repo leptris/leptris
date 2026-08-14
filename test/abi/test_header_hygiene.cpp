@@ -124,15 +124,15 @@ TEST(HeaderHygiene, ElementTreeEdgeRoundTrip) {
 TEST(HeaderHygiene, ElementAttributeEdgeRoundTrip) {
     /* Attribute-list offsets use the same encoding as tree edges.
      * TODO 155 Phase C: last_attribute was removed; the getter walks
-     * via attr->next. The test attr must have next=NULL so the walk
-     * terminates after one step. */
+     * via the cp16 attr edge (TODO 183 Phase 5). The test attr must
+     * have next=NULL so the walk terminates after one step. */
     static const size_t kAlign = alignof(struct taurus_element);
     alignas(kAlign) char buf[sizeof(struct taurus_element) +
                               sizeof(struct taurus_attribute) + 64];
     struct taurus_element* e = (struct taurus_element*)buf;
     struct taurus_attribute* attr =
         (struct taurus_attribute*)(buf + sizeof(*e));
-    attr->next = NULL;
+    taurus_attr_set_next(attr, NULL);
 
     taurus_elem_set_first_attribute(e, attr);
     EXPECT_EQ(taurus_elem_first_attribute(e), attr);

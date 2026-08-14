@@ -66,13 +66,20 @@ struct taurus_attribute {
     char* name;                  /* NULL until first access */
     char* value;                 /* NULL until first access */
 
-    /* Next attribute in linked list */
-    struct taurus_attribute* next;
-
     /* Side cache for namespace activity. NULL when the attr has no prefix
      * and no namespace_uri (the common case). Allocated from the pool on
      * first set via attr_ensure_ns_cache(). TODO 173. */
     struct taurus_attr_ns_cache* ns_cache;
+
+    /* Next attribute in linked list. TODO 183 Phase 5 (TODO 181
+     * Phase D): cp16 compact pointer — the attr `next` edge only
+     * connects attrs of the SAME element, which are allocated as
+     * adjacent slots in the parser's attr_block (contiguous by
+     * construction since TODO 183 Phase 3; distance ≤ K × sizeof,
+     * ~4 KB at K=100 — always within cp16's ±256 KB). Mutation-
+     * created attrs (different region) go through the encoder's
+     * overflow-table path. 0 = NULL end-of-list. */
+    int16_t next_cp;
 
     /* Performance: Pre-computed entity flag (set during parsing) */
     unsigned char has_entities;  /* 1 if value_view contains '&', 0 otherwise */
@@ -82,9 +89,32 @@ struct taurus_attribute {
      * and caches. The parse path skips this work entirely (saves ~5ns
      * per attr on attr-heavy inputs); query paths pay it on first
      * access, then cached for subsequent walks. FNV-1a output is never
-     * 0 for non-empty input, so 0 is a safe sentinel. TODO 172. */
+     * 0 for non-empty input, so 0 is a safe sentinel. TODO 172.
+     *
+     * Layout note: next_cp + has_entities + name_hash pack into one
+     * 8-byte tail after the four 8-byte fields — sizeof is 64 (was 72
+     * with a raw next pointer). */
     uint32_t name_hash;
 };
+
+/* Attr list-edge accessors (TODO 183 Phase 5). next_cp stores the
+ * byte offset to the next attr scaled by 8 (align_log2=3); attrs are
+ * 8-byte aligned pool/arena residents. The encoder falls back to the
+ * per-field overflow table when the pair spans regions (mutation-
+ * created attrs). */
+static inline struct taurus_attribute* taurus_attr_next(
+    const struct taurus_attribute* a) {
+    return (a)
+        ? (struct taurus_attribute*)taurus_compact_ptr16_decode(
+              (const void*)a, a->next_cp, 3, &a->next_cp)
+        : NULL;
+}
+
+static inline void taurus_attr_set_next(struct taurus_attribute* a,
+                                         struct taurus_attribute* next) {
+    if (!a) return;
+    a->next_cp = taurus_compact_ptr16_encode(a, next, 3, &a->next_cp);
+}
 
 /* Lazy FNV-1a hash accessor (TODO 172). Computes and caches on first call.
  * Thread-unsafe in the strict sense (racy writes), but the worst case is
@@ -416,7 +446,7 @@ static inline struct taurus_attribute* taurus_elem_last_attribute(const TaurusEl
     if (!e) return NULL;
     struct taurus_attribute* a = taurus_elem_first_attribute(e);
     if (!a) return NULL;
-    while (a->next) a = a->next;
+    while (taurus_attr_next(a)) a = taurus_attr_next(a);
     return a;
 }
 

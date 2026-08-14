@@ -1734,7 +1734,7 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
             }
             /* Pool-allocated: pool will reclaim on document free. */
 
-            attr = attr->next;
+            attr = taurus_attr_next(attr);
         }
 
         /* Check if we found xml:lang attribute */

@@ -258,7 +258,11 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
         attr->has_entities = 0;
     }
     attr->ns_cache = NULL;  /* TODO 173: side cache allocated on demand */
-    attr->next = NULL;
+    /* TODO 183 Phase 5 (TODO 181 Phase D): cp16 sibling edge. Attrs of
+     * one element are adjacent attr_block slots (distance ≤ K × 64 B,
+     * far inside cp16 range) — direct store, no encoder call on the
+     * hot path. The defensive walk below uses the decoder. */
+    attr->next_cp = 0;
 
     /* FNV-1a hash deferred to first read via attr_name_hash() (TODO 172).
      * Saves ~5ns per attr on attr-heavy parse paths where XPath attr
@@ -278,11 +282,13 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
          * only if cache is NULL (defensive — shouldn't happen). */
         struct taurus_attribute* tail = p->current_elem_last_attr;
         if (tail) {
-            tail->next = attr;
+            /* Same-element attrs are adjacent block slots — direct
+             * cp16 store, no encoder call (TODO 183 Phase 5). */
+            tail->next_cp = (int16_t)(((char*)attr - (char*)tail) >> 3);
         } else {
             tail = (struct taurus_attribute*)((char*)elem + elem->first_attribute_off);
-            while (tail->next) tail = tail->next;
-            tail->next = attr;
+            while (taurus_attr_next(tail)) tail = taurus_attr_next(tail);
+            taurus_attr_set_next(tail, attr);
         }
     } else {
         elem->first_attribute_off = attr_off;

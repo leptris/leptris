@@ -78,7 +78,7 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
                     if (grow_ptr_array((void**)&idx->attr_buckets,
                                         &idx->attr_bucket_capacity,
                                         sizeof(TaurusElementIndexAttrBucket)) != 0) {
-                        attr = attr->next; continue;
+                        attr = taurus_attr_next(attr); continue;
                     }
                 }
                 abucket = &idx->attr_buckets[idx->attr_bucket_count++];
@@ -98,7 +98,7 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
             if (abucket->count >= abucket->capacity) {
                 if (grow_ptr_array((void**)&abucket->matches,
                                     &abucket->capacity, sizeof(TaurusElement)) != 0) {
-                    attr = attr->next; continue;
+                    attr = taurus_attr_next(attr); continue;
                 }
             }
             abucket->matches[abucket->count++] = elem;
@@ -117,7 +117,7 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
                         if (grow_ptr_array((void**)&abucket->values,
                                             &abucket->value_capacity,
                                             sizeof(TaurusElementIndexAttrValue)) != 0) {
-                            attr = attr->next; continue;
+                            attr = taurus_attr_next(attr); continue;
                         }
                     }
                     vbucket = &abucket->values[abucket->value_count++];
@@ -134,13 +134,13 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
                 if (vbucket->count >= vbucket->capacity) {
                     if (grow_ptr_array((void**)&vbucket->matches,
                                         &vbucket->capacity, sizeof(TaurusElement)) != 0) {
-                        attr = attr->next; continue;
+                        attr = taurus_attr_next(attr); continue;
                     }
                 }
                 vbucket->matches[vbucket->count++] = elem;
             }
         }
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
 
     TaurusElement child = taurus_element_get_first_child(elem);
