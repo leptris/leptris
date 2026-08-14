@@ -101,6 +101,50 @@ void*   taurus_compact_int32_decode(void* base, int32_t off,
 }
 #endif
 
+/* TODO 178: 1-byte and 2-byte compact pointer encoders.
+ *
+ * Same overflow-table mechanism as int32, but tighter encoding for
+ * nearby-pointer cases common in tree edges (text/comment/cdata/pi
+ * sibling chains, attribute lists). The byte offset between base and
+ * target is scaled by `1 << align_log2` before storage, so the
+ * representable range with N-byte signed storage becomes:
+ *
+ *   1-byte, align_log2=3: ±127 * 8  = ±1016 bytes (covers small pages)
+ *   2-byte, align_log2=3: ±32767 * 8 = ±262 KB   (covers any doc)
+ *
+ * NULL is encoded as 0 (the field's natural zero-init state, so
+ * calloc'd memory is correctly NULL). INT8_MIN / INT16_MIN are
+ * reserved as overflow sentinels: when encode returns one, the
+ * (field_addr -> target) mapping has been registered in the global
+ * overflow table; decode recognises the sentinel and looks it up.
+ *
+ * The base pointer is the address of the struct containing the field
+ * (e.g., for `text_node->next_sibling_cp`, base is `text_node`).
+ * field_addr is `&text_node->next_sibling_cp` — used as the hash key
+ * so distinct fields on the same struct don't collide. */
+#define TAURUS_COMPACT_PTR8_OVERFLOW  INT8_MIN
+#define TAURUS_COMPACT_PTR16_OVERFLOW INT16_MIN
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+int8_t  taurus_compact_ptr8_encode(const void* base, const void* target,
+                                    int align_log2,
+                                    const int8_t* field_addr);
+void*   taurus_compact_ptr8_decode(const void* base, int8_t off,
+                                    int align_log2,
+                                    const int8_t* field_addr);
+
+int16_t taurus_compact_ptr16_encode(const void* base, const void* target,
+                                     int align_log2,
+                                     const int16_t* field_addr);
+void*   taurus_compact_ptr16_decode(const void* base, int16_t off,
+                                     int align_log2,
+                                     const int16_t* field_addr);
+#ifdef __cplusplus
+}
+#endif
+
 /* ============================================================================
  * Overflow Hash Table Functions
  * ============================================================================ */

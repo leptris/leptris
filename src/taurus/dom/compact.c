@@ -243,6 +243,96 @@ void* taurus_compact_int32_decode(void* base, int32_t off,
 }
 
 /* ============================================================================
+ * 1-byte and 2-byte Compact Pointers (TODO 178)
+ *
+ * Same overflow mechanism as int32, but tighter storage for nearby
+ * tree edges (sibling chains, attribute lists). Offsets are scaled by
+ * `1 << align_log2` before encoding, expanding the representable
+ * range at the cost of an alignment requirement on base and target.
+ * ============================================================================ */
+
+int8_t taurus_compact_ptr8_encode(const void* base, const void* target,
+                                   int align_log2,
+                                   const int8_t* field_addr) {
+    if (!target) return 0;
+    ptrdiff_t d = (const char*)target - (const char*)base;
+    ptrdiff_t align_mask = ((ptrdiff_t)1 << align_log2) - 1;
+    if (d & align_mask) {
+        /* Misaligned — can't represent, fall through to overflow. */
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        struct taurus_document* doc = get_current_document();
+        if (table && taurus_compact_overflow_set(table, field_addr,
+                                                  (void*)target, doc) == 0) {
+            return TAURUS_COMPACT_PTR8_OVERFLOW;
+        }
+        return 0;
+    }
+    ptrdiff_t scaled = d >> align_log2;
+    if (scaled <= INT8_MIN || scaled > INT8_MAX) {
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        struct taurus_document* doc = get_current_document();
+        if (table && taurus_compact_overflow_set(table, field_addr,
+                                                  (void*)target, doc) == 0) {
+            return TAURUS_COMPACT_PTR8_OVERFLOW;
+        }
+        return 0;
+    }
+    return (int8_t)scaled;
+}
+
+void* taurus_compact_ptr8_decode(const void* base, int8_t off,
+                                  int align_log2,
+                                  const int8_t* field_addr) {
+    if (off == 0) return NULL;
+    if (off == TAURUS_COMPACT_PTR8_OVERFLOW) {
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        if (table) return taurus_compact_overflow_get(table, field_addr);
+        return NULL;
+    }
+    return (char*)base + ((ptrdiff_t)off << align_log2);
+}
+
+int16_t taurus_compact_ptr16_encode(const void* base, const void* target,
+                                     int align_log2,
+                                     const int16_t* field_addr) {
+    if (!target) return 0;
+    ptrdiff_t d = (const char*)target - (const char*)base;
+    ptrdiff_t align_mask = ((ptrdiff_t)1 << align_log2) - 1;
+    if (d & align_mask) {
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        struct taurus_document* doc = get_current_document();
+        if (table && taurus_compact_overflow_set(table, field_addr,
+                                                  (void*)target, doc) == 0) {
+            return TAURUS_COMPACT_PTR16_OVERFLOW;
+        }
+        return 0;
+    }
+    ptrdiff_t scaled = d >> align_log2;
+    if (scaled <= INT16_MIN || scaled > INT16_MAX) {
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        struct taurus_document* doc = get_current_document();
+        if (table && taurus_compact_overflow_set(table, field_addr,
+                                                  (void*)target, doc) == 0) {
+            return TAURUS_COMPACT_PTR16_OVERFLOW;
+        }
+        return 0;
+    }
+    return (int16_t)scaled;
+}
+
+void* taurus_compact_ptr16_decode(const void* base, int16_t off,
+                                   int align_log2,
+                                   const int16_t* field_addr) {
+    if (off == 0) return NULL;
+    if (off == TAURUS_COMPACT_PTR16_OVERFLOW) {
+        TaurusCompactOverflowTable* table = get_overflow_table();
+        if (table) return taurus_compact_overflow_get(table, field_addr);
+        return NULL;
+    }
+    return (char*)base + ((ptrdiff_t)off << align_log2);
+}
+
+/* ============================================================================
  * Compact Header Implementation
  * ============================================================================ */
 
