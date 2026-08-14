@@ -57,14 +57,14 @@ static int (*g_contains_fn)(const char*, size_t, char) = NULL;
 
 static void dispatch_init(void) {
     taurus_cpu_level lvl = taurus_cpu_detect();
-#if defined(TAURUS_ARCH_X86)
+#if defined(TAURUS_ARCH_X86) && defined(TAURUS_HAS_AVX2_BUILD)
     if (lvl >= TAURUS_CPU_AVX2) {
         extern int taurus_text_contains_avx2(const char*, size_t, char);
         g_contains_fn = taurus_text_contains_avx2;
         return;
     }
 #endif
-#if defined(TAURUS_ARCH_ARM)
+#if defined(TAURUS_ARCH_ARM) && defined(__aarch64__)
     if (lvl >= TAURUS_CPU_NEON) {
         extern int taurus_text_contains_neon(const char*, size_t, char);
         g_contains_fn = taurus_text_contains_neon;
