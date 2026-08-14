@@ -1,14 +1,52 @@
 ## [Unreleased]
 
-## [0.20.0] - Y-08-14
+## [0.20.0] - 2026-08-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — fused attr-value scan: 45% faster attr-heavy parse (TODO 184)
 
-### Changed
+The largest single parse win of the campaign, closing the K=100
+gap to pugixml from 2.79× to **1.54×**.
 
-- (describe changes here)
+`dp_parse_attrs` scanned every attribute value twice — `memchr`
+for the closing quote, then a second pass for `&` (entity check).
+libc `memchr` pays ~10 ns of call/setup cost even on 6-byte values
+(the TODO 174 finding, previously applied only to the entity
+check). At K=100 — 100,000 attrs, average value ~6 bytes — that
+setup cost was ~1 ms per parse, the dominant share of the measured
+2.8× gap.
 
+One fused loop now finds the closing quote AND flags `&` on the
+way past, modeled on pugixml's `ct_parse_attr` single-pass loop:
+the first 48 bytes scan inline (a byte loop beats `memchr` setup
+at that size), longer values fall back to SIMD (`memchr` for the
+quote + `taurus_text_contains` for `&` over the scanned span).
+`dp_add_attr_inline` receives `has_amp` from the caller; its
+internal re-scan is deleted. Entity routing semantics (lazy
+accessor vs DTD-aware eager decode) are unchanged.
+
+This follows the profiling round that eliminated the other
+hypotheses with controlled Release A/B builds: struct width
+(64-byte attr, #339) and cross-TU inlining (amalgamation) were
+each perf-neutral. The gap was loop structure, and this change
+removes its largest component.
+
+#### Measured impact (benchmark_many_attrs K=100, Release, 10 runs)
+
+| | median | gap to pugixml (711 µs) |
+|---|---|---|
+| v0.19.9 | 1986 µs | 2.79× |
+| **v0.20.0** | **1095 µs** (1091–1099) | **1.54×** |
+
+#### Remaining gap (~1.5×) — ordered levers, TODO 184
+
+1. The same fused-inline principle for the text-node `<` scan and
+   the name-scan dispatch.
+2. The K=5/20/50 element-wiring path (still trails there).
+3. Buffer-copy accounting parity in the benchmark harness
+   (taurus memcpy's the input per parse; verify pugixml's harness
+   gives identical semantics).
+
+All 508 tests pass.
 
 ## [0.19.9] - 2026-08-14
 
