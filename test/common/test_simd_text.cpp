@@ -101,4 +101,42 @@ TEST(SimdText, Find3TooShort) {
     EXPECT_EQ(taurus_text_find3(s, 0, '-', '-', '>'), -1);
 }
 
+TEST(SimdText, Find3LongBodyEveryPosition) {
+    /* Exercise the vector loop (len >= 16), the 14-byte chunk advance,
+     * and boundary-straddling triples. A match must be found at every
+     * possible start offset in a comment-like body. */
+    std::string body(80, 'x');
+    for (size_t pos = 0; pos + 3 <= body.size(); pos++) {
+        std::string t = body;
+        t[pos] = '-';
+        t[pos + 1] = '-';
+        t[pos + 2] = '>';
+        EXPECT_EQ(taurus_text_find3(t.data(), t.size(), '-', '-', '>'),
+                  (ptrdiff_t)pos)
+            << "pos=" << pos;
+    }
+    /* No match in a long body. */
+    EXPECT_EQ(taurus_text_find3(body.data(), body.size(), '-', '-', '>'), -1);
+}
+
+TEST(SimdText, Find3DashRunHeavyBody) {
+    /* Adoc-style separator comment: long dash runs starve the old
+     * memchr-anchor verify loop. The SIMD path must find the real
+     * terminator. */
+    std::string t(200, '-');
+    t += "-->";
+    t.append(50, 'x');
+    EXPECT_EQ(taurus_text_find3(t.data(), t.size(), '-', '-', '>'), 200);
+}
+
+TEST(SimdText, Find3TerminatorAtVeryEnd) {
+    std::string t(40, 'y');
+    t += "-->";
+    EXPECT_EQ(taurus_text_find3(t.data(), t.size(), '-', '-', '>'), 40);
+    /* "--" at the end without '>' is not a match. */
+    std::string u(40, 'y');
+    u += "--";
+    EXPECT_EQ(taurus_text_find3(u.data(), u.size(), '-', '-', '>'), -1);
+}
+
 }  // namespace
