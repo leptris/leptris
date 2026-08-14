@@ -45,6 +45,10 @@ set(TAURUS_SOURCES
     taurus/common/string_view.c
     taurus/common/entities.c
     taurus/common/chartype.c
+    # AOT SIMD framework (TODO 175): scalar impls + runtime dispatch
+    taurus/common/cpu.c
+    taurus/common/simd_text.c
+    # ISA-specific TUs added below (they need per-file compile flags)
 
     # Encoding (UTF-16 support - always available)
     taurus/encoding/utf16.c
@@ -188,6 +192,28 @@ endif()
 # work because its libc returns pointers that fit in 32 bits.
 # See TODOs 94 / 95 for the bug this caused.
 target_compile_definitions(taurus_objects PUBLIC _POSIX_C_SOURCE=200809L)
+
+# ============================================================================
+# AOT SIMD sources (TODO 175)
+# ============================================================================
+# The simdjson model: compile ISA-specific TUs with their own flags, link
+# them all into the same library, dispatch at runtime via cpu.c. The
+# scalar TU (simd_text.c) is always built; these add accelerated paths.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|i[3-6]86)")
+    check_c_compiler_flag("-mavx2" TAURUS_HAVE_AVX2_FLAG)
+    if(TAURUS_HAVE_AVX2_FLAG)
+        target_sources(taurus_objects PRIVATE taurus/common/simd_text_avx2.c)
+        set_source_files_properties(taurus/common/simd_text_avx2.c
+            PROPERTIES COMPILE_FLAGS "-mavx2")
+        message(STATUS "AOT SIMD: AVX2 text scan ENABLED")
+    else()
+        message(STATUS "AOT SIMD: AVX2 unavailable (flag rejected)")
+    endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64|ARM64)")
+    # NEON is baseline on aarch64 — no special flags needed.
+    target_sources(taurus_objects PRIVATE taurus/common/simd_text_neon.c)
+    message(STATUS "AOT SIMD: NEON text scan ENABLED")
+endif()
 
 target_compile_options(taurus_objects PRIVATE
     $<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:
