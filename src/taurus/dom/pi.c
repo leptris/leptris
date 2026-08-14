@@ -47,7 +47,7 @@ TaurusPINode* taurus_pi_create(const char* target,
     node->base.frozen = 0;
     node->base.version = 0;
     node->parent_off = 0;
-    node->next_sibling_off = 0;
+    node->next_sibling_cp = 0;
     node->target = target_storage;
 
     return node;

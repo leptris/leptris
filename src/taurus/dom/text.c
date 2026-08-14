@@ -34,7 +34,7 @@ TaurusTextNode* taurus_text_create(const char* content,
     node->pool = NULL;       /* content is pool-resident + NUL-terminated */
     node->borrowed = 0;
     node->parent_off = 0;
-    node->next_sibling_off = 0;
+    node->next_sibling_cp = 0;
 
     if (content && content_len > 0) {
         memcpy(content_storage, content, content_len);
@@ -68,7 +68,7 @@ TaurusTextNode* taurus_text_create_borrowed(const char* content,
     node->pool = pool;
     node->borrowed = 1;
     node->parent_off = 0;
-    node->next_sibling_off = 0;
+    node->next_sibling_cp = 0;
 
     return node;
 }
