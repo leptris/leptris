@@ -32,6 +32,7 @@
 #include "../common/chartype.h"
 #include "../common/entities.h"
 #include "../common/port.h"
+#include "../common/simd_text.h"
 #include "../dtd/model.h"
 
 #include <string.h>
@@ -894,18 +895,14 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 /* Comment: <!-- ... --> */
                 p.pos += 4;
                 char* start = p.pos;
-                /* memchr for '-' to fast-skip large comment bodies,
-                 * then verify "−−>" at each candidate. libc memchr
-                 * processes 16-32 bytes/iteration. */
-                for (;;) {
-                    char* dash = (char*)memchr(p.pos, '-', p.end - p.pos);
-                    if (!dash || dash + 2 >= p.end) goto fail;
-                    if (dash[1] == '-' && dash[2] == '>') {
-                        p.pos = dash;
-                        break;
-                    }
-                    p.pos = dash + 1;
-                }
+                /* TODO 177: SIMD find3 for "-->" (NEON/AVX2 when
+                 * available, scalar memchr-anchor fallback). Replaces
+                 * the per-candidate dash verify loop; dash-run-heavy
+                 * comment bodies no longer re-scan candidates. */
+                ptrdiff_t hit = taurus_text_find3(
+                    p.pos, (size_t)(p.end - p.pos), '-', '-', '>');
+                if (hit < 0) goto fail;
+                p.pos += hit;
                 *p.pos = '\0'; /* NUL-terminate content */
                 TaurusCommentNode* cn = taurus_comment_create(
                     start, p.pos - start, pool);
@@ -921,17 +918,11 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 /* CDATA: <![CDATA[ ... ]]> */
                 p.pos += 9;
                 char* start = p.pos;
-                /* memchr for ']' to fast-skip large CDATA bodies,
-                 * then verify "]]>" at each candidate. */
-                for (;;) {
-                    char* bracket = (char*)memchr(p.pos, ']', p.end - p.pos);
-                    if (!bracket || bracket + 2 >= p.end) goto fail;
-                    if (bracket[1] == ']' && bracket[2] == '>') {
-                        p.pos = bracket;
-                        break;
-                    }
-                    p.pos = bracket + 1;
-                }
+                /* TODO 177: SIMD find3 for "]]>". */
+                ptrdiff_t hit = taurus_text_find3(
+                    p.pos, (size_t)(p.end - p.pos), ']', ']', '>');
+                if (hit < 0) goto fail;
+                p.pos += hit;
                 *p.pos = '\0';
                 TaurusCDATANode* cd = taurus_cdata_create(
                     start, p.pos - start, pool);
