@@ -1,13 +1,41 @@
 ## [Unreleased]
 
-## [0.19.6] - Y-08-14
+## [0.19.6] - 2026-08-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Foundation — contiguous per-document arena (TODO 183 Phase 1)
 
-### Changed
+New `src/taurus/memory/arena.{h,c}`: a fail-fast bump allocator
+backed by one single contiguous malloc per document. Purely
+additive — no existing code path touched yet.
 
-- (describe changes here)
+**The contract — fail-fast, no silent fallback.**
+`taurus_arena_alloc` returns NULL when a request does not fit in
+the remaining space; it never falls back to malloc. Every returned
+pointer is guaranteed to lie within `[base, base + size)`. That
+guarantee is the property the page-based pool cannot provide: its
+32 KB pages are independent mallocs that land megabytes apart on
+macOS ASLR / Linux glibc — exactly what silently truncated cp16
+tree edges during the attempted compact-pointer Phase C (TODO 180).
+pugixml behaves the same way: parse fails on allocator exhaustion
+rather than scattering allocations.
+
+API mirrors the pool subset the parser uses (8-byte aligned, so
+compact-pointer scale-8 assumptions hold): `create/destroy`,
+`alloc`, `alloc_zeroed`, `alloc_node_with_content` (struct+content
+contiguous), `remaining`, `base`.
+
+11 new specs in `test/memory/test_arena.cpp`, including
+`AllPointersWithinSpanForCompactEncoding` — the invariant the pool
+cannot guarantee, stated as a test — plus exhaustion semantics
+(exact-fit then refusal, smaller-fit-after-refusal), alignment,
+non-overlap, zeroing, and node+content contiguity.
+
+All 497 tests pass (486 + 11 new).
+
+Next: Phase 2 (pool API wrapper over the arena) and Phase 3
+(`direct_parse` sizes the arena ≈2× document bytes + 64 KB and
+allocates everything from it), after which compact-pointer Phases
+C/D (TODO 180/181) can be retried on the contiguous layout.
 
 
 ## [0.19.5] - 2026-08-14
