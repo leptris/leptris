@@ -20,6 +20,7 @@
 #include "../../include/taurus/types.h"  /* Allocator hook typedefs + opaque types */
 #include "../common/types_internal.h"     /* Single source for TaurusMemoryPool */
 #include "../common/string_view.h"       /* Full TaurusStringView definition */
+#include "arena.h"                       /* Contiguous arena mode (TODO 183) */
 
 /* ============================================================================
  * String Interning Structures (for deduplication)
@@ -102,6 +103,16 @@ struct taurus_memory_pool {
     /* Oversized allocations — freed in taurus_pool_destroy alongside pages. */
     TaurusBigAlloc* first_big_alloc;            /* Head of side list */
     TaurusBigAlloc** last_big_alloc_link;       /* O(1) append target */
+
+    /* Arena mode (TODO 183 Phase 2). When non-NULL, every allocation
+     * routes to this single contiguous arena instead of pages: pool
+     * allocs are guaranteed within [arena->base, +size), and overflow
+     * is a hard NULL (never a scattered malloc) — the property tree
+     * compact-pointer edges need. Page fields are unused in this mode.
+     * arena_owned: destroy the arena with the pool (parser-owned
+     * arenas set 0 when the caller manages lifetime itself). */
+    TaurusArena* arena;
+    int arena_owned;
 };
 
 /* TaurusMemoryPool typedef comes from common/types_internal.h
@@ -125,6 +136,22 @@ TaurusMemoryPool* taurus_pool_create(void);
  * Returns: New pool, or NULL on allocation failure
  */
 TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size);
+
+/* Arena-backed mode (TODO 183 Phase 2).
+ *
+ * All allocations route to `arena` — a single contiguous malloc —
+ * so every pointer the pool hands out lies within
+ * [base, base + size) and exhaustion is a hard NULL (no fallback
+ * malloc, no scattered pages). `owns_arena`: when 1, pool destroy
+ * frees the arena; when 0, the caller owns the arena's lifetime
+ * (used when the parser pre-sizes one arena and hands it to the
+ * pool). The pool API is unchanged for callers. */
+TaurusMemoryPool* taurus_pool_create_arena_backed(TaurusArena* arena,
+                                                   int owns_arena);
+
+/* Nonzero when the pool routes to an arena (diagnostics + parser
+ * capacity planning). */
+int taurus_pool_is_arena_backed(const TaurusMemoryPool* pool);
 
 /**
  * Destroy pool and free all allocated memory
