@@ -169,7 +169,7 @@ struct taurus_attribute* taurus_element_get_attribute_by_index(TaurusElement ele
     for (uint8_t i = 0; i < index && attr; i++) {
         /* Validate attr pointer before accessing next */
         if ((uintptr_t)attr < 0x1000) return NULL;  /* Invalid pointer */
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
 
     /* Final validation before returning */
@@ -209,7 +209,7 @@ struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem
                 return attr;
             }
         }
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
 
     return NULL;
@@ -231,7 +231,7 @@ struct taurus_attribute* taurus_element_get_attribute_by_name_view(TaurusElement
         if (taurus_sv_equals(&attr->name_view, &name)) {
             return attr;
         }
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
 
     return NULL;
@@ -309,7 +309,7 @@ int taurus_element_add_attribute(TaurusElement elem,
         attr->has_entities = 0;
     }
 
-    attr->next = NULL;
+    taurus_attr_set_next(attr, NULL);
 
     /* Append via cached last_attribute pointer (TODO 106).
      * Maintains the same invariant as taurus_element_set_attribute.
@@ -317,7 +317,7 @@ int taurus_element_add_attribute(TaurusElement elem,
      * the encoder (TODO 90 Phase 2d). */
     struct taurus_attribute* last = taurus_elem_last_attribute(elem);
     if (last) {
-        last->next = attr;
+        taurus_attr_set_next(last, attr);
     } else {
         taurus_elem_set_first_attribute(elem, attr);
     }
@@ -382,11 +382,11 @@ int taurus_element_add_attribute_zero_copy(TaurusElement elem,
         attr->has_entities = 0;
     }
 
-    attr->next = NULL;
+    taurus_attr_set_next(attr, NULL);
 
     struct taurus_attribute* last = taurus_elem_last_attribute(elem);
     if (last) {
-        last->next = attr;
+        taurus_attr_set_next(last, attr);
     } else {
         taurus_elem_set_first_attribute(elem, attr);
     }
@@ -938,7 +938,7 @@ int taurus_element_remove_all_attributes(TaurusElement elem) {
     /* Just clear the attribute linked list pointers */
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     while (attr) {
-        struct taurus_attribute* next = attr->next;
+        struct taurus_attribute* next = taurus_attr_next(attr);
         /* Don't free attr or any of its strings - all pool-allocated!
          * They will be reclaimed when the document/pool is freed. */
         attr = next;

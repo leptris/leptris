@@ -271,7 +271,7 @@ static void collect_namespaces_recursive(XPathContext* context,
         /* Walk the attribute linked list */
         struct taurus_attribute* attr = taurus_element_get_first_attribute(element);
         for (size_t j = 0; j < i && attr; j++) {
-            attr = attr->next;
+            attr = taurus_attr_next(attr);
         }
         if (!attr) continue;
 

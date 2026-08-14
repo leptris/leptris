@@ -88,7 +88,7 @@ static void xml_print_element_recursive(
         /* Walk the attribute linked list manually to get the i-th attribute */
         struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
         for (size_t j = 0; j < i && attr; j++) {
-            attr = attr->next;
+            attr = taurus_attr_next(attr);
         }
         if (!attr) continue;
 
@@ -507,7 +507,7 @@ static void json_print_element_recursive(
             if (temp_value) free(temp_value);
 
             /* Move to next attribute */
-            attr = attr->next;
+            attr = taurus_attr_next(attr);
         }
         fprintf(out, "}");
     }
@@ -692,7 +692,7 @@ static void text_print_element_recursive(
                 }
             }
             /* Move to next attribute */
-            attr = attr->next;
+            attr = taurus_attr_next(attr);
         }
         fprintf(out, "}");
     }

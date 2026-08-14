@@ -383,7 +383,7 @@ struct taurus_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* 
                 /* Allocate a TaurusAttributeNode mirroring
                  * create_attribute_node in evaluator_axes.c. */
                 TaurusAttributeNode* an = TAURUS_ALLOC(TaurusAttributeNode);
-                if (!an) { attr = attr->next; continue; }
+                if (!an) { attr = taurus_attr_next(attr); continue; }
                 an->node_type = TAURUS_NODE_ATTRIBUTE;
 
                 /* Copy name */
@@ -418,7 +418,7 @@ struct taurus_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* 
 
                 xpath_nodeset_add_fast(out, an);
             }
-            attr = attr->next;
+            attr = taurus_attr_next(attr);
         }
     }
 
@@ -743,7 +743,7 @@ static int attr_pred_match(TaurusElement e,
                 return 1;
             }
         }
-        a = a->next;
+        a = taurus_attr_next(a);
     }
     return 0;
 }
@@ -1365,7 +1365,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                             found = 1;
                             break;
                         }
-                        a = a->next;
+                        a = taurus_attr_next(a);
                     }
                     if (found) {
                         if (write != read) input->nodes[write] = node;
@@ -1421,7 +1421,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                             match = 1;
                             break;
                         }
-                        a = a->next;
+                        a = taurus_attr_next(a);
                     }
                     if (match) {
                         if (write != read) input->nodes[write] = node;

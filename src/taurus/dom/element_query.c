@@ -892,7 +892,7 @@ TAURUS_API const char* taurus_element_attribute_name_at(TaurusElement elem, size
             return NULL;
         }
         i++;
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
     return NULL;
 }
@@ -912,7 +912,7 @@ TAURUS_API const char* taurus_element_attribute_value_at(TaurusElement elem, siz
             return NULL;
         }
         i++;
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
     return NULL;
 }
@@ -937,7 +937,7 @@ TAURUS_API size_t taurus_element_namespace_count(TaurusElement elem) {
             nv.data[4] == 's') {
             count++;
         }
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
     return count;
 }
@@ -990,7 +990,7 @@ static int element_namespace_decl_at(TaurusElement elem, size_t index,
             }
             i++;
         }
-        attr = attr->next;
+        attr = taurus_attr_next(attr);
     }
     return 0;
 }

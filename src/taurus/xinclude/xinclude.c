@@ -117,7 +117,7 @@ static TaurusElement deep_copy_element(const TaurusElement src,
     if (!dst) return NULL;
 
     /* Copy attributes. */
-    for (struct taurus_attribute* a = taurus_elem_first_attribute(src); a; a = a->next) {
+    for (struct taurus_attribute* a = taurus_elem_first_attribute(src); a; a = taurus_attr_next(a)) {
         const char* a_name = a->name ? a->name : "";
         const char* a_value = a->value ? a->value : "";
         taurus_element_add_attribute_pooled(dst, a_name, a_value, target_pool);
