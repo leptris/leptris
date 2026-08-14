@@ -70,6 +70,35 @@ TaurusMemoryPool* taurus_pool_create(void) {
     return taurus_pool_create_with_page_size(TAURUS_POOL_PAGE_SIZE_DEFAULT);
 }
 
+/* Arena-backed mode (TODO 183 Phase 2). The pool struct is a plain
+ * hook-allocated block — no pages, no inline first page. */
+TaurusMemoryPool* taurus_pool_create_arena_backed(TaurusArena* arena,
+                                                   int owns_arena) {
+    if (!arena) return NULL;
+    TaurusMemoryPool* pool =
+        (TaurusMemoryPool*)taurus_alloc_hook(sizeof(TaurusMemoryPool));
+    if (!pool) return NULL;
+    pool->first_page = NULL;
+    pool->current_page = NULL;
+    pool->page_count = 0;
+    pool->string_cache = NULL;
+    pool->strict_mode = 0;
+    pool->page_size = 0;
+    pool->page_base = arena->base;
+    pool->first_page_inline = 0;
+    pool->alloc_hook = NULL;
+    pool->dealloc_hook = NULL;
+    pool->first_big_alloc = NULL;
+    pool->last_big_alloc_link = &pool->first_big_alloc;
+    pool->arena = arena;
+    pool->arena_owned = owns_arena;
+    return pool;
+}
+
+int taurus_pool_is_arena_backed(const TaurusMemoryPool* pool) {
+    return pool && pool->arena != NULL;
+}
+
 TaurusMemoryPool* taurus_pool_create_with_hooks(
     size_t page_size,
     taurus_allocation_function alloc,
@@ -123,6 +152,8 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
     pool->page_size = page_size;
     pool->page_base = page->data;  /* Initialize page_base for compact pointer decoding */
     pool->first_page_inline = 1;
+    pool->arena = NULL;
+    pool->arena_owned = 0;
 
     /* No oversized allocations yet — list starts empty. */
     pool->first_big_alloc = NULL;
@@ -150,6 +181,17 @@ TaurusMemoryPool* taurus_pool_create_with_page_size(size_t page_size) {
 
 void taurus_pool_destroy(TaurusMemoryPool* pool) {
     if (!pool) return;
+
+    /* Arena mode: everything handed out (pages of nothing, string-cache
+     * entries, node structs, content buffers) lives inside the single
+     * arena allocation. Destroy it (when owned) and the pool struct. */
+    if (pool->arena) {
+        if (pool->arena_owned) {
+            taurus_arena_destroy(pool->arena);
+        }
+        taurus_free_hook(pool);
+        return;
+    }
 
     /* Oversized allocations come from taurus_alloc_hook directly and
      * are tracked on the side list.  Free the user data, then the
@@ -238,6 +280,13 @@ static void* pool_alloc_oversized(TaurusMemoryPool* pool, size_t size) {
 void* taurus_pool_alloc(TaurusMemoryPool* pool, size_t size) {
     if (!pool || size == 0) return NULL;
 
+    /* Arena mode: one contiguous span, hard-NULL exhaustion. Never
+     * reaches the oversized path — a request that doesn't fit simply
+     * fails (the TODO 183 contract). */
+    if (pool->arena) {
+        return taurus_arena_alloc(pool->arena, size);
+    }
+
     /* Align size to 8 bytes for performance and alignment requirements */
     size = ALIGN_SIZE(size);
 
@@ -288,6 +337,12 @@ void* taurus_pool_calloc(TaurusMemoryPool* pool, size_t size) {
 void* taurus_pool_alloc_batch(TaurusMemoryPool* pool, size_t item_size, size_t count) {
     if (!pool || item_size == 0 || count == 0) return NULL;
 
+    /* Arena mode: one bump for the whole batch — contiguous by
+     * construction. */
+    if (pool->arena) {
+        return taurus_arena_alloc(pool->arena, item_size * count);
+    }
+
     /* Align item size */
     item_size = ALIGN_SIZE(item_size);
 
@@ -333,6 +388,16 @@ void* taurus_pool_alloc_node_with_content(TaurusMemoryPool* pool,
                                            size_t content_size,
                                            char** content_out) {
     if (!pool || struct_size == 0 || !content_out) return NULL;
+
+    /* Arena mode: struct + content contiguous in one bump — including
+     * oversized content. This is strictly better than the page-mode
+     * split (which parks big content in a separate oversized malloc);
+     * here the content stays inside the span, so nothing an edge could
+     * point at ever leaves it. */
+    if (pool->arena) {
+        return taurus_arena_alloc_node_with_content(
+            pool->arena, struct_size, content_size, content_out);
+    }
 
     size_t aligned_struct = ALIGN_SIZE(struct_size);
     size_t total = aligned_struct + ALIGN_SIZE(content_size + 1);
@@ -752,6 +817,9 @@ void taurus_hash_table_for_each(StringHashTable* table,
 size_t taurus_pool_total_size(TaurusMemoryPool* pool) {
     if (!pool) return 0;
 
+    /* Arena mode: capacity is the single allocation. */
+    if (pool->arena) return pool->arena->size;
+
     size_t total = 0;
 
     /* Pages: header struct + data capacity, summed.  The header uses
@@ -774,6 +842,9 @@ size_t taurus_pool_used_size(TaurusMemoryPool* pool) {
      * now (busy_size + oversized bytes).  Useful for waste reporting. */
     if (!pool) return 0;
 
+    /* Arena mode: the bump pointer IS the used count. */
+    if (pool->arena) return pool->arena->used;
+
     size_t used = 0;
     for (MemoryPage* page = pool->first_page; page; page = page->next) {
         used += page->busy_size;
@@ -785,5 +856,9 @@ size_t taurus_pool_used_size(TaurusMemoryPool* pool) {
 }
 
 size_t taurus_pool_page_count(TaurusMemoryPool* pool) {
-    return pool ? pool->page_count : 0;
+    if (!pool) return 0;
+    /* Arena mode: one contiguous block — report 1 so callers that use
+     * page_count>0 as "has backing storage" stay truthful. */
+    if (pool->arena) return 1;
+    return pool->page_count;
 }
