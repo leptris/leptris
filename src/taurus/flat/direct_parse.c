@@ -587,8 +587,16 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                        + taurus_text_count_char(buf, len, '\'');
     size_t est_elems = lt_count + 8;
     size_t elem_bytes = est_elems * sizeof(struct taurus_element);
-    size_t attr_bytes = (quote_count / 2 + 16) * sizeof(struct taurus_attribute);
-    size_t text_room = len;
+    size_t attr_bytes = (quote_count / 2 + 64) * sizeof(struct taurus_attribute);
+    /* len bounds all text/name/value content copies (substrings of the
+     * document), but each text/comment NODE costs ~48-56 B of struct
+     * overhead regardless of content length — one per element on
+     * mixed-content docs, ~2x the per-item markup. Bound it per
+     * element (CI catch: a 134 KB item-heavy doc exhausted the arena
+     * at item 4144/5000 with 38 bytes left when this term was
+     * missing). */
+    size_t node_overhead = est_elems * 64;
+    size_t text_room = len + node_overhead;
     size_t buf_extra = (owns_buffer == 2) ? (len + 1) : 0;
     size_t slack = len / 2 + 64 * 1024;  /* mutation headroom + floor */
     size_t arena_size = elem_bytes + attr_bytes + text_room + buf_extra + slack;
@@ -627,7 +635,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * attr capacity follows the quote-derived estimate (each attr
      * value contributes exactly 2 quote chars). Overflow falls back
      * to per-attr pool alloc — which now bumps the same arena. */
-    size_t attr_capacity = quote_count / 2 + 16;
+    size_t attr_capacity = quote_count / 2 + 64;
     char* combined = (char*)taurus_pool_alloc(pool, elem_bytes + attr_bytes);
     if (!combined) {
         taurus_pool_destroy(pool);

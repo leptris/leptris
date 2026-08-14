@@ -52,17 +52,44 @@ TEST(PoolArenaMode, AllocsLieWithinArenaSpan) {
     taurus_pool_destroy(pool);
 }
 
-TEST(PoolArenaMode, ExhaustionIsHardNullNoFallback) {
+TEST(PoolArenaMode, ExhaustionExtendsBeyondSpan) {
+    /* Post-Phase-3 contract: the POOL never hard-fails (mutation APIs
+     * like element_create can't start returning NULL). Overflow beyond
+     * the sized span is satisfied by a tracked extension block — which
+     * must lie OUTSIDE [base, base+size): the span stays contiguous
+     * and exclusively holds parse-time allocations. */
     TaurusArena* arena = taurus_arena_create(128);
     ASSERT_NE(arena, nullptr);
     TaurusMemoryPool* pool = taurus_pool_create_arena_backed(arena, 1);
     ASSERT_NE(pool, nullptr);
-    /* Fill almost everything. */
-    ASSERT_NE(taurus_pool_alloc(pool, 120), nullptr);
-    /* Refused — and NOT silently satisfied by a malloc elsewhere. */
-    EXPECT_EQ(taurus_pool_alloc(pool, 64), nullptr);
-    /* Smaller request that fits still succeeds. */
-    ASSERT_NE(taurus_pool_alloc(pool, 8), nullptr);
+    char* base = (char*)taurus_arena_base(arena);
+    /* In-span allocations stay in-span. */
+    char* in_span = (char*)taurus_pool_alloc(pool, 120);
+    ASSERT_NE(in_span, nullptr);
+    EXPECT_GE(in_span, base);
+    EXPECT_LT(in_span, base + 128);
+    /* Overflow succeeds but comes from an extension block. */
+    char* ext = (char*)taurus_pool_alloc(pool, 64);
+    ASSERT_NE(ext, nullptr);
+    EXPECT_TRUE(ext < base || ext >= base + 128)
+        << "overflow allocation must not land inside the arena span";
+    /* Span accounting unchanged by the extension. */
+    EXPECT_LE(taurus_pool_used_size(pool), 128u);
+    taurus_pool_destroy(pool);  /* extension freed with the pool */
+}
+
+TEST(PoolArenaMode, MutationGrowthNeverFails) {
+    /* The motivating case: parse a tiny doc, then build a large tree
+     * through the mutation API — the page pool always allowed this,
+     * so the arena-backed pool must too. */
+    TaurusArena* arena = taurus_arena_create(64);
+    ASSERT_NE(arena, nullptr);
+    TaurusMemoryPool* pool = taurus_pool_create_arena_backed(arena, 1);
+    ASSERT_NE(pool, nullptr);
+    for (int i = 0; i < 1000; i++) {
+        void* p = taurus_pool_alloc(pool, 72);
+        ASSERT_NE(p, nullptr) << "i=" << i;
+    }
     taurus_pool_destroy(pool);
 }
 
