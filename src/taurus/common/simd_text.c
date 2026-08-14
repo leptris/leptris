@@ -55,6 +55,20 @@ static ptrdiff_t find3_scalar(const char* s, size_t len,
  * racing threads write identical values; the store is idempotent). */
 static int (*g_contains_fn)(const char*, size_t, char) = NULL;
 static ptrdiff_t (*g_find3_fn)(const char*, size_t, char, char, char) = NULL;
+static size_t (*g_count_fn)(const char*, size_t, char) = NULL;
+
+static size_t count_scalar(const char* s, size_t len, char c) {
+    size_t n = 0;
+    const char* p = s;
+    const char* end = s + len;
+    while (p < end) {
+        const char* hit = (const char*)memchr(p, c, (size_t)(end - p));
+        if (!hit) break;
+        n++;
+        p = hit + 1;
+    }
+    return n;
+}
 
 static void dispatch_init(void) {
     taurus_cpu_level lvl = taurus_cpu_detect();
@@ -62,8 +76,10 @@ static void dispatch_init(void) {
     if (lvl >= TAURUS_CPU_AVX2) {
         extern int taurus_text_contains_avx2(const char*, size_t, char);
         extern ptrdiff_t taurus_text_find3_avx2(const char*, size_t, char, char, char);
+        extern size_t taurus_text_count_char_avx2(const char*, size_t, char);
         g_contains_fn = taurus_text_contains_avx2;
         g_find3_fn = taurus_text_find3_avx2;
+        g_count_fn = taurus_text_count_char_avx2;
         return;
     }
 #endif
@@ -71,14 +87,17 @@ static void dispatch_init(void) {
     if (lvl >= TAURUS_CPU_NEON) {
         extern int taurus_text_contains_neon(const char*, size_t, char);
         extern ptrdiff_t taurus_text_find3_neon(const char*, size_t, char, char, char);
+        extern size_t taurus_text_count_char_neon(const char*, size_t, char);
         g_contains_fn = taurus_text_contains_neon;
         g_find3_fn = taurus_text_find3_neon;
+        g_count_fn = taurus_text_count_char_neon;
         return;
     }
 #endif
     (void)lvl;
     g_contains_fn = contains_scalar;
     g_find3_fn = find3_scalar;
+    g_count_fn = count_scalar;
 }
 
 int taurus_text_contains(const char* s, size_t len, char c) {
@@ -94,4 +113,9 @@ ptrdiff_t taurus_text_find3(const char* s, size_t len,
                              char c0, char c1, char c2) {
     if (!g_find3_fn) dispatch_init();
     return g_find3_fn(s, len, c0, c1, c2);
+}
+
+size_t taurus_text_count_char(const char* s, size_t len, char c) {
+    if (!g_count_fn) dispatch_init();
+    return g_count_fn(s, len, c);
 }

@@ -13,7 +13,6 @@
 #include "../common/port.h"
 
 #if defined(TAURUS_ARCH_X86) && defined(__AVX2__)
-
 #include <immintrin.h>
 
 int taurus_text_contains_avx2(const char* s, size_t len, char c) {
@@ -74,6 +73,33 @@ ptrdiff_t taurus_text_find3_avx2(const char* s, size_t len,
         }
     }
     return -1;
+}
+
+/* Byte-population count: cmpeq → movemask → popcount per 32-byte
+ * chunk, 16-byte SSE step, scalar tail. Never reads past s+len. */
+size_t taurus_text_count_char_avx2(const char* s, size_t len, char c) {
+    const char* p = s;
+    const char* end = s + len;
+    const __m256i needle = _mm256_set1_epi8((char)c);
+    size_t n = 0;
+
+    while (end - p >= 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)p);
+        __m256i eq = _mm256_cmpeq_epi8(v, needle);
+        n += (size_t)__builtin_popcount((unsigned)_mm256_movemask_epi8(eq));
+        p += 32;
+    }
+    if (end - p >= 16) {
+        __m128i v = _mm_loadu_si128((const __m128i*)p);
+        __m128i eq = _mm_cmpeq_epi8(v, _mm256_castsi256_si128(needle));
+        n += (size_t)__builtin_popcount((unsigned)_mm_movemask_epi8(eq));
+        p += 16;
+    }
+    while (p < end) {
+        if (*p == c) n++;
+        p++;
+    }
+    return n;
 }
 
 #endif /* TAURUS_ARCH_X86 && __AVX2__ */

@@ -562,61 +562,44 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
  */
 static struct taurus_document* direct_parse_internal(char* buf, size_t len, int owns_buffer) {
 
-    /* 2. Create pool. The page size MUST be large enough to hold the
-     * bulk element+attribute block (allocated in step 3). If the page
-     * is too small, the bulk block becomes an oversized allocation
-     * (separate malloc), which can land >2GB from the pool pages that
-     * hold text/comment/CDATA nodes. This causes int32 offset overflow
-     * in compact pointers and silent tree corruption (#261).
+    /* 2. Create arena-backed pool (TODO 183 Phase 3).
      *
-     * Fix: set page_size = elem_bytes + attr_bytes + headroom. The
-     * pool allocator places the bulk block in the first oversized
-     * page and subsequent text/comment allocations in the same page's
-     * remaining space. All nodes are contiguous → offsets fit int32.
+     * Content-derived sizing: one cheap pre-scan counts '<' (an upper
+     * bound on tags — close tags and '<' in text only over-count, which
+     * over-allocates in the safe direction) and quote characters (each
+     * attribute value contributes exactly 2, single- or double-quoted).
+     * This sizes the element and attribute blocks to the document's
+     * actual shape instead of a fixed len/10 heuristic — the K=100
+     * many-attrs case (884 bytes/element) no longer over-allocates
+     * attrs 5×, and text-heavy docs reserve room the old est missed.
      *
-     * Cap at 4 MB to avoid wasting memory on pathologically large docs. */
-    /* Estimate element count from input size. Tuned to avoid
-     * over-allocation on tiny docs (where pool page malloc dominates
-     * parse time) while still keeping headroom for moderately
-     * attribute-heavy inputs.
+     * One arena replaces the old "single 4 MB-capped first pool page"
+     * trick (#261): there is no page cap, so the bulk elem+attr block
+     * and every text/string/mutation allocation share one contiguous
+     * span. Exhaustion is a hard NULL → parse fails cleanly (pugixml
+     * semantics) instead of scattering a second page megabytes away.
      *
-     * The "+128" floor in earlier revisions allocated ~50 KB per
-     * parse even for 37-byte inputs — pugixml does ~0.1 µs on such
-     * docs because it allocates O(actual-size). The lower floor
-     * here costs a few ns of fallback pool_alloc on pathological
-     * inputs but saves 100+ ns of malloc on the common case.
-     *
-     * Worst-case element is `<a/>` = 4 bytes, but the typical
-     * element with attributes and text averages ~10 bytes. len/10
-     * is a reasonable estimate; +8 is a small safety margin (vs
-     * the prior +128). The element overflow path falls back to
-     * pool_alloc, so underestimates don't break parsing. */
-    size_t est_elems = len / 10 + 8;
+     * Slack: len covers all text/name/value copies (they're substrings
+     * of the document), plus len/2 mutation headroom (post-parse
+     * append/set calls allocate from the same arena). */
+    size_t lt_count = taurus_text_count_char(buf, len, '<');
+    size_t quote_count = taurus_text_count_char(buf, len, '"')
+                       + taurus_text_count_char(buf, len, '\'');
+    size_t est_elems = lt_count + 8;
     size_t elem_bytes = est_elems * sizeof(struct taurus_element);
-    size_t attr_bytes = est_elems * 6 * sizeof(struct taurus_attribute);
-    size_t text_headroom = est_elems * 64; /* text/comment/CDATA/PI */
-    /* 2. Create pool. The page size MUST be large enough to hold the
-     * bulk element+attribute block (allocated in step 3). If the page
-     * is too small, the bulk block becomes an oversized allocation
-     * (separate malloc), which can land >2GB from the pool pages that
-     * hold text/comment/CDATA nodes. This causes int32 offset overflow
-     * in compact pointers and silent tree corruption (#261).
-     *
-     * Fix: set page_size = elem_bytes + attr_bytes + headroom. The
-     * pool allocator places the bulk block in the first oversized
-     * page and subsequent text/comment allocations in the same page's
-     * remaining space. All nodes are contiguous → offsets fit int32.
-     *
-     * Cap at 4 MB to avoid wasting memory on pathologically large docs.
-     *
-     * When owns_buffer == 2 (TODO 154 Phase C), also account for the
-     * input copy that we'll allocate from this same pool. */
+    size_t attr_bytes = (quote_count / 2 + 16) * sizeof(struct taurus_attribute);
+    size_t text_room = len;
     size_t buf_extra = (owns_buffer == 2) ? (len + 1) : 0;
-    size_t page_size = elem_bytes + attr_bytes + text_headroom + buf_extra;
-    if (page_size < 4096) page_size = 4096;
-    if (page_size > 4 * 1024 * 1024) page_size = 4 * 1024 * 1024;
-    TaurusMemoryPool* pool = taurus_pool_create_with_page_size(page_size);
+    size_t slack = len / 2 + 64 * 1024;  /* mutation headroom + floor */
+    size_t arena_size = elem_bytes + attr_bytes + text_room + buf_extra + slack;
+    TaurusArena* arena = taurus_arena_create(arena_size);
+    if (!arena) {
+        if (owns_buffer == 1) free(buf);
+        return NULL;
+    }
+    TaurusMemoryPool* pool = taurus_pool_create_arena_backed(arena, 1);
     if (!pool) {
+        taurus_arena_destroy(arena);
         if (owns_buffer == 1) free(buf);
         return NULL;
     }
@@ -639,17 +622,12 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     }
 
     /* 3. Bulk-allocate element + attribute blocks as ONE contiguous
-     * allocation. This guarantees that offsets between elements and
-     * attributes always fit in int32 — even under extreme memory
-     * pressure with 15,000+ simultaneously-alive documents (#261).
+     * arena bump. Layout: [ elem_block | attr_block ]
      *
-     * If they were separate oversized allocations, malloc could place
-     * them >2GB apart, causing int32 offset overflow and silent
-     * pointer corruption on decode.
-     *
-     * Layout: [ elem_block | attr_block ]
-     */
-    size_t attr_capacity = est_elems * 6;
+     * attr capacity follows the quote-derived estimate (each attr
+     * value contributes exactly 2 quote chars). Overflow falls back
+     * to per-attr pool alloc — which now bumps the same arena. */
+    size_t attr_capacity = quote_count / 2 + 16;
     char* combined = (char*)taurus_pool_alloc(pool, elem_bytes + attr_bytes);
     if (!combined) {
         taurus_pool_destroy(pool);
@@ -1055,9 +1033,31 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     /* 7. Freeze tree (match legacy parser behavior). */
     taurus_document_freeze_tree(doc);
 
+    {
+        static int dbg_ok = -1;
+        if (dbg_ok < 0) dbg_ok = getenv("TAURUS_DEBUG_PARSE") != NULL;
+        if (dbg_ok) {
+            fprintf(stderr, "dp ok: arena_used=%zu arena_cap=%zu elem_idx=%zu attr_idx=%zu\n",
+                    arena->used, arena->size, elem_idx, p.attr_idx);
+        }
+    }
+
     return doc;
 
 fail:
+    {
+        /* Cached env lookup — getenv is a linear environ scan, too
+         * costly to repeat on every parse. Benign init race. */
+        static int dbg = -1;
+        if (dbg < 0) dbg = getenv("TAURUS_DEBUG_PARSE") != NULL;
+        if (dbg) {
+            fprintf(stderr, "dp fail: pos=%ld off=%ld depth=%d arena_used=%zu arena_cap=%zu elem_idx=%zu attr_idx=%zu lt=%zu q=%zu est=%zu attrcap=%zu\n",
+                    (long)(p.pos - p.buf), (long)(p.end - p.pos), p.depth,
+                    arena ? arena->used : 0, arena ? arena->size : 0,
+                    elem_idx, p.attr_idx, lt_count, quote_count, est_elems,
+                    attr_capacity);
+        }
+    }
     taurus_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't TAURUS_FREE(doc) (TODO 154). */
