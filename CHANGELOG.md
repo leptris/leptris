@@ -1,13 +1,74 @@
 ## [Unreleased]
 
-## [0.19.8] - Y-08-14
+## [0.19.8] - 2026-08-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Architecture — parser fully on the contiguous arena (TODO 183 Phase 3)
 
-### Changed
+`direct_parse` now allocates EVERYTHING for a parsed document from
+one contiguous arena: the bulk element+attribute block, text/comment/
+CDATA/PI nodes, strings, the document struct, and the input copy all
+live within `[base, base+size)` by construction. The old 4 MB page
+cap — which scattered attr-heavy documents' bulk block to a separate
+oversized malloc — is gone. This is the layout prerequisite for
+retrying compact-pointer Phases C/D (TODO 180/181, the 1.5–3×
+pugixml-gap levers).
 
-- (describe changes here)
+#### Content-derived sizing via SIMD byte population count
+
+One SIMD pass counts `<` (upper bound on tags) and quote characters
+(exactly 2 per attribute value, single- or double-quoted); attr
+capacity follows the document's actual shape instead of the len/10
+heuristic. K=100 many-attrs allocates 9.6 MB at 87% utilization vs
+the old path's 43.7 MB oversized block — 5× less over-allocation.
+
+New `taurus_text_count_char` in the AOT SIMD framework: AVX2 via
+movemask popcount; NEON via `vpaddlq_u8`→`vaddvq_u16`. The naive
+NEON form (`vaddvq_u8`) is WRONG on real hardware — ARM's `ADDV.16b`
+accumulates in a byte register, so 255×match overflows mod 256 and
+any chunk with 2+ matches counted as zero. Unit-tested across
+per-chunk densities 1–15; the bug was caught live when it
+under-sized arenas and failed the 5000-doc stress suite.
+
+#### Measured impact (controlled A/B, fresh Release build dirs, 7 runs)
+
+| build | K=100 median |
+|---|---|
+| v0.19.7 (page mode) | 2053 µs |
+| **v0.19.8 (arena)** | **1986 µs** |
+
+Parity-to-slightly-ahead, with 5× less over-allocation. (An earlier
+apparent +20% regression was an artifact of benchmarking an
+inconsistently configured build directory; all comparisons in this
+entry use identical explicit flags.)
+
+#### Two CI-caught defects fixed during migration
+
+1. **Item-heavy docs under-sized**: the sizing model bounded text
+   content by `len` but not the ~48–56 B struct overhead per text
+   NODE (~2× the per-item markup on mixed-content docs) — a 134 KB
+   doc exhausted the arena at item 4144/5000 with 38 bytes left.
+   Sizing now adds `est_elems × 64` node overhead; attr margin
+   16 → 64.
+2. **Post-parse mutation crash**: fail-fast NULL out of a tiny
+   document's arena segfaulted `element_create`→`append_child` (the
+   page pool could never fail there). The pool regains its
+   never-fail contract: overflow beyond the sized span goes to
+   tracked extension blocks (freed at destroy). The contiguous span
+   stays exclusively parse-time; Phase 5 note — edges touching
+   extension nodes must use the int32 path.
+
+Specs: `ExhaustionExtendsBeyondSpan` (overflow succeeds AND lands
+outside the span), `MutationGrowthNeverFails` (1000 × 72 B from a
+64 B arena), `NodeWithContentKeepsNextAllocAligned` (arena content
+region rounds to the 8-byte grid — an odd-sized region previously
+misaligned every subsequent allocation, mangling comments/PIs).
+
+Diagnostics: `TAURUS_DEBUG_PARSE=1` prints parse-failure position,
+arena used/capacity, elem/attr indices, and sizing inputs (env
+lookup cached off the hot path).
+
+All 508 tests pass. Next: Phase 5 — retry compact-pointer Phases
+C/D on the now-contiguous layout.
 
 
 ## [0.19.7] - 2026-08-14
