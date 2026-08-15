@@ -1,13 +1,33 @@
 ## [Unreleased]
 
-## [0.21.1] - Y-08-15
+## [0.21.1] - 2026-08-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Docs — parse-perf campaign closure (TODO 185 round 3)
 
-### Changed
+- **Source-level micro-optimization of the parse path is formally
+  closed.** The lazy element name-hash experiment (mirroring the
+  shipped lazy attr-hash) — pure work removed from the parse loop —
+  still regressed 3-5% at K=5-50: the fifth consecutive experiment
+  where even deleting work perturbs codegen/layout more than the
+  work cost. All five are recorded in TODO 185 with a
+  do-not-reopen-without-architectural-change note.
+- **PGO measured on the current parser**: 1.2-2.2% faster on every
+  many-attrs K section (far below its 10-15% on the XPath VM
+  dispatch loop). Documented in the `TAURUS_ENABLE_PGO` CMake
+  comment for packagers, including the `TAURUS_PGO_DIR` pointer
+  from GENERATE to USE builds.
+- **TODO 182 marked the remaining endgame**: 32-byte attrs
+  (2 per cache line, pugixml density) is the only lever with >5%
+  potential left; the measured cache-line constraint is now
+  written into its premise (the old 24 B struct numbers were
+  stale).
+- README roadmap updated (Ruby SAX shipped; TODO 183/184/185
+  campaign items; TODO 182 as planned endgame); FFI.md documents
+  the Ruby SAX binding pattern (user_data anchor registry,
+  pointer+length characters contract) for the future
+  Python/Rust bindings.
 
-- (describe changes here)
+No code changes in this release.
 
 
 ## [0.21.0] - 2026-08-15
