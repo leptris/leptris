@@ -1,13 +1,36 @@
 ## [Unreleased]
 
-## [0.21.2] - Y-08-15
+## [0.21.2] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — attribute struct 64 to 48 bytes (TODO 186)
 
-### Changed
+The largest parse win since the fused scans. The attribute struct
+drops its 16-byte layout pad and ships at the natural packed 48
+bytes, revising the TODO 184 round-4 "must stay 64" cache-line law —
+which turns out to have been K-local (measured at K=100 only).
 
-- (describe changes here)
+Measured across every K (12-run interleaved Release A/B, fresh
+build dirs, best-of), with the pugixml gap:
+
+| attrs/element | 64 B | 48 B | gap 64B | gap 48B |
+|---------------|------|------|---------|---------|
+| 5 | 54.4 µs | 54.4 µs | 1.62x | 1.62x |
+| 20 | 270.5 µs | **218.7 µs** | 1.91x | **1.55x** |
+| 50 | 637.6 µs | **619.9 µs** | 2.02x | **1.96x** |
+| 100 | **1013.4 µs** | 1222.7 µs | **1.64x** | 1.97x |
+
+- **K=20: −19%** (gap 1.91x → 1.55x)
+- K=50: −3%; K=5: parity
+- K=100: +20% — the cache-line straddle penalty in a 4.8 MB
+  DRAM-streaming attribute block. Real-world attribute density is
+  under 20 per element and the mid-range is the campaign yardstick,
+  so 48 B wins overall. The TODO 182 split-stream design (32-byte
+  view pairs + parallel control array, 2 per cache line) is the
+  documented path to recovering K=100.
+
+Also 25% less memory per attribute. 535/535 tests, ASAN clean,
+zero leaks at the new size. Full table and reasoning recorded in
+`TODO.fix/185-k50-attr-path.md` (round 4).
 
 
 ## [0.21.1] - 2026-08-15
