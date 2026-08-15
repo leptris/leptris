@@ -801,13 +801,12 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
      * namespace_uri_view + prefix_view removed (TODO 90) — both are now
      * set eagerly by the parser via pool-strdup. */
 
-    /* Convert all attribute StringViews */
-    size_t attr_count = taurus_element_attribute_count(elem);
-    for (size_t i = 0; i < attr_count; i++) {
-        struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
-        if (!attr) continue;
-
-        /* Validate attribute pointer before accessing */
+    /* Convert all attribute StringViews — direct walk (TODO 185):
+     * the old `for i < attr_count: get_attribute_by_index(elem, i)`
+     * re-walked the list from the head for every index — O(K²) per
+     * element, 4,950 walks at K=100 (~5M per parse). */
+    for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+         attr; attr = taurus_attr_next(attr)) {
         if ((uintptr_t)attr < 0x1000) continue;  /* Invalid pointer */
 
         /* Single representation (round 4): entity values expand INTO

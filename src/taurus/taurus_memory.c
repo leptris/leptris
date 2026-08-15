@@ -47,13 +47,16 @@ struct taurus_attribute* taurus_attribute_new(const char* name, const char* valu
 void taurus_attribute_free(struct taurus_attribute* attr) {
     if (!attr) return;
 
-    free(attr->name_view.data);
+    /* The views hold owned heap copies on this lifecycle — cast away
+     * const for free (the data IS mutable storage; the view type is
+     * const only for read-side safety). */
+    free((void*)(uintptr_t)attr->name_view.data);
     if (attr->ns_cache) {
         if (attr->ns_cache->prefix) free(attr->ns_cache->prefix);
         if (attr->ns_cache->namespace_uri) free(attr->ns_cache->namespace_uri);
         free(attr->ns_cache);
     }
-    free(attr->value_view.data);
+    free((void*)(uintptr_t)attr->value_view.data);
 
     free(attr);
 }

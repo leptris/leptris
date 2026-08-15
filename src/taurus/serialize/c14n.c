@@ -150,12 +150,15 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
     if (attr_count > 0) {
         sorted_attrs = (struct taurus_attribute**)malloc(attr_count * sizeof(struct taurus_attribute*));
         if (sorted_attrs) {
-            /* Copy attributes from linked list to temporary array */
-            for (uint8_t i = 0; i < attr_count; i++) {
-                sorted_attrs[i] = taurus_element_get_attribute_by_index(elem, i);
+            /* Copy attributes — direct walk (TODO 185: indexed access
+             * re-walks the list per index, O(K²)). */
+            uint8_t si = 0;
+            for (struct taurus_attribute* a = taurus_element_get_first_attribute(elem);
+                 a && si < attr_count; a = taurus_attr_next(a)) {
+                sorted_attrs[si++] = a;
             }
             /* Sort attributes lexicographically */
-            qsort(sorted_attrs, attr_count, sizeof(struct taurus_attribute*), compare_attributes);
+            qsort(sorted_attrs, si, sizeof(struct taurus_attribute*), compare_attributes);
         }
     }
 
@@ -570,9 +573,8 @@ static void c14n_serialize_element_excl(TaurusElement elem,
     uint8_t attr_count = taurus_element_attribute_count(elem);
     char needed_attr_prefix[16][64];
     int attr_prefix_count = 0;
-    for (uint8_t i = 0; i < attr_count && attr_prefix_count < 16; i++) {
-        struct taurus_attribute* a = taurus_element_get_attribute_by_index(elem, i);
-        if (!a) continue;
+    for (struct taurus_attribute* a = taurus_element_get_first_attribute(elem);
+         a && attr_prefix_count < 16; a = taurus_attr_next(a)) {
         TaurusStringView nv = a->name_view;
         if (nv.length > 0 && nv.data) {
             const char* colon = (const char*)memchr(nv.data, ':', nv.length);
@@ -668,10 +670,12 @@ static void c14n_serialize_element_excl(TaurusElement elem,
         sorted_attrs = (struct taurus_attribute**)malloc(
             attr_count * sizeof(*sorted_attrs));
         if (sorted_attrs) {
-            for (uint8_t i = 0; i < attr_count; i++) {
-                sorted_attrs[i] = taurus_element_get_attribute_by_index(elem, i);
+            uint8_t si = 0;
+            for (struct taurus_attribute* a = taurus_element_get_first_attribute(elem);
+                 a && si < attr_count; a = taurus_attr_next(a)) {
+                sorted_attrs[si++] = a;
             }
-            qsort(sorted_attrs, attr_count, sizeof(*sorted_attrs), compare_attributes);
+            qsort(sorted_attrs, si, sizeof(*sorted_attrs), compare_attributes);
             for (size_t i = 0; i < attr_count; i++) {
                 struct taurus_attribute* a = sorted_attrs[i];
                 if (!a) continue;
