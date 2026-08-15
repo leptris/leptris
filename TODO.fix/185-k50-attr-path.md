@@ -21,19 +21,28 @@ pugixml: flat ~7 ns/attr at every K.
 
 ## Next levers (ranked)
 
-1. **Attr init store volume** — 48 B of stores per attr (2 views
-   16 B each + ns_cache 8 B + tail 8 B) vs pugixml's 36 B. Our
-   views carry length (needed for zero-copy compare); pugixml
-   stores bare pointers. Candidate: single 8 B store for
-   ns_cache, single 8 B for the tail (they're adjacent?) — check
-   field order; fold into 2 stores.
+1. ~~**Attr init store volume**~~ — DEAD (2026-08-15 disasm): clang
+   -O3 already emits the floor — `stp`x2 (views) + one 8 B zero
+   (ns_cache+next_cp+has_entities) + `str wzr` (name_hash) = 4
+   stores/attr. Nothing to fold. CHECK DISASM BEFORE OPTIMIZING.
 2. **Scanner loop structure** at mid-K — the K=20-50 bump is not
-   store-volume (flat curve expected); suspect branch texture in
-   dp_parse_attrs per-attr dispatch. Compare against pugixml
-   strconv_attribute shape.
+   store-volume; suspect branch texture in dp_parse_attrs
+   per-attr dispatch. Compare against pugixml strconv_attribute.
 3. **compact_string endgame (TODO 182)** remains the structural
    answer for memory, but the 64 B cache-line law (element.h)
    blocks attr shrink unless the block layout changes.
+
+## Feature costs we pay that pugixml does not (context for the gap)
+
+- Line tracking (issue #223): '\n' compare per ws-skip + per text
+  span fold. No newlines in the benchmark docs, so ~1 compare/ws.
+- Arena pre-sizing scan (count3): one SIMD pass over the doc —
+  ~2-4% at K=5, ~1% at K=100.
+- DTD-entity-capable value routing.
+
+The remaining ~5-8 ns/attr is diffuse micro-cost plus these
+feature deltas — no single lever left. Judge any future change on
+the K=20-50 mid-range (the honest gap: ~2.0-2.2x).
 
 ## Note
 
