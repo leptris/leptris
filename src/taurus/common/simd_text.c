@@ -56,6 +56,8 @@ static ptrdiff_t find3_scalar(const char* s, size_t len,
 static int (*g_contains_fn)(const char*, size_t, char) = NULL;
 static ptrdiff_t (*g_find3_fn)(const char*, size_t, char, char, char) = NULL;
 static size_t (*g_count_fn)(const char*, size_t, char) = NULL;
+static void (*g_count3_fn)(const char*, size_t, char, char, char,
+                           size_t*, size_t*, size_t*) = NULL;
 
 static size_t count_scalar(const char* s, size_t len, char c) {
     size_t n = 0;
@@ -88,9 +90,12 @@ static void dispatch_init(void) {
         extern int taurus_text_contains_neon(const char*, size_t, char);
         extern ptrdiff_t taurus_text_find3_neon(const char*, size_t, char, char, char);
         extern size_t taurus_text_count_char_neon(const char*, size_t, char);
+        extern void taurus_text_count3_neon(const char*, size_t, char, char, char,
+                                            size_t*, size_t*, size_t*);
         g_contains_fn = taurus_text_contains_neon;
         g_find3_fn = taurus_text_find3_neon;
         g_count_fn = taurus_text_count_char_neon;
+        g_count3_fn = taurus_text_count3_neon;
         return;
     }
 #endif
@@ -118,4 +123,21 @@ ptrdiff_t taurus_text_find3(const char* s, size_t len,
 size_t taurus_text_count_char(const char* s, size_t len, char c) {
     if (!g_count_fn) dispatch_init();
     return g_count_fn(s, len, c);
+}
+
+void taurus_text_count3(const char* s, size_t len,
+                        char c0, char c1, char c2,
+                        size_t* n0, size_t* n1, size_t* n2) {
+    /* Single memory pass, three counters — the parser's sizing
+     * pre-scan walks the document once instead of three times
+     * (TODO 184: at 884 KB that is 1.7 MB of avoided L2/DRAM
+     * traffic per parse). Falls back to three count_char calls
+     * where no SIMD path is compiled. */
+    if (g_count3_fn) {
+        g_count3_fn(s, len, c0, c1, c2, n0, n1, n2);
+        return;
+    }
+    *n0 = taurus_text_count_char(s, len, c0);
+    *n1 = taurus_text_count_char(s, len, c1);
+    *n2 = taurus_text_count_char(s, len, c2);
 }

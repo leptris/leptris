@@ -601,9 +601,13 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * Slack: len covers all text/name/value copies (they're substrings
      * of the document), plus len/2 mutation headroom (post-parse
      * append/set calls allocate from the same arena). */
-    size_t lt_count = taurus_text_count_char(buf, len, '<');
-    size_t quote_count = taurus_text_count_char(buf, len, '"')
-                       + taurus_text_count_char(buf, len, '\'');
+    /* TODO 184: count3 — one memory pass for all three sizing
+     * counters (was three full traversals; at 884 KB that's 1.7 MB
+     * of avoided L2/DRAM traffic per parse). */
+    size_t lt_count, dq_count, sq_count;
+    taurus_text_count3(buf, len, '<', '"', '\'',
+                       &lt_count, &dq_count, &sq_count);
+    size_t quote_count = dq_count + sq_count;
     size_t est_elems = lt_count + 8;
     size_t elem_bytes = est_elems * sizeof(struct taurus_element);
     size_t attr_bytes = (quote_count / 2 + 64) * sizeof(struct taurus_attribute);
@@ -730,16 +734,39 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         }
 
         if (*p.pos != '<') {
-            /* Text content via memchr. */
+            /* Text content — FUSED scan (TODO 184): one inline loop
+             * finds '<' AND counts '\n' (issue #223 line tracking),
+             * replacing the memchr + dp_advance_line re-walk (two
+             * passes; memchr pays ~10ns setup on short text — the
+             * same finding as the attr-value scan). First 48 bytes
+             * inline, SIMD fallback for longer spans. */
             char* text_start = p.pos;
-            char* lt = (char*)memchr(p.pos, '<', p.end - p.pos);
+            uint32_t line_snap = p.line;
+            char* lt = NULL;
+            {
+                const char* q = p.pos;
+                const char* probe_end =
+                    (p.end - q > 48) ? q + 48 : p.end;
+                while (q < probe_end) {
+                    if (*q == '<') { lt = (char*)q; goto text_done; }
+                    if (*q == '\n') p.line++;
+                    q++;
+                }
+                if (q >= p.end) goto text_done;
+                lt = (char*)memchr(q, '<', p.end - q);
+                if (!lt) lt = p.end;
+                /* Line count for the SIMD-skipped span only. */
+                if (q < lt) {
+                    p.line += (uint32_t)taurus_text_count_char(
+                        q, (size_t)(lt - q), '\n');
+                }
+            }
+        text_done:
             p.pos = lt ? lt : p.end;
             size_t tlen = p.pos - text_start;
-            /* Snapshot line at the text start, then fold newlines in
-             * the consumed range so the NEXT token starts on the
-             * correct line. Issue #223. */
-            uint32_t text_line = p.line;
-            dp_advance_line(&p, text_start, p.pos);
+            /* Snapshot line at the text start, then the loop above
+             * already folded newlines — p.line is current. Issue #223. */
+            uint32_t text_line = line_snap;
             if (tlen == 0) continue;
             if (p.depth == 0) {
                 /* Whitespace-only between root and PIs. */

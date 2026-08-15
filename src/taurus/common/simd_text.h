@@ -39,6 +39,14 @@ ptrdiff_t taurus_text_find3(const char* s, size_t len,
  * memchr-hopping per hit costs ~10ns each there. */
 size_t taurus_text_count_char(const char* s, size_t len, char c);
 
+/* Count occurrences of c0, c1, and c2 in [s, s+len) — one memory
+ * pass where a SIMD path is compiled (falls back to three
+ * count_char calls otherwise). The parser's sizing pre-scan walks
+ * the document once instead of three times. */
+void taurus_text_count3(const char* s, size_t len,
+                        char c0, char c1, char c2,
+                        size_t* n0, size_t* n1, size_t* n2);
+
 #ifdef __cplusplus
 }
 #endif
