@@ -100,14 +100,18 @@ struct taurus_attribute {
      * 72 with a raw next pointer). */
     uint32_t name_hash;
 
-    /* MEASURED LAYOUT DECISION (TODO 184 round 4): sizeof must stay
-     * 64 — one attribute per cache line. At the natural 48 B the
-     * struct straddles lines (1.33 lines/attr) and the K=100 parse
-     * regressed 22% (1252-1309 vs 1025-1041 µs, interleaved Release
-     * A/B) because every wiring/scan touch pulls TWO lines. The
-     * 16 bytes are padding; do not "optimize" them away without
-     * re-running benchmark_many_attrs K=100. */
-    char _layout_pad[16];
+    /* MEASURED LAYOUT DECISION (TODO 186, revises TODO 184 round 4):
+     * sizeof is 48 — the natural packed size, no padding. The
+     * "must stay 64" law from round 4 was K-LOCAL: measured only at
+     * K=100, where 48 B straddles cache lines (1.33 lines/attr) in
+     * a 4.8 MB DRAM-streaming block and costs ~20%. Re-measured at
+     * every K (12-run interleaved Release A/B): K=20 270->219 us
+     * (-19%, gap vs pugixml 1.91x->1.55x), K=50 638->620 (-3%),
+     * K=5 parity, K=100 1013->1223 (+20%). Mid-K is the campaign
+     * yardstick (TODO 185) and real-world attr density is < 20 per
+     * element, so 48 B ships. Recovering K=100 needs 2-per-line
+     * alignment — the TODO 182 split-stream endgame (32 B views +
+     * parallel ctrl array), which no layout stride can provide. */
 };
 
 /* C-string accessors (TODO 184 rounds 3–4). The views are the
