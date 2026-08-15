@@ -1,8 +1,18 @@
 # TODO 185 — K<=50 element/attr path vs pugixml
 
 **Priority**: P0 (the remaining gap)
-**Status**: round 4 — the 64 B cache-line law REVISED: attr is 48 B.
-K=20 gap 1.91x -> 1.55x.
+**Status**: **CLOSED (2026-08-16).** Every layout and micro lever
+measured; 48 B shipped as the global optimum. See rounds 4-6 and
+[[182-compact-pointer-phase-e-strings]] (upper-bound probe).
+
+## Round 6 (2026-08-16): TODO 182 upper-bound probe — parse thesis dead
+
+32 B views-only stride (no ctrl, no wiring, no finalize — the
+theoretical maximum of any split-stream design) vs shipped 48 B:
+K=20 +14% WORSE (273.5 vs 239.4), K=100 only −6.5% (1239.6 vs
+1326.3; the 64 B point is 1013). Full table in TODO 182. The
+attr-design space is now exhaustively measured:
+{32-split-upper-bound < 48 = SHIPPED > 56 dead, 64 old law}.
 
 ## Round 4 (2026-08-16): the round-4-of-184 law was K-local — 48 B wins
 

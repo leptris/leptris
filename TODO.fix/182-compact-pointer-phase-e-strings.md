@@ -1,11 +1,33 @@
 # TODO 182 — Compact pointer Phase E (compact_string for names)
 
 **Priority**: P1 (final structural compaction; stretch goal)
-**Status**: scoped — THE remaining perf lever (TODO 185 round 3
-closed all source-level micro-optimization). Premise numbers below
-predate the TODO 184 round-4 measurement; read the constraint first.
+**Status**: **PARSE THESIS DEAD (2026-08-16 upper-bound probe).**
+The 32 B split-stream was probed at its theoretical maximum — a
+parser-internal hack writing views-only at 32 B stride with no
+ctrl fields, no next_cp wiring, and no finalize pass (strictly
+less work than any real split-stream could do; benchmark never
+reads attrs, so the probe is valid). Interleaved 6-run A/B vs the
+shipped 48 B:
 
-## CONSTRAINT (measured, TODO 184 round 4 + TODO 185)
+| K | 48 B shipped | 32 B upper bound |
+|---|--------------|------------------|
+| 5 | 58.5 µs | 57.9 µs |
+| 20 | **239.4 µs** | 273.5 µs (+14%) |
+| 50 | 650.3 µs | 650.0 µs |
+| 100 | 1326.3 µs | 1239.6 µs (−6.5%) |
+
+Even the theoretical maximum LOSES 14% at K=20 (where 48 B wins
+19%) and recovers only a third of the K=100 penalty at 64 B
+levels (1239 vs 1013). A real implementation — with ctrl writes,
+wiring, finalize support, and the public handle→ctrl mapping this
+design never solved — would be strictly slower than the probe.
+**No split-stream layout can beat the shipped 48 B. Closed.**
+
+The string-interning half of this TODO (dedupe common tag names
+via a per-document pool, pointer-equality name compare) remains
+orthogonal and unmeasured; it was never the parse lever.
+
+## CONSTRAINT (measured, TODO 184 round 4 + TODO 185; superseded by TODO 186)
 
 sizeof(attr) = 64 today and the natural 48 B form REGRESSED 22% at
 K=100 — sub-64-B node structs straddle cache lines unless the
