@@ -1,13 +1,39 @@
 ## [Unreleased]
 
-## [0.21.4] - Y-08-15
+## [0.21.4] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — fused copy+count3 (TODO 188)
 
-### Changed
+The first change of the entire parse campaign to improve EVERY
+benchmark section. The owns-copy path streamed the input twice
+before parsing began — the count3 SIMD pre-scan for arena sizing
+(~7% of parse) and the memcpy into the pool's buffer copy
+(~4.5%). Both passes read the same bytes.
 
-- (describe changes here)
+One NEON kernel now copies each chunk to the destination AND
+counts '<' / '"' / '\'' from the same registers, and the buffer
+copy moves out of the arena into a separately-malloc'd,
+document-owned allocation (freed via the existing
+`xml_buffer_needs_free` machinery). The arena holds only nodes
+and strings. Platforms without the NEON kernel get the exact
+pre-fusion behavior as the scalar fallback.
+
+Measured (8-run interleaved Release A/B, best-of):
+
+| attrs/element | before | after | gap vs pugixml |
+|---------------|--------|-------|----------------|
+| 5 | 54.4 µs | **50.8 µs (−6.7%)** | 1.65x → **1.54x** |
+| 20 | 222.3 µs | **212.1 µs (−4.6%)** | 1.58x → **1.51x** |
+| 50 | 630.1 µs | **589.7 µs (−6.4%)** | 1.97x → **1.84x** |
+| 100 | 1222.6 µs | **1143.7 µs (−6.4%)** | 1.96x → **1.83x** |
+
+K=50 and K=100 drop below 1.9x for the first time. Prototype
+kernel: 17-33% faster than memcpy + count3 across 40-884 KB
+inputs on M1.
+
+Also in this release: the post-parse freeze tree walk removed
+(TODO 187, v0.21.3 content — nodes are created frozen; K=5
+−5.8%).
 
 
 ## [0.21.3] - 2026-08-16
