@@ -42,7 +42,7 @@ static const char* get_attr_value(TaurusElement elem, const char* name) {
     if (!elem || !name) return NULL;
     struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
     if (!attr) return NULL;
-    return attr->value ? attr->value : "";
+    return attr_cvalue(attr);
 }
 
 TAURUS_API int taurus_xinclude_is_include_element(TaurusElement elem) {
@@ -118,8 +118,8 @@ static TaurusElement deep_copy_element(const TaurusElement src,
 
     /* Copy attributes. */
     for (struct taurus_attribute* a = taurus_elem_first_attribute(src); a; a = taurus_attr_next(a)) {
-        const char* a_name = a->name ? a->name : "";
-        const char* a_value = a->value ? a->value : "";
+        const char* a_name = attr_cname(a);
+        const char* a_value = attr_cvalue(a);
         taurus_element_add_attribute_pooled(dst, a_name, a_value, target_pool);
     }
 

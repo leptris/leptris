@@ -810,21 +810,20 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
         /* Validate attribute pointer before accessing */
         if ((uintptr_t)attr < 0x1000) continue;  /* Invalid pointer */
 
-        /* Convert attribute name and value StringViews.
-         *
-         * TODO 25: pool is always non-NULL here; force pooled path. */
-        if (!attr->name && !taurus_sv_is_empty(&attr->name_view)) {
-            if ((uintptr_t)attr->name_view.data >= 0x1000) {
-                attr->name = taurus_sv_to_cstr_pooled(&attr->name_view, pool);
-            }
-        }
-        if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
+        /* TODO 184 round 3: parse-path attrs keep name/value NULL —
+         * the views' data are NUL-terminated in the document buffer
+         * (document-lifetime; readers derive via attr_cname/cvalue).
+         * Only ENTITY values need materializing here; the plain
+         * pool-copies were historical defensiveness, and this walk
+         * runs over every attr of every parse. */
+        if (!attr->value && attr->has_entities &&
+            !taurus_sv_is_empty(&attr->value_view)) {
             if ((uintptr_t)attr->value_view.data >= 0x1000) {
-                if (attr->has_entities) {
-                    attr->value = taurus_decode_entities_view(&attr->value_view, pool);
-                }
-                if (!attr->value) {
-                    attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
+                char* expanded =
+                    taurus_decode_entities_view(&attr->value_view, pool);
+                if (expanded) {
+                    attr->value = expanded;
+                    attr->has_entities = 0;
                 }
             }
         }

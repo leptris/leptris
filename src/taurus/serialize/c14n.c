@@ -209,15 +209,24 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
             const char* attr_name = !taurus_sv_is_empty(&attr->name_view) ? attr->name_view.data : attr->name;
             size_t attr_name_len = !taurus_sv_is_empty(&attr->name_view) ? attr->name_view.length : strlen(attr->name);
 
-            /* Get attribute value (convert if needed) */
-            const char* attr_value = attr->value;
-            if (!attr_value && !taurus_sv_is_empty(&attr->value_view)) {
-                /* Need to convert StringView to string with entity expansion
-                 * Use lenient mode for C14N to handle edge cases like "&" in attributes */
+            /* Get attribute value. TODO 184 round 3: no-entity values
+             * read the view directly (NUL-terminated in the doc
+             * buffer); only entity values decode, and only the
+             * decoded copy is freed afterward. */
+            const char* attr_value;
+            int attr_value_owned = 0;
+            if (attr->value) {
+                attr_value = attr->value;
+            } else if (attr->has_entities &&
+                       !taurus_sv_is_empty(&attr->value_view)) {
+                /* Use lenient mode for C14N to handle edge cases like "&" in attributes */
                 int old_strict = taurus_get_strict_mode();
                 taurus_set_strict_mode(0);  /* Enable lenient mode */
                 attr_value = taurus_decode_entities_view(&attr->value_view, NULL);
                 taurus_set_strict_mode(old_strict);  /* Restore strict mode */
+                attr_value_owned = (attr_value != NULL);
+            } else {
+                attr_value = attr_cvalue(attr);
             }
 
             if (attr_name && attr_value) {
@@ -229,8 +238,8 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
                     free(escaped_value);
                 }
 
-                /* Free temporary value if we created it (wasn't cached) */
-                if (attr_value != attr->value && attr_value) {
+                /* Free temporary value only if we allocated it */
+                if (attr_value_owned) {
                     free((void*)attr_value);
                 }
             }
