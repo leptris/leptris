@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.21.1] - Y-08-15
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.21.0] - 2026-08-15
 
 ### Added — Ruby SAX binding (TODO 118 Phase B)
