@@ -352,33 +352,36 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
 
     /* Attributes - iterate through linked list */
     for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem); attr != NULL; attr = taurus_attr_next(attr)) {
-        if (!attr || !attr->name) continue;
+        if (!attr) continue;
 
         /* Expand entity-containing values lazily before re-escaping.
-         * direct_parse/flat_promote store raw attr values zero-copy
-         * and leave value=NULL when '&' is present so the accessor
-         * path knows to expand. The serializer must follow the same
-         * contract — otherwise '&' in the raw value double-escapes. */
-        const char* val = attr->value;
-        if (!val) {
+         * Parse-path attrs keep value=NULL with has_entities=1 when
+         * '&' is present — expand here (document pool) so the raw
+         * '&' doesn't double-escape. No-entity values read the view
+         * directly (TODO 184 round 3: view data is NUL-terminated
+         * in the document buffer — no materialization needed). */
+        const char* val;
+        if (attr->has_entities && !attr->value) {
             struct taurus_document* doc = taurus_element_get_document(elem);
             TaurusMemoryPool* pool = doc ? doc->pool : NULL;
-            char* resolved = NULL;
-            if (attr->has_entities && pool) {
-                resolved = taurus_decode_entities_view(&attr->value_view, pool);
-            } else if (pool) {
-                resolved = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
-            }
+            char* resolved = pool
+                ? taurus_decode_entities_view(&attr->value_view, pool)
+                : NULL;
             if (resolved) {
                 attr->value = resolved;
+                attr->has_entities = 0;
                 val = resolved;
+            } else {
+                val = attr_cvalue(attr);
             }
+        } else {
+            val = attr_cvalue(attr);
         }
 
         buffer_append_char(buf, ' ');
-        buffer_append(buf, attr->name);
+        buffer_append(buf, attr_cname(attr));
         buffer_append(buf, "=\"");
-        buffer_append_attribute_value(buf, val ? val : "");
+        buffer_append_attribute_value(buf, val);
         buffer_append_char(buf, '"');
     }
 

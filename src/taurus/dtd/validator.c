@@ -323,26 +323,27 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
     for (uint8_t i = 0; i < ac; i++) {
         struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
         if (!attr) continue;
-        const char* attr_name = attr->name;
-        if (!attr_name || !attr->value) continue;
+        const char* attr_name = attr_cname(attr);
+        const char* attr_val = attr_cvalue(attr);
+        if (!*attr_name) continue;
         DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
         if (!ad || !ad->attr_type) continue;
 
         /* #FIXED: the element's attribute value must exactly match
          * the fixed value declared in the DTD. */
         if (ad->default_type == DTD_ATTR_FIXED && ad->default_value) {
-            if (strcmp(attr->value, ad->default_value) != 0) {
+            if (strcmp(attr_val, ad->default_value) != 0) {
                 char msg[200];
                 snprintf(msg, sizeof(msg),
                          "Attribute '%s' has #FIXED value '%s' but document has '%s'",
-                         attr_name, ad->default_value, attr->value);
+                         attr_name, ad->default_value, attr_val);
                 set_error(error, msg, name);
                 return 0;
             }
         }
 
         if (strcmp(ad->attr_type, "ID") == 0) {
-            const char* id_value = attr->value;
+            const char* id_value = attr_val;
             size_t id_len = strlen(id_value);
             if (taurus_hash_table_get(id_table, id_value, id_len) != NULL) {
                 char msg[160];
@@ -366,7 +367,7 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
         /* Phase 7: NMTOKEN / Enumerated type validation.
          * These can be checked in-place (no cross-element state). */
         if (strcmp(ad->attr_type, "NMTOKEN") == 0) {
-            const char* v = attr->value;
+            const char* v = attr_val;
             int valid = (v && *v);
             for (const char* p = v; *p; p++) {
                 unsigned char c = (unsigned char)*p;
@@ -386,7 +387,7 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
         } else if (strcmp(ad->attr_type, "NMTOKENS") == 0) {
             /* Whitespace-separated list of NMTOKENs. Each non-empty
              * token must match the NMTOKEN character class. */
-            const char* p = attr->value;
+            const char* p = attr_val;
             while (*p) {
                 while (*p && isspace((unsigned char)*p)) p++;
                 if (!*p) break;
@@ -414,7 +415,7 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
             /* Enumerated type: attr_type is "opt1|opt2|opt3" (the
              * parser strips the surrounding parens). The value must
              * match one of the pipe-separated options. */
-            const char* val = attr->value;
+            const char* val = attr_val;
             const char* model = ad->attr_type;
             int matched = 0;
             while (*model) {
@@ -447,7 +448,7 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
          * dtd->tables.notations. */
         if (strcmp(ad->attr_type, "ENTITY") == 0 ||
             strcmp(ad->attr_type, "ENTITIES") == 0) {
-            const char* p = attr->value;
+            const char* p = attr_val;
             while (*p) {
                 /* Skip whitespace between tokens (ENTITIES). */
                 while (*p && isspace((unsigned char)*p)) p++;
@@ -525,13 +526,14 @@ static int validate_idref_pass(TaurusElement elem, TaurusDTD* dtd,
         for (uint8_t i = 0; i < ac; i++) {
             struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
             if (!attr) continue;
-            const char* attr_name = attr->name;
-            if (!attr_name || !attr->value) continue;
+            const char* attr_name = attr_cname(attr);
+            const char* attr_val2 = attr_cvalue(attr);
+            if (!*attr_name) continue;
             DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
             if (!ad || !ad->attr_type) continue;
             /* IDREF (single) and IDREFS (whitespace-separated list). */
             if (strcmp(ad->attr_type, "IDREF") == 0) {
-                const char* ref = attr->value;
+                const char* ref = attr_val2;
                 size_t ref_len = strlen(ref);
                 if (taurus_hash_table_get(id_table, ref, ref_len) == NULL) {
                     char msg[180];
@@ -542,7 +544,7 @@ static int validate_idref_pass(TaurusElement elem, TaurusDTD* dtd,
                 }
             } else if (strcmp(ad->attr_type, "IDREFS") == 0) {
                 /* Whitespace-separated list of references. */
-                const char* p = attr->value;
+                const char* p = attr_val2;
                 while (*p) {
                     while (*p && isspace((unsigned char)*p)) p++;
                     if (!*p) break;

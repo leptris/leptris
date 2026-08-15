@@ -214,16 +214,18 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
 
     attr->name_view = taurus_sv_from_ptr(name, name_len);
     attr->value_view = taurus_sv_from_ptr(val, val_len);
-    attr->name = name;            /* zero-copy, NUL-terminated in buffer */
-    /* Entity handling for attr values (has_amp comes from the caller's
-     * fused value scan — TODO 184: one pass finds the closing quote AND
-     * flags '&', replacing the two-pass quote-memchr + amp scan):
-     * - DTD present + value has '&': eagerly expand via DTD-aware
-     *   decoder (custom entities &foo; need the DTD table). Result
-     *   is pool-allocated; has_entities=0 (already resolved).
-     * - No DTD + value has '&': leave value NULL, has_entities=1.
-     *   Accessor expands predefined entities lazily on first read.
-     * - No '&': zero-copy, no expansion needed. */
+    /* TODO 184 round 3: name/value char* fields stay NULL on the
+     * parse path — the views' data are NUL-terminated in the doc
+     * buffer, and readers derive via attr_cname/attr_cvalue. Two
+     * stores per attr saved; the fields are reserved for owned
+     * copies (entity expansion, mutation API).
+     *
+     * Entity routing (has_amp from the caller's fused scan):
+     * - DTD present: eagerly expand via DTD-aware decoder; result
+     *   is pool-owned, has_entities=0.
+     * - No DTD: value stays NULL, has_entities=1 — accessor
+     *   expands predefined entities lazily on first read.
+     * - No '&': nothing to do — view is the value. */
     if (val_len > 0 && has_amp) {
         if (p->dtd) {
             TaurusStringView dsv = taurus_sv_from_ptr(val, val_len);
@@ -241,7 +243,6 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
             attr->has_entities = 1;
         }
     } else {
-        attr->value = val;
         attr->has_entities = 0;
     }
     attr->ns_cache = NULL;  /* TODO 173: side cache allocated on demand */

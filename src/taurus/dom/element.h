@@ -97,6 +97,28 @@ struct taurus_attribute {
     uint32_t name_hash;
 };
 
+/* C-string accessors over the dual representation (TODO 184 round 3).
+ *
+ * name/value are NULL on parse-path attrs: the parse path NUL-
+ * terminates name and value in the document buffer and stores only
+ * the views — the char* fields are reserved for owned copies
+ * (mutation API strdup, entity/DTD expansion). Readers derive:
+ * non-NULL field wins; else the view's data (document-lifetime,
+ * NUL-terminated). Public-API standalone attrs (taurus_attribute_new)
+ * always set the fields, so they are unaffected.
+ *
+ * attr_cvalue does NOT expand entities — callers needing expansion
+ * use taurus_element_attribute(), which materializes lazily. */
+static inline const char* attr_cname(const struct taurus_attribute* a) {
+    return a->name ? a->name
+         : (a->name_view.data ? a->name_view.data : "");
+}
+
+static inline const char* attr_cvalue(const struct taurus_attribute* a) {
+    return a->value ? a->value
+         : (a->value_view.data ? a->value_view.data : "");
+}
+
 /* Attr list-edge accessors (TODO 183 Phase 5). next_cp stores the
  * byte offset to the next attr scaled by 8 (align_log2=3); attrs are
  * 8-byte aligned pool/arena residents. The encoder falls back to the

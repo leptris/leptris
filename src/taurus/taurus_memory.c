@@ -18,6 +18,11 @@ struct taurus_attribute* taurus_attribute_new(const char* name, const char* valu
 
     struct taurus_attribute* attr = TAURUS_ALLOC(struct taurus_attribute);
     if (!attr) return NULL;
+    /* Zero the whole struct: views/flags/hash have no owners on this
+     * heap-allocated lifecycle (TODO 184 round 3 hardening — readers
+     * now derive from views when the char* fields are NULL, so the
+     * view fields must never be garbage). */
+    memset(attr, 0, sizeof(*attr));
 
     attr->name = taurus_strdup(name);
     if (!attr->name) {

@@ -152,22 +152,14 @@ TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* 
     struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
     if (!attr) return NULL;
 
-    /* Lazy convert value to NULL-terminated and resolve entities */
-    if (!attr->value) {
-        /* Get pool from document for string conversion */
+    /* TODO 184 round 3: no-entity values need no materialization —
+     * the view's data is NUL-terminated in the document buffer
+     * (document-lifetime). Only entity values expand, lazily. */
+    if (!attr->value && attr->has_entities) {
         TaurusMemoryPool* pool = taurus_element_get_pool(elem);
-
-        /* PERFORMANCE: Use pre-computed has_entities flag */
-        if (attr->has_entities) {
-            attr->value = taurus_decode_entities_view(&attr->value_view, pool);
-        }
-
-        /* Fallback: convert without entity resolution */
-        if (!attr->value) {
-            attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, pool);
-        }
+        attr->value = taurus_decode_entities_view(&attr->value_view, pool);
     }
-    return attr->value;
+    return attr->value ? attr->value : attr->value_view.data;
 }
 
 TAURUS_API int taurus_element_has_attribute(TaurusElement elem, const char* name) {
