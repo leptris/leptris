@@ -23,6 +23,18 @@ The K=100 loss (~20%) is the straddle penalty in a 4.8 MB
 DRAM-streaming block — unavoidable at any 48 B stride. 535 tests,
 ASAN, leaks-clean at 48 B.
 
+## Round 5 (2026-08-16): 56 B is strictly worse — 48 B confirmed optimal
+
+Tried 56 B (8 B pad; every 8th slot straddles vs every 3rd at
+48 B) expecting to keep half the mid-K win while halving the
+K=100 penalty. Measured (4-run interleaved): K=20 268.9 vs
+220.8 — **loses the ENTIRE mid-K win** — K=5/50/100 also slightly
+worse or equal. The 48 B win is not a smooth density function of
+stride; it is specific to the natural packed size (clang folds the
+control tail into fewer stores + 25% smaller block). Operating
+points measured: 48 = shipped optimum, 56 = dead, 64 = old law.
+Remaining: TODO 182 split-stream for K=100 recovery.
+
 ## Round 3 (2026-08-15): lazy elem hash dead; PGO measured
 
 5. **Lazy element name_hash** (mirror of the TODO 172 attr pattern;
