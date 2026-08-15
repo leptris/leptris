@@ -1,13 +1,31 @@
 ## [Unreleased]
 
-## [0.20.4] - Y-08-15
+## [0.20.4] - 2026-08-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Changed — quadratic attr walks eliminated (TODO 185)
 
-### Changed
+Every `get_attribute_by_index(elem, i)` loop — an O(K²) re-walk of
+the attribute list per index — is replaced by a single direct
+`taurus_attr_next` walk. Converted sites:
 
-- (describe changes here)
+- `finalize_element_strings` (taurus.c) — the per-element NUL-
+  termination pass
+- DTD validator (`dtd/validator.c`) — default-value and #FIXED
+  checks, twice
+- C14N (`serialize/c14n.c`) — three array-fill loops
+
+Measured effect at K=100 (5M indexed walks) is ~2 µs — parity, by
+design: this was a correctness/complexity hazard (quadratic
+scaling latent in every future caller), not a perf win. Also
+const-cleans `taurus_attribute_free`'s owned-copy releases.
+
+### Docs
+
+- TODO 185 measurement record: the attr-init store-fold lever is
+  **dead by disassembly** — clang -O3 already emits the 4-store
+  floor (`stp`×2 + 8 B zero + `str wzr`) per attribute. Feature
+  costs vs pugixml (line tracking, pre-sizing scan, DTD routing)
+  documented as the residual mid-K gap context.
 
 
 ## [0.20.3] - 2026-08-15
