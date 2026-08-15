@@ -318,11 +318,10 @@ static int validate_element_recursive(TaurusElement elem, TaurusDTD* dtd,
 
     /* Phase 5: ID uniqueness. Walk the element's attributes; if any
      * is declared as type "ID", record its value in id_table. The
-     * first occurrence of a duplicate triggers a violation. */
-    uint8_t ac = taurus_element_attribute_count(elem);
-    for (uint8_t i = 0; i < ac; i++) {
-        struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
-        if (!attr) continue;
+     * first occurrence of a duplicate triggers a violation.
+     * Direct walk (TODO 185) — indexed access is O(K²). */
+    for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+         attr; attr = taurus_attr_next(attr)) {
         const char* attr_name = attr_cname(attr);
         const char* attr_val = attr_cvalue(attr);
         if (!*attr_name) continue;
@@ -522,10 +521,8 @@ static int validate_idref_pass(TaurusElement elem, TaurusDTD* dtd,
     if (!elem) return 1;
     const char* name = taurus_element_get_name(elem);
     if (name) {
-        uint8_t ac = taurus_element_attribute_count(elem);
-        for (uint8_t i = 0; i < ac; i++) {
-            struct taurus_attribute* attr = taurus_element_get_attribute_by_index(elem, i);
-            if (!attr) continue;
+        for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+             attr; attr = taurus_attr_next(attr)) {
             const char* attr_name = attr_cname(attr);
             const char* attr_val2 = attr_cvalue(attr);
             if (!*attr_name) continue;
