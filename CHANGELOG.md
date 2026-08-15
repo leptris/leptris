@@ -1,14 +1,39 @@
 ## [Unreleased]
 
-## [0.20.1] - Y-08-15
+## [0.20.1] - 2026-08-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — fused text scan + single-pass sizing counts (TODO 184 round 2)
 
-### Changed
+Round 2 of the pugixml parse-loop port: two more applications of
+the "one pass beats setup + re-walk" finding that drove v0.20.0's
+45% win.
 
-- (describe changes here)
+1. **`taurus_text_count3`** — the arena sizing pre-scan counted
+   `<`, `"`, and `'` in three separate traversals of the document.
+   One SIMD pass now maintains all three counters (three `vceqq`
+   per 16-byte chunk with the widen-then-add idiom). At 884 KB
+   that avoids 1.7 MB of L2/DRAM traffic per parse. Scalar
+   fallback on builds without a SIMD path.
+2. **Fused text-node scan** — the text path was `memchr` for `<`
+   plus a `dp_advance_line` re-walk counting newlines (issue #223
+   tracking): two passes and a `memchr` setup per text node. One
+   inline loop now finds `<` and folds newline counts; spans
+   beyond 48 bytes fall back to `memchr` +
+   `taurus_text_count_char` over the skipped region only.
 
+#### Measured impact (controlled Release builds, fresh dirs)
+
+| workload | v0.20.0 | v0.20.1 |
+|---|---|---|
+| many-attrs K=100 (7-run median) | 1095 µs | **1043 µs** |
+| many-attrs K=5 | ~60 µs | ~56 µs |
+| text-heavy 337 KB, 5 K text nodes (best of 50) | 481 µs | **446 µs** |
+
+Gap to pugixml at K=100: 1.54× → **1.47×** (1043 vs 711 µs).
+Campaign total: 6885 → 1043 µs at K=100 (6.6× faster since
+v0.18.4).
+
+All 508 tests pass, including the issue #223 line-tracking specs.
 
 ## [0.20.0] - 2026-08-14
 
