@@ -792,6 +792,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             }
             if (!tn) goto fail;
             tn->base.line = text_line;
+            tn->base.frozen = 1;  /* at creation — TODO 187 */
             dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)tn);
             continue;
         }
@@ -822,6 +823,11 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             }
             elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
             elem->base.line = elem_line;
+            /* Parse-built trees are frozen (immutable until a
+             * mutation copies) — set at creation instead of the old
+             * post-parse tree walk, which cost ~11% of parse at
+             * K=5 in the sample profile (TODO 187). */
+            elem->base.frozen = 1;
             /* TODO 155 Phase A: document field removed; root registered
              * below via taurus_root_doc_register. */
 
@@ -935,6 +941,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                     start, p.pos - start, pool);
                 if (!cn) goto fail;
                 cn->base.line = markup_line;
+                cn->base.frozen = 1;  /* at creation — TODO 187 */
                 if (p.depth > 0) {
                     dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)cn);
                 }
@@ -955,6 +962,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                     start, p.pos - start, pool);
                 if (!cd) goto fail;
                 cd->base.line = markup_line;
+                cd->base.frozen = 1;  /* at creation — TODO 187 */
                 if (p.depth > 0) {
                     dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)cd);
                 }
@@ -1035,6 +1043,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 data_start, data_len, pool);
             if (!pi) goto fail;
             pi->base.line = pi_line;
+            pi->base.frozen = 1;  /* at creation — TODO 187 */
             if (p.depth > 0) {
                 dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)pi);
             } else {
@@ -1079,8 +1088,13 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         if (!doc->xml_version) goto fail;
     }
 
-    /* 7. Freeze tree (match legacy parser behavior). */
-    taurus_document_freeze_tree(doc);
+    /* 7. Freeze tree (match legacy parser behavior).
+     *
+     * TODO 187: the tree walk is GONE — every node is created with
+     * frozen=1 above (elements, text, comments, CDATA, PIs). The
+     * walk cost ~11% of parse on element-heavy documents (sample
+     * profile: taurus_node_freeze + sibling/offset decoders). The
+     * public taurus_document_freeze API still walks on demand. */
 
     {
         static int dbg_ok = -1;
