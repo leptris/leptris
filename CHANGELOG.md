@@ -1,14 +1,41 @@
 ## [Unreleased]
 
-## [0.20.2] - Y-08-15
+## [0.20.2] - 2026-08-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Architecture — view-backed attribute name/value (TODO 184 round 3)
 
-### Changed
+The attribute `name`/`value` char* fields are no longer written by
+the parse path: readers derive from the views via new
+`attr_cname`/`attr_cvalue` helpers (non-NULL field wins for owned
+copies — entity expansion, mutation API). The parse path NUL-
+terminates name and value in the document buffer and stores only
+the (pointer, length) views.
 
-- (describe changes here)
+Simplifications this unlocks:
 
+- `finalize_element_strings` and `taurus_element_attribute` only
+  materialize ENTITY values; the per-attr plain pool-copies were
+  historical defensiveness (that walk runs over every attribute of
+  every parse).
+- DTD validator, serializer, c14n, xinclude, and the FFI accessors
+  read view data directly — c14n now frees only copies it allocated
+  (the old `!= attr->value` test would have freed view data under
+  the new contract).
+- `taurus_attribute_new` zeroes the struct — the view fields were
+  uninitialized garbage, a pre-existing landmine.
+
+### Fixed
+
+- Parse-path attributes now store explicit NULL for the char*
+  fields. `attr_block` is deliberately not memset, and macOS only
+  passed because fresh mmap pages read as zero — CI allocators
+  fill 0xbe/0xcd patterns and crashed every attribute lookup
+  (ASAN Linux SEGV at 0xbebebebe; Windows 0xc0000005). Verified
+  with a local ASAN build before merge.
+
+Measured: K=100 parity (1049 vs 1043 µs) — the structural payoff
+(fields now provably unused on the parse path) lands in round 4.
+All 508 tests pass.
 
 ## [0.20.1] - 2026-08-15
 
