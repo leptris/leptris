@@ -412,19 +412,18 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
                 if (!storage) return TAURUS_ERROR_MEMORY;
                 memcpy(storage, value, vlen);
                 storage[vlen] = '\0';
-                existing->value = storage;
                 existing->value_view = taurus_sv_from_ptr(storage, vlen);
             } else {
-                existing->value = NULL;
                 existing->value_view = taurus_sv_empty();
             }
+            existing->has_entities = 0;
         } else {
-            /* No pool available: Use malloc/free (fallback for edge cases) */
-            if (existing->value) {
-                TAURUS_FREE(existing->value);
-            }
-            existing->value = value ? taurus_strdup(value) : NULL;
-            existing->value_view = value ? taurus_sv_from_cstr(value) : taurus_sv_empty();
+            /* No pool available: views into the caller's string
+             * (fallback for edge cases — mutation API contract says
+             * the value string must outlive the attribute here). */
+            existing->value_view =
+                value ? taurus_sv_from_cstr(value) : taurus_sv_empty();
+            existing->has_entities = 0;
         }
     } else {
         /* Get the memory pool from the document */
@@ -449,7 +448,6 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
         if (!name_storage) return TAURUS_ERROR_MEMORY;
         memcpy(name_storage, name, nlen);
         name_storage[nlen] = '\0';
-        attr->name = name_storage;
         attr->name_view = taurus_sv_from_ptr(name_storage, nlen);
 
         /* Pre-compute name hash for O(1) lookup filtering (TODO 113). */
@@ -465,10 +463,8 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
             if (!value_storage) return TAURUS_ERROR_MEMORY;
             memcpy(value_storage, value, vlen);
             value_storage[vlen] = '\0';
-            attr->value = value_storage;
             attr->value_view = taurus_sv_from_ptr(value_storage, vlen);
         } else {
-            attr->value = NULL;
             attr->value_view = taurus_sv_empty();
         }
 
@@ -506,19 +502,11 @@ TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* nam
     struct taurus_attribute* prev = NULL;
 
     while (attr) {
-        const char* attr_name = attr->name;
-        if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
-            attr_name = taurus_sv_to_cstr(&attr->name_view);
-        }
+        const char* attr_name = attr_cname(attr);
 
         int match = 0;
         if (attr_name) {
             match = (strcmp(attr_name, name) == 0);
-        }
-        /* Free temporary string if we converted from StringView */
-        if (attr_name && attr_name != attr->name) {
-            char* temp = (char*)attr_name;
-            TAURUS_FREE(temp);
         }
 
         if (match) {
@@ -652,14 +640,12 @@ TaurusElement taurus_element_append_copy(TaurusElement parent, TaurusElement sou
             if (taurus_element_get_pool(parent)) {
                 taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
-                /* Fallback: use cached strings if available, otherwise convert from StringView */
-                const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
-                const char* attr_value = attr->value ? attr->value : taurus_sv_to_cstr(&attr->value_view);
+                /* Fallback: C-string API (views are always valid C
+                 * strings under the single representation). */
+                const char* attr_name = attr_cname(attr);
+                const char* attr_value = attr_cvalue(attr);
                 if (attr_name && attr_value) {
                     taurus_element_set_attribute(copy, attr_name, attr_value);
-                    /* Free temporary strings if we converted from StringView */
-                    if (!attr->name) free((char*)attr_name);
-                    if (!attr->value) free((char*)attr_value);
                 }
             }
         }
@@ -805,14 +791,12 @@ TaurusElement taurus_element_prepend_copy(TaurusElement parent, TaurusElement so
             if (taurus_element_get_pool(parent)) {
                 taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
-                /* Fallback: use cached strings if available, otherwise convert from StringView */
-                const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
-                const char* attr_value = attr->value ? attr->value : taurus_sv_to_cstr(&attr->value_view);
+                /* Fallback: C-string API (views are always valid C
+                 * strings under the single representation). */
+                const char* attr_name = attr_cname(attr);
+                const char* attr_value = attr_cvalue(attr);
                 if (attr_name && attr_value) {
                     taurus_element_set_attribute(copy, attr_name, attr_value);
-                    /* Free temporary strings if we converted from StringView */
-                    if (!attr->name) free((char*)attr_name);
-                    if (!attr->value) free((char*)attr_value);
                 }
             }
         }
@@ -920,14 +904,12 @@ TaurusElement taurus_element_insert_copy_after(TaurusElement sibling, TaurusElem
             if (taurus_element_get_pool(parent)) {
                 taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
-                /* Fallback: use cached strings if available, otherwise convert from StringView */
-                const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
-                const char* attr_value = attr->value ? attr->value : taurus_sv_to_cstr(&attr->value_view);
+                /* Fallback: C-string API (views are always valid C
+                 * strings under the single representation). */
+                const char* attr_name = attr_cname(attr);
+                const char* attr_value = attr_cvalue(attr);
                 if (attr_name && attr_value) {
                     taurus_element_set_attribute(copy, attr_name, attr_value);
-                    /* Free temporary strings if we converted from StringView */
-                    if (!attr->name) free((char*)attr_name);
-                    if (!attr->value) free((char*)attr_value);
                 }
             }
         }
@@ -1035,14 +1017,12 @@ TaurusElement taurus_element_insert_copy_before(TaurusElement sibling, TaurusEle
             if (taurus_element_get_pool(parent)) {
                 taurus_element_add_attribute(copy, attr_name_view, attr_value_view, taurus_element_get_pool(parent));
             } else {
-                /* Fallback: use cached strings if available, otherwise convert from StringView */
-                const char* attr_name = attr->name ? attr->name : taurus_sv_to_cstr(&attr->name_view);
-                const char* attr_value = attr->value ? attr->value : taurus_sv_to_cstr(&attr->value_view);
+                /* Fallback: C-string API (views are always valid C
+                 * strings under the single representation). */
+                const char* attr_name = attr_cname(attr);
+                const char* attr_value = attr_cvalue(attr);
                 if (attr_name && attr_value) {
                     taurus_element_set_attribute(copy, attr_name, attr_value);
-                    /* Free temporary strings if we converted from StringView */
-                    if (!attr->name) free((char*)attr_name);
-                    if (!attr->value) free((char*)attr_value);
                 }
             }
         }
@@ -1175,19 +1155,20 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
         /* Initialize attribute */
         memset(dst_attr, 0, sizeof(struct taurus_attribute));
 
-        /* Copy StringView data (zero-copy) */
-        dst_attr->name_view = src_attr->name_view;
-        dst_attr->value_view = src_attr->value_view;
+        /* Owned copies in the DESTINATION pool (single representation,
+         * round 4): the source's views may point into the source
+         * document's buffer, which can be freed before this copy. */
+        if (!taurus_sv_is_empty(&src_attr->name_view)) {
+            char* n = taurus_pool_strdup(pool, src_attr->name_view.data);
+            if (n) dst_attr->name_view = taurus_sv_from_cstr(n);
+        }
+        if (!taurus_sv_is_empty(&src_attr->value_view)) {
+            char* v = taurus_pool_strdup(pool, src_attr->value_view.data);
+            if (v) dst_attr->value_view = taurus_sv_from_cstr(v);
+        }
+        dst_attr->has_entities = src_attr->has_entities;
         dst_attr->name_hash = src_attr->name_hash;
         dst_attr->ns_cache = NULL;  /* set below if source has cache */
-
-        /* Copy cached strings if they exist */
-        if (src_attr->name) {
-            dst_attr->name = taurus_pool_strdup(pool, src_attr->name);
-        }
-        if (src_attr->value) {
-            dst_attr->value = taurus_pool_strdup(pool, src_attr->value);
-        }
 
         /* Copy namespace cache if present (TODO 173). */
         if (src_attr->ns_cache) {

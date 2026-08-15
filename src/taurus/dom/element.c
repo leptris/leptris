@@ -201,14 +201,8 @@ struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem
          * Only when hash AND length match do we do the full memcmp. */
         if (attr_name_hash(attr) == name_hash &&
             attr->name_view.length == name_len) {
-            /* TODO 184 round 3: view-first (parse path keeps name NULL);
-             * owned copies (mutation API / entity expansion) win when set. */
-            if (!taurus_sv_is_empty(&attr->name_view)) {
-                if (memcmp(attr->name_view.data, name, name_len) == 0) {
-                    return attr;
-                }
-            } else if (attr->name &&
-                       memcmp(attr->name, name, name_len) == 0) {
+            if (!taurus_sv_is_empty(&attr->name_view) &&
+                memcmp(attr->name_view.data, name, name_len) == 0) {
                 return attr;
             }
         }
@@ -279,7 +273,21 @@ int taurus_element_add_attribute(TaurusElement elem,
      *
      * CRITICAL: Decode XML entities in attribute values BEFORE converting to C string.
      * Entities like &lt; &gt; &amp; must be decoded to < > & during parsing. */
-    attr->name = taurus_sv_to_cstr_pooled(&name_view, pool);
+    /* SINGLE representation (TODO 184 round 4): the caller's views may
+     * point at temporary memory, so this path REPLACES them with owned
+     * pool copies. Parse-path attrs keep their zero-copy buffer views.
+     *
+     * Names: interned via the pool's hash table (they recur across
+     * elements). Values: direct pool allocation (values are almost
+     * always unique — interning cost is wasted).
+     *
+     * Entities decode BEFORE storing; &lt; &gt; &amp; must read as
+     * < > & in the value. */
+    char* name_storage = taurus_sv_to_cstr_pooled(&name_view, pool);
+    if (name_storage) {
+        attr->name_view = taurus_sv_from_ptr(
+            name_storage, name_view.length);
+    }
 
     /* Allocate value storage directly from the pool — no interning. */
     char* value_storage = (char*)taurus_pool_alloc(pool, value_view.length + 1);
@@ -297,18 +305,20 @@ int taurus_element_add_attribute(TaurusElement elem,
             TaurusStringView decoded_sv = { value_storage, value_view.length };
             char* decoded = taurus_decode_entities_view(&decoded_sv, pool);
             if (decoded) {
-                attr->value = decoded;
+                attr->value_view = taurus_sv_from_cstr(decoded);
                 attr->has_entities = 0;
             } else {
-                attr->value = value_storage;
+                attr->value_view =
+                    taurus_sv_from_ptr(value_storage, value_view.length);
                 attr->has_entities = 1;
             }
         } else {
-            attr->value = value_storage;
+            attr->value_view =
+                taurus_sv_from_ptr(value_storage, value_view.length);
             attr->has_entities = 0;
         }
     } else {
-        attr->value = NULL;
+        attr->value_view = taurus_sv_from_ptr(NULL, 0);
         attr->has_entities = 0;
     }
 
@@ -353,8 +363,6 @@ int taurus_element_add_attribute_zero_copy(TaurusElement elem,
 
     attr->name_view = name_view;
     attr->value_view = value_view;
-    attr->name = NULL;
-    attr->value = NULL;
 
     attr->name_hash = 2166136261u;
     for (size_t i = 0; i < name_view.length; i++) {
@@ -372,10 +380,11 @@ int taurus_element_add_attribute_zero_copy(TaurusElement elem,
             TaurusStringView decoded_sv = { value_storage, value_view.length };
             char* decoded = taurus_decode_entities_view(&decoded_sv, pool);
             if (decoded) {
-                attr->value = decoded;
+                attr->value_view = taurus_sv_from_cstr(decoded);
                 attr->has_entities = 0;
             } else {
-                attr->value = value_storage;
+                attr->value_view =
+                    taurus_sv_from_ptr(value_storage, value_view.length);
                 attr->has_entities = 1;
             }
         } else {
@@ -581,19 +590,27 @@ const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* 
     struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
     if (!attr) return NULL;
 
-    /* TODO 184 round 3: only entity values materialize; the view's
-     * data is NUL-terminated in the document buffer otherwise. */
-    if (!attr->value && attr->has_entities &&
-        !taurus_sv_is_empty(&attr->value_view)) {
+    /* Single representation (TODO 184 round 4): entity values expand
+     * lazily into the view (owned copy); no-entity views are already
+     * NUL-terminated. */
+    if (attr->has_entities && !taurus_sv_is_empty(&attr->value_view)) {
         if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
-            attr->value = taurus_decode_entities_view(
+            char* decoded = taurus_decode_entities_view(
                 &attr->value_view, taurus_element_get_pool(elem));
+            if (decoded) {
+                attr->value_view = taurus_sv_from_cstr(decoded);
+                attr->has_entities = 0;
+            }
         } else {
-            attr->value = taurus_sv_to_cstr(&attr->value_view);
+            char* expanded = taurus_sv_to_cstr(&attr->value_view);
+            if (expanded) {
+                attr->value_view = taurus_sv_from_cstr(expanded);
+                attr->has_entities = 0;
+            }
         }
     }
 
-    return attr->value ? attr->value : attr->value_view.data;
+    return attr->value_view.data;
 }
 
 /* Add namespace with in-place strings (zero-copy).

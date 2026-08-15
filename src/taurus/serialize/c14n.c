@@ -113,11 +113,11 @@ static int compare_attributes(const void* a, const void* b) {
     const struct taurus_attribute* attr_a = *(const struct taurus_attribute**)a;
     const struct taurus_attribute* attr_b = *(const struct taurus_attribute**)b;
 
-    /* Get attribute names */
-    const char* name_a = !taurus_sv_is_empty(&attr_a->name_view) ? attr_a->name_view.data : attr_a->name;
-    const char* name_b = !taurus_sv_is_empty(&attr_b->name_view) ? attr_b->name_view.data : attr_b->name;
-    size_t len_a = !taurus_sv_is_empty(&attr_a->name_view) ? attr_a->name_view.length : strlen(attr_a->name);
-    size_t len_b = !taurus_sv_is_empty(&attr_b->name_view) ? attr_b->name_view.length : strlen(attr_b->name);
+    /* Get attribute names (single representation) */
+    const char* name_a = attr_a->name_view.data;
+    const char* name_b = attr_b->name_view.data;
+    size_t len_a = attr_a->name_view.length;
+    size_t len_b = attr_b->name_view.length;
 
     /* Lexicographic comparison */
     size_t min_len = len_a < len_b ? len_a : len_b;
@@ -206,19 +206,16 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
     if (sorted_attrs) {
         for (size_t i = 0; i < attr_count; i++) {
             struct taurus_attribute* attr = sorted_attrs[i];
-            const char* attr_name = !taurus_sv_is_empty(&attr->name_view) ? attr->name_view.data : attr->name;
-            size_t attr_name_len = !taurus_sv_is_empty(&attr->name_view) ? attr->name_view.length : strlen(attr->name);
+            const char* attr_name = attr->name_view.data;
+            size_t attr_name_len = attr->name_view.length;
 
-            /* Get attribute value. TODO 184 round 3: no-entity values
-             * read the view directly (NUL-terminated in the doc
-             * buffer); only entity values decode, and only the
-             * decoded copy is freed afterward. */
+            /* Get attribute value. Single representation (round 4):
+             * no-entity values read the view directly (NUL-terminated
+             * in the doc buffer); entity values decode to a temporary
+             * that this loop frees. */
             const char* attr_value;
             int attr_value_owned = 0;
-            if (attr->value) {
-                attr_value = attr->value;
-            } else if (attr->has_entities &&
-                       !taurus_sv_is_empty(&attr->value_view)) {
+            if (attr->has_entities && !taurus_sv_is_empty(&attr->value_view)) {
                 /* Use lenient mode for C14N to handle edge cases like "&" in attributes */
                 int old_strict = taurus_get_strict_mode();
                 taurus_set_strict_mode(0);  /* Enable lenient mode */
@@ -678,12 +675,17 @@ static void c14n_serialize_element_excl(TaurusElement elem,
             for (size_t i = 0; i < attr_count; i++) {
                 struct taurus_attribute* a = sorted_attrs[i];
                 if (!a) continue;
-                const char* an = !taurus_sv_is_empty(&a->name_view) ? a->name_view.data : a->name;
-                size_t an_len = !taurus_sv_is_empty(&a->name_view) ? a->name_view.length : (an ? strlen(an) : 0);
-                const char* av = a->value;
-                if (!av && !taurus_sv_is_empty(&a->value_view)) {
+                const char* an = a->name_view.data;
+                size_t an_len = a->name_view.length;
+                /* Single representation: entity values decode to a
+                 * temporary this loop frees; others read the view. */
+                const char* av = NULL;
+                int av_owned = 0;
+                if (a->has_entities && !taurus_sv_is_empty(&a->value_view)) {
                     av = taurus_decode_entities_view(&a->value_view, NULL);
+                    av_owned = (av != NULL);
                 }
+                if (!av) av = attr_cvalue(a);
                 if (an && av) {
                     char* escaped = c14n_escape_text(av, 1);
                     if (escaped) {
@@ -693,7 +695,7 @@ static void c14n_serialize_element_excl(TaurusElement elem,
                         APPEND_STRING(temp, len);
                         free(escaped);
                     }
-                    if (av != a->value) free((void*)av);
+                    if (av_owned) free((void*)av);
                 }
             }
             free(sorted_attrs);

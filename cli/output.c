@@ -92,23 +92,10 @@ static void xml_print_element_recursive(
         }
         if (!attr) continue;
 
-        /* Get attribute name (handle both StringView and C string) */
-        attr_name = attr->name;
-        char* temp_name = NULL;
-        if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
-            /* Convert StringView to C string for output */
-            temp_name = taurus_sv_to_cstr(&attr->name_view);
-            attr_name = temp_name;
-        }
-
-        /* Get attribute value (handle both StringView and C string) */
-        attr_value = attr->value;
-        char* temp_value = NULL;
-        if (!attr_value && !taurus_sv_is_empty(&attr->value_view)) {
-            /* Convert StringView to C string for output */
-            temp_value = taurus_sv_to_cstr(&attr->value_view);
-            attr_value = temp_value;
-        }
+        /* Single representation (TODO 184 round 4): views ARE the
+         * NUL-terminated strings — no conversion, no temp frees. */
+        attr_name = attr_cname(attr);
+        attr_value = attr_cvalue(attr);
 
         if (attr_name) {
             fprintf(out, " %s=\"", attr_name);
@@ -127,10 +114,6 @@ static void xml_print_element_recursive(
             }
             fprintf(out, "\"");
         }
-
-        /* Clean up temporary conversions */
-        if (temp_name) free(temp_name);
-        if (temp_value) free(temp_value);
     }
 
     /* Namespace declarations - output xmlns attributes if element has namespace */
@@ -471,23 +454,9 @@ static void json_print_element_recursive(
         /* Walk the attribute linked list */
         struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
         while (attr) {
-            /* Get attribute name (handle both StringView and C string) */
-            const char* attr_name = attr->name;
-            char* temp_name = NULL;
-            if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
-                /* Convert StringView to C string for output */
-                temp_name = taurus_sv_to_cstr(&attr->name_view);
-                attr_name = temp_name;
-            }
-
-            /* Get attribute value (handle both StringView and C string) */
-            const char* attr_value = attr->value;
-            char* temp_value = NULL;
-            if (!attr_value && !taurus_sv_is_empty(&attr->value_view)) {
-                /* Convert StringView to C string for output */
-                temp_value = taurus_sv_to_cstr(&attr->value_view);
-                attr_value = temp_value;
-            }
+            /* Single representation: views ARE the C strings. */
+            const char* attr_name = attr_cname(attr);
+            const char* attr_value = attr_cvalue(attr);
 
             if (attr_name) {
                 if (!first_attr) fprintf(out, ",");
@@ -501,10 +470,6 @@ static void json_print_element_recursive(
                 }
                 fprintf(out, "\"");
             }
-
-            /* Clean up temporary conversions */
-            if (temp_name) free(temp_name);
-            if (temp_value) free(temp_value);
 
             /* Move to next attribute */
             attr = taurus_attr_next(attr);
@@ -683,14 +648,9 @@ static void text_print_element_recursive(
         while (attr) {
             if (!first_attr) fprintf(out, ", ");
             first_attr = 0;
-            if (attr->name) {
-                fprintf(out, "%s=", attr->name);
-                if (attr->value) {
-                    fprintf(out, "\"%s\"", attr->value);
-                } else {
-                    fprintf(out, "\"\"");
-                }
-            }
+            fprintf(out, "%s=", attr_cname(attr));
+            const char* av = attr_cvalue(attr);
+            fprintf(out, "\"%s\"", av ? av : "");
             /* Move to next attribute */
             attr = taurus_attr_next(attr);
         }
