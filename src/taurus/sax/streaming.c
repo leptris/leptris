@@ -42,6 +42,8 @@
  */
 
 #include "sax_internal.h"
+#include "../common/string_view.h"
+#include "../common/entities.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -259,6 +261,21 @@ static void sxs_emit_end_element(TaurusSAXParser* p, SaxElementFrame* f) {
 
 static void sxs_emit_characters(TaurusSAXParser* p, const char* text, size_t len) {
     if (p->handler && p->handler->characters && len > 0) {
+        /* XML 1.0 2.4: character data must reach the application
+         * with entity/character references expanded. Spans without
+         * '&' (the common case) are delivered zero-copy as before;
+         * spans containing '&' are decoded into a temporary buffer. */
+        if (memchr(text, '&', len)) {
+            TaurusStringView sv = taurus_sv_from_ptr(text, len);
+            char* decoded = taurus_decode_entities_view(&sv, NULL);
+            if (decoded) {
+                p->handler->characters(p->user_data, decoded, strlen(decoded));
+                free(decoded);
+                return;
+            }
+            /* Undecodable reference: deliver raw (matches the
+             * pre-expansion behavior). */
+        }
         p->handler->characters(p->user_data, text, len);
     }
 }
@@ -725,8 +742,27 @@ static int sxs_step_attr_value(TaurusSAXParser* p, int is_final) {
     }
     /* p->pos points at closing quote. */
     p->pos++;
-    /* Build value: skip carry[0] (quote), copy carry[1..]. */
-    const char* value = sxs_scratch_append(p, p->carry + 1, p->carry_len - 1);
+    /* Build value: skip carry[0] (quote), copy carry[1..].
+     *
+     * XML 1.0 3.3.3: attribute values must be delivered with
+     * entity/character references expanded. Values without '&'
+     * (the common case) copy verbatim; values with '&' decode
+     * through a temporary buffer first. */
+    const char* raw = p->carry + 1;
+    size_t raw_len = p->carry_len - 1;
+    const char* value;
+    if (raw_len && memchr(raw, '&', raw_len)) {
+        TaurusStringView sv = taurus_sv_from_ptr(raw, raw_len);
+        char* decoded = taurus_decode_entities_view(&sv, NULL);
+        if (decoded) {
+            value = sxs_scratch_append(p, decoded, strlen(decoded));
+            free(decoded);
+        } else {
+            value = sxs_scratch_append(p, raw, raw_len);
+        }
+    } else {
+        value = sxs_scratch_append(p, raw, raw_len);
+    }
     if (!value) { sxs_set_error(p, "out of memory"); return SAX_STEP_ERR; }
 
     /* Pair pending_attr_name with value, append to top frame's attrs. */
@@ -843,9 +879,46 @@ static int sxs_step_text(TaurusSAXParser* p, int is_final) {
     const char* start = p->pos;
     while (p->pos < p->end && *p->pos != '<') p->pos++;
     size_t len = (size_t)(p->pos - start);
-    if (len > 0) {
-        sxs_emit_characters(p, start, len);
+
+    if (p->carry_len == 0 && (len == 0 || !memchr(start, '&', len))) {
+        /* Fast path: no pending reference and none in this span —
+         * zero-copy emit, exactly the pre-expansion behavior. */
+        if (len > 0) sxs_emit_characters(p, start, len);
+    } else {
+        /* Entity references must not be split across chunk
+         * boundaries. Accumulate into carry, deliver only up to the
+         * last COMPLETE reference, hold any incomplete tail for the
+         * next feed. A reference split across feeds would otherwise
+         * arrive as raw bytes on either side and never decode. */
+        if (sxs_carry_append(p, start, len) < 0) {
+            sxs_set_error(p, "out of memory");
+            return SAX_STEP_ERR;
+        }
+        const char* pend = p->carry;
+        const char* pend_end = p->carry + p->carry_len;
+        size_t complete = 0;
+        const char* q = pend;
+        while (q < pend_end) {
+            const char* amp = (const char*)memchr(q, '&',
+                                                  (size_t)(pend_end - q));
+            if (!amp) { complete = (size_t)(pend_end - pend); break; }
+            const char* semi = (const char*)memchr(amp, ';',
+                                                   (size_t)(pend_end - amp));
+            if (!semi) { complete = (size_t)(amp - pend); break; }
+            q = semi + 1;
+        }
+        if (q >= pend_end) complete = (size_t)(pend_end - pend);
+        /* On the final feed there is no next chunk: flush the tail
+         * too (decode falls back to raw for anything malformed). */
+        if (is_final) complete = (size_t)(pend_end - pend);
+        if (complete > 0) {
+            sxs_emit_characters(p, pend, complete);
+            memmove(p->carry, p->carry + complete,
+                    p->carry_len - complete);
+            p->carry_len -= complete;
+        }
     }
+
     if (p->pos >= p->end) {
         /* End of input.  If is_final, the element was unterminated --
          * that's an error, but we've already emitted the text. */
@@ -854,6 +927,15 @@ static int sxs_step_text(TaurusSAXParser* p, int is_final) {
             return SAX_STEP_ERR;
         }
         return SAX_STEP_NEED_MORE;
+    }
+
+    if (p->carry_len > 0) {
+        /* p->pos is at '<' but carry still holds an incomplete
+         * reference — it can never complete (malformed input).
+         * Flush it raw (parity with the one-shot lenient path) so
+         * the tag states enter with an empty carry. */
+        sxs_emit_characters(p, p->carry, p->carry_len);
+        sxs_carry_reset(p);
     }
     /* p->pos points at '<' — back to content dispatch. */
     p->state = SAX_ST_ELEM_CONTENT;

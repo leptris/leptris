@@ -94,10 +94,36 @@ module Taurus
   attach_function :taurus_free_string, [:pointer], :void
   attach_function :taurus_xpath_result_boolean, [:xpath_result], :int
 
+  # ---- SAX (TODO 118 Phase B: full callback surface) ----
+  # Callback typedefs mirror struct TaurusSAXHandler (sax.h).
+  # characters' text is NOT NUL-terminated: pointer + length.
+  callback :sax_start_document,  [:pointer], :void
+  callback :sax_end_document,    [:pointer], :void
+  callback :sax_start_element,   [:pointer, :string, :pointer], :void
+  callback :sax_end_element,     [:pointer, :string], :void
+  callback :sax_characters,      [:pointer, :pointer, :size_t], :void
+  callback :sax_comment,         [:pointer, :string], :void
+  callback :sax_cdata,           [:pointer, :string], :void
+  callback :sax_pi,              [:pointer, :string, :string], :void
+  callback :sax_prefix_mapping,  [:pointer, :string, :string], :void
+  callback :sax_end_prefix,      [:pointer, :string], :void
+  callback :sax_error,           [:pointer, :string, :int, :int], :void
+
+  attach_function :taurus_sax_parse,
+    [:string, :size_t, :pointer, :pointer], :int
+  attach_function :taurus_sax_parser_create,
+    [:pointer, :pointer], :sax_parser
+  attach_function :taurus_sax_parser_feed,
+    [:sax_parser, :string, :size_t, :int], :int
+  attach_function :taurus_sax_parser_set_streaming,
+    [:sax_parser, :int], :int
+  attach_function :taurus_sax_parser_free, [:sax_parser], :void
+
   # Autoload children from their files.  No require_relative.
   autoload :Document, 'taurus/document'
   autoload :Element,  'taurus/element'
   autoload :Node,     'taurus/node'
   autoload :XPath,    'taurus/xpath'
+  autoload :SAX,      'taurus/sax'
   autoload :Error,    'taurus/error'
 end

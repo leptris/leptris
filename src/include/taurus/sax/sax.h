@@ -87,9 +87,15 @@ struct TaurusSAXHandler {
     /**
      * Called for character data (text content)
      *
+     * Entity and character references are expanded before delivery:
+     * "&amp;" arrives as "&", "&#65;" as "A" (XML 1.0 section 2.4).
+     * Attribute values in start_element are expanded the same way
+     * (XML 1.0 section 3.3.3).
+     *
      * May be called multiple times for a single text node if the text
-     * is long or contains special characters. Concatenate all calls
-     * between start_element and end_element to get complete text.
+     * is long, contains references, or spans chunk boundaries in
+     * incremental parsing. Concatenate all calls between start_element
+     * and end_element to get complete text.
      *
      * @param user_data User-provided context pointer
      * @param text Text content (UTF-8, NOT null-terminated)
