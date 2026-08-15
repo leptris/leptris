@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.20.3] - Y-08-15
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.20.2] - 2026-08-15
 
 ### Architecture — view-backed attribute name/value (TODO 184 round 3)
