@@ -1,14 +1,40 @@
 ## [Unreleased]
 
-## [0.20.3] - Y-08-15
+## [0.20.3] - 2026-08-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Architecture — single-representation attribute strings (TODO 184 round 4)
 
-### Changed
+The attribute struct's `char* name`/`char* value` fields are
+**deleted**. The `TaurusStringView` fields are the only string
+representation:
 
-- (describe changes here)
+- **Parse path**: zero-copy views into the document buffer, NUL-
+  terminated in place by the parser (document-lifetime).
+- **Mutation API / entity expansion**: owned copies *replace* the
+  view — callers' strings may be temporary, and the raw entity
+  text is never needed after expansion.
 
+Every dual-representation branch, temporary conversion, and
+convert-and-free dance collapses to `attr_cname`/`attr_cvalue` —
+**208 net lines deleted** across the parser, DTD validator,
+serializer, c14n, xinclude, XPath VM/evaluator/functions, FFI
+accessors, and CLI. Deep-copy now pool-copies attribute views into
+the destination pool (the source document's buffer can be freed
+first — a pre-existing exposure, now closed).
+
+#### Measured layout law (documented in element.h)
+
+`sizeof(struct taurus_attribute)` **must stay 64** — exactly one
+cache line per attribute. The natural 48-byte struct was built and
+benchmarked: it **regressed K=100 by 22%** (1252–1309 vs 1025–1041
+µs, interleaved Release A/B on fresh build trees) because 48-byte
+attributes straddle cache lines (1.33 lines/attr) — every
+parse-wiring touch pulled two lines. The struct retains 16 bytes
+of documented padding with a do-not-remove-without-benchmark note.
+
+Verified: 508/508 tests, ASAN clean (dom/serialize/xpath suites,
+checked locally before push), interleaved K=100 parity 1030 vs
+1040 µs.
 
 ## [0.20.2] - 2026-08-15
 
