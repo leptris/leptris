@@ -810,19 +810,16 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
         /* Validate attribute pointer before accessing */
         if ((uintptr_t)attr < 0x1000) continue;  /* Invalid pointer */
 
-        /* TODO 184 round 3: parse-path attrs keep name/value NULL —
-         * the views' data are NUL-terminated in the document buffer
-         * (document-lifetime; readers derive via attr_cname/cvalue).
-         * Only ENTITY values need materializing here; the plain
-         * pool-copies were historical defensiveness, and this walk
-         * runs over every attr of every parse. */
-        if (!attr->value && attr->has_entities &&
+        /* Single representation (round 4): entity values expand INTO
+         * the view (owned pool copy); everything else already reads
+         * correctly from the zero-copy view. */
+        if (attr->has_entities &&
             !taurus_sv_is_empty(&attr->value_view)) {
             if ((uintptr_t)attr->value_view.data >= 0x1000) {
                 char* expanded =
                     taurus_decode_entities_view(&attr->value_view, pool);
                 if (expanded) {
-                    attr->value = expanded;
+                    attr->value_view = taurus_sv_from_cstr(expanded);
                     attr->has_entities = 0;
                 }
             }

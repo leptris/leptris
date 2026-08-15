@@ -81,12 +81,8 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
 
     attr_node->node_type = TAURUS_NODE_ATTRIBUTE;
 
-    /* Handle name - support both cached and StringView-based attributes */
-    if (attr->name) {
-        /* Use cached name if available */
-        attr_node->name = taurus_strdup(attr->name);
-    } else if (!taurus_sv_is_empty(&attr->name_view)) {
-        /* Convert StringView to C string */
+    /* Handle name - copy from the single-representation view */
+    if (!taurus_sv_is_empty(&attr->name_view)) {
         size_t len = attr->name_view.length;
         char* name_copy = TAURUS_ALLOC_N(char, len + 1);
         if (name_copy) {
@@ -100,12 +96,8 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
         attr_node->name = NULL;
     }
 
-    /* Handle value - support both cached and StringView-based attributes */
-    if (attr->value) {
-        /* Use cached value if available */
-        attr_node->value = taurus_strdup(attr->value);
-    } else if (!taurus_sv_is_empty(&attr->value_view)) {
-        /* Convert StringView to C string */
+    /* Handle value - copy from the single-representation view */
+    if (!taurus_sv_is_empty(&attr->value_view)) {
         size_t len = attr->value_view.length;
         char* value_copy = TAURUS_ALLOC_N(char, len + 1);
         if (value_copy) {
@@ -416,11 +408,7 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElement node,
         if (test && test->type == XPATH_AST_NODE_TEST_NAME) {
             /* Specific attribute name test - handle both StringView and cached name */
             int name_matches = 0;
-            if (attr->name) {
-                /* Use cached name if available */
-                name_matches = (test->value && strcmp(test->value, attr->name) == 0);
-            } else if (!taurus_sv_is_empty(&attr->name_view)) {
-                /* Compare with StringView */
+            if (!taurus_sv_is_empty(&attr->name_view)) {
                 name_matches = taurus_sv_equals_cstr(&attr->name_view, test->value);
             }
             matches = name_matches;

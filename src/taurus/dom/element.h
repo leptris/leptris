@@ -58,13 +58,17 @@ struct taurus_attr_ns_cache {
 };
 
 struct taurus_attribute {
-    /* StringView storage (zero-copy, points into XML buffer) */
+    /* SINGLE string representation (TODO 184 round 4): the views.
+     * - Parse path: zero-copy into the document buffer (NUL-
+     *   terminated in place by the parser; document-lifetime).
+     * - Mutation API / entity expansion: view.data is an OWNED
+     *   pool/heap copy, NUL-terminated, length set. Owned copies
+     *   REPLACE the view because callers' strings may be temporary
+     *   and the raw entity text is never needed post-expansion.
+     * 48 bytes: 16 + 16 + 8 (ns_cache) + 8-byte tail. */
+
     TaurusStringView name_view;
     TaurusStringView value_view;
-
-    /* Cached NULL-terminated (lazy conversion from pool) */
-    char* name;                  /* NULL until first access */
-    char* value;                 /* NULL until first access */
 
     /* Side cache for namespace activity. NULL when the attr has no prefix
      * and no namespace_uri (the common case). Allocated from the pool on
@@ -76,7 +80,7 @@ struct taurus_attribute {
      * connects attrs of the SAME element, which are allocated as
      * adjacent slots in the parser's attr_block (contiguous by
      * construction since TODO 183 Phase 3; distance ≤ K × sizeof,
-     * ~4 KB at K=100 — always within cp16's ±256 KB). Mutation-
+     * ~3 KB at K=100 — always within cp16's ±256 KB). Mutation-
      * created attrs (different region) go through the encoder's
      * overflow-table path. 0 = NULL end-of-list. */
     int16_t next_cp;
@@ -92,31 +96,32 @@ struct taurus_attribute {
      * 0 for non-empty input, so 0 is a safe sentinel. TODO 172.
      *
      * Layout note: next_cp + has_entities + name_hash pack into one
-     * 8-byte tail after the four 8-byte fields — sizeof is 64 (was 72
-     * with a raw next pointer). */
+     * 8-byte tail — sizeof is 48 (was 64 with separate char* fields,
+     * 72 with a raw next pointer). */
     uint32_t name_hash;
+
+    /* MEASURED LAYOUT DECISION (TODO 184 round 4): sizeof must stay
+     * 64 — one attribute per cache line. At the natural 48 B the
+     * struct straddles lines (1.33 lines/attr) and the K=100 parse
+     * regressed 22% (1252-1309 vs 1025-1041 µs, interleaved Release
+     * A/B) because every wiring/scan touch pulls TWO lines. The
+     * 16 bytes are padding; do not "optimize" them away without
+     * re-running benchmark_many_attrs K=100. */
+    char _layout_pad[16];
 };
 
-/* C-string accessors over the dual representation (TODO 184 round 3).
- *
- * name/value are NULL on parse-path attrs: the parse path NUL-
- * terminates name and value in the document buffer and stores only
- * the views — the char* fields are reserved for owned copies
- * (mutation API strdup, entity/DTD expansion). Readers derive:
- * non-NULL field wins; else the view's data (document-lifetime,
- * NUL-terminated). Public-API standalone attrs (taurus_attribute_new)
- * always set the fields, so they are unaffected.
- *
- * attr_cvalue does NOT expand entities — callers needing expansion
- * use taurus_element_attribute(), which materializes lazily. */
+/* C-string accessors (TODO 184 rounds 3–4). The views are the
+ * single representation; their data is always NUL-terminated
+ * (parse path: in the document buffer; mutation/expansion: owned
+ * copy). attr_cvalue does NOT expand entities — callers needing
+ * expansion use taurus_element_attribute(), which materializes
+ * lazily. */
 static inline const char* attr_cname(const struct taurus_attribute* a) {
-    return a->name ? a->name
-         : (a->name_view.data ? a->name_view.data : "");
+    return a->name_view.data ? a->name_view.data : "";
 }
 
 static inline const char* attr_cvalue(const struct taurus_attribute* a) {
-    return a->value ? a->value
-         : (a->value_view.data ? a->value_view.data : "");
+    return a->value_view.data ? a->value_view.data : "";
 }
 
 /* Attr list-edge accessors (TODO 183 Phase 5). next_cp stores the

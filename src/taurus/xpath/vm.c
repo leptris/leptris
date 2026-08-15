@@ -386,10 +386,8 @@ struct taurus_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* 
                 if (!an) { attr = taurus_attr_next(attr); continue; }
                 an->node_type = TAURUS_NODE_ATTRIBUTE;
 
-                /* Copy name */
-                if (attr->name) {
-                    an->name = taurus_strdup(attr->name);
-                } else if (nv.length > 0 && nv.data) {
+                /* Copy name (single representation: from the view) */
+                if (nv.length > 0 && nv.data) {
                     an->name = (char*)malloc(nv.length + 1);
                     if (an->name) {
                         memcpy(an->name, nv.data, nv.length);
@@ -399,11 +397,9 @@ struct taurus_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* 
                     an->name = NULL;
                 }
 
-                /* Copy value */
+                /* Copy value (single representation: from the view) */
                 TaurusStringView vv = attr->value_view;
-                if (attr->value) {
-                    an->value = taurus_strdup(attr->value);
-                } else if (vv.length > 0 && vv.data) {
+                if (vv.length > 0 && vv.data) {
                     an->value = (char*)malloc(vv.length + 1);
                     if (an->value) {
                         memcpy(an->value, vv.data, vv.length);

@@ -152,14 +152,20 @@ TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* 
     struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
     if (!attr) return NULL;
 
-    /* TODO 184 round 3: no-entity values need no materialization —
-     * the view's data is NUL-terminated in the document buffer
-     * (document-lifetime). Only entity values expand, lazily. */
-    if (!attr->value && attr->has_entities) {
+    /* Single representation (round 4): entity values expand lazily
+     * INTO the view (owned copy); no-entity views are already
+     * NUL-terminated C strings. */
+    if (attr->has_entities) {
         TaurusMemoryPool* pool = taurus_element_get_pool(elem);
-        attr->value = taurus_decode_entities_view(&attr->value_view, pool);
+        char* decoded = pool
+            ? taurus_decode_entities_view(&attr->value_view, pool)
+            : NULL;
+        if (decoded) {
+            attr->value_view = taurus_sv_from_cstr(decoded);
+            attr->has_entities = 0;
+        }
     }
-    return attr->value ? attr->value : attr->value_view.data;
+    return attr->value_view.data;
 }
 
 TAURUS_API int taurus_element_has_attribute(TaurusElement elem, const char* name) {
@@ -875,13 +881,10 @@ TAURUS_API const char* taurus_element_attribute_name_at(TaurusElement elem, size
     size_t i = 0;
     while (attr) {
         if (i == index) {
-            /* TODO 184 round 3: view data is NUL-terminated and
-             * document-lifetime — no heap copy needed (the old
-             * per-call taurus_sv_to_cstr leaked under pool attrs). */
             if (attr->name_view.data && attr->name_view.length > 0) {
                 return attr->name_view.data;
             }
-            return attr->name;
+            return NULL;
         }
         i++;
         attr = taurus_attr_next(attr);
@@ -895,14 +898,17 @@ TAURUS_API const char* taurus_element_attribute_value_at(TaurusElement elem, siz
     size_t i = 0;
     while (attr) {
         if (i == index) {
-            if (attr->has_entities && !attr->value) {
+            if (attr->has_entities) {
                 TaurusMemoryPool* pool = taurus_element_get_pool(elem);
                 if (pool) {
-                    attr->value = taurus_decode_entities_view(
+                    char* decoded = taurus_decode_entities_view(
                         &attr->value_view, pool);
+                    if (decoded) {
+                        attr->value_view = taurus_sv_from_cstr(decoded);
+                        attr->has_entities = 0;
+                    }
                 }
             }
-            if (attr->value) return attr->value;
             if (attr->value_view.data && attr->value_view.length > 0) {
                 return attr->value_view.data;
             }

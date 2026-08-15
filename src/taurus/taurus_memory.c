@@ -18,25 +18,27 @@ struct taurus_attribute* taurus_attribute_new(const char* name, const char* valu
 
     struct taurus_attribute* attr = TAURUS_ALLOC(struct taurus_attribute);
     if (!attr) return NULL;
-    /* Zero the whole struct: views/flags/hash have no owners on this
-     * heap-allocated lifecycle (TODO 184 round 3 hardening — readers
-     * now derive from views when the char* fields are NULL, so the
-     * view fields must never be garbage). */
+    /* Zero the whole struct: next_cp/has_entities/name_hash have no
+     * owners on this heap-allocated lifecycle. */
     memset(attr, 0, sizeof(*attr));
 
-    attr->name = taurus_strdup(name);
-    if (!attr->name) {
+    /* Single representation (TODO 184 round 4): owned NUL-terminated
+     * copies stored AS views. taurus_attribute_free releases them. */
+    char* name_copy = taurus_strdup(name);
+    if (!name_copy) {
         free(attr);
         return NULL;
     }
+    attr->name_view = taurus_sv_from_cstr(name_copy);
 
-    attr->ns_cache = NULL;  /* TODO 173 */
-    attr->value = value ? taurus_strdup(value) : NULL;
-
-    if (value && !attr->value) {
-        free(attr->name);
-        free(attr);
-        return NULL;
+    if (value) {
+        char* value_copy = taurus_strdup(value);
+        if (!value_copy) {
+            free(name_copy);
+            free(attr);
+            return NULL;
+        }
+        attr->value_view = taurus_sv_from_cstr(value_copy);
     }
 
     return attr;
@@ -45,13 +47,13 @@ struct taurus_attribute* taurus_attribute_new(const char* name, const char* valu
 void taurus_attribute_free(struct taurus_attribute* attr) {
     if (!attr) return;
 
-    if (attr->name) free(attr->name);
+    free(attr->name_view.data);
     if (attr->ns_cache) {
         if (attr->ns_cache->prefix) free(attr->ns_cache->prefix);
         if (attr->ns_cache->namespace_uri) free(attr->ns_cache->namespace_uri);
         free(attr->ns_cache);
     }
-    if (attr->value) free(attr->value);
+    free(attr->value_view.data);
 
     free(attr);
 }

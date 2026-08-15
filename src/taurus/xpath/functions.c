@@ -1663,13 +1663,9 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
                 }
             }
 
-            /* Get attribute name */
-            const char* attr_name = attr->name;
-            if (!attr_name && !taurus_sv_is_empty(&attr->name_view)) {
-                attr_name = pool
-                    ? taurus_sv_to_cstr_pooled(&attr->name_view, pool)
-                    : taurus_sv_to_cstr(&attr->name_view);
-            }
+            /* Get attribute name (single representation: the view IS
+             * the NUL-terminated string; no conversion, no free). */
+            const char* attr_name = attr_cname(attr);
 
             /* Check if this is xml:lang (try by namespace URI, by prefixed name, or by prefix) */
             int is_xml_lang_attr = 0;
@@ -1715,13 +1711,7 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
                 }
 
                 if (is_xml_lang) {
-                    lang_attr = attr->value;
-                    if (!lang_attr && !taurus_sv_is_empty(&attr->value_view)) {
-                        TaurusMemoryPool* pool3 = context->document ? context->document->pool : NULL;
-                        lang_attr = pool3
-                            ? taurus_sv_to_cstr_pooled(&attr->value_view, pool3)
-                            : taurus_sv_to_cstr(&attr->value_view);
-                    }
+                    lang_attr = attr_cvalue(attr);
                 }
             }
 
@@ -1729,7 +1719,6 @@ static struct taurus_xpath_result* xpath_func_lang(XPathContext* context,
              * Only legacy calloc'd intermediates need explicit free. */
             TaurusMemoryPool* free_pool = context->document ? context->document->pool : NULL;
             if (!free_pool) {
-                if (attr->name != attr_name && attr_name) free((char*)attr_name);
                 if (attr_get_namespace_uri(attr) != ns_uri && ns_uri) free((char*)ns_uri);
             }
             /* Pool-allocated: pool will reclaim on document free. */

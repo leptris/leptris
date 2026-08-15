@@ -214,35 +214,26 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
 
     attr->name_view = taurus_sv_from_ptr(name, name_len);
     attr->value_view = taurus_sv_from_ptr(val, val_len);
-    /* CRITICAL: attr_block is NOT memset (documented below) — every
-     * field must be written here. The char* fields are NULL on the
-     * parse path (readers derive via attr_cname/attr_cvalue, owned
-     * copies only for entity expansion), but the NULL itself MUST be
-     * stored: uninitialized arena bytes are garbage on CI allocators
-     * (0xbebebebe / 0xcd patterns), and macOS only "passed" because
-     * fresh mmap pages are zero. */
-    attr->name = NULL;
-    attr->value = NULL;
-    /* Entity routing (has_amp from the caller's fused scan):
-     * - DTD present: eagerly expand via DTD-aware decoder; result
-     *   is pool-owned, has_entities=0.
-     * - No DTD: value stays NULL, has_entities=1 — accessor
-     *   expands predefined entities lazily on first read.
-     * - No '&': nothing to do — view is the value. */
+    /* Single representation (TODO 184 round 4): the views ARE the
+     * strings (NUL-terminated in the document buffer). Entity
+     * routing (has_amp from the caller's fused scan):
+     * - DTD present: eagerly expand; the owned pool copy REPLACES
+     *   the view, has_entities=0.
+     * - No DTD: view stays raw, has_entities=1 — accessors expand
+     *   predefined entities lazily on first read.
+     * - No '&': nothing to do. */
     if (val_len > 0 && has_amp) {
         if (p->dtd) {
             TaurusStringView dsv = taurus_sv_from_ptr(val, val_len);
             char* expanded = taurus_decode_entities_view_with_dtd(
                 &dsv, p->dtd, p->pool);
             if (expanded) {
-                attr->value = expanded;
+                attr->value_view = taurus_sv_from_cstr(expanded);
                 attr->has_entities = 0;
             } else {
-                attr->value = NULL;
                 attr->has_entities = 1;
             }
         } else {
-            attr->value = NULL;
             attr->has_entities = 1;
         }
     } else {
