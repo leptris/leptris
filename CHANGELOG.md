@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.21.2] - Y-08-15
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.21.1] - 2026-08-15
 
 ### Docs — parse-perf campaign closure (TODO 185 round 3)
