@@ -569,10 +569,12 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
 /* owns_buffer values:
  *   0 — caller owns the buf (in-place parse). Don't free.
  *   1 — direct_parse_internal owns the buf via separate malloc.
- *       Free on failure.
- *   2 — buf should be copied into the pool (TODO 154 Phase C).
- *       The input `buf` is const; we pool-alloc a copy. Pool owns
- *       the copy. No separate free.
+ *       Free on failure; doc->xml_buffer owns it on success.
+ *   2 — the input `buf` is const; the parser mallocs its own copy,
+ *       FUSED with the count3 sizing pre-scan into one pass
+ *       (TODO 188), then behaves as owns_buffer = 1. The copy
+ *       lives outside the arena; the document frees it via
+ *       doc->xml_buffer_needs_free.
  */
 static struct taurus_document* direct_parse_internal(char* buf, size_t len, int owns_buffer) {
 
@@ -596,12 +598,28 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * Slack: len covers all text/name/value copies (they're substrings
      * of the document), plus len/2 mutation headroom (post-parse
      * append/set calls allocate from the same arena). */
-    /* TODO 184: count3 — one memory pass for all three sizing
-     * counters (was three full traversals; at 884 KB that's 1.7 MB
-     * of avoided L2/DRAM traffic per parse). */
+    /* TODO 188: fused copy+count. The owns-copy path used to stream
+     * the input TWICE — count3 for arena sizing, then the memcpy
+     * into the pool's buffer copy. Now one kernel copies into a
+     * separately-malloc'd buffer AND produces the three counters
+     * from the same load. The arena no longer carries the copy
+     * (buf_extra = 0 below) and the document owns the malloc via
+     * the owns_buffer = 1 free paths + doc->xml_buffer. In-place
+     * callers (owns_buffer = 0) have no copy to fuse and keep the
+     * plain pre-scan. */
     size_t lt_count, dq_count, sq_count;
-    taurus_text_count3(buf, len, '<', '"', '\'',
-                       &lt_count, &dq_count, &sq_count);
+    if (owns_buffer == 2) {
+        char* own = (char*)malloc(len + 1);
+        if (!own) return NULL;
+        taurus_copy_count3(own, buf, len, '<', '"', '\'',
+                           &lt_count, &dq_count, &sq_count);
+        own[len] = '\0';
+        buf = own;
+        owns_buffer = 1;  /* free-on-failure below; doc owns on success */
+    } else {
+        taurus_text_count3(buf, len, '<', '"', '\'',
+                           &lt_count, &dq_count, &sq_count);
+    }
     size_t quote_count = dq_count + sq_count;
     size_t est_elems = lt_count + 8;
     size_t elem_bytes = est_elems * sizeof(struct taurus_element);
@@ -615,9 +633,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * missing). */
     size_t node_overhead = est_elems * 64;
     size_t text_room = len + node_overhead;
-    size_t buf_extra = (owns_buffer == 2) ? (len + 1) : 0;
     size_t slack = len / 2 + 64 * 1024;  /* mutation headroom + floor */
-    size_t arena_size = elem_bytes + attr_bytes + text_room + buf_extra + slack;
+    size_t arena_size = elem_bytes + attr_bytes + text_room + slack;
     TaurusArena* arena = taurus_arena_create(arena_size);
     if (!arena) {
         if (owns_buffer == 1) free(buf);
@@ -633,19 +650,10 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         pool->string_cache = taurus_hash_table_create(pool, 128);
     }
 
-    /* If owns_buffer == 2, copy the input into the pool now. The
-     * caller's `buf` is const — we promised not to modify it. */
-    if (owns_buffer == 2) {
-        char* pool_buf = (char*)taurus_pool_alloc(pool, len + 1);
-        if (!pool_buf) {
-            taurus_pool_destroy(pool);
-            return NULL;
-        }
-        memcpy(pool_buf, buf, len);
-        pool_buf[len] = '\0';
-        buf = pool_buf;
-        owns_buffer = 0;  /* Pool owns the copy now. */
-    }
+    /* owns_buffer == 2 was resolved above (TODO 188): the input is
+     * already copied — fused with the count3 pre-scan into the
+     * separately-malloc'd buffer `buf` — and owns_buffer is now 1.
+     * There is no second copy here. */
 
     /* 3. Bulk-allocate element + attribute blocks as ONE contiguous
      * arena bump. Layout: [ elem_block | attr_block ]
@@ -1130,17 +1138,15 @@ fail:
 
 /* Public: copy the input then parse (standard path).
  *
- * The input copy is allocated FROM THE POOL (not via malloc) so the
- * document owns exactly one allocation that's freed in one shot at
- * taurus_document_free. Saves one malloc+free per parse call vs the
- * old pattern of malloc(buf) + pool_alloc(everything else).
- *
- * TODO 154 Phase C. */
+ * The copy and the arena-sizing pre-scan are ONE fused SIMD pass
+ * into a separately-malloc'd buffer (TODO 188) — the old design
+ * streamed the input twice (count3 pre-scan + pool memcpy). The
+ * document owns the malloc via doc->xml_buffer_needs_free; the
+ * arena holds only nodes and strings. */
 struct taurus_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
-    /* The pool-allocate-then-parse path lives in
-     * direct_parse_internal. owns_buffer=2 signals "copy the input
-     * into the pool, then parse." */
+    /* owns_buffer=2 signals "copy the input (fused with the sizing
+     * pre-scan), then parse." */
     return direct_parse_internal((char*)xml, len, 2);
 }
 

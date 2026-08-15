@@ -58,6 +58,8 @@ static ptrdiff_t (*g_find3_fn)(const char*, size_t, char, char, char) = NULL;
 static size_t (*g_count_fn)(const char*, size_t, char) = NULL;
 static void (*g_count3_fn)(const char*, size_t, char, char, char,
                            size_t*, size_t*, size_t*) = NULL;
+static void (*g_copy3_fn)(char*, const char*, size_t, char, char, char,
+                          size_t*, size_t*, size_t*) = NULL;
 
 static size_t count_scalar(const char* s, size_t len, char c) {
     size_t n = 0;
@@ -92,10 +94,13 @@ static void dispatch_init(void) {
         extern size_t taurus_text_count_char_neon(const char*, size_t, char);
         extern void taurus_text_count3_neon(const char*, size_t, char, char, char,
                                             size_t*, size_t*, size_t*);
+        extern void taurus_copy_count3_neon(char*, const char*, size_t, char, char, char,
+                                            size_t*, size_t*, size_t*);
         g_contains_fn = taurus_text_contains_neon;
         g_find3_fn = taurus_text_find3_neon;
         g_count_fn = taurus_text_count_char_neon;
         g_count3_fn = taurus_text_count3_neon;
+        g_copy3_fn = taurus_copy_count3_neon;
         return;
     }
 #endif
@@ -140,4 +145,17 @@ void taurus_text_count3(const char* s, size_t len,
     *n0 = taurus_text_count_char(s, len, c0);
     *n1 = taurus_text_count_char(s, len, c1);
     *n2 = taurus_text_count_char(s, len, c2);
+}
+
+void taurus_copy_count3(char* dst, const char* src, size_t len,
+                        char c0, char c1, char c2,
+                        size_t* n0, size_t* n1, size_t* n2) {
+    if (!g_copy3_fn) dispatch_init();
+    if (g_copy3_fn) {
+        g_copy3_fn(dst, src, len, c0, c1, c2, n0, n1, n2);
+        return;
+    }
+    /* Fallback = exactly the pre-fusion behavior: memcpy + count. */
+    memcpy(dst, src, len);
+    taurus_text_count3(src, len, c0, c1, c2, n0, n1, n2);
 }
