@@ -83,13 +83,29 @@ Negative on error, zero on success.
 
 ## Bindings
 
-Planned bindings (see `TODO.fix/81-*` through `TODO.fix/83-*`):
-
-- **Ruby** via `ruby-ffi` — pure Ruby, no compilation.
-- **Python** via `cffi` — header-aware, type-safe.
-- **Rust** via `bindgen` + idiomatic wrapper — zero-cost with safety.
+- **Ruby** via `ruby-ffi` — pure Ruby, no compilation. **Shipped**
+  (TODO 118): `Taurus::Document.parse`, XPath, serialize, and the
+  full SAX surface — `Taurus::SAX.parse(xml, handlers)` (all 11
+  event callbacks) and `Taurus::SAX::Parser` for incremental
+  `feed()` streaming. See `bindings/ruby/` and the Ruby SAX
+  section of the README.
+- **Python** via `cffi` — header-aware, type-safe. Planned.
+- **Rust** via `bindgen` + idiomatic wrapper — zero-cost with
+  safety. Planned.
 
 The C ABI is the foundation; each binding is a thin wrapper.
+
+### Binding the SAX callbacks (Ruby pattern)
+
+C hands the user's `void* user_data` back on every callback. The
+Ruby binding passes the address of a small unique `FFI::MemoryPointer`
+as `user_data` and maps that address to the Ruby handler object in
+a registry — the Ruby object is never exposed to C, so the GC can
+move it freely; the registry entry (and with it the anchor and the
+`FFI::Function` wrappers) lives exactly as long as C can fire
+callbacks. `characters` delivers `pointer, length` — the text is
+NOT NUL-terminated and must be read with the length; entities
+arrive expanded (XML 1.0 2.4/3.3.3).
 
 ## Example FFI call
 

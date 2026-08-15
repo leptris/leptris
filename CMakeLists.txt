@@ -191,7 +191,8 @@ endif()
 #
 # Defaults to OFF because it's a two-pass build and most users won't
 # bother. Distributions / packagers who want the last ~10-15% on the
-# XPath VM dispatch loop should enable it.
+# XPath VM dispatch loop should enable it; on the DOM parse path the
+# measured gain is smaller (~1-2%, TODO 185 round 3).
 set(TAURUS_ENABLE_PGO "OFF" CACHE STRING "Profile-guided optimization phase: OFF, GENERATE, or USE")
 set_property(CACHE TAURUS_ENABLE_PGO PROPERTY STRINGS OFF GENERATE USE)
 set(TAURUS_PGO_DIR "${CMAKE_BINARY_DIR}/pgo-data" CACHE PATH "PGO profile directory")

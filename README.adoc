@@ -50,8 +50,9 @@ memory handling matter.
   additive; no switches to edit.
 * **CLI tool** — `taurus parse`, `taurus xpath`, `taurus format`,
   `taurus version` for command-line XML processing.
-* **Ruby FFI binding** — `Taurus::Document.parse`, XPath, serialize via
-  the `ffi` gem. No C extension compilation needed. See
+* **Ruby FFI binding** — `Taurus::Document.parse`, XPath, serialize,
+  and event-driven SAX (one-shot + incremental streaming) via the
+  `ffi` gem. No C extension compilation needed. See
   link:bindings/ruby/[Ruby binding].
 * **Zero required runtime dependencies** — utf8proc and iconv are
   optional features, not prerequisites.
@@ -796,17 +797,24 @@ Shipped post-v0.3.0 (XPath perf track):
 * ✓ Fast inline nodeset_add for VM hot paths (TODO 135)
 * ✓ Descendant-or-self fused predicate opcodes (TODO 136)
 * ✓ Memcpy fast path for index-backed descendant queries — Taurus BEATS libxml2 on ALL XPath benchmarks (TODO 137)
+* ✓ Contiguous per-document arena + content-derived block sizing (TODO 183)
+* ✓ Single-representation attribute strings — views only, one cache line per attr (TODO 184)
+* ✓ Fused attribute/text scans — K=100 parse gap vs pugixml 7.8x → ~1.5x (TODO 184)
+* ✓ O(K^2) attribute walks eliminated across finalize/DTD/c14n (TODO 185)
+* ✓ Ruby SAX binding — full callback surface + streaming (TODO 118 Phase B)
 
 Planned:
 
 * Python bindings via `cffi`.
 * Rust bindings via `bindgen`.
-* Ruby SAX binding (now unblocked by TODO 122).
 * Extend element index to relative-descendant queries (currently
   only absolute paths and root-context descendant use it).
 * Pre-evaluate function args via VM for the remaining string
   functions (`concat`, `contains`, `substring`).
 * Doxygen API reference polish.
+* TODO 182 endgame: 32 B attrs (2/cache line) — the one remaining
+  >5% parse lever; all source-level micro-optimization is measured
+  dead (TODO 185 round 3).
 
 == Contributing
 
