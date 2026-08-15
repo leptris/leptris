@@ -434,6 +434,41 @@ TEST_F(SaxParser, XmlDeclarationSkippedCleanly) {
     }
 }
 
+TEST_F(SaxParser, EntityReferencesExpandedInText) {
+    /* XML 1.0 2.4: characters() must deliver expanded references —
+     * predefined entities and numeric character references alike.
+     * Found via the Ruby binding round-trip (TODO 118 Phase B):
+     * the raw span used to be handed out with "&amp;" intact. */
+    const char xml[] = "<r>a &amp; b &lt;c&gt; &#65;&#x42;</r>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto it = std::find_if(log.events.begin(), log.events.end(),
+        [](const std::string& e) { return e.find("text:") == 0; });
+    ASSERT_NE(it, log.events.end());
+    EXPECT_EQ(*it, "text:a & b <c> AB");
+}
+
+TEST_F(SaxParser, EntityReferencesExpandedInAttrValues) {
+    /* XML 1.0 3.3.3: attribute values arrive expanded. */
+    const char xml[] = "<r tag='r&amp;d' code='&#65;'/>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto it = std::find_if(log.events.begin(), log.events.end(),
+        [](const std::string& e) { return e.find("start:r ") == 0; });
+    ASSERT_NE(it, log.events.end());
+    EXPECT_NE(it->find("tag=r&d"), std::string::npos) << *it;
+    EXPECT_NE(it->find("code=A"), std::string::npos) << *it;
+}
+
+TEST_F(SaxParser, CdataIsNotEntityDecoded) {
+    /* CDATA sections are character data verbatim — references inside
+     * must NOT be expanded. */
+    const char xml[] = "<r><![CDATA[a &amp; b]]></r>";
+    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    auto it = std::find_if(log.events.begin(), log.events.end(),
+        [](const std::string& e) { return e.find("cdata:") == 0; });
+    ASSERT_NE(it, log.events.end());
+    EXPECT_EQ(*it, "cdata:a &amp; b");
+}
+
 }  // namespace
 
 // ---- Incremental SAX (TODO 89) ---------------------------------------
