@@ -214,13 +214,16 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
 
     attr->name_view = taurus_sv_from_ptr(name, name_len);
     attr->value_view = taurus_sv_from_ptr(val, val_len);
-    /* TODO 184 round 3: name/value char* fields stay NULL on the
-     * parse path — the views' data are NUL-terminated in the doc
-     * buffer, and readers derive via attr_cname/attr_cvalue. Two
-     * stores per attr saved; the fields are reserved for owned
-     * copies (entity expansion, mutation API).
-     *
-     * Entity routing (has_amp from the caller's fused scan):
+    /* CRITICAL: attr_block is NOT memset (documented below) — every
+     * field must be written here. The char* fields are NULL on the
+     * parse path (readers derive via attr_cname/attr_cvalue, owned
+     * copies only for entity expansion), but the NULL itself MUST be
+     * stored: uninitialized arena bytes are garbage on CI allocators
+     * (0xbebebebe / 0xcd patterns), and macOS only "passed" because
+     * fresh mmap pages are zero. */
+    attr->name = NULL;
+    attr->value = NULL;
+    /* Entity routing (has_amp from the caller's fused scan):
      * - DTD present: eagerly expand via DTD-aware decoder; result
      *   is pool-owned, has_entities=0.
      * - No DTD: value stays NULL, has_entities=1 — accessor

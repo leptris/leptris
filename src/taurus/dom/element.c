@@ -201,11 +201,14 @@ struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem
          * Only when hash AND length match do we do the full memcmp. */
         if (attr_name_hash(attr) == name_hash &&
             attr->name_view.length == name_len) {
-            if (attr->name && memcmp(attr->name, name, name_len) == 0) {
-                return attr;
-            }
-            if (!taurus_sv_is_empty(&attr->name_view) &&
-                memcmp(attr->name_view.data, name, name_len) == 0) {
+            /* TODO 184 round 3: view-first (parse path keeps name NULL);
+             * owned copies (mutation API / entity expansion) win when set. */
+            if (!taurus_sv_is_empty(&attr->name_view)) {
+                if (memcmp(attr->name_view.data, name, name_len) == 0) {
+                    return attr;
+                }
+            } else if (attr->name &&
+                       memcmp(attr->name, name, name_len) == 0) {
                 return attr;
             }
         }
@@ -578,21 +581,19 @@ const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* 
     struct taurus_attribute* attr = taurus_element_get_attribute_by_name(elem, name);
     if (!attr) return NULL;
 
-    /* Lazy convert value_view to C string */
-    if (!attr->value && !taurus_sv_is_empty(&attr->value_view)) {
+    /* TODO 184 round 3: only entity values materialize; the view's
+     * data is NUL-terminated in the document buffer otherwise. */
+    if (!attr->value && attr->has_entities &&
+        !taurus_sv_is_empty(&attr->value_view)) {
         if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
-            if (attr->has_entities) {
-                attr->value = taurus_decode_entities_view(&attr->value_view, taurus_element_get_pool(elem));
-            }
-            if (!attr->value) {
-                attr->value = taurus_sv_to_cstr_pooled(&attr->value_view, taurus_element_get_pool(elem));
-            }
+            attr->value = taurus_decode_entities_view(
+                &attr->value_view, taurus_element_get_pool(elem));
         } else {
             attr->value = taurus_sv_to_cstr(&attr->value_view);
         }
     }
 
-    return attr->value;
+    return attr->value ? attr->value : attr->value_view.data;
 }
 
 /* Add namespace with in-place strings (zero-copy).
