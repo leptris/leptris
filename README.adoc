@@ -438,6 +438,49 @@ To parse the headers from a binding tool:
 cc -DTAURUS_FOR_BINDGEN -E src/include/taurus.h   # strips TAURUS_API
 ----
 
+==== Ruby SAX
+
+Event-driven parsing (TODO 118 Phase B) — a handlers Hash of procs;
+all keys optional. Strings arrive as UTF-8; entity references in
+text and attribute values arrive expanded (XML 1.0):
+
+[source,ruby]
+----
+require 'taurus'
+
+Taurus::SAX.parse('<books><book id="1">title &amp; more</book></books>',
+  start_element: ->(name, attrs) { puts "#{name} #{attrs.inspect}" },
+  end_element:   ->(name) { },
+  characters:    ->(text) { },
+  error:         ->(msg, line, col) { warn "#{line}:#{col} #{msg}" }
+)
+# prints: books {}
+#         book {"id"=>"1"}
+----
+
+Incremental parsing for streams (`streaming: true` selects the
+constant-memory state machine — the same machine the one-shot API
+uses; the default buffers chunks and parses on the final feed):
+
+[source,ruby]
+----
+parser = Taurus::SAX::Parser.new({ characters: ->(t) { print t } },
+                                 streaming: true)
+IO.popen('curl -s https://example.com/feed.xml') do |io|
+  io.each(4096) { |chunk| parser.feed(chunk) }
+end
+parser.feed('', final: true)
+parser.free
+----
+
+Events: `:start_document`, `:end_document`, `:start_element`
+(name, attrs-hash), `:end_element` (name), `:characters` (text),
+`:comment`, `:cdata`, `:processing_instruction` (target, data),
+`:start_prefix_mapping` / `:end_prefix_mapping` (namespace
+declarations), `:error` (message, line, column). A `characters`
+event may fire multiple times per text node — concatenate between
+element events to coalesce (the SAX contract).
+
 See link:docs/FFI.md[docs/FFI.md] for the full design document.
 
 == CLI
