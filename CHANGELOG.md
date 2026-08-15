@@ -1,13 +1,48 @@
 ## [Unreleased]
 
-## [0.21.0] - Y-08-15
+## [0.21.0] - 2026-08-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Ruby SAX binding (TODO 118 Phase B)
 
-### Changed
+`Taurus::SAX` is real. The module previously existed as a stub
+that called `taurus_sax_parse` with NULL callbacks and never fired
+a handler.
 
-- (describe changes here)
+- **`Taurus::SAX.parse(xml, handlers)`** — one-shot parse of a
+  String. handlers is a Hash of procs; all keys optional:
+  `:start_document`, `:end_document`, `:start_element` (name,
+  attrs-as-Hash), `:end_element`, `:characters`, `:comment`,
+  `:cdata`, `:processing_instruction`, `:start_prefix_mapping`,
+  `:end_prefix_mapping`, `:error` (message, line, column).
+- **`Taurus::SAX::Parser`** — incremental parsing for streams:
+  `feed(chunk, final:)` + `free`; `streaming: true` selects the
+  constant-memory state machine (the same machine the one-shot
+  path uses; the default buffers and parses on the final feed).
+- GC-safe FFI bridge: user_data is a unique anchor pointer; a
+  registry maps it back to the Ruby bridge for exactly as long as
+  C can fire callbacks. All strings delivered as UTF-8; `characters`
+  handles the non-NUL-terminated pointer+length contract.
+- README: Ruby SAX quick start + streaming example (verified to
+  run as printed). 12 new Ruby specs.
+
+### Fixed — SAX entity semantics (C, found via the binding)
+
+Two conformance gaps in the SAX streaming state machine:
+
+- **Entity references now expand** in `characters()` text and in
+  `start_element` attribute values (XML 1.0 sections 2.4 / 3.3.3).
+  `&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;` and numeric
+  character references (`&#65;`, `&#x42;`) arrive expanded. Spans
+  without `&` keep the zero-copy emit path; CDATA sections remain
+  verbatim. 3 new C specs pin the contract; the header doc now
+  states it.
+- **Chunk-boundary reference splitting**: an entity reference
+  split across incremental feeds (`&` at the end of one chunk,
+  `amp;` in the next) was emitted raw on both sides and never
+  decoded. The text state now delivers only through the last
+  complete reference and holds the incomplete tail for the next
+  feed. Caught by the existing MixedContent differential test at
+  1-byte chunks.
 
 
 ## [0.20.4] - 2026-08-15
