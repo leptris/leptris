@@ -1,9 +1,27 @@
 # TODO 185 — K<=50 element/attr path vs pugixml
 
 **Priority**: P0 (the remaining gap)
-**Status**: round 3 done — source-level micro-optimization of the
-parse path is CLOSED. Only PGO (1-2%) or the TODO 182 architecture
-endgame remain.
+**Status**: round 4 — the 64 B cache-line law REVISED: attr is 48 B.
+K=20 gap 1.91x -> 1.55x.
+
+## Round 4 (2026-08-16): the round-4-of-184 law was K-local — 48 B wins
+
+Re-measured the "must stay 64" attr law at every K (the original
+measurement was K=100 only). 12-run interleaved Release A/B,
+fresh dirs, min per section:
+
+| K | 64 B | 48 B | pugixml | gap 64B | gap 48B |
+|---|------|------|---------|---------|---------|
+| 5 | 54.4 | 54.4 | 33.5 | 1.62x | 1.62x |
+| 20 | 270.5 | **218.7** | 141.0 | 1.91x | **1.55x** |
+| 50 | 637.6 | **619.9** | 315.3 | 2.02x | **1.96x** |
+| 100 | **1013.4** | 1222.7 | 617.5 | **1.64x** | 1.97x |
+
+Shipped 48 B (TODO 186): mid-K is the yardstick per this TODO,
+real-world attr density is < 20/element, and the K=20 win is 19%.
+The K=100 loss (~20%) is the straddle penalty in a 4.8 MB
+DRAM-streaming block — unavoidable at any 48 B stride. 535 tests,
+ASAN, leaks-clean at 48 B.
 
 ## Round 3 (2026-08-15): lazy elem hash dead; PGO measured
 
@@ -32,10 +50,10 @@ endgame remain.
 
 ## Remaining paths (the only two left)
 
-1. **TODO 182 endgame: 32 B attrs** (2/cache line, pugixml-density)
-   — requires dropping view lengths or a parallel side-array for
-   control fields; large refactor of rounds 3-4 of TODO 184. The
-   only lever with >5% potential at K=20-100.
+1. **TODO 182 endgame: 32 B attrs** (2/cache line — now ALSO the
+   path to recovering the K=100 loss at 48 B; the split-stream
+   ctrl array gives perfect 2/line alignment that no single-array
+   stride can).
 2. PGO for packagers (1-2%).
 
 ## Measured state (2026-08-15, Release, best-of interleaved)
