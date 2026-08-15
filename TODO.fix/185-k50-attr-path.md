@@ -1,7 +1,42 @@
 # TODO 185 — K<=50 element/attr path vs pugixml
 
 **Priority**: P0 (the remaining gap)
-**Status**: round 2 done (scanner-shape levers dead; code reverted to main)
+**Status**: round 3 done — source-level micro-optimization of the
+parse path is CLOSED. Only PGO (1-2%) or the TODO 182 architecture
+endgame remain.
+
+## Round 3 (2026-08-15): lazy elem hash dead; PGO measured
+
+5. **Lazy element name_hash** (mirror of the TODO 172 attr pattern;
+   parse path stopped walking every name with FNV — pure work
+   REMOVED): **+3 to +5% at K=5-50** (56.9→58.6, 279→293, 671→704,
+   parity at K=100). Fifth consecutive experiment where even
+   deleting work regresses — the codegen/layout shift dominates any
+   µarch saving. Reverted.
+
+   **Verdict: closed.** Five experiments, two of them work-removal,
+   all regressing 1-13%. direct_parse_internal cannot be improved
+   by source-level edits on this compiler. Do not reopen without an
+   architectural change.
+
+6. **PGO (the systematic alternative to all five)** — trained on
+   benchmark_many_attrs, llvm-profdata, -fprofile-instr-use:
+   **-1.2 to -2.2% on every K section** (55.5→54.4, 276→270,
+   647→637, 1027→1015 µs, interleaved). Real and free of source
+   risk, but far below the ~10-15% it yields on the XPath VM
+   dispatch loop. Worth enabling for packagers; not a gap-closer.
+   Workflow: `-DTAURUS_ENABLE_PGO=GENERATE` → train → `llvm-profdata
+   merge` → `-DTAURUS_ENABLE_PGO=USE -DTAURUS_PGO_DIR=<gen dir>`.
+   NOTE: USE defaults to its own binary dir — point TAURUS_PGO_DIR
+   at the GENERATE dir explicitly.
+
+## Remaining paths (the only two left)
+
+1. **TODO 182 endgame: 32 B attrs** (2/cache line, pugixml-density)
+   — requires dropping view lengths or a parallel side-array for
+   control fields; large refactor of rounds 3-4 of TODO 184. The
+   only lever with >5% potential at K=20-100.
+2. PGO for packagers (1-2%).
 
 ## Measured state (2026-08-15, Release, best-of interleaved)
 

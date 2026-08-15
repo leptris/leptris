@@ -1,7 +1,22 @@
 # TODO 182 — Compact pointer Phase E (compact_string for names)
 
 **Priority**: P1 (final structural compaction; stretch goal)
-**Status**: scoped
+**Status**: scoped — THE remaining perf lever (TODO 185 round 3
+closed all source-level micro-optimization). Premise numbers below
+predate the TODO 184 round-4 measurement; read the constraint first.
+
+## CONSTRAINT (measured, TODO 184 round 4 + TODO 185)
+
+sizeof(attr) = 64 today and the natural 48 B form REGRESSED 22% at
+K=100 — sub-64-B node structs straddle cache lines unless the
+allocation is aligned to the struct size. Any layout this TODO
+produces must deliver attrs at 2-per-64B-line (32 B, pugixml
+density) or keep 64 B. A 32 B attr fits name_view + value_view
+exactly, leaving NO room for next_cp/has_entities/name_hash —
+those need either a parallel side-array in the attr block or
+bit-packing into the views' length fields. This is the >5% lever
+the TODO 185 endgame identifies; everything cheaper is measured
+dead.
 
 ## Goal
 
