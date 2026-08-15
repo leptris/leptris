@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.20.2] - Y-08-15
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.20.1] - 2026-08-15
 
 ### Performance — fused text scan + single-pass sizing counts (TODO 184 round 2)
