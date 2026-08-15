@@ -47,6 +47,15 @@ void taurus_text_count3(const char* s, size_t len,
                         char c0, char c1, char c2,
                         size_t* n0, size_t* n1, size_t* n2);
 
+/* Copy [src, src+len) to dst while counting c0/c1/c2 occurrences —
+ * one fused memory pass (falls back to memcpy + count3 where no
+ * SIMD path is compiled). The parser's owns-copy path gets its
+ * buffer copy and its arena-sizing counters from a single
+ * traversal of the input instead of two. TODO 188. */
+void taurus_copy_count3(char* dst, const char* src, size_t len,
+                        char c0, char c1, char c2,
+                        size_t* n0, size_t* n1, size_t* n2);
+
 #ifdef __cplusplus
 }
 #endif
