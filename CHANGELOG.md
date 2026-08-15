@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.20.1] - Y-08-15
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.20.0] - 2026-08-14
 
 ### Performance — fused attr-value scan: 45% faster attr-heavy parse (TODO 184)
