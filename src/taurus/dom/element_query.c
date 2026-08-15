@@ -875,13 +875,13 @@ TAURUS_API const char* taurus_element_attribute_name_at(TaurusElement elem, size
     size_t i = 0;
     while (attr) {
         if (i == index) {
-            if (attr->name) return attr->name;
-            TaurusStringView nv = attr->name_view;
-            if (nv.length > 0 && nv.data) {
-                attr->name = taurus_sv_to_cstr(&nv);
-                return attr->name;
+            /* TODO 184 round 3: view data is NUL-terminated and
+             * document-lifetime — no heap copy needed (the old
+             * per-call taurus_sv_to_cstr leaked under pool attrs). */
+            if (attr->name_view.data && attr->name_view.length > 0) {
+                return attr->name_view.data;
             }
-            return NULL;
+            return attr->name;
         }
         i++;
         attr = taurus_attr_next(attr);
@@ -895,11 +895,16 @@ TAURUS_API const char* taurus_element_attribute_value_at(TaurusElement elem, siz
     size_t i = 0;
     while (attr) {
         if (i == index) {
+            if (attr->has_entities && !attr->value) {
+                TaurusMemoryPool* pool = taurus_element_get_pool(elem);
+                if (pool) {
+                    attr->value = taurus_decode_entities_view(
+                        &attr->value_view, pool);
+                }
+            }
             if (attr->value) return attr->value;
-            TaurusStringView vv = attr->value_view;
-            if (vv.length > 0 && vv.data) {
-                attr->value = taurus_sv_to_cstr(&vv);
-                return attr->value;
+            if (attr->value_view.data && attr->value_view.length > 0) {
+                return attr->value_view.data;
             }
             return NULL;
         }
@@ -958,26 +963,15 @@ static int element_namespace_decl_at(TaurusElement elem, size_t index,
             nv.data[2] == 'l' && nv.data[3] == 'n' &&
             nv.data[4] == 's') {
             if (i == index) {
-                /* Materialize full name + value. */
-                const char* full = attr->name;
-                if (!full) {
-                    attr->name = taurus_sv_to_cstr(&nv);
-                    full = attr->name;
-                }
-                if (full && strlen(full) > 5) {
+                /* View data is NUL-terminated and document-lifetime —
+                 * no materialization (TODO 184 round 3). */
+                const char* full = (const char*)nv.data;
+                if (full && nv.length > 5) {
                     *out_prefix = full + 6;
                 } else {
                     *out_prefix = NULL;
                 }
-                if (attr->value) {
-                    *out_uri = attr->value;
-                } else {
-                    TaurusStringView vv = attr->value_view;
-                    if (vv.length > 0 && vv.data) {
-                        attr->value = taurus_sv_to_cstr(&vv);
-                    }
-                    *out_uri = attr->value;
-                }
+                *out_uri = attr_cvalue(attr);
                 return 1;
             }
             i++;
