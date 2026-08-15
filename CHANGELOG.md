@@ -1,13 +1,35 @@
 ## [Unreleased]
 
-## [0.21.3] - Y-08-15
+## [0.21.3] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — post-parse freeze walk removed (TODO 187)
 
-### Changed
+The parser froze the tree it had just built by walking it —
+`taurus_document_freeze_tree` after every parse, an iterative DFS
+through every element and sibling edge to set a single
+immutability bit per node. The first K=5 sample profile (only K=50
+had ever been profiled) showed the walk plus its decoders costing
+~11% of parse time on element-heavy documents.
 
-- (describe changes here)
+Every node is created by the parser, which knows it is immutable
+the moment it creates it: `frozen = 1` is now set at the creation
+sites (elements, text, comments, CDATA, PIs) and the walk is
+deleted. The public `taurus_document_freeze` API is unchanged.
+
+Measured (8-run interleaved Release A/B, best-of):
+
+| attrs/element | before | after | gap vs pugixml |
+|---------------|--------|-------|----------------|
+| 5 | 53.5 µs | **50.5 µs (−5.8%)** | 1.63x → **1.53x** |
+| 20 | 218.3 µs | 215.9 µs | 1.56x → 1.54x |
+| 50 | 612.3 µs | 609.9 µs | 1.96x → 1.95x |
+| 100 | 1194.2 µs | 1204.0 µs | 1.94x → 1.95x |
+
+Element-heavy and small documents — the common real-world shape —
+win where the profile predicted.
+
+Also in this release (docs): TODO 182's split-stream parse thesis
+closed by upper-bound probe; TODO 185 campaign record complete.
 
 
 ## [0.21.2] - 2026-08-16
