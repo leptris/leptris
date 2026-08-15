@@ -96,4 +96,36 @@ size_t taurus_text_count_char_neon(const char* s, size_t len, char c) {
     return n;
 }
 
+/* Three counters in one memory pass — the sizing pre-scan shape.
+ * Same widen-then-add idiom as count_char above, three vceqq per
+ * chunk. One DRAM/L2 traversal instead of three. */
+void taurus_text_count3_neon(const char* s, size_t len,
+                             char c0, char c1, char c2,
+                             size_t* n0, size_t* n1, size_t* n2) {
+    const char* p = s;
+    const char* end = s + len;
+    const uint8x16_t k0 = vdupq_n_u8((uint8_t)c0);
+    const uint8x16_t k1 = vdupq_n_u8((uint8_t)c1);
+    const uint8x16_t k2 = vdupq_n_u8((uint8_t)c2);
+    size_t a = 0, b = 0, c = 0;
+
+    while (end - p >= 16) {
+        uint8x16_t v = vld1q_u8((const uint8_t*)p);
+        a += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v, k0))) / 255);
+        b += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v, k1))) / 255);
+        c += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v, k2))) / 255);
+        p += 16;
+    }
+    while (p < end) {
+        unsigned char ch = (unsigned char)*p;
+        if (ch == (unsigned char)c0) a++;
+        if (ch == (unsigned char)c1) b++;
+        if (ch == (unsigned char)c2) c++;
+        p++;
+    }
+    *n0 = a;
+    *n1 = b;
+    *n2 = c;
+}
+
 #endif /* TAURUS_ARCH_ARM && __aarch64__ */
