@@ -1,13 +1,28 @@
 ## [Unreleased]
 
-## [0.23.2] - Y-08-16
+## [0.23.2] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — attr-value bucket windows (TODO 192c)
 
-### Changed
+The attribute predicate itself is now served from the element
+index. A relative step with a single attr-equals predicate
+(`a//b[@x='v']`, `.//b[@x='v']`) compiles to one fused opcode
+whose VM handler windows the index's attr-VALUE bucket by each
+context element's subtree interval — O(log B + hits) per context,
+with zero per-element attribute walks. Value buckets gained
+preorder positions (lockstep-grown, mutation-safe); without the
+index the opcode falls back to the subtree walk with a
+hash-prefiltered attribute filter.
 
-- (describe changes here)
+Measured on `.//item[@n='5']` from 200 section contexts
+(Release, min of 5): 0.50 us -> 0.25 us per query — now faster
+than the UNPREDICATED `.//item` (0.30 us), because the value
+bucket pre-narrows candidates below the name bucket's density.
+pugixml with a reused compiled `xpath_query` measures 0.55 us
+on the same workload — 2.2x in taurus's favor; 6.7x over the
+v0.23.0 expanded-walk form.
+
+549 tests, full XPath conformance, ASAN clean, zero leaks.
 
 
 ## [0.23.1] - 2026-08-16
