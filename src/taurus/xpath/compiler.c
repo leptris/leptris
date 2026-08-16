@@ -588,6 +588,49 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
         if (!child) continue;
 
         if (child->type == XPATH_AST_STEP) {
+            /* Relative double-slash fusion (TODO 192): the parser
+             * expands `a//b` to [descendant-or-self::node()][child::b].
+             * Without predicates those two steps are exactly
+             * `descendant::b` — a matching element's parent is the
+             * context or one of its descendants — so lower them to
+             * one axis opcode. The VM then serves it from the
+             * element-index subtree intervals in O(hits) instead of
+             * walking each context subtree. Predicate-free only:
+             * position predicates are per-parent in the expanded
+             * form but document-wide in the fused form. */
+            if (i + 1 < child_count &&
+                children[i + 1] &&
+                children[i + 1]->type == XPATH_AST_STEP &&
+                child->axis_id == XPATH_AXIS_DESCENDANT_OR_SELF &&
+                child->child_count == 1) {
+                XPathASTNode* dstest = child->children[0];
+                int ds_ok = (dstest &&
+                             (dstest->type == XPATH_AST_NODE_TEST_ALL ||
+                              (dstest->type == XPATH_AST_NODE_TEST_TYPE &&
+                               dstest->value &&
+                               strcmp(dstest->value, "node") == 0)));
+                XPathASTNode* next = children[i + 1];
+                if (ds_ok && next->axis_id == XPATH_AXIS_CHILD &&
+                    next->child_count == 1) {
+                    XPathASTNode* ctest = next->children[0];
+                    int c_name = (ctest &&
+                                  ctest->type == XPATH_AST_NODE_TEST_NAME &&
+                                  ctest->value &&
+                                  !strchr(ctest->value, ':'));
+                    int c_wild = (ctest &&
+                                  ctest->type == XPATH_AST_NODE_TEST_ALL);
+                    if (c_name || c_wild) {
+                        if (c_wild) {
+                            emit_op(st, XPATH_BC_AXIS_DESCENDANT_WILD);
+                        } else {
+                            emit_op_u16(st, XPATH_BC_AXIS_DESCENDANT_NAME,
+                                        add_const_string(st, ctest->value));
+                        }
+                        i++;  /* consume the child step too */
+                        continue;
+                    }
+                }
+            }
             if (!try_compile_specialized_axis(st, child)) {
                 emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, child));
             }

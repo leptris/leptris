@@ -298,6 +298,12 @@ TaurusStatus taurus_element_remove_child(TaurusElement parent, TaurusElement chi
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
 
     taurus_element_invalidate_child_cache(parent);
+
+    /* Structural mutation: a cached element index would describe the
+     * pre-removal tree (append_child invalidates; removal must too). */
+    if (taurus_element_get_document(parent)) {
+        taurus_element_index_invalidate(taurus_element_get_document(parent));
+    }
     return TAURUS_OK;
 }
 
@@ -324,6 +330,11 @@ TaurusStatus taurus_element_remove_all_children(TaurusElement elem) {
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
 
     taurus_element_invalidate_child_cache(elem);
+
+    /* Structural mutation: invalidate any cached element index. */
+    if (taurus_element_get_document(elem)) {
+        taurus_element_index_invalidate(taurus_element_get_document(elem));
+    }
     return TAURUS_OK;
 }
 

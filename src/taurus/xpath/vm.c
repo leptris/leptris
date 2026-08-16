@@ -694,6 +694,106 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
         /* Index build failed — fall through to walk. */
     }
 
+    /* TODO 192: subtree-interval index for non-root contexts — the
+     * fast path above handled the doc-root input; this one serves
+     * .//name and chained a//b steps from any context set. Intervals
+     * are preorder ranges; name-bucket matches store their preorder
+     * positions, so each context costs a binary search plus its own
+     * hits instead of a subtree walk. */
+    if (!wild && ctx && ctx->document && input->count > 0) {
+        struct taurus_element_index* idx = ctx->document->element_index;
+        if (!idx && ++ctx->document->axis_query_count >= 2) {
+            idx = taurus_element_index_build(ctx->document);
+            ctx->document->element_index = idx;
+        }
+        if (idx && idx->subtree_end) {
+            const TaurusElementIndexBucket* bucket =
+                taurus_element_index_lookup(idx, name);
+            /* No bucket / empty bucket: the name does not occur in
+             * this document, so every subtree yields empty — but a
+             * partially-built index without positions must fall back. */
+            if (!bucket || (bucket->count > 0 && bucket->match_positions)) {
+                size_t n_ctx = 0;
+                for (size_t i = 0; i < input->count; i++) {
+                    if (node_is_element(input->nodes[i])) n_ctx++;
+                }
+                if (n_ctx > 0) {
+                    size_t* los = (size_t*)malloc(n_ctx * sizeof(size_t));
+                    size_t* his = (size_t*)malloc(n_ctx * sizeof(size_t));
+                    int all_found = (los && his);
+                    size_t k = 0;
+                    for (size_t i = 0; all_found && i < input->count; i++) {
+                        if (!node_is_element(input->nodes[i])) continue;
+                        all_found = taurus_element_index_subtree_interval(
+                            idx, (TaurusElement)input->nodes[i],
+                            &los[k], &his[k]);
+                        if (all_found) k++;
+                    }
+                    if (all_found) {
+                        /* Sort intervals by start; subtrees are either
+                         * disjoint or nested, so skipping any interval
+                         * contained in a previous one removes all overlap
+                         * — no dedup pass needed and output stays in
+                         * document order (bucket positions ascend). */
+                        for (size_t a = 1; a < k; a++) {
+                            size_t l = los[a], h = his[a], b = a;
+                            while (b > 0 && los[b - 1] > l) {
+                                los[b] = los[b - 1];
+                                his[b] = his[b - 1];
+                                b--;
+                            }
+                            los[b] = l;
+                            his[b] = h;
+                        }
+                        size_t prev_hi = 0;
+                        int have_prev = 0;
+                        for (size_t a = 0; a < k; a++) {
+                            if (have_prev && los[a] <= prev_hi) continue;
+                            if (bucket && bucket->count > 0) {
+                                size_t lo2 = los[a], hi2 = his[a];
+                                size_t l = 0, r = bucket->count;
+                                while (l < r) {
+                                    size_t mid = l + (r - l) / 2;
+                                    if (bucket->match_positions[mid] < lo2) {
+                                        l = mid + 1;
+                                    } else {
+                                        r = mid;
+                                    }
+                                }
+                                for (size_t j = l;
+                                     j < bucket->count &&
+                                     bucket->match_positions[j] <= hi2;
+                                     j++) {
+                                    if (!include_self &&
+                                        bucket->match_positions[j] == lo2) {
+                                        continue;
+                                    }
+                                    xpath_nodeset_add_fast(
+                                        out, bucket->matches[j]);
+                                }
+                            }
+                            prev_hi = his[a];
+                            have_prev = 1;
+                        }
+                        free(los);
+                        free(his);
+                        xpath_nodeset_free(input);
+                        struct taurus_xpath_result* r =
+                            xpath_result_new(XPATH_RESULT_NODESET);
+                        if (!r) {
+                            xpath_nodeset_free(out);
+                            return NULL;
+                        }
+                        r->value.nodeset_value = out;
+                        return r;
+                    }
+                    free(los);
+                    free(his);
+                }
+            }
+        }
+    }
+
     /* General path: walk subtrees from each input element. */
     int need_dedup = (input->count > 1);
 

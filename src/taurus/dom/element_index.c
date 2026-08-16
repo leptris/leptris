@@ -26,6 +26,7 @@ static int grow_ptr_array(void** arr, size_t* cap, size_t elem_size) {
 static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
     if (!elem) return;
 
+    size_t me = idx->all_count;
     idx->all_elements[idx->all_count++] = elem;
 
     /* Name bucket. */
@@ -51,12 +52,28 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
             bucket->matches = NULL;
             bucket->count = 0;
             bucket->capacity = 0;
+            bucket->match_positions = NULL;
         }
         if (bucket->count >= bucket->capacity) {
-            if (grow_ptr_array((void**)&bucket->matches,
-                                &bucket->capacity, sizeof(TaurusElement)) != 0) return;
+            /* Grow matches and match_positions in lockstep — one
+             * capacity, two arrays (TODO 192). */
+            size_t new_cap = (bucket->capacity == 0) ? 8 : bucket->capacity * 2;
+            TaurusElement* gm = (TaurusElement*)realloc(
+                bucket->matches, new_cap * sizeof(TaurusElement));
+            size_t* gp = (size_t*)realloc(
+                bucket->match_positions, new_cap * sizeof(size_t));
+            if (!gm || !gp) {
+                if (gm) bucket->matches = gm;
+                if (gp) bucket->match_positions = gp;
+                return;
+            }
+            bucket->matches = gm;
+            bucket->match_positions = gp;
+            bucket->capacity = new_cap;
         }
-        bucket->matches[bucket->count++] = elem;
+        bucket->matches[bucket->count] = elem;
+        bucket->match_positions[bucket->count] = me;
+        bucket->count++;
     }
 
     /* Attribute buckets (TODO 133). */
@@ -148,6 +165,10 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
         index_walk(idx, child);
         child = taurus_element_get_next_sibling(child);
     }
+
+    /* Subtree interval close (TODO 192): all children walked, so
+     * the subtree covers [me, all_count - 1] in preorder. */
+    idx->subtree_end[me] = idx->all_count - 1;
 }
 
 /* Count elements in the tree (for initial allocation). */
@@ -179,6 +200,12 @@ TaurusElementIndex* taurus_element_index_build(struct taurus_document* doc) {
         free(idx);
         return NULL;
     }
+    idx->subtree_end = (size_t*)malloc(total * sizeof(size_t));
+    if (!idx->subtree_end) {
+        free(idx->all_elements);
+        free(idx);
+        return NULL;
+    }
     idx->all_count = 0;
 
     index_walk(idx, root);
@@ -188,9 +215,11 @@ TaurusElementIndex* taurus_element_index_build(struct taurus_document* doc) {
 void taurus_element_index_free(TaurusElementIndex* idx) {
     if (!idx) return;
     free(idx->all_elements);
+    free(idx->subtree_end);
     for (size_t i = 0; i < idx->bucket_count; i++) {
         free(idx->buckets[i].name);
         free(idx->buckets[i].matches);
+        free(idx->buckets[i].match_positions);
     }
     free(idx->buckets);
     for (size_t i = 0; i < idx->attr_bucket_count; i++) {
@@ -223,6 +252,37 @@ const TaurusElementIndexBucket* taurus_element_index_lookup(
         }
     }
     return NULL;
+}
+
+int taurus_element_index_subtree_interval(
+    const TaurusElementIndex* idx, TaurusElement ctx,
+    size_t* out_lo, size_t* out_hi) {
+    if (!idx || !ctx || !idx->subtree_end || idx->all_count == 0) return 0;
+
+    /* Binary search by pointer. For parse-produced documents the
+     * arena order is preorder, so all_elements is pointer-sorted and
+     * the search hits. For mutated documents the order may be
+     * disturbed — a miss just means "fall back to a walk"; an exact
+     * pointer hit is always the element's true preorder position. */
+    size_t lo = 0, hi = idx->all_count;
+    size_t pos = (size_t)-1;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if ((const void*)idx->all_elements[mid] == (const void*)ctx) {
+            pos = mid;
+            break;
+        }
+        if ((const void*)idx->all_elements[mid] < (const void*)ctx) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (pos == (size_t)-1) return 0;
+
+    *out_lo = pos;
+    *out_hi = idx->subtree_end[pos];
+    return 1;
 }
 
 const TaurusElementIndexAttrBucket* taurus_element_index_lookup_attr(
