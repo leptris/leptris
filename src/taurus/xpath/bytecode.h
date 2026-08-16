@@ -65,6 +65,14 @@ typedef enum {
     XPATH_BC_AXIS_DESCENDANT_WILD,        /* no operand */
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME,/* u16 operand: const-pool string */
     XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD,/* no operand */
+    /* Fused relative descendant + attr-equals predicate (TODO 192c).
+     * Three u16 operands: name idx, attr name idx, value idx. Served
+     * from the element index: per context element, the subtree
+     * interval windows the attr-VALUE bucket's preorder positions —
+     * O(log B + hits) instead of walking the subtree and each
+     * element's attribute list. Falls back to walk+filter without
+     * the index. */
+    XPATH_BC_AXIS_DESCENDANT_NAME_ATTREQ,
 
     /* Fused axis+predicate opcodes (TODO 134). Combines the axis
      * walk with the predicate filter into a single pass, and uses

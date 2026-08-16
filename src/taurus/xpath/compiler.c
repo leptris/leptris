@@ -640,6 +640,33 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                         }
                     }
                     if ((c_name || c_wild) && preds_ok) {
+                        /* Single attr-equals predicate on a name test:
+                         * one fused opcode whose VM handler windows the
+                         * attr-VALUE bucket by subtree interval (TODO
+                         * 192c) — no per-element attribute walks. */
+                        if (cpred == 1 && c_name) {
+                            const char *fa, *fv;
+                            long fp;
+                            if (classify_predicate(next->children[1],
+                                                    &fa, &fv, &fp) ==
+                                    PRED_KIND_ATTR_EQ_STRING && fa && fv) {
+                                uint16_t n1 = add_const_string(st, ctest->value);
+                                uint16_t n2 = add_const_string(st, fa);
+                                uint16_t n3 = add_const_string(st, fv);
+                                if (reserve_code(st, 7) == 0) {
+                                    st->bc->code[st->bc->code_len++] =
+                                        (unsigned char)XPATH_BC_AXIS_DESCENDANT_NAME_ATTREQ;
+                                    st->bc->code[st->bc->code_len++] = (n1 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n1 & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (n2 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n2 & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (n3 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n3 & 0xFF;
+                                }
+                                i++;  /* consume the child step too */
+                                continue;
+                            }
+                        }
                         if (c_wild) {
                             emit_op(st, XPATH_BC_AXIS_DESCENDANT_WILD);
                         } else {

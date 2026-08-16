@@ -147,14 +147,27 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
                     vbucket->matches = NULL;
                     vbucket->count = 0;
                     vbucket->capacity = 0;
+                    vbucket->match_positions = NULL;
                 }
                 if (vbucket->count >= vbucket->capacity) {
-                    if (grow_ptr_array((void**)&vbucket->matches,
-                                        &vbucket->capacity, sizeof(TaurusElement)) != 0) {
+                    /* Lockstep growth: one capacity, two arrays. */
+                    size_t new_cap = (vbucket->capacity == 0) ? 8 : vbucket->capacity * 2;
+                    TaurusElement* gm = (TaurusElement*)realloc(
+                        vbucket->matches, new_cap * sizeof(TaurusElement));
+                    size_t* gp = (size_t*)realloc(
+                        vbucket->match_positions, new_cap * sizeof(size_t));
+                    if (!gm || !gp) {
+                        if (gm) vbucket->matches = gm;
+                        if (gp) vbucket->match_positions = gp;
                         attr = taurus_attr_next(attr); continue;
                     }
+                    vbucket->matches = gm;
+                    vbucket->match_positions = gp;
+                    vbucket->capacity = new_cap;
                 }
-                vbucket->matches[vbucket->count++] = elem;
+                vbucket->matches[vbucket->count] = elem;
+                vbucket->match_positions[vbucket->count] = me;
+                vbucket->count++;
             }
         }
         attr = taurus_attr_next(attr);
@@ -228,6 +241,7 @@ void taurus_element_index_free(TaurusElementIndex* idx) {
         for (size_t j = 0; j < idx->attr_buckets[i].value_count; j++) {
             free(idx->attr_buckets[i].values[j].value);
             free(idx->attr_buckets[i].values[j].matches);
+            free(idx->attr_buckets[i].values[j].match_positions);
         }
         free(idx->attr_buckets[i].values);
     }

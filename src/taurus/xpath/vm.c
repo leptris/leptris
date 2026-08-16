@@ -1298,6 +1298,160 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 break;
             }
 
+            case XPATH_BC_AXIS_DESCENDANT_NAME_ATTREQ: {
+                /* TODO 192c: relative descendant::name[@attr='value']
+                 * served from the index — each context element's
+                 * subtree interval windows the attr-VALUE bucket's
+                 * preorder positions. O(log B + hits) per context. */
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t attr_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* name = (name_idx < bc->const_count &&
+                                    bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_name = (attr_idx < bc->const_count &&
+                                         bc->constants[attr_idx].type == XPATH_CONST_STRING)
+                                        ? bc->constants[attr_idx].v.string : NULL;
+                const char* value = (value_idx < bc->const_count &&
+                                     bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                    ? bc->constants[value_idx].v.string : NULL;
+                if (!name || !attr_name || !value) { vm.error = 1; break; }
+
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+                XPathNodeSet* out = xpath_nodeset_new();
+                if (!out) { xpath_nodeset_free(input); vm.error = 1; break; }
+
+                struct taurus_element_index* index =
+                    (ctx && ctx->document) ? ctx->document->element_index : NULL;
+                if (!index && ctx && ctx->document &&
+                    ++ctx->document->axis_query_count >= 2) {
+                    index = taurus_element_index_build(ctx->document);
+                    ctx->document->element_index = index;
+                }
+
+                int served = 0;
+                if (index && index->subtree_end) {
+                    const TaurusElementIndexAttrBucket* abucket =
+                        taurus_element_index_lookup_attr(index, attr_name);
+                    const TaurusElementIndexAttrValue* vbucket =
+                        abucket ? taurus_element_index_attr_lookup_value(abucket, value)
+                                : NULL;
+                    /* No such attr=value anywhere: empty answer. A
+                     * value bucket without positions must fall back. */
+                    if (!vbucket ||
+                        (vbucket->count > 0 && vbucket->match_positions)) {
+                        size_t n_ctx = 0;
+                        for (size_t i = 0; i < input->count; i++) {
+                            if (node_is_element(input->nodes[i])) n_ctx++;
+                        }
+                        size_t* los = (n_ctx > 0)
+                            ? (size_t*)malloc(n_ctx * sizeof(size_t)) : NULL;
+                        size_t* his = (n_ctx > 0)
+                            ? (size_t*)malloc(n_ctx * sizeof(size_t)) : NULL;
+                        int all_found = (n_ctx == 0) || (los && his);
+                        size_t k = 0;
+                        for (size_t i = 0; all_found && i < input->count; i++) {
+                            if (!node_is_element(input->nodes[i])) continue;
+                            all_found = taurus_element_index_subtree_interval(
+                                index, (TaurusElement)input->nodes[i],
+                                &los[k], &his[k]);
+                            if (all_found) k++;
+                        }
+                        if (all_found) {
+                            /* Same ordering argument as the name path:
+                             * bucket positions ascend, subtrees are
+                             * disjoint-or-nested, skip contained ones. */
+                            for (size_t a = 1; a < k; a++) {
+                                size_t l = los[a], h = his[a], b = a;
+                                while (b > 0 && los[b - 1] > l) {
+                                    los[b] = los[b - 1];
+                                    his[b] = his[b - 1];
+                                    b--;
+                                }
+                                los[b] = l;
+                                his[b] = h;
+                            }
+                            size_t prev_hi = 0;
+                            int have_prev = 0;
+                            for (size_t a = 0; a < k; a++) {
+                                if (have_prev && los[a] <= prev_hi) continue;
+                                if (vbucket && vbucket->count > 0) {
+                                    size_t lo2 = los[a], hi2 = his[a];
+                                    size_t l = 0, r = vbucket->count;
+                                    while (l < r) {
+                                        size_t mid = l + (r - l) / 2;
+                                        if (vbucket->match_positions[mid] < lo2) {
+                                            l = mid + 1;
+                                        } else {
+                                            r = mid;
+                                        }
+                                    }
+                                    for (size_t j = l;
+                                         j < vbucket->count &&
+                                         vbucket->match_positions[j] <= hi2;
+                                         j++) {
+                                        if (taurus_elem_name_is(
+                                                vbucket->matches[j], name,
+                                                taurus_name_hash_compute(name))) {
+                                            xpath_nodeset_add_fast(
+                                                out, vbucket->matches[j]);
+                                        }
+                                    }
+                                }
+                                prev_hi = his[a];
+                                have_prev = 1;
+                            }
+                            served = 1;
+                        }
+                        free(los);
+                        free(his);
+                    }
+                }
+
+                if (!served) {
+                    /* Fallback: subtree walk + inline attr filter
+                     * (hash-prefiltered walk, the PRED_ATTR_EXISTS
+                     * handler's pattern). */
+                    uint32_t attr_hash =
+                        xpath_fnv1a_32(attr_name, strlen(attr_name));
+                    for (size_t i = 0; i < input->count; i++) {
+                        if (!node_is_element(input->nodes[i])) continue;
+                        TaurusElement elem = (TaurusElement)input->nodes[i];
+                        size_t mark = out->count;
+                        descendant_walk(out, elem, name, 0, 0);
+                        for (size_t w = mark; w < out->count;) {
+                            TaurusElement e2 = (TaurusElement)out->nodes[w];
+                            const char* v = NULL;
+                            for (struct taurus_attribute* a =
+                                     taurus_element_get_first_attribute(e2);
+                                 a; a = taurus_attr_next(a)) {
+                                if (a->name_hash == attr_hash &&
+                                    attr_cname(a) &&
+                                    strcmp(attr_cname(a), attr_name) == 0) {
+                                    v = attr_cvalue(a);
+                                    break;
+                                }
+                            }
+                            if (v && strcmp(v, value) == 0) {
+                                w++;
+                            } else {
+                                out->nodes[w] = out->nodes[out->count - 1];
+                                out->count--;
+                            }
+                        }
+                    }
+                }
+
+                xpath_nodeset_free(input);
+                struct taurus_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(out); vm.error = 1; break; }
+                r->value.nodeset_value = out;
+                vm_push(&vm, r);
+                break;
+            }
+
             /* Fused axis+predicate (TODO 134). */
             case XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS: {
                 uint16_t idx = read_u16(&pc);
