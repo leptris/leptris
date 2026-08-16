@@ -1,13 +1,35 @@
 ## [Unreleased]
 
-## [0.23.3] - Y-08-16
+## [0.23.3] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — absolute `//name[@attr='value']` from the value bucket (TODO 192d)
 
-### Changed
+The canonical whole-document predicated query now compiles to one
+self-contained opcode whose VM handler scans the element index's
+attr-VALUE bucket directly: no name-bucket materialization of all
+candidates, no per-element attribute walks. The whole-document
+scan is descendant-or-self-correct by construction — the root
+element is in the bucket if and only if it carries the matching
+attribute value. Without the index (a document's first query),
+the opcode falls back to a root walk with a hash-prefiltered
+attribute filter.
 
-- (describe changes here)
+Measured on `//item[@n='5']` over a 5000-element document
+(Release, min of 5): 38.8 us -> 1.27 us per query (30x vs
+0.23.2). pugixml with a reused compiled `xpath_query` measures
+110.8 us on the same workload — 87x in taurus's favor.
+
+### Fixed — cold fused-attribute queries returned empty (latent in 0.23.2)
+
+Both `a//b[@x='v']` fused-opcode fallback paths compared the raw
+`a->name_hash` field, which is zero until lazily computed — so a
+COLD first query of `.//b[@x='v']` (no element index built yet)
+returned an empty result instead of the matches. Both fallbacks
+now use the `attr_name_hash()` accessor. Caught by the new
+cold-path spec, which also verifies cold/warm agreement and the
+root-match descendant-or-self edge.
+
+551 tests, full XPath conformance, ASAN clean, zero leaks.
 
 
 ## [0.23.2] - 2026-08-16
