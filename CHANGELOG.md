@@ -1,13 +1,26 @@
 ## [Unreleased]
 
-## [0.22.1] - Y-08-16
+## [0.22.1] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Documentation — TODO 192 design: subtree-interval element index
 
-### Changed
+`TODO.fix/192-xpath-subtree-interval-index.md` scopes the next
+performance lever, identified by the pugixml v1.16 audit: pugixml
+has no document index, so every `//name` query from any context
+walks the tree every time. Our existing element index covers only
+root-context queries; extending it to subtree-restricted queries
+makes the second+ relative query (`.//x`, `a//b`) cost O(matches)
+from any context.
 
-- (describe changes here)
+The design exploits a structural fact: the index's flat array is
+preorder and arena pointers are monotonic in document order, so a
+subtree is a contiguous interval — settable with one line in the
+existing build walk, queried with a binary search plus
+pointer-range filter over name buckets. The document specifies
+the struct/function/VM changes, spec list, benchmark gate, and
+risks (`direct_parse.c` stays untouched — the codegen wall).
+
+No code changes in this release; documentation only.
 
 
 ## [0.22.0] - 2026-08-16
