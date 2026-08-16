@@ -110,9 +110,13 @@ struct taurus_document {
     int strict_mode;
 
     /* Element index (TODO 132) — lazily-built flat array + per-name
-     * buckets for O(1) descendant queries. Built on first access.
-     * NULL until first descendant-axis query touches it. */
+     * buckets for O(1) descendant queries. Built on SECOND axis
+     * query (TODO 190): building costs two tree walks + per-name
+     * bucket allocations, which a single-query document never
+     * recovers — the first query walks directly and only repeat
+     * queries pay for the index. NULL until then. */
     struct taurus_element_index* element_index;
+    unsigned axis_query_count;  /* axis queries seen without an index */
 
     /* FlatDoc + lazy-promote removed — direct_parse builds the
      * TaurusElement tree eagerly. Retained as an always-zero field
