@@ -1,7 +1,13 @@
 # TODO 192: Subtree-interval element index — beat pugixml on repeated queries
 
 **Priority**: P1 (the one place we can be strictly FASTER, not parity)
-**Status**: Design (code-grounded; ready to execute)
+**Status**: Done (2026-08-16) — subtree_end + match_positions in the
+index; relative-`//` compiler fusion ([d-o-s node()][child b] →
+BC_AXIS_DESCENDANT_NAME); VM interval path with nested-subtree skip;
+remove_child/remove_all_children index invalidation (latent stale-index
+bug the new specs exposed). Gate: 546/546 + ASAN + zero leaks; `.//item`
+from 200 section contexts: 2.0 → 0.30 µs/query (6.6× vs main);
+pugixml with reused xpath_query = 0.42 µs — taurus 1.4× FASTER.
 **Effort**: M
 
 ## Why this is the lever pugixml cannot match

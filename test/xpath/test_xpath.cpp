@@ -380,3 +380,152 @@ TEST(XPathNested, NestedPredicates) {
     taurus_xpath_result_free(r);
     taurus_document_free(doc);
 }
+
+/* ---- TODO 192: subtree-interval index for relative descendants ---- */
+
+namespace {
+
+const char kSubtree[] =
+    "<library>"
+    "<section id='a'><item>1</item><item>2</item>"
+    "<section><item>3</item></section></section>"
+    "<section id='b'><item>4</item></section>"
+    "</library>";
+
+/* The element index builds on the second axis query (TODO 190), so
+ * each spec runs a warm-up first — otherwise only the walk path
+ * would be tested. */
+TaurusXPathResult EvalWarm(TaurusDocument doc, TaurusElement ctx,
+                           const char* expr) {
+    TaurusXPathResult warm =
+        taurus_xpath_eval(doc, nullptr, "//warmup-absent");
+    if (warm) taurus_xpath_result_free(warm);
+    return taurus_xpath_eval(doc, ctx, expr);
+}
+
+TaurusElement FirstSection(TaurusDocument doc) {
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "//section");
+    if (!r || taurus_xpath_result_count(r) == 0) {
+        if (r) taurus_xpath_result_free(r);
+        return nullptr;
+    }
+    TaurusElement e = taurus_xpath_result_get(r, 0);
+    taurus_xpath_result_free(r);
+    return e;
+}
+
+}  // namespace
+
+TEST(XPathSubtreeIndex, ChainedDoubleSlashNoDoubleCount) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtree, std::strlen(kSubtree), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* //section matches the outer AND the nested section; the
+     * subtrees overlap. Interval containment must skip the nested
+     * one — 4 items, not 5. Second+ query exercises the index. */
+    TaurusXPathResult first = taurus_xpath_eval(doc, nullptr, "//item");
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(first), 4u);
+    taurus_xpath_result_free(first);
+
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "//section//item");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 4u);
+    taurus_xpath_result_free(r);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, RelativeDescendantFromContext) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtree, std::strlen(kSubtree), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusElement sec = FirstSection(doc);
+    ASSERT_NE(sec, nullptr);
+
+    /* .//item from section[a]: items 1, 2 and the nested 3. */
+    TaurusXPathResult r = EvalWarm(doc, sec, ".//item");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 3u);
+    taurus_xpath_result_free(r);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, StrictDescendantExcludesSelf) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<item><item>x</item></item>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusXPathResult root = taurus_xpath_eval(doc, nullptr, "//item");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(taurus_xpath_result_count(root), 2u);
+    TaurusElement e = taurus_xpath_result_get(root, 0);
+    taurus_xpath_result_free(root);
+
+    /* descendant::item from the outer item: the inner one only. */
+    TaurusXPathResult r = EvalWarm(doc, e, "descendant::item");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 1u);
+    taurus_xpath_result_free(r);
+
+    /* descendant-or-self::item includes the context itself. */
+    TaurusXPathResult r2 = EvalWarm(doc, e, "descendant-or-self::item");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r2), 2u);
+    taurus_xpath_result_free(r2);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, MutationInvalidatesIndex) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtree, std::strlen(kSubtree), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Two queries so the index is built and cached. */
+    TaurusXPathResult warm = taurus_xpath_eval(doc, nullptr, "//item");
+    ASSERT_NE(warm, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(warm), 4u);
+    taurus_xpath_result_free(warm);
+    TaurusXPathResult warm2 = taurus_xpath_eval(doc, nullptr, "//warmup-absent");
+    if (warm2) taurus_xpath_result_free(warm2);
+
+    /* Mutate: remove section[b]'s only item, then query again — the
+     * rebuilt index must not serve stale results. */
+    TaurusXPathResult secs = taurus_xpath_eval(doc, nullptr, "//section[@id='b']");
+    ASSERT_NE(secs, nullptr);
+    ASSERT_EQ(taurus_xpath_result_count(secs), 1u);
+    TaurusElement secb = taurus_xpath_result_get(secs, 0);
+    taurus_xpath_result_free(secs);
+    ASSERT_NE(secb, nullptr);
+
+    TaurusXPathResult victim = taurus_xpath_eval(doc, secb, ".//item");
+    ASSERT_NE(victim, nullptr);
+    ASSERT_EQ(taurus_xpath_result_count(victim), 1u);
+    TaurusElement item = taurus_xpath_result_get(victim, 0);
+    taurus_xpath_result_free(victim);
+    ASSERT_NE(item, nullptr);
+
+    EXPECT_EQ(taurus_element_remove_child(secb, item), TAURUS_OK);
+
+    TaurusXPathResult after = taurus_xpath_eval(doc, nullptr, "//item");
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(after), 3u);
+    taurus_xpath_result_free(after);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, EmptyResultForAbsentName) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtree, std::strlen(kSubtree), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement sec = FirstSection(doc);
+    ASSERT_NE(sec, nullptr);
+
+    TaurusXPathResult r = EvalWarm(doc, sec, ".//does-not-exist");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 0u);
+    taurus_xpath_result_free(r);
+    taurus_document_free(doc);
+}
