@@ -880,6 +880,43 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                     }
 
                     if (preds_ok) {
+                        /* Single attr-equals predicate on a name test:
+                         * one self-contained opcode whose VM handler
+                         * scans the attr-VALUE bucket directly (TODO
+                         * 192d) — no name-bucket materialization, no
+                         * per-element attribute walks. */
+                        if (cpred == 1 && c_has_name) {
+                            const char *fa, *fv;
+                            long fp;
+                            if (classify_predicate(second_step->children[1],
+                                                    &fa, &fv, &fp) ==
+                                    PRED_KIND_ATTR_EQ_STRING && fa && fv) {
+                                uint16_t n1 = add_const_string(st, ctest->value);
+                                uint16_t n2 = add_const_string(st, fa);
+                                uint16_t n3 = add_const_string(st, fv);
+                                if (reserve_code(st, 7) == 0) {
+                                    st->bc->code[st->bc->code_len++] =
+                                        (unsigned char)XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ;
+                                    st->bc->code[st->bc->code_len++] = (n1 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n1 & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (n2 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n2 & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (n3 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n3 & 0xFF;
+                                }
+                                /* Then any remaining steps. */
+                                for (size_t i = 0; i < rest_count; i++) {
+                                    XPathASTNode* s = rest[i];
+                                    if (s && s->type == XPATH_AST_STEP) {
+                                        if (!try_compile_specialized_axis(st, s)) {
+                                            emit_op_u16(st, XPATH_BC_AXIS_STEP,
+                                                        add_const_ast(st, s));
+                                        }
+                                    }
+                                }
+                                return;
+                            }
+                        }
                         /* Emit the fused opcode. */
                         if (c_has_wild) {
                             emit_op(st, XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD);
