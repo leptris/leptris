@@ -529,3 +529,68 @@ TEST(XPathSubtreeIndex, EmptyResultForAbsentName) {
     taurus_xpath_result_free(r);
     taurus_document_free(doc);
 }
+
+/* ---- TODO 192b: predicated relative descendants via the index ---- */
+
+namespace {
+/* Items carry n attributes for the predicated relative specs. */
+const char kSubtreeAttr[] =
+    "<library>"
+    "<section id='a'><item n='1'>x</item><item n='2'>y</item>"
+    "<section><item n='11'>z</item></section></section>"
+    "<section id='b'><item n='1'>w</item></section>"
+    "</library>";
+}
+
+TEST(XPathSubtreeIndex, PredicatedRelativeFromContext) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtreeAttr, std::strlen(kSubtreeAttr), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement sec = FirstSection(doc);
+    ASSERT_NE(sec, nullptr);
+
+    TaurusXPathResult r = EvalWarm(doc, sec, ".//item[@n='2']");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 1u);
+    taurus_xpath_result_free(r);
+
+    TaurusXPathResult r2 = EvalWarm(doc, sec, ".//item[@n='11']");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r2), 1u);  /* nested section */
+    taurus_xpath_result_free(r2);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, PredicatedChainedAcrossSections) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtreeAttr, std::strlen(kSubtreeAttr), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Both sections own an item with n='1'; the nested item is
+     * n='11' and must not double-count. */
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "//section//item[@n='1']");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 2u);
+    taurus_xpath_result_free(r);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "//section//item[@n='11']");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r2), 1u);
+    taurus_xpath_result_free(r2);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, PositionPredicateKeepsExpandedSemantics) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtreeAttr, std::strlen(kSubtreeAttr), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* `//section//item[1]` means first item PER PARENT (section a,
+     * its nested section, and section b) — 3, not 2-per-section.
+     * Position predicates must NOT take the fused path. */
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "//section//item[1]");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 3u);
+    taurus_xpath_result_free(r);
+    taurus_document_free(doc);
+}

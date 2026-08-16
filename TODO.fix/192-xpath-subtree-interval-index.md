@@ -8,6 +8,16 @@ remove_child/remove_all_children index invalidation (latent stale-index
 bug the new specs exposed). Gate: 546/546 + ASAN + zero leaks; `.//item`
 from 200 section contexts: 2.0 → 0.30 µs/query (6.6× vs main);
 pugixml with reused xpath_query = 0.42 µs — taurus 1.4× FASTER.
+
+**192b (same day): predicated relative queries.** The fusion now
+also accepts the absolute fold's predicate set (attr-exists,
+attr-eq-string, child-num-cmp — all per-element/context-independent),
+emitting the pred opcodes after the fused axis opcode; position
+predicates stay expanded (per-parent semantics — pinned by spec).
+`.//item[@n='5']`: main 1.67 → 0.50 µs (3.3×); pugixml reused
+query 0.55 µs — taurus ahead. Next lever if needed: serve the attr
+predicate itself from the index attr-value buckets (windowed like
+names) instead of the per-element attr walk.
 **Effort**: M
 
 ## Why this is the lever pugixml cannot match
