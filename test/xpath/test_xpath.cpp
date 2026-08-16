@@ -594,3 +594,49 @@ TEST(XPathSubtreeIndex, PositionPredicateKeepsExpandedSemantics) {
     taurus_xpath_result_free(r);
     taurus_document_free(doc);
 }
+
+/* ---- TODO 192d: absolute //name[@attr='value'] via value buckets ---- */
+
+TEST(XPathSubtreeIndex, AbsolutePredicatedValueBucket) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtreeAttr, std::strlen(kSubtreeAttr), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Cold query (no index yet) and warm query must agree. */
+    TaurusXPathResult cold = taurus_xpath_eval(doc, nullptr, "//item[@n='1']");
+    ASSERT_NE(cold, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(cold), 2u);
+    taurus_xpath_result_free(cold);
+
+    TaurusXPathResult warm = taurus_xpath_eval(doc, nullptr, "//item[@n='11']");
+    ASSERT_NE(warm, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(warm), 1u);
+    taurus_xpath_result_free(warm);
+
+    /* Chained rest steps still follow the fused opcode. */
+    TaurusXPathResult chained = taurus_xpath_eval(doc, nullptr, "//item[@n='11']/text()");
+    ASSERT_NE(chained, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(chained), 1u);
+    taurus_xpath_result_free(chained);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, AbsolutePredicatedRootMatches) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<item n='5'><item n='5'/><other/></item>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* `//` is descendant-or-SELF: the root itself carries n='5' and
+     * must be included, cold and warm. */
+    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, "count(//item[@n='5'])");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r), 2.0);
+    taurus_xpath_result_free(r);
+
+    TaurusXPathResult r2 = taurus_xpath_eval(doc, nullptr, "count(//item[@n='5'])");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(r2), 2.0);
+    taurus_xpath_result_free(r2);
+    taurus_document_free(doc);
+}

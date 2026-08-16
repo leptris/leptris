@@ -1426,7 +1426,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                             for (struct taurus_attribute* a =
                                      taurus_element_get_first_attribute(e2);
                                  a; a = taurus_attr_next(a)) {
-                                if (a->name_hash == attr_hash &&
+                                if (attr_name_hash(a) == attr_hash &&
                                     attr_cname(a) &&
                                     strcmp(attr_cname(a), attr_name) == 0) {
                                     v = attr_cvalue(a);
@@ -1584,6 +1584,99 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 struct taurus_xpath_result* r =
                     vm_apply_absolute(ctx, name, 0, 2);
                 if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ: {
+                /* TODO 192d: `//name[@attr='value']` served from the
+                 * index. The value bucket holds exactly the elements
+                 * carrying attr=value (root included when it matches),
+                 * so one name-filtered scan IS the answer — no name
+                 * bucket materialization, no per-element attr walks. */
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t attr_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* name = (name_idx < bc->const_count &&
+                                    bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_name = (attr_idx < bc->const_count &&
+                                         bc->constants[attr_idx].type == XPATH_CONST_STRING)
+                                        ? bc->constants[attr_idx].v.string : NULL;
+                const char* value = (value_idx < bc->const_count &&
+                                     bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                    ? bc->constants[value_idx].v.string : NULL;
+                if (!name || !attr_name || !value) { vm.error = 1; break; }
+
+                struct taurus_element_index* index =
+                    (ctx && ctx->document) ? ctx->document->element_index : NULL;
+                if (!index && ctx && ctx->document &&
+                    ++ctx->document->axis_query_count >= 2) {
+                    index = taurus_element_index_build(ctx->document);
+                    ctx->document->element_index = index;
+                }
+
+                XPathNodeSet* out = xpath_nodeset_new();
+                if (!out) { vm.error = 1; break; }
+
+                int served = 0;
+                if (index && index->subtree_end) {
+                    const TaurusElementIndexAttrBucket* abucket =
+                        taurus_element_index_lookup_attr(index, attr_name);
+                    const TaurusElementIndexAttrValue* vbucket =
+                        abucket ? taurus_element_index_attr_lookup_value(abucket, value)
+                                : NULL;
+                    if (!vbucket ||
+                        (vbucket->count > 0 && vbucket->match_positions)) {
+                        uint16_t name_hash = taurus_name_hash_compute(name);
+                        for (size_t j = 0;
+                             vbucket && j < vbucket->count; j++) {
+                            if (taurus_elem_name_is(vbucket->matches[j],
+                                                    name, name_hash)) {
+                                xpath_nodeset_add_fast(out, vbucket->matches[j]);
+                            }
+                        }
+                        served = 1;
+                    }
+                }
+
+                if (!served) {
+                    /* Fallback: full walk from root with inline
+                     * hash-prefiltered attr filter. */
+                    TaurusElement root = (ctx && ctx->document)
+                        ? (TaurusElement)ctx->document->new_dom_root : NULL;
+                    if (root) {
+                        uint32_t attr_hash =
+                            xpath_fnv1a_32(attr_name, strlen(attr_name));
+                        size_t mark = out->count;
+                        descendant_walk(out, root, name, 0, 1);
+                        for (size_t w = mark; w < out->count;) {
+                            TaurusElement e2 = (TaurusElement)out->nodes[w];
+                            const char* v = NULL;
+                            for (struct taurus_attribute* a =
+                                     taurus_element_get_first_attribute(e2);
+                                 a; a = taurus_attr_next(a)) {
+                                if (attr_name_hash(a) == attr_hash &&
+                                    attr_cname(a) &&
+                                    strcmp(attr_cname(a), attr_name) == 0) {
+                                    v = attr_cvalue(a);
+                                    break;
+                                }
+                            }
+                            if (v && strcmp(v, value) == 0) {
+                                w++;
+                            } else {
+                                out->nodes[w] = out->nodes[out->count - 1];
+                                out->count--;
+                            }
+                        }
+                    }
+                }
+
+                struct taurus_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(out); vm.error = 1; break; }
+                r->value.nodeset_value = out;
                 vm_push(&vm, r);
                 break;
             }

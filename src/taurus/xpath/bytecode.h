@@ -73,6 +73,12 @@ typedef enum {
      * element's attribute list. Falls back to walk+filter without
      * the index. */
     XPATH_BC_AXIS_DESCENDANT_NAME_ATTREQ,
+    /* Absolute //name[@attr='value'], same operands and index
+     * service, but self-contained (no input nodeset): the whole
+     * document IS the interval, and the value-bucket scan is
+     * descendant-or-self-correct by construction (the root is in
+     * the bucket iff it carries attr=value). TODO 192d. */
+    XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ,
 
     /* Fused axis+predicate opcodes (TODO 134). Combines the axis
      * walk with the predicate filter into a single pass, and uses

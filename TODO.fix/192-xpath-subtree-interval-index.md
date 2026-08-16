@@ -117,3 +117,14 @@ Subtree-restricted bucket query for context element C:
    multi-MB attr blocks; macOS cannot measure — packager win only.
 4. SIMD scans beyond count3 — blocked by the codegen wall for
    in-loop edits; revisit only with an architectural change.
+
+**192d (2026-08-17): absolute //name[@a='v'] via the value bucket.**
+New self-contained opcode BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ; the
+whole-doc value-bucket scan is descendant-or-self-correct by
+construction (root is in the bucket iff it carries attr=value).
+`//item[@n='5']` (5000-element doc): 38.8 -> **1.27 us (30x)**;
+pugixml 110.8 us — **87x**. ALSO FIXED a latent v0.23.2 bug found
+by the cold-path spec: both ATTREQ fallbacks compared raw
+`a->name_hash` (0 until lazily computed, TODO 172) — a cold
+`.//b[@x='v']` first query returned EMPTY; both now use the
+attr_name_hash() accessor. 551 tests + ASAN + zero leaks.
