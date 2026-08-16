@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.23.1] - Y-08-16
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.23.0] - 2026-08-16
 
 ### Performance — subtree-interval element index (TODO 192)
