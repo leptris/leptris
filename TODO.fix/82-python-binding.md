@@ -1,7 +1,11 @@
 # TODO 82: Python binding (cffi)
 
 **Priority**: P2 (binding — Python ecosystem)
-**Status**: Design
+**Status**: Done — `bindings/python/` (pytaurus, cffi ABI mode):
+Document.parse/close + context manager, Element navigation with
+whitespace-safe sibling walking, generic Node types, typed XPath
+results, serialize. 22 pytest specs + parse/free stress + flat-RSS
+check green. README quick start added; TODO 82 done 2026-08-16.
 **Effort**: M
 
 ## Approach: cffi

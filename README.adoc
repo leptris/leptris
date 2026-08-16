@@ -54,10 +54,14 @@ memory handling matter.
   and event-driven SAX (one-shot + incremental streaming) via the
   `ffi` gem. No C extension compilation needed. See
   link:bindings/ruby/[Ruby binding].
+* **Python binding** — `pytaurus` via `cffi` (ABI mode, single
+  `cdef` mirroring the public headers): `Document.parse`, element
+  navigation, typed XPath results, serialize. See
+  link:bindings/python/[Python binding].
 * **Zero required runtime dependencies** — utf8proc and iconv are
   optional features, not prerequisites.
 * **Stable C ABI** with a documented FFI contract; bindings shipped
-  for Ruby (Python and Rust planned).  See <<FFI,FFI Design>>.
+  for Ruby and Python (Rust planned).  See <<FFI,FFI Design>>.
 
 == When to use libtaurus
 
@@ -402,7 +406,8 @@ ctest --test-dir build -R HeaderHygiene
 libtaurus exposes a stable C ABI.  Bindings:
 
 * *Ruby* — shipped. Uses `ffi` gem. See link:bindings/ruby/[Ruby binding].
-* *Python* — planned via `cffi` (header-aware)
+* *Python* — shipped as `pytaurus` via `cffi` (ABI mode). See
+  link:bindings/python/[Python binding].
 * *Rust* — planned via `bindgen` + idiomatic wrapper
 
 === Ruby quick start
@@ -437,6 +442,31 @@ To parse the headers from a binding tool:
 [source,bash]
 ----
 cc -DTAURUS_FOR_BINDGEN -E src/include/taurus.h   # strips TAURUS_API
+----
+
+=== Python quick start
+
+[source,python]
+----
+from pytaurus import Document
+
+doc = Document.parse('<root><item id="1">hello</item></root>')
+root = doc.root
+print(root.name)                        # => "root"
+print(root.first_child_element.attribute('id'))  # => "1"
+print(doc.xpath('count(//item)'))       # => 1.0
+doc.close()
+----
+
+Install: `pip install cffi` and point `TAURUS_LIB_PATH` at your
+`libtaurus.dylib` / `.so` (or install libtaurus system-wide).
+
+[source,bash]
+----
+cmake -B build -S . -DTAURUS_BUILD_SHARED=ON
+cmake --build build --target taurus_shared
+TAURUS_LIB_PATH=$PWD/build/src/libtaurus.dylib \
+  python3 -m pytest bindings/python/tests/
 ----
 
 ==== Ruby SAX
