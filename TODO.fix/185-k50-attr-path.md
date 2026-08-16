@@ -1,10 +1,49 @@
 # TODO 185 — K<=50 element/attr path vs pugixml
 
 **Priority**: P0 (the remaining gap)
-**Status**: rounds 4-9 done. Phase-level wins (TODO 187 freeze
+**Status**: rounds 4-10 done. Phase-level wins (TODO 187 freeze
 walk, TODO 188 fused copy) shipped; every remaining lever measured
 dead, parity, or sub-noise. Three consecutive sub-noise results
-(rounds 7-9) — the floor is real.
+(rounds 7-9) plus a gate-fail regression (round 10) — the floor is
+real and the codegen wall now covers setup-region edits too.
+
+## Round 10 (2026-08-16): pugixml build/config audit + lazy
+## string-cache = K=5 +2.4%, reverted
+
+Audited pugixml v1.16 (local checkout ~/src/external/pugixml,
+source + CMake) flag-for-flag and trick-for-trick:
+
+- **Build flags: nothing to copy.** Their CMake ships zero
+  optimization flags (no -O3/LTO/arch); Homebrew builds plain
+  Release. We already ship -O3 + thin-LTO + hidden visibility.
+  `TAURUS_TARGET_ARCH=native` measured MIXED (K=20 −8.9%,
+  K=5 +6.8%, K=100 +1.4%) — not a lever, not apples-to-apples.
+- **Correction to TODO 182 notes: pugixml attrs are 40 B**
+  (5 raw pointers, doubly-linked via prev_attribute_c), nodes
+  64 B. Our 48 B attrs / 64 B elements are DENSER — the residual
+  mid-K gap is not struct density.
+- **SCANWHILE_UNROLL** (4-byte unroll, unlikely-marked exits) is
+  a loop-body shape — the class measured dead 6×.
+- **Setup asymmetry (actionable)**: pugixml embeds the first
+  memory page in the xml_document object (zero setup allocs);
+  we eagerly build a 128-bucket string-cache table per parse
+  (len >= 256) that the parse path NEVER uses (attrs are views;
+  only ns-XPath functions and DOM mutation intern).
+
+Implemented lazy table creation (create-on-first-intern in
+pool.c, intern routing in sv_to_cstr_pooled, eager creation
+deleted from direct_parse setup) + 64 B-aligned elem/attr block
+(phase-determinism for the 48 B stride). 541 tests + ASAN +
+zero leaks. Measured (2× 8-run interleaved Release A/B, fresh
+dirs, min): K=5 +2.4% CONSISTENT (52.6-52.8 vs 51.3-52.1 in
+16/16 runs — alignment variant identical, so not cache phase),
+K=20/50/100 parity. Deleting three setup lines perturbs the
+mega-function's codegen exactly like the round 2-3 loop edits:
+the ~100 ns table saving is invisible next to a 1.2 µs layout
+shift at K=5. Reverted; recovery confirmed (51.8-52.3 post-
+revert). **The codegen wall covers setup-region edits inside
+direct_parse_internal. Only changes fully OUTSIDE the function
+(TODO 187/188 shapes) can win.**
 
 ## Round 9 (2026-08-16): bulk text-node block = PARITY, reverted
 
