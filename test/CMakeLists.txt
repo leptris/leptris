@@ -29,7 +29,14 @@ add_custom_target(check_all
 # it with ctest via gtest_discover_tests, and adds it to check_all.
 function(taurus_add_test name)
     add_executable(${name} ${ARGN})
-    target_link_libraries(${name} PRIVATE taurus GTest::gtest_main)
+    # Specs exercise internal symbols (pool internals, vtables,
+    # compact pointers) that the shared library does not export —
+    # always link the static objects.
+    if(TARGET taurus_static)
+        target_link_libraries(${name} PRIVATE taurus_static GTest::gtest_main)
+    else()
+        target_link_libraries(${name} PRIVATE taurus GTest::gtest_main)
+    endif()
     target_include_directories(${name} PRIVATE
         ${PROJECT_SOURCE_DIR}/src/include
         # Pool / StringView internals — used by memory specs.

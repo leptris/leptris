@@ -13,8 +13,18 @@ add_executable(taurus-cli
     commands/format.c
 )
 
-# Link to libtaurus
-target_link_libraries(taurus-cli PRIVATE taurus)
+# Link to libtaurus. When both static and shared are built, link the
+# CLI against the STATIC library: the CLI's output formatters use
+# internal accessors (taurus_element_get_name, compact-pointer
+# decoding, struct taurus_attribute walks) that are not exported
+# from the shared library, so a shared-only link fails. TODO 191
+# tracks moving the CLI onto the public API only; until then this
+# keeps TAURUS_BUILD_SHARED=ON fully buildable.
+if(TARGET taurus_static)
+    target_link_libraries(taurus-cli PRIVATE taurus_static)
+else()
+    target_link_libraries(taurus-cli PRIVATE taurus)
+endif()
 
 # Include directories
 target_include_directories(taurus-cli PRIVATE
