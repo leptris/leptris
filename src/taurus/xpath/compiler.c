@@ -611,7 +611,7 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                                strcmp(dstest->value, "node") == 0)));
                 XPathASTNode* next = children[i + 1];
                 if (ds_ok && next->axis_id == XPATH_AXIS_CHILD &&
-                    next->child_count == 1) {
+                    next->child_count >= 1) {
                     XPathASTNode* ctest = next->children[0];
                     int c_name = (ctest &&
                                   ctest->type == XPATH_AST_NODE_TEST_NAME &&
@@ -619,12 +619,64 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                                   !strchr(ctest->value, ':'));
                     int c_wild = (ctest &&
                                   ctest->type == XPATH_AST_NODE_TEST_ALL);
-                    if (c_name || c_wild) {
+                    /* Attribute and child-num-cmp predicates are
+                     * per-element (context-independent), so they apply
+                     * identically before or after the fusion — the same
+                     * allowed set as the absolute fold. Position
+                     * predicates stay expanded: per-parent in the
+                     * expanded form, global in the fused one. */
+                    size_t cpred = next->child_count - 1;
+                    int preds_ok = 1;
+                    for (size_t pi = 0; pi < cpred; pi++) {
+                        const char *a, *v;
+                        long p;
+                        PredKind pk = classify_predicate(
+                            next->children[1 + pi], &a, &v, &p);
+                        if (pk != PRED_KIND_ATTR_EXISTS &&
+                            pk != PRED_KIND_ATTR_EQ_STRING &&
+                            pk != PRED_KIND_CHILD_NUM_CMP) {
+                            preds_ok = 0;
+                            break;
+                        }
+                    }
+                    if ((c_name || c_wild) && preds_ok) {
                         if (c_wild) {
                             emit_op(st, XPATH_BC_AXIS_DESCENDANT_WILD);
                         } else {
                             emit_op_u16(st, XPATH_BC_AXIS_DESCENDANT_NAME,
                                         add_const_string(st, ctest->value));
+                        }
+                        for (size_t pi = 0; pi < cpred; pi++) {
+                            const char *a, *v;
+                            long p;
+                            XPathASTNode* pred_ast = next->children[1 + pi];
+                            PredKind k = classify_predicate(pred_ast, &a, &v, &p);
+                            if (k == PRED_KIND_ATTR_EXISTS) {
+                                emit_op_u16(st, XPATH_BC_PRED_ATTR_EXISTS,
+                                            add_const_string(st, a));
+                            } else if (k == PRED_KIND_ATTR_EQ_STRING) {
+                                uint16_t n = add_const_string(st, a);
+                                uint16_t v2 = add_const_string(st, v);
+                                if (reserve_code(st, 5) == 0) {
+                                    st->bc->code[st->bc->code_len++] = (unsigned char)XPATH_BC_PRED_ATTR_EQ_STRING;
+                                    st->bc->code[st->bc->code_len++] = (n >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (v2 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = v2 & 0xFF;
+                                }
+                            } else if (k == PRED_KIND_CHILD_NUM_CMP) {
+                                XPathOperatorType op = (XPathOperatorType)pred_ast->number_value;
+                                double rhs = pred_ast->children[1]->number_value;
+                                uint16_t name_idx = add_const_string(st, a);
+                                if (reserve_code(st, 12) == 0) {
+                                    st->bc->code[st->bc->code_len++] = (unsigned char)XPATH_BC_PRED_CHILD_NUM_CMP;
+                                    st->bc->code[st->bc->code_len++] = (unsigned char)op;
+                                    st->bc->code[st->bc->code_len++] = (name_idx >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = name_idx & 0xFF;
+                                    memcpy(&st->bc->code[st->bc->code_len], &rhs, sizeof(double));
+                                    st->bc->code_len += sizeof(double);
+                                }
+                            }
                         }
                         i++;  /* consume the child step too */
                         continue;
