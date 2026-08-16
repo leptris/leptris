@@ -1,9 +1,21 @@
 # TODO 185 — K<=50 element/attr path vs pugixml
 
 **Priority**: P0 (the remaining gap)
-**Status**: rounds 4-8 done. Phase-level wins (TODO 187 freeze
+**Status**: rounds 4-9 done. Phase-level wins (TODO 187 freeze
 walk, TODO 188 fused copy) shipped; every remaining lever measured
-dead, parity, or sub-noise.
+dead, parity, or sub-noise. Three consecutive sub-noise results
+(rounds 7-9) — the floor is real.
+
+## Round 9 (2026-08-16): bulk text-node block = PARITY, reverted
+
+dp_add_text_inline with a text_block in the parser (mirroring the
+attr bulk block): eliminated the per-text-node pool_alloc call.
+535 tests + ASAN + leaks clean; measured PARITY at every gate
+(parse K=5/20/50/100 and the XPath cycle) — taurus_pool_alloc is
+a bump allocator costing ~3 ns amortized; removing the call is
+below the measurement floor. Reverted. (Post-190 cycle profile:
+parse 83.5%, eval 13.8%, free 1.4% — the cycle is parse-bound and
+the parse loop is closed.)
 
 ## Round 8 (2026-08-16): UTF-8-declaration fast path = sub-noise, reverted
 
