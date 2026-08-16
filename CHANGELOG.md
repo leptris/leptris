@@ -1,13 +1,28 @@
 ## [Unreleased]
 
-## [0.23.1] - Y-08-16
+## [0.23.1] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — predicated relative descendants via the index (TODO 192b)
 
-### Changed
+`a//b[@x='v']` and `.//b[@x]` from any context now take the
+subtree-interval index path instead of the expanded wildcard
+walk. The relative `a//b` compiler fusion accepts the same
+predicate set the absolute fold has always allowed —
+attribute-exists, attribute-equals-string, and child-num-cmp,
+all per-element and context-independent — emitting the predicate
+opcodes after the fused descendant opcode. Position predicates
+remain excluded: they are per-parent in the expanded form but
+global in the fused one, and a new spec pins that distinction
+(`//section//item[1]` must return first-per-parent).
 
-- (describe changes here)
+Measured on `.//item[@n='5']` from 200 section contexts
+(Release, min of 5): 1.67 us -> 0.50 us per query (3.3x vs
+0.23.0). pugixml with a reused compiled `xpath_query` measures
+0.55 us — taurus is ahead on predicated relative queries as
+well. The unpredicated path is unchanged (0.30 us).
+
+549 tests (3 new specs), full XPath conformance on the fused
+bytecode, ASAN clean, zero leaks.
 
 
 ## [0.23.0] - 2026-08-16
