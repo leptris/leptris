@@ -235,7 +235,10 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
      *   - name_bucket.matches: all elements with that name in preorder
      */
     struct taurus_element_index* idx = ctx->document->element_index;
-    if (!idx) {
+    /* TODO 190: build on the SECOND axis query. The build costs
+     * two tree walks + per-name bucket allocations; a document
+     * that sees one query pays less walking directly. */
+    if (!idx && ++ctx->document->axis_query_count >= 2) {
         idx = taurus_element_index_build(ctx->document);
         ctx->document->element_index = idx;
     }
@@ -308,7 +311,19 @@ static struct taurus_xpath_result* vm_apply_absolute(XPathContext* ctx,
     } else {
         /* Index build failed — fall back to walk. */
         int include_self = (mode == 2);
-        if (include_self) xpath_nodeset_add_fast(out, root);
+        /* descendant-or-self::name matches the root only when the
+         * root's name matches (or it's a wildcard). The index path
+         * applies the same filter via the name bucket; this walk
+         * path ran only on index-build failure until TODO 190 made
+         * first queries walk directly — the unconditional root add
+         * was a latent off-by-one for named // queries (exposed by
+         * count(//book) returning root+books). */
+        if (include_self &&
+            (wild || (root->name &&
+                      taurus_elem_name_is(root, name,
+                                          taurus_name_hash_compute(name))))) {
+            xpath_nodeset_add_fast(out, root);
+        }
         descendant_walk(out, root, name, wild, 0);
     }
 
@@ -586,7 +601,10 @@ struct taurus_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM*
     if (input->count == 1 && doc_root &&
         input->nodes[0] == doc_root && node_is_element(input->nodes[0])) {
         struct taurus_element_index* idx = ctx->document->element_index;
-        if (!idx) {
+        /* TODO 190: build on the SECOND axis query. The build costs
+         * two tree walks + per-name bucket allocations; a document
+         * that sees one query pays less walking directly. */
+        if (!idx && ++ctx->document->axis_query_count >= 2) {
             idx = taurus_element_index_build(ctx->document);
             ctx->document->element_index = idx;
         }
@@ -764,7 +782,10 @@ static struct taurus_xpath_result* vm_apply_axis_descendant_pred_attr(
         input->nodes[0] == doc_root && node_is_element(input->nodes[0])) {
 
         struct taurus_element_index* idx = ctx->document->element_index;
-        if (!idx) {
+        /* TODO 190: build on the SECOND axis query. The build costs
+         * two tree walks + per-name bucket allocations; a document
+         * that sees one query pays less walking directly. */
+        if (!idx && ++ctx->document->axis_query_count >= 2) {
             idx = taurus_element_index_build(ctx->document);
             ctx->document->element_index = idx;
         }
