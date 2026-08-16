@@ -46,6 +46,9 @@ typedef struct taurus_element_index_attr_value {
     TaurusElement* matches;      /* Elements with attr name AND this value */
     size_t count;
     size_t capacity;
+    /* Preorder position of each match, parallel to matches (TODO
+     * 192c): lets subtree-restricted queries window the bucket. */
+    size_t* match_positions;
 } TaurusElementIndexAttrValue;
 
 typedef struct taurus_element_index_attr_bucket {

@@ -15,9 +15,18 @@ attr-eq-string, child-num-cmp — all per-element/context-independent),
 emitting the pred opcodes after the fused axis opcode; position
 predicates stay expanded (per-parent semantics — pinned by spec).
 `.//item[@n='5']`: main 1.67 → 0.50 µs (3.3×); pugixml reused
-query 0.55 µs — taurus ahead. Next lever if needed: serve the attr
-predicate itself from the index attr-value buckets (windowed like
-names) instead of the per-element attr walk.
+query 0.55 µs — taurus ahead.
+
+**192c (same day): attr-value bucket windows.** Value buckets now
+store preorder positions; a single attr-equals pred on a relative
+name step compiles to one fused opcode
+(BC_AXIS_DESCENDANT_NAME_ATTREQ) whose handler windows the VALUE
+bucket by each context's subtree interval — no per-element attr
+walks at all (walk+hash-filter fallback without the index).
+`.//item[@n='5']`: 0.50 → **0.25 µs** — now FASTER than the
+unpredicated path (0.30) because the value bucket pre-narrows
+candidates below the name bucket's density. 2.2× vs pugixml's
+0.55 µs; 6.7× vs v0.23.0's 1.67. 549 tests + ASAN + zero leaks.
 **Effort**: M
 
 ## Why this is the lever pugixml cannot match
