@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.21.5] - Y-08-16
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.21.4] - 2026-08-16
 
 ### Performance — fused copy+count3 (TODO 188)
