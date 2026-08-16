@@ -1,9 +1,21 @@
 # TODO 185 — K<=50 element/attr path vs pugixml
 
 **Priority**: P0 (the remaining gap)
-**Status**: **CLOSED (2026-08-16).** Every layout and micro lever
-measured; 48 B shipped as the global optimum. See rounds 4-6 and
-[[182-compact-pointer-phase-e-strings]] (upper-bound probe).
+**Status**: rounds 4-7 done. Phase-level wins (TODO 187 freeze
+walk, TODO 188 fused copy) shipped; every remaining lever measured
+dead or parity.
+
+## Round 7 (2026-08-16): elem-block bzero removal = PARITY, reverted
+
+The last setup-phase candidate (2.2% at K=20 in the profile):
+replaced the bulk elem_block memset with explicit zero-init of
+every field at element creation (the dp_add_attr_inline pattern).
+535 tests + ASAN clean, but measured 8-run A/B: K=5/20 parity,
+K=50 +0.8%, K=100 -1.5% — the ~7 init stores cost exactly what
+the streaming bzero saved. Reverted; the bzero is genuinely the
+cheaper zeroing strategy at this struct size. The phase-level
+winning streak (rounds TODO 187/188) ends here — the setup phase
+is now as lean as the loop.
 
 ## Round 6 (2026-08-16): TODO 182 upper-bound probe — parse thesis dead
 
