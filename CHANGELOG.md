@@ -1,13 +1,50 @@
 ## [Unreleased]
 
-## [0.23.0] - Y-08-16
+## [0.23.0] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — subtree-interval element index (TODO 192)
 
-### Changed
+Relative descendant queries (`.//name`, `a//b`, chained steps)
+from any context are now answered from the element index in
+O(log N + hits) instead of walking each context subtree — the
+first XPath axis where taurus is faster than pugixml rather
+than at parity.
 
-- (describe changes here)
+Measured on `.//item` evaluated from 200 section contexts
+(Release, min of 5): 2.0 us -> 0.30 us per query (6.6x vs
+0.22.1). pugixml with a reused compiled `xpath_query` measures
+0.42 us on the same workload — taurus is 1.4x faster (2.2x
+against pugixml's one-shot `select_nodes`).
+
+How it works:
+
+- A subtree is a contiguous preorder interval of the index's
+  flat array; the build walk now records each interval's end in
+  `subtree_end[]` (one line).
+- Name buckets store each match's preorder position, so
+  filtering is index arithmetic and stays correct when mutation
+  disturbs pointer order.
+- The compiler fuses the predicate-free expanded `a//b` form
+  ([descendant-or-self::node()][child::b]) into a single
+  descendant-name opcode — the same equivalence the
+  absolute-path fold has used since TODO 129.
+- The VM binary-searches each context element's interval, scans
+  the bucket window, and skips intervals nested inside an
+  already-processed one (subtrees are disjoint or nested, so
+  no dedup pass is needed and document order is preserved).
+  Unlocatable contexts (foreign documents) fall back to the
+  existing walk.
+
+### Fixed — stale element index after child removal
+
+`taurus_element_remove_child` and
+`taurus_element_remove_all_children` never invalidated the
+cached per-document element index (`taurus_element_append_child`
+did), so descendant queries after a removal could serve
+pre-mutation results. Found by the new TODO 192 specs; both now
+invalidate. Five new XPath specs cover chained `//section//item`
+nested dedup, context-relative `.//item`, strict
+descendant-or-self, mutation invalidation, and absent names.
 
 
 ## [0.22.1] - 2026-08-16
