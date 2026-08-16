@@ -1,9 +1,22 @@
 # TODO 185 — K<=50 element/attr path vs pugixml
 
 **Priority**: P0 (the remaining gap)
-**Status**: rounds 4-7 done. Phase-level wins (TODO 187 freeze
+**Status**: rounds 4-8 done. Phase-level wins (TODO 187 freeze
 walk, TODO 188 fused copy) shipped; every remaining lever measured
-dead or parity.
+dead, parity, or sub-noise.
+
+## Round 8 (2026-08-16): UTF-8-declaration fast path = sub-noise, reverted
+
+The encoding detour for `<?xml ... encoding="UTF-8"?>` documents
+(full-document memcpy + two strdups in auto_convert before
+direct_parse copies again) was bypassed by a bounded declaration
+scan in the taurus_parse_string fast path. Correct for all gate
+cases (UTF-8/lower/no-enc/latin1/UTF-16 probes + 535 tests + 19
+encoding tests), but measured: cycle CPU PARITY (the detour is
+~0.15 µs on the 10 KB cycle doc — below the noise floor) and the
+parse gate showed an unproven +2-3.6% at K=50/100 on docs that
+don't touch the changed path. Real lever, payoff below measurement
+resolution at realistic sizes; reverted per the gate rule.
 
 ## Round 7 (2026-08-16): elem-block bzero removal = PARITY, reverted
 
