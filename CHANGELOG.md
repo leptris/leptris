@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.23.3] - Y-08-16
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.23.2] - 2026-08-16
 
 ### Performance — attr-value bucket windows (TODO 192c)
