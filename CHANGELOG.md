@@ -1,13 +1,38 @@
 ## [Unreleased]
 
-## [0.21.6] - Y-08-16
+## [0.21.6] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Documentation — TODO 185 round 10: pugixml build/config audit
 
-### Changed
+A flag-for-flag and trick-for-trick audit of pugixml v1.16
+(CMake configuration, allocator design, parse-loop macros)
+against ours, recorded in `TODO.fix/185-k50-attr-path.md`:
 
-- (describe changes here)
+- **Build flags: nothing left to copy.** pugixml's CMake ships no
+  optimization flags; our Release build (`-O3`, thin LTO, hidden
+  visibility) is already ahead of the Homebrew artifacts we
+  benchmark against. `TAURUS_TARGET_ARCH=native` measured mixed
+  across the K matrix and is not a lever.
+- **Struct density is not the residual gap.** pugixml attributes
+  are 40 B (5 pointers) and nodes 64 B; our 48 B attribute /
+  64 B element representation is denser.
+- **`SCANWHILE_UNROLL`** (4-byte unrolled scans with unlikely
+  exits) is a loop-body shape — the class measured dead in
+  rounds 2-3.
+- **The one actionable asymmetry** (setup allocations: pugixml
+  embeds its first memory page in the document object; we build
+  an unused-per-parse intern table) was implemented as lazy
+  string-cache creation plus a 64 B-aligned element/attribute
+  block. Tests, ASAN, and leak checks were clean, but the gate
+  failed: K=5 regressed +2.4% consistently across 16/16
+  interleaved runs. The change was reverted — the codegen wall
+  around `direct_parse_internal` covers setup-region edits, not
+  just loop-body edits.
+
+No code changes in this release; documentation and campaign
+ledger only. Parse standings vs pugixml are unchanged:
+K=5 1.54x, K=20 1.51x, K=50 1.84x, K=100 1.83x, with the XPath
+cycle at CPU parity.
 
 
 ## [0.21.5] - 2026-08-16
