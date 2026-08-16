@@ -1,13 +1,43 @@
 ## [Unreleased]
 
-## [0.22.0] - Y-08-16
+## [0.22.0] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — Python bindings (`pytaurus`, TODO 82)
 
-### Changed
+`bindings/python/` ships a cffi (ABI-mode) binding mirroring the
+public headers in a single `cdef` (`pytaurus/_ffi.py`, the same
+architecture as the Ruby binding's `lib/taurus.rb`):
 
-- (describe changes here)
+- `Document.parse(str | bytes)` with `close()`, context-manager
+  support, and a refcounting `__del__` safety net
+- `Element`: name, text, attributes with defaults, iteration over
+  child elements, parent navigation — with whitespace-safe sibling
+  walking (the immediate node sibling of an element is usually an
+  interleaved text node; the binding loops until the next element)
+- `Node`: typed traversal for text/comment/CDATA/PI with exact
+  content access
+- `Document.xpath` / `Element.xpath`: typed results — nodesets as
+  Element lists, number/string/boolean as native Python types
+- `Document.serialize` and `process_xinclude`
+- 22 pytest specs, a 3000-iteration parse/eval/free stress loop,
+  and a flat-RSS lifecycle check; every cdef symbol verified
+  against the shared library's exported symbols
+- README.adoc: Python quick start in the FFI section
+
+### Fixed — `TAURUS_BUILD_SHARED=ON` failed to link
+
+The CLI and the test tree linked the `taurus` alias, which points
+at the shared library when both variants are built — but
+`cli/output.c` and specs use internal accessors that the shared
+library does not export. Both now link `taurus_static` when it is
+built (no source changes). This unblocks the shared-library
+workflow documented for the Python binding.
+
+Follow-up scoped in `TODO.fix/191-cli-public-api.md`: refactor the
+CLI output formatters onto the public API only, and add public
+attribute-iteration functions — the public API currently offers
+attribute lookup by name and a count but no iteration, which keeps
+every binding from enumerating attributes.
 
 
 ## [0.21.6] - 2026-08-16
