@@ -1,13 +1,37 @@
 ## [Unreleased]
 
-## [0.21.5] - Y-08-16
+## [0.21.5] - 2026-08-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed — latent off-by-one in `//name` walk fallback (TODO 190)
 
-### Changed
+`vm_apply_absolute`'s non-index fallback added the root element
+UNCONDITIONALLY for `//name` (descendant-or-self) queries — but
+descendant-or-self matches the root only when the root's name
+matches; the index path applies exactly that filter via the name
+bucket. The fallback only ever executed when index construction
+failed, so no test had reached it: `count(//book)` on a document
+with three books returned 4. Root is now added only on a name
+match (hash prefilter + strcmp). Found by TODO 190's deferral
+routing real traffic through the path; the single root-cause fix
+cleared all 12 initially-failing tests.
 
-- (describe changes here)
+### Performance — element index built on the second axis query
+
+The per-document element index (TODO 132) was built on the FIRST
+descendant/absolute XPath query — two full tree walks plus
+per-name bucket allocations inside that query. A document that
+sees one query (the common parse-query-free lifecycle) never
+recovers that cost. The first axis query now walks directly
+through the existing fallback paths; the second and later
+queries get the index. Mutation invalidation semantics are
+unchanged.
+
+Measured on the parse+XPath+free cycle benchmark (CPU time):
+count(//*) 5.24 → 5.03 µs, count(//book) 5.15 → 5.03 µs, parity
+elsewhere; parse benchmarks unchanged. Also documented in the PR:
+taurus is at CPU parity with pugixml (~5 µs) on the full cycle
+for the 10 KB benchmark document — earlier "3-6x slower" ratios
+were wall-time artifacts of machine load.
 
 
 ## [0.21.4] - 2026-08-16
