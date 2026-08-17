@@ -175,3 +175,73 @@ void taurus_copy_count3_neon(char* dst, const char* src, size_t len,
 }
 
 #endif /* TAURUS_ARCH_ARM && __aarch64__ */
+
+/* Structural span scan (TODO 193 Phase 1). Marker detection is 8
+ * vector compares per 16-byte chunk ('<','>','/','\'','"','=','&'
+ * plus a c<=' ' range test for whitespace); the per-hit class comes
+ * from the shared 256-byte table — hits are ~1 per 8-15 bytes in
+ * real XML, so the scalar lookups are noise. The 16-bit mask is
+ * built with the bit-weight + horizontal-add trick: no NEON
+ * movemask exists, and weights sum to the exact bitmask because
+ * each bit appears once (no carries). */
+size_t taurus_text_scan_events_neon(const char* buf, size_t len,
+                                    TaurusScanEvent* out, size_t max) {
+    const uint8x16_t k_lt   = vdupq_n_u8('<');
+    const uint8x16_t k_gt   = vdupq_n_u8('>');
+    const uint8x16_t k_sl   = vdupq_n_u8('/');
+    const uint8x16_t k_eq   = vdupq_n_u8('=');
+    const uint8x16_t k_qs   = vdupq_n_u8('\'');
+    const uint8x16_t k_qd   = vdupq_n_u8('"');
+    const uint8x16_t k_amp  = vdupq_n_u8('&');
+    const uint8x16_t k_sp   = vdupq_n_u8(' ');
+    static const uint16_t sh8[8] = {0,1,2,3,4,5,6,7};
+    const uint16x8_t sh8v = vld1q_u16(sh8);
+
+    size_t n = 0;
+    const unsigned char* p = (const unsigned char*)buf;
+    const unsigned char* end = p + len;
+    size_t base = 0;
+
+    while (end - p >= 16 && n < max) {
+        uint8x16_t v = vld1q_u8(p);
+        uint8x16_t m = vorrq_u8(vceqq_u8(v, k_lt), vceqq_u8(v, k_gt));
+        m = vorrq_u8(m, vceqq_u8(v, k_sl));
+        m = vorrq_u8(m, vceqq_u8(v, k_eq));
+        m = vorrq_u8(m, vceqq_u8(v, k_qs));
+        m = vorrq_u8(m, vceqq_u8(v, k_qd));
+        m = vorrq_u8(m, vceqq_u8(v, k_amp));
+        m = vorrq_u8(m, vcltq_u8(v, k_sp));   /* c < ' ' = ctrl/ws */
+        m = vorrq_u8(m, vceqq_u8(v, k_sp));
+        if (vmaxvq_u8(m) != 0) {
+            /* NEON has no movemask: widen both halves, shift each
+             * lane by its own index (vector shift), reduce. */
+            uint8x16_t bits = vshrq_n_u8(m, 7);
+            uint16x8_t lo16 = vshlq_u16(vmovl_u8(vget_low_u8(bits)), sh8v);
+            uint16x8_t hi16 = vshlq_u16(vmovl_u8(vget_high_u8(bits)), sh8v);
+            unsigned mask =
+                (unsigned)vaddvq_u16(lo16) | ((unsigned)vaddvq_u16(hi16) << 8);
+            while (mask) {
+                if (n >= max) return max;
+                unsigned bit = mask & (unsigned)(-(int)mask);
+                unsigned idx = __builtin_ctz(mask);
+                out[n].offset = (uint32_t)(base + idx);
+                out[n].cls = taurus_dp_class_table[p[idx]];
+                n++;
+                mask ^= bit;
+            }
+        }
+        p += 16;
+        base += 16;
+    }
+    /* Tail: scalar, same table. */
+    while (p < end && n < max) {
+        unsigned char cls = taurus_dp_class_table[*p];
+        if (cls) {
+            out[n].offset = (uint32_t)((size_t)(p - (const unsigned char*)buf));
+            out[n].cls = cls;
+            n++;
+        }
+        p++;
+    }
+    return n;
+}

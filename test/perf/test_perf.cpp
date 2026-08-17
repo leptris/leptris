@@ -137,73 +137,70 @@ TEST(PerfRegression, DeepNestingIsRejectedQuickly) {
 // class) drives it toward 3x+ at these sizes.
 
 TEST(PerfRegression, AppendChildDoesNotRegress) {
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
-    ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-
-    const int half = 4000;
-    auto h1 = clock_type::now();
-    for (int i = 0; i < half; i++) {
-        TaurusElement c = taurus_element_create(doc, "c");
-        taurus_element_append_child(root, c);
-    }
-    double first = ElapsedUs(h1);
-    auto h2 = clock_type::now();
-    for (int i = 0; i < half; i++) {
-        TaurusElement c = taurus_element_create(doc, "c");
-        taurus_element_append_child(root, c);
-    }
-    double second = ElapsedUs(h2);
-
     /* Documented shape: append walks to the tail (last_child_off was
      * removed in TODO 155 Phase C to hold the 64 B element), so N
-     * appends are O(N^2) — the second half costs ~4x the first.
-     * The budget catches WORSE-than-documented: an O(N^3) regression
-     * reaches ~8x at 2x size. Restoring a last-child edge is the
+     * appends are O(N^2). Compare T(4N) vs T(N) on FRESH documents,
+     * min of 2 pairs: documented O(N^2) lands at ~16x, an O(N^3)
+     * regression at ~64x — the 30x budget separates both with
+     * margin on any runner. Restoring a last-child edge is the
      * known fix if programmatic DOM building matters; see TODO 155. */
-    ASSERT_GT(first, 1.0);
-    EXPECT_LT(second, 6.5 * first)
-        << "AppendChild worse than documented O(N^2): second half "
-        << second << " us vs first half " << first << " us";
-
-    taurus_document_free(doc);
+    auto append_us = [](int n) {
+        TaurusStatus st;
+        TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
+        TaurusElement root = taurus_document_root(doc);
+        auto start = clock_type::now();
+        for (int i = 0; i < n; i++) {
+            TaurusElement c = taurus_element_create(doc, "c");
+            taurus_element_append_child(root, c);
+        }
+        double us = ElapsedUs(start);
+        taurus_document_free(doc);
+        return us;
+    };
+    double small = 1e18, large = 1e18;
+    for (int rep = 0; rep < 2; rep++) {
+        double a = append_us(1500);
+        double b = append_us(6000);
+        if (a < small) small = a;
+        if (b < large) large = b;
+    }
+    ASSERT_GT(small, 1.0);
+    EXPECT_LT(large, 30.0 * small)
+        << "AppendChild worse than documented O(N^2): T(4N) " << large
+        << " us vs T(N) " << small << " us";
 }
 
 TEST(PerfRegression, SetAttributeDoesNotRegress) {
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
-    ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-
-    const int half = 150;
-    char name[16], value[32];
-    auto h1 = clock_type::now();
-    for (int i = 0; i < half; i++) {
-        snprintf(name, sizeof(name), "a%d", i);
-        snprintf(value, sizeof(value), "v-%d", i);
-        taurus_element_set_attribute(root, name, value);
-    }
-    double first = ElapsedUs(h1);
-    auto h2 = clock_type::now();
-    for (int i = half; i < 2 * half; i++) {
-        snprintf(name, sizeof(name), "a%d", i);
-        snprintf(value, sizeof(value), "v-%d", i);
-        taurus_element_set_attribute(root, name, value);
-    }
-    double second = ElapsedUs(h2);
-
     /* Documented shape: attribute insertion walks the singly-linked
-     * attribute list to the tail (O(attrs) per call, O(N^2) total —
-     * the parser keeps its own last-attr cache, TODO 159 Phase G,
-     * but the public API does not). Budget catches worse-than-
-     * documented complexity. */
-    ASSERT_GT(first, 1.0);
-    EXPECT_LT(second, 6.5 * first)
-        << "SetAttribute worse than documented O(N^2): second half "
-        << second << " us vs first half " << first << " us";
-
-    taurus_document_free(doc);
+     * list to the tail (O(N^2) total; the parser keeps its own
+     * last-attr cache, TODO 159 Phase G). T(4N) vs T(N), min of 2:
+     * documented ~16x, budget 30x catches worse. */
+    auto setattr_us = [](int n) {
+        TaurusStatus st;
+        TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
+        TaurusElement root = taurus_document_root(doc);
+        char name[16], value[32];
+        auto start = clock_type::now();
+        for (int i = 0; i < n; i++) {
+            snprintf(name, sizeof(name), "a%d", i);
+            snprintf(value, sizeof(value), "v-%d", i);
+            taurus_element_set_attribute(root, name, value);
+        }
+        double us = ElapsedUs(start);
+        taurus_document_free(doc);
+        return us;
+    };
+    double small = 1e18, large = 1e18;
+    for (int rep = 0; rep < 2; rep++) {
+        double a = setattr_us(150);
+        double b = setattr_us(600);
+        if (a < small) small = a;
+        if (b < large) large = b;
+    }
+    ASSERT_GT(small, 1.0);
+    EXPECT_LT(large, 30.0 * small)
+        << "SetAttribute worse than documented O(N^2): T(4N) " << large
+        << " us vs T(N) " << small << " us";
 }
 
 TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
