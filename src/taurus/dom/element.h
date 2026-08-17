@@ -777,6 +777,8 @@ const char* taurus_element_lookup_namespace(TaurusElement elem,
 
 /* Children manipulation */
 void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child);
+void taurus_element_append_child_internal_doc(TaurusElement elem, TaurusNode* child,
+                                              struct taurus_document* doc);
 void taurus_element_prepend_child_internal(TaurusElement elem, TaurusNode* child);
 
 /* Bulk allocation for subtree copy (10-15% faster for large subtrees) */
