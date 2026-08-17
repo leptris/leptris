@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.24.6] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.24.5] - 2026-08-17
 
 ### Performance — any-size mutation: overflow-table slabs (TODO 195b)
