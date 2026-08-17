@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.0] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.24.7] - 2026-08-17
 
 ### Performance — fused text-only element serialization (TODO 194d)
