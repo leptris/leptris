@@ -1,13 +1,29 @@
 ## [Unreleased]
 
-## [0.24.7] - Y-08-17
+## [0.24.7] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — fused text-only element serialization (TODO 194d)
 
-### Changed
+A compact-mode text-only element — `<p>text</p>`, the dominant
+shape in text-heavy documents — emitted through five buffer calls
+plus a node-dispatch hop. A pure inline escaper (preserving the
+entity-reference semantics of the run-batched walkers: references
+emit as-is, bare `&` escapes, quotes stay ordinary in text mode)
+now emits the entire open tag + escaped text + close tag from a
+single worst-case reservation.
 
-- (describe changes here)
+Measured on a 1.6 MB text-heavy document: 1.06 -> **1.15 GB/s**.
+Cumulative across 194b/c/d: 0.40 -> 1.15 GB/s (2.9x), narrowing
+the pugixml gap from 3.8x to 1.34x; the remainder is the
+per-element recursion and the text-only detection walk.
+
+Also settled by analysis: the mutation-side attribute hash for
+`set_attribute` is not worth building — sequential NEW attribute
+names must walk for duplicate rejection regardless of indexing
+(pugixml pays the same walk), so the fair 1.4x gap is compact-
+pointer decode constant, near the memory model's floor.
+
+558 tests including serialize round-trips, ASAN clean, zero leaks.
 
 
 ## [0.24.6] - 2026-08-17
