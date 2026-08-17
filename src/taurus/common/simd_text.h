@@ -14,6 +14,7 @@
 #define TAURUS_COMMON_SIMD_TEXT_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +56,42 @@ void taurus_text_count3(const char* s, size_t len,
 void taurus_copy_count3(char* dst, const char* src, size_t len,
                         char c0, char c1, char c2,
                         size_t* n0, size_t* n1, size_t* n2);
+
+/* ---- Structural span scan (TODO 193 Phase 1: parser v3) ----
+ *
+ * Records every byte of the XML structural set in [buf, buf+len)
+ * as an event. Pass 2 of the two-pass parser walks ONLY these
+ * events (typically ~1 per 8-15 bytes in real XML), replacing the
+ * byte-at-a-time char+table classification that dominates the
+ * single-pass parser (89% of K=50 parse time) with one vector
+ * traversal plus a per-hit class lookup. */
+
+#define DPSCAN_WS       1u  /* c <= ' ' (whitespace/controls) */
+#define DPSCAN_LT       2u  /* '<' */
+#define DPSCAN_GT       3u  /* '>' */
+#define DPSCAN_SLASH    4u  /* '/' */
+#define DPSCAN_EQ       5u  /* '=' */
+#define DPSCAN_QUOTE_S  6u  /* '\'' */
+#define DPSCAN_QUOTE_D  7u  /* '"' */
+#define DPSCAN_AMP      8u  /* '&' */
+
+typedef struct {
+    uint32_t offset;   /* byte offset from buf */
+    uint8_t  cls;      /* DPSCAN_* — never 0 */
+} TaurusScanEvent;
+
+/* Shared classification table: taurus_dp_class_table[byte] is 0 for
+ * ordinary bytes, else the DPSCAN_* class. The <= ' ' class means
+ * control bytes are reported as WS; pass 2 treats non-XML controls
+ * as ordinary scan bytes, matching the single-pass parser. */
+extern unsigned char taurus_dp_class_table[256];
+
+/* Append events for every structural byte to out (capacity max).
+ * Returns the number of events written; returns max unchanged as
+ * an overflow signal (caller must detect return == max and treat
+ * the scan as truncated). len == 0 returns 0. */
+size_t taurus_text_scan_events(const char* buf, size_t len,
+                               TaurusScanEvent* out, size_t max);
 
 #ifdef __cplusplus
 }

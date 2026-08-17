@@ -159,3 +159,58 @@ void taurus_copy_count3(char* dst, const char* src, size_t len,
     memcpy(dst, src, len);
     taurus_text_count3(src, len, c0, c1, c2, n0, n1, n2);
 }
+
+/* ---- Structural span scan (TODO 193 Phase 1) ---- */
+
+unsigned char taurus_dp_class_table[256];
+/* One-time fill (constructor): explicit markers for the structural
+ * bytes, WS for the whole c <= ' ' range (controls included — pass
+ * 2 treats non-whitespace controls as ordinary scan bytes, matching
+ * the single-pass parser), 0 elsewhere. */
+static void scan_table_fill(void) __attribute__((constructor));
+static void scan_table_fill(void) {
+    static int done = 0;
+    if (done) return;
+    for (int i = 0; i <= ' '; i++) taurus_dp_class_table[i] = DPSCAN_WS;
+    taurus_dp_class_table['<']  = DPSCAN_LT;
+    taurus_dp_class_table['>']  = DPSCAN_GT;
+    taurus_dp_class_table['/']  = DPSCAN_SLASH;
+    taurus_dp_class_table['=']  = DPSCAN_EQ;
+    taurus_dp_class_table['\''] = DPSCAN_QUOTE_S;
+    taurus_dp_class_table['"']  = DPSCAN_QUOTE_D;
+    taurus_dp_class_table['&']  = DPSCAN_AMP;
+    done = 1;
+}
+
+static size_t scan_events_scalar(const char* buf, size_t len,
+                                 TaurusScanEvent* out, size_t max) {
+    scan_table_fill();
+    size_t n = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char cls = taurus_dp_class_table[(unsigned char)buf[i]];
+        if (cls) {
+            if (n >= max) return max;
+            out[n].offset = (uint32_t)i;
+            out[n].cls = cls;
+            n++;
+        }
+    }
+    return n;
+}
+
+static size_t (*g_scan_fn)(const char*, size_t, TaurusScanEvent*, size_t) = NULL;
+
+size_t taurus_text_scan_events(const char* buf, size_t len,
+                               TaurusScanEvent* out, size_t max) {
+    if (!g_scan_fn) {
+        g_scan_fn = scan_events_scalar;
+#if defined(TAURUS_ARCH_ARM) && defined(__aarch64__)
+        if (taurus_cpu_detect() >= TAURUS_CPU_NEON) {
+            extern size_t taurus_text_scan_events_neon(const char*, size_t,
+                                                       TaurusScanEvent*, size_t);
+            g_scan_fn = taurus_text_scan_events_neon;
+        }
+#endif
+    }
+    return g_scan_fn(buf, len, out, max);
+}

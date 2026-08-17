@@ -47,7 +47,14 @@ function(taurus_add_test name)
         # Flat doc internals — used by flat parse specs (TODO 139).
         ${PROJECT_SOURCE_DIR}/src/taurus/flat)
     target_compile_features(${name} PRIVATE cxx_std_11)
-    gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
+    # Timing specs measure ratios; concurrent processes steal cache
+    # and skew short measurements — run test_perf's cases serially.
+    if(name STREQUAL "test_perf")
+        gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST
+                             PROPERTIES RUN_SERIAL TRUE)
+    else()
+        gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
+    endif()
     add_dependencies(check_all ${name})
 endfunction()
 
@@ -64,6 +71,9 @@ function(taurus_add_cli_test name)
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        # CLI cases spawn subprocesses; fork/exec contention under
+        # parallel ctest flakes them — run serially.
+        RUN_SERIAL TRUE
     )
     add_dependencies(check_all ${name} taurus-cli)
 endfunction()
@@ -76,6 +86,7 @@ taurus_add_test(test_vtable     dom/test_vtable.cpp)
 taurus_add_test(test_text_borrowed dom/test_text_borrowed.cpp)
 taurus_add_test(test_compact    dom/test_compact.cpp)
 taurus_add_test(test_simd_text  common/test_simd_text.cpp)
+taurus_add_test(test_simd_spans common/test_simd_spans.cpp)
 taurus_add_test(test_pool       memory/test_pool.cpp)
 taurus_add_test(test_arena      memory/test_arena.cpp)
 taurus_add_test(test_pool_arena memory/test_pool_arena.cpp)

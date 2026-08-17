@@ -62,3 +62,31 @@ Scan classification is the dominant shared cost; SIMD pass 1 at
 even 2x scalar rate converts the 1.5-1.8x gap to parity-or-better
 at mid/high K, where the gap is largest (1.84x/1.83x). K=5 stays
 wiring-bound (already 1.54x).
+
+## VERDICT (2026-08-17): two-pass v3 DEAD by floor probe; scanner ships as a primitive
+
+Phase 1 delivered the SIMD structural span scanner
+(`taurus_text_scan_events`, NEON + scalar, parity-tested over
+all-256-bytes / boundary lengths / realistic docs / 50 random
+buffers): **3.17 GB/s vs 0.46 GB/s for the scalar table loop —
+6.85x classification rate.** The movemask uses widen +
+per-lane-shift + horizontal-reduce (vpaddq(a,a) interleaves from
+both operands and cannot build a bitmask — probed empirically).
+
+The architecture died in the go/no-go: on the K=50 doc the event
+density is 1/4.1 bytes (over half the events are WS separators),
+and the v3 FLOOR — memcpy + full scan + a stub event walk that
+builds NOTHING — costs **531 us = 88.5% of the entire current
+600 us parse** (which includes full tree building). There is no
+headroom for materialization; the two-pass design re-walks what
+the fused single pass does once. Probe cost: one afternoon vs an
+XL build.
+
+Final parse position: every architectural class is now measured —
+11 micro/structural experiments, the out-of-line split, and the
+SIMD two-pass floor. The single-pass parser is at a genuine
+global optimum on this compiler/hardware; taurus parses 6-14x
+faster than libxml2 and 1.5-1.8x behind pugixml, and that gap
+has no remaining lever of any known class. The scanner remains
+shipped infrastructure for future consumers (XInclude href
+scanning, entity pre-location).
