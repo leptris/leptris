@@ -696,6 +696,17 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
         taurus_node_unlink(child);
     }
 
+    /* Mutation tail cache (TODO 195): sequential appends target the
+     * same parent; the cached tail skips the O(N) walk. Verified by
+     * the child's parent back-pointer — a removed or re-parented
+     * cached tail fails the check and falls back to the walk. */
+    struct taurus_document* mut_doc = taurus_element_get_document(elem);
+    TaurusNode* mut_tail =
+        (mut_doc && mut_doc->mut_tail_parent == elem && mut_doc->mut_tail_child &&
+         taurus_node_parent(mut_doc->mut_tail_child) == (TaurusNode*)elem)
+            ? mut_doc->mut_tail_child
+            : NULL;
+
     /* For element children, set up linked list structure */
     if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
         TaurusElement child_elem = (TaurusElement)child;
@@ -707,7 +718,7 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
         /* Append to end of children list.
          * last_child may point to any node type (text/comment/etc.) so
          * we set its next_sibling via the type-dispatching setter. */
-        TaurusNode* last_node = taurus_elem_last_child(elem);
+        TaurusNode* last_node = mut_tail ? mut_tail : taurus_elem_last_child(elem);
         if (last_node) {
             taurus_node_set_next_sibling(last_node, (TaurusNode*)child_elem);
 
@@ -723,7 +734,7 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
         elem->child_count++;
     } else {
         /* For non-element children (text, cdata, comment, pi), append to linked list */
-        TaurusNode* last = taurus_elem_last_child(elem);
+        TaurusNode* last = mut_tail ? mut_tail : taurus_elem_last_child(elem);
         if (last) {
             taurus_node_set_next_sibling(last, (TaurusNode*)child);
             taurus_elem_set_last_child(elem, (TaurusNode*)child);
