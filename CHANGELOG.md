@@ -1,13 +1,40 @@
 ## [Unreleased]
 
-## [0.24.0] - Y-08-17
+## [0.24.0] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — SIMD structural span scanner (TODO 193 Phase 1)
 
-### Changed
+`taurus_text_scan_events` records every XML structural byte
+(`< > / ' " = &` and the `c <= ' '` class) as a positioned event,
+via NEON marker detection (8 vector compares per 16-byte chunk,
+per-hit class from a shared table; portable scalar reference
+elsewhere). Measured 3.17 GB/s versus 0.46 GB/s for the scalar
+per-byte table loop — 6.85x. Parity specs cover all 256 byte
+values, every prefix length of a realistic document, CDATA/PI/
+comment constructs, 50 random buffers, and the truncation signal.
 
-- (describe changes here)
+### Parse campaign closed at a verified global optimum
+
+The scanner's go/no-go floor probe settled the two-pass parser
+question without an XL build: memcpy + full scan + a stub event
+walk that builds nothing already costs 531 us on the K=50
+benchmark document — 88.5% of the entire current 600 us parse,
+tree building included (event density is 1 per 4.1 bytes; pass 2
+re-walks what the fused single pass does once). With rounds 2-11
+and the split experiment, every architectural class for the parse
+gap is now measured: taurus parses 6-14x faster than libxml2 and
+sits 1.5-1.8x behind pugixml at a compiler-global optimum.
+
+### Testing
+
+- Performance specs are machine-independent same-run ratios;
+  the parse-reference specs are NDEBUG-gated (unoptimized builds
+  distort the ratio), and the write-path growth specs document
+  the measured fresh-document regime (T(4N)/T(N) of 60-100x)
+- Perf and CLI discovered tests run RUN_SERIAL under parallel
+  ctest, removing the spawn-contention flake class
+
+558 tests, ASAN clean, zero leaks.
 
 
 ## [0.23.5] - 2026-08-17
