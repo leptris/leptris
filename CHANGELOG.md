@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.23.4] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.23.3] - 2026-08-17
 
 ### Performance — absolute `//name[@attr='value']` from the value bucket (TODO 192d)
