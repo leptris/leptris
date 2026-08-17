@@ -160,6 +160,61 @@ int buffer_has_error(SerializeBuffer* buf) {
  * XML Entity Escaping
  * ============================================================================ */
 
+
+/* Inline escaped-text emitter (TODO 194d): writes into a caller-
+ * reserved worst-case buffer (6 bytes per input byte), preserving
+ * the entity semantics of the previous per-run walkers — entity
+ * references emit as-is (text mode), bare & escapes, quotes are
+ * ordinary in text mode and escaped in attribute mode. */
+static char* emit_escaped_inline(char* out, const char* content,
+                                 size_t len, int attr_mode) {
+    size_t i = 0;
+    while (i < len) {
+        size_t run = i;
+        while (run < len) {
+            char c = content[run];
+            if (c == '&' || c == '<' || c == '>' ||
+                (attr_mode && (c == '"' || c == '\''))) {
+                break;
+            }
+            run++;
+        }
+        if (run > i) {
+            memcpy(out, &content[i], run - i);
+            out += run - i;
+            i = run;
+            if (i >= len) break;
+        }
+
+        if (content[i] == '&') {
+            size_t j = i + 1;
+            int found_semicolon = 0;
+            while (j < len && j < i + 12) {
+                if (content[j] == ';') { found_semicolon = 1; break; }
+                if (!isalnum((unsigned char)content[j]) && content[j] != '#' && content[j] != '-') break;
+                j++;
+            }
+            if (!attr_mode && found_semicolon && j > i + 1) {
+                size_t n = j - i + 1;
+                memcpy(out, &content[i], n);
+                out += n;
+                i = j + 1;
+            } else {
+                memcpy(out, "&amp;", 5);
+                out += 5;
+                i++;
+            }
+            continue;
+        }
+        if (content[i] == '<') { memcpy(out, "&lt;", 4); out += 4; }
+        else if (content[i] == '>') { memcpy(out, "&gt;", 4); out += 4; }
+        else if (attr_mode && content[i] == '"') { memcpy(out, "&quot;", 6); out += 6; }
+        else { memcpy(out, "&apos;", 6); out += 6; }
+        i++;
+    }
+    return out;
+}
+
 /* Escape special XML characters in text content.
  * Ordinary-character RUNS are bulk-appended (one capacity check +
  * one memcpy per run) instead of per-character appends — the
@@ -469,17 +524,25 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         }
 
         if (is_text_only && buf->indent_spaces == 0) {
-            /* Text-only element in compact mode - serialize inline */
-            /* Close opening tag */
-            buffer_append_char(buf, '>');
-
-            /* Serialize the single text child */
-            serialize_node_internal(taurus_node_first_child_internal((TaurusNode*)elem), buf);
-
-            /* Closing tag */
-            buffer_append(buf, "</");
-            buffer_append_len(buf, elem_name, elem_name_len);
-            buffer_append_char(buf, '>');
+            /* Text-only element, compact mode: ONE reservation + inline
+             * emission for the whole `<name>text</name>` (TODO 194d) —
+             * was five buffer calls plus a node-dispatch hop. */
+            TaurusTextNode* tn = (TaurusTextNode*)child;
+            const char* tc = taurus_text_get_content(tn);
+            size_t tlen = tc ? tn->content_len : 0;
+            buffer_ensure_capacity(buf, 2 + elem_name_len + 6 * tlen + 2 + 1);
+            char* te = buf->data + buf->size;
+            *te++ = '>';
+            if (tc && tlen) {
+                te = emit_escaped_inline(te, tc, tlen, 0);
+            }
+            *te++ = '<';
+            *te++ = '/';
+            memcpy(te, elem_name, elem_name_len);
+            te += elem_name_len;
+            *te++ = '>';
+            buf->size = (size_t)(te - buf->data);
+            buf->data[buf->size] = '\0';
         } else if (is_text_only && buf->indent_spaces > 0) {
             /* Text-only element with indenting - serialize with newlines */
             /* Close opening tag */
