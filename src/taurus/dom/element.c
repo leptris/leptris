@@ -766,6 +766,11 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
         /* Don't increment child_count for non-element children */
     }
 
+    if (mut_doc) {
+        mut_doc->mut_tail_parent = elem;
+        mut_doc->mut_tail_child = child;
+    }
+
     /* COW: Increment version on modification */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));
 }
