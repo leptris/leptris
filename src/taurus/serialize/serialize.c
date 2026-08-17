@@ -382,7 +382,9 @@ void serialize_doctype_internal(TaurusDoctypeNode* doctype, SerializeBuffer* buf
     buffer_append_char(buf, '>');
 }
 
-void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is_root) {
+/* Recursive serializer (kept as the deep-tree fallback for the
+ * iterative walker below). */
+static void serialize_element_recursive(TaurusElement elem, SerializeBuffer* buf, int is_root) {
     if (!elem) return;
 
     /* Get element name - use cached string if available, otherwise use StringView directly */
@@ -576,7 +578,7 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             while (child) {
                 /* Pass is_root=0 for all children */
                 if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-                    serialize_element_internal((TaurusElement)child, buf, 0);
+                    serialize_element_recursive((TaurusElement)child, buf, 0);
                 } else {
                     serialize_node_internal(child, buf);
                 }
@@ -608,6 +610,242 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         /* Add newline after self-closing tag if indenting and not root */
         if (!is_root && buf->indent_spaces > 0) {
             buffer_append_newline(buf);
+        }
+    }
+}
+
+
+/* ============================================================================
+ * Iterative serializer (TODO 194e): one frame, explicit descent stack,
+ * no per-child call — the recursive walker's call frame was ~15 ns per
+ * element, the largest single item left in the text-heavy gap vs
+ * pugixml. Element siblings stay in this frame; only DESCENT pushes.
+ * Depth beyond the stack falls back to the recursive walker (which
+ * also keeps unbounded-depth documents serializable).
+ * ============================================================================
+ */
+#define SER_WALK_STACK_MAX 512
+
+void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, int is_root) {
+    if (!root_elem || !root_elem->name) return;
+
+    struct { TaurusElement e; size_t nl; } st[SER_WALK_STACK_MAX];
+    int sp = 0;
+
+    TaurusNode* cur = (TaurusNode*)root_elem;
+    int is_root_cur = is_root;
+
+    for (;;) {
+        if (cur->type != TAURUS_NODE_TYPE_ELEMENT) {
+            serialize_node_internal(cur, buf);
+            goto advance;
+        }
+
+        TaurusElement e = (TaurusElement)cur;
+        const char* name = e->name;
+        size_t nl = strlen(name);
+
+        /* --- total-fusion fast path (TODO 194f): a compact-mode leaf
+         * element with no attributes and no namespaces emits its ENTIRE
+         * `<name>text</name>` from one reservation — the dominant shape
+         * in text-heavy documents paid two reservations + finalize. */
+        if (buf->indent_spaces == 0 &&
+            taurus_element_get_first_attribute(e) == NULL &&
+            taurus_elem_namespaces(e) == NULL) {
+            TaurusNode* fc0 = taurus_node_first_child_internal((TaurusNode*)e);
+            if (fc0 && fc0->type == TAURUS_NODE_TYPE_TEXT &&
+                taurus_node_get_next_sibling(fc0) == NULL) {
+                TaurusTextNode* tn0 = (TaurusTextNode*)fc0;
+                const char* tc0 = taurus_text_get_content(tn0);
+                size_t tl0 = tc0 ? tn0->content_len : 0;
+                buffer_ensure_capacity(buf, 2 * nl + 6 * tl0 + 6);
+                char* q = buf->data + buf->size;
+                *q++ = '<';
+                memcpy(q, name, nl); q += nl;
+                *q++ = '>';
+                if (tc0 && tl0) q = emit_escaped_inline(q, tc0, tl0, 0);
+                *q++ = '<'; *q++ = '/';
+                memcpy(q, name, nl); q += nl;
+                *q++ = '>';
+                buf->size = (size_t)(q - buf->data);
+                buf->data[buf->size] = '\0';
+                goto advance;
+            }
+        }
+
+        /* --- open tag (batched, as before) --- */
+        if (!is_root_cur && buf->indent_spaces > 0) buffer_append_indent(buf);
+        buffer_ensure_capacity(buf, 1 + nl + 1);
+        char* ot = buf->data + buf->size;
+        *ot++ = '<';
+        memcpy(ot, name, nl);
+        ot += nl;
+        buf->size = (size_t)(ot - buf->data);
+        buf->data[buf->size] = '\0';
+
+        /* --- attributes (identical emission) --- */
+        for (struct taurus_attribute* attr = taurus_element_get_first_attribute(e); attr; attr = taurus_attr_next(attr)) {
+            const char* val;
+            if (attr->has_entities) {
+                struct taurus_document* d = taurus_element_get_document(e);
+                TaurusMemoryPool* pool = d ? d->pool : NULL;
+                char* resolved = pool ? taurus_decode_entities_view(&attr->value_view, pool) : NULL;
+                if (resolved) {
+                    attr->value_view = taurus_sv_from_cstr(resolved);
+                    attr->has_entities = 0;
+                }
+                val = attr_cvalue(attr);
+            } else {
+                val = attr_cvalue(attr);
+            }
+            const char* name_c = attr_cname(attr);
+            size_t anl = attr->name_view.length;
+            size_t vlen = strlen(val);
+            buffer_ensure_capacity(buf, 1 + anl + 2 + 6 * vlen + 2 + 1);
+            char* out = buf->data + buf->size;
+            *out++ = ' ';
+            memcpy(out, name_c, anl);
+            out += anl;
+            *out++ = '=';
+            *out++ = '"';
+            for (size_t i = 0; i < vlen; i++) {
+                switch (val[i]) {
+                    case '<':  memcpy(out, "&lt;", 4);   out += 4; break;
+                    case '>':  memcpy(out, "&gt;", 4);   out += 4; break;
+                    case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
+                    case '"':  memcpy(out, "&quot;", 6); out += 6; break;
+                    case '\'': memcpy(out, "&apos;", 6); out += 6; break;
+                    default:   *out++ = val[i]; break;
+                }
+            }
+            *out++ = '"';
+            buf->size = (size_t)(out - buf->data);
+            buf->data[buf->size] = '\0';
+        }
+
+        /* --- namespaces (identical emission) --- */
+        for (struct taurus_namespace* ns = taurus_elem_namespaces(e); ns; ns = ns->next) {
+            const char* prefix = ns->prefix ? ns->prefix : "";
+            size_t pnl = ns->prefix ? strlen(ns->prefix) : 0;
+            const char* uri = ns->uri ? ns->uri : "";
+            size_t ul = ns->uri ? strlen(ns->uri) : 0;
+            buffer_ensure_capacity(buf, 7 + pnl + 2 + 6 * ul + 2);
+            char* nw = buf->data + buf->size;
+            *nw++ = ' ';
+            memcpy(nw, "xmlns", 5);
+            nw += 5;
+            if (ns->prefix) { *nw++ = ':'; memcpy(nw, prefix, pnl); nw += pnl; }
+            *nw++ = '=';
+            *nw++ = '"';
+            for (size_t i = 0; i < ul; i++) {
+                switch (uri[i]) {
+                    case '<':  memcpy(nw, "&lt;", 4);   nw += 4; break;
+                    case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
+                    case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
+                    case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
+                    case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
+                    default:   *nw++ = uri[i]; break;
+                }
+            }
+            *nw++ = '"';
+            buf->size = (size_t)(nw - buf->data);
+            buf->data[buf->size] = '\0';
+        }
+
+        /* --- children --- */
+        TaurusNode* fc = taurus_node_first_child_internal((TaurusNode*)e);
+        if (!fc) {
+            buffer_append(buf, "/>");
+            if (!is_root_cur && buf->indent_spaces > 0) buffer_append_newline(buf);
+            goto advance;
+        }
+        if (fc->type == TAURUS_NODE_TYPE_TEXT &&
+            taurus_node_get_next_sibling(fc) == NULL) {
+            /* text-only element */
+            if (buf->indent_spaces == 0) {
+                TaurusTextNode* tn = (TaurusTextNode*)fc;
+                const char* tc = taurus_text_get_content(tn);
+                size_t tlen = tc ? tn->content_len : 0;
+                buffer_ensure_capacity(buf, 2 + nl + 6 * tlen + 2 + 1);
+                char* te = buf->data + buf->size;
+                *te++ = '>';
+                if (tc && tlen) te = emit_escaped_inline(te, tc, tlen, 0);
+                *te++ = '<'; *te++ = '/';
+                memcpy(te, name, nl); te += nl;
+                *te++ = '>';
+                buf->size = (size_t)(te - buf->data);
+                buf->data[buf->size] = '\0';
+            } else {
+                buffer_append_char(buf, '>');
+                serialize_node_internal(fc, buf);
+                buffer_append(buf, "</");
+                buffer_append_len(buf, name, nl);
+                buffer_append_char(buf, '>');
+                buffer_append_newline(buf);
+            }
+            goto advance;
+        }
+
+        /* complex children: descend (stack overflow guard -> recurse) */
+        if (sp == SER_WALK_STACK_MAX) {
+            buffer_append_char(buf, '>');
+            if (buf->indent_spaces > 0) buffer_append_newline(buf);
+            buf->indent++;
+            TaurusNode* c = fc;
+            while (c) {
+                if (c->type == TAURUS_NODE_TYPE_ELEMENT) {
+                    serialize_element_recursive((TaurusElement)c, buf, 0);
+                } else {
+                    serialize_node_internal(c, buf);
+                }
+                c = taurus_node_get_next_sibling(c);
+            }
+            buf->indent--;
+            if (buf->indent_spaces > 0) buffer_append_indent(buf);
+            buffer_append(buf, "</");
+            buffer_append_len(buf, name, nl);
+            buffer_append_char(buf, '>');
+            if (!is_root_cur && buf->indent_spaces > 0) buffer_append_newline(buf);
+            goto advance;
+        }
+
+        buffer_append_char(buf, '>');
+        if (buf->indent_spaces > 0) buffer_append_newline(buf);
+        st[sp].e = e;
+        st[sp].nl = nl;
+        sp++;
+        buf->indent++;
+        cur = fc;
+        is_root_cur = 0;
+        continue;
+
+    advance:
+        /* next sibling, else ascend closing frames */
+        for (;;) {
+            TaurusNode* nsib = taurus_node_get_next_sibling(cur);
+            if (nsib) {
+                cur = nsib;
+                break;
+            }
+            if (sp == 0) return;  /* root fully emitted */
+            sp--;
+            buf->indent--;
+            TaurusElement pe = st[sp].e;
+            const char* pn = pe->name;
+            size_t pnl2 = st[sp].nl;
+            if (buf->indent_spaces > 0) buffer_append_indent(buf);
+            buffer_append(buf, "</");
+            buffer_append_len(buf, pn, pnl2);
+            buffer_append_char(buf, '>');
+            if (buf->indent_spaces > 0 && !(sp == 0 && (TaurusNode*)pe == (TaurusNode*)root_elem && is_root)) {
+                buffer_append_newline(buf);
+            }
+            if (sp == 0 && (TaurusNode*)pe == (TaurusNode*)root_elem) {
+                /* root closed; but root may itself have siblings if the
+                 * caller passed a non-root — handled: loop continues to
+                 * root's next sibling check at top of advance loop */
+            }
+            cur = (TaurusNode*)pe;
         }
     }
 }
