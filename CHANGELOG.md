@@ -1,13 +1,31 @@
 ## [Unreleased]
 
-## [0.24.5] - Y-08-17
+## [0.24.5] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — any-size mutation: overflow-table slabs (TODO 195b)
 
-### Changed
+Documents built through the mutation API allocate via scattered
+pool pages, so at large sizes compact-pointer offsets exceed their
+range and every tree-edge store falls back to the overflow table —
+which paid one malloc per entry and a byte-wise 8-multiply hash
+per call (91% of append time at ~20M children).
 
-- (describe changes here)
+- Overflow entries are now carved from 256-entry slabs: roughly
+  one malloc per 256 edges instead of one per edge; destruction
+  frees whole slabs
+- The pointer hash is multiply-shift Fibonacci hashing — two
+  operations instead of eight multiplies
+
+Combined with the tail cache from 0.24.4, sequential appends now
+measure ~81 ns each (from ~21 us at the start of the mutation
+campaign) — about 4.5x behind pugixml's ~18 ns, with the remaining
+gap identified as per-call constant (version increment,
+index-invalidation check, and the document-lookup walk, paid
+twice). Fair-semantics set_attribute sits ~1.4x behind (the
+earlier 53x figure compared against pugixml's check-free
+append_attribute).
+
+558 tests, ASAN clean.
 
 
 ## [0.24.4] - 2026-08-17
