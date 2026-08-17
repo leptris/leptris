@@ -1,13 +1,27 @@
 ## [Unreleased]
 
-## [0.24.6] - Y-08-17
+## [0.24.6] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — single document resolution per append (TODO 195c)
 
-### Changed
+The public `taurus_element_append_child` resolved the document
+three times per call — twice in the wrapper's index-invalidation
+guard, once inside the internal function for the tail cache —
+each resolution paying the parent-chain walk plus the root-map
+lookup. The wrapper now resolves the document once and passes it
+through a doc-taking internal variant; the existing signature
+delegates for the parser and modify-path call sites.
 
-- (describe changes here)
+Measured (1k sequential appends, on a machine at load average
+~466 — a floor reading): 81 ns -> 69-72 ns per append. Across the
+mutation campaign (0.24.4 tail cache, 0.24.5 overflow slabs, this
+release), sequential appends went from ~21 us to ~70 ns — about
+300x — and now sit ~4x behind pugixml's ~18 ns, with the residual
+being the COW version increment, compact-offset encoding, and
+allocation: the price of the copy-on-write and 4x memory-density
+features pugixml does not carry.
+
+558 tests, ASAN clean.
 
 
 ## [0.24.5] - 2026-08-17
