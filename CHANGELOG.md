@@ -1,13 +1,28 @@
 ## [Unreleased]
 
-## [0.24.1] - Y-08-17
+## [0.24.1] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — batched serialization writer (TODO 194)
 
-### Changed
+The serializer's hot paths no longer pay per-piece writer costs:
 
-- (describe changes here)
+- Attribute emission reserves capacity ONCE per attribute
+  (worst-case escape bound: name + quotes + 6x value bytes) and
+  emits inline — replacing five append calls per attribute, each
+  with its own capacity check and NUL store, and dropping the
+  strlen on names (views already carry the length)
+- Escaped text bulk-appends ordinary-character runs with one
+  memcpy per run instead of a per-character append call
+
+Measured on the 847 KB K=50 benchmark document (min of 10,
+Release): 1501 us -> 779 us (0.56 -> 1.09 GB/s) — 48% faster.
+pugixml's raw save to a string sink measures 856 us (0.99 GB/s)
+on the same machine: serialization now favors taurus.
+
+Output is byte-identical; 558 tests including the serialize
+round-trip specs, ASAN clean, zero leaks. The indexed-walk perf
+spec also moved to N-vs-3N sizing for ratio stability under ASAN
+and loaded runners.
 
 
 ## [0.24.0] - 2026-08-17
