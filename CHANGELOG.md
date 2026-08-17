@@ -1,13 +1,28 @@
 ## [Unreleased]
 
-## [0.24.4] - Y-08-17
+## [0.24.4] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — mutation tail cache, appends 45x faster (TODO 195)
 
-### Changed
+The public `taurus_element_append_child` walked to the child-list
+tail on every append — elements carry no last-child edge by design
+(the 64 B layout law) — making N sequential appends O(N^2). A
+document-level one-entry (parent, last-child) cache now serves the
+dominant pattern, appending in O(1); correctness is preserved by
+verifying the cached child's parent back-pointer, and stale
+entries (removed or re-parented children) fall back to the walk
+automatically.
 
-- (describe changes here)
+Measured: 10,000 sequential appends 212,458 us -> 4,742 us
+(**45x**; the quadratic is gone). ~474 ns per append remains
+against pugixml's ~18 ns — version increment, index-invalidation
+check, and the document lookup walk are the identified next trim.
+`taurus_element_set_attribute` is unchanged: its cost is the
+existing-attribute name check (O(N^2) per add; the list tail is
+already O(1)), which needs a mutation-side attribute hash —
+scoped as the follow-up.
+
+558 tests, ASAN clean.
 
 
 ## [0.24.3] - 2026-08-17
