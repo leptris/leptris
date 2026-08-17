@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.23.5] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.23.4] - 2026-08-17
 
 ### Performance — attr-EXISTS queries via the any-value bucket (TODO 192e)
