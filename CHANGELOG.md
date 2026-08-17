@@ -1,13 +1,37 @@
 ## [Unreleased]
 
-## [0.25.0] - Y-08-17
+## [0.25.0] - 2026-08-18
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — iterative serializer + total-fusion leaves (TODO 194e/f)
 
-### Changed
+The element serializer's structural endgame, closing the
+serialization campaign (194a-f):
 
-- (describe changes here)
+- **Iterative sibling walk** (pugixml's `node_output` shape): one
+  frame with an explicit descent stack replaces the per-child
+  recursive call. Depth beyond 512 falls back to the recursive
+  walker — which also removes the recursion depth limit for deep
+  mutation-built trees.
+- **Total-fusion leaf path**: a compact-mode leaf element with no
+  attributes and no namespaces emits its entire `<name>text</name>`
+  from a single worst-case reservation.
+
+Measured (min of 20, Release, same machine as the pugixml
+references):
+
+| Shape | before | after | pugixml |
+|---|---|---|---|
+| attribute-heavy | 1.09 GB/s | 1.09 | 0.99 — ahead |
+| pretty-print | 0.54 | **0.60** | 0.52 — ahead |
+| small | ~0 | ~0 | tie |
+| namespaced | 0.68 | **0.79** | 0.84 — within 1.06x |
+| text-heavy | 1.15 | **1.19** | 1.54 — within 1.29x |
+
+Text-heavy output has improved 3x across the campaign (0.40 ->
+1.19 GB/s); its residual is the per-element strlen, text
+materialization, and child-detection decodes. Output is
+byte-identical: 558 tests including all serialize round-trip
+specs, ASAN clean, zero leaks.
 
 
 ## [0.24.7] - 2026-08-17
