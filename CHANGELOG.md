@@ -1,13 +1,31 @@
 ## [Unreleased]
 
-## [0.23.5] - Y-08-17
+## [0.23.5] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Documentation — parse endgame: round 11 gate-fail + parser v3 design
 
-### Changed
+The parse campaign's eleventh measured experiment closed the last
+architectural hypothesis for the current single-pass parser. A
+fresh 767-sample profile places 89% of K=50 parse time in the
+attribute-scan region (8% in the fused copy+count, <3% elsewhere);
+forcing `dp_parse_attrs` out of line — so the compiler gets an
+independent optimization surface for the attr loop — passed all
+553 tests but regressed the 8-run interleaved gate (K=20 +2.7%,
+K=50 +1.5%) and was reverted. Together with rounds 2-10 this
+establishes the single-pass parser as compiler-globally optimal:
+no C-level edit of any class moves mid-K.
 
-- (describe changes here)
+`TODO.fix/193-parser-v3-simd.md` scopes the remaining path: a
+two-pass SIMD span-scanner. Pass 1 classifies bytes into a span/
+event index with NEON/AVX2 (branch-free, reusing the proven
+simd_text framework) instead of the byte-at-a-time
+classify-by-table loop both we and pugixml pay today; pass 2
+materializes the tree from spans through the existing correctness
+paths. Ship behind a build flag, flip after gates. Context: taurus
+already parses 6-14x faster than libxml2 across the K matrix; the
+1.5-1.8x gap to pugixml is the target.
+
+No code changes in this release; documentation only.
 
 
 ## [0.23.4] - 2026-08-17
