@@ -160,31 +160,35 @@ int buffer_has_error(SerializeBuffer* buf) {
  * XML Entity Escaping
  * ============================================================================ */
 
-/* Escape special XML characters in text content */
+/* Escape special XML characters in text content.
+ * Ordinary-character RUNS are bulk-appended (one capacity check +
+ * one memcpy per run) instead of per-character appends — the
+ * per-byte path was the serializer's dominant cost (TODO 194). */
 static void buffer_append_escaped(SerializeBuffer* buf, const char* str) {
     if (!str) return;
 
+    size_t run = 0;
     for (size_t i = 0; str[i] != '\0'; i++) {
+        const char* rep = NULL;
+        size_t rep_len = 0;
         switch (str[i]) {
-            case '<':
-                buffer_append(buf, "&lt;");
-                break;
-            case '>':
-                buffer_append(buf, "&gt;");
-                break;
-            case '&':
-                buffer_append(buf, "&amp;");
-                break;
-            case '"':
-                buffer_append(buf, "&quot;");
-                break;
-            case '\'':
-                buffer_append(buf, "&apos;");
-                break;
+            case '<':  rep = "&lt;";   rep_len = 4; break;
+            case '>':  rep = "&gt;";   rep_len = 4; break;
+            case '&':  rep = "&amp;";  rep_len = 5; break;
+            case '"':  rep = "&quot;"; rep_len = 6; break;
+            case '\'': rep = "&apos;"; rep_len = 6; break;
             default:
-                buffer_append_char(buf, str[i]);
-                break;
+                run++;
+                continue;
         }
+        if (run > 0) {
+            buffer_append_len(buf, &str[i - run], run);
+            run = 0;
+        }
+        buffer_append_len(buf, rep, rep_len);
+    }
+    if (run > 0) {
+        buffer_append_len(buf, str, run);
     }
 }
 
@@ -373,11 +377,36 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
             val = attr_cvalue(attr);
         }
 
-        buffer_append_char(buf, ' ');
-        buffer_append(buf, attr_cname(attr));
-        buffer_append(buf, "=\"");
-        buffer_append_attribute_value(buf, val);
-        buffer_append_char(buf, '"');
+        /* One capacity reservation + raw emission per attribute
+         * (TODO 194): worst-case escaping is 6 bytes per value byte,
+         * so name + quotes + fully-escaped value fits one check.
+         * Replaces five append calls (each with its own capacity
+         * check and NUL store) per attribute. */
+        const char* name_c = attr_cname(attr);
+        size_t name_len = attr->name_view.length;
+        size_t val_len = strlen(val);
+        size_t needed = 1 + name_len + 2 + 6 * val_len + 2;
+        buffer_ensure_capacity(buf, needed + 1);
+
+        char* out = buf->data + buf->size;
+        *out++ = ' ';
+        memcpy(out, name_c, name_len);
+        out += name_len;
+        *out++ = '=';
+        *out++ = '"';
+        for (size_t i = 0; i < val_len; i++) {
+            switch (val[i]) {
+                case '<':  memcpy(out, "&lt;", 4);   out += 4; break;
+                case '>':  memcpy(out, "&gt;", 4);   out += 4; break;
+                case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
+                case '"':  memcpy(out, "&quot;", 6); out += 6; break;
+                case '\'': memcpy(out, "&apos;", 6); out += 6; break;
+                default:   *out++ = val[i]; break;
+            }
+        }
+        *out++ = '"';
+        buf->size = (size_t)(out - buf->data);
+        buf->data[buf->size] = '\0';
     }
 
     /* Namespaces - serialize as xmlns attributes */

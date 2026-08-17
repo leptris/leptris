@@ -244,15 +244,15 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
     double small = 1e18, large = 1e18;
     for (int rep = 0; rep < 3; rep++) {
         double s = sweep_us(25);
-        double l = sweep_us(50);
+        double l = sweep_us(75);
         if (s < small) small = s;
         if (l < large) large = l;
     }
-    /* Same work per outer iteration; O(N^2) sweep => large/small ~ 4x.
-     * Budget 6.5x absorbs ratio jitter on loaded runners while
-     * staying far below the ~8x an O(N^3) regression reaches. */
-    EXPECT_LT(large, 6.5 * small)
-        << "Indexed child access complexity regression: 50-child sweep "
+    /* 3x size: O(N^2) sweep => large/small ~ 9x; an O(N^3)
+     * regression reaches ~27x. Budget 18x separates both with
+     * margin on loaded runners and under ASAN. */
+    EXPECT_LT(large, 18.0 * small)
+        << "Indexed child access complexity regression: 75-child sweep "
         << large << " us vs 25-child sweep " << small << " us";
 }
 
