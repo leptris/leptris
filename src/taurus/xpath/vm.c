@@ -1312,10 +1312,15 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 const char* attr_name = (attr_idx < bc->const_count &&
                                          bc->constants[attr_idx].type == XPATH_CONST_STRING)
                                         ? bc->constants[attr_idx].v.string : NULL;
-                const char* value = (value_idx < bc->const_count &&
+                /* 0xFFFF = no value operand: attr-EXISTS predicate. */
+                const char* value = (value_idx != 0xFFFF &&
+                                     value_idx < bc->const_count &&
                                      bc->constants[value_idx].type == XPATH_CONST_STRING)
                                     ? bc->constants[value_idx].v.string : NULL;
-                if (!name || !attr_name || !value) { vm.error = 1; break; }
+                if (!name || !attr_name || (value_idx != 0xFFFF && !value)) {
+                    vm.error = 1;
+                    break;
+                }
 
                 XPathNodeSet* input = vm_detach_input_nodeset(&vm);
                 if (!input) { vm.error = 1; break; }
@@ -1334,13 +1339,37 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 if (index && index->subtree_end) {
                     const TaurusElementIndexAttrBucket* abucket =
                         taurus_element_index_lookup_attr(index, attr_name);
-                    const TaurusElementIndexAttrValue* vbucket =
-                        abucket ? taurus_element_index_attr_lookup_value(abucket, value)
-                                : NULL;
-                    /* No such attr=value anywhere: empty answer. A
-                     * value bucket without positions must fall back. */
-                    if (!vbucket ||
-                        (vbucket->count > 0 && vbucket->match_positions)) {
+                    /* Equality reads the value bucket; existence reads
+                     * the any-value bucket (TODO 192e). No bucket for
+                     * this attribute anywhere: empty answer. A bucket
+                     * without positions must fall back. */
+                    const TaurusElement* bucket_matches = NULL;
+                    const size_t* bucket_positions = NULL;
+                    size_t bucket_count = 0;
+                    int bucket_valid = 0;
+                    if (value) {
+                        const TaurusElementIndexAttrValue* vbucket =
+                            abucket ? taurus_element_index_attr_lookup_value(abucket, value)
+                                    : NULL;
+                        if (!vbucket ||
+                            (vbucket->count > 0 && vbucket->match_positions)) {
+                            bucket_valid = 1;
+                            if (vbucket) {
+                                bucket_matches = vbucket->matches;
+                                bucket_positions = vbucket->match_positions;
+                                bucket_count = vbucket->count;
+                            }
+                        }
+                    } else if (!abucket ||
+                               (abucket->count > 0 && abucket->match_positions)) {
+                        bucket_valid = 1;
+                        if (abucket) {
+                            bucket_matches = abucket->matches;
+                            bucket_positions = abucket->match_positions;
+                            bucket_count = abucket->count;
+                        }
+                    }
+                    if (bucket_valid) {
                         size_t n_ctx = 0;
                         for (size_t i = 0; i < input->count; i++) {
                             if (node_is_element(input->nodes[i])) n_ctx++;
@@ -1376,26 +1405,26 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                             int have_prev = 0;
                             for (size_t a = 0; a < k; a++) {
                                 if (have_prev && los[a] <= prev_hi) continue;
-                                if (vbucket && vbucket->count > 0) {
+                                if (bucket_count > 0) {
                                     size_t lo2 = los[a], hi2 = his[a];
-                                    size_t l = 0, r = vbucket->count;
+                                    size_t l = 0, r = bucket_count;
                                     while (l < r) {
                                         size_t mid = l + (r - l) / 2;
-                                        if (vbucket->match_positions[mid] < lo2) {
+                                        if (bucket_positions[mid] < lo2) {
                                             l = mid + 1;
                                         } else {
                                             r = mid;
                                         }
                                     }
                                     for (size_t j = l;
-                                         j < vbucket->count &&
-                                         vbucket->match_positions[j] <= hi2;
+                                         j < bucket_count &&
+                                         bucket_positions[j] <= hi2;
                                          j++) {
                                         if (taurus_elem_name_is(
-                                                vbucket->matches[j], name,
+                                                bucket_matches[j], name,
                                                 taurus_name_hash_compute(name))) {
                                             xpath_nodeset_add_fast(
-                                                out, vbucket->matches[j]);
+                                                out, bucket_matches[j]);
                                         }
                                     }
                                 }
@@ -1433,7 +1462,8 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                                     break;
                                 }
                             }
-                            if (v && strcmp(v, value) == 0) {
+                            if (value ? (v && strcmp(v, value) == 0)
+                                      : (v != NULL)) {
                                 w++;
                             } else {
                                 out->nodes[w] = out->nodes[out->count - 1];
@@ -1603,10 +1633,15 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 const char* attr_name = (attr_idx < bc->const_count &&
                                          bc->constants[attr_idx].type == XPATH_CONST_STRING)
                                         ? bc->constants[attr_idx].v.string : NULL;
-                const char* value = (value_idx < bc->const_count &&
+                /* 0xFFFF = no value operand: attr-EXISTS predicate. */
+                const char* value = (value_idx != 0xFFFF &&
+                                     value_idx < bc->const_count &&
                                      bc->constants[value_idx].type == XPATH_CONST_STRING)
                                     ? bc->constants[value_idx].v.string : NULL;
-                if (!name || !attr_name || !value) { vm.error = 1; break; }
+                if (!name || !attr_name || (value_idx != 0xFFFF && !value)) {
+                    vm.error = 1;
+                    break;
+                }
 
                 struct taurus_element_index* index =
                     (ctx && ctx->document) ? ctx->document->element_index : NULL;
@@ -1623,17 +1658,37 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                 if (index && index->subtree_end) {
                     const TaurusElementIndexAttrBucket* abucket =
                         taurus_element_index_lookup_attr(index, attr_name);
-                    const TaurusElementIndexAttrValue* vbucket =
-                        abucket ? taurus_element_index_attr_lookup_value(abucket, value)
-                                : NULL;
-                    if (!vbucket ||
-                        (vbucket->count > 0 && vbucket->match_positions)) {
+                    /* Equality reads the value bucket; existence reads
+                     * the any-value bucket (TODO 192e). */
+                    const TaurusElement* bucket_matches = NULL;
+                    size_t bucket_count = 0;
+                    int bucket_valid = 0;
+                    if (value) {
+                        const TaurusElementIndexAttrValue* vbucket =
+                            abucket ? taurus_element_index_attr_lookup_value(abucket, value)
+                                    : NULL;
+                        if (!vbucket ||
+                            (vbucket->count > 0 && vbucket->match_positions)) {
+                            bucket_valid = 1;
+                            if (vbucket) {
+                                bucket_matches = vbucket->matches;
+                                bucket_count = vbucket->count;
+                            }
+                        }
+                    } else if (!abucket ||
+                               (abucket->count > 0 && abucket->match_positions)) {
+                        bucket_valid = 1;
+                        if (abucket) {
+                            bucket_matches = abucket->matches;
+                            bucket_count = abucket->count;
+                        }
+                    }
+                    if (bucket_valid) {
                         uint16_t name_hash = taurus_name_hash_compute(name);
-                        for (size_t j = 0;
-                             vbucket && j < vbucket->count; j++) {
-                            if (taurus_elem_name_is(vbucket->matches[j],
+                        for (size_t j = 0; j < bucket_count; j++) {
+                            if (taurus_elem_name_is(bucket_matches[j],
                                                     name, name_hash)) {
-                                xpath_nodeset_add_fast(out, vbucket->matches[j]);
+                                xpath_nodeset_add_fast(out, bucket_matches[j]);
                             }
                         }
                         served = 1;
@@ -1663,7 +1718,8 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                                     break;
                                 }
                             }
-                            if (v && strcmp(v, value) == 0) {
+                            if (value ? (v && strcmp(v, value) == 0)
+                                      : (v != NULL)) {
                                 w++;
                             } else {
                                 out->nodes[w] = out->nodes[out->count - 1];
