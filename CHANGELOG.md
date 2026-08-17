@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.24.0] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.23.5] - 2026-08-17
 
 ### Documentation — parse endgame: round 11 gate-fail + parser v3 design
