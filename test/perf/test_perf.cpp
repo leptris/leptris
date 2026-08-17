@@ -75,8 +75,16 @@ double MemcpyRefUs(const char* xml, size_t len, int iters) {
 
 TEST(PerfRegression, SmallDocumentParseIsFast) {
     const char xml[] = "<root><item id='1'>text</item><item id='2'/></root>";
-    double parse_us = ParseBenchUs(xml, std::strlen(xml), 5000);
-    double ref_us = MemcpyRefUs(xml, std::strlen(xml), 5000);
+    /* Min-of-3 both sides: shared runners preempt the CPU-bound
+     * parse while the cache-resident memcpy reference sails through,
+     * inflating the ratio without any regression. */
+    double parse_us = 1e18, ref_us = 1e18;
+    for (int rep = 0; rep < 3; rep++) {
+        double a = ParseBenchUs(xml, std::strlen(xml), 5000);
+        double b = MemcpyRefUs(xml, std::strlen(xml), 5000);
+        if (a < parse_us) parse_us = a;
+        if (b < ref_us) ref_us = b;
+    }
     /* Parse does far more work than memcpy over the same bytes, but
      * the multiple is a property of the algorithm, not the machine.
      * Healthy parse measures in the low hundreds x memcpy; a 10x
@@ -100,8 +108,13 @@ TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
     }
     xml += ">text</root>";
 
-    double parse_us = ParseBenchUs(xml.data(), xml.size(), 1000);
-    double ref_us = MemcpyRefUs(xml.data(), xml.size(), 1000);
+    double parse_us = 1e18, ref_us = 1e18;
+    for (int rep = 0; rep < 3; rep++) {
+        double a = ParseBenchUs(xml.data(), xml.size(), 1000);
+        double b = MemcpyRefUs(xml.data(), xml.size(), 1000);
+        if (a < parse_us) parse_us = a;
+        if (b < ref_us) ref_us = b;
+    }
 #if defined(NDEBUG) && !TAURUS_TEST_ASAN
         EXPECT_LT(parse_us, 20000.0 * ref_us)
             << "Attribute-heavy parse regression: parse " << parse_us
