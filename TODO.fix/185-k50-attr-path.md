@@ -245,3 +245,21 @@ The K=100 dip (10.7 ns) suggests large attr blocks (6.4 MB) hit a
 better allocation path (fresh mmap, streaming faults) than mid-K
 blocks — machine texture, not portable. Judge changes on the
 K=20-50 mid-range.
+
+## Round 11 (2026-08-17): out-of-line attr split = mid-K regression, reverted
+
+The parse-endgame architectural test: `dp_parse_attrs` forced
+TAURUS_NOINLINE (it was being inlined back into the mega-function;
+89% of K=50 parse time sits in that loop region per the fresh
+767-sample profile; only 8% in the fused copy, <3% everything
+else). Hypothesis: an out-of-line attr parser gives clang an
+independent optimization surface on both halves — the documented
+escape from the codegen wall. 553 tests pass; 8-run interleaved
+fresh-dir gate: K=5 +0.4%, K=20 +2.7% WORSE, K=50 +1.5% WORSE,
+K=100 -0.8%. GATE FAIL — reverted, recovery confirmed. Eleventh
+measured failure; the wall holds even across a real function
+boundary: register warmth/state sharing across the per-element
+call costs more than independent codegen gains. Conclusion: the
+attr loop's local optimum is genuinely global on this compiler;
+only a structurally different parser (two-pass SIMD scan index,
+TODO 193) can move mid-K.
