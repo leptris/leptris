@@ -71,6 +71,15 @@ typedef struct taurus_compact_overflow_table {
     TaurusCompactOverflowEntry** buckets;
     size_t bucket_count;
     size_t entry_count;
+    /* Entry slabs (any-size robustness, TODO 195b): mutation-heavy
+     * documents create one overflow entry per out-of-range edge —
+     * malloc-per-entry dominated append time at scale. Entries are
+     * now carved from slab allocations; destroy frees whole slabs. */
+    void** slabs;
+    size_t slab_count;
+    size_t slab_capacity;
+    TaurusCompactOverflowEntry* slab_next;  /* carve cursor */
+    size_t slab_remaining;
 } TaurusCompactOverflowTable;
 
 /* ============================================================================

@@ -21,30 +21,11 @@
  * ============================================================================ */
 
 static inline size_t hash_pointer(const void* key, size_t bucket_count) {
+    /* Multiply-shift pointer hash: 2 ops vs the old byte-wise FNV
+     * (8 multiplies). Aligned pointers are well-distributed under
+     * Fibonacci hashing; bucket_count is a power of two. */
     uintptr_t k = (uintptr_t)key;
-    size_t hash = 2166136261u;
-
-    hash ^= (k >> 0) & 0xFF;
-    hash *= 16777619;
-    hash ^= (k >> 8) & 0xFF;
-    hash *= 16777619;
-    hash ^= (k >> 16) & 0xFF;
-    hash *= 16777619;
-    hash ^= (k >> 24) & 0xFF;
-    hash *= 16777619;
-
-#if UINTPTR_MAX >= 0xFFFFFFFFFFFFFFFF
-    hash ^= (k >> 32) & 0xFF;
-    hash *= 16777619;
-    hash ^= (k >> 40) & 0xFF;
-    hash *= 16777619;
-    hash ^= (k >> 48) & 0xFF;
-    hash *= 16777619;
-    hash ^= (k >> 56) & 0xFF;
-    hash *= 16777619;
-#endif
-
-    return hash & (bucket_count - 1);
+    return (size_t)((k * 0x9E3779B97F4A7C15ULL) >> 32) & (bucket_count - 1);
 }
 
 /* ============================================================================
@@ -73,21 +54,48 @@ TaurusCompactOverflowTable* taurus_compact_overflow_table_create(size_t bucket_c
 
     table->bucket_count = bucket_count;
     table->entry_count = 0;
+    table->slabs = NULL;
+    table->slab_count = 0;
+    table->slab_capacity = 0;
+    table->slab_next = NULL;
+    table->slab_remaining = 0;
 
     return table;
+}
+
+#define OVERFLOW_SLAB_ENTRIES 256
+
+/* Carve an entry from the current slab, starting a new slab when
+ * exhausted. ~1 malloc per 256 entries instead of one per entry. */
+static TaurusCompactOverflowEntry* overflow_entry_alloc(
+    TaurusCompactOverflowTable* table) {
+    if (table->slab_remaining == 0) {
+        if (table->slab_count == table->slab_capacity) {
+            size_t new_cap = table->slab_capacity ? table->slab_capacity * 2 : 4;
+            void** grown = (void**)realloc(table->slabs, new_cap * sizeof(void*));
+            if (!grown) return NULL;
+            table->slabs = grown;
+            table->slab_capacity = new_cap;
+        }
+        char* slab = (char*)malloc(OVERFLOW_SLAB_ENTRIES *
+                                   sizeof(TaurusCompactOverflowEntry));
+        if (!slab) return NULL;
+        table->slabs[table->slab_count++] = slab;
+        table->slab_next = (TaurusCompactOverflowEntry*)slab;
+        table->slab_remaining = OVERFLOW_SLAB_ENTRIES;
+    }
+    table->slab_remaining--;
+    return table->slab_next++;
 }
 
 void taurus_compact_overflow_table_destroy(TaurusCompactOverflowTable* table) {
     if (!table) return;
 
-    for (size_t i = 0; i < table->bucket_count; i++) {
-        TaurusCompactOverflowEntry* entry = table->buckets[i];
-        while (entry) {
-            TaurusCompactOverflowEntry* next = entry->next;
-            free(entry);
-            entry = next;
-        }
+    /* Entries live in slabs — freeing the slabs frees them all. */
+    for (size_t i = 0; i < table->slab_count; i++) {
+        free(table->slabs[i]);
     }
+    free(table->slabs);
 
     free(table->buckets);
     free(table);
@@ -111,7 +119,7 @@ int taurus_compact_overflow_set(TaurusCompactOverflowTable* table,
         entry = entry->next;
     }
 
-    entry = (TaurusCompactOverflowEntry*)malloc(sizeof(TaurusCompactOverflowEntry));
+    entry = overflow_entry_alloc(table);
     if (!entry) return -1;
 
     entry->key = key;
