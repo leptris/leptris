@@ -1,13 +1,33 @@
 ## [Unreleased]
 
-## [0.23.4] - Y-08-17
+## [0.23.4] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — attr-EXISTS queries via the any-value bucket (TODO 192e)
 
-### Changed
+`//name[@attr]` and `.//name[@attr]` compile to the fused
+attribute opcode with a 0xFFFF value sentinel; the VM reads the
+any-value attribute bucket — which now stores preorder positions —
+instead of walking each candidate element's attribute list. The
+gain scales with attribute selectivity: attributes carried by
+every element (like the benchmark's n) get a small win since the
+bucket is as dense as the name bucket; selective attributes get
+the full 192d-class jump.
 
-- (describe changes here)
+### Testing — machine-independent performance specs
+
+All absolute time budgets are removed from the perf regression
+suite. Every assertion now compares two measurements from the same
+run on the same machine: parse against a memcpy reference over the
+same bytes (skipped under ASAN, where sanitizer costs are
+asymmetric), write paths against their own first half (growth
+ratio), and the indexed child walk at N=50 against N=25
+(complexity ratio, min-of-3 per side). The growth specs also
+documented the known TODO 155 Phase C tradeoff: public-API
+`append_child` and `set_attribute` are O(n) per call (the parser
+keeps private tail caches; the API walks) — the specs accept the
+documented O(N^2) shape and flag anything worse.
+
+553 tests, full XPath conformance, ASAN clean, zero leaks.
 
 
 ## [0.23.3] - 2026-08-17
