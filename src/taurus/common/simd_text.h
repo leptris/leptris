@@ -86,6 +86,10 @@ typedef struct {
  * as ordinary scan bytes, matching the single-pass parser. */
 extern unsigned char taurus_dp_class_table[256];
 
+/* Idempotent one-time fill of the table (call before first use or
+ * rely on taurus_text_scan_events to call it). */
+void taurus_dp_class_table_init(void);
+
 /* Append events for every structural byte to out (capacity max).
  * Returns the number of events written; returns max unchanged as
  * an overflow signal (caller must detect return == max and treat

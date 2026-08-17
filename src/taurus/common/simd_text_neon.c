@@ -186,6 +186,8 @@ void taurus_copy_count3_neon(char* dst, const char* src, size_t len,
  * each bit appears once (no carries). */
 size_t taurus_text_scan_events_neon(const char* buf, size_t len,
                                     TaurusScanEvent* out, size_t max) {
+    extern void taurus_dp_class_table_init(void);
+    taurus_dp_class_table_init();
     const uint8x16_t k_lt   = vdupq_n_u8('<');
     const uint8x16_t k_gt   = vdupq_n_u8('>');
     const uint8x16_t k_sl   = vdupq_n_u8('/');

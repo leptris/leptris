@@ -163,13 +163,14 @@ void taurus_copy_count3(char* dst, const char* src, size_t len,
 /* ---- Structural span scan (TODO 193 Phase 1) ---- */
 
 unsigned char taurus_dp_class_table[256];
-/* One-time fill (constructor): explicit markers for the structural
- * bytes, WS for the whole c <= ' ' range (controls included — pass
- * 2 treats non-whitespace controls as ordinary scan bytes, matching
- * the single-pass parser), 0 elsewhere. */
-static void scan_table_fill(void) __attribute__((constructor));
-static void scan_table_fill(void) {
-    static int done = 0;
+/* One-time fill (no constructor attribute — MSVC rejects it):
+ * explicit markers for the structural bytes, WS for the whole
+ * c <= ' ' range (controls included — pass 2 treats non-whitespace
+ * controls as ordinary scan bytes, matching the single-pass
+ * parser), 0 elsewhere. Benign duplicate fills write identical
+ * values; the flag keeps it one-pass in practice. */
+void taurus_dp_class_table_init(void) {
+    static volatile int done = 0;
     if (done) return;
     for (int i = 0; i <= ' '; i++) taurus_dp_class_table[i] = DPSCAN_WS;
     taurus_dp_class_table['<']  = DPSCAN_LT;
@@ -184,7 +185,7 @@ static void scan_table_fill(void) {
 
 static size_t scan_events_scalar(const char* buf, size_t len,
                                  TaurusScanEvent* out, size_t max) {
-    scan_table_fill();
+    taurus_dp_class_table_init();
     size_t n = 0;
     for (size_t i = 0; i < len; i++) {
         unsigned char cls = taurus_dp_class_table[(unsigned char)buf[i]];
@@ -202,6 +203,7 @@ static size_t (*g_scan_fn)(const char*, size_t, TaurusScanEvent*, size_t) = NULL
 
 size_t taurus_text_scan_events(const char* buf, size_t len,
                                TaurusScanEvent* out, size_t max) {
+    taurus_dp_class_table_init();
     if (!g_scan_fn) {
         g_scan_fn = scan_events_scalar;
 #if defined(TAURUS_ARCH_ARM) && defined(__aarch64__)
