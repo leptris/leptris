@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.24.4] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.24.3] - 2026-08-17
 
 ### Performance — batched open tags and xmlns emission (TODO 194c)
