@@ -26,6 +26,17 @@
 #include <chrono>
 #include <string>
 
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define TAURUS_TEST_ASAN 1
+#  endif
+#elif defined(__SANITIZE_ADDRESS__)
+#  define TAURUS_TEST_ASAN 1
+#endif
+#ifndef TAURUS_TEST_ASAN
+#  define TAURUS_TEST_ASAN 0
+#endif
+
 namespace {
 
 using clock_type = std::chrono::steady_clock;
