@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.24.5] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.24.4] - 2026-08-17
 
 ### Performance — mutation tail cache, appends 45x faster (TODO 195)
