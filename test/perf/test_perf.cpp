@@ -217,10 +217,21 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
         return us;
     };
 
-    double small = sweep_us(25);
-    double large = sweep_us(50);
-    /* Same work per outer iteration; O(N^2) sweep => large/small ~ 4x. */
-    EXPECT_LT(large, 4.5 * small)
+    /* Min-of-3 per side: single short measurements on shared CI
+     * runners get skewed by preemption between the two sweeps; the
+     * minimum filters that noise out (same discipline as the
+     * Release A/B gates). */
+    double small = 1e18, large = 1e18;
+    for (int rep = 0; rep < 3; rep++) {
+        double s = sweep_us(25);
+        double l = sweep_us(50);
+        if (s < small) small = s;
+        if (l < large) large = l;
+    }
+    /* Same work per outer iteration; O(N^2) sweep => large/small ~ 4x.
+     * Budget 6.5x absorbs ratio jitter on loaded runners while
+     * staying far below the ~8x an O(N^3) regression reaches. */
+    EXPECT_LT(large, 6.5 * small)
         << "Indexed child access complexity regression: 50-child sweep "
         << large << " us vs 25-child sweep " << small << " us";
 }
