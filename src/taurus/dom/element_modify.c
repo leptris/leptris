@@ -63,15 +63,20 @@ TaurusElement taurus_element_create(TaurusDocument doc, const char* name) {
 TaurusStatus taurus_element_append_child(TaurusElement parent, TaurusElement child) {
     if (!parent || !child) return TAURUS_ERROR_NULL_ARG;
 
+    /* Single document resolution per mutation (TODO 195c): the
+     * root walk + map lookup was paid three times per append
+     * (twice here, once inside the internal for the tail cache). */
+    struct taurus_document* doc = taurus_element_get_document(parent);
+
     /* Call internal void function, assume success */
-    taurus_element_append_child_internal(parent, (TaurusNode*)child);
+    taurus_element_append_child_internal_doc(parent, (TaurusNode*)child, doc);
     taurus_element_invalidate_child_cache(parent);
 
     /* Invalidate element index (TODO 132): the new child changes
      * the document's element set. The index will be rebuilt lazily
      * on the next descendant-axis query. */
-    if (taurus_element_get_document(parent)) {
-        taurus_element_index_invalidate(taurus_element_get_document(parent));
+    if (doc) {
+        taurus_element_index_invalidate(doc);
     }
     return TAURUS_OK;
 }

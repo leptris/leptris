@@ -668,7 +668,19 @@ const char* taurus_element_lookup_namespace(TaurusElement elem,
 }
 
 /* Children manipulation */
+void taurus_element_append_child_internal_doc(TaurusElement elem, TaurusNode* child,
+                                              struct taurus_document* doc);
 void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child) {
+    if (!elem || !child) return;
+    taurus_element_append_child_internal_doc(elem, child,
+                                             taurus_element_get_document(elem));
+}
+
+/* doc is the caller-resolved document (NULL for detached trees) —
+ * the public mutation path resolves it once instead of paying the
+ * root walk + map lookup on every append (TODO 195c). */
+void taurus_element_append_child_internal_doc(TaurusElement elem, TaurusNode* child,
+                                              struct taurus_document* doc) {
     if (!elem || !child) return;
 
     /* SAFETY: Verify node type field is valid before accessing it
@@ -700,7 +712,7 @@ void taurus_element_append_child_internal(TaurusElement elem, TaurusNode* child)
      * same parent; the cached tail skips the O(N) walk. Verified by
      * the child's parent back-pointer — a removed or re-parented
      * cached tail fails the check and falls back to the walk. */
-    struct taurus_document* mut_doc = taurus_element_get_document(elem);
+    struct taurus_document* mut_doc = doc;
     TaurusNode* mut_tail =
         (mut_doc && mut_doc->mut_tail_parent == elem && mut_doc->mut_tail_child &&
          taurus_node_parent(mut_doc->mut_tail_child) == (TaurusNode*)elem)
