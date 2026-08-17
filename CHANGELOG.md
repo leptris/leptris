@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.24.3] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.24.2] - 2026-08-17
 
 ### Performance — run-batched text serialization (TODO 194b)
