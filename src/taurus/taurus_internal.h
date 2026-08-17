@@ -118,6 +118,18 @@ struct taurus_document {
     struct taurus_element_index* element_index;
     unsigned axis_query_count;  /* axis queries seen without an index */
 
+    /* Mutation tail caches (TODO 195): the public API's append /
+     * set-attribute walk to the tail because elements carry no
+     * last-child edge (64 B layout law, TODO 155). Sequential
+     * mutation — the dominant programmatic-build pattern — appends
+     * to the SAME parent/element, so a one-entry cache makes the
+     * common case O(1). Verified before use via the child's parent
+     * back-pointer (stale entries fall back to the walk). */
+    struct taurus_element* mut_tail_parent;
+    struct taurus_node* mut_tail_child;
+    struct taurus_element* mut_attr_elem;
+    struct taurus_attribute* mut_attr_last;
+
     /* FlatDoc + lazy-promote removed — direct_parse builds the
      * TaurusElement tree eagerly. Retained as an always-zero field
      * so taurus_document_ensure_promoted (a public-facing no-op
