@@ -1,13 +1,29 @@
 ## [Unreleased]
 
-## [0.24.3] - Y-08-17
+## [0.24.3] - 2026-08-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — batched open tags and xmlns emission (TODO 194c)
 
-### Changed
+The serializer's remaining per-piece writer sites go batched:
+element open tags emit `<` + name from one capacity reservation
+(was two appends per element), and each xmlns declaration emits
+inline with in-place URI escaping from one reservation (was six
+appends per namespace).
 
-- (describe changes here)
+Measured (min of 20, Release): text-heavy 1.6 MB at 0.99 ->
+1.06 GB/s; namespaced 0.5 MB at 0.68 -> 0.70 GB/s. Modest gains —
+append-level writer optimization is now exhausted; the residual
+gaps to pugixml (1.54 / 0.84 GB/s) lie in per-element
+walk/dispatch and content materialization, identified as the next
+profiling targets.
+
+### Testing
+
+The two remaining parse-vs-memcpy reference specs are NDEBUG-gated
+(the Windows test-suite job builds unoptimized, where the ratio is
+not comparable — same treatment the deep-nesting spec already
+had). Output remains byte-identical: 558/558 tests including the
+serialize round-trip specs, ASAN clean, zero leaks.
 
 
 ## [0.24.2] - 2026-08-17
