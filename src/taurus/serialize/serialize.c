@@ -214,56 +214,53 @@ void serialize_text_internal(TaurusTextNode* text, SerializeBuffer* buf) {
     if (!content) return;
     size_t content_len = text->content_len;
 
-    for (size_t i = 0; i < content_len; i++) {
-        /* Check if this is start of entity reference */
+    /* Run-batched (TODO 194b): bulk-append ordinary bytes up to the
+     * next special character; the entity lookahead only runs at '&'.
+     * Quotes and apostrophes are ordinary in text content. */
+    size_t i = 0;
+    while (i < content_len) {
+        size_t run = i;
+        while (run < content_len) {
+            char c = content[run];
+            if (c == '&' || c == '<' || c == '>') break;
+            run++;
+        }
+        if (run > i) {
+            buffer_append_len(buf, &content[i], run - i);
+            i = run;
+            if (i >= content_len) break;
+        }
+
         if (content[i] == '&') {
             /* Look ahead for ';' to detect entity reference */
             size_t j = i + 1;
             int found_semicolon = 0;
-
-            /* Entity names are typically short (lt, gt, amp, quot, apos, or #digits) */
             while (j < text->content_len && j < i + 12) {
                 if (content[j] == ';') {
                     found_semicolon = 1;
                     break;
                 }
-                /* Valid entity chars: alphanumeric, #, or - */
                 if (!isalnum((unsigned char)content[j]) && content[j] != '#' && content[j] != '-') {
                     break;
                 }
                 j++;
             }
-
             if (found_semicolon && j > i + 1) {
-                /* It's an entity reference - output as-is */
                 buffer_append_len(buf, &content[i], j - i + 1);
-                i = j;
-                continue;
+                i = j + 1;
+            } else {
+                buffer_append_len(buf, "&amp;", 5);
+                i++;
             }
-
-            /* Not an entity reference - escape the bare & */
-            buffer_append(buf, "&amp;");
             continue;
         }
 
-        /* Normal escaping for other special characters */
-        switch (content[i]) {
-            case '<':
-                buffer_append(buf, "&lt;");
-                break;
-            case '>':
-                buffer_append(buf, "&gt;");
-                break;
-            /* Note: &quot; and &apos; are NOT escaped in text content
-             * (they're only escaped in attribute values) */
-            case '"':
-            case '\'':
-                buffer_append_char(buf, content[i]);
-                break;
-            default:
-                buffer_append_char(buf, content[i]);
-                break;
+        if (content[i] == '<') {
+            buffer_append_len(buf, "&lt;", 4);
+        } else {
+            buffer_append_len(buf, "&gt;", 4);
         }
+        i++;
     }
 }
 
