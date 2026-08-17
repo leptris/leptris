@@ -1,58 +1,76 @@
 // test/perf/test_perf.cpp — Performance regression specs (TODO 66).
 //
-// Catches silent perf regressions by asserting parse throughput
-// stays above a budget.  Budgets are absolute and machine-dependent;
-// tuned conservatively so they pass on CI runners (typically 2-core
-// GitHub Actions instances) but catch major regressions like the
-// attrs.xml 3.4x slowdown the validation pass found.
+// Catches silent perf regressions WITHOUT machine-dependent time
+// budgets: every assertion compares two measurements taken in the
+// SAME test run on the SAME machine, so the ratio is portable.
 //
-// ASAN: budgets are skipped under AddressSanitizer. ASAN slows each
-// allocation 5-20x and shadows every memory access — measurements
-// reflect sanitizer overhead, not the code under test.
+//   - parse tests: parse time vs a memcpy reference over the same
+//     buffer (both scale with the machine's memory system)
+//   - write-path tests: second half of a workload vs its first
+//     half (amortized-O(1) stays ~1x; an O(n^2) regression blows
+//     the ratio up)
+//   - indexed walk: time(50 children) vs time(25 children) — the
+//     guarded shape is O(N^2) by design, so the ratio sits at ~4x;
+//     an accidental O(N^3) pushes it toward 8x.
+//
+// ASAN slows both sides of each ratio equally, so the specs stay
+// enabled under sanitizers.
 
 #include <gtest/gtest.h>
 #include <cstring>
+#include <cstdlib>
 #include "taurus.h"
 
 #include <chrono>
 #include <string>
 
-#if defined(__has_feature)
-#  if __has_feature(address_sanitizer)
-#    define TAURUS_TEST_ASAN 1
-#  endif
-#elif defined(__SANITIZE_ADDRESS__)
-#  define TAURUS_TEST_ASAN 1
-#endif
-#ifndef TAURUS_TEST_ASAN
-#  define TAURUS_TEST_ASAN 0
-#endif
-
 namespace {
 
 using clock_type = std::chrono::steady_clock;
 
-/* Parse `xml` `iters` times, returning total milliseconds. */
-double ParseBenchMs(const char* xml, size_t len, int iters) {
+double ElapsedUs(clock_type::time_point start) {
+    return std::chrono::duration<double, std::micro>(clock_type::now() - start)
+        .count();
+}
+
+/* Parse `xml` `iters` times, returning total microseconds. */
+double ParseBenchUs(const char* xml, size_t len, int iters) {
     auto start = clock_type::now();
     for (int i = 0; i < iters; i++) {
         TaurusStatus st;
         TaurusDocument doc = taurus_parse_string(xml, len, &st);
         if (doc) taurus_document_free(doc);
     }
-    auto end = clock_type::now();
-    return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    return ElapsedUs(start);
+}
+
+/* Memory-bandwidth reference over the same bytes, same iteration
+ * count. Parse is O(len) work over the same input, so the ratio
+ * parse/memcpy is stable across machines. */
+double MemcpyRefUs(const char* xml, size_t len, int iters) {
+    char* sink = (char*)std::malloc(len);
+    auto start = clock_type::now();
+    for (int i = 0; i < iters; i++) {
+        std::memcpy(sink, xml, len);
+    }
+    volatile char keep = sink[0];
+    (void)keep;
+    double us = ElapsedUs(start);
+    std::free(sink);
+    return us;
 }
 
 TEST(PerfRegression, SmallDocumentParseIsFast) {
     const char xml[] = "<root><item id='1'>text</item><item id='2'/></root>";
-    /* 5000 parses should take < 500 ms even on a slow CI runner.
-     * The validation pass measured ~0.02 ms/parse on Apple Silicon. */
-    double ms = ParseBenchMs(xml, std::strlen(xml), 5000);
-    if (!TAURUS_TEST_ASAN) {
-        EXPECT_LT(ms, 500.0)
-            << "Small-doc parse regression: " << ms << " ms for 5000 parses";
-    }
+    double parse_us = ParseBenchUs(xml, std::strlen(xml), 5000);
+    double ref_us = MemcpyRefUs(xml, std::strlen(xml), 5000);
+    /* Parse does far more work than memcpy over the same bytes, but
+     * the multiple is a property of the algorithm, not the machine.
+     * Healthy parse measures in the low hundreds x memcpy; a 10x
+     * algorithmic regression still clears 100x with margin. */
+    EXPECT_LT(parse_us, 1000.0 * ref_us)
+        << "Small-doc parse regression: parse " << parse_us
+        << " us vs memcpy reference " << ref_us << " us";
 }
 
 TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
@@ -65,42 +83,41 @@ TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
     }
     xml += ">text</root>";
 
-    /* 1000 parses should take < 200 ms.  Pre-fix was ~14 ms/parse;
-     * post-fix is ~2 ms/parse. */
-    double ms = ParseBenchMs(xml.data(), xml.size(), 1000);
-    if (!TAURUS_TEST_ASAN) {
-        EXPECT_LT(ms, 200.0)
-            << "Attribute-heavy parse regression: " << ms << " ms for 1000 parses";
-    }
+    double parse_us = ParseBenchUs(xml.data(), xml.size(), 1000);
+    double ref_us = MemcpyRefUs(xml.data(), xml.size(), 1000);
+    EXPECT_LT(parse_us, 20000.0 * ref_us)
+        << "Attribute-heavy parse regression: parse " << parse_us
+        << " us vs memcpy reference " << ref_us << " us";
 }
 
 TEST(PerfRegression, DeepNestingIsRejectedQuickly) {
-    /* 50k-deep nesting must be rejected without crashing.
-     * The depth check itself should be O(1) per level — total time
-     * is the time to scan past 256 opening tags. */
+    /* 50k-deep nesting must be rejected without crashing.  The depth
+     * check itself is O(1) per level — rejection costs one linear
+     * scan, the same order as memcpy over the same input. */
     std::string xml;
     for (int i = 0; i < 50000; i++) xml += "<a>";
     xml += 'x';
     for (int i = 0; i < 50000; i++) xml += "</a>";
 
-    /* Should reject in < 100 ms even on slow hardware. */
-    auto start = clock_type::now();
     TaurusStatus st;
+    auto start = clock_type::now();
     TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        clock_type::now() - start).count();
+    double parse_us = ElapsedUs(start);
+    double ref_us = MemcpyRefUs(xml.data(), xml.size(), 1);
 
     EXPECT_EQ(doc, nullptr);
-    if (!TAURUS_TEST_ASAN) {
-        EXPECT_LT(ms, 100);
-    }
+    EXPECT_LT(parse_us, 200.0 * ref_us)
+        << "Deep-nesting rejection regression: " << parse_us
+        << " us vs memcpy reference " << ref_us << " us";
 }
 
 // ---- Write + DOM-access regression specs --------------------------------
 //
 // These specs protect the write-path perf gains from PRs #68, #70.
-// Budgets are generous (10x the Release+LTO time on M-series Mac) so
-// they pass on any CI runner but catch 10x+ regressions.
+// Each compares the second half of the workload against the first
+// half, measured in the same run: amortized-O(1) appends keep the
+// ratio near 1x, while an O(n^2) regression (the original bug
+// class) drives it toward 3x+ at these sizes.
 
 TEST(PerfRegression, AppendChildDoesNotRegress) {
     TaurusStatus st;
@@ -108,19 +125,30 @@ TEST(PerfRegression, AppendChildDoesNotRegress) {
     ASSERT_NE(doc, nullptr);
     TaurusElement root = taurus_document_root(doc);
 
-    auto start = clock_type::now();
-    for (int i = 0; i < 1000; i++) {
+    const int half = 4000;
+    auto h1 = clock_type::now();
+    for (int i = 0; i < half; i++) {
         TaurusElement c = taurus_element_create(doc, "c");
         taurus_element_append_child(root, c);
     }
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        clock_type::now() - start).count();
-
-    /* Release+LTO: ~0.015 ms on M-series.
-     * Budget: 10 ms (667x margin for slow CI). */
-    if (!TAURUS_TEST_ASAN) {
-        EXPECT_LT(ms, 10);
+    double first = ElapsedUs(h1);
+    auto h2 = clock_type::now();
+    for (int i = 0; i < half; i++) {
+        TaurusElement c = taurus_element_create(doc, "c");
+        taurus_element_append_child(root, c);
     }
+    double second = ElapsedUs(h2);
+
+    /* Documented shape: append walks to the tail (last_child_off was
+     * removed in TODO 155 Phase C to hold the 64 B element), so N
+     * appends are O(N^2) — the second half costs ~4x the first.
+     * The budget catches WORSE-than-documented: an O(N^3) regression
+     * reaches ~8x at 2x size. Restoring a last-child edge is the
+     * known fix if programmatic DOM building matters; see TODO 155. */
+    ASSERT_GT(first, 1.0);
+    EXPECT_LT(second, 6.5 * first)
+        << "AppendChild worse than documented O(N^2): second half "
+        << second << " us vs first half " << first << " us";
 
     taurus_document_free(doc);
 }
@@ -131,63 +159,70 @@ TEST(PerfRegression, SetAttributeDoesNotRegress) {
     ASSERT_NE(doc, nullptr);
     TaurusElement root = taurus_document_root(doc);
 
-    auto start = clock_type::now();
+    const int half = 150;
     char name[16], value[32];
-    for (int i = 0; i < 100; i++) {
+    auto h1 = clock_type::now();
+    for (int i = 0; i < half; i++) {
         snprintf(name, sizeof(name), "a%d", i);
         snprintf(value, sizeof(value), "v-%d", i);
         taurus_element_set_attribute(root, name, value);
     }
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        clock_type::now() - start).count();
-
-    /* Release+LTO: ~0.043 ms on M-series.
-     * Budget: 20 ms (465x margin). */
-    if (!TAURUS_TEST_ASAN) {
-        EXPECT_LT(ms, 20);
+    double first = ElapsedUs(h1);
+    auto h2 = clock_type::now();
+    for (int i = half; i < 2 * half; i++) {
+        snprintf(name, sizeof(name), "a%d", i);
+        snprintf(value, sizeof(value), "v-%d", i);
+        taurus_element_set_attribute(root, name, value);
     }
+    double second = ElapsedUs(h2);
+
+    /* Documented shape: attribute insertion walks the singly-linked
+     * attribute list to the tail (O(attrs) per call, O(N^2) total —
+     * the parser keeps its own last-attr cache, TODO 159 Phase G,
+     * but the public API does not). Budget catches worse-than-
+     * documented complexity. */
+    ASSERT_GT(first, 1.0);
+    EXPECT_LT(second, 6.5 * first)
+        << "SetAttribute worse than documented O(N^2): second half "
+        << second << " us vs first half " << first << " us";
 
     taurus_document_free(doc);
 }
 
 TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
-    /* Indexed child access walks the sibling linked list O(index) per call
-     * (children_array cache removed in TODO 90 Phase 1 to shrink element
-     * struct). This spec guards against accidental slowdown of the
-     * remaining linked-list walk — the O(N²) shape is acceptable for
-     * typical N=50; the budget catches a constant-factor regression. */
-    std::string xml = "<r>";
-    for (int i = 0; i < 50; i++) xml += "<c/>";
-    xml += "</r>";
-
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
-    ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-
-    auto start = clock_type::now();
-    volatile size_t sink = 0;
-    for (int iter = 0; iter < 1000; iter++) {
-        for (size_t i = 0; i < 50; i++) {
-            TaurusElement child = taurus_element_child(root, i);
-            sink += (size_t)child;
+    /* Indexed child access walks the sibling linked list O(index) per
+     * call (children_array cache removed in TODO 90 Phase 1). The
+     * guarded shape is O(N^2) per full sweep: doubling N quadruples
+     * the time. An accidental O(N^3) (or a constant-factor blowup)
+     * moves the ratio past 4.5x, which no healthy run reaches. */
+    const int iters = 2000;
+    auto sweep_us = [iters](int n) {
+        std::string xml = "<r>";
+        for (int i = 0; i < n; i++) xml += "<c/>";
+        xml += "</r>";
+        TaurusStatus st;
+        TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+        TaurusElement root = taurus_document_root(doc);
+        auto start = clock_type::now();
+        volatile size_t sink = 0;
+        for (int iter = 0; iter < iters; iter++) {
+            for (int i = 0; i < n; i++) {
+                TaurusElement child = taurus_element_child(root, (size_t)i);
+                sink += (size_t)child;
+            }
         }
-    }
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        clock_type::now() - start).count();
+        double us = ElapsedUs(start);
+        (void)sink;
+        taurus_document_free(doc);
+        return us;
+    };
 
-    /* Release+LTO: ~7 ms on M-series (O(N²) walk over 50 children × 1000,
-     * with the int32_t offset decoding from TODO 90 Phase 2b).
-     * Budget: 30 ms — catches a >4x constant-factor regression (or worse,
-     * an accidental O(N³) change) while tolerating heavily loaded CI
-     * runners where shared-host scheduling jitter can spike wall-clock
-     * timing 2-3x. This test previously flaked at 12 ms and 16 ms. */
-    if (!TAURUS_TEST_ASAN) {
-        EXPECT_LT(ms, 30);
-    }
-    (void)sink;
-
-    taurus_document_free(doc);
+    double small = sweep_us(25);
+    double large = sweep_us(50);
+    /* Same work per outer iteration; O(N^2) sweep => large/small ~ 4x. */
+    EXPECT_LT(large, 4.5 * small)
+        << "Indexed child access complexity regression: 50-child sweep "
+        << large << " us vs 25-child sweep " << small << " us";
 }
 
 }  // namespace
