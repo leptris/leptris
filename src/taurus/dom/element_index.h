@@ -57,6 +57,10 @@ typedef struct taurus_element_index_attr_bucket {
     TaurusElement* matches;      /* Elements with this attr (any value) */
     size_t count;
     size_t capacity;
+    /* Preorder position of each match, parallel to matches (TODO
+     * 192e): serves attr-EXISTS subtree queries the same way value
+     * buckets serve attr-equals ones. */
+    size_t* match_positions;
 
     /* Per-value breakdown for [@attr='value'] predicates. Linear scan
      * is fine — the number of distinct values per attr is typically

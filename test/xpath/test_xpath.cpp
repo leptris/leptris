@@ -640,3 +640,50 @@ TEST(XPathSubtreeIndex, AbsolutePredicatedRootMatches) {
     taurus_xpath_result_free(r2);
     taurus_document_free(doc);
 }
+
+/* ---- TODO 192e: attr-EXISTS via the any-value bucket ---- */
+
+TEST(XPathSubtreeIndex, AttrExistsAbsolute) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtreeAttr, std::strlen(kSubtreeAttr), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Cold and warm must agree: every item carries n. */
+    TaurusXPathResult cold = taurus_xpath_eval(doc, nullptr, "//item[@n]");
+    ASSERT_NE(cold, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(cold), 4u);
+    taurus_xpath_result_free(cold);
+
+    TaurusXPathResult warm = taurus_xpath_eval(doc, nullptr, "count(//item[@n])");
+    ASSERT_NE(warm, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(warm), 4.0);
+    taurus_xpath_result_free(warm);
+
+    /* Attribute carried by the outer sections only (the nested
+     * section has no id). */
+    TaurusXPathResult secs = taurus_xpath_eval(doc, nullptr, "count(//section[@id])");
+    ASSERT_NE(secs, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(secs), 2.0);
+    taurus_xpath_result_free(secs);
+
+    /* Absent attribute: empty, cold and warm. */
+    TaurusXPathResult none = taurus_xpath_eval(doc, nullptr, "count(//item[@zzz])");
+    ASSERT_NE(none, nullptr);
+    EXPECT_DOUBLE_EQ(taurus_xpath_result_number(none), 0.0);
+    taurus_xpath_result_free(none);
+    taurus_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, AttrExistsRelativeFromContext) {
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(kSubtreeAttr, std::strlen(kSubtreeAttr), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement sec = FirstSection(doc);
+    ASSERT_NE(sec, nullptr);
+
+    TaurusXPathResult r = EvalWarm(doc, sec, ".//item[@n]");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(taurus_xpath_result_count(r), 3u);
+    taurus_xpath_result_free(r);
+    taurus_document_free(doc);
+}

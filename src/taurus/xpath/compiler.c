@@ -647,12 +647,15 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                         if (cpred == 1 && c_name) {
                             const char *fa, *fv;
                             long fp;
-                            if (classify_predicate(next->children[1],
-                                                    &fa, &fv, &fp) ==
-                                    PRED_KIND_ATTR_EQ_STRING && fa && fv) {
+                            PredKind fk = classify_predicate(next->children[1],
+                                                             &fa, &fv, &fp);
+                            /* 0xFFFF value operand marks attr-EXISTS. */
+                            if ((fk == PRED_KIND_ATTR_EQ_STRING && fa && fv) ||
+                                (fk == PRED_KIND_ATTR_EXISTS && fa)) {
                                 uint16_t n1 = add_const_string(st, ctest->value);
                                 uint16_t n2 = add_const_string(st, fa);
-                                uint16_t n3 = add_const_string(st, fv);
+                                uint16_t n3 = (fk == PRED_KIND_ATTR_EQ_STRING)
+                                    ? add_const_string(st, fv) : 0xFFFF;
                                 if (reserve_code(st, 7) == 0) {
                                     st->bc->code[st->bc->code_len++] =
                                         (unsigned char)XPATH_BC_AXIS_DESCENDANT_NAME_ATTREQ;
@@ -888,12 +891,15 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                         if (cpred == 1 && c_has_name) {
                             const char *fa, *fv;
                             long fp;
-                            if (classify_predicate(second_step->children[1],
-                                                    &fa, &fv, &fp) ==
-                                    PRED_KIND_ATTR_EQ_STRING && fa && fv) {
+                            PredKind fk = classify_predicate(second_step->children[1],
+                                                             &fa, &fv, &fp);
+                            /* 0xFFFF value operand marks attr-EXISTS. */
+                            if ((fk == PRED_KIND_ATTR_EQ_STRING && fa && fv) ||
+                                (fk == PRED_KIND_ATTR_EXISTS && fa)) {
                                 uint16_t n1 = add_const_string(st, ctest->value);
                                 uint16_t n2 = add_const_string(st, fa);
-                                uint16_t n3 = add_const_string(st, fv);
+                                uint16_t n3 = (fk == PRED_KIND_ATTR_EQ_STRING)
+                                    ? add_const_string(st, fv) : 0xFFFF;
                                 if (reserve_code(st, 7) == 0) {
                                     st->bc->code[st->bc->code_len++] =
                                         (unsigned char)XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ;

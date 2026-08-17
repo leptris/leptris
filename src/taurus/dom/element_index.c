@@ -108,17 +108,30 @@ static void index_walk(TaurusElementIndex* idx, TaurusElement elem) {
                 abucket->matches = NULL;
                 abucket->count = 0;
                 abucket->capacity = 0;
+                abucket->match_positions = NULL;
                 abucket->values = NULL;
                 abucket->value_count = 0;
                 abucket->value_capacity = 0;
             }
             if (abucket->count >= abucket->capacity) {
-                if (grow_ptr_array((void**)&abucket->matches,
-                                    &abucket->capacity, sizeof(TaurusElement)) != 0) {
+                /* Lockstep growth: one capacity, two arrays. */
+                size_t new_cap = (abucket->capacity == 0) ? 8 : abucket->capacity * 2;
+                TaurusElement* gm = (TaurusElement*)realloc(
+                    abucket->matches, new_cap * sizeof(TaurusElement));
+                size_t* gp = (size_t*)realloc(
+                    abucket->match_positions, new_cap * sizeof(size_t));
+                if (!gm || !gp) {
+                    if (gm) abucket->matches = gm;
+                    if (gp) abucket->match_positions = gp;
                     attr = taurus_attr_next(attr); continue;
                 }
+                abucket->matches = gm;
+                abucket->match_positions = gp;
+                abucket->capacity = new_cap;
             }
-            abucket->matches[abucket->count++] = elem;
+            abucket->matches[abucket->count] = elem;
+            abucket->match_positions[abucket->count] = me;
+            abucket->count++;
 
             if (vv.length > 0 && vv.data) {
                 TaurusElementIndexAttrValue* vbucket = NULL;
@@ -238,6 +251,7 @@ void taurus_element_index_free(TaurusElementIndex* idx) {
     for (size_t i = 0; i < idx->attr_bucket_count; i++) {
         free(idx->attr_buckets[i].attr_name);
         free(idx->attr_buckets[i].matches);
+        free(idx->attr_buckets[i].match_positions);
         for (size_t j = 0; j < idx->attr_buckets[i].value_count; j++) {
             free(idx->attr_buckets[i].values[j].value);
             free(idx->attr_buckets[i].values[j].matches);
