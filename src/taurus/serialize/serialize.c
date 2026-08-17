@@ -347,9 +347,16 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         buffer_append_indent(buf);
     }
 
-    /* Opening tag */
-    buffer_append_char(buf, '<');
-    buffer_append_len(buf, elem_name, elem_name_len);
+    /* Opening tag — one reservation + inline emission (TODO 194c):
+     * replaces separate '<' and name appends (two capacity checks
+     * and two NUL stores per element). */
+    buffer_ensure_capacity(buf, 1 + elem_name_len + 1);
+    char* ot = buf->data + buf->size;
+    *ot++ = '<';
+    memcpy(ot, elem_name, elem_name_len);
+    ot += elem_name_len;
+    buf->size = (size_t)(ot - buf->data);
+    buf->data[buf->size] = '\0';
 
     /* Attributes - iterate through linked list */
     for (struct taurus_attribute* attr = taurus_element_get_first_attribute(elem); attr != NULL; attr = taurus_attr_next(attr)) {
@@ -406,22 +413,42 @@ void serialize_element_internal(TaurusElement elem, SerializeBuffer* buf, int is
         buf->data[buf->size] = '\0';
     }
 
-    /* Namespaces - serialize as xmlns attributes */
+    /* Namespaces - serialize as xmlns attributes. One reservation +
+     * inline emission per namespace (TODO 194c): URIs rarely need
+     * escaping, but the 6x worst-case bound is reserved anyway. */
     for (struct taurus_namespace* ns = taurus_elem_namespaces(elem); ns != NULL; ns = ns->next) {
         if (!ns) continue;
 
-        buffer_append_char(buf, ' ');
-        buffer_append(buf, "xmlns");
+        const char* prefix = ns->prefix ? ns->prefix : "";
+        size_t prefix_len = ns->prefix ? strlen(ns->prefix) : 0;
+        const char* uri = ns->uri ? ns->uri : "";
+        size_t uri_len = ns->uri ? strlen(ns->uri) : 0;
+        buffer_ensure_capacity(buf, 7 + prefix_len + 2 + 6 * uri_len + 2);
 
-        /* Add prefix if not default namespace */
+        char* nw = buf->data + buf->size;
+        *nw++ = ' ';
+        memcpy(nw, "xmlns", 5);
+        nw += 5;
         if (ns->prefix) {
-            buffer_append_char(buf, ':');
-            buffer_append(buf, ns->prefix);
+            *nw++ = ':';
+            memcpy(nw, prefix, prefix_len);
+            nw += prefix_len;
         }
-
-        buffer_append(buf, "=\"");
-        buffer_append(buf, ns->uri ? ns->uri : "");
-        buffer_append_char(buf, '"');
+        *nw++ = '=';
+        *nw++ = '"';
+        for (size_t i = 0; i < uri_len; i++) {
+            switch (uri[i]) {
+                case '<':  memcpy(nw, "&lt;", 4);   nw += 4; break;
+                case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
+                case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
+                case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
+                case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
+                default:   *nw++ = uri[i]; break;
+            }
+        }
+        *nw++ = '"';
+        buf->size = (size_t)(nw - buf->data);
+        buf->data[buf->size] = '\0';
     }
 
     /* Check if element has children */
