@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.24.1] - Y-08-17
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.24.0] - 2026-08-17
 
 ### Added — SIMD structural span scanner (TODO 193 Phase 1)
