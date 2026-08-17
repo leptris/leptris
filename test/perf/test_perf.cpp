@@ -81,11 +81,13 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
      * the multiple is a property of the algorithm, not the machine.
      * Healthy parse measures in the low hundreds x memcpy; a 10x
      * algorithmic regression still clears 100x with margin. */
-    if (!TAURUS_TEST_ASAN) {
+#if defined(NDEBUG) && !TAURUS_TEST_ASAN
         EXPECT_LT(parse_us, 1000.0 * ref_us)
             << "Small-doc parse regression: parse " << parse_us
             << " us vs memcpy reference " << ref_us << " us";
-    }
+#else
+    (void)parse_us; (void)ref_us;
+#endif
 }
 
 TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
@@ -100,11 +102,13 @@ TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
 
     double parse_us = ParseBenchUs(xml.data(), xml.size(), 1000);
     double ref_us = MemcpyRefUs(xml.data(), xml.size(), 1000);
-    if (!TAURUS_TEST_ASAN) {
+#if defined(NDEBUG) && !TAURUS_TEST_ASAN
         EXPECT_LT(parse_us, 20000.0 * ref_us)
             << "Attribute-heavy parse regression: parse " << parse_us
             << " us vs memcpy reference " << ref_us << " us";
-    }
+#else
+    (void)parse_us; (void)ref_us;
+#endif
 }
 
 TEST(PerfRegression, DeepNestingIsRejectedQuickly) {
