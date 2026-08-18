@@ -713,7 +713,9 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
             }
             const char* name_c = attr_cname(attr);
             size_t anl = attr->name_view.length;
-            size_t vlen = strlen(val);
+            /* View length is authoritative (entity resolution
+             * replaces the view) — same as the recursive path. */
+            size_t vlen = attr->value_view.length;
             buffer_ensure_capacity(buf, 1 + anl + 2 + 6 * vlen + 2 + 1);
             char* out = buf->data + buf->size;
             *out++ = ' ';
