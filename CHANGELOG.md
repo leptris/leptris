@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.1] - Y-08-18
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.25.0] - 2026-08-18
 
 ### Performance — iterative serializer + total-fusion leaves (TODO 194e/f)
