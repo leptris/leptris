@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.2] - Y-08-18
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.25.1] - 2026-08-18
 
 ### Performance — sentinel-terminated scans; first all-K parse improvement
