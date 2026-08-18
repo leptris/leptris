@@ -460,13 +460,18 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
      * xmlns wiring below can both run in O(1) per attr. */
     p->current_elem_last_attr = NULL;
     p->current_elem_last_ns = NULL;
-    while (p->pos < p->end) {
+    /* Sentinel-terminated (parse endgame, third application): buf[len]
+     * is NUL and NUL fails every classification below — not '>', not
+     * '/', not '=' , not a quote, not IS_NAME_START. Each former
+     * bounds check returned -1 on overrun; the NUL now reaches the
+     * same return -1 through the character checks, so the compares
+     * were pure overhead (3-4 per attribute). */
+    for (;;) {
         dp_skip_ws(p);
-        if (p->pos >= p->end) return -1;
         char c = *p->pos;
         if (c == '>') { p->pos++; return 0; }
         if (c == '/') {
-            if (p->pos + 1 >= p->end || p->pos[1] != '>') return -1;
+            if (p->pos[1] != '>') return -1; /* NUL sentinel fails this */
             p->pos += 2;
             return 1; /* self-closing */
         }
@@ -481,9 +486,9 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
         /* Defer NUL-termination until after '=' is consumed — the
          * delimiter byte (whitespace or '=') is needed for the scan. */
 
-        /* Skip = and whitespace. */
+        /* Skip = and whitespace. NUL sentinel fails the '=' test. */
         dp_skip_ws(p);
-        if (p->pos >= p->end || *p->pos != '=') return -1;
+        if (*p->pos != '=') return -1;
         p->pos++;
         /* '=' consumed — the delimiter byte at name_end is no longer
          * needed. Safe to NUL-terminate the name in-place now. */
@@ -502,9 +507,8 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
          * for '&' over the scanned prefix. pugixml's single-table
          * ct_parse_attr loop is the model; this is its shape with a
          * SIMD tail. */
-        if (p->pos >= p->end) return -1;
         char quote = *p->pos;
-        if (quote != '"' && quote != '\'') return -1;
+        if (quote != '"' && quote != '\'') return -1; /* NUL sentinel fails */
         p->pos++;
         char* val_start = p->pos;
         int has_amp = 0;
