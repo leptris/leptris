@@ -95,13 +95,16 @@ jobs:
         run: |
           # The default build never links the shared library, so the
           # TAURUS_API dllexport path went untested and #278 (macro
-          # name mismatch: header checks TAURUS_BUILD_SHARED, CMake
-          # defines TAURUS_BUILDING_DLL) shipped. This step configures
-          # a shared-only build and links taurus_shared: with broken
-          # exports the CLI link fails with MSB3073.
+          # name mismatch; definition never reaching the objects;
+          # mirrored-declaration linkage) shipped. This step builds
+          # taurus_shared: MSVC emits no import library unless symbols
+          # actually export, so a broken TAURUS_API fails here with
+          # LNK1181/MSB3073-class errors. CLI is OFF — the CLI uses
+          # internal accessors that a shared-only build cannot link
+          # (TODO 191, the documented interim contract).
           cmake -B build-shared -S . `
             -DBUILD_TESTING=OFF `
-            -DTAURUS_BUILD_CLI=ON `
+            -DTAURUS_BUILD_CLI=OFF `
             -DTAURUS_BUILD_STATIC=OFF `
             -DTAURUS_BUILD_SHARED=ON `
             -DTAURUS_ENABLE_UTF8PROC=OFF `
