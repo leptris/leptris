@@ -166,17 +166,25 @@ int buffer_has_error(SerializeBuffer* buf) {
  * the entity semantics of the previous per-run walkers — entity
  * references emit as-is (text mode), bare & escapes, quotes are
  * ordinary in text mode and escaped in attribute mode. */
+/* Escape-class table (serialize endgame): the run scan was 3-4
+ * compares per byte — the dominant serializer cost at 57% of the
+ * text-heavy profile. One indexed load + one test per byte, the
+ * same chartype-table shape as the parser (common/chartype.h) and
+ * pugixml's g_escape_table. Bit 1 = must escape in text mode
+ * (& < >), bit 2 = additional attr-mode chars (" '). */
+static const unsigned char taurus_escape_table[256] = {
+    ['&'] = 3, ['<'] = 3, ['>'] = 3,
+    ['"'] = 2, ['\''] = 2,
+};
+
 static char* emit_escaped_inline(char* out, const char* content,
                                  size_t len, int attr_mode) {
+    unsigned mode = attr_mode ? 3u : 1u;
     size_t i = 0;
     while (i < len) {
         size_t run = i;
-        while (run < len) {
-            char c = content[run];
-            if (c == '&' || c == '<' || c == '>' ||
-                (attr_mode && (c == '"' || c == '\''))) {
-                break;
-            }
+        while (run < len &&
+               !(taurus_escape_table[(unsigned char)content[run]] & mode)) {
             run++;
         }
         if (run > i) {
@@ -392,9 +400,11 @@ static void serialize_element_recursive(TaurusElement elem, SerializeBuffer* buf
     size_t elem_name_len;
 
     if (elem->name) {
-        /* Use cached NULL-terminated string */
+        /* Use cached NULL-terminated string; name_len byte avoids
+         * the per-element strlen (0xFF = long-name fallback). */
         elem_name = elem->name;
-        elem_name_len = strlen(elem->name);
+        elem_name_len = (elem->name_len != 0xFF)
+            ? (size_t)elem->name_len : strlen(elem->name);
     } else {
         return;
     }
@@ -445,7 +455,9 @@ static void serialize_element_recursive(TaurusElement elem, SerializeBuffer* buf
          * check and NUL store) per attribute. */
         const char* name_c = attr_cname(attr);
         size_t name_len = attr->name_view.length;
-        size_t val_len = strlen(val);
+        /* The view is authoritative: entity resolution REPLACES the
+         * view (from_cstr), so length always matches the data. */
+        size_t val_len = attr->value_view.length;
         size_t needed = 1 + name_len + 2 + 6 * val_len + 2;
         buffer_ensure_capacity(buf, needed + 1);
 
@@ -643,7 +655,8 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
 
         TaurusElement e = (TaurusElement)cur;
         const char* name = e->name;
-        size_t nl = strlen(name);
+        size_t nl = (e->name_len != 0xFF) ? (size_t)e->name_len
+                                          : strlen(name);
 
         /* --- total-fusion fast path (TODO 194f): a compact-mode leaf
          * element with no attributes and no namespaces emits its ENTIRE
