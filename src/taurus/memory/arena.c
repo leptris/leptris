@@ -9,19 +9,140 @@
 #define ARENA_ALIGNMENT 8u
 
 static inline size_t align_up(size_t n) {
-    return (n + (ARENA_ALIGNMENT - 1)) & ~(size_t)(ARENA_ALIGNMENT - 1);
+    return (n + ARENA_ALIGNMENT - 1) & ~(size_t)(ARENA_ALIGNMENT - 1);
+}
+
+/* ---- Retained-block free list (parse fault fix) -----------------------
+ *
+ * Libc routes mallocs above the magazine-zone threshold (256 KB on
+ * macOS, similar on glibc) straight to mmap, and munmaps them on
+ * free. A parse of an 884 KB many-attr document builds a ~7.5 MB
+ * arena, so every parse/free/parse cycle faults ~1,600 zero-fill
+ * pages — measured at 0.21 us/page, ~400 us of a 1.36 ms parse.
+ * That repeated-fault tax is why the parse ratio vs pugixml grew
+ * with document size: their node memory grows through incremental
+ * small pages, which libc zone-reuses without unmapping.
+ *
+ * Retaining a handful of freed blocks and handing them back on the
+ * next create keeps the pages mapped across documents.
+ *
+ * Semantics identical to malloc: the memory is NOT zeroed (callers
+ * memset what they need — the same contract as a fresh malloc), so
+ * a reused block behaves exactly like a new allocation.
+ *
+ * Bounded: at most 4 blocks / 32 MB retained process-wide. Blocks
+ * below ARENA_RETAIN_MIN go straight to free() — small allocations
+ * are zone-reused by libc anyway, so retaining them buys nothing.
+ * Retained blocks stay reachable through this table, so leak
+ * checkers classify them as still-reachable, not leaked.
+ *
+ * Thread safety: a spinlock guards the table. It is held for ~50 ns
+ * twice per document lifetime, so contention is irrelevant. */
+#define ARENA_RETAIN_MIN (256u * 1024u)
+#define ARENA_RETAIN_MAX_BLOCKS 4u
+#define ARENA_RETAIN_MAX_BYTES (32u * 1024u * 1024u)
+
+static struct {
+    char* base[ARENA_RETAIN_MAX_BLOCKS];
+    size_t size[ARENA_RETAIN_MAX_BLOCKS];
+    size_t count;
+    size_t bytes;
+} g_retain;
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+static volatile long g_retain_lock;
+static void retain_lock(void) {
+    while (_InterlockedCompareExchange(&g_retain_lock, 1, 0)) {
+        while (g_retain_lock) { /* spin */ }
+    }
+}
+static void retain_unlock(void) { _InterlockedExchange(&g_retain_lock, 0); }
+#else
+static volatile int g_retain_lock;
+static void retain_lock(void) {
+    while (!__sync_bool_compare_and_swap(&g_retain_lock, 0, 1)) {
+        while (g_retain_lock) { /* spin */ }
+    }
+}
+static void retain_unlock(void) { __sync_lock_release(&g_retain_lock); }
+#endif
+
+/* Best fit: the smallest retained block that covers the request, so
+ * oversized blocks aren't burned on small documents. Returns the
+ * block and reports its true capacity; NULL when nothing fits (or
+ * the request is below the retain threshold — malloc territory). */
+static char* retain_take(size_t request, size_t* capacity) {
+    if (request < ARENA_RETAIN_MIN) return NULL;
+    char* found = NULL;
+    size_t found_size = 0;
+    retain_lock();
+    for (size_t i = 0; i < g_retain.count; i++) {
+        if (g_retain.size[i] >= request &&
+            (found_size == 0 || g_retain.size[i] < found_size)) {
+            found = g_retain.base[i];
+            found_size = g_retain.size[i];
+            g_retain.base[i] = g_retain.base[g_retain.count - 1];
+            g_retain.size[i] = g_retain.size[g_retain.count - 1];
+            g_retain.count--;
+            break;
+        }
+    }
+    g_retain.bytes -= found_size;
+    retain_unlock();
+    if (found) *capacity = found_size;
+    return found;
+}
+
+static void retain_give(char* base, size_t size) {
+    if (size < ARENA_RETAIN_MIN) {
+        free(base);
+        return;
+    }
+    retain_lock();
+    if (g_retain.count >= ARENA_RETAIN_MAX_BLOCKS ||
+        g_retain.bytes + size > ARENA_RETAIN_MAX_BYTES) {
+        retain_unlock();
+        free(base);
+        return;
+    }
+    g_retain.base[g_retain.count] = base;
+    g_retain.size[g_retain.count] = size;
+    g_retain.count++;
+    g_retain.bytes += size;
+    retain_unlock();
+}
+
+char* taurus_arena_buffer_alloc(size_t size) {
+    size_t capacity = size;
+    char* base = retain_take(size, &capacity);
+    return base ? base : (char*)malloc(size);
+}
+
+void taurus_arena_buffer_release(void* p, size_t size) {
+    if (!p) return;
+    retain_give((char*)p, size);
 }
 
 TaurusArena* taurus_arena_create(size_t size) {
     if (size == 0 || size > (size_t)-1 - ARENA_ALIGNMENT) return NULL;
     TaurusArena* arena = (TaurusArena*)malloc(sizeof(TaurusArena));
     if (!arena) return NULL;
-    arena->base = (char*)malloc(size);
-    if (!arena->base) {
-        free(arena);
-        return NULL;
+    size_t capacity = size;
+    char* base = retain_take(size, &capacity);
+    if (!base) {
+        base = (char*)malloc(size);
+        capacity = size;
+        if (!base) {
+            free(arena);
+            return NULL;
+        }
     }
-    arena->size = size;
+    arena->base = base;
+    /* For a reused block this is the BLOCK capacity, so the
+     * fail-fast bound [base, base + size) and remaining() stay
+     * exact; it is >= the requested size, never smaller. */
+    arena->size = capacity;
     arena->used = 0;
     arena->failed = 0;
     return arena;
@@ -29,7 +150,7 @@ TaurusArena* taurus_arena_create(size_t size) {
 
 void taurus_arena_destroy(TaurusArena* arena) {
     if (!arena) return;
-    free(arena->base);
+    retain_give(arena->base, arena->size);
     free(arena);
 }
 

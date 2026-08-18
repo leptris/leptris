@@ -66,6 +66,13 @@ void* taurus_arena_alloc_node_with_content(TaurusArena* arena,
                                             size_t content_size,
                                             char** content_out);
 
+/* Retained-buffer helpers: the same free-list the arena uses, for
+ * other large per-document allocations (the parser's input copy).
+ * Identical semantics to malloc/free — the memory is not zeroed;
+ * freed buffers may be parked and handed back by a later call. */
+char* taurus_arena_buffer_alloc(size_t size);
+void taurus_arena_buffer_release(void* p, size_t size);
+
 /* Capacity not yet handed out. */
 size_t taurus_arena_remaining(const TaurusArena* arena);
 
