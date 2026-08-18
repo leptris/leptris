@@ -682,6 +682,11 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         free(doc->line_breaks);
         doc->line_breaks = NULL;
     }
+    if (doc->attr_index) {
+        free(doc->attr_index->slots);
+        free(doc->attr_index);
+        doc->attr_index = NULL;
+    }
 
     /* CRITICAL: Cleanup overflow table BEFORE destroying the pool
      * The new per-document cleanup only removes entries for this document,
