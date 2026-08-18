@@ -31,7 +31,7 @@ void taurus_doctype_free(TaurusDoctypeNode* doctype);
 /* Content access.  Setters are pool-routed (TODO 16) — the input
  * string is copied into the pool so the caller's buffer can be
  * freed/reused immediately. */
-const char* taurus_doctype_get_name(TaurusDoctypeNode* doctype);
+TAURUS_API const char* taurus_doctype_get_name(TaurusDoctypeNode* doctype);
 void taurus_doctype_set_public_id(TaurusDoctypeNode* doctype,
                                    const char* public_id,
                                    struct taurus_memory_pool* pool);

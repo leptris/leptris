@@ -11,6 +11,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+/* Linkage marker source: declarations mirrored between this header
+ * and the public taurus.h must expand TAURUS_API identically in
+ * every TU (C2375 on MSVC otherwise). Pull the real definition —
+ * no fallback macro, which would poison taurus.h's #ifndef guard. */
+#include "../include/taurus.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -180,7 +186,7 @@ extern struct taurus_document* taurus_parse(const char* xml, size_t len);
 extern void taurus_document_ensure_promoted(struct taurus_document* doc);
 
 /* Get current strict parsing mode */
-extern int taurus_get_strict_mode(void);
+extern TAURUS_API int taurus_get_strict_mode(void);
 
 /* Namespace structure - Matches ext/taurus/taurus.h _namespace */
 struct taurus_namespace {

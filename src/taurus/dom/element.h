@@ -622,7 +622,7 @@ struct taurus_attribute* taurus_element_get_first_attribute(TaurusElement elem);
 void taurus_element_set_first_attribute(TaurusElement elem, struct taurus_attribute* attr);
 
 /* Get attribute count (size_t for public API compatibility — TODO 138) */
-size_t taurus_element_attribute_count(TaurusElement elem);
+TAURUS_API size_t taurus_element_attribute_count(TaurusElement elem);
 
 /* Get attribute by index */
 struct taurus_attribute* taurus_element_get_attribute_by_index(TaurusElement elem, uint8_t index);
@@ -722,7 +722,7 @@ static inline int taurus_element_name_equals_lit(TaurusElement elem, const char*
  * ============================================================================ */
 
 /* Get child count */
-size_t taurus_element_child_count(TaurusElement elem);
+TAURUS_API size_t taurus_element_child_count(TaurusElement elem);
 
 /* Get child by index */
 TaurusElement taurus_element_get_child(TaurusElement elem, uint16_t index);
