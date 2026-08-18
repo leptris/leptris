@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.4] - Y-08-18
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.25.3] - 2026-08-18
 ### Performance — the page-fault tax, the attr-loop diet, and lazy lines: high-attr parse −18% to −21%
 
