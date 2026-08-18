@@ -99,6 +99,19 @@ struct taurus_document {
     char* xml_buffer;               /* Owned writable XML buffer (NULL if not in-place) */
     size_t xml_buffer_len;       /* Length of xml_buffer */
     int xml_buffer_needs_free;   /* 1 if xml_buffer needs free(), 0 if stack/const */
+    /* Extra allocation past len+1: the parser's owns-copy over-
+     * allocates 64 zeroed bytes for slack-backed probe windows. The
+     * release path must hand the retention free-list the TRUE size
+     * or later best-fit reuses under-advertise the block. */
+    unsigned xml_buffer_slack;
+    /* Lazy line resolution (issue #223 follow-up): parse-created
+     * nodes store byteOffset+1 in base.line; taurus_node_line builds
+     * this newline-offset table ONCE per document (memchr hop over
+     * xml_buffer) and resolves queries via binary search, caching
+     * the result in the node with the high bit set. NULL = not yet
+     * built. Freed with the document. */
+    uint32_t* line_breaks;
+    size_t line_break_count;
 
     /* Document-scoped state (TODO 27/38 phase 2).
      *

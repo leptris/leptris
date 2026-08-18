@@ -673,9 +673,14 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
         /* Release through the retained-buffer free list (see
          * memory/arena.c): large inputs would otherwise be munmapped
          * here and re-faulted page-by-page on the next parse. */
-        taurus_arena_buffer_release(doc->xml_buffer,
-                                    doc->xml_buffer_len + 1);
+        taurus_arena_buffer_release(
+            doc->xml_buffer,
+            doc->xml_buffer_len + 1 + doc->xml_buffer_slack);
         doc->xml_buffer = NULL;
+        /* The newline-offset table indexes the buffer; nothing can
+         * resolve lines after it is gone. */
+        free(doc->line_breaks);
+        doc->line_breaks = NULL;
     }
 
     /* CRITICAL: Cleanup overflow table BEFORE destroying the pool
