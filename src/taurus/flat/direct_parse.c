@@ -463,15 +463,15 @@ static TAURUS_NOINLINE int dp_parse_doctype(DParser* p) {
  * direct_parse_internal grew the hot attr loop's neighborhood and
  * regressed K=100 by ~1.5% (code layout, not work). Called once
  * per element; the call cost is ~1ns against 51us at K=5. */
-#if defined(__GNUC__)
-__attribute__((noinline))
-#endif
 static void dp_split_hash_name(TaurusElement elem, char* name_start,
                                size_t name_len, TaurusMemoryPool* pool) {
     char* colon = NULL;
     uint16_t h = 0x811C;
+    /* A colon needs prefix (>=1) + ':' + local (>=1) = 3 bytes; 1-2
+     * byte names skip the colon test in the walk entirely. */
+    const int colon_possible = name_len >= 3;
     for (const char* c = name_start; c < name_start + name_len; c++) {
-        if (DP_UNLIKELY(*c == ':')) {
+        if (colon_possible && DP_UNLIKELY(*c == ':')) {
             colon = (char*)c;
             h = 0x811C; /* restart on the local part */
             continue;
@@ -994,7 +994,26 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 ? (size_t)open->name_len : strlen(open_name);
             const char* close_local = close_start;
             size_t close_local_len = close_len;
-            const char* colon = (const char*)memchr(close_start, ':', close_len);
+            /* Strip the close tag's prefix ONLY when the open element
+             * was prefixed. Exact, allocation-independent test: the
+             * open tag's colon was NUL-terminated in-place, so
+             * open->name[-1] is that NUL for prefixed names and '<'
+             * for unprefixed ones (element names directly follow '<').
+             * An unprefixed open closed by a prefixed name already
+             * fails the length compare below — same result as the old
+             * unconditional scan, without the per-element memchr call
+             * (a libc call for a 1-6 byte span — the TODO 174 law). */
+            const char* colon = NULL;
+            if (open->name[-1] == '\0') {
+                if (close_len < 16) {
+                    for (const char* c = close_start;
+                         c < close_start + close_len; c++) {
+                        if (*c == ':') { colon = c; break; }
+                    }
+                } else {
+                    colon = (const char*)memchr(close_start, ':', close_len);
+                }
+            }
             if (colon) {
                 close_local = colon + 1;
                 close_local_len = close_len - (colon + 1 - close_start);
