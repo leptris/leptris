@@ -69,7 +69,15 @@ typedef struct {
     int standalone;
     /* Source line tracking (issue #223). Updated as the scanner
      * crosses '\n' bytes. Frozen into each node at creation. */
-    uint32_t line;
+    /* Line tracking is LAZY (issue #223 follow-up): parse stores
+     * byteOffset+1 in node->base.line and taurus_node_line resolves
+     * it against doc->xml_buffer on first query (doc-level newline
+     * table, binary search, cached in-place). The per-byte '
+'
+     * compares this removed were ~30% of text-heavy parse. 0 for
+     * documents >= 2 GiB (offsets don't fit; line reads return
+     * unknown, matching the pre-#223 behavior). */
+    int line_offsets_ok;
     int had_declaration;
     /* Bulk-allocated attribute block. Pre-allocated from pool so the
      * common case is a bump-pointer off the block — no per-attr
@@ -78,6 +86,19 @@ typedef struct {
     struct taurus_attribute* attr_block;
     size_t attr_idx;
     size_t attr_capacity;
+    /* Attr-diet fields: a running cursor replaces the per-attr
+     * `&block[idx++]` multiply (48-byte stride), and the parser-local
+     * counter replaces the per-attr elem->attr_count load-add-store
+     * (the element cache line only needs touching twice per tag). */
+    struct taurus_attribute* attr_cursor;
+    struct taurus_attribute* attr_end;
+    unsigned cur_attr_count;
+    /* 1 when the parser owns an over-allocated copy: probe windows
+     * may read up to 48 bytes past p->end because the 64-byte zeroed
+     * slack after the sentinel stops them (NUL matches neither quote
+     * nor '&', and the bounded memchr fallback re-checks). 0 for
+     * in-place parses on caller buffers — clamped windows only. */
+    int probe_slack;
     /* TODO 159 Phase G: parser-local last-attr cache for the element
      * currently being parsed. Eliminates the O(N) walk-to-find-tail
      * in dp_add_attr_inline — O(1) wiring per attr instead of O(N),
@@ -101,10 +122,7 @@ static inline void dp_skip_ws(DParser* p) {
      * carries a NUL at buf[len] (copy and in-place entries both
      * write it), and NUL classifies as no chartype — the bounds
      * check per byte was the pugixml delta this loop can drop. */
-    while (IS_WS(*p->pos)) {
-        if (*p->pos == '\n') p->line++;
-        p->pos++;
-    }
+    while (IS_WS(*p->pos)) p->pos++;
 }
 
 /* Phase B (TODO 166): name-char scan helper.
@@ -146,15 +164,6 @@ static TAURUS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
         s += 4;
     }
     p->pos = s;
-}
-
-/* Tally '\n' bytes in [from, to) and fold into p->line. Used after
- * bulk scans (memchr for text, multi-char literal matches) where the
- * per-byte scanner can't update line inline. */
-static inline void dp_advance_line(DParser* p, char* from, char* to) {
-    for (char* c = from; c < to; c++) {
-        if (*c == '\n') p->line++;
-    }
 }
 
 /* Compile-time offset tables for next_sibling and parent_off
@@ -229,13 +238,13 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
                                       char* name, size_t name_len,
                                       char* val, size_t val_len,
                                       int has_amp) {
-    struct taurus_attribute* attr;
-    if (p->attr_idx < p->attr_capacity) {
-        attr = &p->attr_block[p->attr_idx++];
-    } else {
+    struct taurus_attribute* attr = p->attr_cursor;
+    if (DP_UNLIKELY(attr >= p->attr_end)) {
         attr = (struct taurus_attribute*)taurus_pool_alloc(
             p->pool, sizeof(struct taurus_attribute));
         if (!attr) return -1;
+    } else {
+        p->attr_cursor = attr + 1;
     }
 
     attr->name_view = taurus_sv_from_ptr(name, name_len);
@@ -284,7 +293,6 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
      * Careful: first_attribute_off == 0 means empty list. We can't decode
      * the pointer and check for NULL — at offset 0 the decoded pointer
      * is `elem` itself, which is non-NULL. Check the offset field. */
-    int32_t attr_off = (int32_t)((char*)attr - (char*)elem);
     if (elem->first_attribute_off != 0) {
         /* Cache should always be valid mid-parse. Fall back to walk
          * only if cache is NULL (defensive — shouldn't happen). */
@@ -299,10 +307,13 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
             taurus_attr_set_next(tail, attr);
         }
     } else {
-        elem->first_attribute_off = attr_off;
+        /* First attr of this element: the only place the elem->attr
+         * offset is ever needed. */
+        elem->first_attribute_off =
+            (int32_t)((char*)attr - (char*)elem);
     }
     p->current_elem_last_attr = attr;
-    elem->attr_count++;
+    p->cur_attr_count++;
     return 0;
 }
 
@@ -315,24 +326,17 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
  * Returns:
  *   0  — handled, caller should `continue` the parse loop.
  *  -1  — parse error, caller should fail. */
-static TAURUS_NOINLINE int dp_parse_doctype(DParser* p,
-                                             uint32_t markup_line) {
-    (void)markup_line;
-    char* doctype_start = p->pos;
+static TAURUS_NOINLINE int dp_parse_doctype(DParser* p) {
     p->pos += 2; /* skip "<!" */
     /* Match "DOCTYPE" keyword (case-sensitive per XML spec). */
     if (p->end - p->pos < 7 ||
         memcmp(p->pos, "DOCTYPE", 7) != 0) {
         while (p->pos < p->end && *p->pos != '>') p->pos++;
         if (p->pos < p->end) p->pos++;
-        dp_advance_line(p, doctype_start, p->pos);
         return 0;
     }
     p->pos += 7;
-    while (p->pos < p->end && IS_WS(*p->pos)) {
-        if (*p->pos == '\n') p->line++;
-        p->pos++;
-    }
+    while (p->pos < p->end && IS_WS(*p->pos)) p->pos++;
     /* Scan DOCTYPE name. */
     char* dt_name_start = p->pos;
     dp_scan_name(p);
@@ -448,7 +452,6 @@ static TAURUS_NOINLINE int dp_parse_doctype(DParser* p,
             p->dtd = dtd;
         }
     }
-    dp_advance_line(p, doctype_start, p->pos);
     return 0;
 }
 
@@ -498,6 +501,7 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
      * xmlns wiring below can both run in O(1) per attr. */
     p->current_elem_last_attr = NULL;
     p->current_elem_last_ns = NULL;
+    p->cur_attr_count = 0;
     /* Sentinel-terminated (parse endgame, third application): buf[len]
      * is NUL and NUL fails every classification below — not '>', not
      * '/', not '=' , not a quote, not IS_NAME_START. Each former
@@ -507,10 +511,15 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
     for (;;) {
         dp_skip_ws(p);
         char c = *p->pos;
-        if (c == '>') { p->pos++; return 0; }
+        if (c == '>') {
+            p->pos++;
+            elem->attr_count = (uint8_t)p->cur_attr_count;
+            return 0;
+        }
         if (c == '/') {
             if (p->pos[1] != '>') return -1; /* NUL sentinel fails this */
             p->pos += 2;
+            elem->attr_count = (uint8_t)p->cur_attr_count;
             return 1; /* self-closing */
         }
 
@@ -553,7 +562,9 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
         char* val_end = NULL;
         {
             const char* q = p->pos;
-            const char* probe_end = (p->end - q > 48) ? q + 48 : p->end;
+            const char* probe_end = p->probe_slack
+                ? q + 48
+                : ((p->end - q > 48) ? q + 48 : p->end);
             while (q < probe_end) {
                 char c = *q;
                 if (c == quote) { val_end = (char*)q; goto value_done; }
@@ -644,6 +655,8 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
  *       doc->xml_buffer_needs_free.
  */
 static struct taurus_document* direct_parse_internal(char* buf, size_t len, int owns_buffer) {
+    /* Set when the owns_buffer==2 path made our slack-backed copy. */
+    int buf_is_owned_copy = 0;
 
     /* 2. Create arena-backed pool (TODO 183 Phase 3).
      *
@@ -679,12 +692,17 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         /* Retained buffer: inputs >256 KB would otherwise be
          * munmapped on free and re-faulted on the next parse (the
          * arena free-list rationale — see arena.c). */
-        char* own = taurus_arena_buffer_alloc(len + 1);
+        /* +64 zeroed slack past the sentinel: probe windows on the
+         * owned copy may read up to 48 bytes past p->end (probe_slack)
+         * — zeros stop them, NUL matching neither quote nor '&'. */
+        char* own = taurus_arena_buffer_alloc(len + 1 + 64);
         if (!own) return NULL;
         taurus_copy_count3(own, buf, len, '<', '"', '\'',
                            &lt_count, &dq_count, &sq_count);
         own[len] = '\0';
+        memset(own + len + 1, 0, 64);
         buf = own;
+        buf_is_owned_copy = 1;
         owns_buffer = 1;  /* free-on-failure below; doc owns on success */
     } else {
         taurus_text_count3(buf, len, '<', '"', '\'',
@@ -707,13 +725,15 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     size_t arena_size = elem_bytes + attr_bytes + text_room + slack;
     TaurusArena* arena = taurus_arena_create(arena_size);
     if (!arena) {
-        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
+        if (owns_buffer == 1)
+            taurus_arena_buffer_release(buf, len + 1 + 64);
         return NULL;
     }
     TaurusMemoryPool* pool = taurus_pool_create_arena_backed(arena, 1);
     if (!pool) {
         taurus_arena_destroy(arena);
-        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
+        if (owns_buffer == 1)
+            taurus_arena_buffer_release(buf, len + 1 + 64);
         return NULL;
     }
     if (len >= 256) {
@@ -735,7 +755,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     char* combined = (char*)taurus_pool_alloc(pool, elem_bytes + attr_bytes);
     if (!combined) {
         taurus_pool_destroy(pool);
-        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
+        if (owns_buffer == 1)
+            taurus_arena_buffer_release(buf, len + 1 + 64);
         return NULL;
     }
     TaurusElement elem_block = (TaurusElement)combined;
@@ -754,7 +775,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         taurus_pool_alloc(pool, sizeof(struct taurus_document));
     if (!doc) {
         taurus_pool_destroy(pool);
-        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
+        if (owns_buffer == 1)
+            taurus_arena_buffer_release(buf, len + 1 + 64);
         return NULL;
     }
     memset(doc, 0, sizeof(*doc));
@@ -766,6 +788,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     doc->xml_buffer = buf;
     doc->xml_buffer_len = len;
     doc->xml_buffer_needs_free = owns_buffer;
+    doc->xml_buffer_slack = buf_is_owned_copy ? 64u : 0u;
     /* No taurus_compact_set_current_document — direct_parse is
      * overflow-table-free. All compact pointer edges use direct
      * offset arithmetic, never touching the shared thread-local
@@ -790,8 +813,13 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     p.attr_block = attr_block;
     p.attr_idx = 0;
     p.attr_capacity = attr_capacity;
+    p.attr_cursor = attr_block;
+    p.attr_end = attr_block + attr_capacity;
+    /* owns_buffer==2 was converted to 1 above; only the parser's own
+     * copy carries the zeroed slack. */
+    p.probe_slack = owns_buffer == 1 && buf_is_owned_copy;
     p.dtd = NULL;
-    p.line = 1;
+    p.line_offsets_ok = len < 0x7FFFFFFFu;
 
     /* Skip BOM. */
     if (len >= 3 && (unsigned char)buf[0] == 0xEF &&
@@ -814,32 +842,27 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
              * same finding as the attr-value scan). First 48 bytes
              * inline, SIMD fallback for longer spans. */
             char* text_start = p.pos;
-            uint32_t line_snap = p.line;
+            uint32_t text_off =
+                p.line_offsets_ok
+                    ? (uint32_t)(text_start - p.buf) + 1u : 0u;
             char* lt = NULL;
             {
                 const char* q = p.pos;
-                const char* probe_end =
-                    (p.end - q > 48) ? q + 48 : p.end;
+                const char* probe_end = p.probe_slack
+                    ? q + 48
+                    : ((p.end - q > 48) ? q + 48 : p.end);
                 while (q < probe_end) {
                     if (*q == '<') { lt = (char*)q; goto text_done; }
-                    if (*q == '\n') p.line++;
                     q++;
                 }
                 if (q >= p.end) goto text_done;
                 lt = (char*)memchr(q, '<', p.end - q);
                 if (!lt) lt = p.end;
-                /* Line count for the SIMD-skipped span only. */
-                if (q < lt) {
-                    p.line += (uint32_t)taurus_text_count_char(
-                        q, (size_t)(lt - q), '\n');
-                }
             }
         text_done:
             p.pos = lt ? lt : p.end;
             size_t tlen = p.pos - text_start;
-            /* Snapshot line at the text start, then the loop above
-             * already folded newlines — p.line is current. Issue #223. */
-            uint32_t text_line = line_snap;
+
             if (tlen == 0) continue;
             if (p.depth == 0) {
                 /* Whitespace-only between root and PIs. */
@@ -869,7 +892,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 tn = taurus_text_create_borrowed(text_start, tlen, pool);
             }
             if (!tn) goto fail;
-            tn->base.line = text_line;
+            tn->base.line = text_off;
             tn->base.frozen = 1;  /* at creation — TODO 187 */
             dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)tn);
             continue;
@@ -882,7 +905,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         if (IS_NAME_START(next)) {
             /* Element. Snapshot line BEFORE scanning the open tag so
              * the element reports the line where '<' appeared. */
-            uint32_t elem_line = p.line;
+            uint32_t elem_off = p.line_offsets_ok
+                ? (uint32_t)(p.pos - p.buf) + 1u : 0u;
             TaurusElement elem;
             if (elem_idx < est_elems) {
                 elem = &elem_block[elem_idx++];
@@ -900,7 +924,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 memset(elem, 0, sizeof(struct taurus_element));
             }
             elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
-            elem->base.line = elem_line;
+            elem->base.line = elem_off;
             /* Parse-built trees are frozen (immutable until a
              * mutation copies) — set at creation instead of the old
              * post-parse tree walk, which cost ~11% of parse at
@@ -982,7 +1006,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         }
         else if (next == '!') {
             /* Comment, CDATA, or DOCTYPE. */
-            uint32_t markup_line = p.line;
+            uint32_t markup_off = p.line_offsets_ok
+                ? (uint32_t)(p.pos - p.buf) + 1u : 0u;
             if (p.end - p.pos >= 4 && p.pos[2] == '-' && p.pos[3] == '-') {
                 /* Comment: <!-- ... --> */
                 p.pos += 4;
@@ -999,13 +1024,12 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 TaurusCommentNode* cn = taurus_comment_create(
                     start, p.pos - start, pool);
                 if (!cn) goto fail;
-                cn->base.line = markup_line;
+                cn->base.line = markup_off;
                 cn->base.frozen = 1;  /* at creation — TODO 187 */
                 if (p.depth > 0) {
                     dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)cn);
                 }
                 p.pos += 3;
-                dp_advance_line(&p, start, p.pos);
             } else if (p.end - p.pos >= 9 &&
                        memcmp(p.pos + 2, "[CDATA[", 7) == 0) {
                 /* CDATA: <![CDATA[ ... ]]> */
@@ -1020,24 +1044,23 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 TaurusCDATANode* cd = taurus_cdata_create(
                     start, p.pos - start, pool);
                 if (!cd) goto fail;
-                cd->base.line = markup_line;
+                cd->base.line = markup_off;
                 cd->base.frozen = 1;  /* at creation — TODO 187 */
                 if (p.depth > 0) {
                     dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)cd);
                 }
                 p.pos += 3;
-                dp_advance_line(&p, start, p.pos);
             } else {
                 /* DOCTYPE: extract name + internal subset. Cold path
                  * extracted to dp_parse_doctype (TODO 166 Phase A). */
-                if (dp_parse_doctype(&p, markup_line) != 0) goto fail;
+                if (dp_parse_doctype(&p) != 0) goto fail;
                 continue;
             }
         }
         else if (next == '?') {
             /* PI: <?target data?> or XML declaration. */
-            uint32_t pi_line = p.line;
-            char* pi_start = p.pos;
+            uint32_t pi_off = p.line_offsets_ok
+                ? (uint32_t)(p.pos - p.buf) + 1u : 0u;
             p.pos += 2;
             char* target_start = p.pos;
             if (!IS_NAME_START(*p.pos)) goto fail;
@@ -1056,7 +1079,6 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             *p.pos = '\0'; /* NUL-terminate data */
             size_t data_len = p.pos - data_start;
             p.pos += 2;
-            dp_advance_line(&p, pi_start, p.pos);
 
             /* XML declaration handling. */
             if (strcmp(target_start, "xml") == 0) {
@@ -1101,7 +1123,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 target_start, strlen(target_start),
                 data_start, data_len, pool);
             if (!pi) goto fail;
-            pi->base.line = pi_line;
+            pi->base.line = pi_off;
             pi->base.frozen = 1;  /* at creation — TODO 187 */
             if (p.depth > 0) {
                 dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)pi);
@@ -1159,8 +1181,10 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         static int dbg_ok = -1;
         if (dbg_ok < 0) dbg_ok = getenv("TAURUS_DEBUG_PARSE") != NULL;
         if (dbg_ok) {
+            size_t dbg_attr_idx =
+                (size_t)(p.attr_cursor - p.attr_block);
             fprintf(stderr, "dp ok: arena_used=%zu arena_cap=%zu elem_idx=%zu attr_idx=%zu\n",
-                    arena->used, arena->size, elem_idx, p.attr_idx);
+                    arena->used, arena->size, elem_idx, dbg_attr_idx);
         }
     }
 
@@ -1176,14 +1200,16 @@ fail:
             fprintf(stderr, "dp fail: pos=%ld off=%ld depth=%d arena_used=%zu arena_cap=%zu elem_idx=%zu attr_idx=%zu lt=%zu q=%zu est=%zu attrcap=%zu\n",
                     (long)(p.pos - p.buf), (long)(p.end - p.pos), p.depth,
                     arena ? arena->used : 0, arena ? arena->size : 0,
-                    elem_idx, p.attr_idx, lt_count, quote_count, est_elems,
+                    elem_idx, (size_t)(p.attr_cursor - p.attr_block),
+                    lt_count, quote_count, est_elems,
                     attr_capacity);
         }
     }
     taurus_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't TAURUS_FREE(doc) (TODO 154). */
-    if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);  /* Only free our own copy, not caller's */
+    if (owns_buffer == 1)
+            taurus_arena_buffer_release(buf, len + 1 + 64);  /* Only free our own copy, not caller's */
     return NULL;
 }
 

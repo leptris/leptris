@@ -372,8 +372,89 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node) {
  * node_line + node_compare (issue #172).
  * ============================================================================ */
 
+/* High bit of base.line marks a RESOLVED line; otherwise the field
+ * holds byteOffset+1 into doc->xml_buffer (lazy line tracking — the
+ * parse scans carry no '\n' compares). */
+#define TAURUS_LINE_RESOLVED 0x80000000u
+
+/* Reach the owning document from any node: elements go through the
+ * root map; other node types hop their parent edge first. */
+static struct taurus_document* node_document(TaurusNodeRef node) {
+    if (!node) return NULL;
+    switch (node->type) {
+    case TAURUS_NODE_TYPE_ELEMENT:
+        return taurus_element_get_document((TaurusElement)node);
+    case TAURUS_NODE_TYPE_TEXT:
+        return taurus_element_get_document(
+            taurus_textnode_parent((const TaurusTextNode*)node));
+    case TAURUS_NODE_TYPE_COMMENT:
+        return taurus_element_get_document(
+            taurus_comment_parent((const TaurusCommentNode*)node));
+    case TAURUS_NODE_TYPE_CDATA:
+        return taurus_element_get_document(
+            taurus_cdata_parent((const TaurusCDATANode*)node));
+    case TAURUS_NODE_TYPE_PI:
+        return taurus_element_get_document(
+            taurus_pi_parent((const TaurusPINode*)node));
+    default:
+        return NULL;
+    }
+}
+
+/* Build (once) the per-document table of '\n' byte offsets. The
+ * buffer is required to stay unmodified for the document's lifetime
+ * (the same contract that keeps StringViews valid), so the table
+ * never goes stale. */
+static const uint32_t* doc_line_breaks(struct taurus_document* doc,
+                                       size_t* count) {
+    if (!doc->line_breaks) {
+        size_t cap = 256, n_ = 0;
+        uint32_t* a = (uint32_t*)malloc(cap * sizeof(uint32_t));
+        const char* b = doc->xml_buffer;
+        const char* end = b + doc->xml_buffer_len;
+        const char* q = b;
+        while (q < end) {
+            const char* hit = (const char*)memchr(q, '\n',
+                                                  (size_t)(end - q));
+            if (!hit) break;
+            if (n_ == cap) {
+                cap *= 2;
+                uint32_t* grown = (uint32_t*)realloc(
+                    a, cap * sizeof(uint32_t));
+                if (!grown) { free(a); return NULL; }
+                a = grown;
+            }
+            a[n_++] = (uint32_t)(size_t)(hit - b);
+            q = hit + 1;
+        }
+        doc->line_breaks = a;
+        doc->line_break_count = n_;
+    }
+    *count = doc->line_break_count;
+    return doc->line_breaks;
+}
+
 TAURUS_API int taurus_node_line(TaurusNodeRef node) {
-    return node ? (int)node->line : 0;
+    if (!node) return 0;
+    uint32_t v = node->line;
+    if (v == 0) return 0;                       /* unknown */
+    if (v & TAURUS_LINE_RESOLVED) return (int)(v & ~TAURUS_LINE_RESOLVED);
+    /* Offset-encoded: resolve against the document buffer. */
+    struct taurus_document* doc = node_document(node);
+    if (!doc || !doc->xml_buffer) return 0;
+    size_t off = (size_t)(v - 1);
+    if (off > doc->xml_buffer_len) return 0;    /* defensive */
+    size_t n_ = 0;
+    const uint32_t* brks = doc_line_breaks(doc, &n_);
+    if (!brks) return 0;
+    /* line = 1 + number of newlines strictly before the node start */
+    size_t lo = 0, hi = n_;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (brks[mid] < off) lo = mid + 1; else hi = mid;
+    }
+    node->line = TAURUS_LINE_RESOLVED | (uint32_t)(lo + 1);
+    return (int)(lo + 1);
 }
 
 TAURUS_API void* taurus_node_get_binding_wrapper(TaurusNodeRef node) {
