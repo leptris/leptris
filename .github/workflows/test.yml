@@ -90,6 +90,24 @@ jobs:
           ctest --test-dir build --output-on-failure --build-config Release `
             --exclude-regex 'XIncludeProcess|XIncludeXpointer|XIncludeRecursion|XIncludePhaseA|XIncludePhaseC|CliVersion|CliParse|CliFormat|CliXpath|SymbolExportCheck'
 
+      - name: Build shared library (Windows DLL export check, issue #278)
+        if: runner.os == 'Windows'
+        run: |
+          # The default build never links the shared library, so the
+          # TAURUS_API dllexport path went untested and #278 (macro
+          # name mismatch: header checks TAURUS_BUILD_SHARED, CMake
+          # defines TAURUS_BUILDING_DLL) shipped. This step configures
+          # a shared-only build and links taurus_shared: with broken
+          # exports the CLI link fails with MSB3073.
+          cmake -B build-shared -S . `
+            -DBUILD_TESTING=OFF `
+            -DTAURUS_BUILD_CLI=ON `
+            -DTAURUS_BUILD_STATIC=OFF `
+            -DTAURUS_BUILD_SHARED=ON `
+            -DTAURUS_ENABLE_UTF8PROC=OFF `
+            -DTAURUS_ENABLE_ICONV=OFF
+          cmake --build build-shared --config Release
+
       - name: Check for memory leaks (Linux only)
         if: runner.os == 'Linux'
         run: |

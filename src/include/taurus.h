@@ -33,6 +33,11 @@ extern "C" {
 #  ifdef _WIN32
 #    ifdef TAURUS_BUILD_SHARED
 #      define TAURUS_API __declspec(dllexport)
+#    elif defined(TAURUS_BUILDING_DLL)
+       /* CMake defines TAURUS_BUILDING_DLL (not TAURUS_BUILD_SHARED)
+        * on the taurus_shared target — accept both so the DLL
+        * actually exports its symbols (issue #278). */
+#      define TAURUS_API __declspec(dllexport)
 #    elif defined(TAURUS_USE_SHARED)
 #      define TAURUS_API __declspec(dllimport)
 #    else
