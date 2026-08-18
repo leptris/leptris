@@ -1,13 +1,31 @@
 ## [Unreleased]
 
-## [0.25.1] - Y-08-18
+## [0.25.1] - 2026-08-18
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — sentinel-terminated scans; first all-K parse improvement
 
-### Changed
+The parse buffer has always carried a NUL sentinel (both the copy
+and in-place entries write `buf[len]`, and NUL classifies as no
+character class) — but every scanner loop still paid a per-byte
+bounds check. pugixml's scans are sentinel-terminated.
 
-- (describe changes here)
+- `dp_skip_ws` drops its bounds check (the newline line-tracking
+  check remains)
+- `dp_scan_name` drops its bounds check and takes pugixml's exact
+  `SCANWHILE_UNROLL` shape: four plain byte loads per iteration
+  with `__builtin_expect`-marked exits. The earlier failed fast
+  path was SWAR — a different shape whose mask setup dominated
+  short names; this one keeps byte loads and amortizes only the
+  loop counter.
+
+Measured (8-run interleaved fresh-directory Release A/B, minimum
+per section): K=5 −3.6%, K=20 −1.9%, K=50 −2.6%, K=100 −4.6% —
+the first change in the parse campaign to improve all four
+attribute-density sections simultaneously, breaking a string of
+eleven gated failures. Both parse entry points were verified to
+write the sentinel before the conversion.
+
+558 tests, ASAN clean, zero leaks.
 
 
 ## [0.25.0] - 2026-08-18
