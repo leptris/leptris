@@ -12,6 +12,7 @@ extern "C" {
 }
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -188,4 +189,64 @@ TEST(Arena, AllPointersWithinSpanForCompactEncoding) {
     taurus_arena_destroy(a);
 }
 
+
+/* ---- Retained-block free list (parse fault fix) ---------------------- */
+
+TEST(TaurusArena, RetainsAndReusesLargeBlocks) {
+    /* Blocks >= 256 KB must round-trip through the free list: the
+     * next same-size create gets the SAME mapping back (no munmap,
+     * no page faults). Machine-independent by construction: it
+     * asserts pointer identity, not timing. */
+    const size_t big = 512u * 1024u;
+    TaurusArena* a1 = taurus_arena_create(big);
+    ASSERT_NE(a1, nullptr);
+    void* b1 = taurus_arena_base(a1);
+    memset(b1, 0xAB, big);          /* dirty every page */
+    taurus_arena_destroy(a1);
+
+    TaurusArena* a2 = taurus_arena_create(big);
+    ASSERT_NE(a2, nullptr);
+    EXPECT_EQ(taurus_arena_base(a2), b1);   /* same mapping reused */
+    taurus_arena_destroy(a2);
+}
+
+TEST(TaurusArena, RetentionCapacityIsHonest) {
+    /* A reused block may be larger than requested; remaining()
+     * must report the BLOCK capacity so the fail-fast bound
+     * [base, base+size) stays exact. */
+    TaurusArena* a1 = taurus_arena_create(300u * 1024u);
+    ASSERT_NE(a1, nullptr);
+    size_t cap1 = taurus_arena_remaining(a1);
+    taurus_arena_destroy(a1);
+
+    TaurusArena* a2 = taurus_arena_create(260u * 1024u);  /* fits inside */
+    ASSERT_NE(a2, nullptr);
+    EXPECT_GE(taurus_arena_remaining(a2), 260u * 1024u);
+    EXPECT_LE(taurus_arena_remaining(a2), cap1);
+    taurus_arena_destroy(a2);
+}
+
+TEST(TaurusArena, SmallBlocksStillMallocSemantics) {
+    /* Below the retain threshold nothing is parked; semantics are
+     * plain malloc/free and all writes stay valid. */
+    TaurusArena* a = taurus_arena_create(1024);
+    ASSERT_NE(a, nullptr);
+    char* p = (char*)taurus_arena_alloc(a, 1024);
+    ASSERT_NE(p, nullptr);
+    memset(p, 7, 1024);
+    EXPECT_EQ((unsigned char)p[1023], 7);
+    taurus_arena_destroy(a);
+}
+
+TEST(TaurusArena, BufferRoundTripReusesMapping) {
+    char* b1 = taurus_arena_buffer_alloc(512u * 1024u);
+    ASSERT_NE(b1, nullptr);
+    memset(b1, 1, 512u * 1024u);
+    taurus_arena_buffer_release(b1, 512u * 1024u);
+
+    char* b2 = taurus_arena_buffer_alloc(512u * 1024u);
+    ASSERT_NE(b2, nullptr);
+    EXPECT_EQ(b2, b1);
+    taurus_arena_buffer_release(b2, 512u * 1024u);
+}
 }  // namespace

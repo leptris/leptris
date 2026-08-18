@@ -21,6 +21,7 @@
  * entities), the caller falls back to flat_parse + promote.
  */
 #include "direct_parse.h"
+#include "../memory/arena.h"
 #include "../dom/element.h"
 #include "../dom/root_doc_map.h"
 #include "../dom/text.h"
@@ -675,7 +676,10 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * plain pre-scan. */
     size_t lt_count, dq_count, sq_count;
     if (owns_buffer == 2) {
-        char* own = (char*)malloc(len + 1);
+        /* Retained buffer: inputs >256 KB would otherwise be
+         * munmapped on free and re-faulted on the next parse (the
+         * arena free-list rationale — see arena.c). */
+        char* own = taurus_arena_buffer_alloc(len + 1);
         if (!own) return NULL;
         taurus_copy_count3(own, buf, len, '<', '"', '\'',
                            &lt_count, &dq_count, &sq_count);
@@ -703,13 +707,13 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     size_t arena_size = elem_bytes + attr_bytes + text_room + slack;
     TaurusArena* arena = taurus_arena_create(arena_size);
     if (!arena) {
-        if (owns_buffer == 1) free(buf);
+        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
         return NULL;
     }
     TaurusMemoryPool* pool = taurus_pool_create_arena_backed(arena, 1);
     if (!pool) {
         taurus_arena_destroy(arena);
-        if (owns_buffer == 1) free(buf);
+        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
         return NULL;
     }
     if (len >= 256) {
@@ -731,7 +735,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     char* combined = (char*)taurus_pool_alloc(pool, elem_bytes + attr_bytes);
     if (!combined) {
         taurus_pool_destroy(pool);
-        if (owns_buffer == 1) free(buf);
+        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
         return NULL;
     }
     TaurusElement elem_block = (TaurusElement)combined;
@@ -750,7 +754,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         taurus_pool_alloc(pool, sizeof(struct taurus_document));
     if (!doc) {
         taurus_pool_destroy(pool);
-        if (owns_buffer == 1) free(buf);
+        if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);
         return NULL;
     }
     memset(doc, 0, sizeof(*doc));
@@ -1179,7 +1183,7 @@ fail:
     taurus_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't TAURUS_FREE(doc) (TODO 154). */
-    if (owns_buffer == 1) free(buf);  /* Only free our own copy, not caller's */
+    if (owns_buffer == 1) taurus_arena_buffer_release(buf, len + 1);  /* Only free our own copy, not caller's */
     return NULL;
 }
 

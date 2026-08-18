@@ -6,6 +6,7 @@
 
 #include "../include/taurus.h"
 #include "taurus_internal.h"
+#include "taurus/memory/arena.h"
 #include "xpath/parser.h"
 #include "xpath/evaluator.h"
 #include "xpath/xpath_variables.h"
@@ -669,7 +670,12 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
      * The buffer is freed here to ensure StringViews remain valid for document lifetime
      * For stack-allocated buffers (files <= 4KB), xml_buffer_needs_free = 0 */
     if (doc->xml_buffer && doc->xml_buffer_needs_free) {
-        TAURUS_FREE(doc->xml_buffer);
+        /* Release through the retained-buffer free list (see
+         * memory/arena.c): large inputs would otherwise be munmapped
+         * here and re-faulted page-by-page on the next parse. */
+        taurus_arena_buffer_release(doc->xml_buffer,
+                                    doc->xml_buffer_len + 1);
+        doc->xml_buffer = NULL;
     }
 
     /* CRITICAL: Cleanup overflow table BEFORE destroying the pool
