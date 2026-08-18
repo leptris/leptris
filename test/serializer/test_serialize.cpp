@@ -378,4 +378,37 @@ TEST(SerializeOptions, OmitsXmlDeclarationWhenDisabled) {
     taurus_document_free(doc);
 }
 
+
+TEST(SerializeOptions, PrettyTextLeavesStayOnOneLine) {
+    /* Pins the pretty emission of text-only leaves: no blank lines
+     * between siblings (a fused-path regression inserted leading
+     * newlines after the parent's open-tag newline and sailed
+     * through the whole suite — only a byte-diff against main
+     * caught it). */
+    const char xml[] =
+        "<root><a x=\"1\"><b>hello</b><c>world &amp; more</c></a>"
+        "<d/><e>tail</e></root>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    TaurusSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* s = taurus_document_serialize(doc, &opts);
+    ASSERT_NE(s, nullptr);
+    std::string out(s);
+
+    /* No empty lines anywhere. */
+    EXPECT_EQ(out.find("\n\n"), std::string::npos);
+    /* Text leaves stay inline with their content. */
+    EXPECT_NE(out.find("<b>hello</b>"), std::string::npos);
+    EXPECT_NE(out.find("<c>world &amp; more</c>"), std::string::npos);
+    EXPECT_NE(out.find("<e>tail</e>"), std::string::npos);
+    /* Every line except the last starts with an indent or a tag. */
+    EXPECT_EQ(out.find("\n \n"), std::string::npos);
+
+    taurus_free_string(s);
+    taurus_document_free(doc);
+}
+
 }  // namespace

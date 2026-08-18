@@ -662,8 +662,7 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
          * element with no attributes and no namespaces emits its ENTIRE
          * `<name>text</name>` from one reservation — the dominant shape
          * in text-heavy documents paid two reservations + finalize. */
-        if (buf->indent_spaces == 0 &&
-            taurus_element_get_first_attribute(e) == NULL &&
+        if (taurus_element_get_first_attribute(e) == NULL &&
             taurus_elem_namespaces(e) == NULL) {
             TaurusNode* fc0 = taurus_node_first_child_internal((TaurusNode*)e);
             if (fc0 && fc0->type == TAURUS_NODE_TYPE_TEXT &&
@@ -671,8 +670,26 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
                 TaurusTextNode* tn0 = (TaurusTextNode*)fc0;
                 const char* tc0 = taurus_text_get_content(tn0);
                 size_t tl0 = tc0 ? tn0->content_len : 0;
-                buffer_ensure_capacity(buf, 2 * nl + 6 * tl0 + 6);
+                /* Pretty mode fuses newline + indent + open + text +
+                 * close into the same single reservation — leaves
+                 * otherwise pay ~8 capacity-checked appends each
+                 * (the raw-only guard was why pretty trailed). */
+                int pretty0 = buf->indent_spaces > 0;
+                /* Lead = indent spaces ONLY: the parent's open tag
+                 * (or the previous sibling's close) already emitted
+                 * the newline that ended this line — a leading \n
+                 * here inserts blank lines. Trail mirrors the close-
+                 * tag site: newline after non-root closes. */
+                int lead = (!is_root_cur && pretty0)
+                    ? buf->indent * buf->indent_spaces : 0;
+                int trail = (pretty0 && !is_root_cur) ? 1 : 0;
+                buffer_ensure_capacity(
+                    buf, (size_t)(lead + trail) + 2 * nl + 6 * tl0 + 6);
                 char* q = buf->data + buf->size;
+                if (lead) {
+                    memset(q, ' ', (size_t)lead);
+                    q += lead;
+                }
                 *q++ = '<';
                 memcpy(q, name, nl); q += nl;
                 *q++ = '>';
@@ -680,6 +697,7 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
                 *q++ = '<'; *q++ = '/';
                 memcpy(q, name, nl); q += nl;
                 *q++ = '>';
+                if (trail) *q++ = '\n';
                 buf->size = (size_t)(q - buf->data);
                 buf->data[buf->size] = '\0';
                 goto advance;
