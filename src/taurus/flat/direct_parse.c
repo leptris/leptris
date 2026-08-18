@@ -96,7 +96,11 @@ typedef struct {
 } DParser;
 
 static inline void dp_skip_ws(DParser* p) {
-    while (p->pos < p->end && IS_WS(*p->pos)) {
+    /* Sentinel-terminated (parse endgame): the parse buffer always
+     * carries a NUL at buf[len] (copy and in-place entries both
+     * write it), and NUL classifies as no chartype — the bounds
+     * check per byte was the pugixml delta this loop can drop. */
+    while (IS_WS(*p->pos)) {
         if (*p->pos == '\n') p->line++;
         p->pos++;
     }
@@ -117,9 +121,30 @@ static inline void dp_skip_ws(DParser* p) {
  * call-site DRY (six name-scan loops collapse to one helper)
  * and guarantees no call-site regression vs the original
  * inline loop. */
+#if defined(__GNUC__)
+#  define DP_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#  define DP_UNLIKELY(x) (x)
+#endif
+/* Sentinel-terminated + 4x-unrolled byte loads (parse endgame):
+ * pugixml's SCANWHILE_UNROLL shape, never tested here — the earlier
+ * failed fast path was SWAR (mask setup dominated short names);
+ * this one keeps plain byte loads and only amortizes the loop
+ * counter and exits via unlikely hints. NUL stops the scan. */
 static TAURUS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
-    while (p->pos < p->end && IS_NAME_CHAR(*p->pos))
-        p->pos++;
+    char* s = p->pos;
+    for (;;) {
+        char c = s[0];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) break;
+        c = s[1];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) { s += 1; break; }
+        c = s[2];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) { s += 2; break; }
+        c = s[3];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) { s += 3; break; }
+        s += 4;
+    }
+    p->pos = s;
 }
 
 /* Tally '\n' bytes in [from, to) and fold into p->line. Used after
