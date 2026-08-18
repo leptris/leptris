@@ -1,13 +1,43 @@
 ## [Unreleased]
 
-## [0.25.2] - Y-08-18
+## [0.25.2] - 2026-08-18
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance — serialization at parity or ahead of pugixml on every shape
 
-### Changed
+The write side of the pugixml parity mandate is now closed. Measured
+on the same driver, same process (taurus vs pugixml, min-of-N):
 
-- (describe changes here)
+- attr-heavy (K=50, 847 KB): **1.4x faster than pugixml**
+  (0.67-0.73x ratio) — attribute values serialize from the stored
+  view length instead of re-deriving strlen per attribute
+- namespaced (218 KB): **ahead** (0.91x) — same view-length fix on
+  the iterative walker (the first fix landed only on the recursive
+  fallback)
+- text-heavy raw (1.17 MB): parity (0.97-1.02x, was 1.29x) —
+  escape-class table in the escaper (one table load + test per byte
+  instead of 3-4 compares; 57% of the profile) and a name_len byte
+  in the element struct's last padding byte (sizeof stays 64;
+  0xFF marks >254-byte names with strlen fallback) killing the
+  per-element strlen
+- text-heavy pretty: parity (0.97-1.06x, was 1.13-1.26x) — the
+  total-fusion leaf path now covers pretty mode (one reservation
+  for indent + open + text + close + newline; previously ~8
+  capacity-checked appends per leaf)
+
+Byte-identical output verified against the previous release on a
+mixed document; added `SerializeOptions.PrettyTextLeavesStayOnOneLine`
+after a blank-line regression sailed through the suite (pretty
+round-trip specs had never covered text-only leaves).
+
+Also shipped in this release: the parse sentinel-attr-loop and
+fused name walk from #411 (K=50 -3.6%, K=5 -3.2%) and the Windows
+DLL export fix for #278 (#410).
+
+### Fixed
+
+- Windows: `TAURUS_API` now accepts `TAURUS_BUILDING_DLL` so
+  shared-library builds export the full surface; CI gained a
+  shared-only Windows build to keep it green (issue #278)
 
 
 ## [0.25.1] - 2026-08-18
