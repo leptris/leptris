@@ -80,6 +80,38 @@ TEST(NamespaceReadBug, NamespaceInheritsFromParent) {
 // Issue #223 — taurus_node_line
 // =====================================================================
 
+/* Lazy resolution (parse stores byte offsets; taurus_node_line
+ * resolves against the doc's newline table and caches): repeated
+ * queries must be stable, resolution order must not matter, and
+ * text/comment nodes must resolve through their parent edge. */
+TEST(NodeLineBug, LazyResolutionIsIdempotentAndOrderIndependent) {
+    auto doc = Parse(
+        "<root>\n"
+        "  <a>text on line 2</a>\n"
+        "  <!-- comment on line 3 -->\n"
+        "  <b/>\n"
+        "</root>");
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+    TaurusElement a = taurus_element_first_child(root, "a");
+    TaurusElement b = taurus_element_first_child(root, "b");
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+
+    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);
+    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);  /* cached */
+    EXPECT_EQ(taurus_node_line(taurus_element_as_node(b)), 4);
+    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);  /* after other */
+    EXPECT_EQ(taurus_node_line(taurus_element_as_node(root)), 1);
+
+    /* Text child of <a> shares line 2. */
+    TaurusNodeRef n = taurus_node_first_child(taurus_element_as_node(a));
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(taurus_node_line(n), 2);
+    EXPECT_EQ(taurus_node_line(n), 2);
+    taurus_document_free(doc);
+}
+
 TEST(NodeLineBug, RootReportsLine1) {
     auto doc = Parse("<root>\n  <a/>\n</root>");
     ASSERT_NE(doc, nullptr);
