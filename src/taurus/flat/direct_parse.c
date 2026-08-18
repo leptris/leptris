@@ -451,6 +451,40 @@ static TAURUS_NOINLINE int dp_parse_doctype(DParser* p,
     return 0;
 }
 
+/* Fused prefix split + 16-bit FNV-1a of the local name (TODO 159
+ * hash), one bounded walk instead of strchr + a second walk to NUL.
+ * ':' resets the hash so it covers exactly the local part.
+ *
+ * Deliberately noinline: inlining this into the element branch of
+ * direct_parse_internal grew the hot attr loop's neighborhood and
+ * regressed K=100 by ~1.5% (code layout, not work). Called once
+ * per element; the call cost is ~1ns against 51us at K=5. */
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static void dp_split_hash_name(TaurusElement elem, char* name_start,
+                               size_t name_len, TaurusMemoryPool* pool) {
+    char* colon = NULL;
+    uint16_t h = 0x811C;
+    for (const char* c = name_start; c < name_start + name_len; c++) {
+        if (DP_UNLIKELY(*c == ':')) {
+            colon = (char*)c;
+            h = 0x811C; /* restart on the local part */
+            continue;
+        }
+        h ^= (unsigned char)*c;
+        h *= 0x0193;
+    }
+    elem->name_hash = h;
+    if (colon) {
+        *colon = '\0';
+        taurus_elem_set_prefix(elem, name_start, pool);
+        elem->name = colon + 1;
+    } else {
+        elem->name = name_start;
+    }
+}
+
 /* Parse attributes for an element. Writes attr structs into the
  * pre-allocated attr_block (zero-copy name/value, no interning).
  * Names are NUL-terminated in-place AFTER '=' is consumed; values
@@ -885,27 +919,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
              * has finished scanning the open tag. */
             name_start[name_len] = '\0';
 
-            /* Split prefix:local. */
-            char* colon = strchr(name_start, ':');
-            if (colon) {
-                *colon = '\0';
-                taurus_elem_set_prefix(elem, name_start, p.pool);
-                elem->name = colon + 1;
-            } else {
-                elem->name = name_start;
-            }
-
-            /* Compute 16-bit FNV-1a hash of local name for fast
-             * child-axis lookups in XPath (TODO 159). Compares
-             * 2 bytes before falling back to strcmp. */
-            {
-                uint16_t h = 0x811C;
-                for (const char* c = elem->name; *c; c++) {
-                    h ^= (unsigned char)*c;
-                    h *= 0x0193;
-                }
-                elem->name_hash = h;
-            }
+            dp_split_hash_name(elem, name_start, name_len, p.pool);
 
             /* Wire into parent. */
             if (p.depth > 0) {
