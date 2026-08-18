@@ -178,7 +178,7 @@ typedef struct {
 } taurus_parse_options;
 
 /* Internal parse function - implemented in parse_simple.c or parser_new.c */
-extern struct taurus_document* taurus_parse(const char* xml, size_t len);
+extern TAURUS_API struct taurus_document* taurus_parse(const char* xml, size_t len);
 
 /* TODO 139 Phase D: trigger lazy promote if the doc has a parsed
  * FlatDoc that hasn't been built into the compact-pointer tree yet.

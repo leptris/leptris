@@ -114,7 +114,7 @@ static inline void taurus_parse_context_set_error(TaurusParseContext *ctx,
  *   // Use document...
  *   taurus_document_free_tree(doc);
  */
-struct taurus_document *taurus_parse(const char *xml,
+TAURUS_API struct taurus_document *taurus_parse(const char *xml,
                                       size_t len,
                                       TaurusParseOptions *opts);
 
