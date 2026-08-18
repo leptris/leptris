@@ -399,6 +399,173 @@ TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
  * Set attribute (Public API)
  * COMPACT MODE: Uses linked list attribute storage
  */
+
+/* ---- Doc-level attribute-name index (mutation path) --------------------
+ *
+ * taurus_element_set_attribute walks the attr list per call to
+ * reject duplicates — O(N) per set, O(N^2) for programmatic builds
+ * (11 ms at 2000 attrs on one element). This open-addressed index
+ * keys (element pointer, 32-bit name hash) -> attribute so the
+ * duplicate check is O(1). Safety: nodes are arena-backed and
+ * element removal only unlinks (never frees), so raw attr pointers
+ * cannot dangle before taurus_document_free — which frees the
+ * index. Entries: attr != NULL live; attr == NULL with elem != NULL
+ * is a tombstone (probe continues); all-NULL slot ends the probe.
+ * The (elem, hash == 0) sentinel marks an element as registered:
+ * parse-created attrs are bulk-inserted on the element's first
+ * mutation so the index is authoritative without ever touching the
+ * parse path. ------------------------------------------------------------------ */
+
+/* struct taurus_attr_index_entry / _index: taurus_internal.h
+ * (document_free releases the table). */
+
+#define ATTR_INDEX_INIT_CAP 16u
+
+static uint32_t attr_index_slot(TaurusElement elem, uint32_t name_hash,
+                                size_t cap) {
+    uint64_t h = (uint64_t)(uintptr_t)elem;
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdULL;
+    uint64_t h2 = name_hash;
+    h2 ^= h2 >> 15;
+    h2 *= 0x9E3779B97F4A7C15ULL;
+    return (uint32_t)((h ^ h2) & (cap - 1));
+}
+
+static struct taurus_attr_index* attr_index_get(struct taurus_document* doc) {
+    if (!doc->attr_index) {
+        doc->attr_index = (struct taurus_attr_index*)malloc(
+            sizeof(struct taurus_attr_index));
+        if (!doc->attr_index) return NULL;
+        doc->attr_index->slots = (struct taurus_attr_index_entry*)calloc(
+            ATTR_INDEX_INIT_CAP, sizeof(struct taurus_attr_index_entry));
+        if (!doc->attr_index->slots) {
+            free(doc->attr_index);
+            doc->attr_index = NULL;
+            return NULL;
+        }
+        doc->attr_index->cap = ATTR_INDEX_INIT_CAP;
+        doc->attr_index->used = 0;
+    }
+    return doc->attr_index;
+}
+
+/* Probe for (elem, name_hash). On hit returns the slot index with
+ * *attr_out set (NULL when the slot is the registration sentinel).
+ * On miss returns the empty-slot index for insertion. */
+static size_t attr_index_probe(struct taurus_attr_index* ix,
+                               TaurusElement elem, uint32_t name_hash,
+                               struct taurus_attribute** attr_out,
+                               int* found) {
+    size_t cap = ix->cap;
+    size_t i = attr_index_slot(elem, name_hash, cap);
+    *found = 0;
+    for (size_t n_ = 0; n_ < cap; n_++) {
+        struct taurus_attr_index_entry* e = &ix->slots[i];
+        if (!e->elem && !e->attr) return i;         /* never used: miss */
+        if (e->elem == elem && e->name_hash == name_hash) {
+            if (e->attr) { *attr_out = e->attr; *found = 1; return i; }
+            if (name_hash == 0) { *attr_out = NULL; *found = 1; return i; }
+        }
+        i = (i + 1) & (cap - 1);
+    }
+    return (size_t)-1; /* full (cannot happen: rehash keeps load < 0.7) */
+}
+
+static void attr_index_rehash(struct taurus_attr_index* ix) {
+    size_t ncap = ix->cap * 2;
+    struct taurus_attr_index_entry* ns = (struct taurus_attr_index_entry*)
+        calloc(ncap, sizeof(struct taurus_attr_index_entry));
+    if (!ns) return; /* stay at old size; probe loop tolerates it */
+    for (size_t i = 0; i < ix->cap; i++) {
+        struct taurus_attr_index_entry e = ix->slots[i];
+        if (!e.elem && !e.attr) continue;
+        if (!e.attr && e.name_hash != 0) continue;  /* drop tombstones */
+        size_t j = attr_index_slot(e.elem, e.name_hash, ncap);
+        while (ns[j].elem || ns[j].attr) j = (j + 1) & (ncap - 1);
+        ns[j] = e;
+    }
+    free(ix->slots);
+    ix->slots = ns;
+    ix->cap = ncap;
+    ix->used = 0;
+    for (size_t i = 0; i < ncap; i++) {
+        if (ns[i].elem || ns[i].attr) ix->used++;
+    }
+}
+
+static void attr_index_put(struct taurus_attr_index* ix, TaurusElement elem,
+                           uint32_t name_hash,
+                           struct taurus_attribute* attr, size_t slot) {
+    if (slot >= ix->cap) {
+        attr_index_rehash(ix);
+        struct taurus_attribute* dummy;
+        int f;
+        slot = attr_index_probe(ix, elem, name_hash, &dummy, &f);
+        if (slot == (size_t)-1) return;
+    }
+    struct taurus_attr_index_entry* e = &ix->slots[slot];
+    if (!e->elem && !e->attr) ix->used++;
+    e->elem = elem;
+    e->name_hash = name_hash;
+    e->attr = attr;
+    if (ix->used * 10 >= ix->cap * 7) attr_index_rehash(ix);
+}
+
+/* Bulk-register every attr of `elem` plus the (elem, 0) sentinel so
+ * later probes are authoritative. Falls back silently (index stays
+ * partial) only on allocation failure — callers must then use the
+ * list walk. */
+static void attr_index_register(struct taurus_document* doc,
+                                struct taurus_attr_index* ix,
+                                TaurusElement elem) {
+    struct taurus_attribute* dummy;
+    int found;
+    size_t slot = attr_index_probe(ix, elem, 0, &dummy, &found);
+    if (found || slot == (size_t)-1) return;
+    attr_index_put(ix, elem, 0, NULL, slot);
+    struct taurus_attribute* a = taurus_element_get_first_attribute(elem);
+    while (a) {
+        uint32_t h = attr_name_hash(a);
+        slot = attr_index_probe(ix, elem, h, &dummy, &found);
+        if (!found && slot != (size_t)-1) {
+            attr_index_put(ix, elem, h, a, slot);
+        }
+        a = taurus_attr_next(a);
+    }
+}
+
+/* O(1) duplicate check with lazy registration. Returns the existing
+ * attr or NULL; *ix_out/registered bookkeeping lets the caller
+ * insert the new attr without re-probing. */
+static struct taurus_attribute* attr_index_lookup(
+    struct taurus_document* doc, TaurusElement elem, const char* name,
+    size_t name_len, uint32_t name_hash,
+    struct taurus_attr_index** ix_out, size_t* insert_slot) {
+    *ix_out = NULL;
+    *insert_slot = (size_t)-1;
+    struct taurus_attr_index* ix = attr_index_get(doc);
+    if (!ix) return NULL;
+    attr_index_register(doc, ix, elem);
+    struct taurus_attribute* hit = NULL;
+    int found;
+    size_t slot = attr_index_probe(ix, elem, name_hash, &hit, &found);
+    if (slot == (size_t)-1) return NULL;
+    if (!found) {
+        *ix_out = ix;
+        *insert_slot = slot;
+        return NULL;
+    }
+    if (!hit) return NULL;                 /* sentinel-only element */
+    /* Confirm with the string (hash collisions). */
+    if (hit->name_view.length == name_len &&
+        memcmp(attr_cname(hit), name, name_len) == 0) {
+        return hit;
+    }
+    /* Collision with a different name: fall back to the walk. */
+    return taurus_element_get_attribute_by_name(elem, name);
+}
+
 TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, const char* value) {
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
 
@@ -409,8 +576,23 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
      * is pure overhead — ~200ns × N attrs.  Inline pool_alloc + memcpy
      * is faster than taurus_sv_to_cstr_pooled for this case. */
 
-    /* Check if attribute already exists */
-    struct taurus_attribute* existing = taurus_element_get_attribute_by_name(elem, name);
+    /* Check if attribute already exists — O(1) via the doc-level
+     * attr-name index (lazy registration covers parse-created attrs);
+     * NULL index (alloc failure) falls back to the list walk. */
+    size_t set_name_len = strlen(name);
+    uint32_t set_name_hash = 2166136261u;
+    for (size_t i = 0; i < set_name_len; i++) {
+        set_name_hash ^= (unsigned char)name[i];
+        set_name_hash *= 16777619u;
+    }
+    struct taurus_document* set_doc = taurus_element_get_document(elem);
+    struct taurus_attr_index* set_ix = NULL;
+    size_t set_slot = (size_t)-1;
+    struct taurus_attribute* existing =
+        set_doc
+            ? attr_index_lookup(set_doc, elem, name, set_name_len,
+                                set_name_hash, &set_ix, &set_slot)
+            : taurus_element_get_attribute_by_name(elem, name);
     if (existing) {
         /* Update existing attribute's value */
         TaurusMemoryPool* pool = NULL;
@@ -488,18 +670,30 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
         attr->has_entities = 0;
         taurus_attr_set_next(attr, NULL);
 
-        /* Append via cached last_attribute offset — O(1) instead of
-         * the old O(N) walk to find the tail.  Decode the offset to
-         * access the struct, then re-encode (TODO 90 Phase 2d). */
-        struct taurus_attribute* last = taurus_elem_last_attribute(elem);
+        /* Append via the doc-level attr-tail cache — O(1) for the
+         * sequential case (the element struct carries no last-attr
+         * edge by the 64-byte layout law; the walk is O(attr_count)
+         * and made programmatic builds quadratic). */
+        struct taurus_attribute* last =
+            (set_doc && set_doc->mut_attr_elem == elem)
+                ? set_doc->mut_attr_tail
+                : taurus_elem_last_attribute(elem);
         if (last) {
             taurus_attr_set_next(last, attr);
         } else {
             taurus_elem_set_first_attribute(elem, attr);
         }
         taurus_elem_set_last_attribute(elem, attr);
+        if (set_doc) {
+            set_doc->mut_attr_elem = elem;
+            set_doc->mut_attr_tail = attr;
+        }
 
         elem->attr_count++;
+
+        if (set_ix && set_slot != (size_t)-1) {
+            attr_index_put(set_ix, elem, attr->name_hash, attr, set_slot);
+        }
     }
 
     /* COW: Increment version */
@@ -513,6 +707,13 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
  */
 TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* name) {
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
+
+    struct taurus_document* rm_doc = taurus_element_get_document(elem);
+    uint32_t rm_hash = 2166136261u;
+    for (const char* c = name; *c; c++) {
+        rm_hash ^= (unsigned char)*c;
+        rm_hash *= 16777619u;
+    }
 
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     struct taurus_attribute* prev = NULL;
@@ -549,6 +750,24 @@ TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* nam
              * Pool-allocated strings cannot be individually freed - they will be
              * reclaimed when the entire document/pool is freed.
              * Trying to free() them here causes undefined behavior (Abort trap). */
+
+            /* Tombstone the index entry: the attr memory stays valid
+             * (pool-backed) but is detached — a later set_attribute
+             * must not resurrect it. */
+            if (rm_doc && rm_doc->mut_attr_elem == elem &&
+                rm_doc->mut_attr_tail == attr) {
+                rm_doc->mut_attr_elem = NULL;
+                rm_doc->mut_attr_tail = NULL;
+            }
+            if (rm_doc && rm_doc->attr_index) {
+                struct taurus_attribute* dummy;
+                int found;
+                size_t slot = attr_index_probe(rm_doc->attr_index, elem,
+                                               rm_hash, &dummy, &found);
+                if (found && rm_doc->attr_index->slots[slot].attr == attr) {
+                    rm_doc->attr_index->slots[slot].attr = NULL;
+                }
+            }
 
             elem->attr_count--;
             taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));

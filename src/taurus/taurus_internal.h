@@ -112,6 +112,22 @@ struct taurus_document {
      * built. Freed with the document. */
     uint32_t* line_breaks;
     size_t line_break_count;
+    /* Doc-level attribute-name index (mutation path): open-addressed
+     * (element, name-hash) -> attr. Built lazily on the first
+     * set/remove_attribute; each element bulk-registers its attrs on
+     * first touch (one O(N) walk amortized per element) via the
+     * (elem, hash=0) sentinel. Safe with raw pointers because nodes
+     * are arena-backed and unlink-never-frees — entries outlive any
+     * detach. remove_attribute tombstones its entry. NULL = unused
+     * (never-mutated documents pay nothing). */
+    struct taurus_attr_index* attr_index;
+    /* Mutation attr-tail cache (the 195a child-tail twin): elements
+     * carry no last-attribute edge (64-byte layout law), so appends
+     * would otherwise walk the list — O(N^2) for programmatic attr
+     * builds. Sequential set_attribute on one element is O(1). */
+    struct taurus_element* mut_attr_elem;
+    struct taurus_attribute* mut_attr_tail;
+    /* Definition follows this struct (needed by document_free). */
 
     /* Document-scoped state (TODO 27/38 phase 2).
      *
@@ -146,8 +162,6 @@ struct taurus_document {
      * back-pointer (stale entries fall back to the walk). */
     struct taurus_element* mut_tail_parent;
     struct taurus_node* mut_tail_child;
-    struct taurus_element* mut_attr_elem;
-    struct taurus_attribute* mut_attr_last;
 
     /* FlatDoc + lazy-promote removed — direct_parse builds the
      * TaurusElement tree eagerly. Retained as an always-zero field
@@ -180,6 +194,21 @@ struct taurus_document {
      * allocated docs (taurus_document_copy, taurus_parse_fragment)
      * leave this 0 and get freed via TAURUS_FREE. TODO 154. */
     int doc_pool_allocated;
+};
+
+/* Open-addressed (element, name-hash) -> attribute index for the
+ * mutation path (see doc->attr_index). Defined here so document_free
+ * can release it; all logic lives in dom/element_modify.c. */
+struct taurus_attr_index_entry {
+    struct taurus_element* elem;
+    uint32_t name_hash;
+    struct taurus_attribute* attr;   /* NULL: tombstone or sentinel */
+};
+
+struct taurus_attr_index {
+    struct taurus_attr_index_entry* slots;
+    size_t cap;   /* power of two */
+    size_t used;
 };
 
 /* Parse options structure */
