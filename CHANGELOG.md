@@ -1,13 +1,17 @@
 ## [Unreleased]
 
-## [0.25.3] - Y-08-18
+## [0.25.3] - 2026-08-18
+### Performance — the page-fault tax, the attr-loop diet, and lazy lines: high-attr parse −18% to −21%
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+- **Retained-block free list (#415):** libc mmaps large blocks and munmaps them on free, so every parse/free/parse cycle re-faulted the whole arena (0.21 us/page — ~400 us of a 1.36 ms parse at 100 attrs/element). Freed arena blocks and the parser's input-copy buffer now round through a bounded free list (4 blocks / 32 MB) and keep their pages mapped. K=50 −15.5%, K=100 −17.3%; macOS leaks still 0.
+- **Attr-loop diet + lazy line resolution (#416):** a running attr cursor (no per-attr stride multiply), first-attr-only offset math, a parser-local attr counter, and unconditional probe windows over a 64-byte zeroed slack on the owned copy. Line numbers (#223) became lazy: parse stores byte offsets and `taurus_node_line` resolves via a per-document newline table with in-place caching — the scan loops carry zero '\n' compares. Identical results through the resolver (all #223 and nokogiri line specs pass); documents ≥ 2 GiB report unknown lines.
+- Standings vs pugixml on the many-attrs benchmark: **1.40x/1.42x/1.48x/1.52x** (was 1.41/1.44/1.87/2.05 at the start of the day).
 
 ### Changed
 
-- (describe changes here)
+- `taurus_node_line` now resolves lazily and caches; the buffer-immutability contract (already required by StringViews) covers the resolution
+
+- **Mutation attribute index + attr-tail cache (#417):** `taurus_element_set_attribute` carried two hidden O(N^2) walks — the duplicate-name check and the append tail walk. A lazily-built per-document (element, name-hash) attribute index plus an attr-tail cache (the child-tail twin) makes programmatic attribute builds O(1): 2000 attributes on one element went from 11.1 ms to 426 us — 20-30x faster than pugixml's duplicate-checking equivalent. Append re-measured: 2.5x ahead of pugixml.
 
 
 ## [0.25.2] - 2026-08-18
