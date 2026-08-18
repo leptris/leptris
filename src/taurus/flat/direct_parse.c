@@ -480,8 +480,11 @@ static void dp_split_hash_name(TaurusElement elem, char* name_start,
         *colon = '\0';
         taurus_elem_set_prefix(elem, name_start, pool);
         elem->name = colon + 1;
+        size_t local_len = name_len - (size_t)(colon + 1 - name_start);
+        elem->name_len = (local_len > 254) ? 0xFF : (uint8_t)local_len;
     } else {
         elem->name = name_start;
+        elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
     }
 }
 
@@ -959,7 +962,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
              * everything after ':' (or the whole name if no ':'). */
             TaurusElement open = p.open_stack[p.depth - 1];
             const char* open_name = open->name;
-            size_t open_len = strlen(open_name);
+            size_t open_len = (open->name_len != 0xFF)
+                ? (size_t)open->name_len : strlen(open_name);
             const char* close_local = close_start;
             size_t close_local_len = close_len;
             const char* colon = (const char*)memchr(close_start, ':', close_len);

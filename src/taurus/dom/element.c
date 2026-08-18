@@ -58,6 +58,8 @@ TaurusElement taurus_element_create_with_view(
     elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
     elem->name = taurus_sv_to_cstr_pooled(&name_view, pool);
     elem->name_hash = taurus_name_hash_compute(elem->name);
+    elem->name_len = (name_view.length > 254)
+        ? 0xFF : (uint8_t)name_view.length;
 
     return elem;
 }

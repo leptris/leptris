@@ -236,6 +236,12 @@ struct taurus_element {
     TaurusCompactHeader header;        /* 2 bytes */
     uint16_t name_hash;               /* 2 bytes — FNV-1a of local name */
     uint8_t attr_count;                /* 1 byte */
+    /* Local-name byte length, 0xFF = name longer than 254 bytes
+     * (callers fall back to strlen). Fills the last padding byte
+     * of this packed header — sizeof stays 64. Kills the per-element
+     * strlen in the serializer (8% of text-heavy serialize) and the
+     * close-tag comparison in the parser. */
+    uint8_t name_len;                  /* 1 byte */
     uint16_t child_count;              /* 2 bytes */
 
     /* Cached NULL-terminated strings (16 bytes).
