@@ -374,8 +374,15 @@ if(TAURUS_BUILD_SHARED)
         C_EXTENSIONS OFF
     )
 
-    # Export symbols for Windows DLL
+    # Export symbols for Windows DLL. The definition must reach the
+    # compilation of the .c files, which happens in taurus_objects —
+    # a PRIVATE definition here never propagates to an object
+    # library's sources, so the DLL exported nothing and MSVC
+    # emitted no import library (issue #278).
     target_compile_definitions(taurus_shared PRIVATE TAURUS_BUILDING_DLL)
+    if(WIN32)
+        target_compile_definitions(taurus_objects PRIVATE TAURUS_BUILDING_DLL)
+    endif()
     if(WIN32)
         target_compile_definitions(taurus_shared PUBLIC TAURUS_DLL)
     endif()
