@@ -12,6 +12,7 @@
 #define TAURUS_COMPACT_ALLOCATOR_H
 
 #include <stddef.h>
+#include "../taurus_internal.h"  /* TAURUS_API for the mirrored declaration */
 #include <stdint.h>
 
 /* No TaurusStringView forward decl: nothing in this header references
@@ -118,7 +119,7 @@ typedef struct compact_text {
 /* Parse document in compact mode - returns regular TaurusDocument
  * (converts from compact to regular format internally) */
 struct taurus_document;
-struct taurus_document* taurus_parse_string_compact(const char* xml, size_t length, int* error_out);
+TAURUS_API struct taurus_document* taurus_parse_string_compact(const char* xml, size_t length, int* error_out);
 
 #ifdef __cplusplus
 }
