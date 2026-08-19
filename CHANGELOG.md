@@ -1,13 +1,15 @@
 ## [Unreleased]
 
-## [0.25.5] - Y-08-19
+## [0.25.5] - 2026-08-19
+### Fixed — critical: binding_wrapper NULL on all parse-created nodes (#421)
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+The text/comment/CDATA/PI node creators initialize every base field except `binding_wrapper`. Fresh mmap-backed arenas had zeroed it by luck for the library's entire life; the retained-arena free list introduced in v0.25.3 recycles dirty pages, so a second parse in the same process could return a stale, non-NULL wrapper pointer into the previous document's memory from `taurus_node_get_binding_wrapper` — dangling by construction, and reachable from the language bindings. All four creators now set it explicitly, pinned by a spec that parses the same document twice (the second parse draws recycled arena memory) and asserts NULL on every node type.
 
-### Changed
+### Performance — bulk text-node block (round 8, modest)
 
-- (describe changes here)
+Text nodes now carve from a bulk block like elements and attributes (upper-bounded by the tag count; overflow falls back to the pool path), removing the last per-node out-of-line call from the element/text path. K=5 -0.3% to K=20 -1.3% across the many-attrs sections, no regressions.
+
+Parse standings vs pugixml on this build: many-attrs **1.38/1.42/1.48/1.51x**; real-world corpus 1.44-1.81x; append 2.5x ahead; set_attribute ~20x ahead of the duplicate-checking equivalent; serialize at parity-or-ahead on every shape; XPath ahead up to 87x.
 
 
 ## [0.25.4] - 2026-08-19
