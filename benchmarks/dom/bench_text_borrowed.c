@@ -37,11 +37,20 @@ static void build_doc(text_ctx_t* ctx) {
     }
 
     size_t off = 0;
-    off += (size_t)snprintf(ctx->xml + off, DOC_CAPACITY - off, "<article>");
+    /* Clamp on truncation: snprintf returns the UNTRUNCATED length,
+     * which would push `off` past DOC_CAPACITY and underflow the
+     * next size argument (CodeQL cpp/overflowing-snprintf). */
+    int r = snprintf(ctx->xml + off, DOC_CAPACITY - off, "<article>");
+    off += (r > 0 && (size_t)r < DOC_CAPACITY - off) ? (size_t)r : 0;
     for (int i = 0; i < PARAGRAPH_COUNT; i++) {
-        off += (size_t)snprintf(ctx->xml + off, DOC_CAPACITY - off, "%s", PARAGRAPH);
+        if (off >= DOC_CAPACITY - 1) break;
+        r = snprintf(ctx->xml + off, DOC_CAPACITY - off, "%s", PARAGRAPH);
+        off += (r > 0 && (size_t)r < DOC_CAPACITY - off) ? (size_t)r : 0;
     }
-    off += (size_t)snprintf(ctx->xml + off, DOC_CAPACITY - off, "</article>");
+    if (off < DOC_CAPACITY - 1) {
+        r = snprintf(ctx->xml + off, DOC_CAPACITY - off, "</article>");
+        off += (r > 0 && (size_t)r < DOC_CAPACITY - off) ? (size_t)r : 0;
+    }
     ctx->len = off;
 }
 

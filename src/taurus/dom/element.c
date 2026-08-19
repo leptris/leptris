@@ -520,7 +520,10 @@ TaurusElement taurus_element_get_child(TaurusElement elem, uint16_t index) {
 
     /* Walk the child linked list */
     TaurusElement child = taurus_element_get_first_child(elem);
-    for (uint8_t i = 0; i < index && child; i++) {
+    /* size_t counter: a uint8_t wraps for index > 255 and the walk
+     * never terminates early as intended (CodeQL comparison-with-
+     * wider-type). */
+    for (size_t i = 0; i < index && child; i++) {
         child = taurus_element_get_next_sibling(child);
     }
 
