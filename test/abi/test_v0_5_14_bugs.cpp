@@ -80,6 +80,34 @@ TEST(NamespaceReadBug, NamespaceInheritsFromParent) {
 // Issue #223 — taurus_node_line
 // =====================================================================
 
+/* Regression: the retained-arena free list recycles dirty pages, so
+ * every parse-created node MUST explicitly NULL binding_wrapper —
+ * pre-retention, fresh mmap pages zeroed it by luck. Parse twice
+ * (second parse gets recycled memory) and check every node type. */
+TEST(NodeBindingWrapper, NullOnAllParseCreatedNodesAcrossArenaReuse) {
+    const char xml[] =
+        "<r>text<c/><!--co--><![CDATA[cd]]><?pi data?></r>";
+    for (int round = 0; round < 2; round++) {
+        TaurusStatus st = TAURUS_OK;
+        TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &st);
+        ASSERT_NE(doc, nullptr);
+        TaurusElement r = taurus_document_root(doc);
+        ASSERT_NE(r, nullptr);
+        TaurusNodeRef n = taurus_node_first_child(taurus_element_as_node(r));
+        int checked = 0;
+        while (n) {
+            EXPECT_EQ(taurus_node_get_binding_wrapper(n), nullptr)
+                << "round " << round << " node " << checked;
+            n = taurus_node_next_sibling(n);
+            checked++;
+        }
+        ASSERT_GE(checked, 4);   /* text, element, comment, cdata, pi */
+        EXPECT_EQ(taurus_node_get_binding_wrapper(
+                      taurus_element_as_node(r)), nullptr);
+        taurus_document_free(doc);
+    }
+}
+
 /* Lazy resolution (parse stores byte offsets; taurus_node_line
  * resolves against the doc's newline table and caches): repeated
  * queries must be stable, resolution order must not matter, and
