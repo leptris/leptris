@@ -350,6 +350,21 @@ TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, Ta
 /**
  * Parse XML string into document with in-place optimization (Public API wrapper)
  */
+
+TAURUS_API TaurusDocument taurus_parse_string_flags(const char* xml,
+                                                    size_t length,
+                                                    TaurusParseFlags flags,
+                                                    TaurusStatus* status) {
+    extern struct taurus_document* direct_parse_flags(const char* xml,
+                                                      size_t len,
+                                                      unsigned parse_flags);
+    TaurusDocument doc = direct_parse_flags(xml, length, (unsigned)flags);
+    if (status) {
+        *status = doc ? TAURUS_OK : TAURUS_ERROR_PARSE;
+    }
+    return doc;
+}
+
 TAURUS_API TaurusDocument taurus_parse_string_inplace(char* xml, size_t length, TaurusStatus* status) {
     if (status) *status = TAURUS_OK;
 

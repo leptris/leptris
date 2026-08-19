@@ -80,6 +80,61 @@ TEST(NamespaceReadBug, NamespaceInheritsFromParent) {
 // Issue #223 — taurus_node_line
 // =====================================================================
 
+/* TAURUS_PARSE_DROP_WS_TEXT (pugixml-parity mode): default keeps
+ * whitespace-only text nodes (libxml2-faithful, byte round-trips);
+ * the flag drops them and starts mixed runs at the first non-ws
+ * byte. Both modes pinned. */
+TEST(ParseFlags, DropWsTextSemantics) {
+    const char pretty[] = "<r>\n  <a/>\n  <b>x</b>\n</r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument def = taurus_parse_string(pretty, strlen(pretty), &st);
+    ASSERT_NE(def, nullptr);
+    TaurusDocument drop = taurus_parse_string_flags(
+        pretty, strlen(pretty), TAURUS_PARSE_DROP_WS_TEXT, &st);
+    ASSERT_NE(drop, nullptr);
+
+    auto cc = [](TaurusDocument d) {
+        int c = 0;
+        TaurusNodeRef n = taurus_node_first_child(
+            taurus_element_as_node(taurus_document_root(d)));
+        while (n) { c++; n = taurus_node_next_sibling(n); }
+        return c;
+    };
+    /* default: <a/> + ws + <b/> + ws + <b>'s text "x" ... children of r:
+     * ws, a, ws, b, ws = 5 (b's text is b's child) */
+    EXPECT_EQ(cc(def), 5);
+    /* flagged: ws runs dropped = a, b = 2 */
+    EXPECT_EQ(cc(drop), 2);
+    /* mixed run "x" inside <b> survives in both */
+    TaurusElement b = taurus_element_first_child(taurus_document_root(drop), "b");
+    ASSERT_NE(b, nullptr);
+    TaurusNodeRef bn = taurus_node_first_child(taurus_element_as_node(b));
+    ASSERT_NE(bn, nullptr);
+    EXPECT_STREQ(taurus_text_node_get_content(bn), "x");
+
+    taurus_document_free(def);
+    taurus_document_free(drop);
+}
+
+TEST(ParseFlags, DefaultFlagsEqualPlainParse) {
+    const char xml[] = "<r>\n  <a/>\n</r>";
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument a = taurus_parse_string(xml, strlen(xml), &st);
+    TaurusDocument b = taurus_parse_string_flags(
+        xml, strlen(xml), TAURUS_PARSE_DEFAULT, &st);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    char* sa = taurus_document_serialize(a, NULL);
+    char* sb = taurus_document_serialize(b, NULL);
+    ASSERT_NE(sa, nullptr);
+    ASSERT_NE(sb, nullptr);
+    EXPECT_STREQ(sa, sb);
+    free(sa);
+    free(sb);
+    taurus_document_free(a);
+    taurus_document_free(b);
+}
+
 /* Regression: the retained-arena free list recycles dirty pages, so
  * every parse-created node MUST explicitly NULL binding_wrapper —
  * pre-retention, fresh mmap pages zeroed it by luck. Parse twice
