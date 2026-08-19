@@ -469,7 +469,7 @@ static TAURUS_NOINLINE int dp_parse_doctype(DParser* p) {
  * direct_parse_internal grew the hot attr loop's neighborhood and
  * regressed K=100 by ~1.5% (code layout, not work). Called once
  * per element; the call cost is ~1ns against 51us at K=5. */
-static void dp_split_hash_name(TaurusElement elem, char* name_start,
+static TAURUS_ALWAYS_INLINE void dp_split_hash_name(TaurusElement elem, char* name_start,
                                size_t name_len, TaurusMemoryPool* pool) {
     char* colon = NULL;
     uint16_t h = 0x811C;
@@ -655,7 +655,18 @@ static inline TaurusTextNode* dp_text_create(DParser* p,
                                              size_t content_len) {
     TaurusTextNode* tn = p->text_cursor;
     if (DP_UNLIKELY(tn >= p->text_end)) {
-        return taurus_text_create_borrowed(content, content_len, p->pool);
+        /* The lt_count bound under-counts when comments/PIs/CDATA
+         * interleave with text (each can split a run, adding one).
+         * Grow by arena chunks instead of falling to the out-of-line
+         * pool path per node — one bump per 128 nodes. */
+        tn = (TaurusTextNode*)taurus_pool_alloc(
+            p->pool, 128 * sizeof(TaurusTextNode));
+        if (!tn) {
+            return taurus_text_create_borrowed(content, content_len,
+                                               p->pool);
+        }
+        p->text_end = tn + 128;
+        /* cursor == tn: carve below */
     }
     p->text_cursor = tn + 1;
     tn->base.type = TAURUS_NODE_TYPE_TEXT;
