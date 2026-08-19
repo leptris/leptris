@@ -1,13 +1,18 @@
 ## [Unreleased]
 
-## [0.25.6] - Y-08-19
+## [0.25.6] - 2026-08-19
+### Performance — parse round 9: real-world corpus 1.39-1.72x vs pugixml
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+A line-level profile of the corpus (the honest battleground — the attribute benchmark had been flattering us) found two items:
 
-### Changed
+- **Chunked text-block growth.** The v0.25.5 bulk text block sized itself by the tag count, which under-counts when comments/PIs/CDATA interleave with text (each interleave can split a run); overflow fell back to the out-of-line pool path per node (8% of the xsdtest profile). The cursor now grows by 128-node arena chunks — one bump per 128 nodes.
+- **Deterministic split-inline.** The element name walk's inlining was left to the compiler's per-build choice; `TAURUS_ALWAYS_INLINE` pins the round-7 win across build configurations.
 
-- (describe changes here)
+Corpus standings: medium 1.50x, large 1.39x, xsdtest 1.72x, workflow 1.39x, catalog 1.54x (from 1.60/1.44/1.81/1.51/1.64 at round 8). Attribute benchmark flat. Cumulative day: attr benchmark 1.41/1.44/1.87/2.05x -> 1.38/1.40/1.48/1.51x; corpus 1.54-1.91x -> 1.39-1.72x.
+
+### CI
+
+- 30-minute timeout on the AddressSanitizer (Linux) job: Ubuntu mirror stalls inside apt-get several times a day (caught in the act four times across 2026-08-18/19), previously hanging up to six hours. The slowest healthy run is 20.1 minutes; 30 keeps 1.5x headroom.
 
 
 ## [0.25.5] - 2026-08-19
