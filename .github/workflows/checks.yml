@@ -49,6 +49,13 @@ jobs:
 
       - name: Install clang-format
         run: |
+          # ubuntu-latest images preinstall clang-format; use it and
+          # skip apt entirely (the Ubuntu mirror stalls multiple
+          # times a day — two consecutive 15m timeouts today).
+          if command -v clang-format &>/dev/null; then
+            echo "using preinstalled $(clang-format --version)"
+            exit 0
+          fi
           sudo apt-get update
           sudo apt-get install -y clang-format
 
@@ -64,7 +71,10 @@ jobs:
 
       - name: Install cppcheck + cmake + ninja
         run: |
-          sudo apt-get update
+          # Retry the mirror fetch: transient noble-updates stalls
+          # fail this job several times a day.
+          sudo apt-get update || (sleep 15 && sudo apt-get update) \
+                                || (sleep 45 && sudo apt-get update)
           sudo apt-get install -y cppcheck cmake ninja-build
 
       - name: Configure (generates compile_commands.json)
