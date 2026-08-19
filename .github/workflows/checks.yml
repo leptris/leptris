@@ -31,6 +31,7 @@ jobs:
   trailing-whitespace:
     name: Trailing whitespace
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,6 +43,7 @@ jobs:
   clang-format:
     name: clang-format
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -56,6 +58,7 @@ jobs:
   cppcheck:
     name: cppcheck static analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
