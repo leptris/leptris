@@ -1,13 +1,16 @@
 ## [Unreleased]
 
-## [0.25.4] - Y-08-18
+## [0.25.4] - 2026-08-19
+### Performance — parse round 7: real-world corpus 1.54-1.91x -> 1.45-1.79x vs pugixml
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+The attribute-heavy benchmark had been flattering us; profiling the real-world corpus (XSD test suites, catalogs, workflow documents) found two element-path costs:
 
-### Changed
+- **Close-tag colon scan only for prefixed opens.** Every `</name>` match called `memchr` to find a prefix colon in what is usually a 1-6 byte name — a libc call per element for the short-scan setup law (the TODO 174 finding, fourth application). The scan is only needed when the open element was prefixed, detected exactly via `open->name[-1] == '\0'` (the open tag's colon was NUL-terminated in place; unprefixed names directly follow `'<'`). Non-namespaced documents now perform zero colon scans; accept/reject behavior is provably identical.
+- **dp_split_hash_name re-inlined.** The noinline attribute was a verdict from three layout regimes ago; after the attr diet, lazy lines, and probe slack reshaped the surrounding function, inlining wins every section. Names shorter than 3 bytes skip the colon test in the walk entirely.
 
-- (describe changes here)
+Cumulative parse standings vs pugixml today (from 1.41/1.44/1.87/2.05x): many-attrs benchmark **1.40/1.42/1.50/1.51x**; real-world corpus **1.45-1.79x** (medium 1.60x, large 1.45x, xsdtest 1.79x, workflow 1.46x, catalog 1.67x).
+
+Also in this release (v0.25.3 items, for the record): the retained-block free list (page-fault tax, K=50 -15.5%/K=100 -17.3%), the attr-loop diet, lazy line resolution, the serialize matrix at parity-or-ahead on every shape, and the mutation attribute index (set_attribute 26x, append 2.5x ahead of pugixml).
 
 
 ## [0.25.3] - 2026-08-18
