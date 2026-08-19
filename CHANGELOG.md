@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.6] - Y-08-19
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.25.5] - 2026-08-19
 ### Fixed — critical: binding_wrapper NULL on all parse-created nodes (#421)
 
