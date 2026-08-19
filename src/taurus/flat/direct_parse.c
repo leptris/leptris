@@ -1070,9 +1070,27 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 close_local = colon + 1;
                 close_local_len = close_len - (colon + 1 - close_start);
             }
-            if (open_len != close_local_len ||
-                memcmp(open_name, close_local, close_local_len) != 0)
+            if (open_len != close_local_len) goto fail;
+            if (close_local_len <= 8 && p.probe_slack) {
+                /* Masked 64-bit compare for short names — one load
+                 * each side vs a libc memcmp call (the TODO 174 law:
+                 * setup dominates sub-8-byte compares; ~9% of the
+                 * element-heavy corpus profile). probe_slack guards
+                 * the 8-byte load past the name: only the parser's
+                 * owned copy carries the zeroed tail; open_name
+                 * always has the document's remainder after it, and
+                 * close_local near the end lands in the slack. */
+                uint64_t mask = (close_local_len == 8)
+                    ? ~(uint64_t)0
+                    : ((1ull << (close_local_len * 8)) - 1);
+                uint64_t a, b;
+                memcpy(&a, open_name, 8);
+                memcpy(&b, close_local, 8);
+                if ((a & mask) != (b & mask)) goto fail;
+            } else if (memcmp(open_name, close_local,
+                              close_local_len) != 0) {
                 goto fail;
+            }
             p.depth--;
         }
         else if (next == '!') {
