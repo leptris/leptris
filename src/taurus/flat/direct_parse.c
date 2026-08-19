@@ -105,6 +105,9 @@ typedef struct {
      * nor '&', and the bounded memchr fallback re-checks). 0 for
      * in-place parses on caller buffers — clamped windows only. */
     int probe_slack;
+    /* TAURUS_PARSE_DROP_WS_TEXT: skip creating nodes for
+     * whitespace-only text runs (pugixml-default semantics). */
+    int drop_ws_text;
     /* TODO 159 Phase G: parser-local last-attr cache for the element
      * currently being parsed. Eliminates the O(N) walk-to-find-tail
      * in dp_add_attr_inline — O(1) wiring per attr instead of O(N),
@@ -696,7 +699,9 @@ static inline TaurusTextNode* dp_text_create(DParser* p,
  *       lives outside the arena; the document frees it via
  *       doc->xml_buffer_needs_free.
  */
-static struct taurus_document* direct_parse_internal(char* buf, size_t len, int owns_buffer) {
+static struct taurus_document* direct_parse_internal(char* buf, size_t len,
+                                                     int owns_buffer,
+                                                     int drop_ws_text) {
     /* Set when the owns_buffer==2 path made our slack-backed copy. */
     int buf_is_owned_copy = 0;
 
@@ -870,6 +875,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     /* owns_buffer==2 was converted to 1 above; only the parser's own
      * copy carries the zeroed slack. */
     p.probe_slack = owns_buffer == 1 && buf_is_owned_copy;
+    p.drop_ws_text = drop_ws_text;
     p.dtd = NULL;
     p.line_offsets_ok = len < 0x7FFFFFFFu;
 
@@ -887,6 +893,18 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
         }
 
         if (*p.pos != '<') {
+            /* DROP_WS_TEXT fast path (pugixml-parity semantics):
+             * whitespace directly after markup is eaten in the
+             * cheapest possible loop BEFORE the text machinery —
+             * ws-only runs between tags never enter the text path
+             * at all, and mixed runs start their text node at the
+             * first non-ws byte (pugixml's observable behavior).
+             * Default mode is untouched: every byte still reaches
+             * the text path. */
+            if (p.drop_ws_text) {
+                dp_skip_ws(&p);
+                if (*p.pos == '<' || p.pos >= p.end) continue;
+            }
             /* Text content — FUSED scan (TODO 184): one inline loop
              * finds '<' AND counts '\n' (issue #223 line tracking),
              * replacing the memchr + dp_advance_line re-walk (two
@@ -916,6 +934,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
             size_t tlen = p.pos - text_start;
 
             if (tlen == 0) continue;
+            /* (ws handling lives at the text-branch ENTRY — see the
+             * drop_ws_text fast path before text_start.) */
             if (p.depth == 0) {
                 /* Whitespace-only between root and PIs. */
                 for (char* c = text_start; c < p.pos; c++) {
@@ -1293,14 +1313,21 @@ fail:
  * arena holds only nodes and strings. */
 struct taurus_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
-    /* owns_buffer=2 signals "copy the input (fused with the sizing
-     * pre-scan), then parse." */
-    return direct_parse_internal((char*)xml, len, 2);
+    return direct_parse_internal((char*)xml, len, 2, 0);
+}
+
+/* Public flagged entry (TAURUS_PARSE_DROP_WS_TEXT et al.). */
+struct taurus_document* direct_parse_flags(const char* xml, size_t len,
+                                           unsigned parse_flags) {
+    if (!xml || len == 0) return NULL;
+    return direct_parse_internal((char*)xml, len, 2,
+                                 (parse_flags & TAURUS_PARSE_DROP_WS_TEXT)
+                                     ? 1 : 0);
 }
 
 /* Public: parse a caller-owned writable buffer without copying. */
 struct taurus_document* direct_parse_inplace(char* buf, size_t len) {
     if (!buf || len == 0) return NULL;
     buf[len] = '\0';  /* Ensure NUL termination */
-    return direct_parse_internal(buf, len, 0);
+    return direct_parse_internal(buf, len, 0, 0);
 }

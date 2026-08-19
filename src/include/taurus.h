@@ -419,6 +419,27 @@ TAURUS_API const char* taurus_pi_node_get_data(TaurusNodeRef node);
  */
 TAURUS_API TaurusDocument taurus_parse_string(const char* xml, size_t length, TaurusStatus* status);
 
+/* Parse flags for taurus_parse_string_flags().
+ *
+ * TAURUS_PARSE_DROP_WS_TEXT discards whitespace-ONLY text nodes
+ * (runs between tags that contain nothing but spaces/tabs/newlines).
+ * This matches pugixml's default behavior (their parse_ws_pcdata is
+ * opt-in) and libxml2's XML_PARSE_NOBLANKS. By default taurus KEEPS
+ * these nodes — the faithful-DOM behavior of libxml2/Nokogiri and
+ * the only way to round-trip pretty-printed XML byte-for-byte.
+ * Pretty-printed documents carry one ws-only node per element;
+ * dropping them removes ~6ns of create+wire per element and wins
+ * the whitespace-heavy parse shapes outright. */
+typedef enum {
+    TAURUS_PARSE_DEFAULT     = 0,
+    TAURUS_PARSE_DROP_WS_TEXT = 1u
+} TaurusParseFlags;
+
+TAURUS_API TaurusDocument taurus_parse_string_flags(const char* xml,
+                                                    size_t length,
+                                                    TaurusParseFlags flags,
+                                                    TaurusStatus* status);
+
 /**
  * Parse XML string into document with zero-copy optimization
  *
