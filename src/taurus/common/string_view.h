@@ -2,6 +2,7 @@
 #define TAURUS_STRING_VIEW_H
 
 #include <stddef.h>
+#include <string.h>
 
 /* Forward declaration - defined in pool.h */
 struct taurus_memory_pool;
@@ -24,9 +25,26 @@ typedef struct taurus_string_view {
 #endif
 
 /* Creation */
-TaurusStringView taurus_sv_from_ptr(const char* data, size_t length);
-TaurusStringView taurus_sv_from_cstr(const char* str);
-TaurusStringView taurus_sv_empty(void);
+/* Constructors are header-inline (round 12): these are pure
+ * two-field initializers on the hottest paths in the library —
+ * taurus_parse alone calls sv_from_ptr twice PER ATTRIBUTE, and as
+ * out-of-line definitions in another TU they cost a function call
+ * each (~4ns/attr, the bulk of the measured gap vs pugixml). */
+static inline TaurusStringView taurus_sv_from_ptr(const char* data,
+                                                  size_t length) {
+    TaurusStringView sv = { data, length };
+    return sv;
+}
+
+static inline TaurusStringView taurus_sv_from_cstr(const char* str) {
+    TaurusStringView sv = { str ? str : NULL, str ? strlen(str) : 0 };
+    return sv;
+}
+
+static inline TaurusStringView taurus_sv_empty(void) {
+    TaurusStringView sv = { NULL, 0 };
+    return sv;
+}
 
 /* Query */
 int taurus_sv_is_empty(const TaurusStringView* sv);

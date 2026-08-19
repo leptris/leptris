@@ -83,27 +83,8 @@ static inline int taurus_simd_memcmp(const char* a, const char* b, size_t len) {
 }
 
 /* Creation from pointer + length */
-TaurusStringView taurus_sv_from_ptr(const char* data, size_t length) {
-    TaurusStringView sv = { data, length };
-    return sv;
-}
-
 /* Creation from NULL-terminated C string */
-TaurusStringView taurus_sv_from_cstr(const char* str) {
-    if (!str) {
-        TaurusStringView sv = { NULL, 0 };
-        return sv;
-    }
-    TaurusStringView sv = { str, strlen(str) };
-    return sv;
-}
-
 /* Create empty StringView */
-TaurusStringView taurus_sv_empty(void) {
-    TaurusStringView sv = { NULL, 0 };
-    return sv;
-}
-
 /* Query: Check if empty */
 int taurus_sv_is_empty(const TaurusStringView* sv) {
     return !sv || !sv->data || sv->length == 0;
