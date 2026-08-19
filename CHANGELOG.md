@@ -1,13 +1,11 @@
 ## [Unreleased]
 
-## [0.25.7] - Y-08-19
+## [0.25.7] - 2026-08-19
+### Performance — parse round 10: real-world corpus 1.32-1.72x vs pugixml
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+The fifth application of the short-scan law (libc call setup dominates sub-16-byte spans): the close-tag match called `memcmp` per element for names that are typically 3-7 bytes. Short names on the parser's owned copy now compare via one masked 64-bit load per side; the 8-byte load past the name is guarded by the zeroed slack tail, and in-place parses keep plain memcmp by construction.
 
-### Changed
-
-- (describe changes here)
+Corpus standings: large **1.32x**, workflow **1.34x**, catalog **1.47x**, medium 1.50x, xsdtest 1.62x (from 1.39/1.39/1.54/1.50/1.72 in v0.25.6). Attribute benchmark flat. Cumulative arc: 1.54-1.91x at the start of 2026-08-18 to 1.32-1.62x now.
 
 
 ## [0.25.6] - 2026-08-19
