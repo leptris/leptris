@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.7] - Y-08-19
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.25.6] - 2026-08-19
 ### Performance — parse round 9: real-world corpus 1.39-1.72x vs pugixml
 
