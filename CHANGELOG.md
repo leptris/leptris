@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.9] - Y-08-19
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.25.8] - 2026-08-19
 ### Performance — pugixml-parity whitespace mode + the decomposition benchmark
 
