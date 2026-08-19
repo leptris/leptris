@@ -79,6 +79,33 @@ Tests core DOM operations:
 4. **Text Extraction**: Get text content (repeated)
 5. **Child Iteration**: Iterate all children (repeated)
 
+## Decomposition Benchmark (`benchmark_decomp`)
+
+Isolates WHERE parse time goes by holding document size constant while
+varying node density (and vice versa). This is the benchmark that
+answers "is the gap time or throughput?" — run it before concluding
+anything from mixed-shape numbers.
+
+| Probe | Shape | What it isolates |
+|---|---|---|
+| P1 | one element, ~2MB entity-free text | pure text-streaming throughput (zero-copy views vs in-situ copying) |
+| P2 | 100k tiny `<a/>` | per-element cost: scan, struct stores, wiring |
+| P3 | 50k attributes (5k elements x 10) | per-attribute cost: the name/`=`/value sub-scans + struct fields |
+| P4 | 25k `<i>ab</i>` | per-text-node cost |
+| P5 | P2's shape scaled 117KB -> 937KB | size-scaling curve: separates fixed/setup costs and cache-footprint effects from per-node costs |
+
+Readings (2026-08-19, Apple Silicon, min-of-30, pugixml anchored
+in-process): text streaming **taurus wins ~3x** (zero-copy views);
+per-element and per-text-node **parity**; attributes **~1.5x** (the
+one structural gap); the small-document ratio is ~1.6x falling to
+~1.2x by ~1MB — a cache-footprint effect (pugixml's 40-byte attrs
+and embedded first page stay L2-resident on small docs), not a
+throughput limit.
+
+Method note: ratios here are only comparable within one process
+run; re-run both sides together, take minima, and prefer medians
+when the machine is loaded.
+
 ## XPath Benchmarks
 
 Tests query performance:

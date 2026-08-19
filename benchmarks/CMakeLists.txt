@@ -147,7 +147,8 @@ if(PUGIXML_AVAILABLE)
             benchmark_first_access
             benchmark_parse_ops
             benchmark_memory
-            benchmark_many_attrs)
+            benchmark_many_attrs
+            benchmark_decomp)
         taurus_add_benchmark(${name} CXX comprehensive/${name}.cpp)
         if(PUGIXML_TARGET)
             target_link_libraries(${name} PRIVATE ${PUGIXML_TARGET})
