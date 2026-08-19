@@ -1,13 +1,19 @@
 ## [Unreleased]
 
-## [0.25.8] - Y-08-19
+## [0.25.8] - 2026-08-19
+### Performance — pugixml-parity whitespace mode + the decomposition benchmark
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+- **`TAURUS_PARSE_DROP_WS_TEXT`** (new `taurus_parse_string_flags` API): the decomposition benchmark's whitespace probe found the corpus gap's hidden driver — whitespace-only text nodes, one per element in pretty-printed documents, each paying the full text-path entry machinery. pugixml discards them by default; libxml2 keeps them. The taurus **default keeps them** (libxml2-faithful, required for byte-exact pretty round-trips); under the flag, whitespace after markup is eaten in the main loop before the text path engages and mixed runs start at the first non-whitespace byte — pugixml's observable semantics, pinned by specs. Whitespace-heavy shapes: 1.68x -> 1.35x vs pugixml; default-mode timing unchanged everywhere.
+- **`benchmark_decomp`**: five shape-isolating probes (text streaming / tiny elements / attributes / text nodes / size scaling) that answer "is the gap time or throughput?" — documented in benchmarks/README.md. Readings: text streaming taurus wins ~3x (zero-copy views); per-element and per-text-node at parity; attributes ~1.5x; small-document ratios are a cache-footprint effect.
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- `element.c` indexed child walk: the loop counter was `uint8_t` against a `size_t` index — it wraps for index > 255 and the intended early-exit never fires (CodeQL high). Now `size_t`.
+- Benchmark generators: `snprintf` accumulation could pass the buffer end on truncation and underflow the next size argument (CodeQL high) — clamped everywhere via a `snappend()` helper.
+
+### CI
+
+- 15-minute timeouts on the checks jobs, preinstalled clang-format (no apt), apt retries for cppcheck: the Ubuntu mirror stall plague (seven occurrences over two days) now fails visibly instead of hanging for up to six hours.
 
 
 ## [0.25.7] - 2026-08-19
