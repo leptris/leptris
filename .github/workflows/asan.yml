@@ -27,9 +27,10 @@ jobs:
     # Fail fast on hung runners: the Ubuntu mirrors stall inside
     # apt-get several times a day (observed 3x on 2026-08-18/19,
     # each hanging 1h+ in "Install dependencies" until the 6h job
-    # timeout). 20 minutes is 3x the healthy run; a timeout here
-    # fails visibly and can be re-run immediately.
-    timeout-minutes: 20
+    # timeout). The slowest healthy run observed is 20.1 minutes
+    # (cold cache) — 30 gives it 1.5x headroom while still failing
+    # hung installs within half an hour instead of six.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
