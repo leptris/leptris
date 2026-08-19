@@ -92,6 +92,12 @@ typedef struct {
      * (the element cache line only needs touching twice per tag). */
     struct taurus_attribute* attr_cursor;
     struct taurus_attribute* attr_end;
+    /* Bulk text-node block (round 8): taurus_text_create_borrowed
+     * is an out-of-line call per text node — pool_alloc alone costs
+     * more than the field stores. Same carve pattern as the elem and
+     * attr blocks. Overflow falls back to the pool path. */
+    struct taurus_text_node* text_cursor;
+    struct taurus_text_node* text_end;
     unsigned cur_attr_count;
     /* 1 when the parser owns an over-allocated copy: probe windows
      * may read up to 48 bytes past p->end because the 64-byte zeroed
@@ -641,6 +647,31 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
     return -1;
 }
 
+/* Inline borrowed-text creation from the bulk block (round 8): the
+ * same stores taurus_text_create_borrowed performs, minus the
+ * out-of-line pool_alloc call per node. */
+static inline TaurusTextNode* dp_text_create(DParser* p,
+                                             const char* content,
+                                             size_t content_len) {
+    TaurusTextNode* tn = p->text_cursor;
+    if (DP_UNLIKELY(tn >= p->text_end)) {
+        return taurus_text_create_borrowed(content, content_len, p->pool);
+    }
+    p->text_cursor = tn + 1;
+    tn->base.type = TAURUS_NODE_TYPE_TEXT;
+    tn->base.frozen = 1;   /* parse-created: set here, not after */
+    tn->base.version = 0;
+    tn->base.binding_wrapper = NULL;
+    tn->base.line = 0;     /* caller stamps the offset */
+    tn->content = (char*)content;
+    tn->content_len = content_len;
+    tn->pool = p->pool;
+    tn->borrowed = 1;
+    tn->parent_off = 0;
+    tn->next_sibling_cp = 0;
+    return tn;
+}
+
 /* Internal: parse from a writable, NUL-terminated buffer.
  * owns_buffer: 1 = document frees buf on taurus_document_free,
  *              0 = caller owns buf (in-place mode). */
@@ -752,7 +783,13 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
      * value contributes exactly 2 quote chars). Overflow falls back
      * to per-attr pool alloc — which now bumps the same arena. */
     size_t attr_capacity = quote_count / 2 + 64;
-    char* combined = (char*)taurus_pool_alloc(pool, elem_bytes + attr_bytes);
+    /* Text-node upper bound: every text node is followed by a '<'
+     * (lt_count), so the count can never exceed it. Attr-heavy docs
+     * over-reserve (~56 B per tag) — bounded, and the retained arena
+     * absorbs it after the first parse of each size. */
+    size_t text_bytes = lt_count * sizeof(struct taurus_text_node);
+    char* combined = (char*)taurus_pool_alloc(
+        pool, elem_bytes + attr_bytes + text_bytes);
     if (!combined) {
         taurus_pool_destroy(pool);
         if (owns_buffer == 1)
@@ -763,6 +800,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     memset(elem_block, 0, elem_bytes);
     struct taurus_attribute* attr_block =
         (struct taurus_attribute*)(combined + elem_bytes);
+    struct taurus_text_node* text_block =
+        (struct taurus_text_node*)(combined + elem_bytes + attr_bytes);
     /* No memset on attr_block — dp_add_attr_inline initializes every
      * field of each attr it uses. */
     size_t elem_idx = 0;
@@ -815,6 +854,8 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
     p.attr_capacity = attr_capacity;
     p.attr_cursor = attr_block;
     p.attr_end = attr_block + attr_capacity;
+    p.text_cursor = text_block;
+    p.text_end = text_block + lt_count;
     /* owns_buffer==2 was converted to 1 above; only the parser's own
      * copy carries the zeroed slack. */
     p.probe_slack = owns_buffer == 1 && buf_is_owned_copy;
@@ -886,14 +927,14 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len, int 
                 if (expanded) {
                     tn = taurus_text_create(expanded, strlen(expanded), pool);
                 } else {
-                    tn = taurus_text_create_borrowed(text_start, tlen, pool);
+                    tn = dp_text_create(&p, text_start, tlen);
                 }
             } else {
-                tn = taurus_text_create_borrowed(text_start, tlen, pool);
+                tn = dp_text_create(&p, text_start, tlen);
             }
             if (!tn) goto fail;
             tn->base.line = text_off;
-            tn->base.frozen = 1;  /* at creation — TODO 187 */
+            if (!tn->base.frozen) tn->base.frozen = 1;
             dp_wire_child(&p, p.open_stack[p.depth - 1], (TaurusNode*)tn);
             continue;
         }

@@ -31,6 +31,10 @@ TaurusTextNode* taurus_text_create(const char* content,
     node->base.type = TAURUS_NODE_TYPE_TEXT;
     node->base.frozen = 0;
     node->base.version = 0;
+      /* Explicit: pool memory is not zeroed and the retained arena
+     * recycles dirty pages — a stale binding_wrapper would hand
+     * bindings a dangling pointer. */
+    node->base.binding_wrapper = NULL;
     node->pool = NULL;       /* content is pool-resident + NUL-terminated */
     node->borrowed = 0;
     node->parent_off = 0;
