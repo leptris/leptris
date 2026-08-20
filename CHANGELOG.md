@@ -1,13 +1,16 @@
 ## [Unreleased]
 
-## [0.25.10] - Y-08-20
+## [0.25.10] - 2026-08-20
+### Performance — SAX round: streaming parse now beats libxml2 on every shape
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+The first SAX benchmark (`benchmark_sax`, libxml2-gated — pugixml has no SAX interface; libxml2 is the streaming reference) exposed that our SAX path ran 2-3x slower than our own DOM parser: the streaming element frame was heap-allocating and freeing the element name **per element**, behind a comment claiming "well under 1% of parse time" (profiling showed ~10%).
 
-### Changed
+- Names up to 47 bytes and attribute arrays up to 12 entries now live inline in the element frame — the LIFO nesting discipline makes frame storage exactly the right lifetime, surviving scratch-arena reallocs across feed() chunks. Oversized cases spill to the heap via malloc-and-copy.
+- **Fixed en route**: a no-attribute `start_element` handed handlers a non-NULL attrs array with an uninitialized first slot — caught by the ASAN differential suite as a handler SEGV, now NULL-terminated on push.
 
-- (describe changes here)
+SAX vs libxml2 SAX2 (min-of-30, no-op handlers both sides): small **0.40x**, xsdtest **0.76x**, large **0.91x**, workflow **0.93x**, catalog **0.89x** — taurus ahead on every shape (the three large shapes were losing at 1.03-1.10x before). Method and readings documented in benchmarks/README.md.
+
+Read-mode scoreboard: DOM parse (attributes at the measured 1.5x source floor, everything else parity-or-won), SAX **won**, XPath **won up to 87x**.
 
 
 ## [0.25.9] - 2026-08-20
