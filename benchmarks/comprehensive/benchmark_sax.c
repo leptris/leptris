@@ -44,12 +44,18 @@ static void t_start(void* u, const char* n, const char** a) { (void)u; (void)n; 
 static void t_end(void* u, const char* n) { (void)u; (void)n; g_events++; }
 static void t_chars(void* u, const char* t, size_t l) { (void)u; (void)t; (void)l; g_events++; }
 
-static void x_start(void* u, const xmlChar* n, const xmlChar** p,
-                    int nr, int nb, int nd, int np) {
-    (void)u; (void)n; (void)p; (void)nr; (void)nb; (void)nd; (void)np;
+static void x_start(void* u, const xmlChar* local, const xmlChar* pfx,
+                    const xmlChar* uri, int n_ns, const xmlChar** ns,
+                    int n_attr, int n_def, const xmlChar** attr) {
+    (void)u; (void)local; (void)pfx; (void)uri; (void)n_ns; (void)ns;
+    (void)n_attr; (void)n_def; (void)attr;
     g_events++;
 }
-static void x_end(void* u, const xmlChar* n) { (void)u; (void)n; g_events++; }
+static void x_end(void* u, const xmlChar* local, const xmlChar* pfx,
+                  const xmlChar* uri) {
+    (void)u; (void)local; (void)pfx; (void)uri;
+    g_events++;
+}
 static void x_chars(void* u, const xmlChar* t, int l) { (void)u; (void)t; (void)l; g_events++; }
 
 int main(int argc, char** argv) {
