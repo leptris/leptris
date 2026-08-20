@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.10] - Y-08-20
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [0.25.9] - 2026-08-20
 ### Performance — round 12: the attribute floor, measured
 
