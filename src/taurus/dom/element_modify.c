@@ -459,14 +459,32 @@ TaurusStatus taurus_element_set_text(TaurusElement elem, const char* text) {
 
 #define ATTR_INDEX_INIT_CAP 16u
 
+/* Index keys use the FULL 32-bit FNV of the name — independent of
+ * the attr field's 15-bit lazy hash (round 20). The u15 field feeds
+ * per-element walk pre-filters; the doc-level open-addressed index
+ * needs full-width keys so distinct names never share a probe key
+ * (a u15 key space turns each hash collision into an O(N) fallback
+ * walk, re-quadraticizing programmatic builds). */
+static uint32_t attr_index_hash(const char* s, size_t len) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (unsigned char)s[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
 static uint32_t attr_index_slot(TaurusElement elem, uint32_t name_hash,
                                 size_t cap) {
     uint64_t h = (uint64_t)(uintptr_t)elem;
     h ^= h >> 33;
     h *= 0xff51afd7ed558ccdULL;
-    uint64_t h2 = name_hash;
-    h2 ^= h2 >> 15;
-    h2 *= 0x9E3779B97F4A7C15ULL;
+    /* Round 20: fold AFTER the multiply. The old `h2 ^= h2 >> 15`
+     * was a no-op for the 15-bit attr hashes — with stride-256 hash
+     * progressions (pre-finalizer bug) that piled whole arithmetic
+     * sequences onto single probe chains. */
+    uint64_t h2 = (uint64_t)name_hash * 0x9E3779B97F4A7C15ULL;
+    h2 ^= h2 >> 32;
     return (uint32_t)((h ^ h2) & (cap - 1));
 }
 
@@ -564,7 +582,7 @@ static void attr_index_register(struct taurus_document* doc,
     attr_index_put(ix, elem, 0, NULL, slot);
     struct taurus_attribute* a = taurus_element_get_first_attribute(elem);
     while (a) {
-        uint32_t h = attr_name_hash(a);
+        uint32_t h = attr_index_hash(attr_cname(a), a->name_view.length);
         slot = attr_index_probe(ix, elem, h, &dummy, &found);
         if (!found && slot != (size_t)-1) {
             attr_index_put(ix, elem, h, a, slot);
@@ -618,7 +636,7 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
      * attr-name index (lazy registration covers parse-created attrs);
      * NULL index (alloc failure) falls back to the list walk. */
     size_t set_name_len = strlen(name);
-    uint16_t set_name_hash = attr_hash15(name, set_name_len);
+    uint32_t set_name_hash = attr_index_hash(name, set_name_len);
     struct taurus_document* set_doc = taurus_element_get_document(elem);
     struct taurus_attr_index* set_ix = NULL;
     size_t set_slot = (size_t)-1;
@@ -698,7 +716,6 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
         }
 
         attr->ns_cache_off = 0;  /* TODO 173 */
-        attr->name_hash = 0;  /* lazy hash, no entities */
         taurus_attr_set_next(attr, NULL);
 
         /* Append via the doc-level attr-tail cache — O(1) for the
@@ -723,7 +740,7 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
         elem->attr_count++;
 
         if (set_ix && set_slot != (size_t)-1) {
-            attr_index_put(set_ix, elem, attr->name_hash, attr, set_slot);
+            attr_index_put(set_ix, elem, set_name_hash, attr, set_slot);
         }
     }
 
@@ -740,7 +757,7 @@ TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* nam
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
 
     struct taurus_document* rm_doc = taurus_element_get_document(elem);
-    uint16_t rm_hash = attr_hash15(name, strlen(name));
+    uint32_t rm_hash = attr_index_hash(name, strlen(name));
 
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     struct taurus_attribute* prev = NULL;
