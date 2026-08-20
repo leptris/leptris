@@ -8,10 +8,29 @@
  * TODO 157 (perf): uses a free-list to avoid per-parse malloc/free.
  * After warmup, register and unregister are O(1) with zero heap ops. */
 #include "root_doc_map.h"
+#include "element.h"
 #include "../common/port.h"
 #include <stdlib.h>
 
 #define ROOT_DOC_BUCKETS 256
+
+/* Round 20: header.flags bit marking "an entry for this element is
+ * (possibly) in the map". flags is otherwise reserved — node types
+ * live in base.type. With the bit, register skips the duplicate-
+ * check walk for never-registered elements (the mutation hot path:
+ * create registers every new element so pre-attach ops can resolve
+ * the doc; the walk made sequential appends O(chain) with chains
+ * polluted by every element ever created). */
+#define ROOTMAP_FLAG 0x80u
+
+static inline int rootmap_marked(TaurusElement e) {
+    return (e->header.flags & ROOTMAP_FLAG) != 0;
+}
+
+static inline void rootmap_set(TaurusElement e, int on) {
+    if (on) e->header.flags |= ROOTMAP_FLAG;
+    else e->header.flags &= (uint8_t)~ROOTMAP_FLAG;
+}
 
 typedef struct root_doc_entry {
     TaurusElement root;
@@ -35,8 +54,25 @@ static size_t bucket_index(TaurusElement root) {
 void taurus_root_doc_register(TaurusElement root, struct taurus_document* doc) {
     if (!root || !doc) return;
     size_t idx = bucket_index(root);
-    for (RootDocEntry* e = g_root_doc_buckets[idx]; e; e = e->next) {
-        if (e->root == root) { e->doc = doc; return; }
+    if (rootmap_marked(root)) {
+        /* Possibly already present: walk to update. */
+        for (RootDocEntry* e = g_root_doc_buckets[idx]; e; e = e->next) {
+            if (e->root == root) { e->doc = doc; return; }
+        }
+    } else {
+        /* Never registered: prepend directly, no duplicate walk. */
+        RootDocEntry* e = g_free_list;
+        if (e) {
+            g_free_list = e->next;
+        } else {
+            e = (RootDocEntry*)malloc(sizeof(*e));
+            if (!e) return;
+        }
+        e->root = root; e->doc = doc;
+        e->next = g_root_doc_buckets[idx];
+        g_root_doc_buckets[idx] = e;
+        rootmap_set(root, 1);
+        return;
     }
     /* Pop from free-list, or malloc if empty. */
     RootDocEntry* e = g_free_list;
@@ -53,6 +89,7 @@ void taurus_root_doc_register(TaurusElement root, struct taurus_document* doc) {
 
 void taurus_root_doc_unregister(TaurusElement root) {
     if (!root) return;
+    if (!rootmap_marked(root)) return;  /* never registered: O(1) out */
     size_t idx = bucket_index(root);
     RootDocEntry** pp = &g_root_doc_buckets[idx];
     while (*pp) {
@@ -62,6 +99,7 @@ void taurus_root_doc_unregister(TaurusElement root) {
             /* Push to free-list instead of free(). */
             freed->next = g_free_list;
             g_free_list = freed;
+            rootmap_set(root, 0);
             return;
         }
         pp = &(*pp)->next;

@@ -110,6 +110,12 @@ TaurusStatus taurus_element_append_child(TaurusElement parent, TaurusElement chi
     taurus_element_append_child_internal_doc(parent, (TaurusNode*)child, doc);
     taurus_element_invalidate_child_cache(parent);
 
+    /* Round 20: the child is attached — its root-map entry (kept for
+     * pre-attach doc resolution) is dead weight that pollutes lookup
+     * chains for the rest of the document's life. Remove it; the bit
+     * makes both this and re-registration O(1). */
+    taurus_root_doc_unregister(child);
+
     /* Invalidate element index (TODO 132): the new child changes
      * the document's element set. The index will be rebuilt lazily
      * on the next descendant-axis query. */
@@ -128,6 +134,7 @@ TaurusStatus taurus_element_prepend_child(TaurusElement parent, TaurusElement ch
     /* Call internal void function, assume success */
     taurus_element_prepend_child_internal(parent, (TaurusNode*)child);
     taurus_element_invalidate_child_cache(parent);
+    taurus_root_doc_unregister(child);
     return TAURUS_OK;
 }
 
@@ -212,6 +219,9 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
 
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
     taurus_element_invalidate_child_cache(parent);
+    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
+        taurus_root_doc_unregister((TaurusElement)new_node_ptr);
+    }
     return TAURUS_OK;
 }
 
@@ -284,6 +294,9 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
 
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
     taurus_element_invalidate_child_cache(parent);
+    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
+        taurus_root_doc_unregister((TaurusElement)new_node_ptr);
+    }
     return TAURUS_OK;
 }
 
