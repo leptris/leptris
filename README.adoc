@@ -650,37 +650,38 @@ CPU time.
 
 Taurus BEATS libxml2 on **all 10** XPath benchmarks.
 
-=== DOM writes (vs pugixml + libxml2)
+=== DOM writes (vs pugixml)
+
+Quiet-machine, in-process comparison (min-of-N). Pugixml's
+`append_attribute` does not reject duplicates; the fair comparison
+for attribute setting is find-then-set (or find-then-append), which
+is what a correct program must do. Taurus rejects duplicates per
+the XML 1.0 attribute uniqueness rule.
 
 [cols="2,>1,>1,>1",options="header"]
 |===
-|Benchmark |Taurus |pugixml |libxml2
+|Benchmark |Taurus |pugixml |Advantage
 
-|Append 1000 children
-|15.0 µs
-|11.9 µs
-|56.2 µs
+|Append 10000 children (one parent)
+|~70 µs
+|~180 µs
+|**~2.5× faster**
 
-|Set 100 attributes
-|43.3 µs
-|10.4 µs
-|33.4 µs
+|Set 2000 attributes (duplicate-rejecting)
+|~430 µs
+|~8–14 ms (find+set)
+|**~20× faster**
 
-|Set text
-|0.9 µs
-|0.7 µs
-|0.8 µs
-
-|Parse + 10 writes (medium)
-|30.7 µs
-|5.1 µs
-|41.6 µs
+|Set 2000 attributes (pugixml blind append)
+|~430 µs
+|~220 µs
+|1.9× slower (we pay uniqueness)
 |===
 
-Taurus beats libxml2 on every benchmark except set-text (1.15× slower).
-Against pugixml, append is within 1.25× and set-text within 1.3×.
-The remaining gap (set-attributes) is due to node layout — see TODO 90
-for the compact-storage migration plan.
+See also `benchmarks/README.md` for the decomposition benchmark
+(`benchmark_decomp`: isolates text/element/attr/text-node costs)
+and the SAX benchmark (`benchmark_sax`: taurus vs libxml2 SAX2 —
+pugixml has no SAX interface; taurus leads every corpus shape).
 
 === Building with LTO
 

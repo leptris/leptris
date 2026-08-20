@@ -93,14 +93,15 @@ anything from mixed-shape numbers.
 | P3 | 50k attributes (5k elements x 10) | per-attribute cost: the name/`=`/value sub-scans + struct fields |
 | P4 | 25k `<i>ab</i>` | per-text-node cost |
 | P5 | P2's shape scaled 117KB -> 937KB | size-scaling curve: separates fixed/setup costs and cache-footprint effects from per-node costs |
+| P6 | pretty-printed (`  <a/>\n`) | whitespace-only text nodes (one per element) |
+| P6b | P6 with `TAURUS_PARSE_DROP_WS_TEXT` | pugixml-default whitespace semantics |
 
-Readings (2026-08-19, Apple Silicon, min-of-30, pugixml anchored
+Readings (2026-08-19/20, Apple Silicon, min-of-30, pugixml anchored
 in-process): text streaming **taurus wins ~3x** (zero-copy views);
 per-element and per-text-node **parity**; attributes **~1.5x** (the
 one structural gap); the small-document ratio is ~1.6x falling to
-~1.2x by ~1MB — a cache-footprint effect (pugixml's 40-byte attrs
-and embedded first page stay L2-resident on small docs), not a
-throughput limit.
+~1.2x by ~1MB — a cache-footprint effect; P6 pretty-ws ~1.6-1.7x
+default, **~1.35x with DROP_WS** (the corpus gap's hidden driver).
 
 Method note: ratios here are only comparable within one process
 run; re-run both sides together, take minima, and prefer medians

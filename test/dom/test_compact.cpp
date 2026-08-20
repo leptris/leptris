@@ -17,6 +17,7 @@ extern "C" {
 #include <cstring>
 #include <vector>
 #include <cstdlib>
+#include <cstdint>
 
 namespace {
 
@@ -216,6 +217,34 @@ TEST(CompactPtr8And16, ShareOverflowTableWithoutInterference) {
 
     taurus_explicit_cleanup();
     std::free(big);
+}
+
+
+/* Overflow-table growth (round 17): the table historically kept a
+ * fixed 256-bucket chained hash; >256 entries degraded to linear
+ * chain walks (the rising mutation-append cost). Load-factor growth
+ * must preserve every entry across rehashes. */
+TEST(TaurusCompact, OverflowTableGrowsCorrectly) {
+    TaurusCompactOverflowTable* t = taurus_compact_overflow_table_create(16);
+    ASSERT_NE(t, nullptr);
+
+    /* 5000 distinct keys — forces several doublings past the
+     * initial 16 buckets. Values are the key address itself. */
+    static void* keys[5000];
+    for (int i = 0; i < 5000; i++) {
+        keys[i] = (void*)(uintptr_t)(0x100000 + (size_t)i * 24);
+        ASSERT_EQ(taurus_compact_overflow_set(t, keys[i], keys[i], nullptr), 0);
+    }
+    for (int i = 0; i < 5000; i++) {
+        EXPECT_EQ(taurus_compact_overflow_get(t, keys[i]), keys[i])
+            << "entry " << i << " lost across growth rehash";
+    }
+    /* Overwrite one entry; the update must win over the old value. */
+    void* sentinel = (void*)(uintptr_t)0xDEAD;
+    ASSERT_EQ(taurus_compact_overflow_set(t, keys[7], sentinel, nullptr), 0);
+    EXPECT_EQ(taurus_compact_overflow_get(t, keys[7]), sentinel);
+
+    taurus_compact_overflow_table_destroy(t);
 }
 
 }  // namespace
