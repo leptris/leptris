@@ -428,6 +428,39 @@ TEST(ElementSetAttribute, CreatesAndUpdates) {
     taurus_document_free(doc);
 }
 
+/* Regression (v0.26.2 bug): set_attribute on a name it had itself
+ * created inserted a DUPLICATE attribute instead of updating. The
+ * doc-level attr index stored hash 0 for every mutation-created
+ * attr (an overzealous name_hash clear wiped the eager value), so
+ * the duplicate probe never matched. XML forbids duplicate
+ * attribute names — this must stay pinned. */
+TEST(ElementSetAttribute, UpdatesMutationCreatedAttrInPlace) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    EXPECT_EQ(taurus_element_set_attribute(root, "x", "1"), TAURUS_OK);
+    EXPECT_EQ(taurus_element_set_attribute(root, "x", "2"), TAURUS_OK);
+    EXPECT_EQ(taurus_element_attribute_count(root), 1u);
+    EXPECT_STREQ(taurus_element_attribute(root, "x"), "2");
+
+    /* Same via serialize: exactly one x attribute on output. */
+    char* out = taurus_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r x=\"2\"/>");
+    taurus_free_string(out);
+
+    /* Third write and a distinct name alongside. */
+    EXPECT_EQ(taurus_element_set_attribute(root, "x", "3"), TAURUS_OK);
+    EXPECT_EQ(taurus_element_set_attribute(root, "y", "9"), TAURUS_OK);
+    EXPECT_EQ(taurus_element_attribute_count(root), 2u);
+    EXPECT_STREQ(taurus_element_attribute(root, "x"), "3");
+
+    taurus_document_free(doc);
+}
+
 TEST(ElementSetAttributeTyped, RoundTripViaStringAccessor) {
     TaurusStatus st = TAURUS_OK;
     const char xml[] = "<r/>";

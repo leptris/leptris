@@ -162,7 +162,15 @@ static inline uint16_t attr_hash15(const char* s, size_t len) {
         h ^= (unsigned char)s[i];
         h *= 16777619u;
     }
-    uint16_t h15 = (uint16_t)((h >> 16) & 0x7FFFu);
+    /* Finalizer (round 20): raw FNV truncation (h>>16) mapped
+     * names differing in their last digit to hashes exactly 256
+     * apart — arithmetic progressions that collide onto one open-
+     * addressing chain at every cap ≤ 256. A murmur-style avalanche
+     * step breaks the progression before the 15-bit cut. */
+    h ^= h >> 16;
+    h *= 0x7FEB352Du;
+    h ^= h >> 15;
+    uint16_t h15 = (uint16_t)(h & 0x7FFFu);
     return h15 ? h15 : 1;
 }
 
