@@ -227,39 +227,6 @@ static char* emit_escaped_inline(char* out, const char* content,
  * Ordinary-character RUNS are bulk-appended (one capacity check +
  * one memcpy per run) instead of per-character appends — the
  * per-byte path was the serializer's dominant cost (TODO 194). */
-static void buffer_append_escaped(SerializeBuffer* buf, const char* str) {
-    if (!str) return;
-
-    size_t run = 0;
-    for (size_t i = 0; str[i] != '\0'; i++) {
-        const char* rep = NULL;
-        size_t rep_len = 0;
-        switch (str[i]) {
-            case '<':  rep = "&lt;";   rep_len = 4; break;
-            case '>':  rep = "&gt;";   rep_len = 4; break;
-            case '&':  rep = "&amp;";  rep_len = 5; break;
-            case '"':  rep = "&quot;"; rep_len = 6; break;
-            case '\'': rep = "&apos;"; rep_len = 6; break;
-            default:
-                run++;
-                continue;
-        }
-        if (run > 0) {
-            buffer_append_len(buf, &str[i - run], run);
-            run = 0;
-        }
-        buffer_append_len(buf, rep, rep_len);
-    }
-    if (run > 0) {
-        buffer_append_len(buf, str, run);
-    }
-}
-
-/* Escape attribute values (same as text but ensure quotes are escaped) */
-static void buffer_append_attribute_value(SerializeBuffer* buf, const char* str) {
-    buffer_append_escaped(buf, str);
-}
-
 /* ============================================================================
  * Node Serialization Functions
  * ============================================================================ */
