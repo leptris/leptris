@@ -1,13 +1,12 @@
 ## [Unreleased]
 
-## [0.25.9] - Y-08-19
+## [0.25.9] - 2026-08-20
+### Performance — round 12: the attribute floor, measured
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+- **Header-inline StringView constructors**: `taurus_sv_from_ptr` / `_from_cstr` / `_empty` are pure two-field initializers called twice per attribute by the parser; they now inline from the header in every build configuration (thinLTO already did; non-LTO builds and drivers get the guarantee). Perf-neutral in Release, gated at ±0.4%.
+- **The attribute investigation's conclusions, on the record**: the out-of-line calls seen in profiling were a no-LTO artifact; the table-driven value probe (pugixml's single-lookup shape) measured as an exact wash (one table load plus re-dispatch equals two register compares); every remaining per-attribute item is ±1ns and the layout wall blocks their fusion. Attributes at ~1.5x are the measured source-level floor of the current architecture.
 
-### Changed
-
-- (describe changes here)
+Full standings vs pugixml on this build: text streaming won ~3x; elements and text nodes at parity; whitespace mode 1.35x; attributes ~1.5x (floor); append 2.5x ahead; set_attribute ~20x ahead of the duplicate-checking equivalent; serialize at parity-or-ahead on every shape; XPath ahead up to 87x. The decomposition benchmark (`benchmark_decomp`) and its README section document how each component is measured.
 
 
 ## [0.25.8] - 2026-08-19
