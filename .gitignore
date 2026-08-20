@@ -33,6 +33,8 @@ build-test/
 
 # Benchmark and profile executables
 bench_*
+!benchmarks/matrix/
+!benchmarks/matrix/bench_matrix.cpp
 profile_*
 element_layout
 
