@@ -86,6 +86,13 @@ taurus_add_benchmark(bench_text_borrowed   dom/bench_text_borrowed.c)
     taurus_add_benchmark(bench_dom_libxml2     dom/bench_libxml2.c)
     target_include_directories(bench_dom_libxml2 PRIVATE ${LIBXML2_INCLUDE_DIR})
     target_link_libraries(bench_dom_libxml2 PRIVATE ${LIBXML2_LIBRARY})
+
+    # SAX-mode comparison: taurus events vs libxml2 SAX2 (pugixml has
+    # no SAX interface). No-op handlers both sides — pure scan +
+    # dispatch cost, no tree construction.
+    taurus_add_benchmark(benchmark_sax comprehensive/benchmark_sax.c)
+    target_include_directories(benchmark_sax PRIVATE ${LIBXML2_INCLUDE_DIR})
+    target_link_libraries(benchmark_sax PRIVATE ${LIBXML2_LIBRARY})
 endif()
 
 # ----------------------------------------------------------------------------

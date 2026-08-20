@@ -106,6 +106,19 @@ Method note: ratios here are only comparable within one process
 run; re-run both sides together, take minima, and prefer medians
 when the machine is loaded.
 
+## SAX Benchmark (`benchmark_sax`)
+
+SAX-mode parse: taurus events vs libxml2 SAX2 (pugixml has no SAX interface,
+so libxml2 is the streaming reference). No-op handlers on both sides — the
+measurement is pure scan + callback dispatch with no tree construction.
+
+Readings (2026-08-20, Apple Silicon, min-of-30): taurus wins every corpus
+shape — small 0.40x, xsdtest 0.77x, large 0.92x, workflow 0.94x, catalog
+0.93x. (Before round 14 removed a per-element malloc+free from the element
+frame, large/catalog ran at 1.03-1.10x — a comment claiming the allocator
+was "under 1% of parse time" was off by an order of magnitude; always
+measure.)
+
 ## XPath Benchmarks
 
 Tests query performance:
