@@ -1,13 +1,24 @@
 ## [Unreleased]
 
-## [0.26.5] - Y-08-20
-
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+## [0.26.5] - 2026-08-21
 
 ### Changed
 
-- (describe changes here)
+- Mutation append ~2x faster (37 → 19 ns/element; 400 → ~195 µs for a
+  10k sequential build): mutation element names now carry an 8-byte
+  document backpointer, so unattached elements resolve their document
+  statelessly — the per-append root-map register/unregister pair (~11 ns)
+  is gone entirely.
+- Element name storage for mutation-created elements uses per-document
+  contiguous blocks instead of the general pool path.
+
+### Fixed
+
+- `taurus_element_set_name` never updated the element's cached name
+  length, so a renamed element serialized only the first N bytes of its
+  new name (N = the OLD name's length). The document is also now resolved
+  before the rename replaces name storage, keeping later mutations
+  working on renamed elements.
 
 
 ## [0.26.4] - 2026-08-20
