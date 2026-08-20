@@ -1,13 +1,21 @@
 ## [Unreleased]
 
-## [0.26.0] - Y-08-20
+## [0.26.0] - 2026-08-20
+### Added — full-feature benchmark matrix (taurus vs pugixml vs libxml2)
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+Two new benchmark tools under `benchmarks/matrix/`:
 
-### Changed
+**`bench_matrix`** (C++): measures all three libraries across 15 benchmark shapes in 5 feature categories — DOM parse (4 shapes), SAX parse (4 shapes), serialize (2 shapes), mutation (append 10k, set-attr 2k), and XPath (3 queries). Records latency (min/median), throughput (MB/s), CPU (user/sys via `getrusage`), and peak RSS (KB). Writes one YAML file per library.
 
-- (describe changes here)
+**`bench2html.rb`** (Ruby, stdlib only): generates a self-contained HTML report from the YAML output with a feature-support matrix (which libraries implement which capabilities), per-feature comparison sections with winner badges and ratio indicators, Chart.js bar charts per shape, and a resource-usage table. Dark theme, responsive.
+
+Usage:
+```bash
+cmake --build build --target bench_matrix
+mkdir -p build/bench-matrix
+./build/benchmarks/matrix/bench_matrix build/bench-matrix
+ruby benchmarks/matrix/bench2html.rb build/bench-matrix/*.yaml -o build/bench_report.html
+```
 
 
 ## [0.25.11] - 2026-08-20
