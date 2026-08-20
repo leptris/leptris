@@ -1,14 +1,18 @@
 ## [Unreleased]
 
-## [0.26.1] - Y-08-20
-
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+## [0.26.1] - 2026-08-20
 
 ### Changed
 
-- (describe changes here)
-
+- Serialize view-direct: entity-free borrowed text is read directly from
+  the parse buffer instead of materializing a pool copy per node —
+  text-heavy serialization reaches parity with pugixml (1.38x → 1.04x).
+- Mutation element bump block: elements created via the mutation API are
+  carved from a per-document contiguous block (1024 per allocation,
+  chained, freed with the document) instead of individual pool mallocs —
+  sequential append is ~3x faster with zero heap fragmentation.
+- Removed two static escapers orphaned by the inline escape emitter
+  (TODO 194d); builds are warning-clean again.
 
 ## [0.26.0] - 2026-08-20
 ### Added — full-feature benchmark matrix (taurus vs pugixml vs libxml2)
