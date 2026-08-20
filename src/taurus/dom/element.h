@@ -113,8 +113,8 @@ struct taurus_attribute {
      * bound dead — 40 was the last unmeasured point on the axis. */
 };
 
-_Static_assert(sizeof(struct taurus_attribute) == 40,
-               "round 19 attr layout: 16+16+4+2+2 = 40");
+/* Size pin lives with the TAURUS_STATIC_ASSERT macro below (C++-
+ * compatible), next to the element size pin. */
 
 /* C-string accessors (TODO 184 rounds 3–4). The views are the
  * single representation; their data is always NUL-terminated
@@ -423,6 +423,9 @@ static inline struct taurus_namespace** taurus_elem_namespaces_ptr(
 
 TAURUS_STATIC_ASSERT(sizeof(struct taurus_element) == 64,
     "taurus_element must fit one cache line (TODO 155 Phase A)");
+
+TAURUS_STATIC_ASSERT(sizeof(struct taurus_attribute) == 40,
+    "round 19 attr layout: 16+16+4+2+2 = 40");
 
 /* ============================================================================
  * Compact tree-edge accessors (Phase 2b of TODO 90)
