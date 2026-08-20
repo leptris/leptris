@@ -168,22 +168,31 @@ static int sxs_elem_push(TaurusSAXParser* p, const char* name, size_t name_len) 
         return -1;
     }
     SaxElementFrame* f = &p->elem_stack[p->elem_depth];
-    /* Heap-allocate the name so it survives scratch arena reallocs
-     * across feed() calls.  Cost: one small malloc + free per
-     * element.  For typical elements (short names) this is well under
-     * 1% of parse time. */
-    char* name_copy = (char*)malloc(name_len + 1);
-    if (!name_copy) {
-        sxs_set_error(p, "out of memory");
-        return -1;
+    /* Inline name storage for the common case (names <= 47 bytes);
+     * heap only for long ones. The frame is part of the parser, so
+     * inline storage survives scratch arena reallocs across feed()
+     * calls exactly like the old heap copy did. */
+    if (name_len < SAX_NAME_INLINE) {
+        memcpy(f->name_buf, name, name_len);
+        f->name_buf[name_len] = '\0';
+        f->name = f->name_buf;
+        f->name_heap = NULL;
+    } else {
+        f->name_heap = (char*)malloc(name_len + 1);
+        if (!f->name_heap) {
+            sxs_set_error(p, "out of memory");
+            return -1;
+        }
+        memcpy(f->name_heap, name, name_len);
+        f->name_heap[name_len] = '\0';
+        f->name = f->name_heap;
     }
-    memcpy(name_copy, name, name_len);
-    name_copy[name_len] = '\0';
-    f->name = name_copy;
     f->name_len = name_len;
-    f->attrs = NULL;
+    f->attrs = f->attrs_inline;
+    f->attrs_inline[0] = NULL;  /* empty list is NULL-terminated */
+    f->attrs_heap = NULL;
     f->attr_count = 0;
-    f->attr_cap = 0;
+    f->attr_cap = SAX_ATTRS_INLINE;
     f->self_closing = 0;
     p->elem_depth++;
     return 0;
@@ -193,13 +202,13 @@ static void sxs_elem_pop(TaurusSAXParser* p) {
     if (p->elem_depth == 0) return;
     p->elem_depth--;
     SaxElementFrame* f = &p->elem_stack[p->elem_depth];
-    free(f->name);
+    free(f->name_heap);   /* NULL for inline-stored names */
+    f->name_heap = NULL;
     f->name = NULL;
     f->name_len = 0;
-    if (f->attrs) {
-        /* attrs[i] pointers are scratch-owned; do not free individually. */
-        free(f->attrs);
-    }
+    /* attrs[i] pointers are scratch-owned; do not free individually. */
+    free(f->attrs_heap);  /* NULL while the inline array sufficed */
+    f->attrs_heap = NULL;
     f->attrs = NULL;
     f->attr_count = 0;
     f->attr_cap = 0;
@@ -215,9 +224,23 @@ static int sxs_elem_add_attr(TaurusSAXParser* p, const char* name, const char* v
     SaxElementFrame* f = sxs_elem_top(p);
     if (!f) return -1;
     if (f->attr_count * 2 + 2 >= f->attr_cap) {
-        size_t new_cap = f->attr_cap == 0 ? 8 : f->attr_cap * 2;
-        char** grown = (char**)realloc(f->attrs, (new_cap + 1) * sizeof(char*));
-        if (!grown) return -1;
+        size_t new_cap = f->attr_cap < SAX_ATTRS_INLINE
+            ? SAX_ATTRS_INLINE * 2
+            : f->attr_cap * 2;
+        char** grown;
+        if (f->attrs == f->attrs_inline) {
+            /* Spilling out of the in-frame array: allocate heap and
+             * copy (realloc on the frame's fixed array is UB). */
+            grown = (char**)malloc((new_cap + 1) * sizeof(char*));
+            if (!grown) return -1;
+            memcpy(grown, f->attrs_inline,
+                   (f->attr_count * 2) * sizeof(char*));
+        } else {
+            grown = (char**)realloc(f->attrs_heap,
+                                    (new_cap + 1) * sizeof(char*));
+            if (!grown) return -1;
+        }
+        f->attrs_heap = grown;
         f->attrs = grown;
         f->attr_cap = new_cap;
     }

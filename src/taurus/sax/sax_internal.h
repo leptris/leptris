@@ -23,12 +23,25 @@
 #endif
 
 /* One element frame on the explicit nesting stack (TODO 116). */
+#define SAX_NAME_INLINE 48u   /* names <= 47 bytes: no allocation */
+#define SAX_ATTRS_INLINE 12u  /* up to 6 attributes inline */
+
 typedef struct SaxElementFrame {
-    char*  name;            /* scratch-owned NUL-terminated element name */
+    /* Name storage: inline for the common short-name case (round 14:
+     * the per-element malloc+free this replaces measured ~10% of SAX
+     * parse, not the "under 1%" the old comment claimed). Long names
+     * take name_heap; either way `name` points at valid storage for
+     * the element's LIFO lifetime. */
+    char   name_buf[SAX_NAME_INLINE];
+    char*  name_heap;      /* NULL unless name_len >= SAX_NAME_INLINE */
+    char*  name;           /* name_buf or name_heap, NUL-terminated */
     size_t name_len;
     /* Flat array of [name, value, name, value, ...] terminated by NULL.
-     * All pointers are scratch-owned. */
-    char** attrs;
+     * Value pointers are scratch-owned; the ARRAY is inline for up to
+     * SAX_ATTRS_INLINE entries, heap beyond. */
+    char*  attrs_inline[SAX_ATTRS_INLINE];
+    char** attrs_heap;     /* NULL while the inline array suffices */
+    char** attrs;          /* attrs_inline or attrs_heap */
     size_t attr_count;
     size_t attr_cap;
     int    self_closing;   /* Already emitted start+end (empty element). */
