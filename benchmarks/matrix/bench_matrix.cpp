@@ -447,6 +447,20 @@ static void bench_serialize(Library& lib, const Fixture& attr_heavy,
                 }));
         }
 #endif
+#ifdef HAVE_LIBXML2
+        else if (lib.name == "libxml2") {
+            xmlDocPtr doc = xmlReadMemory(data, (int)len, NULL, NULL, 0);
+            if (!doc) continue;
+            lib.add(run_bench(id, "serialize", sh.label, len, iters,
+                [&]() {
+                    xmlBufferPtr buf = xmlBufferCreate();
+                    xmlNodeDump(buf, doc, xmlDocGetRootElement(doc),
+                                0, 0);
+                    xmlBufferFree(buf);
+                }));
+            xmlFreeDoc(doc);
+        }
+#endif
     }
 }
 
@@ -497,6 +511,33 @@ static void bench_mutation(Library& lib, int iters) {
                     snprintf(v, 16, "v%d", i);
                     root.append_attribute(n).set_value(v);
                 }
+            }));
+    }
+#endif
+#ifdef HAVE_LIBXML2
+    else if (lib.name == "libxml2") {
+        lib.add(run_bench("mutation_append_10k", "mutation", "append-10k", 0, iters,
+            [&]() {
+                xmlDocPtr d = xmlNewDoc(NULL);
+                xmlNodePtr root = xmlNewNode(NULL, (const xmlChar*)"r");
+                xmlDocSetRootElement(d, root);
+                for (int i = 0; i < 10000; i++) {
+                    xmlNewTextChild(root, NULL, (const xmlChar*)"c", NULL);
+                }
+                xmlFreeDoc(d);
+            }));
+        lib.add(run_bench("mutation_set_attr_2k", "mutation", "set-attr-2k", 0, iters,
+            [&]() {
+                xmlDocPtr d = xmlNewDoc(NULL);
+                xmlNodePtr root = xmlNewNode(NULL, (const xmlChar*)"r");
+                xmlDocSetRootElement(d, root);
+                char n[16], v[16];
+                for (int i = 0; i < 2000; i++) {
+                    snprintf(n, 16, "a%d", i);
+                    snprintf(v, 16, "v%d", i);
+                    xmlSetProp(root, (const xmlChar*)n, (const xmlChar*)v);
+                }
+                xmlFreeDoc(d);
             }));
     }
 #endif
@@ -631,6 +672,8 @@ int main(int argc, char** argv) {
         printf("running libxml2...\n");
         bench_dom_parse(lib, parse_fixtures, iters);
         bench_sax_parse(lib, parse_fixtures, iters);
+        bench_serialize(lib, attr_heavy, text_heavy, iters);
+        bench_mutation(lib, iters);
         bench_xpath(lib, catalog, iters);
         libraries.push_back(lib);
     }
