@@ -1,13 +1,16 @@
 ## [Unreleased]
 
-## [0.25.11] - Y-08-20
+## [0.25.11] - 2026-08-20
+### Performance — overflow-table growth for large mutation trees
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+The compact overflow table kept a fixed 256-bucket chained hash forever. Mutation-created elements live in a different malloc region than the parse arena (far beyond the int32 compact field), so every child→parent edge takes the overflow path. With N children the chains grew to N/256 deep and every set/get walked them — the measured rising cost of sequential append past a few thousand children.
 
-### Changed
+Load-factor growth doubles the bucket array and rehashes when `entry_count >= bucket_count`; chains stay O(1). Parse never touches this table (`direct_parse` is overflow-free), so parse timing is unaffected.
 
-- (describe changes here)
+### Documentation
+
+- `README.adoc` DOM-writes table: current quiet-machine numbers — append **~2.5× ahead** of pugixml, setattr **~20× ahead** of duplicate-rejecting pugixml (blind-append comparison noted separately).
+- Decomposition benchmark gains P6 pretty-ws and P6b `DROP_WS` probes (P6b **1.20×** vs pugixml).
 
 
 ## [0.25.10] - 2026-08-20
