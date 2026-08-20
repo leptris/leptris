@@ -26,6 +26,33 @@
  * Public API Implementation - DOM Modification (Compact Mode)
  * =========================================================================== */
 
+/* Round 18: carve mutation elements from a per-document contiguous
+ * bump block. The pool extension path malloc'd each element
+ * separately, scattering them across heap regions — sibling edges
+ * (self-relative offsets) still worked but landed far apart, and
+ * every fresh malloc paid allocator + page costs. Contiguous
+ * carving keeps sequential-append elements cache-adjacent. Blocks
+ * chain via ->next and are freed with the document. */
+#define MUT_ELEM_BLOCK_COUNT 1024
+
+static TaurusElement mut_elem_carve(struct taurus_document* doc) {
+    if (doc->mut_elem_cursor && doc->mut_elem_cursor < doc->mut_elem_end) {
+        return doc->mut_elem_cursor++;
+    }
+
+    struct taurus_mut_elem_block* blk =
+        (struct taurus_mut_elem_block*)malloc(
+            sizeof(struct taurus_mut_elem_block) +
+            (size_t)MUT_ELEM_BLOCK_COUNT * sizeof(struct taurus_element));
+    if (!blk) return NULL;
+
+    blk->next = doc->mut_elem_blocks;
+    doc->mut_elem_blocks = blk;
+    doc->mut_elem_cursor = (TaurusElement)blk->bytes;
+    doc->mut_elem_end = doc->mut_elem_cursor + MUT_ELEM_BLOCK_COUNT;
+    return doc->mut_elem_cursor++;
+}
+
 /**
  * Create new element in document (Public API)
  */
@@ -34,24 +61,35 @@ TaurusElement taurus_element_create(TaurusDocument doc, const char* name) {
 
     /* Issue #187: trigger lazy promote if the doc was produced by
      * the flat-parse fast path. The compact-pointer tree must exist
-     * before we can pool-allocate a new element into it. */
+     * before we can allocate a new element into it. */
     taurus_document_ensure_promoted(doc);
 
-    /* Fast path: use bulk allocation if pool available */
+    TaurusElement elem = NULL;
     if (doc->pool) {
-        TaurusElement elem = taurus_element_create_pooled(name, doc->pool);
+        /* Round 18: struct from the bump block, name from the pool.
+         * Same init contract as taurus_element_create_with_view
+         * (memset-zero + type/name/name_hash/name_len). Falls back
+         * to the plain pool path when a block can't be allocated. */
+        elem = mut_elem_carve(doc);
         if (elem) {
-            /* TODO 155 Phase A: register elem as a root in the thread-local
-             * root→doc map so descendants (and pre-attach ops) can reach
-             * the doc via walk + lookup. */
-            taurus_root_doc_register(elem, doc);
+            char* name_copy = taurus_pool_strdup(doc->pool, name);
+            if (!name_copy) return NULL;
+            size_t name_len = strlen(name);
+            memset(elem, 0, sizeof(struct taurus_element));
+            elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
+            elem->name = name_copy;
+            elem->name_hash = taurus_name_hash_compute(name_copy);
+            elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
+        } else {
+            elem = taurus_element_create_pooled(name, doc->pool);
         }
-        return elem;
+    } else {
+        elem = taurus_element_create_pooled(name, doc->pool);
     }
-
-    /* Fallback: use regular internal creation if no pool */
-    TaurusElement elem = taurus_element_create_pooled(name, doc->pool);
     if (elem) {
+        /* TODO 155 Phase A: register elem as a root in the thread-local
+         * root→doc map so descendants (and pre-attach ops) can reach
+         * the doc via walk + lookup. */
         taurus_root_doc_register(elem, doc);
     }
     return elem;
