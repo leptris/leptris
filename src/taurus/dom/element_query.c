@@ -155,14 +155,14 @@ TAURUS_API const char* taurus_element_attribute(TaurusElement elem, const char* 
     /* Single representation (round 4): entity values expand lazily
      * INTO the view (owned copy); no-entity views are already
      * NUL-terminated C strings. */
-    if (attr->has_entities) {
+    if (attr_has_entities(attr)) {
         TaurusMemoryPool* pool = taurus_element_get_pool(elem);
         char* decoded = pool
             ? taurus_decode_entities_view(&attr->value_view, pool)
             : NULL;
         if (decoded) {
             attr->value_view = taurus_sv_from_cstr(decoded);
-            attr->has_entities = 0;
+            attr_set_entities(attr, 0);
         }
     }
     return attr->value_view.data;
@@ -898,14 +898,14 @@ TAURUS_API const char* taurus_element_attribute_value_at(TaurusElement elem, siz
     size_t i = 0;
     while (attr) {
         if (i == index) {
-            if (attr->has_entities) {
+            if (attr_has_entities(attr)) {
                 TaurusMemoryPool* pool = taurus_element_get_pool(elem);
                 if (pool) {
                     char* decoded = taurus_decode_entities_view(
                         &attr->value_view, pool);
                     if (decoded) {
                         attr->value_view = taurus_sv_from_cstr(decoded);
-                        attr->has_entities = 0;
+                        attr_set_entities(attr, 0);
                     }
                 }
             }

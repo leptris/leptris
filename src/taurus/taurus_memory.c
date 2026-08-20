@@ -51,10 +51,11 @@ void taurus_attribute_free(struct taurus_attribute* attr) {
      * const for free (the data IS mutable storage; the view type is
      * const only for read-side safety). */
     free((void*)(uintptr_t)attr->name_view.data);
-    if (attr->ns_cache) {
-        if (attr->ns_cache->prefix) free(attr->ns_cache->prefix);
-        if (attr->ns_cache->namespace_uri) free(attr->ns_cache->namespace_uri);
-        free(attr->ns_cache);
+    struct taurus_attr_ns_cache* nsc = attr_get_ns_cache(attr);
+    if (nsc) {
+        if (nsc->prefix) free(nsc->prefix);
+        if (nsc->namespace_uri) free(nsc->namespace_uri);
+        free(nsc);
     }
     free((void*)(uintptr_t)attr->value_view.data);
 

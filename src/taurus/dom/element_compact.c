@@ -282,7 +282,7 @@ int taurus_compact_add_attribute(TaurusElementCompact* elem,
     attr->next = NULL;
 
     /* Check for entities in value (set during parsing for performance) */
-    attr->has_entities = (memchr(value_view.data, '&', value_view.length) != NULL);
+    attr_set_entities(attr, memchr(value_view.data, '&', value_view.length) != NULL);
 
     /* Add to linked list */
     struct taurus_compact_attribute* first_attr = taurus_compact_get_first_attribute(elem);

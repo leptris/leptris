@@ -77,19 +77,6 @@ static uint8_t read_u8(const unsigned char** pc) {
     return v;
 }
 
-/* Compute 32-bit FNV-1a hash matching the one stored on
- * taurus_attribute->name_hash. Used by the fused attribute predicate
- * handlers to pre-filter attrs via integer compare before memcmp.
- * (TODO 159 Phase E.) */
-static inline uint32_t xpath_fnv1a_32(const char* s, size_t len) {
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < len; i++) {
-        h ^= (unsigned char)s[i];
-        h *= 16777619u;
-    }
-    return h;
-}
-
 static uint16_t read_u16(const unsigned char** pc) {
     uint16_t v = ((uint16_t)(*pc)[0] << 8) | (*pc)[1];
     *pc += 2;
@@ -1442,8 +1429,8 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                     /* Fallback: subtree walk + inline attr filter
                      * (hash-prefiltered walk, the PRED_ATTR_EXISTS
                      * handler's pattern). */
-                    uint32_t attr_hash =
-                        xpath_fnv1a_32(attr_name, strlen(attr_name));
+                    uint16_t attr_hash =
+                        attr_hash15(attr_name, strlen(attr_name));
                     for (size_t i = 0; i < input->count; i++) {
                         if (!node_is_element(input->nodes[i])) continue;
                         TaurusElement elem = (TaurusElement)input->nodes[i];
@@ -1701,8 +1688,8 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                     TaurusElement root = (ctx && ctx->document)
                         ? (TaurusElement)ctx->document->new_dom_root : NULL;
                     if (root) {
-                        uint32_t attr_hash =
-                            xpath_fnv1a_32(attr_name, strlen(attr_name));
+                        uint16_t attr_hash =
+                            attr_hash15(attr_name, strlen(attr_name));
                         size_t mark = out->count;
                         descendant_walk(out, root, name, 0, 1);
                         for (size_t w = mark; w < out->count;) {
@@ -1764,7 +1751,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                  * strlen(attr_name) inside the loop body, redundant
                  * per-attr. */
                 size_t name_len = attr_name ? strlen(attr_name) : 0;
-                uint32_t name_hash = attr_name ? xpath_fnv1a_32(attr_name, name_len) : 0;
+                uint16_t name_hash = attr_name ? attr_hash15(attr_name, name_len) : 0;
 
                 size_t write = 0;
                 for (size_t read = 0; read < input->count; read++) {
@@ -1819,7 +1806,7 @@ static struct taurus_xpath_result* vm_run(TaurusXPathBytecode* bc,
                  * strlen(expected) once per attribute per element. */
                 size_t name_len = attr_name ? strlen(attr_name) : 0;
                 size_t value_len = expected ? strlen(expected) : 0;
-                uint32_t name_hash = attr_name ? xpath_fnv1a_32(attr_name, name_len) : 0;
+                uint16_t name_hash = attr_name ? attr_hash15(attr_name, name_len) : 0;
 
                 size_t write = 0;
                 for (size_t read = 0; read < input->count; read++) {

@@ -258,14 +258,15 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
 
     attr->name_view = taurus_sv_from_ptr(name, name_len);
     attr->value_view = taurus_sv_from_ptr(val, val_len);
-    /* Single representation (TODO 184 round 4): the views ARE the
-     * strings (NUL-terminated in the document buffer). Entity
+    /* Round 19 packed tail: single name_hash store carries both the
+     * lazy-hash sentinel (0) and the entity flag (bit 15). Entity
      * routing (has_amp from the caller's fused scan):
      * - DTD present: eagerly expand; the owned pool copy REPLACES
-     *   the view, has_entities=0.
-     * - No DTD: view stays raw, has_entities=1 — accessors expand
+     *   the view, entities=0.
+     * - No DTD: view stays raw, entities=1 — accessors expand
      *   predefined entities lazily on first read.
      * - No '&': nothing to do. */
+    unsigned ent = 0;
     if (val_len > 0 && has_amp) {
         if (p->dtd) {
             TaurusStringView dsv = taurus_sv_from_ptr(val, val_len);
@@ -273,27 +274,20 @@ static inline int dp_add_attr_inline(DParser* p, TaurusElement elem,
                 &dsv, p->dtd, p->pool);
             if (expanded) {
                 attr->value_view = taurus_sv_from_cstr(expanded);
-                attr->has_entities = 0;
             } else {
-                attr->has_entities = 1;
+                ent = 1;
             }
         } else {
-            attr->has_entities = 1;
+            ent = 1;
         }
-    } else {
-        attr->has_entities = 0;
     }
-    attr->ns_cache = NULL;  /* TODO 173: side cache allocated on demand */
+    attr->name_hash = (uint16_t)(ent << 15);
+    attr->ns_cache_off = 0;  /* TODO 173: side cache allocated on demand */
     /* TODO 183 Phase 5 (TODO 181 Phase D): cp16 sibling edge. Attrs of
-     * one element are adjacent attr_block slots (distance ≤ K × 64 B,
+     * one element are adjacent attr_block slots (distance ≤ K × 40 B,
      * far inside cp16 range) — direct store, no encoder call on the
      * hot path. The defensive walk below uses the decoder. */
     attr->next_cp = 0;
-
-    /* FNV-1a hash deferred to first read via attr_name_hash() (TODO 172).
-     * Saves ~5ns per attr on attr-heavy parse paths where XPath attr
-     * predicates are never used. The first read computes and caches. */
-    attr->name_hash = 0;
 
     /* Wire attr into elem's attr list. TODO 159 Phase G: use the
      * parser-local last-attr cache for O(1) wiring instead of walking

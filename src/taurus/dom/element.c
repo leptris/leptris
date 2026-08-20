@@ -185,16 +185,13 @@ struct taurus_attribute* taurus_element_get_attribute_by_name(TaurusElement elem
     if (!elem || !name) return NULL;
 
     /* Hash-filtered attribute lookup (TODO 113 Phase 4).
-     * Compute the FNV-1a hash of the search name once, then compare
-     * 4-byte hashes in the loop before touching string data. This
-     * turns O(N × strlen) into O(N × uint32) for the non-matching
-     * case. */
+     * Compute the 15-bit hash of the search name once (round 19 —
+     * attr_name_hash truncates identically via attr_hash15), then
+     * compare small integers in the loop before touching string
+     * data. This turns O(N × strlen) into O(N × uint16) for the
+     * non-matching case. */
     size_t name_len = strlen(name);
-    uint32_t name_hash = 2166136261u;
-    for (size_t i = 0; i < name_len; i++) {
-        name_hash ^= (unsigned char)name[i];
-        name_hash *= 16777619u;
-    }
+    uint16_t name_hash = attr_hash15(name, name_len);
 
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     while (attr) {
@@ -252,18 +249,16 @@ int taurus_element_add_attribute(TaurusElement elem,
     attr->name_view = name_view;
     attr->value_view = value_view;
 
-    /* Pre-compute FNV-1a hash of attribute name for O(1) lookup
-     * filtering (TODO 113 Phase 4). */
-    attr->name_hash = 2166136261u;
-    for (size_t i = 0; i < name_view.length; i++) {
-        attr->name_hash ^= (unsigned char)name_view.data[i];
-        attr->name_hash *= 16777619u;
-    }
+    /* Pre-compute the 15-bit hash of the attribute name for O(1)
+     * lookup filtering (TODO 113 Phase 4). Entity flag starts
+     * clear; the decode below sets it only when expansion fails.
+     * Round 19: hash and flag share the field (bit 15). */
+    attr->name_hash = attr_hash15(name_view.data, name_view.length);
 
     /* CRITICAL FIX: Initialize namespace/prefix fields to prevent stale data.
-     * TODO 173: these now live in the side-cache struct (attr->ns_cache).
-     * NULL ns_cache = no prefix / namespace_uri = empty/NULL. */
-    attr->ns_cache = NULL;
+     * TODO 173: these now live in the side-cache struct (ns_cache_off).
+     * 0 = no prefix / namespace_uri = empty/NULL. */
+    attr->ns_cache_off = 0;
 
     /* EAGER STRING CONVERSION: Convert attribute name and value to NULL-terminated C-strings.
      *
@@ -308,20 +303,17 @@ int taurus_element_add_attribute(TaurusElement elem,
             char* decoded = taurus_decode_entities_view(&decoded_sv, pool);
             if (decoded) {
                 attr->value_view = taurus_sv_from_cstr(decoded);
-                attr->has_entities = 0;
             } else {
                 attr->value_view =
                     taurus_sv_from_ptr(value_storage, value_view.length);
-                attr->has_entities = 1;
+                attr_set_entities(attr, 1);
             }
         } else {
             attr->value_view =
                 taurus_sv_from_ptr(value_storage, value_view.length);
-            attr->has_entities = 0;
         }
     } else {
         attr->value_view = taurus_sv_from_ptr(NULL, 0);
-        attr->has_entities = 0;
     }
 
     taurus_attr_set_next(attr, NULL);
@@ -366,13 +358,9 @@ int taurus_element_add_attribute_zero_copy(TaurusElement elem,
     attr->name_view = name_view;
     attr->value_view = value_view;
 
-    attr->name_hash = 2166136261u;
-    for (size_t i = 0; i < name_view.length; i++) {
-        attr->name_hash ^= (unsigned char)name_view.data[i];
-        attr->name_hash *= 16777619u;
-    }
+    attr->name_hash = attr_hash15(name_view.data, name_view.length);
 
-    attr->ns_cache = NULL;  /* TODO 173: side cache allocated on demand. */
+    attr->ns_cache_off = 0;  /* TODO 173: side cache allocated on demand. */
 
     if (memchr(value_view.data, '&', value_view.length) != NULL) {
         char* value_storage = (char*)taurus_pool_alloc(pool, value_view.length + 1);
@@ -383,17 +371,17 @@ int taurus_element_add_attribute_zero_copy(TaurusElement elem,
             char* decoded = taurus_decode_entities_view(&decoded_sv, pool);
             if (decoded) {
                 attr->value_view = taurus_sv_from_cstr(decoded);
-                attr->has_entities = 0;
+                attr_set_entities(attr, 0);
             } else {
                 attr->value_view =
                     taurus_sv_from_ptr(value_storage, value_view.length);
-                attr->has_entities = 1;
+                attr_set_entities(attr, 1);
             }
         } else {
-            attr->has_entities = 0;
+            attr_set_entities(attr, 0);
         }
     } else {
-        attr->has_entities = 0;
+        attr_set_entities(attr, 0);
     }
 
     taurus_attr_set_next(attr, NULL);
@@ -598,19 +586,19 @@ const char* taurus_element_get_attribute_legacy(TaurusElement elem, const char* 
     /* Single representation (TODO 184 round 4): entity values expand
      * lazily into the view (owned copy); no-entity views are already
      * NUL-terminated. */
-    if (attr->has_entities && !taurus_sv_is_empty(&attr->value_view)) {
+    if (attr_has_entities(attr) && !taurus_sv_is_empty(&attr->value_view)) {
         if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
             char* decoded = taurus_decode_entities_view(
                 &attr->value_view, taurus_element_get_pool(elem));
             if (decoded) {
                 attr->value_view = taurus_sv_from_cstr(decoded);
-                attr->has_entities = 0;
+                attr_set_entities(attr, 0);
             }
         } else {
             char* expanded = taurus_sv_to_cstr(&attr->value_view);
             if (expanded) {
                 attr->value_view = taurus_sv_from_cstr(expanded);
-                attr->has_entities = 0;
+                attr_set_entities(attr, 0);
             }
         }
     }

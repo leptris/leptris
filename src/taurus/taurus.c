@@ -852,23 +852,26 @@ static void finalize_element_strings(TaurusElement elem, TaurusMemoryPool* pool)
         /* Single representation (round 4): entity values expand INTO
          * the view (owned pool copy); everything else already reads
          * correctly from the zero-copy view. */
-        if (attr->has_entities &&
+        if (attr_has_entities(attr) &&
             !taurus_sv_is_empty(&attr->value_view)) {
             if ((uintptr_t)attr->value_view.data >= 0x1000) {
                 char* expanded =
                     taurus_decode_entities_view(&attr->value_view, pool);
                 if (expanded) {
                     attr->value_view = taurus_sv_from_cstr(expanded);
-                    attr->has_entities = 0;
+                    attr_set_entities(attr, 0);
                 }
             }
         }
-        /* TODO 173: namespace_uri lives in attr->ns_cache side table. */
-        if (attr->ns_cache && !attr->ns_cache->namespace_uri &&
-            !taurus_sv_is_empty(&attr->ns_cache->namespace_uri_view)) {
-            if ((uintptr_t)attr->ns_cache->namespace_uri_view.data >= 0x1000) {
-                attr->ns_cache->namespace_uri =
-                    taurus_sv_to_cstr_pooled(&attr->ns_cache->namespace_uri_view, pool);
+        /* TODO 173: namespace_uri lives in the attr ns_cache side
+         * table (int32 offset, round 19). The cache struct itself
+         * never moves, so decode once and mutate through it. */
+        struct taurus_attr_ns_cache* nsc = attr_get_ns_cache(attr);
+        if (nsc && !nsc->namespace_uri &&
+            !taurus_sv_is_empty(&nsc->namespace_uri_view)) {
+            if ((uintptr_t)nsc->namespace_uri_view.data >= 0x1000) {
+                nsc->namespace_uri =
+                    taurus_sv_to_cstr_pooled(&nsc->namespace_uri_view, pool);
             }
         }
     }

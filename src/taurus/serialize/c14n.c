@@ -218,7 +218,7 @@ static void c14n_serialize_element(TaurusElement elem, char** buffer, size_t* si
              * that this loop frees. */
             const char* attr_value;
             int attr_value_owned = 0;
-            if (attr->has_entities && !taurus_sv_is_empty(&attr->value_view)) {
+            if (attr_has_entities(attr) && !taurus_sv_is_empty(&attr->value_view)) {
                 /* Use lenient mode for C14N to handle edge cases like "&" in attributes */
                 int old_strict = taurus_get_strict_mode();
                 taurus_set_strict_mode(0);  /* Enable lenient mode */
@@ -685,7 +685,7 @@ static void c14n_serialize_element_excl(TaurusElement elem,
                  * temporary this loop frees; others read the view. */
                 const char* av = NULL;
                 int av_owned = 0;
-                if (a->has_entities && !taurus_sv_is_empty(&a->value_view)) {
+                if (attr_has_entities(a) && !taurus_sv_is_empty(&a->value_view)) {
                     av = taurus_decode_entities_view(&a->value_view, NULL);
                     av_owned = (av != NULL);
                 }
