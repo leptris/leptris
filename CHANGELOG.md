@@ -1,14 +1,18 @@
 ## [Unreleased]
 
-## [0.26.2] - Y-08-20
-
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+## [0.26.2] - 2026-08-20
 
 ### Changed
 
-- (describe changes here)
-
+- Attribute struct 48 → 40 bytes (hot/cold split, pugixml density): the
+  namespace side-cache pointer becomes a self-relative offset and the entity
+  flag folds into the name-hash word. Attr-heavy parse improves ~1% at every
+  attribute density (K=5/20/50/100) and attribute memory drops 17%. With
+  32/40/48/56/64-byte strides all measured, the attribute layout axis is
+  closed at 40 bytes.
+- The attr name hash narrows to 15 bits with a shared attr_hash15() helper on
+  both lazy-compute and query sides (it is a pre-filter only; every hit is
+  confirmed by memcmp).
 
 ## [0.26.1] - 2026-08-20
 
