@@ -95,6 +95,30 @@ taurus_add_benchmark(bench_text_borrowed   dom/bench_text_borrowed.c)
     target_link_libraries(benchmark_sax PRIVATE ${LIBXML2_LIBRARY})
 endif()
 
+# Full-feature matrix: taurus vs pugixml vs libxml2 (YAML + HTML report).
+if(PUGIXML_AVAILABLE AND LIBXML2_AVAILABLE)
+    taurus_add_benchmark(bench_matrix CXX matrix/bench_matrix.cpp)
+    target_compile_definitions(bench_matrix PRIVATE
+        HAVE_PUGIXML=1 HAVE_LIBXML2=1)
+    if(PUGIXML_TARGET)
+        target_link_libraries(bench_matrix PRIVATE ${PUGIXML_TARGET})
+    else()
+        target_include_directories(bench_matrix PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(bench_matrix PRIVATE ${PUGIXML_LIBRARY})
+    endif()
+    target_include_directories(bench_matrix PRIVATE ${LIBXML2_INCLUDE_DIR})
+    target_link_libraries(bench_matrix PRIVATE ${LIBXML2_LIBRARY})
+elseif(PUGIXML_AVAILABLE)
+    taurus_add_benchmark(bench_matrix CXX matrix/bench_matrix.cpp)
+    target_compile_definitions(bench_matrix PRIVATE HAVE_PUGIXML=1)
+    if(PUGIXML_TARGET)
+        target_link_libraries(bench_matrix PRIVATE ${PUGIXML_TARGET})
+    else()
+        target_include_directories(bench_matrix PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(bench_matrix PRIVATE ${PUGIXML_LIBRARY})
+    endif()
+endif()
+
 # ----------------------------------------------------------------------------
 # XPath benchmarks
 # ----------------------------------------------------------------------------
