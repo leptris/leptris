@@ -26,6 +26,43 @@
  * Public API Implementation - DOM Modification (Compact Mode)
  * =========================================================================== */
 
+/* Round 21: carve mutation element names from a per-document
+ * contiguous block — replaces taurus_pool_strdup on the create path
+ * (call chain + arena slack checks cost ~9ns for a 2-byte name;
+ * this is bump + copy). Oversized names (> block size) fall back
+ * to the pool. */
+#define MUT_NAME_BLOCK_BYTES 4096
+
+static char* mut_name_carve(struct taurus_document* doc,
+                            const char* name, size_t name_len) {
+    /* Slot layout: [8B doc backpointer][name bytes][NUL]. The
+     * backpointer + header bit 6 let get_document resolve this
+     * element while unattached with zero registration (see
+     * taurus_elem_namebp_doc). */
+    size_t need = sizeof(struct taurus_document*) + name_len + 1;
+    if (name_len > 254 || need > MUT_NAME_BLOCK_BYTES / 4) {
+        /* Long names: pool path (rare; element names are short).
+         * No backpointer — caller must register in the root map. */
+        return NULL;
+    }
+    if (doc->mut_name_cursor + need > doc->mut_name_end) {
+        struct taurus_mut_name_block* blk =
+            (struct taurus_mut_name_block*)malloc(
+                sizeof(struct taurus_mut_name_block) + MUT_NAME_BLOCK_BYTES);
+        if (!blk) return NULL;
+        blk->next = doc->mut_name_blocks;
+        doc->mut_name_blocks = blk;
+        doc->mut_name_cursor = blk->bytes;
+        doc->mut_name_end = blk->bytes + MUT_NAME_BLOCK_BYTES;
+    }
+    char* slot = doc->mut_name_cursor;
+    doc->mut_name_cursor += need;
+    *(struct taurus_document**)slot = doc;
+    memcpy(slot + sizeof(struct taurus_document*), name, name_len);
+    slot[sizeof(struct taurus_document*) + name_len] = '\0';
+    return slot + sizeof(struct taurus_document*);
+}
+
 /* Round 18: carve mutation elements from a per-document contiguous
  * bump block. The pool extension path malloc'd each element
  * separately, scattering them across heap regions — sibling edges
@@ -70,27 +107,37 @@ TaurusElement taurus_element_create(TaurusDocument doc, const char* name) {
          * Same init contract as taurus_element_create_with_view
          * (memset-zero + type/name/name_hash/name_len). Falls back
          * to the plain pool path when a block can't be allocated. */
+        size_t name_len = strlen(name);
         elem = mut_elem_carve(doc);
         if (elem) {
-            char* name_copy = taurus_pool_strdup(doc->pool, name);
-            if (!name_copy) return NULL;
-            size_t name_len = strlen(name);
-            memset(elem, 0, sizeof(struct taurus_element));
-            elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
-            elem->name = name_copy;
-            elem->name_hash = taurus_name_hash_compute(name_copy);
-            elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
+            char* name_copy = mut_name_carve(doc, name, name_len);
+            if (name_copy) {
+                memset(elem, 0, sizeof(struct taurus_element));
+                elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
+                elem->header.flags |= TAURUS_NAMEBP_FLAG;
+                elem->name = name_copy;
+                elem->name_hash = taurus_name_hash_compute(name_copy);
+                elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
+            } else {
+                /* Long name or block alloc failure: fall through to
+                 * the pool path (registration follows below — pool
+                 * names carry no backpointer). */
+                memset(elem, 0, sizeof(struct taurus_element));
+                char* pooled = taurus_pool_strdup(doc->pool, name);
+                if (!pooled) return NULL;
+                elem->base.type = TAURUS_NODE_TYPE_ELEMENT;
+                elem->name = pooled;
+                elem->name_hash = taurus_name_hash_compute(pooled);
+                elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
+                taurus_root_doc_register(elem, doc);
+            }
         } else {
             elem = taurus_element_create_pooled(name, doc->pool);
+            if (elem) taurus_root_doc_register(elem, doc);
         }
     } else {
         elem = taurus_element_create_pooled(name, doc->pool);
-    }
-    if (elem) {
-        /* TODO 155 Phase A: register elem as a root in the thread-local
-         * root→doc map so descendants (and pre-attach ops) can reach
-         * the doc via walk + lookup. */
-        taurus_root_doc_register(elem, doc);
+        if (elem) taurus_root_doc_register(elem, doc);
     }
     return elem;
 }
@@ -110,11 +157,7 @@ TaurusStatus taurus_element_append_child(TaurusElement parent, TaurusElement chi
     taurus_element_append_child_internal_doc(parent, (TaurusNode*)child, doc);
     taurus_element_invalidate_child_cache(parent);
 
-    /* Round 20: the child is attached — its root-map entry (kept for
-     * pre-attach doc resolution) is dead weight that pollutes lookup
-     * chains for the rest of the document's life. Remove it; the bit
-     * makes both this and re-registration O(1). */
-    taurus_root_doc_unregister(child);
+
 
     /* Invalidate element index (TODO 132): the new child changes
      * the document's element set. The index will be rebuilt lazily
@@ -134,7 +177,6 @@ TaurusStatus taurus_element_prepend_child(TaurusElement parent, TaurusElement ch
     /* Call internal void function, assume success */
     taurus_element_prepend_child_internal(parent, (TaurusNode*)child);
     taurus_element_invalidate_child_cache(parent);
-    taurus_root_doc_unregister(child);
     return TAURUS_OK;
 }
 
@@ -219,9 +261,6 @@ TaurusStatus taurus_element_insert_before(TaurusElement sibling, TaurusElement n
 
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
     taurus_element_invalidate_child_cache(parent);
-    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
-        taurus_root_doc_unregister((TaurusElement)new_node_ptr);
-    }
     return TAURUS_OK;
 }
 
@@ -294,9 +333,6 @@ TaurusStatus taurus_element_insert_after(TaurusElement sibling, TaurusElement ne
 
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(parent));
     taurus_element_invalidate_child_cache(parent);
-    if (new_node_ptr->type == TAURUS_NODE_TYPE_ELEMENT) {
-        taurus_root_doc_unregister((TaurusElement)new_node_ptr);
-    }
     return TAURUS_OK;
 }
 
@@ -405,15 +441,27 @@ TaurusStatus taurus_element_set_name(TaurusElement elem, const char* name) {
      * Pool-allocated strings will be freed when the pool is destroyed.
      * If we free() a pool-allocated string, we get undefined behavior. */
 
-    /* Set new name - prefer pool allocation if document is available */
-    if (taurus_element_get_document(elem) && taurus_element_get_pool(elem)) {
+    /* Set new name - prefer pool allocation if document is available.
+     * Round 21: resolve the doc BEFORE clearing the mutation name-
+     * backpointer bit — the element was reachable only through that
+     * backpointer, and clearing it first sends the element down the
+     * standalone/malloc path (breaking every later mutation op).
+     * A replacement name is pool storage with no backpointer: clear
+     * the bit and register in the root map instead. */
+    struct taurus_document* sn_doc = taurus_element_get_document(elem);
+    elem->header.flags &= (uint8_t)~TAURUS_NAMEBP_FLAG;
+    if (sn_doc && sn_doc->pool) {
         /* Use pool allocation for consistency with parsing */
-        elem->name = taurus_pool_strdup(taurus_element_get_pool(elem), name);
+        elem->name = taurus_pool_strdup(sn_doc->pool, name);
+        if (elem->name) taurus_root_doc_register(elem, sn_doc);
     } else {
         /* Fallback to malloc for standalone elements */
         elem->name = taurus_strdup(name);
     }
+    if (!elem->name) return TAURUS_ERROR_MEMORY;
     elem->name_hash = taurus_name_hash_compute(elem->name);
+    elem->name_len = (uint8_t)(strlen(elem->name) > 254
+                                   ? 0xFF : strlen(elem->name));
 
     /* COW: Increment version */
     taurus_node_increment_version(TAURUS_ELEMENT_AS_NODE(elem));

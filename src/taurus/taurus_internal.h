@@ -82,6 +82,14 @@ struct taurus_mut_elem_block {
     char bytes[];
 };
 
+/* Round 21 twin: chained blocks for mutation-created element NAME
+ * storage. Names are short (element names, not content); carved
+ * bump-style, freed with the document. */
+struct taurus_mut_name_block {
+    struct taurus_mut_name_block* next;
+    char bytes[];
+};
+
 struct taurus_document {
     struct taurus_element* root;             /* Root element (legacy API) */
     char* encoding;                 /* UTF-8 assumed, but store if specified */
@@ -152,6 +160,14 @@ struct taurus_document {
     struct taurus_mut_elem_block* mut_elem_blocks;
     struct taurus_element* mut_elem_cursor;
     struct taurus_element* mut_elem_end;
+    /* Mutation name bump block (round 21): element_create's name
+     * copy went through taurus_pool_strdup → arena_alloc (call
+     * chain + strlen + slack checks, ~9ns for a 2-byte name).
+     * Carving from a per-doc contiguous block is a bump + memcpy +
+     * NUL. Freed with the document. */
+    struct taurus_mut_name_block* mut_name_blocks;
+    char* mut_name_cursor;
+    char* mut_name_end;
     /* Definition follows this struct (needed by document_free). */
 
     /* Document-scoped state (TODO 27/38 phase 2).

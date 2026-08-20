@@ -315,6 +315,25 @@ struct taurus_element {
 struct taurus_document* taurus_element_get_document(TaurusElement elem);
 TaurusMemoryPool* taurus_element_get_pool(TaurusElement elem);
 
+/* Round 21: header.flags bit 6 — "elem->name is preceded by 8 bytes
+ * holding the owning document pointer" (mutation name-block carve
+ * layout). Lets get_document resolve UNATTACHED mutation elements
+ * with zero registration: the map is only consulted for roots and
+ * map-registered (parse/copy) elements; a stateless backpointer
+ * replaces the register-on-create / unregister-on-attach pair that
+ * cost ~11ns per append. */
+#define TAURUS_NAMEBP_FLAG 0x40u
+
+static inline int taurus_elem_has_namebp(const TaurusElement e) {
+    return (e->header.flags & TAURUS_NAMEBP_FLAG) != 0;
+}
+
+static inline struct taurus_document* taurus_elem_namebp_doc(
+    const TaurusElement e) {
+    /* name points at slot+8; slot start holds the doc pointer. */
+    return ((struct taurus_document* const*)e->name)[-1];
+}
+
 /* Compute 16-bit FNV-1a hash of an element name string. Used
  * together with elem->name_hash for fast pre-filtering in child-
  * axis lookups. TODO 159: fast child-name matching. */

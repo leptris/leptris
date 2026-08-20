@@ -406,6 +406,56 @@ TEST(ElementSetText, ReplacesTextContent) {
     taurus_document_free(doc);
 }
 
+/* Regression (v0.26.4 bug + round 21 hazard): set_name never updated
+ * name_len, so a renamed element serialized the first N bytes of its
+ * new name (N = old length). Round 21 additionally replaced the name
+ * storage: the doc must be resolved BEFORE the mutation name
+ * backpointer bit is cleared, or every later mutation on the element
+ * loses its document. Pins both. */
+TEST(ElementSetName, UpdatesLengthAndKeepsDocReachable) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    TaurusElement c = taurus_element_create(doc, "orig");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(taurus_element_set_name(c, "renamed"), TAURUS_OK);
+
+    /* Mutation after rename must still reach the document. */
+    EXPECT_EQ(taurus_element_set_attribute(c, "after", "v"), TAURUS_OK);
+
+    EXPECT_EQ(taurus_element_append_child(root, c), TAURUS_OK);
+    char* out = taurus_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r><renamed after=\"v\"/></r>");
+    taurus_free_string(out);
+
+    taurus_document_free(doc);
+}
+
+/* Shorter new name: name_len must shrink too (0xFF sentinel logic). */
+TEST(ElementSetName, ShorterNameAlsoTruncatesCorrectly) {
+    TaurusStatus st = TAURUS_OK;
+    const char xml[] = "<r/>";
+    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    TaurusElement root = taurus_document_root(doc);
+
+    TaurusElement c = taurus_element_create(doc, "longername");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(taurus_element_set_name(c, "short"), TAURUS_OK);
+    EXPECT_EQ(taurus_element_append_child(root, c), TAURUS_OK);
+
+    char* out = taurus_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r><short/></r>");
+    taurus_free_string(out);
+
+    taurus_document_free(doc);
+}
+
 TEST(ElementSetAttribute, CreatesAndUpdates) {
     TaurusStatus st = TAURUS_OK;
     const char xml[] = "<r a='1'/>";
