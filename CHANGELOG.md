@@ -1,13 +1,19 @@
 ## [Unreleased]
 
-## [0.26.4] - Y-08-20
-
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+## [0.26.4] - 2026-08-20
 
 ### Changed
 
-- (describe changes here)
+- Mutation append 40% faster (59 → 37 ns/element): the thread-local
+  root→doc map now marks membership with a header bit — never-registered
+  elements prepend without the duplicate-check walk, attach paths remove
+  the child's entry, and unlink re-registers the orphan. Map chains
+  previously accumulated every element ever created (~40 deep after 10k
+  appends, 75% of the append loop).
+- Text-heavy serialization 2.3× faster (919 → 400 µs on a 2MB single-text
+  document, ahead of pugixml's 644 µs): text-mode escape runs of 256+ bytes
+  locate the next special character with SIMD scans instead of a per-byte
+  table walk; short runs and attribute values keep the table scan.
 
 
 ## [0.26.3] - 2026-08-20
