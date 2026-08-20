@@ -78,5 +78,28 @@ int main(void){
         char lbl[64]; snprintf(lbl,64,"P5 elements x%dk", 120*scale);
         bench(lbl, b, n, scale==8?10:20); free(b);
     }
+    /* P6: pretty-printed — one ws-only text node per element.
+     * Default keeps them (libxml2-faithful). P6b drops them via
+     * TAURUS_PARSE_DROP_WS_TEXT (pugixml-default semantics). */
+    {   size_t cap=1u<<20; char* b=(char*)malloc(cap); size_t n=0;
+        n=snappend(b,n,cap,"<r>\n");
+        while (n < cap-32) n=snappend(b,n,cap,"  <a/>\n");
+        n=snappend(b,n,cap,"</r>\n");
+        bench("P6 pretty-ws elements", b, n);
+        double bt=1e18;
+        for(int r=0;r<30;r++){
+            TaurusStatus st=(TaurusStatus)0; double t0=now_us();
+            TaurusDocument d=taurus_parse_string_flags(
+                b,n,TAURUS_PARSE_DROP_WS_TEXT,&st);
+            double dt=now_us()-t0;
+            if(d){if(dt<bt)bt=dt; taurus_document_free(d);} }
+        double pt=1e18;
+        for(int r=0;r<30;r++){
+            double t0=now_us(); pugi::xml_document pd; pd.load_buffer(b,n);
+            double dt=now_us()-t0; if(dt<pt)pt=dt; }
+        printf("%-28s %6zuKB taurus=%8.1fus pugi=%8.1fus ratio=%.2fx  (DROP_WS)\n",
+               "P6b pretty, DROP_WS flag", n/1024, bt, pt, bt/pt);
+        free(b);
+    }
     return 0;
 }

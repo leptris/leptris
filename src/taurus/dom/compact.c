@@ -101,6 +101,35 @@ void taurus_compact_overflow_table_destroy(TaurusCompactOverflowTable* table) {
     free(table);
 }
 
+/* Double the bucket array and rehash every entry. Mutation-created
+ * trees store a parent-edge entry per node here (their elements sit
+ * in different malloc regions than the parse arena, beyond the int32
+ * compact field); with the fixed 256-bucket table those chains grew
+ * linearly with tree size and every set/get walked them — the
+ * measured rising append cost. Load-factor 1.0 growth keeps chains
+ * O(1). Rehash iterates the OLD bucket chains (the authoritative
+ * structure); slab storage is untouched. */
+static int overflow_table_grow(TaurusCompactOverflowTable* table) {
+    size_t new_count = table->bucket_count * 2;
+    TaurusCompactOverflowEntry** nb = (TaurusCompactOverflowEntry**)
+        calloc(new_count, sizeof(TaurusCompactOverflowEntry*));
+    if (!nb) return -1;   /* stay at current size: correct, slower */
+    for (size_t i = 0; i < table->bucket_count; i++) {
+        TaurusCompactOverflowEntry* e = table->buckets[i];
+        while (e) {
+            TaurusCompactOverflowEntry* next = e->next;
+            size_t idx = hash_pointer(e->key, new_count);
+            e->next = nb[idx];
+            nb[idx] = e;
+            e = next;
+        }
+    }
+    free(table->buckets);
+    table->buckets = nb;
+    table->bucket_count = new_count;
+    return 0;
+}
+
 int taurus_compact_overflow_set(TaurusCompactOverflowTable* table,
                                 const void* key,
                                 void* value,
@@ -128,6 +157,10 @@ int taurus_compact_overflow_set(TaurusCompactOverflowTable* table,
     entry->next = table->buckets[index];
     table->buckets[index] = entry;
     table->entry_count++;
+
+    if (table->entry_count >= table->bucket_count) {
+        overflow_table_grow(table);
+    }
 
     return 0;
 }
