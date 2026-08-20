@@ -63,6 +63,52 @@ static char* mut_name_carve(struct taurus_document* doc,
     return slot + sizeof(struct taurus_document*);
 }
 
+/* Round 22: carve mutation attrs from a per-document contiguous
+ * 40-byte-stride block (adjacent attrs keep their cp16 next-edges
+ * in-range — no compact-overflow traffic for programmatic builds).
+ * Falls back to the pool when a block can't be allocated. */
+#define MUT_ATTR_BLOCK_COUNT 128
+
+static struct taurus_attribute* mut_attr_carve(struct taurus_document* doc) {
+    if (doc->mut_attr_cursor && doc->mut_attr_cursor < doc->mut_attr_end) {
+        return doc->mut_attr_cursor++;
+    }
+    struct taurus_mut_attr_block* blk =
+        (struct taurus_mut_attr_block*)malloc(
+            sizeof(struct taurus_mut_attr_block) +
+            (size_t)MUT_ATTR_BLOCK_COUNT * sizeof(struct taurus_attribute));
+    if (!blk) return NULL;
+    blk->next = doc->mut_attr_blocks;
+    doc->mut_attr_blocks = blk;
+    doc->mut_attr_cursor = (struct taurus_attribute*)blk->bytes;
+    doc->mut_attr_end = doc->mut_attr_cursor + MUT_ATTR_BLOCK_COUNT;
+    return doc->mut_attr_cursor++;
+}
+
+/* Round 22: short string carve for attr names/values — reuses the
+ * name block (its 8-byte doc header is unused here; harmless).
+ * Returns NULL for long strings — caller falls back to the pool. */
+static char* mut_str_carve(struct taurus_document* doc, const char* s,
+                           size_t len) {
+    if (len + 1 > MUT_NAME_BLOCK_BYTES / 4) return NULL;
+    size_t need = 8 + len + 1;
+    if (doc->mut_name_cursor + need > doc->mut_name_end) {
+        struct taurus_mut_name_block* blk =
+            (struct taurus_mut_name_block*)malloc(
+                sizeof(struct taurus_mut_name_block) + MUT_NAME_BLOCK_BYTES);
+        if (!blk) return NULL;
+        blk->next = doc->mut_name_blocks;
+        doc->mut_name_blocks = blk;
+        doc->mut_name_cursor = blk->bytes;
+        doc->mut_name_end = blk->bytes + MUT_NAME_BLOCK_BYTES;
+    }
+    char* p = doc->mut_name_cursor + 8;
+    doc->mut_name_cursor += need;
+    memcpy(p, s, len);
+    p[len] = '\0';
+    return p;
+}
+
 /* Round 18: carve mutation elements from a per-document contiguous
  * bump block. The pool extension path malloc'd each element
  * separately, scattering them across heap regions — sibling edges
@@ -746,19 +792,24 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
             return TAURUS_ERROR_MEMORY;
         }
 
-        /* Allocate attribute from pool (not malloc!) - CRITICAL for correct pointer handling */
-        struct taurus_attribute* attr = (struct taurus_attribute*)taurus_pool_alloc(
+        /* Round 22: struct from the per-doc attr bump block (adjacent
+         * attrs keep cp16 next-edges in-range); strings from the name
+         * block. Pool fallbacks preserve the never-fail contract. */
+        struct taurus_attribute* attr = mut_attr_carve(set_doc);
+        if (!attr) attr = (struct taurus_attribute*)taurus_pool_alloc(
             pool, sizeof(struct taurus_attribute));
         if (!attr) {
             return TAURUS_ERROR_MEMORY;
         }
 
-        /* Pool-strdup name (NO interning — mutation fast path). */
         size_t nlen = strlen(name);
-        char* name_storage = (char*)taurus_pool_alloc(pool, nlen + 1);
-        if (!name_storage) return TAURUS_ERROR_MEMORY;
-        memcpy(name_storage, name, nlen);
-        name_storage[nlen] = '\0';
+        char* name_storage = mut_str_carve(set_doc, name, nlen);
+        if (!name_storage) {
+            name_storage = (char*)taurus_pool_alloc(pool, nlen + 1);
+            if (!name_storage) return TAURUS_ERROR_MEMORY;
+            memcpy(name_storage, name, nlen);
+            name_storage[nlen] = '\0';
+        }
         attr->name_view = taurus_sv_from_ptr(name_storage, nlen);
 
         /* Pre-compute name hash for O(1) lookup filtering (TODO 113).
@@ -767,10 +818,13 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
 
         if (value) {
             size_t vlen = strlen(value);
-            char* value_storage = (char*)taurus_pool_alloc(pool, vlen + 1);
-            if (!value_storage) return TAURUS_ERROR_MEMORY;
-            memcpy(value_storage, value, vlen);
-            value_storage[vlen] = '\0';
+            char* value_storage = mut_str_carve(set_doc, value, vlen);
+            if (!value_storage) {
+                value_storage = (char*)taurus_pool_alloc(pool, vlen + 1);
+                if (!value_storage) return TAURUS_ERROR_MEMORY;
+                memcpy(value_storage, value, vlen);
+                value_storage[vlen] = '\0';
+            }
             attr->value_view = taurus_sv_from_ptr(value_storage, vlen);
         } else {
             attr->value_view = taurus_sv_empty();

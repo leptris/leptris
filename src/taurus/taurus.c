@@ -715,6 +715,15 @@ TAURUS_API void taurus_document_free(struct taurus_document* doc) {
     doc->mut_name_cursor = NULL;
     doc->mut_name_end = NULL;
 
+    /* Free mutation attr blocks (round 22). */
+    while (doc->mut_attr_blocks) {
+        struct taurus_mut_attr_block* next = doc->mut_attr_blocks->next;
+        free(doc->mut_attr_blocks);
+        doc->mut_attr_blocks = next;
+    }
+    doc->mut_attr_cursor = NULL;
+    doc->mut_attr_end = NULL;
+
     if (doc->attr_index) {
         free(doc->attr_index->slots);
         free(doc->attr_index);

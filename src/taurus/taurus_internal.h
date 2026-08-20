@@ -90,6 +90,16 @@ struct taurus_mut_name_block {
     char bytes[];
 };
 
+/* Round 22: chained blocks for mutation-created ATTRIBUTE structs.
+ * Contiguous 40-byte stride keeps sequentially-created attrs of one
+ * element adjacent — their cp16 `next` edges stay in-range instead
+ * of hitting the compact-overflow path (the round-18 element-block
+ * win, applied to attrs). */
+struct taurus_mut_attr_block {
+    struct taurus_mut_attr_block* next;
+    char bytes[];
+};
+
 struct taurus_document {
     struct taurus_element* root;             /* Root element (legacy API) */
     char* encoding;                 /* UTF-8 assumed, but store if specified */
@@ -168,6 +178,10 @@ struct taurus_document {
     struct taurus_mut_name_block* mut_name_blocks;
     char* mut_name_cursor;
     char* mut_name_end;
+    /* Mutation attr bump block (round 22). */
+    struct taurus_mut_attr_block* mut_attr_blocks;
+    struct taurus_attribute* mut_attr_cursor;
+    struct taurus_attribute* mut_attr_end;
     /* Definition follows this struct (needed by document_free). */
 
     /* Document-scoped state (TODO 27/38 phase 2).
