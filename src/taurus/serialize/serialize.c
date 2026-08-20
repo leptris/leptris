@@ -400,7 +400,7 @@ static void serialize_element_recursive(TaurusElement elem, SerializeBuffer* buf
          * (single representation, round 4: the expanded copy REPLACES
          * the view so the raw '&' doesn't double-escape). */
         const char* val;
-        if (attr->has_entities) {
+        if (attr_has_entities(attr)) {
             struct taurus_document* doc = taurus_element_get_document(elem);
             TaurusMemoryPool* pool = doc ? doc->pool : NULL;
             char* resolved = pool
@@ -408,7 +408,7 @@ static void serialize_element_recursive(TaurusElement elem, SerializeBuffer* buf
                 : NULL;
             if (resolved) {
                 attr->value_view = taurus_sv_from_cstr(resolved);
-                attr->has_entities = 0;
+                attr_set_entities(attr, 0);
             }
             val = attr_cvalue(attr);
         } else {
@@ -706,13 +706,13 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
         /* --- attributes (identical emission) --- */
         for (struct taurus_attribute* attr = taurus_element_get_first_attribute(e); attr; attr = taurus_attr_next(attr)) {
             const char* val;
-            if (attr->has_entities) {
+            if (attr_has_entities(attr)) {
                 struct taurus_document* d = taurus_element_get_document(e);
                 TaurusMemoryPool* pool = d ? d->pool : NULL;
                 char* resolved = pool ? taurus_decode_entities_view(&attr->value_view, pool) : NULL;
                 if (resolved) {
                     attr->value_view = taurus_sv_from_cstr(resolved);
-                    attr->has_entities = 0;
+                    attr_set_entities(attr, 0);
                 }
                 val = attr_cvalue(attr);
             } else {

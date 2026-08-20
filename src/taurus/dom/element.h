@@ -65,15 +65,19 @@ struct taurus_attribute {
      *   pool/heap copy, NUL-terminated, length set. Owned copies
      *   REPLACE the view because callers' strings may be temporary
      *   and the raw entity text is never needed post-expansion.
-     * 48 bytes: 16 + 16 + 8 (ns_cache) + 8-byte tail. */
+     * 40 bytes: 16 + 16 + 8-byte packed tail (round 19). */
 
     TaurusStringView name_view;
     TaurusStringView value_view;
 
-    /* Side cache for namespace activity. NULL when the attr has no prefix
-     * and no namespace_uri (the common case). Allocated from the pool on
-     * first set via attr_ensure_ns_cache(). TODO 173. */
-    struct taurus_attr_ns_cache* ns_cache;
+    /* Side cache for namespace activity. 0 when the attr has no
+     * prefix and no namespace_uri (the common case). Points via
+     * self-relative offset at a pool-allocated struct; use
+     * attr_get_ns_cache()/attr_set_ns_cache(). TODO 173.
+     * Round 19: was a raw pointer — now an int32 offset so the
+     * struct fits 40 bytes (compact.c overflow-table fallback
+     * covers >2GB spans). */
+    int32_t ns_cache_off;
 
     /* Next attribute in linked list. TODO 183 Phase 5 (TODO 181
      * Phase D): cp16 compact pointer — the attr `next` edge only
@@ -85,34 +89,32 @@ struct taurus_attribute {
      * overflow-table path. 0 = NULL end-of-list. */
     int16_t next_cp;
 
-    /* Performance: Pre-computed entity flag (set during parsing) */
-    unsigned char has_entities;  /* 1 if value_view contains '&', 0 otherwise */
-
-    /* Performance: FNV-1a hash of the attribute name. LAZY: 0 means
-     * "not yet computed"; the first read via attr_name_hash() computes
-     * and caches. The parse path skips this work entirely (saves ~5ns
-     * per attr on attr-heavy inputs); query paths pay it on first
-     * access, then cached for subsequent walks. FNV-1a output is never
-     * 0 for non-empty input, so 0 is a safe sentinel. TODO 172.
+    /* Bits 0-14: 15-bit FNV-1a of the name, LAZY (0 = not yet
+     * computed; the first read via attr_name_hash() computes and
+     * caches; a real hash is never stored as 0 — the compute maps
+     * 0 to 1). Bit 15: has_entities (1 if value_view contains '&',
+     * 0 otherwise; set during parsing, cleared after eager
+     * expansion). The parse path skips the hash entirely (saves
+     * ~5ns per attr on attr-heavy inputs); query paths pay it on
+     * first access, then cached. The hash is a pre-filter only —
+     * every hash hit is confirmed by memcmp — so 15 bits suffice.
+     * TODO 172.
      *
-     * Layout note: next_cp + has_entities + name_hash pack into one
-     * 8-byte tail — sizeof is 48 (was 64 with separate char* fields,
-     * 72 with a raw next pointer). */
-    uint32_t name_hash;
+     * Layout note: ns_cache_off + name_hash + next_cp pack into one
+     * 8-byte tail — sizeof is 40 (was 48, 64 with separate char*
+     * fields, 72 with a raw next pointer). */
+    uint16_t name_hash;
 
-    /* MEASURED LAYOUT DECISION (TODO 186, revises TODO 184 round 4):
-     * sizeof is 48 — the natural packed size, no padding. The
-     * "must stay 64" law from round 4 was K-LOCAL: measured only at
-     * K=100, where 48 B straddles cache lines (1.33 lines/attr) in
-     * a 4.8 MB DRAM-streaming block and costs ~20%. Re-measured at
-     * every K (12-run interleaved Release A/B): K=20 270->219 us
-     * (-19%, gap vs pugixml 1.91x->1.55x), K=50 638->620 (-3%),
-     * K=5 parity, K=100 1013->1223 (+20%). Mid-K is the campaign
-     * yardstick (TODO 185) and real-world attr density is < 20 per
-     * element, so 48 B ships. Recovering K=100 needs 2-per-line
-     * alignment — the TODO 182 split-stream endgame (32 B views +
-     * parallel ctrl array), which no layout stride can provide. */
+    /* MEASURED LAYOUT DECISION (TODO 186, revises TODO 184 round 4;
+     * round 19 revises again): sizeof was 48 through v0.26.x. 40 B
+     * (ns_cache as int32 offset + 15-bit hash + entity flag in the
+     * tail) reaches pugixml attr density (1.6/line vs 1.33). The
+     * 56 B point measured dead and the 32 B split-stream upper
+     * bound dead — 40 was the last unmeasured point on the axis. */
 };
+
+_Static_assert(sizeof(struct taurus_attribute) == 40,
+               "round 19 attr layout: 16+16+4+2+2 = 40");
 
 /* C-string accessors (TODO 184 rounds 3–4). The views are the
  * single representation; their data is always NUL-terminated
@@ -147,44 +149,77 @@ static inline void taurus_attr_set_next(struct taurus_attribute* a,
     a->next_cp = taurus_compact_ptr16_encode(a, next, 3, &a->next_cp);
 }
 
-/* Lazy FNV-1a hash accessor (TODO 172). Computes and caches on first call.
- * Thread-unsafe in the strict sense (racy writes), but the worst case is
- * two threads both writing the same value (idempotent). Documents are
- * single-threaded by contract. */
-static inline uint32_t attr_name_hash(struct taurus_attribute* a) {
-    if (a->name_hash == 0) {
-        const char* s = a->name_view.data;
-        size_t len = a->name_view.length;
-        uint32_t h = 2166136261u;
-        for (size_t i = 0; i < len; i++) {
-            h ^= (unsigned char)s[i];
-            h *= 16777619u;
-        }
-        /* h is provably non-zero for any non-empty input. Empty input
-         * would give the offset basis (also non-zero). Sentinel safe. */
-        a->name_hash = h;
+/* 15-bit FNV-1a of a name (round 19). Single source of truth for
+ * both the lazy attr accessor and query-side pre-filters — both
+ * sides must truncate identically or hash compares silently
+ * mismatch. Truncation: keep bits 16-30 of the 32-bit FNV (the
+ * low bits sit under the multiply's carry chain; the upper half
+ * mixes better). Returns nonzero: 0 maps to 1 so the "uncomputed"
+ * sentinel stays unambiguous. */
+static inline uint16_t attr_hash15(const char* s, size_t len) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (unsigned char)s[i];
+        h *= 16777619u;
     }
-    return a->name_hash;
+    uint16_t h15 = (uint16_t)((h >> 16) & 0x7FFFu);
+    return h15 ? h15 : 1;
+}
+
+/* Entity flag (round 19): name_hash bit 15. */
+static inline int attr_has_entities(const struct taurus_attribute* a) {
+    return (a->name_hash & 0x8000u) != 0;
+}
+static inline void attr_set_entities(struct taurus_attribute* a, int v) {
+    if (v) a->name_hash |= 0x8000u;
+    else   a->name_hash &= 0x7FFFu;
+}
+
+/* Lazy 15-bit hash accessor (TODO 172). Computes and caches on first
+ * call, preserving the entity flag in bit 15. Thread-unsafe in the
+ * strict sense (racy writes), but the worst case is two threads
+ * both writing the same value (idempotent). Documents are
+ * single-threaded by contract. */
+static inline uint16_t attr_name_hash(struct taurus_attribute* a) {
+    if ((a->name_hash & 0x7FFFu) == 0) {
+        a->name_hash = (uint16_t)((a->name_hash & 0x8000u) |
+            attr_hash15(a->name_view.data, a->name_view.length));
+    }
+    return (uint16_t)(a->name_hash & 0x7FFFu);
 }
 
 /* Attribute namespace-cache accessors (TODO 173). The prefix and
  * namespace_uri (both view and cstr form) live in a side cache struct
  * that's only allocated when one of them is set. The common case (attr
- * without prefix, no namespace_uri) has ns_cache == NULL.
+ * without prefix, no namespace_uri) has ns_cache_off == 0.
  *
  * Readers use these helpers — they return NULL / empty when no cache.
- * Writers use attr_ensure_ns_cache() to allocate the cache lazily. */
-static inline const char* attr_get_prefix(const struct taurus_attribute* a) {
-    return a->ns_cache ? a->ns_cache->prefix : NULL;
+ * Round 19: the cache is reached via a self-relative int32 offset
+ * (0 = none; overflow-table fallback for >2GB spans). */
+static inline struct taurus_attr_ns_cache* attr_get_ns_cache(
+    struct taurus_attribute* a) {
+    return (struct taurus_attr_ns_cache*)taurus_compact_int32_decode(
+        a, a->ns_cache_off, &a->ns_cache_off);
 }
-static inline const char* attr_get_namespace_uri(const struct taurus_attribute* a) {
-    return a->ns_cache ? a->ns_cache->namespace_uri : NULL;
+static inline void attr_set_ns_cache(struct taurus_attribute* a,
+                                     struct taurus_attr_ns_cache* ns) {
+    a->ns_cache_off = taurus_compact_int32_encode(a, ns, &a->ns_cache_off);
 }
-static inline TaurusStringView attr_get_prefix_view(const struct taurus_attribute* a) {
-    return a->ns_cache ? a->ns_cache->prefix_view : taurus_sv_empty();
+static inline const char* attr_get_prefix(struct taurus_attribute* a) {
+    struct taurus_attr_ns_cache* c = attr_get_ns_cache(a);
+    return c ? c->prefix : NULL;
 }
-static inline TaurusStringView attr_get_namespace_uri_view(const struct taurus_attribute* a) {
-    return a->ns_cache ? a->ns_cache->namespace_uri_view : taurus_sv_empty();
+static inline const char* attr_get_namespace_uri(struct taurus_attribute* a) {
+    struct taurus_attr_ns_cache* c = attr_get_ns_cache(a);
+    return c ? c->namespace_uri : NULL;
+}
+static inline TaurusStringView attr_get_prefix_view(struct taurus_attribute* a) {
+    struct taurus_attr_ns_cache* c = attr_get_ns_cache(a);
+    return c ? c->prefix_view : taurus_sv_empty();
+}
+static inline TaurusStringView attr_get_namespace_uri_view(struct taurus_attribute* a) {
+    struct taurus_attr_ns_cache* c = attr_get_ns_cache(a);
+    return c ? c->namespace_uri_view : taurus_sv_empty();
 }
 
 /* Element node - compact architecture

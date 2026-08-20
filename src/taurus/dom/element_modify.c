@@ -618,11 +618,7 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
      * attr-name index (lazy registration covers parse-created attrs);
      * NULL index (alloc failure) falls back to the list walk. */
     size_t set_name_len = strlen(name);
-    uint32_t set_name_hash = 2166136261u;
-    for (size_t i = 0; i < set_name_len; i++) {
-        set_name_hash ^= (unsigned char)name[i];
-        set_name_hash *= 16777619u;
-    }
+    uint16_t set_name_hash = attr_hash15(name, set_name_len);
     struct taurus_document* set_doc = taurus_element_get_document(elem);
     struct taurus_attr_index* set_ix = NULL;
     size_t set_slot = (size_t)-1;
@@ -652,14 +648,14 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
             } else {
                 existing->value_view = taurus_sv_empty();
             }
-            existing->has_entities = 0;
+            attr_set_entities(existing, 0);
         } else {
             /* No pool available: views into the caller's string
              * (fallback for edge cases — mutation API contract says
              * the value string must outlive the attribute here). */
             existing->value_view =
                 value ? taurus_sv_from_cstr(value) : taurus_sv_empty();
-            existing->has_entities = 0;
+            attr_set_entities(existing, 0);
         }
     } else {
         /* Get the memory pool from the document */
@@ -686,12 +682,9 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
         name_storage[nlen] = '\0';
         attr->name_view = taurus_sv_from_ptr(name_storage, nlen);
 
-        /* Pre-compute name hash for O(1) lookup filtering (TODO 113). */
-        attr->name_hash = 2166136261u;
-        for (size_t i = 0; i < nlen; i++) {
-            attr->name_hash ^= (unsigned char)name_storage[i];
-            attr->name_hash *= 16777619u;
-        }
+        /* Pre-compute name hash for O(1) lookup filtering (TODO 113).
+         * Round 19: 15-bit + entity flag share the field. */
+        attr->name_hash = attr_hash15(name_storage, nlen);
 
         if (value) {
             size_t vlen = strlen(value);
@@ -704,8 +697,8 @@ TaurusStatus taurus_element_set_attribute(TaurusElement elem, const char* name, 
             attr->value_view = taurus_sv_empty();
         }
 
-        attr->ns_cache = NULL;  /* TODO 173 */
-        attr->has_entities = 0;
+        attr->ns_cache_off = 0;  /* TODO 173 */
+        attr->name_hash = 0;  /* lazy hash, no entities */
         taurus_attr_set_next(attr, NULL);
 
         /* Append via the doc-level attr-tail cache — O(1) for the
@@ -747,11 +740,7 @@ TaurusStatus taurus_element_remove_attribute(TaurusElement elem, const char* nam
     if (!elem || !name) return TAURUS_ERROR_NULL_ARG;
 
     struct taurus_document* rm_doc = taurus_element_get_document(elem);
-    uint32_t rm_hash = 2166136261u;
-    for (const char* c = name; *c; c++) {
-        rm_hash ^= (unsigned char)*c;
-        rm_hash *= 16777619u;
-    }
+    uint16_t rm_hash = attr_hash15(name, strlen(name));
 
     struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
     struct taurus_attribute* prev = NULL;
@@ -1439,28 +1428,28 @@ static TaurusElement taurus_element_copy_subtree_bulk_internal(
             char* v = taurus_pool_strdup(pool, src_attr->value_view.data);
             if (v) dst_attr->value_view = taurus_sv_from_cstr(v);
         }
-        dst_attr->has_entities = src_attr->has_entities;
-        dst_attr->name_hash = src_attr->name_hash;
-        dst_attr->ns_cache = NULL;  /* set below if source has cache */
+        dst_attr->name_hash = src_attr->name_hash;  /* hash + entity flag */
+        dst_attr->ns_cache_off = 0;  /* set below if source has cache */
 
         /* Copy namespace cache if present (TODO 173). */
-        if (src_attr->ns_cache) {
+        struct taurus_attr_ns_cache* src_ns = attr_get_ns_cache(src_attr);
+        if (src_ns) {
             struct taurus_attr_ns_cache* dst_ns =
                 (struct taurus_attr_ns_cache*)taurus_pool_alloc(
                     pool, sizeof(struct taurus_attr_ns_cache));
             if (dst_ns) {
-                dst_ns->prefix_view = src_attr->ns_cache->prefix_view;
-                dst_ns->namespace_uri_view = src_attr->ns_cache->namespace_uri_view;
-                dst_ns->prefix = src_attr->ns_cache->prefix
-                    ? taurus_pool_strdup(pool, src_attr->ns_cache->prefix) : NULL;
-                dst_ns->namespace_uri = src_attr->ns_cache->namespace_uri
-                    ? taurus_pool_strdup(pool, src_attr->ns_cache->namespace_uri) : NULL;
-                dst_attr->ns_cache = dst_ns;
+                dst_ns->prefix_view = src_ns->prefix_view;
+                dst_ns->namespace_uri_view = src_ns->namespace_uri_view;
+                dst_ns->prefix = src_ns->prefix
+                    ? taurus_pool_strdup(pool, src_ns->prefix) : NULL;
+                dst_ns->namespace_uri = src_ns->namespace_uri
+                    ? taurus_pool_strdup(pool, src_ns->namespace_uri) : NULL;
+                attr_set_ns_cache(dst_attr, dst_ns);
             }
         }
 
-        /* Copy entity flag */
-        dst_attr->has_entities = src_attr->has_entities;
+        /* Entity flag: already carried in the copied name_hash
+         * (bit 15, round 19). */
 
         /* Link to previous attribute or set as first attribute */
         if (!prev_dst_attr) {
