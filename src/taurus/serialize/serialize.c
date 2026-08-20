@@ -542,8 +542,16 @@ static void serialize_element_recursive(TaurusElement elem, SerializeBuffer* buf
              * emission for the whole `<name>text</name>` (TODO 194d) —
              * was five buffer calls plus a node-dispatch hop. */
             TaurusTextNode* tn = (TaurusTextNode*)child;
-            const char* tc = taurus_text_get_content(tn);
-            size_t tlen = tc ? tn->content_len : 0;
+            const char* tc;
+            size_t tlen;
+            if (tn->borrowed && tn->content_len > 0 &&
+                !memchr(tn->content, '&', tn->content_len)) {
+                tc = tn->content;
+                tlen = tn->content_len;
+            } else {
+                tc = taurus_text_get_content(tn);
+                tlen = tc ? tn->content_len : 0;
+            }
             buffer_ensure_capacity(buf, 2 + elem_name_len + 6 * tlen + 2 + 1);
             char* te = buf->data + buf->size;
             *te++ = '>';
@@ -668,8 +676,22 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
             if (fc0 && fc0->type == TAURUS_NODE_TYPE_TEXT &&
                 taurus_node_get_next_sibling(fc0) == NULL) {
                 TaurusTextNode* tn0 = (TaurusTextNode*)fc0;
-                const char* tc0 = taurus_text_get_content(tn0);
-                size_t tl0 = tc0 ? tn0->content_len : 0;
+                /* View-direct (round 18): for entity-free borrowed
+                 * text, read the view directly — get_content would
+                 * materialize a pool copy (alloc + memcpy) just to
+                 * NUL-terminate, which the escaper doesn't need
+                 * (it's length-bounded). Entity-bearing text still
+                 * materializes for correct expansion. */
+                const char* tc0;
+                size_t tl0;
+                if (tn0->borrowed && tn0->content_len > 0 &&
+                    !memchr(tn0->content, '&', tn0->content_len)) {
+                    tc0 = tn0->content;
+                    tl0 = tn0->content_len;
+                } else {
+                    tc0 = taurus_text_get_content(tn0);
+                    tl0 = tc0 ? tn0->content_len : 0;
+                }
                 /* Pretty mode fuses newline + indent + open + text +
                  * close into the same single reservation — leaves
                  * otherwise pay ~8 capacity-checked appends each
@@ -797,8 +819,16 @@ void serialize_element_internal(TaurusElement root_elem, SerializeBuffer* buf, i
             /* text-only element */
             if (buf->indent_spaces == 0) {
                 TaurusTextNode* tn = (TaurusTextNode*)fc;
-                const char* tc = taurus_text_get_content(tn);
-                size_t tlen = tc ? tn->content_len : 0;
+                const char* tc;
+                size_t tlen;
+                if (tn->borrowed && tn->content_len > 0 &&
+                    !memchr(tn->content, '&', tn->content_len)) {
+                    tc = tn->content;
+                    tlen = tn->content_len;
+                } else {
+                    tc = taurus_text_get_content(tn);
+                    tlen = tc ? tn->content_len : 0;
+                }
                 buffer_ensure_capacity(buf, 2 + nl + 6 * tlen + 2 + 1);
                 char* te = buf->data + buf->size;
                 *te++ = '>';

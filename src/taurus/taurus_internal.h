@@ -72,6 +72,16 @@ struct taurus_processing_instruction {
 };
 
 /* Document structure */
+/* Contiguous block of mutation elements (round 18). Chained via
+ * next; freed with the document. Elements are carved from [base,
+ * base+count). */
+struct taurus_mut_elem_block {
+    struct taurus_mut_elem_block* next;
+    /* Raw storage for N contiguous taurus_element structs; typed
+     * as bytes to avoid an incomplete-type dependency. */
+    char bytes[];
+};
+
 struct taurus_document {
     struct taurus_element* root;             /* Root element (legacy API) */
     char* encoding;                 /* UTF-8 assumed, but store if specified */
@@ -127,6 +137,21 @@ struct taurus_document {
      * builds. Sequential set_attribute on one element is O(1). */
     struct taurus_element* mut_attr_elem;
     struct taurus_attribute* mut_attr_tail;
+    /* Mutation element bump block (round 18): taurus_element_create
+     * was allocating each mutation element via the pool extension
+     * path — a separate malloc per element, scattered across heap
+     * regions. Parent edges (root→child) crossed regions → every
+     * edge hit the compact-overflow table; sibling edges (cp16)
+     * missed when mallocs weren't adjacent. Measured: 33× behind
+     * pugixml on sequential append.
+     *
+     * This bump block keeps mutation elements CONTIGUOUS: sibling
+     * edges stay in cp16 range, parent edges in int32 range, zero
+     * overflow-table hits. Grows geometrically; blocks are chained
+     * and freed with the document. */
+    struct taurus_mut_elem_block* mut_elem_blocks;
+    struct taurus_element* mut_elem_cursor;
+    struct taurus_element* mut_elem_end;
     /* Definition follows this struct (needed by document_free). */
 
     /* Document-scoped state (TODO 27/38 phase 2).
