@@ -14,6 +14,7 @@
 #include "../taurus_internal.h"
 #include "../common/entities.h"
 #include "../common/string_view.h"
+#include "../common/simd_text.h"
 /* TaurusSerializeOptions comes from taurus/types.h via taurus_internal.h's
  * pool.h include.  No local redefinition — it would conflict with the
  * public type. */
@@ -177,15 +178,42 @@ static const unsigned char taurus_escape_table[256] = {
     ['"'] = 2, ['\''] = 2,
 };
 
+/* Long-run threshold (round 20): three SIMD finds cost ~60ns of
+ * dispatch; the per-byte table scan reaches that around 256 bytes
+ * of run. Text-heavy documents (one multi-hundred-KB text node,
+ * no specials) spent their entire serialize time in the per-byte
+ * scan — this is the shape the matrix benchmark loses 1.27x on. */
+#define ESCAPE_SIMD_RUN 256
+
 static char* emit_escaped_inline(char* out, const char* content,
                                  size_t len, int attr_mode) {
     unsigned mode = attr_mode ? 3u : 1u;
     size_t i = 0;
     while (i < len) {
         size_t run = i;
-        while (run < len &&
-               !(taurus_escape_table[(unsigned char)content[run]] & mode)) {
-            run++;
+        if (!attr_mode && len - i >= ESCAPE_SIMD_RUN) {
+            /* Text mode over a long remainder: SIMD-find the first
+             * of & < > (three passes beat one per-byte pass by an
+             * order of magnitude at multi-KB lengths). */
+            size_t rem = len - i;
+            ptrdiff_t h1 = taurus_text_find(&content[i], rem, '&');
+            ptrdiff_t h2 = taurus_text_find(&content[i], rem, '<');
+            ptrdiff_t h3 = taurus_text_find(&content[i], rem, '>');
+            ptrdiff_t best = -1;
+            if (h1 >= 0) best = h1;
+            if (h2 >= 0 && (best < 0 || h2 < best)) best = h2;
+            if (h3 >= 0 && (best < 0 || h3 < best)) best = h3;
+            if (best < 0) {
+                memcpy(out, &content[i], rem);
+                out += rem;
+                break;
+            }
+            run = i + (size_t)best;
+        } else {
+            while (run < len &&
+                   !(taurus_escape_table[(unsigned char)content[run]] & mode)) {
+                run++;
+            }
         }
         if (run > i) {
             memcpy(out, &content[i], run - i);

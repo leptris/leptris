@@ -13,6 +13,7 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include "root_doc_map.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -305,6 +306,14 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node) {
     TaurusElement parent = taurus_node_parent(node);
     if (!parent) return TAURUS_ERROR_NOT_FOUND;
 
+    /* Round 20: an element being detached becomes a potential root
+     * again — resolve the doc while still attached and re-register
+     * after the splice so get_document keeps working on the orphan
+     * (attach paths unregister for exactly the mirror reason). */
+    struct taurus_document* orphan_doc =
+        (node->type == TAURUS_NODE_TYPE_ELEMENT)
+            ? taurus_element_get_document((TaurusElement)node) : NULL;
+
     /* Splice node out of parent's child chain. We need the previous
      * sibling to update its next_sibling pointer; if node is the
      * first child, update parent.first_child instead. */
@@ -339,6 +348,7 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node) {
     taurus_node_set_next_sibling(node, NULL);
     if (node->type == TAURUS_NODE_TYPE_ELEMENT) {
         taurus_element_set_parent((TaurusElement)node, NULL);
+        if (orphan_doc) taurus_root_doc_register((TaurusElement)node, orphan_doc);
     } else {
         switch (node->type) {
             case TAURUS_NODE_TYPE_TEXT:
