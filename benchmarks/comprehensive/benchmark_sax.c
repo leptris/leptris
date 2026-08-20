@@ -7,6 +7,8 @@
  *
  * Method: min-of-N per side, same buffer, entity-bearing corpus file.
  */
+/* CLOCK_MONOTONIC under strict -std=c11 on glibc. */
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
