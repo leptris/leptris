@@ -123,7 +123,15 @@ struct taurus_document* taurus_element_get_document(TaurusElement elem) {
         if (!parent) break;
         cur = parent;
     }
-    return taurus_root_doc_lookup(cur);
+    struct taurus_document* d = taurus_root_doc_lookup(cur);
+    if (d) return d;
+    /* Round 21: unattached mutation elements carry their doc in the
+     * name slot backpointer — a stateless fallback that replaced the
+     * register-on-create / unregister-on-attach map pair. */
+    if (cur->name && taurus_elem_has_namebp(cur)) {
+        return taurus_elem_namebp_doc(cur);
+    }
+    return NULL;
 }
 
 TaurusMemoryPool* taurus_element_get_pool(TaurusElement elem) {

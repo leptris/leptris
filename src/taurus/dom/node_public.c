@@ -306,12 +306,13 @@ TAURUS_API TaurusStatus taurus_node_unlink(TaurusNodeRef node) {
     TaurusElement parent = taurus_node_parent(node);
     if (!parent) return TAURUS_ERROR_NOT_FOUND;
 
-    /* Round 20: an element being detached becomes a potential root
-     * again — resolve the doc while still attached and re-register
-     * after the splice so get_document keeps working on the orphan
-     * (attach paths unregister for exactly the mirror reason). */
+    /* Round 21: mutation-carved elements carry their doc in the name
+     * backpointer (header bit 6) — they resolve statelessly whether
+     * attached or orphaned. Pool-named elements have no backpointer;
+     * register those in the root map so the orphan keeps resolving. */
     struct taurus_document* orphan_doc =
-        (node->type == TAURUS_NODE_TYPE_ELEMENT)
+        (node->type == TAURUS_NODE_TYPE_ELEMENT &&
+         !taurus_elem_has_namebp((TaurusElement)node))
             ? taurus_element_get_document((TaurusElement)node) : NULL;
 
     /* Splice node out of parent's child chain. We need the previous
