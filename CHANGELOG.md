@@ -1,14 +1,20 @@
 ## [Unreleased]
 
-## [0.26.3] - Y-08-20
+## [0.26.3] - 2026-08-20
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
-
+- **Critical**: `taurus_element_set_attribute` on a name it had previously
+  created inserted a duplicate attribute instead of updating it
+  (`<r x="1" x="2"/>` — an XML spec violation). The doc-level attribute
+  index stored hash 0 for every mutation-created attribute, so the
+  duplicate probe never matched. Regression spec added.
+- The same hash-0 keying made programmatic attribute builds O(N²):
+  setting 2000 attributes went from 388µs (v0.26.1) to 1587µs (v0.26.2);
+  now 383µs with flat scaling to N=8000. Index keys use a full 32-bit
+  FNV independent of the attribute struct's 15-bit lazy hash, and the
+  15-bit hash gains an avalanche finalizer (raw truncation mapped
+  names differing in their last digit to hashes exactly 256 apart).
 
 ## [0.26.2] - 2026-08-20
 
