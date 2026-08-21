@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '0 4 * * *'   # 04:00 UTC daily
   workflow_dispatch: {}
+permissions:
+  contents: read
 
 jobs:
   fuzz:
