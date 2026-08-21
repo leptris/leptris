@@ -38,10 +38,10 @@ dispatch-heavy workloads.
 
 ## Plan (when revisited)
 
-1. Add `TAURUS_HAVE_LABELS_AS_VALUES` to `port.h` (GCC/Clang only).
+1. Add `LEPTRIS_HAVE_LABELS_AS_VALUES` to `port.h` (GCC/Clang only).
 2. Define macros:
    ```c
-   #if TAURUS_HAVE_LABELS_AS_VALUES
+   #if LEPTRIS_HAVE_LABELS_AS_VALUES
    #  define VM_CASE(name) vm_L_##name:
    #  define VM_NEXT() goto vm_dispatch_next
    #else

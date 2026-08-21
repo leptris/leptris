@@ -10,7 +10,7 @@ Add:
   layout).
 - Spec coverage in test/dom + exercised from both bindings.
 
-Also TODO 191's build side: TAURUS_BUILD_SHARED=ON currently fails
+Also TODO 191's build side: LEPTRIS_BUILD_SHARED=ON currently fails
 to export the full symbol set for FFI (the static objects are
 linked into CLI/tests instead); fix the export map so the shared
 library is a complete FFI surface.

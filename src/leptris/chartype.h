@@ -7,8 +7,8 @@
  * Expected: 10-15% speedup by eliminating branch mispredictions.
  */
 
-#ifndef TAURUS_CHARTYPE_H
-#define TAURUS_CHARTYPE_H
+#ifndef LEPTRIS_CHARTYPE_H
+#define LEPTRIS_CHARTYPE_H
 
 /* Character type bit flags - can be combined with bitwise OR */
 typedef enum {
@@ -121,4 +121,4 @@ static inline int is_digit_fast(char c) {
     return is_chartype((unsigned char)c, ct_digit);
 }
 
-#endif /* TAURUS_CHARTYPE_H */
+#endif /* LEPTRIS_CHARTYPE_H */

@@ -156,7 +156,7 @@ TEST_XML(test_parse_comment, "<root><!--comment--><child/></root>")
     xml_node root = xml_document_element(doc);
     CHECK_NOT_NULL(root);
 
-    /* Taurus always parses comments, find child element */
+    /* Leptris always parses comments, find child element */
     xml_node child = xml_node_first_child(root);
     CHECK_NOT_NULL(child);
 

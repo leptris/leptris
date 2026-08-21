@@ -1,5 +1,5 @@
-#ifndef TAURUS_BENCH_TEST_DATA_H
-#define TAURUS_BENCH_TEST_DATA_H
+#ifndef LEPTRIS_BENCH_TEST_DATA_H
+#define LEPTRIS_BENCH_TEST_DATA_H
 
 #include <stddef.h>
 
@@ -15,4 +15,4 @@ extern const size_t BENCH_XML_MEDIUM_LEN;
 extern const char* BENCH_XML_LARGE;
 extern const size_t BENCH_XML_LARGE_LEN;
 
-#endif /* TAURUS_BENCH_TEST_DATA_H */
+#endif /* LEPTRIS_BENCH_TEST_DATA_H */

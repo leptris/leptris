@@ -1,7 +1,7 @@
 /* utf16.c - UTF-16 to UTF-8 conversion
  * Copyright (c) 2024, Ribose Inc.
  *
- * UTF-16 encoding support for Taurus XML Parser
+ * UTF-16 encoding support for Leptris XML Parser
  */
 
 #include "utf16.h"

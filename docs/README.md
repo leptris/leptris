@@ -1,6 +1,6 @@
-# Taurus Documentation
+# Leptris Documentation
 
-This directory contains all documentation for the Taurus XML parser library.
+This directory contains all documentation for the Leptris XML parser library.
 
 ## Directory Structure
 
@@ -24,13 +24,13 @@ docs/
 
 ## Documentation for Users
 
-If you're using the Taurus library, start with:
+If you're using the Leptris library, start with:
 - **Building**: See `guide/building.md` for compilation and installation instructions
 - **API Reference**: See `api/` for detailed API documentation
 
 ## Documentation for Developers
 
-If you're contributing to Taurus development:
+If you're contributing to Leptris development:
 - **Architecture**: See `developer/architecture.adoc` for system architecture overview
 - **Performance**: See `developer/performance/` for optimization strategies
 - **Testing**: See `developer/testing/` for test suite documentation

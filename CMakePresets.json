@@ -21,9 +21,9 @@
       "binaryDir": "${sourceDir}/build-fast",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "TAURUS_OPT_LEVEL": "aggressive",
-        "TAURUS_TARGET_ARCH": "native",
-        "TAURUS_ENABLE_LTO": "ON",
+        "LEPTRIS_OPT_LEVEL": "aggressive",
+        "LEPTRIS_TARGET_ARCH": "native",
+        "LEPTRIS_ENABLE_LTO": "ON",
         "BUILD_SHARED_LIBS": "OFF"
       }
     },
@@ -34,7 +34,7 @@
       "binaryDir": "${sourceDir}/build-pgo",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "TAURUS_ENABLE_PGO": "GENERATE"
+        "LEPTRIS_ENABLE_PGO": "GENERATE"
       }
     },
     {
@@ -44,8 +44,8 @@
       "binaryDir": "${sourceDir}/build-pgo",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "TAURUS_ENABLE_PGO": "USE",
-        "TAURUS_ENABLE_LTO": "ON"
+        "LEPTRIS_ENABLE_PGO": "USE",
+        "LEPTRIS_ENABLE_LTO": "ON"
       }
     },
     {
@@ -54,7 +54,7 @@
       "binaryDir": "${sourceDir}/build-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "TAURUS_ENABLE_ASAN": "ON"
+        "LEPTRIS_ENABLE_ASAN": "ON"
       }
     }
   ]

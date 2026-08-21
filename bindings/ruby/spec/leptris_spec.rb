@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-RSpec.describe Taurus::Document do
+RSpec.describe Leptris::Document do
   let(:xml) { '<root><child id="1">hello</child><child id="2">world</child></root>' }
 
   describe '.parse' do
@@ -12,7 +12,7 @@ RSpec.describe Taurus::Document do
     end
 
     it 'raises on invalid XML' do
-      expect { described_class.parse('<broken>') }.to raise_error(Taurus::Error)
+      expect { described_class.parse('<broken>') }.to raise_error(Leptris::Error)
     end
   end
 
@@ -49,7 +49,7 @@ RSpec.describe Taurus::Document do
       results = doc.xpath('//child')
       expect(results).to be_an(Array)
       expect(results.length).to eq(2)
-      expect(results[0]).to be_a(Taurus::Element)
+      expect(results[0]).to be_a(Leptris::Element)
       expect(results[0]['id']).to eq('1')
       expect(results[1]['id']).to eq('2')
       doc.free
@@ -67,8 +67,8 @@ RSpec.describe Taurus::Document do
   end
 end
 
-RSpec.describe Taurus::Element do
-  let(:doc) { Taurus::Document.parse('<root attr="val"><a>text</a></root>') }
+RSpec.describe Leptris::Element do
+  let(:doc) { Leptris::Document.parse('<root attr="val"><a>text</a></root>') }
   let(:root) { doc.root }
 
   after { doc.free }

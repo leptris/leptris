@@ -58,7 +58,7 @@ int main(void) {
     BenchResult results[27];
     size_t idx = 0;
 
-    /* Define all test expressions matching Taurus benchmark */
+    /* Define all test expressions matching Leptris benchmark */
     const char* expressions[] = {
         /* String functions (10) */
         "string(//book[1]/title)",

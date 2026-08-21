@@ -1,4 +1,4 @@
-/* simd_helpers.h - SIMD acceleration for Taurus parser
+/* simd_helpers.h - SIMD acceleration for Leptris parser
  * Copyright (c) 2024, Ribose Inc.
  * All rights reserved.
  *
@@ -10,8 +10,8 @@
  * PERFORMANCE TARGET: 3-5× speedup on hot-path operations
  */
 
-#ifndef TAURUS_SIMD_HELPERS_H
-#define TAURUS_SIMD_HELPERS_H
+#ifndef LEPTRIS_SIMD_HELPERS_H
+#define LEPTRIS_SIMD_HELPERS_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -21,15 +21,15 @@
 
 /* Detect platform and include appropriate SIMD headers */
 #if defined(__x86_64__) || defined(_M_X64)
-    #define TAURUS_SIMD_SSE2 1
+    #define LEPTRIS_SIMD_SSE2 1
     #include <emmintrin.h>  /* SSE2 intrinsics */
     typedef __m128i simd_vec_t;
 #elif defined(__aarch64__) || defined(_M_ARM64)
-    #define TAURUS_SIMD_NEON 1
+    #define LEPTRIS_SIMD_NEON 1
     #include <arm_neon.h>   /* NEON intrinsics */
     typedef uint8x16_t simd_vec_t;
 #else
-    #define TAURUS_SIMD_NONE 1
+    #define LEPTRIS_SIMD_NONE 1
 #endif
 
 /* SIMD vector size (16 bytes for both SSE2 and NEON) */
@@ -45,7 +45,7 @@
 inline static const char* simd_skip_whitespace(const char* pos, const char* end) {
     const char* p = pos;
 
-#if defined(TAURUS_SIMD_SSE2)
+#if defined(LEPTRIS_SIMD_SSE2)
     /* SSE2 path - x86_64 */
     __m128i space = _mm_set1_epi8(' ');
     __m128i tab = _mm_set1_epi8('\t');
@@ -72,14 +72,14 @@ inline static const char* simd_skip_whitespace(const char* pos, const char* end)
         int mask = _mm_movemask_epi8(is_ws);
         if (mask != 0xFFFF) {  /* Found non-whitespace */
             /* Count leading whitespace bytes */
-            int leading = TAURUS_CTZ(~mask & 0xFFFF);
+            int leading = LEPTRIS_CTZ(~mask & 0xFFFF);
             return p + leading;
         }
 
         p += SIMD_VEC_SIZE;
     }
 
-#elif defined(TAURUS_SIMD_NEON)
+#elif defined(LEPTRIS_SIMD_NEON)
     /* NEON path - ARM64 */
     uint8x16_t space = vdupq_n_u8(' ');
     uint8x16_t tab = vdupq_n_u8('\t');
@@ -144,7 +144,7 @@ inline static int simd_is_name_char(char c) {
 inline static const char* simd_scan_name(const char* start, const char* end) {
     const char* p = start;
 
-#if defined(TAURUS_SIMD_SSE2)
+#if defined(LEPTRIS_SIMD_SSE2)
     /* SSE2 path - Check ranges in parallel */
     __m128i lower_a = _mm_set1_epi8('a' - 1);
     __m128i upper_z = _mm_set1_epi8('z' + 1);
@@ -195,14 +195,14 @@ inline static const char* simd_scan_name(const char* start, const char* end) {
         /* Find first invalid character */
         int mask = _mm_movemask_epi8(is_valid);
         if (mask != 0xFFFF) {  /* Found invalid char */
-            int valid_count = TAURUS_CTZ(~mask & 0xFFFF);
+            int valid_count = LEPTRIS_CTZ(~mask & 0xFFFF);
             return p + valid_count;
         }
 
         p += SIMD_VEC_SIZE;
     }
 
-#elif defined(TAURUS_SIMD_NEON)
+#elif defined(LEPTRIS_SIMD_NEON)
     /* NEON path - ARM64 */
     uint8x16_t lower_a = vdupq_n_u8('a' - 1);
     uint8x16_t upper_z = vdupq_n_u8('z');
@@ -284,7 +284,7 @@ inline static int simd_memcmp(const char* s1, const char* s2, size_t n) {
         return memcmp(s1, s2, n);
     }
 
-#if defined(TAURUS_SIMD_SSE2)
+#if defined(LEPTRIS_SIMD_SSE2)
     /* SSE2 path */
     const char *p1 = s1, *p2 = s2;
     size_t remaining = n;
@@ -297,7 +297,7 @@ inline static int simd_memcmp(const char* s1, const char* s2, size_t n) {
         int mask = _mm_movemask_epi8(cmp);
         if (mask != 0xFFFF) {  /* Found difference */
             /* Find first differing byte */
-            int diff_pos = TAURUS_CTZ(~mask & 0xFFFF);
+            int diff_pos = LEPTRIS_CTZ(~mask & 0xFFFF);
             return (unsigned char)p1[diff_pos] - (unsigned char)p2[diff_pos];
         }
 
@@ -309,7 +309,7 @@ inline static int simd_memcmp(const char* s1, const char* s2, size_t n) {
     /* Handle remaining bytes */
     return memcmp(p1, p2, remaining);
 
-#elif defined(TAURUS_SIMD_NEON)
+#elif defined(LEPTRIS_SIMD_NEON)
     /* NEON path */
     const char *p1 = s1, *p2 = s2;
     size_t remaining = n;
@@ -350,7 +350,7 @@ inline static int simd_starts_with_xmlns(const char* s) {
     /* Quick scalar check for common non-xmlns cases */
     if (s[0] != 'x') return 0;
 
-#if defined(TAURUS_SIMD_SSE2) || defined(TAURUS_SIMD_NEON)
+#if defined(LEPTRIS_SIMD_SSE2) || defined(LEPTRIS_SIMD_NEON)
     /* Load first 8 bytes (includes "xmlns" and potential ":") */
     /* We know s[0] == 'x', so just check remaining "mlns" */
     if (s[1] == 'm' && s[2] == 'l' && s[3] == 'n' && s[4] == 's') {
@@ -397,7 +397,7 @@ inline static int simd_streq(const char* s1, const char* s2, size_t len) {
 inline static const char* simd_find_char(const char* s, const char* end, char target) {
     const char* p = s;
 
-#if defined(TAURUS_SIMD_SSE2)
+#if defined(LEPTRIS_SIMD_SSE2)
     __m128i target_vec = _mm_set1_epi8(target);
 
     while (p + SIMD_VEC_SIZE <= end) {
@@ -406,14 +406,14 @@ inline static const char* simd_find_char(const char* s, const char* end, char ta
 
         int mask = _mm_movemask_epi8(cmp);
         if (mask != 0) {  /* Found target */
-            int pos = TAURUS_CTZ(mask);
+            int pos = LEPTRIS_CTZ(mask);
             return p + pos;
         }
 
         p += SIMD_VEC_SIZE;
     }
 
-#elif defined(TAURUS_SIMD_NEON)
+#elif defined(LEPTRIS_SIMD_NEON)
     uint8x16_t target_vec = vdupq_n_u8((uint8_t)target);
 
     while (p + SIMD_VEC_SIZE <= end) {
@@ -444,4 +444,4 @@ inline static const char* simd_find_char(const char* s, const char* end, char ta
     return (p < end) ? p : NULL;
 }
 
-#endif /* TAURUS_SIMD_HELPERS_H */
+#endif /* LEPTRIS_SIMD_HELPERS_H */

@@ -8,7 +8,7 @@ record, what is left and why it is not being chased:
   structural idea.
 - pretty-ws parse ~1.1-1.4x default-mode: SEMANTICS (we keep
   whitespace-only text nodes, libxml2-faithful; pugixml discards
-  them). TAURUS_PARSE_DROP_WS_TEXT is the apples-to-apples mode —
+  them). LEPTRIS_PARSE_DROP_WS_TEXT is the apples-to-apples mode —
   DOCUMENT this in the README parse table (small task folded into
   the next README pass).
 - append ~1.2x: last ~4 ns is create internals (memset + hash) +
