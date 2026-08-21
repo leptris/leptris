@@ -638,6 +638,9 @@ struct leptris_xpath_result* xpath_result_new(XPathResultType type) {
 
 void xpath_result_free(struct leptris_xpath_result* result) {
     if (!result) return;
+    /* Already parked on the free-list: freeing again must be a
+     * no-op, never a second payload release. */
+    if (result->type == XPATH_RESULT_CACHED) return;
 
     switch (result->type) {
         case XPATH_RESULT_STRING:
@@ -661,7 +664,7 @@ void xpath_result_free(struct leptris_xpath_result* result) {
      * the next-pointer because the live payload has just been
      * released above. */
     if (xpath_result_free_list_count < XPATH_RESULT_FREE_LIST_CAP) {
-        result->type = (XPathResultType)0;
+        result->type = XPATH_RESULT_CACHED;
         result->value.nodeset_value = (XPathNodeSet*)xpath_result_free_list;
         xpath_result_free_list = result;
         xpath_result_free_list_count++;

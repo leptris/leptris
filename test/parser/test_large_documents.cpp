@@ -75,13 +75,14 @@ std::string gen_attr_heavy(size_t target) {
     b.reserve(target + 256);
     int e = 0;
     while (b.size() < target) {
-        char buf[256];
-        int n = std::snprintf(buf, sizeof buf, "<e");
-        for (int a = 0; a < 8; a++)
-            n += std::snprintf(buf + n, sizeof buf - (size_t)n,
-                               " k%d='v%d'", a, (e + a) % 97);
-        n += std::snprintf(buf + n, sizeof buf - (size_t)n, "/>");
-        b += buf;
+        b += "<e";
+        for (int a = 0; a < 8; a++) {
+            char attr[32];
+            int alen = std::snprintf(attr, sizeof attr,
+                                     " k%d='v%d'", a, (e + a) % 97);
+            if (alen > 0 && (size_t)alen < sizeof attr) b += attr;
+        }
+        b += "/>";
         e++;
     }
     b += "</r>";

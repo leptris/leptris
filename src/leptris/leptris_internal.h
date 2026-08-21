@@ -453,7 +453,14 @@ typedef enum {
     XPATH_RESULT_NODESET,
     XPATH_RESULT_BOOLEAN,
     XPATH_RESULT_NUMBER,
-    XPATH_RESULT_STRING
+    XPATH_RESULT_STRING,
+    /* Internal-only sentinel: a result parked on the thread-local
+     * free-list. The public enum never uses this value. Guards the
+     * free-list against a double xpath_result_free — a cached entry
+     * previously looked like a live NODESET (type 0), and freeing
+     * it again would have treated the free-list next-pointer as a
+     * nodeset and corrupted the list. */
+    XPATH_RESULT_CACHED = 127
 } XPathResultType;
 
 /* XPath result value union */
