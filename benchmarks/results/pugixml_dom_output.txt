@@ -1,5 +1,5 @@
 ╔══════════════════════════════════════════════════════════╗
-║   TAURUS vs PUGIXML DOM MODIFICATION BENCHMARK          ║
+║   LEPTRIS vs PUGIXML DOM MODIFICATION BENCHMARK          ║
 ╚══════════════════════════════════════════════════════════╝
 
 Running 10000 iterations per test...
@@ -19,7 +19,7 @@ Running 10000 iterations per test...
 ║                     BENCHMARK RESULTS                    ║
 ╚══════════════════════════════════════════════════════════╝
 
-Test                               pugixml      Taurus     Ratio  Status
+Test                               pugixml      Leptris     Ratio  Status
 ------------------------------------------------------------------------
 dom_node_append_child               0.05 μs      0.06 μs     1.30x     ✓
 dom_node_prepend_child              0.04 μs      0.06 μs     1.33x     ✓
@@ -44,7 +44,7 @@ dom_node_remove_child               0.06 μs      0.06 μs     1.01x     ✓
   Performance:        ACCEPTABLE (within 50% of pugixml)
 
   Interpretation:
-    - Ratio < 1.0:  Taurus is faster
+    - Ratio < 1.0:  Leptris is faster
     - Ratio = 1.0:  Equal performance
     - Ratio > 1.0:  pugixml is faster
 

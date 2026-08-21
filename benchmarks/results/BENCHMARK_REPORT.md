@@ -1,4 +1,4 @@
-# Taurus Performance Benchmark Report
+# Leptris Performance Benchmark Report
 
 **Generated**: 2025-12-23 16:02:09
 
@@ -12,7 +12,7 @@
 
 ### Combined Comparison
 
-| Operation | Taurus | vs libxml2 | vs pugixml |
+| Operation | Leptris | vs libxml2 | vs pugixml |
 | --- | --- | --- | --- |
 | Iterations: 1000 per benchmark
 ================================================================
@@ -25,7 +25,7 @@
 
 ## XPath Performance Comparison
 
-| Query | Taurus | libxml2 | Comparison |
+| Query | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | Iterations: 1000 per benchmark
 ================================================================
@@ -40,14 +40,14 @@
 
 ### @*[string-length() axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | @*[string-length() > 0] | 950.00 ns | 670.00 ns | ⚠️ 1.42x slower |
 | **@*[string-length() Total** | **950.00 ns** | **670.00 ns** | ⚠️ 1.42x slower |
 
 ### ancestor axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | ancestor::* | 670.00 ns | 480.00 ns | ⚠️ 1.40x slower |
 | ancestor::catalog | 730.00 ns | 580.00 ns | ⚠️ 1.26x slower |
@@ -56,7 +56,7 @@
 
 ### ancestor-or-self axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | ancestor-or-self::* | 660.00 ns | 570.00 ns | ⚠️ 1.16x slower |
 | ancestor-or-self::book | 800.00 ns | 600.00 ns | ⚠️ 1.33x slower |
@@ -65,7 +65,7 @@
 
 ### attribute axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | attribute::* | 690.00 ns | 460.00 ns | ⚠️ 1.50x slower |
 | attribute::id | 760.00 ns | 520.00 ns | ⚠️ 1.46x slower |
@@ -73,7 +73,7 @@
 
 ### child axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | child::* | 720.00 ns | 450.00 ns | ⚠️ 1.60x slower |
 | child::book | 810.00 ns | 510.00 ns | ⚠️ 1.59x slower |
@@ -82,7 +82,7 @@
 
 ### descendant axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | descendant::* | 720.00 ns | 470.00 ns | ⚠️ 1.53x slower |
 | descendant::title | 820.00 ns | 580.00 ns | ⚠️ 1.41x slower |
@@ -91,7 +91,7 @@
 
 ### descendant-or-self axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | descendant-or-self::* | 660.00 ns | 540.00 ns | ⚠️ 1.22x slower |
 | descendant-or-self::book | 750.00 ns | 610.00 ns | ⚠️ 1.23x slower |
@@ -100,7 +100,7 @@
 
 ### following axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | following::* | 720.00 ns | 460.00 ns | ⚠️ 1.57x slower |
 | following::title | 760.00 ns | 560.00 ns | ⚠️ 1.36x slower |
@@ -109,7 +109,7 @@
 
 ### following-sibling axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | following-sibling::* | 670.00 ns | 540.00 ns | ⚠️ 1.24x slower |
 | following-sibling::book | 790.00 ns | 590.00 ns | ⚠️ 1.34x slower |
@@ -118,7 +118,7 @@
 
 ### namespace axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | namespace::* | 690.00 ns | 560.00 ns | ⚠️ 1.23x slower |
 | namespace::xml | 760.00 ns | 540.00 ns | ⚠️ 1.41x slower |
@@ -127,7 +127,7 @@
 
 ### parent axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | parent::* | 680.00 ns | 470.00 ns | ⚠️ 1.45x slower |
 | parent::catalog | 770.00 ns | 560.00 ns | ⚠️ 1.38x slower |
@@ -136,7 +136,7 @@
 
 ### preceding axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | preceding::* | 680.00 ns | 470.00 ns | ⚠️ 1.45x slower |
 | preceding::title | 750.00 ns | 570.00 ns | ⚠️ 1.32x slower |
@@ -145,7 +145,7 @@
 
 ### preceding-sibling axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | preceding-sibling::* | 660.00 ns | 520.00 ns | ⚠️ 1.27x slower |
 | preceding-sibling::book | 770.00 ns | 590.00 ns | ⚠️ 1.31x slower |
@@ -154,7 +154,7 @@
 
 ### self axis
 
-| Test Case | Taurus | libxml2 | Comparison |
+| Test Case | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | self::* | 670.00 ns | 450.00 ns | ⚠️ 1.49x slower |
 | self::book | 750.00 ns | 500.00 ns | ⚠️ 1.50x slower |
@@ -167,7 +167,7 @@
 
 ### String Functions
 
-| Function | Taurus | libxml2 | Comparison |
+| Function | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | string() | 2.04 µs | 11.96 µs | ✅ **5.86x faster** |
 | concat() | 1.27 µs | 1.31 µs | ✅ **1.03x faster** |
@@ -183,7 +183,7 @@
 
 ### Number Functions
 
-| Function | Taurus | libxml2 | Comparison |
+| Function | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | number() | 890.00 ns | 1.08 µs | ✅ **1.21x faster** |
 | sum() | 1.94 µs | 7.14 µs | ✅ **3.68x faster** |
@@ -194,7 +194,7 @@
 
 ### Boolean Functions
 
-| Function | Taurus | libxml2 | Comparison |
+| Function | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | boolean() | 1.61 µs | 2.96 µs | ✅ **1.84x faster** |
 | not() | 690.00 ns | 540.00 ns | ⚠️ 1.28x slower |
@@ -205,7 +205,7 @@
 
 ### Nodeset Functions
 
-| Function | Taurus | libxml2 | Comparison |
+| Function | Leptris | libxml2 | Comparison |
 | --- | --- | --- | --- |
 | last() | 1.52 µs | 8.76 µs | ✅ **5.76x faster** |
 | position() | 1.62 µs | 9.05 µs | ✅ **5.59x faster** |
@@ -221,6 +221,6 @@
 ---
 
 **Legend**:
-- ✅ = Taurus is faster
-- ⚠️ = Taurus is slower
+- ✅ = Leptris is faster
+- ⚠️ = Leptris is slower
 - ➖ = Same performance

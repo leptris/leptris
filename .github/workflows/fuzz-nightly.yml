@@ -20,9 +20,9 @@ jobs:
       - name: Configure (fuzzing)
         run: |
           CC=clang CXX=clang++ cmake -B build -S . \
-            -DTAURUS_ENABLE_FUZZING=ON \
-            -DTAURUS_ENABLE_UTF8PROC=OFF \
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_ENABLE_FUZZING=ON \
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF \
+            -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Build fuzzer
         run: cmake --build build --target fuzz_parse

@@ -141,14 +141,14 @@ TEST_XML(test_xpath_comment, "<root><!--comment--><child/></root>")
 }
 
 /* Test processing instruction nodes */
-TEST_XML(test_xpath_pi, "<root/>")  /* Skip: Taurus crashes on PI parsing */
+TEST_XML(test_xpath_pi, "<root/>")  /* Skip: Leptris crashes on PI parsing */
 {
     xml_document doc = NULL;
     xml_document_load_string(doc, "<root/>");  /* Simplified to avoid crash */
     CHECK(doc != NULL);
 
     /* Note: processing-instruction() node selection requires XPath implementation */
-    /* Note: Taurus has a crash bug with PI parsing - need to fix */
+    /* Note: Leptris has a crash bug with PI parsing - need to fix */
     return 1;
 }
 
