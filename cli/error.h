@@ -1,6 +1,6 @@
 /**
  * @file error.h
- * @brief Error handling for Taurus CLI
+ * @brief Error handling for Leptris CLI
  *
  * This file defines a consistent error handling system for the CLI that
  * provides clear, actionable error messages to users.
@@ -12,17 +12,17 @@
  * - Severity-based: Warnings vs errors vs fatal
  */
 
-#ifndef TAURUS_CLI_ERROR_H
-#define TAURUS_CLI_ERROR_H
+#ifndef LEPTRIS_CLI_ERROR_H
+#define LEPTRIS_CLI_ERROR_H
 
 /* GCC/Clang get format-string checks; MSVC silently ignores them. */
 #if defined(__GNUC__) || defined(__clang__)
-#  define TAURUS_PRINTF(fmt_idx, args_idx) \
+#  define LEPTRIS_PRINTF(fmt_idx, args_idx) \
        __attribute__((format(printf, fmt_idx, args_idx)))
-#  define TAURUS_NORETURN __attribute__((noreturn))
+#  define LEPTRIS_NORETURN __attribute__((noreturn))
 #else
-#  define TAURUS_PRINTF(fmt_idx, args_idx)
-#  define TAURUS_NORETURN
+#  define LEPTRIS_PRINTF(fmt_idx, args_idx)
+#  define LEPTRIS_NORETURN
 #endif
 
 #include <stdio.h>
@@ -149,7 +149,7 @@ void cli_error_print(const cli_error_t* error, FILE* out);
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_fatal(const char* fmt, ...) TAURUS_NORETURN TAURUS_PRINTF(1, 2);
+void cli_fatal(const char* fmt, ...) LEPTRIS_NORETURN LEPTRIS_PRINTF(1, 2);
 
 /**
  * Print error message
@@ -159,7 +159,7 @@ void cli_fatal(const char* fmt, ...) TAURUS_NORETURN TAURUS_PRINTF(1, 2);
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_error(const char* fmt, ...) TAURUS_PRINTF(1, 2);
+void cli_error(const char* fmt, ...) LEPTRIS_PRINTF(1, 2);
 
 /**
  * Print warning message
@@ -169,7 +169,7 @@ void cli_error(const char* fmt, ...) TAURUS_PRINTF(1, 2);
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_warning(const char* fmt, ...) TAURUS_PRINTF(1, 2);
+void cli_warning(const char* fmt, ...) LEPTRIS_PRINTF(1, 2);
 
 /**
  * Print info message
@@ -179,7 +179,7 @@ void cli_warning(const char* fmt, ...) TAURUS_PRINTF(1, 2);
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_info(const char* fmt, ...) TAURUS_PRINTF(1, 2);
+void cli_info(const char* fmt, ...) LEPTRIS_PRINTF(1, 2);
 
 /**
  * Print debug message
@@ -189,7 +189,7 @@ void cli_info(const char* fmt, ...) TAURUS_PRINTF(1, 2);
  * @param fmt Printf-style format string
  * @param ... Format arguments
  */
-void cli_debug(const char* fmt, ...) TAURUS_PRINTF(1, 2);
+void cli_debug(const char* fmt, ...) LEPTRIS_PRINTF(1, 2);
 
 /* ------------------------------------------------------------------------- */
 /* Error Categories                                                          */
@@ -357,4 +357,4 @@ void cli_error_print_summary(FILE* out);
 }
 #endif
 
-#endif /* TAURUS_CLI_ERROR_H */
+#endif /* LEPTRIS_CLI_ERROR_H */

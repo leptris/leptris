@@ -2,8 +2,8 @@
  * Copyright (c) 2024, Ribose Inc.
  */
 
-#ifndef TAURUS_ENCODING_ENCODERS_H
-#define TAURUS_ENCODING_ENCODERS_H
+#ifndef LEPTRIS_ENCODING_ENCODERS_H
+#define LEPTRIS_ENCODING_ENCODERS_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -43,7 +43,7 @@ size_t iso88595_to_utf8(const unsigned char* input, size_t input_len,
  */
 size_t iso88595_to_utf8_size(const unsigned char* input, size_t input_len);
 
-#endif /* TAURUS_ENCODING_ENCODERS_H */
+#endif /* LEPTRIS_ENCODING_ENCODERS_H */
 
 /* ============================================================================
  * EBCDIC-037 to UTF-8 Converter

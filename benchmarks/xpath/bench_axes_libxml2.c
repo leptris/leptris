@@ -58,7 +58,7 @@ int main(void) {
     BenchResult results[39];
     size_t idx = 0;
 
-    /* Define all test expressions matching Taurus benchmark */
+    /* Define all test expressions matching Leptris benchmark */
     const char* expressions[] = {
         /* Child axis */
         "child::*", "child::book", "child::*[@id]",

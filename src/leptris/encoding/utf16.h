@@ -1,11 +1,11 @@
 /* utf16.h - UTF-16 encoding support
  * Copyright (c) 2024, Ribose Inc.
  *
- * UTF-16 to UTF-8 conversion for Taurus XML Parser
+ * UTF-16 to UTF-8 conversion for Leptris XML Parser
  */
 
-#ifndef TAURUS_UTF16_H
-#define TAURUS_UTF16_H
+#ifndef LEPTRIS_UTF16_H
+#define LEPTRIS_UTF16_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -75,4 +75,4 @@ size_t utf16_to_utf8(const unsigned char* utf16, size_t utf16_len,
 }
 #endif
 
-#endif /* TAURUS_UTF16_H */
+#endif /* LEPTRIS_UTF16_H */

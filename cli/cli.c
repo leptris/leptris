@@ -1,6 +1,6 @@
 /**
  * @file cli.c
- * @brief Command registry implementation for Taurus CLI
+ * @brief Command registry implementation for Leptris CLI
  */
 
 #include "cli.h"

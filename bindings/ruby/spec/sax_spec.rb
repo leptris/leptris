@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-RSpec.describe Taurus::SAX do
+RSpec.describe Leptris::SAX do
   let(:xml) do
     <<~XML
       <?xml version="1.0"?>
@@ -75,14 +75,14 @@ RSpec.describe Taurus::SAX do
 
     it 'raises on malformed input' do
       expect { described_class.parse('<a>', {}) }
-        .to raise_error(Taurus::Error)
+        .to raise_error(Leptris::Error)
     end
 
     it 'reports failures through the :error handler before raising' do
       seen = []
       expect do
         described_class.parse('<a><b></a></b>', error: ->(m, l, c) { seen << [m, l, c] })
-      end.to raise_error(Taurus::Error)
+      end.to raise_error(Leptris::Error)
       expect(seen).not_to be_empty
     end
 
@@ -91,7 +91,7 @@ RSpec.describe Taurus::SAX do
     end
   end
 
-  describe Taurus::SAX::Parser do
+  describe Leptris::SAX::Parser do
     it 'parses a document fed in chunks (streaming mode)' do
       events = []
       parser = described_class.new(

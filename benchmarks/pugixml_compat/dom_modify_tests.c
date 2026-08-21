@@ -1,9 +1,9 @@
 /**
  * @file dom_modify_tests.c
- * @brief DOM modification tests adapted from pugixml for Taurus
+ * @brief DOM modification tests adapted from pugixml for Leptris
  *
  * Source: pugixml/tests/test_dom_modify.cpp
- * Adapted to test Taurus DOM manipulation APIs
+ * Adapted to test Leptris DOM manipulation APIs
  */
 
 #include "test_adapter.h"

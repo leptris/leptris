@@ -46,8 +46,8 @@ pugixml has ONE struct for all node types. Type is a field.
 Text/comment/CDATA/PI reuse the same memory layout (the `value`
 field stores the text content).
 
-We have separate structs (TaurusElement, TaurusTextNode,
-TaurusCommentNode, etc.). They share the TaurusNode base but have
+We have separate structs (LeptrisElement, LeptrisTextNode,
+LeptrisCommentNode, etc.). They share the LeptrisNode base but have
 different layouts beyond it. This forces type-dispatched tree
 walks (slow).
 

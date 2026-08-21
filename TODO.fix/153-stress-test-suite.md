@@ -20,7 +20,7 @@ only manifest under high document counts.
    - Frees each batch before the next.
    - Runs in <30 seconds on CI hardware.
 
-2. Gate behind a `TAURUS_RUN_STRESS_TESTS` CMake option (default OFF
+2. Gate behind a `LEPTRIS_RUN_STRESS_TESTS` CMake option (default OFF
    in CI to keep test time manageable; ON for release-validation).
 
 ## Status

@@ -2,7 +2,7 @@
 
 bindgen over the public headers + an idiomatic wrapper crate
 (`leptris-rs`): Document/Element smart wrappers, error enum mapping
-TaurusStatus → Result, zero-copy parse from &[u8], SAX callbacks via
+LeptrisStatus → Result, zero-copy parse from &[u8], SAX callbacks via
 closures, serde optional interop.
 
 Follow the leptris-ruby and leptris-py layout (bindings/<lang>).

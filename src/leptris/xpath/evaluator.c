@@ -642,30 +642,35 @@ void xpath_result_free(struct leptris_xpath_result* result) {
      * no-op, never a second payload release. */
     if (result->type == XPATH_RESULT_CACHED) return;
 
+    /* Release the payload through locals: after this block the
+     * union slot is dead, and parking the free-list next-pointer
+     * into it cannot alias the memory just released. */
     switch (result->type) {
-        case XPATH_RESULT_STRING:
-            if (result->value.string_value) {
-                LEPTRIS_FREE(result->value.string_value);
-            }
+        case XPATH_RESULT_STRING: {
+            char* sv = result->value.string_value;
+            if (sv) LEPTRIS_FREE(sv);
             break;
-        case XPATH_RESULT_NODESET:
-            if (result->value.nodeset_value) {
-                xpath_nodeset_free(result->value.nodeset_value);
-            }
+        }
+        case XPATH_RESULT_NODESET: {
+            XPathNodeSet* nv = result->value.nodeset_value;
+            if (nv) xpath_nodeset_free(nv);
             break;
+        }
         case XPATH_RESULT_NUMBER:
         case XPATH_RESULT_BOOLEAN:
             /* No heap allocation to free */
             break;
+        default:
+            break;
     }
 
     /* Push onto thread-local free-list (TODO 162). Cap prevents
-     * unbounded growth. The value union is safe to overwrite with
-     * the next-pointer because the live payload has just been
-     * released above. */
+     * unbounded growth. The CACHED sentinel parked in type makes a
+     * repeat free a no-op (double-free spec). */
     if (xpath_result_free_list_count < XPATH_RESULT_FREE_LIST_CAP) {
+        struct leptris_xpath_result* next = xpath_result_free_list;
         result->type = XPATH_RESULT_CACHED;
-        result->value.nodeset_value = (XPathNodeSet*)xpath_result_free_list;
+        result->value.nodeset_value = (XPathNodeSet*)next;
         xpath_result_free_list = result;
         xpath_result_free_list_count++;
     } else {

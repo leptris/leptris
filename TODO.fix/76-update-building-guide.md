@@ -9,9 +9,9 @@
 `docs/guide/building.md` was written for the initial commit and
 references build commands that don't match the current state:
 
-- Mentions `TAURUS_BUILD_CLI` default OFF; it's now ON.
-- Doesn't mention `TAURUS_ENABLE_ASAN` / `TAURUS_ENABLE_FUZZING`.
-- Doesn't mention `TAURUS_BUILD_DOCS`.
+- Mentions `LEPTRIS_BUILD_CLI` default OFF; it's now ON.
+- Doesn't mention `LEPTRIS_ENABLE_ASAN` / `LEPTRIS_ENABLE_FUZZING`.
+- Doesn't mention `LEPTRIS_BUILD_DOCS`.
 - The "Quick Start" doesn't reference the test suite.
 
 ## Fix
