@@ -18,7 +18,9 @@
 typedef struct taurus_comment_node {
     TaurusNode base;                   /* MUST be first */
     char* content;                    /* Comment content */
-    int16_t next_sibling_cp;          /* 2-byte compact ptr to next sibling (0=NULL) */
+    int32_t next_sibling_off;         /* (#450) unscaled int32 sibling edge — cp16's
+                                     ±256 KB range cannot hold cross-block sibling
+                                     links on large documents. 0 = NULL. */
     int32_t parent_off;               /* Byte offset to parent element (0=NULL) */
 } TaurusCommentNode;
 
@@ -42,13 +44,13 @@ const char* taurus_comment_get_content(TaurusCommentNode* comment);
 /* Compact next_sibling accessors (TODO 179 Phase B — cp16). */
 static inline TaurusNode* taurus_comment_next_sibling(const TaurusCommentNode* c) {
     return (c)
-        ? (TaurusNode*)taurus_compact_ptr16_decode((void*)c, c->next_sibling_cp, 3, &c->next_sibling_cp)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)c, c->next_sibling_off, &c->next_sibling_off)
         : NULL;
 }
 
 static inline void taurus_comment_set_next_sibling(TaurusCommentNode* c, TaurusNode* sibling) {
     if (!c) return;
-    c->next_sibling_cp = taurus_compact_ptr16_encode(c, sibling, 3, &c->next_sibling_cp);
+    c->next_sibling_off = taurus_compact_int32_encode(c, sibling, &c->next_sibling_off);
 }
 
 /* Compact parent accessors (issue #168). */
