@@ -33,7 +33,14 @@ typedef struct taurus_text_node {
     size_t content_len;               /* Byte length of content (excl. NUL) */
     TaurusMemoryPool* pool;           /* Pool for lazy materialization (NULL if content is NUL-term'd) */
     int borrowed;                     /* 1 = content is borrowed (non-NUL-term'd) */
-    int16_t next_sibling_cp;          /* 2-byte compact ptr to next sibling (0=NULL) */
+    /* (#450) int32 sibling edge — was cp16 (±256 KB). Text nodes
+     * link to ELEMENT siblings across the parse-time element↔text
+     * block gap, which scales with document size and regularly
+     * exceeds cp16's range on large documents; the raw store
+     * truncated and walks decoded into stale arena memory. int32
+     * absorbs the struct's existing padding: sizeof is unchanged.
+     * 0 = NULL. */
+    int32_t next_sibling_off;
     int32_t parent_off;               /* Byte offset to parent element (0=NULL) */
 } TaurusTextNode;
 
@@ -81,18 +88,20 @@ void taurus_text_set_content(TaurusTextNode* text, const char* content);
 #define TAURUS_TEXT_AS_NODE(text) \
     ((TaurusNode*)(text))
 
-/* Compact next_sibling accessors (TODO 179 Phase B — cp16).
- * Stored as 2-byte offset scaled by 8 (align_log2=3). NULL = 0.
- * Range: ±32767 * 8 = ±256 KB — never overflows for realistic docs. */
+/* Compact next_sibling accessors. (#450) Stored as an unscaled
+ * int32 byte offset (0 = NULL) — same encoding as element sibling
+ * edges. Was cp16 (±256 KB): text nodes link to element siblings
+ * across the parse-time block gap, which exceeds cp16 on large
+ * documents; the raw store truncated. */
 static inline TaurusNode* taurus_textnode_next_sibling(const TaurusTextNode* t) {
     return (t)
-        ? (TaurusNode*)taurus_compact_ptr16_decode((void*)t, t->next_sibling_cp, 3, &t->next_sibling_cp)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)t, t->next_sibling_off, &t->next_sibling_off)
         : NULL;
 }
 
 static inline void taurus_textnode_set_next_sibling(TaurusTextNode* t, TaurusNode* sibling) {
     if (!t) return;
-    t->next_sibling_cp = taurus_compact_ptr16_encode(t, sibling, 3, &t->next_sibling_cp);
+    t->next_sibling_off = taurus_compact_int32_encode(t, sibling, &t->next_sibling_off);
 }
 
 /* Compact parent accessors (issue #168). */
