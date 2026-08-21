@@ -21,7 +21,7 @@
 #include "../common/benchmark.h"
 #include "../common/test_data.h"
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <pugixml.hpp>
 
@@ -36,28 +36,28 @@
 /* Per-library setup helpers                                                  */
 /* -------------------------------------------------------------------------- */
 
-/* Parse a fresh taurus doc for each iteration — write benchmarks need a
+/* Parse a fresh leptris doc for each iteration — write benchmarks need a
  * clean tree each time, otherwise the tree grows unboundedly. */
 typedef struct {
     const char* xml;
     size_t len;
-} taurus_ctx_t;
+} leptris_ctx_t;
 
-static void taurus_parse_fresh(void* ctx) {
-    taurus_ctx_t* c = (taurus_ctx_t*)ctx;
-    TaurusDocument doc = taurus_parse_string(c->xml, c->len, NULL);
-    TaurusElement root = taurus_document_root(doc);
+static void leptris_parse_fresh(void* ctx) {
+    leptris_ctx_t* c = (leptris_ctx_t*)ctx;
+    LeptrisDocument doc = leptris_parse_string(c->xml, c->len, NULL);
+    LeptrisElement root = leptris_document_root(doc);
     /* Append 10 child elements */
     for (int i = 0; i < 10; i++) {
-        TaurusElement child = taurus_element_create(doc, "child");
-        taurus_element_set_attribute(child, "id", "x");
-        taurus_element_append_child(root, child);
+        LeptrisElement child = leptris_element_create(doc, "child");
+        leptris_element_set_attribute(child, "id", "x");
+        leptris_element_append_child(root, child);
     }
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 static void pugixml_parse_fresh(void* ctx) {
-    taurus_ctx_t* c = (taurus_ctx_t*)ctx;
+    leptris_ctx_t* c = (leptris_ctx_t*)ctx;
     pugi::xml_document doc;
     doc.load_buffer(c->xml, c->len);
     pugi::xml_node root = doc.root().first_child();
@@ -68,7 +68,7 @@ static void pugixml_parse_fresh(void* ctx) {
 }
 
 static void libxml2_parse_fresh(void* ctx) {
-    taurus_ctx_t* c = (taurus_ctx_t*)ctx;
+    leptris_ctx_t* c = (leptris_ctx_t*)ctx;
     xmlDocPtr doc = xmlReadMemory(c->xml, (int)c->len, NULL, NULL, 0);
     if (!doc) return;
     xmlNodePtr root = xmlDocGetRootElement(doc);
@@ -88,15 +88,15 @@ typedef struct {
     int n_children;
 } append_ctx_t;
 
-static void taurus_append_many(void* ctx) {
+static void leptris_append_many(void* ctx) {
     append_ctx_t* a = (append_ctx_t*)ctx;
-    TaurusDocument doc = taurus_parse_string("<r/>", 4, NULL);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, NULL);
+    LeptrisElement root = leptris_document_root(doc);
     for (int i = 0; i < a->n_children; i++) {
-        TaurusElement c = taurus_element_create(doc, "c");
-        taurus_element_append_child(root, c);
+        LeptrisElement c = leptris_element_create(doc, "c");
+        leptris_element_append_child(root, c);
     }
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 static void pugixml_append_many(void* ctx) {
@@ -129,18 +129,18 @@ typedef struct {
     int n_attrs;
 } attr_ctx_t;
 
-static void taurus_set_attrs(void* ctx) {
+static void leptris_set_attrs(void* ctx) {
     attr_ctx_t* a = (attr_ctx_t*)ctx;
-    TaurusDocument doc = taurus_parse_string("<r/>", 4, NULL);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, NULL);
+    LeptrisElement root = leptris_document_root(doc);
     char name[16];
     char value[32];
     for (int i = 0; i < a->n_attrs; i++) {
         snprintf(name, sizeof(name), "a%d", i);
         snprintf(value, sizeof(value), "value-%d", i);
-        taurus_element_set_attribute(root, name, value);
+        leptris_element_set_attribute(root, name, value);
     }
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 static void pugixml_set_attrs(void* ctx) {
@@ -175,12 +175,12 @@ static void libxml2_set_attrs(void* ctx) {
 /* Set-text benchmarks                                                        */
 /* -------------------------------------------------------------------------- */
 
-static void taurus_set_text(void* ctx) {
+static void leptris_set_text(void* ctx) {
     (void)ctx;
-    TaurusDocument doc = taurus_parse_string("<r/>", 4, NULL);
-    TaurusElement root = taurus_document_root(doc);
-    taurus_element_set_text(root, "hello world this is some text content");
-    taurus_document_free(doc);
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, NULL);
+    LeptrisElement root = leptris_document_root(doc);
+    leptris_element_set_text(root, "hello world this is some text content");
+    leptris_document_free(doc);
 }
 
 static void pugixml_set_text(void* ctx) {
@@ -210,23 +210,23 @@ typedef struct {
     int n_writes;
 } write_parsed_ctx_t;
 
-static void taurus_write_parsed(void* ctx) {
+static void leptris_write_parsed(void* ctx) {
     write_parsed_ctx_t* w = (write_parsed_ctx_t*)ctx;
-    TaurusDocument doc = taurus_parse_string(w->xml, w->len, NULL);
+    LeptrisDocument doc = leptris_parse_string(w->xml, w->len, NULL);
     if (!doc) return;
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     /* Modify the root: set/update attribute N times */
     char value[32];
     for (int i = 0; i < w->n_writes; i++) {
         snprintf(value, sizeof(value), "v%d", i);
-        taurus_element_set_attribute(root, "bench", value);
+        leptris_element_set_attribute(root, "bench", value);
     }
     /* Append N children */
     for (int i = 0; i < w->n_writes; i++) {
-        TaurusElement c = taurus_element_create(doc, "new");
-        taurus_element_append_child(root, c);
+        LeptrisElement c = leptris_element_create(doc, "new");
+        leptris_element_append_child(root, c);
     }
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 static void pugixml_write_parsed(void* ctx) {
@@ -273,13 +273,13 @@ int main(void) {
 
     enum { ITERS_PARSE = 500, ITERS_OP = 2000 };
 
-    bench_print_header("DOM Write Benchmark — taurus vs pugixml vs libxml2");
+    bench_print_header("DOM Write Benchmark — leptris vs pugixml vs libxml2");
 
     /* ---- Build-from-scratch: 1000 child elements ---- */
     printf("\n  -- append 1000 children from scratch --\n");
     {
         append_ctx_t a = { 1000 };
-        BenchResult t = bench_run("taurus: append 1000",   taurus_append_many,   &a, 50);
+        BenchResult t = bench_run("leptris: append 1000",   leptris_append_many,   &a, 50);
         BenchResult p = bench_run("pugixml: append 1000",  pugixml_append_many,  &a, 50);
         BenchResult l = bench_run("libxml2: append 1000",  libxml2_append_many,  &a, 50);
         bench_print_result(&t);
@@ -291,7 +291,7 @@ int main(void) {
     printf("\n  -- set 100 attributes on a single element --\n");
     {
         attr_ctx_t a = { 100 };
-        BenchResult t = bench_run("taurus: set 100 attrs",   taurus_set_attrs,   &a, 200);
+        BenchResult t = bench_run("leptris: set 100 attrs",   leptris_set_attrs,   &a, 200);
         BenchResult p = bench_run("pugixml: set 100 attrs",  pugixml_set_attrs,  &a, 200);
         BenchResult l = bench_run("libxml2: set 100 attrs",  libxml2_set_attrs,  &a, 200);
         bench_print_result(&t);
@@ -302,7 +302,7 @@ int main(void) {
     /* ---- Set text ---- */
     printf("\n  -- set text content --\n");
     {
-        BenchResult t = bench_run("taurus: set text",   taurus_set_text,   NULL, ITERS_OP);
+        BenchResult t = bench_run("leptris: set text",   leptris_set_text,   NULL, ITERS_OP);
         BenchResult p = bench_run("pugixml: set text",  pugixml_set_text,  NULL, ITERS_OP);
         BenchResult l = bench_run("libxml2: set text",  libxml2_set_text,  NULL, ITERS_OP);
         bench_print_result(&t);
@@ -314,7 +314,7 @@ int main(void) {
     printf("\n  -- parse small + 10 attr writes + 10 child appends --\n");
     {
         write_parsed_ctx_t w = { BENCH_XML_SMALL, strlen(BENCH_XML_SMALL), 10 };
-        BenchResult t = bench_run("taurus: small+writes",   taurus_write_parsed,   &w, ITERS_PARSE);
+        BenchResult t = bench_run("leptris: small+writes",   leptris_write_parsed,   &w, ITERS_PARSE);
         BenchResult p = bench_run("pugixml: small+writes",  pugixml_write_parsed,  &w, ITERS_PARSE);
         BenchResult l = bench_run("libxml2: small+writes",  libxml2_write_parsed,  &w, ITERS_PARSE);
         bench_print_result(&t);
@@ -326,7 +326,7 @@ int main(void) {
     printf("\n  -- parse medium + 10 attr writes + 10 child appends --\n");
     {
         write_parsed_ctx_t w = { BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), 10 };
-        BenchResult t = bench_run("taurus: medium+writes",   taurus_write_parsed,   &w, ITERS_PARSE);
+        BenchResult t = bench_run("leptris: medium+writes",   leptris_write_parsed,   &w, ITERS_PARSE);
         BenchResult p = bench_run("pugixml: medium+writes",  pugixml_write_parsed,  &w, ITERS_PARSE);
         BenchResult l = bench_run("libxml2: medium+writes",  libxml2_write_parsed,  &w, ITERS_PARSE);
         bench_print_result(&t);
@@ -338,7 +338,7 @@ int main(void) {
     printf("\n  -- parse large + 10 attr writes + 10 child appends --\n");
     {
         write_parsed_ctx_t w = { BENCH_XML_LARGE, strlen(BENCH_XML_LARGE), 10 };
-        BenchResult t = bench_run("taurus: large+writes",   taurus_write_parsed,   &w, ITERS_PARSE / 2);
+        BenchResult t = bench_run("leptris: large+writes",   leptris_write_parsed,   &w, ITERS_PARSE / 2);
         BenchResult p = bench_run("pugixml: large+writes",  pugixml_write_parsed,  &w, ITERS_PARSE / 2);
         BenchResult l = bench_run("libxml2: large+writes",  libxml2_write_parsed,  &w, ITERS_PARSE / 2);
         bench_print_result(&t);

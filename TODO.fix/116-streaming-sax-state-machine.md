@@ -14,7 +14,7 @@ document size. Required for parsing documents larger than RAM.
 
 ## Plan
 
-Convert the recursive-descent parser (`taurus_sax_parse`) from a
+Convert the recursive-descent parser (`leptris_sax_parse`) from a
 function-call stack to an explicit state machine that can be resumed
 mid-token. The states roughly map to today's recursive calls:
 
@@ -41,7 +41,7 @@ and emits events when complete tokens arrive.
 
 1. Implement the state machine alongside the existing recursive
    parser. Feature-flag the new path behind
-   `taurus_sax_parser_set_streaming(parser, 1)`.
+   `leptris_sax_parser_set_streaming(parser, 1)`.
 2. Run both parsers on the W3C XML test suite. Output must match.
 3. Once confidence is high, make the state machine the default and
    remove the recursive path.

@@ -48,16 +48,16 @@ jobs:
 
       - name: Configure (non-Windows)
         if: runner.os != 'Windows'
-        run: cmake -B build -S . -G Ninja -DTAURUS_BUILD_CLI=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release -DTAURUS_ENABLE_ICONV=OFF
+        run: cmake -B build -S . -G Ninja -DLEPTRIS_BUILD_CLI=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Configure (Windows / MSVC)
         if: runner.os == 'Windows'
         run: |
           cmake -B build -S . `
-            -DTAURUS_BUILD_CLI=ON `
+            -DLEPTRIS_BUILD_CLI=ON `
             -DBUILD_TESTING=ON `
-            -DTAURUS_ENABLE_UTF8PROC=OFF `
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF `
+            -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Build
         run: cmake --build build --config Release
@@ -81,6 +81,6 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           echo '<root><item id="1">Test</item><item id="2">Data</item></root>' > /tmp/test.xml
-          ./build/cli/taurus parse /tmp/test.xml
-          ./build/cli/taurus xpath --count /tmp/test.xml "count(//item)"
-          ./build/cli/taurus format --indent 2 /tmp/test.xml
+          ./build/cli/leptris parse /tmp/test.xml
+          ./build/cli/leptris xpath --count /tmp/test.xml "count(//item)"
+          ./build/cli/leptris format --indent 2 /tmp/test.xml

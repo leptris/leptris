@@ -3,14 +3,14 @@
 
 /**
  * @file test_adapter.h
- * @brief Adapter layer mapping pugixml API to Taurus API for benchmarking
+ * @brief Adapter layer mapping pugixml API to Leptris API for benchmarking
  *
  * This header provides a compatibility layer that allows pugixml test cases
- * to be compiled against Taurus API with minimal modifications.
+ * to be compiled against Leptris API with minimal modifications.
  * COMPACT MODE: Uses public API functions (no direct field access).
  */
 
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -30,9 +30,9 @@ static inline double get_time_us(void) {
 }
 
 /* Type mappings */
-typedef TaurusDocument xml_document;
-typedef TaurusElement xml_node;
-typedef TaurusAttribute xml_attribute;
+typedef LeptrisDocument xml_document;
+typedef LeptrisElement xml_node;
+typedef LeptrisAttribute xml_attribute;
 
 /* String macro (for wide char support in pugixml - we use narrow chars) */
 #define STR(x) x
@@ -52,92 +52,92 @@ typedef enum {
 } xml_node_type;
 
 /* Thread-local document tracking for element creation */
-static __thread TaurusDocument g_current_doc = NULL;
+static __thread LeptrisDocument g_current_doc = NULL;
 
 /* Document operations */
 
-static inline void xml_document_reset(TaurusDocument doc) {
+static inline void xml_document_reset(LeptrisDocument doc) {
     if (!doc) return;
 
     /* Get root element */
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     if (!root) return;
 
     /* Remove all children from root */
-    taurus_element_remove_children(root);
+    leptris_element_remove_children(root);
 }
 
-static inline TaurusDocument xml_document_create(void) {
+static inline LeptrisDocument xml_document_create(void) {
     /* Create/reuse document for benchmark */
     if (g_current_doc) {
         return g_current_doc;
     }
 
     const char* empty_xml = "<root/>";
-    TaurusStatus status;
-    g_current_doc = taurus_parse_string(empty_xml, strlen(empty_xml), &status);
+    LeptrisStatus status;
+    g_current_doc = leptris_parse_string(empty_xml, strlen(empty_xml), &status);
     return g_current_doc;
 }
 
-static inline void xml_document_free(TaurusDocument doc) {
+static inline void xml_document_free(LeptrisDocument doc) {
     /* For benchmark: don't actually free, just clear */
     if (doc && doc == g_current_doc) {
         xml_document_reset(doc);
     }
 }
 
-static inline TaurusElement xml_document_child(TaurusDocument doc, const char* name) {
+static inline LeptrisElement xml_document_child(LeptrisDocument doc, const char* name) {
     if (!doc) return NULL;
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     if (!root) return NULL;
 
-    const char* root_name = taurus_element_name(root);
+    const char* root_name = leptris_element_name(root);
     if (root_name && strcmp(root_name, name) == 0) {
         return root;
     }
     return NULL;
 }
 
-static inline TaurusElement xml_document_append_child(TaurusDocument doc, const char* name) {
+static inline LeptrisElement xml_document_append_child(LeptrisDocument doc, const char* name) {
     if (!doc || !name) return NULL;
 
     /* Track this document for element creation */
     g_current_doc = doc;
 
     /* Create root element if it doesn't exist */
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     if (!root) {
         return NULL;
     }
 
     /* Create and append child using public API */
-    TaurusElement child = taurus_element_create(doc, name);
+    LeptrisElement child = leptris_element_create(doc, name);
     if (!child) return NULL;
 
-    if (taurus_element_append_child(root, child) != TAURUS_OK) {
+    if (leptris_element_append_child(root, child) != LEPTRIS_OK) {
         return NULL;
     }
 
     return child;
 }
 
-static inline TaurusElement xml_document_prepend_child(TaurusDocument doc, const char* name) {
+static inline LeptrisElement xml_document_prepend_child(LeptrisDocument doc, const char* name) {
     if (!doc || !name) return NULL;
 
     /* Track this document for element creation */
     g_current_doc = doc;
 
     /* Create root element if it doesn't exist */
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     if (!root) {
         return NULL;
     }
 
     /* Create and prepend child using public API */
-    TaurusElement child = taurus_element_create(doc, name);
+    LeptrisElement child = leptris_element_create(doc, name);
     if (!child) return NULL;
 
-    if (taurus_element_prepend_child(root, child) != TAURUS_OK) {
+    if (leptris_element_prepend_child(root, child) != LEPTRIS_OK) {
         return NULL;
     }
 
@@ -145,162 +145,162 @@ static inline TaurusElement xml_document_prepend_child(TaurusDocument doc, const
 }
 
 /* Element operations */
-static inline TaurusElement xml_node_child(TaurusElement elem, const char* name) {
+static inline LeptrisElement xml_node_child(LeptrisElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
     /* Iterate through children */
-    TaurusElement child = taurus_element_first_child_any(elem);
+    LeptrisElement child = leptris_element_first_child_any(elem);
     while (child) {
-        const char* child_name = taurus_element_name(child);
+        const char* child_name = leptris_element_name(child);
         if (child_name && strcmp(child_name, name) == 0) {
             return child;
         }
-        child = taurus_element_next_sibling_any(child);
+        child = leptris_element_next_sibling_any(child);
     }
     return NULL;
 }
 
-static inline TaurusElement xml_node_first_child(TaurusElement elem) {
+static inline LeptrisElement xml_node_first_child(LeptrisElement elem) {
     if (!elem) return NULL;
-    return taurus_element_first_child_any(elem);
+    return leptris_element_first_child_any(elem);
 }
 
-static inline TaurusElement xml_node_last_child(TaurusElement elem) {
+static inline LeptrisElement xml_node_last_child(LeptrisElement elem) {
     if (!elem) return NULL;
-    return taurus_element_last_child_any(elem);
+    return leptris_element_last_child_any(elem);
 }
 
-static inline TaurusElement xml_node_next_sibling(TaurusElement elem) {
+static inline LeptrisElement xml_node_next_sibling(LeptrisElement elem) {
     if (!elem) return NULL;
-    return taurus_element_next_sibling(elem, NULL);
+    return leptris_element_next_sibling(elem, NULL);
 }
 
-static inline TaurusElement xml_node_append_child(TaurusElement elem, const char* name) {
+static inline LeptrisElement xml_node_append_child(LeptrisElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
-    TaurusElement child = taurus_element_create(g_current_doc, name);
+    LeptrisElement child = leptris_element_create(g_current_doc, name);
     if (!child) return NULL;
 
-    if (taurus_element_append_child(elem, child) != TAURUS_OK) {
+    if (leptris_element_append_child(elem, child) != LEPTRIS_OK) {
         return NULL;
     }
 
     return child;
 }
 
-static inline TaurusElement xml_node_prepend_child(TaurusElement elem, const char* name) {
+static inline LeptrisElement xml_node_prepend_child(LeptrisElement elem, const char* name) {
     if (!elem || !name) return NULL;
 
-    TaurusElement child = taurus_element_create(g_current_doc, name);
+    LeptrisElement child = leptris_element_create(g_current_doc, name);
     if (!child) return NULL;
 
-    if (taurus_element_prepend_child(elem, child) != TAURUS_OK) {
+    if (leptris_element_prepend_child(elem, child) != LEPTRIS_OK) {
         return NULL;
     }
 
     return child;
 }
 
-static inline TaurusElement xml_node_insert_child_after(TaurusElement elem,
+static inline LeptrisElement xml_node_insert_child_after(LeptrisElement elem,
                                                       const char* name,
-                                                      TaurusElement sibling) {
+                                                      LeptrisElement sibling) {
     if (!elem || !name || !sibling) return NULL;
 
-    TaurusElement child = taurus_element_create(g_current_doc, name);
+    LeptrisElement child = leptris_element_create(g_current_doc, name);
     if (!child) return NULL;
 
-    if (taurus_element_insert_after(sibling, child) != TAURUS_OK) {
+    if (leptris_element_insert_after(sibling, child) != LEPTRIS_OK) {
         return NULL;
     }
 
     return child;
 }
 
-static inline TaurusElement xml_node_insert_child_before(TaurusElement elem,
+static inline LeptrisElement xml_node_insert_child_before(LeptrisElement elem,
                                                        const char* name,
-                                                       TaurusElement sibling) {
+                                                       LeptrisElement sibling) {
     if (!elem || !name || !sibling) return NULL;
 
-    TaurusElement child = taurus_element_create(g_current_doc, name);
+    LeptrisElement child = leptris_element_create(g_current_doc, name);
     if (!child) return NULL;
 
-    if (taurus_element_insert_before(sibling, child) != TAURUS_OK) {
+    if (leptris_element_insert_before(sibling, child) != LEPTRIS_OK) {
         return NULL;
     }
 
     return child;
 }
 
-static inline int xml_node_set_name(TaurusElement elem, const char* name) {
+static inline int xml_node_set_name(LeptrisElement elem, const char* name) {
     if (!elem || !name) return 0;
-    return taurus_element_set_name(elem, name) == TAURUS_OK ? 1 : 0;
+    return leptris_element_set_name(elem, name) == LEPTRIS_OK ? 1 : 0;
 }
 
-static inline TaurusElement xml_node_append_copy(TaurusElement elem, TaurusElement source) {
+static inline LeptrisElement xml_node_append_copy(LeptrisElement elem, LeptrisElement source) {
     if (!elem || !source) return NULL;
-    return taurus_element_append_copy(elem, source);
+    return leptris_element_append_copy(elem, source);
 }
 
-static inline TaurusElement xml_node_prepend_copy(TaurusElement elem, TaurusElement source) {
+static inline LeptrisElement xml_node_prepend_copy(LeptrisElement elem, LeptrisElement source) {
     if (!elem || !source) return NULL;
-    return taurus_element_prepend_copy(elem, source);
+    return leptris_element_prepend_copy(elem, source);
 }
 
-static inline TaurusElement xml_node_insert_copy_after(TaurusElement elem,
-                                                     TaurusElement source,
-                                                     TaurusElement sibling) {
+static inline LeptrisElement xml_node_insert_copy_after(LeptrisElement elem,
+                                                     LeptrisElement source,
+                                                     LeptrisElement sibling) {
     if (!elem || !source || !sibling) return NULL;
-    return taurus_element_insert_copy_after(sibling, source);
+    return leptris_element_insert_copy_after(sibling, source);
 }
 
-static inline TaurusElement xml_node_insert_copy_before(TaurusElement elem,
-                                                      TaurusElement source,
-                                                      TaurusElement sibling) {
+static inline LeptrisElement xml_node_insert_copy_before(LeptrisElement elem,
+                                                      LeptrisElement source,
+                                                      LeptrisElement sibling) {
     if (!elem || !source || !sibling) return NULL;
-    return taurus_element_insert_copy_before(sibling, source);
+    return leptris_element_insert_copy_before(sibling, source);
 }
 
-static inline int xml_node_remove_child(TaurusElement elem, const char* name) {
+static inline int xml_node_remove_child(LeptrisElement elem, const char* name) {
     if (!elem || !name) return 0;
 
     /* Find child by name */
-    TaurusElement child = xml_node_child(elem, name);
+    LeptrisElement child = xml_node_child(elem, name);
     if (!child) return 0;
 
-    return taurus_element_remove_child(elem, child) == TAURUS_OK ? 1 : 0;
+    return leptris_element_remove_child(elem, child) == LEPTRIS_OK ? 1 : 0;
 }
 
-static inline int xml_node_remove_child_node(TaurusElement elem, TaurusElement child) {
+static inline int xml_node_remove_child_node(LeptrisElement elem, LeptrisElement child) {
     if (!elem || !child) return 0;
-    return taurus_element_remove_child(elem, child) == TAURUS_OK ? 1 : 0;
+    return leptris_element_remove_child(elem, child) == LEPTRIS_OK ? 1 : 0;
 }
 
-static inline const char* xml_node_name(TaurusElement elem) {
+static inline const char* xml_node_name(LeptrisElement elem) {
     if (!elem) return "";
-    const char* name = taurus_element_name(elem);
+    const char* name = leptris_element_name(elem);
     return name ? name : "";
 }
 
 /* Attribute operations */
-static inline TaurusAttribute xml_node_attribute(TaurusElement elem, const char* name) {
+static inline LeptrisAttribute xml_node_attribute(LeptrisElement elem, const char* name) {
     if (!elem || !name) return NULL;
-    /* Attribute object API not exposed in taurus.h */
+    /* Attribute object API not exposed in leptris.h */
     (void)name;
     return NULL;
 }
 
-static inline TaurusAttribute xml_node_first_attribute(TaurusElement elem) {
+static inline LeptrisAttribute xml_node_first_attribute(LeptrisElement elem) {
     if (!elem) return NULL;
-    /* Attribute object API not exposed in taurus.h */
+    /* Attribute object API not exposed in leptris.h */
     return NULL;
 }
 
 /* Null checks */
-static inline int xml_node_is_null(TaurusElement* elem) {
+static inline int xml_node_is_null(LeptrisElement* elem) {
     return elem == NULL ? 1 : 0;
 }
 
-static inline int xml_attribute_is_null(TaurusAttribute* attr) {
+static inline int xml_attribute_is_null(LeptrisAttribute* attr) {
     return attr == NULL ? 1 : 0;
 }
 

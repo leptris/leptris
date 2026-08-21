@@ -1,4 +1,4 @@
-# Taurus CLI Architecture
+# Leptris CLI Architecture
 
 **Version**: 0.5.0
 **Last Updated**: 2024-12-01
@@ -24,7 +24,7 @@
 
 ## Overview
 
-The Taurus CLI is a **thin layer** on top of the C library API (`libtaurus`). It provides a command-line interface for XML parsing, XPath queries, and document formatting while maintaining strict separation of concerns.
+The Leptris CLI is a **thin layer** on top of the C library API (`libleptris`). It provides a command-line interface for XML parsing, XPath queries, and document formatting while maintaining strict separation of concerns.
 
 ### Purpose
 
@@ -50,9 +50,9 @@ The Taurus CLI is a **thin layer** on top of the C library API (`libtaurus`). It
                        ↓
 ┌─────────────────────────────────────────────────┐
 │  API Layer (high-level operations)              │
-│  - taurus_parse()                                │
-│  - taurus_xpath_eval()                           │
-│  - taurus_document_free()                        │
+│  - leptris_parse()                                │
+│  - leptris_xpath_eval()                           │
+│  - leptris_document_free()                        │
 └─────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────┐
@@ -162,7 +162,7 @@ main.c
         ├─→ options.c (command options)
         ├─→ output.c (result formatting)
         ├─→ error.c (error reporting)
-        └─→ libtaurus (API calls)
+        └─→ libleptris (API calls)
 ```
 
 ### Module Sizes (Target)
@@ -191,7 +191,7 @@ main.c
 ### Typical Command Execution
 
 ```
-1. User runs: taurus xpath --format json file.xml "//book"
+1. User runs: leptris xpath --format json file.xml "//book"
                       ↓
 2. main() parses global options (--format json)
                       ↓
@@ -203,9 +203,9 @@ main.c
                       ↓
 6. xpath_execute() resolves options (CLI → ENV → Default)
                       ↓
-7. xpath_execute() calls taurus_parse(file.xml)
+7. xpath_execute() calls leptris_parse(file.xml)
                       ↓
-8. xpath_execute() calls taurus_xpath_eval(doc, "//book")
+8. xpath_execute() calls leptris_xpath_eval(doc, "//book")
                       ↓
 9. xpath_execute() creates JSON formatter
                       ↓
@@ -285,7 +285,7 @@ static cli_result_t mycommand_execute(int argc, char** argv) {
     }
 
     // 2. Call API
-    struct taurus_document* doc = taurus_parse(opts->input_file, &len);
+    struct leptris_document* doc = leptris_parse(opts->input_file, &len);
     if (!doc) {
         cli_error_io(opts->input_file, "read", strerror(errno));
         cli_mycommand_options_free(opts);
@@ -298,14 +298,14 @@ static cli_result_t mycommand_execute(int argc, char** argv) {
 
     // 4. Cleanup
     output_formatter_free(fmt);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     cli_mycommand_options_free(opts);
 
     return CLI_SUCCESS;
 }
 
 static void mycommand_print_help(void) {
-    printf("Usage: taurus mycommand [OPTIONS] FILE\n");
+    printf("Usage: leptris mycommand [OPTIONS] FILE\n");
     printf("\nOptions:\n");
     printf("  -h, --help          Show this help\n");
     // ... more options
@@ -336,7 +336,7 @@ Options are resolved from **three mutually exclusive sources** in order of speci
    └─→ --option value
 
 2. Environment Variables (medium priority)
-   └─→ TAURUS_OPTION=value
+   └─→ LEPTRIS_OPTION=value
 
 3. API Defaults (lowest priority)
    └─→ Hardcoded in code
@@ -354,8 +354,8 @@ if (cli_opts->indent_specified) {
     source = OPTION_SOURCE_CLI;
 }
 // Option in environment?
-else if (getenv("TAURUS_INDENT")) {
-    indent = atoi(getenv("TAURUS_INDENT"));  // Use ENV value
+else if (getenv("LEPTRIS_INDENT")) {
+    indent = atoi(getenv("LEPTRIS_INDENT"));  // Use ENV value
     source = OPTION_SOURCE_ENV;
 }
 // Use default
@@ -424,8 +424,8 @@ Without MECE, option handling becomes a mess:
 ```c
 // BAD: Non-MECE (what if CLI and ENV both set?)
 int indent = cli_opts->indent;  // Which one?
-if (getenv("TAURUS_INDENT")) {
-    indent = atoi(getenv("TAURUS_INDENT"));  // Override? Merge?
+if (getenv("LEPTRIS_INDENT")) {
+    indent = atoi(getenv("LEPTRIS_INDENT"));  // Override? Merge?
 }
 
 // GOOD: MECE (clear precedence)
@@ -521,7 +521,7 @@ book #1
 // In xpath command
 output_formatter_t* fmt = output_formatter_create(global_opts->format);
 
-struct taurus_xpath_result* result = taurus_xpath_eval(doc, expr, len);
+struct leptris_xpath_result* result = leptris_xpath_eval(doc, expr, len);
 
 // Dispatcher based on result type
 switch (result->type) {
@@ -631,7 +631,7 @@ static cli_result_t mycommand_execute(int argc, char** argv) {
 }
 
 static void mycommand_print_help(void) {
-    printf("Usage: taurus mycommand...\n");
+    printf("Usage: leptris mycommand...\n");
 }
 
 cli_command_t* cli_command_mycommand(void) {
@@ -762,16 +762,16 @@ options = cli_parse_options_new();
 cli_parse_options_free(options);
 
 // Use API memory functions
-doc = taurus_parse(...);
+doc = leptris_parse(...);
 // ... use doc
-taurus_document_free(doc);
+leptris_document_free(doc);
 ```
 
 ### Error Handling
 
 ```c
 // Always check return values
-struct taurus_document* doc = taurus_parse(file, &len);
+struct leptris_document* doc = leptris_parse(file, &len);
 if (!doc) {
     cli_error_io(file, "parse", "invalid XML");
     return CLI_ERROR_PARSE;
@@ -794,7 +794,7 @@ cli_result_t cmd_execute(...) {
 
 cleanup:
     if (fmt) output_formatter_free(fmt);
-    if (doc) taurus_document_free(doc);
+    if (doc) leptris_document_free(doc);
     if (options) cli_options_free(options);
     return result;
 }
@@ -826,7 +826,7 @@ TEST(OptionsTest, ParseValidOptions) {
 # Test parse command
 
 echo "<root><item/></root>" > test.xml
-./taurus parse test.xml
+./leptris parse test.xml
 if [ $? -eq 0 ]; then
     echo "PASS"
 else
@@ -840,7 +840,7 @@ rm test.xml
 
 ## Summary
 
-The Taurus CLI architecture is designed with:
+The Leptris CLI architecture is designed with:
 
 1. **MECE principles** throughout (options, commands, formats, errors)
 2. **Clear separation** of concerns (CLI → API → Library)

@@ -1,7 +1,7 @@
-require 'taurus'
+require 'leptris'
 
 xml = '<root><child id="1">hello</child><child id="2">world</child></root>'
-doc = Taurus::Document.parse(xml)
+doc = Leptris::Document.parse(xml)
 root = doc.root
 puts "root name: #{root.name}"
 puts "root text: #{root.text}"

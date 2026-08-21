@@ -3,7 +3,7 @@
  * Demonstrates the public API for working with namespaced documents.
  */
 
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -14,36 +14,36 @@ int main(void) {
         "  <c:cd id='c1'><c:title>Album</c:title></c:cd>"
         "</catalog>";
 
-    TaurusStatus status = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+    LeptrisStatus status = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &status);
     if (!doc) {
         fprintf(stderr, "parse failed (status=%d)\n", status);
         return 1;
     }
 
-    printf("=== Taurus Namespace Example ===\n\n");
+    printf("=== Leptris Namespace Example ===\n\n");
 
-    TaurusElement root = taurus_document_root(doc);
-    printf("root element: %s\n", taurus_element_name(root));
+    LeptrisElement root = leptris_document_root(doc);
+    printf("root element: %s\n", leptris_element_name(root));
 
-    TaurusElement child = taurus_element_first_child_any(root);
+    LeptrisElement child = leptris_element_first_child_any(root);
     while (child) {
-        const char* name = taurus_element_name(child);
-        const char* ns    = taurus_element_namespace(child);
-        const char* id    = taurus_element_attribute(child, "id");
+        const char* name = leptris_element_name(child);
+        const char* ns    = leptris_element_namespace(child);
+        const char* id    = leptris_element_attribute(child, "id");
         printf("  <%s> ns='%s' id='%s'\n",
                name ? name : "?",
                ns    ? ns    : "(none)",
                id    ? id    : "(none)");
-        child = taurus_element_next_sibling_any(child);
+        child = leptris_element_next_sibling_any(child);
     }
 
-    TaurusXPathResult r = taurus_xpath_eval(doc, NULL, "//b:title");
+    LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, "//b:title");
     if (r) {
-        printf("\nb: titles found: %zu\n", taurus_xpath_result_count(r));
-        taurus_xpath_result_free(r);
+        printf("\nb: titles found: %zu\n", leptris_xpath_result_count(r));
+        leptris_xpath_result_free(r);
     }
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     return 0;
 }

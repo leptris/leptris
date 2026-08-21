@@ -6,7 +6,7 @@
 
 ## What "FFI" means here
 
-A Foreign Function Interface is the boundary between libtaurus (C99)
+A Foreign Function Interface is the boundary between libleptris (C99)
 and code in other languages (Ruby, Python, Rust, etc.).  Every
 language with a C ABI can technically call our functions, but a good
 FFI is more than "C functions exist":
@@ -20,14 +20,14 @@ FFI is more than "C functions exist":
 
 ## Current state
 
-The public API in `src/include/taurus/` already does most of this:
+The public API in `src/include/leptris/` already does most of this:
 
-- All handles are opaque typedefs (`TaurusDocument`, `TaurusElement`,
-  `TaurusNodeRef`, `TaurusXPathResult`).
-- Status is via `TaurusStatus*` output parameter.
+- All handles are opaque typedefs (`LeptrisDocument`, `LeptrisElement`,
+  `LeptrisNodeRef`, `LeptrisXPathResult`).
+- Status is via `LeptrisStatus*` output parameter.
 - Memory ownership is documented per-function ("Memory:" comments).
 - Strings returned are either document-owned (do not free) or
-  caller-owned (free with `taurus_free_string`).
+  caller-owned (free with `leptris_free_string`).
 
 What's missing:
 
@@ -54,19 +54,19 @@ Add an `ABI.md` document describing what's stable.
 ### Phase 2: symbol versioning
 
 Use CMake's `set_target_properties(... VERSION X.Y.Z SOVERSION X)`
-on `taurus_shared` (already there).  On Linux, link with
-`-Wl,--version-script,taurus.map` to control which symbols are
+on `leptris_shared` (already there).  On Linux, link with
+`-Wl,--version-script,leptris.map` to control which symbols are
 exported.
 
 ### Phase 3: FFI-friendly shim (optional)
 
-A second header `taurus/ffi.h` that wraps common patterns:
+A second header `leptris/ffi.h` that wraps common patterns:
 
-- `taurus_parse_string_with_status(xml, len, status*)` — already
+- `leptris_parse_string_with_status(xml, len, status*)` — already
   exists; document.
-- `taurus_xpath_eval_returning_string(doc, expr, out*)` — wraps the
+- `leptris_xpath_eval_returning_string(doc, expr, out*)` — wraps the
   nodeset→string coercion that's currently 2 calls.
-- Iterators: `taurus_element_first_child` + `taurus_node_next_sibling`
+- Iterators: `leptris_element_first_child` + `leptris_node_next_sibling`
   pattern (already exists; document).
 
 Most languages' FFI can use the existing API directly; the shim is

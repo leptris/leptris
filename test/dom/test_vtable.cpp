@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <cstring>
-#include "taurus.h"
+#include "leptris.h"
 
 extern "C" {
 /* Internal headers — required to inspect the vtable registry. */
@@ -19,49 +19,49 @@ constexpr int kNodeTypeElement = 0;
 constexpr int kNodeTypeText    = 1;
 
 TEST(NodeVTableContract, TextTypeEnumIsLocked) {
-    EXPECT_EQ(TAURUS_NODE_TYPE_TEXT, kNodeTypeText);
+    EXPECT_EQ(LEPTRIS_NODE_TYPE_TEXT, kNodeTypeText);
 }
 
 TEST(NodeVTableContract, ElementTypeEnumIsLocked) {
-    EXPECT_EQ(TAURUS_NODE_TYPE_ELEMENT, kNodeTypeElement);
+    EXPECT_EQ(LEPTRIS_NODE_TYPE_ELEMENT, kNodeTypeElement);
 }
 
 // ---- Registry: every concrete node type has a registered vtable -----------
 
 TEST(NodeVTableRegistry, EveryConcreteTypeHasVtable) {
-    EXPECT_NE(taurus_node_vtable_for(TAURUS_NODE_TYPE_ELEMENT), nullptr);
-    EXPECT_NE(taurus_node_vtable_for(TAURUS_NODE_TYPE_TEXT),    nullptr);
-    EXPECT_NE(taurus_node_vtable_for(TAURUS_NODE_TYPE_COMMENT), nullptr);
-    EXPECT_NE(taurus_node_vtable_for(TAURUS_NODE_TYPE_CDATA),   nullptr);
-    EXPECT_NE(taurus_node_vtable_for(TAURUS_NODE_TYPE_PI),      nullptr);
-    EXPECT_NE(taurus_node_vtable_for(TAURUS_NODE_TYPE_DOCTYPE), nullptr);
+    EXPECT_NE(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_ELEMENT), nullptr);
+    EXPECT_NE(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_TEXT),    nullptr);
+    EXPECT_NE(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_COMMENT), nullptr);
+    EXPECT_NE(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_CDATA),   nullptr);
+    EXPECT_NE(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_PI),      nullptr);
+    EXPECT_NE(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_DOCTYPE), nullptr);
 }
 
 TEST(NodeVTableRegistry, AttributeTypeHasNoVtable) {
     /* XPath-internal node type, not serialized via the registry. */
-    EXPECT_EQ(taurus_node_vtable_for(TAURUS_NODE_TYPE_ATTRIBUTE), nullptr);
+    EXPECT_EQ(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_ATTRIBUTE), nullptr);
 }
 
 TEST(NodeVTableRegistry, OutOfRangeReturnsNull) {
-    EXPECT_EQ(taurus_node_vtable_for((TaurusNodeTypeEnum) 99), nullptr);
-    EXPECT_EQ(taurus_node_vtable_for((TaurusNodeTypeEnum) -1), nullptr);
+    EXPECT_EQ(leptris_node_vtable_for((LeptrisNodeTypeEnum) 99), nullptr);
+    EXPECT_EQ(leptris_node_vtable_for((LeptrisNodeTypeEnum) -1), nullptr);
 }
 
 TEST(NodeVTableRegistry, TypeNameIsHumanReadable) {
-    EXPECT_STREQ(taurus_node_vtable_for(TAURUS_NODE_TYPE_ELEMENT)->type_name, "element");
-    EXPECT_STREQ(taurus_node_vtable_for(TAURUS_NODE_TYPE_TEXT)->type_name,    "text");
-    EXPECT_STREQ(taurus_node_vtable_for(TAURUS_NODE_TYPE_COMMENT)->type_name, "comment");
-    EXPECT_STREQ(taurus_node_vtable_for(TAURUS_NODE_TYPE_CDATA)->type_name,   "cdata");
-    EXPECT_STREQ(taurus_node_vtable_for(TAURUS_NODE_TYPE_PI)->type_name,      "pi");
-    EXPECT_STREQ(taurus_node_vtable_for(TAURUS_NODE_TYPE_DOCTYPE)->type_name, "doctype");
+    EXPECT_STREQ(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_ELEMENT)->type_name, "element");
+    EXPECT_STREQ(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_TEXT)->type_name,    "text");
+    EXPECT_STREQ(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_COMMENT)->type_name, "comment");
+    EXPECT_STREQ(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_CDATA)->type_name,   "cdata");
+    EXPECT_STREQ(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_PI)->type_name,      "pi");
+    EXPECT_STREQ(leptris_node_vtable_for(LEPTRIS_NODE_TYPE_DOCTYPE)->type_name, "doctype");
 }
 
 TEST(NodeVTableRegistry, TypeEnumMatchesIndex) {
     /* Sanity: each vtable's type_enum matches its slot in the registry. */
-    for (int i = 0; i < TAURUS_NODE_TYPE_COUNT; i++) {
-        const TaurusNodeVTable* vt = taurus_node_vtable_for((TaurusNodeTypeEnum)i);
+    for (int i = 0; i < LEPTRIS_NODE_TYPE_COUNT; i++) {
+        const LeptrisNodeVTable* vt = leptris_node_vtable_for((LeptrisNodeTypeEnum)i);
         if (vt) {
-            EXPECT_EQ(vt->type_enum, (TaurusNodeTypeEnum)i);
+            EXPECT_EQ(vt->type_enum, (LeptrisNodeTypeEnum)i);
         }
     }
 }
@@ -80,13 +80,13 @@ TEST(NodeVTableDispatch, EveryNodeTypeSerializesViaVtable) {
         "<r attr='v'><!-- nested -->text<![CDATA[raw]]><?pi data?>"
         "<child/></r>";
 
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    /* taurus_document_serialize returns NULL only on allocation failure.
+    /* leptris_document_serialize returns NULL only on allocation failure.
      * Each vtable's serialize callback must run without crashing. */
-    char* out = taurus_document_serialize(doc, NULL);
+    char* out = leptris_document_serialize(doc, NULL);
     ASSERT_NE(out, nullptr);
     EXPECT_GT(std::strlen(out), 0u);
 
@@ -101,8 +101,8 @@ TEST(NodeVTableDispatch, EveryNodeTypeSerializesViaVtable) {
     EXPECT_NE(s.find("<?pi"),          std::string::npos);  // pi
     EXPECT_NE(s.find("<child"),        std::string::npos);  // child element
 
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 }  // namespace

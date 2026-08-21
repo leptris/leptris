@@ -5,13 +5,13 @@
 
 ## Why
 
-libtaurus is C99 with a stable ABI but no language bindings. To be
+libleptris is C99 with a stable ABI but no language bindings. To be
 usable from Ruby, Python, Rust, etc., we need FFI shims. Each binding
-wraps the public API in `src/include/taurus/`.
+wraps the public API in `src/include/leptris/`.
 
 ## Plan
 
-### Ruby (taurus-ruby)
+### Ruby (leptris-ruby)
 
 Use [ffi](https://github.com/ffi/ffi) gem (no C extension compilation
 needed by users). Map each public function to a Ruby method.
@@ -19,27 +19,27 @@ needed by users). Map each public function to a Ruby method.
 ```ruby
 require 'ffi'
 
-module Taurus
+module Leptris
   extend FFI::Library
-  ffi_lib 'libtaurus'
+  ffi_lib 'libleptris'
 
   class Document < FFI::AutoPointer; end
   class Element < FFI::Struct; end
 
-  attach_function :taurus_parse_string, [:string, :size_t, :pointer], Document
-  attach_function :taurus_document_root, [Document], Element
-  attach_function :taurus_element_name, [Element], :string
+  attach_function :leptris_parse_string, [:string, :size_t, :pointer], Document
+  attach_function :leptris_document_root, [Document], Element
+  attach_function :leptris_element_name, [Element], :string
   # ...
 end
 
-doc = Taurus.taurus_parse_string("<r/>", 4, nil)
-root = Taurus.taurus_document_root(doc)
-puts Taurus.taurus_element_name(root)
+doc = Leptris.leptris_parse_string("<r/>", 4, nil)
+root = Leptris.leptris_document_root(doc)
+puts Leptris.leptris_element_name(root)
 ```
 
-AutoPointer handles `taurus_document_free` on GC.
+AutoPointer handles `leptris_document_free` on GC.
 
-### Python (pytaurus)
+### Python (pyleptris)
 
 Use cffi (no C extension compilation). Similar pattern to Ruby.
 
@@ -47,25 +47,25 @@ Use cffi (no C extension compilation). Similar pattern to Ruby.
 from cffi import FFI
 ffi = FFI()
 ffi.cdef("""
-    typedef struct taurus_document* TaurusDocument;
-    typedef struct taurus_element* TaurusElement;
-    TaurusDocument taurus_parse_string(const char*, size_t, int*);
-    TaurusElement taurus_document_root(TaurusDocument);
-    const char* taurus_element_name(TaurusElement);
-    void taurus_document_free(TaurusDocument);
+    typedef struct leptris_document* LeptrisDocument;
+    typedef struct leptris_element* LeptrisElement;
+    LeptrisDocument leptris_parse_string(const char*, size_t, int*);
+    LeptrisElement leptris_document_root(LeptrisDocument);
+    const char* leptris_element_name(LeptrisElement);
+    void leptris_document_free(LeptrisDocument);
 """)
-lib = ffi.dlopen("libtaurus.dylib")
+lib = ffi.dlopen("libleptris.dylib")
 
 st = ffi.new("int*")
-doc = lib.taurus_parse_string(b"<r/>", 4, st)
-root = lib.taurus_document_root(doc)
-print(ffi.string(lib.taurus_element_name(root)))
-lib.taurus_document_free(doc)
+doc = lib.leptris_parse_string(b"<r/>", 4, st)
+root = lib.leptris_document_root(doc)
+print(ffi.string(lib.leptris_element_name(root)))
+lib.leptris_document_free(doc)
 ```
 
-Wrap in a `pytaurus.Document` class with `__enter__`/`__exit__` for RAII.
+Wrap in a `pyleptris.Document` class with `__enter__`/`__exit__` for RAII.
 
-### Rust (taurus-rs)
+### Rust (leptris-rs)
 
 Use `bindgen` to generate bindings from the public headers, plus a
 safe wrapper crate.
@@ -75,13 +75,13 @@ mod sys {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub struct Document(sys::TaurusDocument);
+pub struct Document(sys::LeptrisDocument);
 
 impl Document {
     pub fn parse(xml: &str) -> Result<Document, Error> {
-        let mut st = sys::TaurusStatus_TAURUS_OK;
+        let mut st = sys::LeptrisStatus_LEPTRIS_OK;
         let doc = unsafe {
-            sys::taurus_parse_string(xml.as_ptr(), xml.len(), &mut st)
+            sys::leptris_parse_string(xml.as_ptr(), xml.len(), &mut st)
         };
         if doc.is_null() { return Err(Error::from(st)); }
         Ok(Document(doc))
@@ -90,7 +90,7 @@ impl Document {
 
 impl Drop for Document {
     fn drop(&mut self) {
-        unsafe { sys::taurus_document_free(self.0) }
+        unsafe { sys::leptris_document_free(self.0) }
     }
 }
 ```

@@ -13,8 +13,8 @@
 ### Why it's hard
 
 The field is read in ~53 sites across 14 files. Most reads are
-simple (`elem->document` → `taurus_element_get_document(elem)`), but
-the `taurus_element_*_copy` family in element_modify.c recurses
+simple (`elem->document` → `leptris_element_get_document(elem)`), but
+the `leptris_element_*_copy` family in element_modify.c recurses
 deeply, reading `parent->document->pool` on every iteration.
 
 ### Refined design (after two failed attempts)
@@ -22,32 +22,32 @@ deeply, reading `parent->document->pool` on every iteration.
 **Architecture**:
 
 ```
-struct taurus_element {
+struct leptris_element {
     /* ... 56 bytes of existing fields ... */
     /* NO document field. 64 bytes total. */
 };
 
 /* New file: dom/root_doc_map.{c,h} */
-struct taurus_document* taurus_element_get_document(TaurusElement);
-TaurusMemoryPool*        taurus_element_get_pool(TaurusElement);
+struct leptris_document* leptris_element_get_document(LeptrisElement);
+LeptrisMemoryPool*        leptris_element_get_pool(LeptrisElement);
 ```
 
-Internally, `taurus_element_get_document(elem)` walks `parent_off`
+Internally, `leptris_element_get_document(elem)` walks `parent_off`
 to the root element, then looks up the root in a thread-local hash
 table (`g_root_doc_buckets[256]`).
 
 **Registration lifecycle**:
-- Parse: `taurus_root_doc_register(root, doc)` at end of `direct_parse_internal`.
-- `taurus_element_create_doc`: register the new element as a "root"
+- Parse: `leptris_root_doc_register(root, doc)` at end of `direct_parse_internal`.
+- `leptris_element_create_doc`: register the new element as a "root"
   of its doc. When later attached to a tree via `append_child`, the
   registration becomes stale but is never consulted (walks go past
   this element to the actual tree root).
-- `taurus_document_free`: `taurus_root_doc_unregister(root)` before
+- `leptris_document_free`: `leptris_root_doc_unregister(root)` before
   destroying pool.
 
 **Copy-function refactor** (the hard part):
 
-The `taurus_element_append_copy`, `prepend_copy`, `insert_copy_*`
+The `leptris_element_append_copy`, `prepend_copy`, `insert_copy_*`
 functions recurse and read `parent->document->pool` on every step.
 With the field gone, each recursion would walk to root — O(depth)
 per node, O(N × depth) total.
@@ -56,13 +56,13 @@ Refactor: add internal recursive helpers that take an explicit
 `pool` parameter:
 
 ```c
-static TaurusElement element_copy_internal(
-    TaurusElement parent, TaurusElement source,
-    TaurusMemoryPool* pool, struct taurus_document* doc);
+static LeptrisElement element_copy_internal(
+    LeptrisElement parent, LeptrisElement source,
+    LeptrisMemoryPool* pool, struct leptris_document* doc);
 ```
 
 The PUBLIC API computes `pool` and `doc` ONCE via
-`taurus_element_get_pool(parent)`, then threads them through.
+`leptris_element_get_pool(parent)`, then threads them through.
 
 ### Migration plan (sub-PRs)
 
@@ -72,19 +72,19 @@ Each sub-PR is independently testable. Land in sequence:
 _initially_ just return `elem->document`. No field removal yet.
 Migrate the simple read sites (element.c, element_query.c,
 element_compact.c, node_public.c, serialize.c, c14n.c,
-taurus_memory.c, taurus.c). No behavior change. ~25 sites.
+leptris_memory.c, leptris.c). No behavior change. ~25 sites.
 
-**Sub-PR 2**: Refactor `taurus_element_*_copy` in element_modify.c
+**Sub-PR 2**: Refactor `leptris_element_*_copy` in element_modify.c
 to use internal helpers with explicit pool/doc parameters. ~12
 sites in the copy family + ~10 other writes in element_modify.c.
 
 **Sub-PR 3**: Add register/unregister calls (parse, create_doc,
-document_free). Switch `taurus_element_get_document` from returning
+document_free). Switch `leptris_element_get_document` from returning
 `elem->document` to walk + hash lookup. Field stays for now;
 both old and new paths work.
 
 **Sub-PR 4**: Remove the field. All reads go through helpers.
-Static assert: `sizeof(taurus_element) == 64`. Minor version bump.
+Static assert: `sizeof(leptris_element) == 64`. Minor version bump.
 
 ### Estimated impact
 
@@ -112,21 +112,21 @@ Two consequences:
 ## Current layout (88 bytes)
 
 ```
-TaurusNode base              (24)  type, frozen, version, line, binding_wrapper
-TaurusCompactHeader header    (2)
+LeptrisNode base              (24)  type, frozen, version, line, binding_wrapper
+LeptrisCompactHeader header    (2)
 uint8_t attr_count            (1)
 uint16_t child_count          (2)
                              (3 pad)
 char* name                    (8)
-struct taurus_ns_cache* ns    (8)
+struct leptris_ns_cache* ns    (8)
 int32_t parent_off            (4)
 int32_t first_child_off       (4)
 int32_t last_child_off        (4)
 int32_t next_sibling_off      (4)
 int32_t first_attribute_off   (4)
 int32_t last_attribute_off    (4)
-struct taurus_namespace* ns2  (8)   ← redundant w/ ns_cache
-struct taurus_document* doc   (8)
+struct leptris_namespace* ns2  (8)   ← redundant w/ ns_cache
+struct leptris_document* doc   (8)
 ```
 
 `namespaces` (the linked-list head) overlaps with `ns_cache` in
@@ -140,7 +140,7 @@ on the common case where the element has zero or one namespace.
 Every element is reachable from its document's `new_dom_root`. The
 document pointer is only used to:
 
-- Walk back to the doc for `taurus_element_get_document(elem)` (public API).
+- Walk back to the doc for `leptris_element_get_document(elem)` (public API).
 - Look up custom XPath functions during evaluation.
 - Get the pool/allocator for new children (mutation API).
 
@@ -155,7 +155,7 @@ Add a `is_root` flag in `header.flags` so the walk stops at root.
 ### Phase B — Merge `namespaces` linked list into `ns_cache` (saves 8 bytes)
 
 Replace the `namespaces` pointer + `ns_cache` pointer with a single
-`struct taurus_ns_cache*` that carries prefix, URI, AND a linked
+`struct leptris_ns_cache*` that carries prefix, URI, AND a linked
 list of additional namespaces (rare case). Elements without
 namespaces pay nothing (NULL pointer). Elements with one namespace
 pay 16 bytes (one ns_cache alloc, ~free from pool). Elements with

@@ -9,7 +9,7 @@ Not recommended as a standalone change.
 
 ## Why
 
-`struct taurus_attribute` uses a `struct taurus_attribute* next`
+`struct leptris_attribute` uses a `struct leptris_attribute* next`
 pointer (8 bytes). The element struct's child links use compact
 int32 byte-offsets (4 bytes). Same idea, different storage. The
 inconsistency:
@@ -25,7 +25,7 @@ inconsistency:
 
 ### Phase A — int32 `next_off` for attribute list
 
-Replace `struct taurus_attribute* next` with `int32_t next_off`
+Replace `struct leptris_attribute* next` with `int32_t next_off`
 (byte offset from THIS attribute's address to the next). Direct
 arithmetic, no overflow table (mirrors how `direct_parse` wires
 element children).
@@ -45,8 +45,8 @@ memory but adds lookup overhead. Skip unless profiling shows wins.
 ## Risk
 
 - All `attr->next` access sites must move to offset arithmetic.
-- `taurus_element_get_first_attribute`,
-  `taurus_element_attributes_count`, `xpath_attribute_index_*` all
+- `leptris_element_get_first_attribute`,
+  `leptris_element_attributes_count`, `xpath_attribute_index_*` all
   walk the list — must use new accessor.
 
 ## Expected impact

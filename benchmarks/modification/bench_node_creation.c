@@ -2,11 +2,11 @@
  * Compares pool-based bulk allocation vs regular malloc-based allocation
  */
 
-#include "taurus.h"
-#include "taurus/memory/pool.h"
-#include "taurus/dom/comment.h"
-#include "taurus/dom/cdata.h"
-#include "taurus/dom/pi.h"
+#include "leptris.h"
+#include "leptris/memory/pool.h"
+#include "leptris/dom/comment.h"
+#include "leptris/dom/cdata.h"
+#include "leptris/dom/pi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,20 +26,20 @@ static void bench_comment_creation(void) {
     size_t len = strlen(content);
 
     /* With pool (fast path) */
-    TaurusMemoryPool* pool = taurus_pool_create();
+    LeptrisMemoryPool* pool = leptris_pool_create();
     double start = get_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        taurus_comment_create_fast(content, len, pool);
+        leptris_comment_create_fast(content, len, pool);
     }
     double end = get_time_us();
     double fast_time = (end - start) / ITERATIONS;
-    taurus_pool_destroy(pool);
+    leptris_pool_destroy(pool);
 
     /* Without pool (regular path) */
     start = get_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        TaurusCommentNode* node = taurus_comment_create(content);
-        taurus_comment_free(node);
+        LeptrisCommentNode* node = leptris_comment_create(content);
+        leptris_comment_free(node);
     }
     end = get_time_us();
     double regular_time = (end - start) / ITERATIONS;
@@ -57,20 +57,20 @@ static void bench_cdata_creation(void) {
     size_t len = strlen(content);
 
     /* With pool (fast path) */
-    TaurusMemoryPool* pool = taurus_pool_create();
+    LeptrisMemoryPool* pool = leptris_pool_create();
     double start = get_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        taurus_cdata_create_fast(content, len, pool);
+        leptris_cdata_create_fast(content, len, pool);
     }
     double end = get_time_us();
     double fast_time = (end - start) / ITERATIONS;
-    taurus_pool_destroy(pool);
+    leptris_pool_destroy(pool);
 
     /* Without pool (regular path) */
     start = get_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        TaurusCDATANode* node = taurus_cdata_create(content);
-        taurus_cdata_free(node);
+        LeptrisCDATANode* node = leptris_cdata_create(content);
+        leptris_cdata_free(node);
     }
     end = get_time_us();
     double regular_time = (end - start) / ITERATIONS;
@@ -90,20 +90,20 @@ static void bench_pi_creation(void) {
     size_t data_len = strlen(data);
 
     /* With pool (fast path) */
-    TaurusMemoryPool* pool = taurus_pool_create();
+    LeptrisMemoryPool* pool = leptris_pool_create();
     double start = get_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        taurus_pi_create_fast(target, target_len, data, data_len, pool);
+        leptris_pi_create_fast(target, target_len, data, data_len, pool);
     }
     double end = get_time_us();
     double fast_time = (end - start) / ITERATIONS;
-    taurus_pool_destroy(pool);
+    leptris_pool_destroy(pool);
 
     /* Without pool (regular path) */
     start = get_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        TaurusPINode* node = taurus_pi_create(target, data);
-        taurus_pi_free(node);
+        LeptrisPINode* node = leptris_pi_create(target, data);
+        leptris_pi_free(node);
     }
     end = get_time_us();
     double regular_time = (end - start) / ITERATIONS;

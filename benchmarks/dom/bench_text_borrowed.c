@@ -11,7 +11,7 @@
  *     ./build/benchmarks/bench_text_borrowed
  */
 #include "../common/benchmark.h"
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -56,8 +56,8 @@ static void build_doc(text_ctx_t* ctx) {
 
 static void bench_parse_text_heavy(void* c) {
     text_ctx_t* ctx = (text_ctx_t*)c;
-    TaurusDocument doc = taurus_parse_string(ctx->xml, ctx->len, NULL);
-    if (doc) taurus_document_free(doc);
+    LeptrisDocument doc = leptris_parse_string(ctx->xml, ctx->len, NULL);
+    if (doc) leptris_document_free(doc);
 }
 
 int main(void) {

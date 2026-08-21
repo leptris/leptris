@@ -13,7 +13,7 @@
  *
  * Expected results:
  * - pugixml: Fastest for small docs (simple, in-place modification)
- * - Taurus: Competitive for medium docs (SIMD optimizations)
+ * - Leptris: Competitive for medium docs (SIMD optimizations)
  * - libxml2: Slowest (full validation, more features)
  */
 
@@ -26,9 +26,9 @@
 #include <numeric>
 #include <cmath>
 
-// Taurus API (C)
+// Leptris API (C)
 extern "C" {
-#include <taurus.h>
+#include <leptris.h>
 }
 
 // pugixml API (C++)
@@ -141,24 +141,24 @@ static char* generate_medium_doc() {
 // Benchmark Functions
 // ============================================================================
 
-static Stats benchmark_taurus_parse(const char* xml, size_t len, int iterations) {
+static Stats benchmark_leptris_parse(const char* xml, size_t len, int iterations) {
     std::vector<uint64_t> times_ns;
 
     // Warmup
     for (int i = 0; i < 3; i++) {
-        TaurusDocument doc = taurus_parse_string(xml, len, NULL);
-        if (doc) taurus_document_free(doc);
+        LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
+        if (doc) leptris_document_free(doc);
     }
 
     // Measure
     for (int i = 0; i < iterations; i++) {
         uint64_t start = Timer::now_ns();
-        TaurusDocument doc = taurus_parse_string(xml, len, NULL);
+        LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
         uint64_t end = Timer::now_ns();
 
         if (doc) {
             times_ns.push_back(end - start);
-            taurus_document_free(doc);
+            leptris_document_free(doc);
         }
     }
 
@@ -202,16 +202,16 @@ static void print_result(const char* name, const Stats& stats) {
     printf("    P99:    %.2f µs\n", stats.p99_ns / 1000.0);
 }
 
-static void print_comparison(const char* doc_name, const Stats& taurus, const Stats& pugixml) {
-    double taurus_mean = taurus.mean_ns;
+static void print_comparison(const char* doc_name, const Stats& leptris, const Stats& pugixml) {
+    double leptris_mean = leptris.mean_ns;
     double pugixml_mean = pugixml.mean_ns;
-    double ratio = pugixml_mean / taurus_mean;
+    double ratio = pugixml_mean / leptris_mean;
 
     printf("\n  Comparison (%s):\n", doc_name);
-    printf("    Taurus:  %.2f µs\n", taurus_mean / 1000.0);
+    printf("    Leptris:  %.2f µs\n", leptris_mean / 1000.0);
     printf("    pugixml:  %.2f µs\n", pugixml_mean / 1000.0);
     printf("    Ratio:   %.2fx (%s)\n", ratio,
-           ratio >= 1.2 ? "Taurus AHEAD ✅" :
+           ratio >= 1.2 ? "Leptris AHEAD ✅" :
            ratio > 0.8 ? "~ PARITY" : "pugixml AHEAD ⚠️");
 }
 
@@ -245,16 +245,16 @@ int main(int argc, char** argv) {
         printf("═══ %s ═══\n", doc_names[doc_idx]);
         printf("Size: %zu bytes\n\n", len);
 
-        // Benchmark Taurus
-        Stats taurus_stats = benchmark_taurus_parse(xml, len, ITERATIONS);
-        print_result("Taurus", taurus_stats);
+        // Benchmark Leptris
+        Stats leptris_stats = benchmark_leptris_parse(xml, len, ITERATIONS);
+        print_result("Leptris", leptris_stats);
 
         // Benchmark pugixml
         Stats pugixml_stats = benchmark_pugixml_parse(xml, len, ITERATIONS);
         print_result("pugixml", pugixml_stats);
 
         // Comparison
-        print_comparison(doc_names[doc_idx], taurus_stats, pugixml_stats);
+        print_comparison(doc_names[doc_idx], leptris_stats, pugixml_stats);
         printf("\n");
     }
 
@@ -262,7 +262,7 @@ int main(int argc, char** argv) {
     printf("Conclusion:\n");
     printf("  - Parse-only tests show RAW parsing performance\n");
     printf("  - pugixml expected to lead for small docs (less overhead)\n");
-    printf("  - Taurus expected to be competitive for medium/large docs\n");
+    printf("  - Leptris expected to be competitive for medium/large docs\n");
     printf("═══════════════════════════════════════════════════════════\n");
     printf("\n");
 

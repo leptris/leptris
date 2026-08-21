@@ -16,7 +16,7 @@ require 'json'
 require 'optparse'
 
 LIB_COLORS = {
-  'taurus'  => { bg: 'rgba(88,166,255,0.7)', border: 'rgba(88,166,255,1)', accent: '#58a6ff' },
+  'leptris'  => { bg: 'rgba(88,166,255,0.7)', border: 'rgba(88,166,255,1)', accent: '#58a6ff' },
   'pugixml' => { bg: 'rgba(63,185,80,0.7)', border: 'rgba(63,185,80,1)', accent: '#3fb950' },
   'libxml2' => { bg: 'rgba(248,81,73,0.7)', border: 'rgba(248,81,73,1)', accent: '#f85149' }
 }.freeze

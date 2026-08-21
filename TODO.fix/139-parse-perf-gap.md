@@ -2,10 +2,10 @@
 
 ## Current state
 
-- **Parse**: taurus ~77 µs vs pugixml ~5 µs for a ~5 KB doc (15× slower)
-- **XPath**: taurus BEATS pugixml (8-17× faster on 4 of 5 queries)
-- **SAX**: taurus BEATS pugixml (3.6× faster)
-- **DOM reads**: taurus BEATS pugixml (attribute lookup, text extraction)
+- **Parse**: leptris ~77 µs vs pugixml ~5 µs for a ~5 KB doc (15× slower)
+- **XPath**: leptris BEATS pugixml (8-17× faster on 4 of 5 queries)
+- **SAX**: leptris BEATS pugixml (3.6× faster)
+- **DOM reads**: leptris BEATS pugixml (attribute lookup, text extraction)
 
 The parse gap is the ONLY remaining area where we lose badly. It is
 purely architectural.
@@ -18,7 +18,7 @@ loop — no per-node allocation, no pointer encoding, no struct init
 beyond writing the raw fields. Traversal is pointer arithmetic into
 the array.
 
-libtaurus uses **pool-allocated compact-pointer elements**:
+libleptris uses **pool-allocated compact-pointer elements**:
 - Each element: 96 bytes (pool_alloc + memset + field init)
 - Each attribute: 88 bytes (pool_alloc + StringView copies)
 - Tree edges: int32 byte offsets with overflow-table fallback
@@ -46,7 +46,7 @@ XML input
     ↓
 Flat parser → FlatDoc (contiguous array of FlatNode)
     ↓ (lazy, on first query or access)
-Promote → TaurusDocument (pool-allocated compact-pointer tree)
+Promote → LeptrisDocument (pool-allocated compact-pointer tree)
 ```
 
 Phase 1 (parse): Build a FlatDoc — a contiguous array of lightweight
@@ -54,7 +54,7 @@ parse nodes. No pool allocation. No compact pointers. No namespace
 processing. No StringView structs. Just raw offsets into the input
 buffer.
 
-Phase 2 (promote, lazy): Convert FlatDoc to TaurusDocument on first
+Phase 2 (promote, lazy): Convert FlatDoc to LeptrisDocument on first
 access that needs the compact-pointer tree (XPath, mutation, SAX
 traversal). The promote pass is a single linear walk that allocates
 pool elements and encodes compact pointers.
@@ -131,8 +131,8 @@ in the flat node — parent is implicit in the nesting).
 ### Phase A: FlatDoc struct + allocator (1 PR)
 
 New files:
-- `src/taurus/flat/flat_doc.h` — FlatNode, FlatAttr, FlatDoc structs
-- `src/taurus/flat/flat_doc.c` — create, free, append_node, append_attr
+- `src/leptris/flat/flat_doc.h` — FlatNode, FlatAttr, FlatDoc structs
+- `src/leptris/flat/flat_doc.c` — create, free, append_node, append_attr
 
 The allocator pre-allocates a contiguous array sized from the input
 length heuristic (~1 node per 100 bytes of XML, ~2 attrs per node).
@@ -150,12 +150,12 @@ uint32_t flat_doc_append_attr(FlatDoc* doc,
 ### Phase B: Flat parser (1 PR)
 
 New file:
-- `src/taurus/flat/flat_parser.c` — single-pass XML parser that
+- `src/leptris/flat/flat_parser.c` — single-pass XML parser that
   builds a FlatDoc directly from the input buffer.
 
 Reuses the tokenizer logic from `parser_new.c` (memchr-based scanning,
 ASCII tight loops for name parsing). The key difference: instead of
-calling `taurus_element_create_with_view` + `taurus_element_add_attribute`
+calling `leptris_element_create_with_view` + `leptris_element_add_attribute`
 (pool allocation + struct init + compact pointer encode), it calls
 `flat_doc_append_node` / `flat_doc_append_attr` (array append + index
 assignment).
@@ -164,14 +164,14 @@ Expected per-element cost: ~100 ns (array append + index set) vs
 current ~1500 ns (pool alloc + memset + compact pointer encode).
 That's 15× faster per element — matching pugixml.
 
-### Phase C: Promote FlatDoc → TaurusDocument (1 PR)
+### Phase C: Promote FlatDoc → LeptrisDocument (1 PR)
 
 New file:
-- `src/taurus/flat/flat_promote.c` — converts FlatDoc to
-  TaurusDocument (pool-allocated compact-pointer tree).
+- `src/leptris/flat/flat_promote.c` — converts FlatDoc to
+  LeptrisDocument (pool-allocated compact-pointer tree).
 
 Single linear walk over the flat node array. For each FlatNode:
-1. Pool-allocate a TaurusElement
+1. Pool-allocate a LeptrisElement
 2. Set name from flat node's name_offset (pool_strdup or lazy)
 3. Set parent/child/sibling via compact pointer encode
 4. For each FlatAttr: pool-allocate attribute, set fields
@@ -181,23 +181,23 @@ Expected promote cost: ~50 µs for 50 elements. This is the SAME
 cost as the current parse — but it only runs when the compact-pointer
 tree is actually needed.
 
-### Phase D: Lazy promote in taurus_parse_string (1 PR)
+### Phase D: Lazy promote in leptris_parse_string (1 PR)
 
-Modify `taurus_parse_string` to:
+Modify `leptris_parse_string` to:
 1. Parse into FlatDoc (fast)
-2. Return a TaurusDocument that wraps the FlatDoc
+2. Return a LeptrisDocument that wraps the FlatDoc
 3. On first access (root element, XPath, mutation), call promote
 
-The TaurusDocument struct gets a new field:
+The LeptrisDocument struct gets a new field:
 ```c
-struct taurus_document {
+struct leptris_document {
     ...
     FlatDoc* flat_doc;          // Set when parse produces flat doc
     int flat_promoted;          // 0 = still flat, 1 = promoted to tree
 };
 ```
 
-`taurus_document_root(doc)` checks `flat_promoted`. If 0, calls
+`leptris_document_root(doc)` checks `flat_promoted`. If 0, calls
 `flat_promote(doc)` first, then returns the root element.
 
 This is backward compatible: all existing API calls work because
@@ -235,7 +235,7 @@ parse-only workloads).
 
 ## Risk assessment
 
-- **ABI stability**: No change to public API. TaurusDocument is opaque.
+- **ABI stability**: No change to public API. LeptrisDocument is opaque.
   FlatDoc is internal.
 - **Correctness**: Flat parse must produce identical trees. The promote
   pass is deterministic.
@@ -248,12 +248,12 @@ parse-only workloads).
 ## File layout
 
 ```
-src/taurus/flat/
+src/leptris/flat/
   flat_doc.h        — FlatNode, FlatAttr, FlatDoc structs + API
   flat_doc.c        — FlatDoc allocator (array append)
   flat_parser.c     — XML parser → FlatDoc (single pass)
-  flat_promote.c    — FlatDoc → TaurusDocument (linear walk)
-src/CMakeLists.txt  — add flat/*.c to TAURUS_SOURCES
+  flat_promote.c    — FlatDoc → LeptrisDocument (linear walk)
+src/CMakeLists.txt  — add flat/*.c to LEPTRIS_SOURCES
 test/flat/
   test_flat_parse.cpp   — verify flat parse matches current parse
   test_flat_promote.cpp — verify promote produces valid tree

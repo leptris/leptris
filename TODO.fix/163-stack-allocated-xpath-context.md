@@ -3,31 +3,31 @@
 ## Status
 
 **DONE.** Added `xpath_context_init` / `xpath_context_cleanup` to
-`evaluator.h` / `evaluator.c`. Updated `taurus_xpath_eval` and
-`taurus_xpath_eval_with_vars` in `xpath_public.c` to stack-allocate
+`evaluator.h` / `evaluator.c`. Updated `leptris_xpath_eval` and
+`leptris_xpath_eval_with_vars` in `xpath_public.c` to stack-allocate
 the context via `XPathContext ctx_storage;` instead of malloc'ing.
 Legacy `xpath_context_new` / `xpath_context_free` preserved as
 thin wrappers (malloc + init / cleanup + free) for any external
 callers.
 
 Benchmark delta is in the noise floor (4.59 µs → 4.44–4.54 µs
-total CPU on `bench_xpath_taurus`). Structural win: one fewer
-malloc/free syscall per `taurus_xpath_eval` call.
+total CPU on `bench_xpath_leptris`). Structural win: one fewer
+malloc/free syscall per `leptris_xpath_eval` call.
 
 ## Why
 
 `xpath_context_new` allocates a ~256-byte `XPathContext` struct
-on the heap per `taurus_xpath_eval` call. The struct lives for
+on the heap per `leptris_xpath_eval` call. The struct lives for
 the duration of one evaluation; no one stashes the pointer past
 `xpath_context_free`.
 
-On `bench_xpath_taurus` this is ~100 ns per call — modest, but
+On `bench_xpath_leptris` this is ~100 ns per call — modest, but
 consistent across every eval. Stack-allocating the context in
-`taurus_xpath_eval` would eliminate the malloc/free pair.
+`leptris_xpath_eval` would eliminate the malloc/free pair.
 
 ## Plan
 
-### Phase A — Stack-allocate in `taurus_xpath_eval`
+### Phase A — Stack-allocate in `leptris_xpath_eval`
 
 Replace:
 ```c
@@ -53,7 +53,7 @@ freeing the struct.
 Search for callers that store `XPathContext*` past the eval call:
 
 ```
-grep -rn 'XPathContext\*' src/taurus/xpath/ | grep -v 'static\|xpath_context_'
+grep -rn 'XPathContext\*' src/leptris/xpath/ | grep -v 'static\|xpath_context_'
 ```
 
 The only legitimate holders during a single eval are:
@@ -67,7 +67,7 @@ allocate their own context on the heap.
 ## Risk
 
 - If any caller does stash the context pointer for later use,
-  they'll have a dangling pointer after `taurus_xpath_eval`
+  they'll have a dangling pointer after `leptris_xpath_eval`
   returns. Need a thorough audit.
 - The struct is 256 bytes (mostly the `error_msg[256]` buffer).
   Stack-allocating may stress restricted-stack environments
@@ -77,7 +77,7 @@ allocate their own context on the heap.
 
 ## Expected impact
 
-~100 ns per `taurus_xpath_eval` call. On `bench_xpath_taurus`
+~100 ns per `leptris_xpath_eval` call. On `bench_xpath_leptris`
 total wall (~6 µs) that's ~1.5%. On its own not material; in
 combination with [[162-result-struct-free-list]] and the existing
 nodeset free-list, the per-call malloc count drops from ~5 to ~0.

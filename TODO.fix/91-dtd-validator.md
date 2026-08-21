@@ -5,7 +5,7 @@
 
 ## What's shipped
 
-The DTD validator at `src/taurus/dtd/{parser,model,resolver,content_check,validator}.c`
+The DTD validator at `src/leptris/dtd/{parser,model,resolver,content_check,validator}.c`
 implements:
 
 - **Element content models**: EMPTY, ANY, Mixed (`(#PCDATA | tag)*`),
@@ -84,5 +84,5 @@ Each phase:
 - W3C conformance test suite cases for that feature all pass
 - New specs cover at minimum: positive case, negative case,
   error-recovery case, no-leak case
-- Public API (`taurus_dtd_validate`) error reporting identifies
+- Public API (`leptris_dtd_validate`) error reporting identifies
   the specific failure type

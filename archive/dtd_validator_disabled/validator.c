@@ -5,15 +5,15 @@
  * Validates documents against DTD rules.
  */
 
-#include "../../include/taurus/dtd.h"
-#include "../../include/taurus.h"
+#include "../../include/leptris/dtd.h"
+#include "../../include/leptris.h"
 #include "model.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
 /* Helper: Find element declaration */
-static DTDElementDecl* find_element_decl(TaurusDTD* dtd, const char* name) {
+static DTDElementDecl* find_element_decl(LeptrisDTD* dtd, const char* name) {
     for (size_t i = 0; i < dtd->element_count; i++) {
         if (strcmp(dtd->elements[i]->name, name) == 0) {
             return dtd->elements[i];
@@ -23,7 +23,7 @@ static DTDElementDecl* find_element_decl(TaurusDTD* dtd, const char* name) {
 }
 
 /* Helper: Find attribute declarations for element */
-static int find_attribute_decls(TaurusDTD* dtd, const char* element_name,
+static int find_attribute_decls(LeptrisDTD* dtd, const char* element_name,
                                 DTDAttributeDecl*** out_decls, size_t* out_count) {
     *out_decls = NULL;
     *out_count = 0;
@@ -46,8 +46,8 @@ static int find_attribute_decls(TaurusDTD* dtd, const char* element_name,
 }
 
 /* Validate element */
-static int validate_element(TaurusElement elem, TaurusDTD* dtd, TaurusDTDError* error) {
-    const char* elem_name = taurus_element_name(elem);
+static int validate_element(LeptrisElement elem, LeptrisDTD* dtd, LeptrisDTDError* error) {
+    const char* elem_name = leptris_element_name(elem);
     if (!elem_name) {
         if (error) {
             error->message = strdup("Element has no name");
@@ -61,7 +61,7 @@ static int validate_element(TaurusElement elem, TaurusDTD* dtd, TaurusDTDError* 
 
     /* Validate content model (basic) - only if element declaration exists */
     if (elem_decl) {
-        size_t child_count = taurus_element_child_count(elem);
+        size_t child_count = leptris_element_child_count(elem);
 
         if (elem_decl->content_type == DTD_CONTENT_EMPTY && child_count > 0) {
             if (error) {
@@ -87,7 +87,7 @@ static int validate_element(TaurusElement elem, TaurusDTD* dtd, TaurusDTDError* 
     /* Check required attributes */
     for (size_t i = 0; i < attr_count; i++) {
         if (attr_decls[i]->default_type == DTD_ATTR_REQUIRED) {
-            const char* attr_value = taurus_element_attribute(elem, attr_decls[i]->attr_name);
+            const char* attr_value = leptris_element_attribute(elem, attr_decls[i]->attr_name);
             if (!attr_value) {
                 if (error) {
                     char msg[512];
@@ -106,9 +106,9 @@ static int validate_element(TaurusElement elem, TaurusDTD* dtd, TaurusDTDError* 
     free(attr_decls);
 
     /* Recursively validate children */
-    size_t child_count = taurus_element_child_count(elem);
+    size_t child_count = leptris_element_child_count(elem);
     for (size_t i = 0; i < child_count; i++) {
-        TaurusElement child = taurus_element_child(elem, i);
+        LeptrisElement child = leptris_element_child(elem, i);
         if (child) {
             int result = validate_element(child, dtd, error);
             if (result != 1) {
@@ -123,7 +123,7 @@ static int validate_element(TaurusElement elem, TaurusDTD* dtd, TaurusDTDError* 
 /**
  * Validate document against DTD
  */
-int taurus_dtd_validate(TaurusDocument doc, TaurusDTD* dtd, TaurusDTDError* error) {
+int leptris_dtd_validate(LeptrisDocument doc, LeptrisDTD* dtd, LeptrisDTDError* error) {
     if (!doc || !dtd) return -1;
 
     /* Initialize error if provided */
@@ -135,7 +135,7 @@ int taurus_dtd_validate(TaurusDocument doc, TaurusDTD* dtd, TaurusDTDError* erro
     }
 
     /* Get root element */
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     if (!root) {
         if (error) {
             error->message = strdup("Document has no root element");
@@ -150,7 +150,7 @@ int taurus_dtd_validate(TaurusDocument doc, TaurusDTD* dtd, TaurusDTDError* erro
 /**
  * Free DTD error
  */
-void taurus_dtd_error_free(TaurusDTDError* error) {
+void leptris_dtd_error_free(LeptrisDTDError* error) {
     if (!error) return;
 
     free(error->message);

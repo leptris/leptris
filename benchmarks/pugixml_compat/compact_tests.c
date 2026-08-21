@@ -2,7 +2,7 @@
  * @file compact_tests.c
  * @brief Compact mode tests adapted from pugixml test_compact.cpp
  *
- * Tests TaurusElementCompact - the 40-byte compact element structure.
+ * Tests LeptrisElementCompact - the 40-byte compact element structure.
  */
 
 #include "test_adapter.h"
@@ -77,7 +77,7 @@ TEST(test_compact_serialization)
     xml_document_load_string(doc, "<root><a><b/></a></root>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     free(xml);

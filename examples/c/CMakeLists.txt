@@ -1,25 +1,25 @@
-# C Examples for Taurus
-# Demonstrates various features of the libtaurus API
+# C Examples for Leptris
+# Demonstrates various features of the libleptris API
 
 # Basic example - demonstrates parsing and XPath
 add_executable(basic_example basic_example.c)
-target_link_libraries(basic_example PRIVATE taurus)
+target_link_libraries(basic_example PRIVATE leptris)
 
 # XPath example - comprehensive XPath 1.0 queries
 add_executable(xpath_example xpath_example.c)
-target_link_libraries(xpath_example PRIVATE taurus)
+target_link_libraries(xpath_example PRIVATE leptris)
 
 # Namespace example - XML Namespaces 1.0 support
 add_executable(namespace_example namespace_example.c)
-target_link_libraries(namespace_example PRIVATE taurus)
+target_link_libraries(namespace_example PRIVATE leptris)
 
 # Error handling example - proper error handling patterns
 add_executable(error_handling_example error_handling_example.c)
-target_link_libraries(error_handling_example PRIVATE taurus)
+target_link_libraries(error_handling_example PRIVATE leptris)
 
 # DOM traversal example - navigating the document tree
 add_executable(dom_traversal_example dom_traversal_example.c)
-target_link_libraries(dom_traversal_example PRIVATE taurus)
+target_link_libraries(dom_traversal_example PRIVATE leptris)
 
 # Set common properties for all examples
 set(EXAMPLE_TARGETS

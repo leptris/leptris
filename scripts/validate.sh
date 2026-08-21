@@ -1,11 +1,11 @@
 #!/bin/bash
-# Taurus Validation Script
+# Leptris Validation Script
 # Run this script to validate that all tests pass and benchmarks work correctly
 
 set -e  # Exit on error
 
 echo "==================================="
-echo "Taurus Validation Script"
+echo "Leptris Validation Script"
 echo "==================================="
 echo ""
 
@@ -26,11 +26,11 @@ echo ""
 echo "Step 2: Configure CMake..."
 cmake -B build -S . \
     -DCMAKE_BUILD_TYPE=Release \
-    -DTAURUS_BUILD_CLI=ON \
-    -DTAURUS_BUILD_BENCHMARKS=ON \
+    -DLEPTRIS_BUILD_CLI=ON \
+    -DLEPTRIS_BUILD_BENCHMARKS=ON \
     -DBUILD_TESTING=ON \
-    -DTAURUS_ENABLE_LIBXML2_BENCH=ON \
-    -DTAURUS_ENABLE_PUGIXML_BENCH=ON
+    -DLEPTRIS_ENABLE_LIBXML2_BENCH=ON \
+    -DLEPTRIS_ENABLE_PUGIXML_BENCH=ON
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ CMake configuration successful${NC}"
@@ -150,17 +150,17 @@ echo "Step 10: Check element structure size..."
 cat > /tmp/check_element_size.c << 'EOF'
 #include <stdio.h>
 #include <stdlib.h>
-#include "taurus.h"
+#include "leptris.h"
 
 int main() {
-    printf("sizeof(struct taurus_element) = %zu bytes\n", sizeof(struct taurus_element));
+    printf("sizeof(struct leptris_element) = %zu bytes\n", sizeof(struct leptris_element));
     return 0;
 }
 EOF
 
 gcc -I"$INCLUDE_DIR" \
     /tmp/check_element_size.c -o /tmp/check_element_size \
-    -L"$BUILD_DIR/src" -ltaurus
+    -L"$BUILD_DIR/src" -lleptris
 
 ELEMENT_SIZE=$(/tmp/check_element_size 2>/dev/null | grep "sizeof" | awk '{print $NF}')
 echo "Element size: $ELEMENT_SIZE bytes"
@@ -195,5 +195,5 @@ echo "Next Steps:"
 echo "  1. View benchmark results above to compare performance"
 echo "  2. Run individual tests with: ./build/test/c/test_dom"
 echo "  3. Run specific benchmarks with: ./build/benchmarks/dom_benchmark"
-echo "  4. Test CLI with: ./build/cli/taurus parse test/fixtures/libxml2/svg1"
+echo "  4. Test CLI with: ./build/cli/leptris parse test/fixtures/libxml2/svg1"
 echo ""

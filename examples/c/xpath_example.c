@@ -4,7 +4,7 @@
  * results of each type (nodeset, string, number, boolean).
  */
 
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -12,38 +12,38 @@ static const char* RESULT_TYPE_NAMES[] = {
     "nodeset", "boolean", "number", "string"
 };
 
-static void show_result(TaurusDocument doc, const char* expr) {
+static void show_result(LeptrisDocument doc, const char* expr) {
     printf("  %-50s => ", expr);
-    TaurusXPathResult r = taurus_xpath_eval(doc, NULL, expr);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, expr);
     if (!r) {
         printf("(error)\n");
         return;
     }
 
-    TaurusXPathResultType t = taurus_xpath_result_type(r);
+    LeptrisXPathResultType t = leptris_xpath_result_type(r);
     switch (t) {
-        case TAURUS_XPATH_NODESET: {
-            size_t n = taurus_xpath_result_count(r);
+        case LEPTRIS_XPATH_NODESET: {
+            size_t n = leptris_xpath_result_count(r);
             printf("nodeset[%zu]\n", n);
             break;
         }
-        case TAURUS_XPATH_BOOLEAN:
-            printf("boolean(%s)\n", taurus_xpath_result_boolean(r) ? "true" : "false");
+        case LEPTRIS_XPATH_BOOLEAN:
+            printf("boolean(%s)\n", leptris_xpath_result_boolean(r) ? "true" : "false");
             break;
-        case TAURUS_XPATH_NUMBER:
-            printf("number(%g)\n", taurus_xpath_result_number(r));
+        case LEPTRIS_XPATH_NUMBER:
+            printf("number(%g)\n", leptris_xpath_result_number(r));
             break;
-        case TAURUS_XPATH_STRING: {
-            char* s = taurus_xpath_result_string(r);
+        case LEPTRIS_XPATH_STRING: {
+            char* s = leptris_xpath_result_string(r);
             printf("string(\"%s\")\n", s ? s : "");
-            if (s) taurus_free_string(s);
+            if (s) leptris_free_string(s);
             break;
         }
         default:
             printf("unknown(%d)\n", (int)t);
             break;
     }
-    taurus_xpath_result_free(r);
+    leptris_xpath_result_free(r);
 }
 
 int main(void) {
@@ -54,14 +54,14 @@ int main(void) {
         "  <book id='b3'><title>Prolog</title><price>49</price></book>"
         "</library>";
 
-    TaurusStatus status = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+    LeptrisStatus status = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &status);
     if (!doc) {
         fprintf(stderr, "parse failed (status=%d)\n", status);
         return 1;
     }
 
-    printf("=== Taurus XPath Example ===\n\n");
+    printf("=== Leptris XPath Example ===\n\n");
     show_result(doc, "count(//book)");
     show_result(doc, "//book[@price > 35]/title");
     show_result(doc, "string(//book[1]/title)");
@@ -69,6 +69,6 @@ int main(void) {
     show_result(doc, "sum(//price)");
     show_result(doc, "//book[contains(title, 'C')]");
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     return 0;
 }

@@ -18,7 +18,7 @@ pugixml's `xml_node_struct` is 20-24 bytes:
 - `compact_string` name (2B)
 - `compact_string` value (2B)
 
-taurus's `struct taurus_element` is 64 bytes (already one cache line,
+leptris's `struct leptris_element` is 64 bytes (already one cache line,
 but 3× pugixml's size). The extra space goes to:
 - 4-byte int32 offsets (parent_off, first_child_off, first_attr_off,
   ns_head_off) instead of 1-byte
@@ -27,7 +27,7 @@ but 3× pugixml's size). The extra space goes to:
 - 4-byte line + child_count fields
 
 Every tree walk processes one cache line per node visited. pugixml
-fits 4 nodes per cache line; taurus fits 1. On deep traversals or
+fits 4 nodes per cache line; leptris fits 1. On deep traversals or
 wide attribute lists, this is the dominant cost.
 
 ## Scope of the migration
@@ -71,10 +71,10 @@ This is genuinely multi-week work. The migration touches:
 
 ## Estimated impact
 
-- `bench_dom_taurus` Tree Traversal: 1.5-2× (more nodes per cache line).
+- `bench_dom_leptris` Tree Traversal: 1.5-2× (more nodes per cache line).
 - `benchmark_many_attrs` K=50: 2-3× (attribute structs shrink from
   ~80B to ~16B; 5× more attrs per cache line).
-- `bench_xpath_taurus`: 1.2-1.5× (VM tree walks).
+- `bench_xpath_leptris`: 1.2-1.5× (VM tree walks).
 
 Combined with TODO 167 (already shipped 3-4×) and TODO 170
 (amalgamation), this would close most of the remaining gap to pugixml.

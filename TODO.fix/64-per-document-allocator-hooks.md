@@ -14,36 +14,36 @@ same thread can't have different allocators.
 ### Step 1: fields on document + pool
 
 ```c
-struct taurus_document {
+struct leptris_document {
     // ...
-    taurus_allocation_function alloc_hook;
-    taurus_deallocation_function dealloc_hook;
+    leptris_allocation_function alloc_hook;
+    leptris_deallocation_function dealloc_hook;
 };
 
-struct taurus_memory_pool {
+struct leptris_memory_pool {
     // ...
-    taurus_allocation_function alloc_hook;
-    taurus_deallocation_function dealloc_hook;
+    leptris_allocation_function alloc_hook;
+    leptris_deallocation_function dealloc_hook;
 };
 ```
 
 ### Step 2: pool uses its hooks
 
-`taurus_pool_alloc` calls `pool->alloc_hook` instead of the global.
+`leptris_pool_alloc` calls `pool->alloc_hook` instead of the global.
 Same for free.  Defaults: NULL → use the global thread-default.
 
 ### Step 3: parser creates pool with document's hooks
 
-`taurus_parse` reads `doc->alloc_hook` and passes to
-`taurus_pool_create_with_hooks`.
+`leptris_parse` reads `doc->alloc_hook` and passes to
+`leptris_pool_create_with_hooks`.
 
 ### Step 4: public API
 
 ```c
-TAURUS_API TaurusStatus taurus_document_set_allocators(
-    TaurusDocument doc,
-    taurus_allocation_function alloc,
-    taurus_deallocation_function dealloc);
+LEPTRIS_API LeptrisStatus leptris_document_set_allocators(
+    LeptrisDocument doc,
+    leptris_allocation_function alloc,
+    leptris_deallocation_function dealloc);
 ```
 
 Must be called BEFORE parsing; changes after parse have no effect.

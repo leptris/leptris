@@ -9,7 +9,7 @@ requires deep refactors documented below.
 
 ### Where we're FASTER than competitors
 
-| Op | taurus | best competitor | ratio |
+| Op | leptris | best competitor | ratio |
 |---|---|---|---|
 | Attribute access ×100 | 2.0 µs | 4 µs (libxml2) | **0.5×** |
 | Text extraction ×100 | 1.8 µs | 5 µs (libxml2) | **0.36×** |
@@ -18,7 +18,7 @@ requires deep refactors documented below.
 
 ### Where we're SLOWER
 
-| Op | taurus | best competitor | ratio |
+| Op | leptris | best competitor | ratio |
 |---|---|---|---|
 | DOM parse (~4 KB) | 106 µs | 45 µs (libxml2) | 2.4× |
 | Tree traversal | 7.1 µs | 1.5 µs (libxml2) | 4.7× |
@@ -92,11 +92,11 @@ improves.
 
 ```bash
 cmake --build build
-build/benchmarks/bench_dom_taurus        # parse + traversal + access
+build/benchmarks/bench_dom_leptris        # parse + traversal + access
 build/benchmarks/bench_dom_libxml2       # competitor
-build/benchmarks/bench_xpath_taurus      # cached XPath
+build/benchmarks/bench_xpath_leptris      # cached XPath
 build/benchmarks/bench_xpath_pugixml     # competitor
-build/benchmarks/bench_sax_taurus        # SAX
+build/benchmarks/bench_sax_leptris        # SAX
 build/benchmarks/bench_sax_libxml2       # competitor
 build/benchmarks/benchmark_write         # mutation comparison
 ctest --test-dir build -j4               # 305/308 pass (3 pre-existing flaky)

@@ -12,49 +12,49 @@ solution; this TODO executes it.
 
 ## Fix
 
-### Step 1: fields on TaurusMemoryPool
+### Step 1: fields on LeptrisMemoryPool
 
 ```c
-struct taurus_memory_pool {
+struct leptris_memory_pool {
     // ... existing fields
-    taurus_allocation_function  alloc_hook;
-    taurus_deallocation_function dealloc_hook;
+    leptris_allocation_function  alloc_hook;
+    leptris_deallocation_function dealloc_hook;
 };
 ```
 
-`taurus_pool_alloc` calls `pool->alloc_hook ? pool->alloc_hook :
-taurus_alloc_hook` instead of always the global.
+`leptris_pool_alloc` calls `pool->alloc_hook ? pool->alloc_hook :
+leptris_alloc_hook` instead of always the global.
 
 ### Step 2: constructor with hooks
 
 ```c
-TaurusMemoryPool* taurus_pool_create_with_hooks(
+LeptrisMemoryPool* leptris_pool_create_with_hooks(
     size_t page_size,
-    taurus_allocation_function alloc,
-    taurus_deallocation_function dealloc);
+    leptris_allocation_function alloc,
+    leptris_deallocation_function dealloc);
 ```
 
 Defaults: NULL → use thread-default globals.
 
-### Step 3: fields on TaurusDocument + parser uses them
+### Step 3: fields on LeptrisDocument + parser uses them
 
 ```c
-struct taurus_document {
+struct leptris_document {
     // ...
-    taurus_allocation_function alloc_hook;
-    taurus_deallocation_function dealloc_hook;
+    leptris_allocation_function alloc_hook;
+    leptris_deallocation_function dealloc_hook;
 };
 ```
 
-`taurus_parse` passes `doc->alloc_hook` to the pool constructor.
+`leptris_parse` passes `doc->alloc_hook` to the pool constructor.
 
 ### Step 4: public API
 
 ```c
-TAURUS_API TaurusStatus taurus_document_set_allocators(
-    TaurusDocument doc,
-    taurus_allocation_function alloc,
-    taurus_deallocation_function dealloc);
+LEPTRIS_API LeptrisStatus leptris_document_set_allocators(
+    LeptrisDocument doc,
+    leptris_allocation_function alloc,
+    leptris_deallocation_function dealloc);
 ```
 
 Note: must be called BEFORE parsing; changes after parse have no
@@ -68,13 +68,13 @@ TEST(DocumentAllocators, PerDocumentOverride) {
     auto my_alloc = [](size_t n) -> void* { alloc_count++; return malloc(n); };
     auto my_free = [](void* p) { free(p); };
 
-    /* Set before parsing — taurus_parse_string_with_options or
+    /* Set before parsing — leptris_parse_string_with_options or
      * similar path that lets us pre-create a doc... actually the API
      * doesn't support pre-parsing allocation config.  See TODO 73. */
 }
 ```
 
-Realistically the API needs `taurus_parse_with_options` to honor
+Realistically the API needs `leptris_parse_with_options` to honor
 `opts->alloc_hook`.  Add that.
 
 ## Verification

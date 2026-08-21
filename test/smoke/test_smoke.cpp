@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <cstring>
 
@@ -14,27 +14,27 @@ namespace {
 constexpr char kBasic[] = "<root><child>hello</child></root>";
 
 TEST(Smoke, ParsesMinimalDocument) {
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(kBasic, std::strlen(kBasic), &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(kBasic, std::strlen(kBasic), &st);
     ASSERT_NE(doc, nullptr);
-    EXPECT_EQ(st, TAURUS_OK);
+    EXPECT_EQ(st, LEPTRIS_OK);
 
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
-    EXPECT_STREQ(taurus_element_name(root), "root");
+    EXPECT_STREQ(leptris_element_name(root), "root");
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(Smoke, RejectsNullInput) {
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(nullptr, 0, &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(nullptr, 0, &st);
     EXPECT_EQ(doc, nullptr);
 }
 
 TEST(Smoke, RejectsZeroLengthInput) {
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string("", 0, &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("", 0, &st);
     EXPECT_EQ(doc, nullptr);
 }
 

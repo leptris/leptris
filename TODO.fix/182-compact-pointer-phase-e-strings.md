@@ -69,7 +69,7 @@ strlen for repeated names.
 
 ### Step 1 — Per-document string pool
 
-`TaurusDocument` gains `struct taurus_string_pool* strings`.
+`LeptrisDocument` gains `struct leptris_string_pool* strings`.
 Hash-table-backed pool: insert returns 2-byte offset.
 
 ### Step 2 — Migrate parser to intern names
@@ -81,7 +81,7 @@ Legacy parser (`parser_new.c`) does the same.
 
 ### Step 3 — Migrate accessors
 
-`taurus_element_get_name(elem)` becomes:
+`leptris_element_get_name(elem)` becomes:
 ```c
 return string_pool_get(elem->document->strings, elem->name_cs);
 ```
@@ -112,8 +112,8 @@ outstanding StringView (currently StringView borrows from the
 parser's text buffer; pool interning adds a copy step).
 
 Risk areas:
-- Mutation API (`taurus_element_set_name`) — must intern new value.
-- `taurus_element_copy` — copies must share or re-intern.
+- Mutation API (`leptris_element_set_name`) — must intern new value.
+- `leptris_element_copy` — copies must share or re-intern.
 - XPath name-compare hot path — verify interning actually helps.
 
 ## References

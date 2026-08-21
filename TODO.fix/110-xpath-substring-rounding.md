@@ -6,14 +6,14 @@
 
 ## Problem
 
-`substring()` in taurus treats `start` and `length` as plain integers
+`substring()` in leptris treats `start` and `length` as plain integers
 (truncating toward zero). The XPath 1.0 spec defines them with
 rounding to the nearest integer, and uses half-open intervals that
 produce subtly different results for fractional and negative inputs.
 
 ## Examples (per W3C XPath 1.0 spec section 4.2)
 
-| Expression                              | taurus | Spec  |
+| Expression                              | leptris | Spec  |
 |---|---|---|
 | `substring('12345', 1.5, 2.6)`          | ?      | '234' |
 | `substring('12345', 0, 2)`              | '12'   | '1'   |
@@ -23,7 +23,7 @@ produce subtly different results for fractional and negative inputs.
 
 ## Cause
 
-`src/taurus/xpath/functions.c:xpath_func_substring` computes
+`src/leptris/xpath/functions.c:xpath_func_substring` computes
 `start_int = (long)start` and `length_int = (long)length` directly
 (truncation). The spec uses `round(start)` and `round(start+length)`
 with `<=` / `<` comparison on positions.

@@ -6,28 +6,28 @@
 
 ## What's in place
 
-- `src/taurus/xinclude/xinclude.c` is compiled into the library.
+- `src/leptris/xinclude/xinclude.c` is compiled into the library.
 - Five classifier/attribute helpers are **fully implemented**:
-  - `taurus_xinclude_is_include_element(elem)` — checks namespace
+  - `leptris_xinclude_is_include_element(elem)` — checks namespace
     + local name "include".
-  - `taurus_xinclude_is_fallback_element(elem)` — same for
+  - `leptris_xinclude_is_fallback_element(elem)` — same for
     "fallback".
-  - `taurus_xinclude_get_href(elem)` — reads `href` attribute.
-  - `taurus_xinclude_get_parse(elem)` — reads `parse` attribute,
+  - `leptris_xinclude_get_href(elem)` — reads `href` attribute.
+  - `leptris_xinclude_get_parse(elem)` — reads `parse` attribute,
     defaults to `"xml"` per XInclude spec.
-  - `taurus_xinclude_get_xpointer(elem)` — reads `xpointer`.
-- `taurus_xinclude_process(doc, base_url)` is **a stub** returning
-  `TAURUS_ERROR_NOT_IMPLEMENTED`.
+  - `leptris_xinclude_get_xpointer(elem)` — reads `xpointer`.
+- `leptris_xinclude_process(doc, base_url)` is **a stub** returning
+  `LEPTRIS_ERROR_NOT_IMPLEMENTED`.
 - 6 specs in `test/xinclude/test_xinclude.cpp`.
 
-The public API in `taurus.h` is no longer declared-but-undefined.
+The public API in `leptris.h` is no longer declared-but-undefined.
 
 ## What's still missing
 
-The actual `taurus_xinclude_process` engine. The full work:
+The actual `leptris_xinclude_process` engine. The full work:
 
 1. **Walk the document** looking for `xi:include` elements
-   (using `taurus_xinclude_is_include_element`).
+   (using `leptris_xinclude_is_include_element`).
 2. **Resolve `href`** against `base_url` (or treat as absolute).
    Support `file://`, `http://`, relative paths.
 3. **Dispatch on `parse`**:

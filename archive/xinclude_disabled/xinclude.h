@@ -5,31 +5,31 @@
  * https://www.w3.org/TR/xinclude/
  */
 
-#ifndef TAURUS_XINCLUDE_H
-#define TAURUS_XINCLUDE_H
+#ifndef LEPTRIS_XINCLUDE_H
+#define LEPTRIS_XINCLUDE_H
 
-#include "../include/taurus.h"
+#include "../include/leptris.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* XInclude namespace */
-#define TAURUS_XINCLUDE_NS "http://www.w3.org/2001/XInclude"
+#define LEPTRIS_XINCLUDE_NS "http://www.w3.org/2001/XInclude"
 
 /* XInclude element names */
-#define TAURUS_XINCLUDE_INCLUDE "include"
-#define TAURUS_XINCLUDE_FALLBACK "fallback"
+#define LEPTRIS_XINCLUDE_INCLUDE "include"
+#define LEPTRIS_XINCLUDE_FALLBACK "fallback"
 
 /* XInclude attribute names */
-#define TAURUS_XINCLUDE_ATTR_HREF "href"
-#define TAURUS_XINCLUDE_ATTR_PARSE "parse"
-#define TAURUS_XINCLUDE_ATTR_ENCODING "encoding"
-#define TAURUS_XINCLUDE_ATTR_XPOINTER "xpointer"
+#define LEPTRIS_XINCLUDE_ATTR_HREF "href"
+#define LEPTRIS_XINCLUDE_ATTR_PARSE "parse"
+#define LEPTRIS_XINCLUDE_ATTR_ENCODING "encoding"
+#define LEPTRIS_XINCLUDE_ATTR_XPOINTER "xpointer"
 
 /* Parse modes */
-#define TAURUS_XINCLUDE_PARSE_XML "xml"
-#define TAURUS_XINCLUDE_PARSE_TEXT "text"
+#define LEPTRIS_XINCLUDE_PARSE_XML "xml"
+#define LEPTRIS_XINCLUDE_PARSE_TEXT "text"
 
 /**
  * Process XInclude elements in document
@@ -39,46 +39,46 @@ extern "C" {
  *
  * @param doc Document to process
  * @param base_url Base URL for resolving relative hrefs (can be NULL)
- * @return TAURUS_OK on success, error code on failure
+ * @return LEPTRIS_OK on success, error code on failure
  */
-TaurusStatus taurus_xinclude_process(TaurusDocument doc, const char* base_url);
+LeptrisStatus leptris_xinclude_process(LeptrisDocument doc, const char* base_url);
 
 /**
  * Check if element is an XInclude include element
  */
-int taurus_xinclude_is_include_element(TaurusElement elem);
+int leptris_xinclude_is_include_element(LeptrisElement elem);
 
 /**
  * Check if element is an XInclude fallback element
  */
-int taurus_xinclude_is_fallback_element(TaurusElement elem);
+int leptris_xinclude_is_fallback_element(LeptrisElement elem);
 
 /**
  * Get href attribute value from include element
  * Returns NULL if not found or on error
  */
-const char* taurus_xinclude_get_href(TaurusElement include_elem);
+const char* leptris_xinclude_get_href(LeptrisElement include_elem);
 
 /**
  * Get parse attribute value from include element
- * Returns TAURUS_XINCLUDE_PARSE_XML by default if not specified
+ * Returns LEPTRIS_XINCLUDE_PARSE_XML by default if not specified
  */
-const char* taurus_xinclude_get_parse(TaurusElement include_elem);
+const char* leptris_xinclude_get_parse(LeptrisElement include_elem);
 
 /**
  * Get xpointer attribute value from include element
  * Returns NULL if not specified
  */
-const char* taurus_xinclude_get_xpointer(TaurusElement include_elem);
+const char* leptris_xinclude_get_xpointer(LeptrisElement include_elem);
 
 /**
  * Get encoding attribute value from include element (for parse="text")
  * Returns NULL if not specified
  */
-const char* taurus_xinclude_get_encoding(TaurusElement include_elem);
+const char* leptris_xinclude_get_encoding(LeptrisElement include_elem);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* TAURUS_XINCLUDE_H */
+#endif /* LEPTRIS_XINCLUDE_H */

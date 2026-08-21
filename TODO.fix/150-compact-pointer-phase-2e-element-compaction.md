@@ -13,8 +13,8 @@ so halving its size halves the cache pressure.
 ```
 offset  field                    bytes  notes
 ──────  ──────                   ─────  ─────
-  0     TaurusNode base           12    type(4) + frozen/version(4) + line(4)
- 12     TaurusCompactHeader        2
+  0     LeptrisNode base           12    type(4) + frozen/version(4) + line(4)
+ 12     LeptrisCompactHeader        2
  14     attr_count                 1
  15     child_count                2
  17     (padding)                  3    ← wasted
@@ -39,19 +39,19 @@ offset  field                    bytes  notes
 
 **Current**: every element carries `elem->document` (8 bytes).
 Used by:
-- `taurus_element_create` to set `elem->document = doc`
-- `taurus_element_append_child_internal` to propagate to children
-- `taurus_element_get_namespace_uri` to access `doc->pool`
-- `taurus_element_index_invalidate` to invalidate on mutation
+- `leptris_element_create` to set `elem->document = doc`
+- `leptris_element_append_child_internal` to propagate to children
+- `leptris_element_get_namespace_uri` to access `doc->pool`
+- `leptris_element_index_invalidate` to invalidate on mutation
 - Clone/copy operations to set document on copies
 
 **Plan**: store document ONLY on the root element. Non-root
-elements recover via parent walk (`taurus_elem_parent` until
+elements recover via parent walk (`leptris_elem_parent` until
 parent_off==0 → that's the root, root->document is the doc).
 Cache the result in a thread-local for O(1) amortized access.
 
 **Risk**: every code path that reads `elem->document` must be
-updated. The `taurus_element_get_document(elem)` helper replaces
+updated. The `leptris_element_get_document(elem)` helper replaces
 direct field access.
 
 ### 2e-B: Drop per-element `namespaces` head pointer (−8 bytes)
@@ -60,15 +60,15 @@ direct field access.
 pointing to a linked list of xmlns declarations on this element.
 
 **Plan**: store namespace declarations as regular attributes with
-a `TAURUS_ATTR_NS_DECL` flag bit on `struct taurus_attribute`.
+a `LEPTRIS_ATTR_NS_DECL` flag bit on `struct leptris_attribute`.
 This removes the separate namespaces linked list entirely.
-`taurus_element_namespace_count` walks the attr list filtering
-on the flag; `taurus_element_namespace_decl_prefix/_uri` index
+`leptris_element_namespace_count` walks the attr list filtering
+on the flag; `leptris_element_namespace_decl_prefix/_uri` index
 into the filtered list.
 
 **Risk**: attr lookup becomes O(N+M) where M is the ns-decl
 count. For typical elements (0-2 ns-decls) this is negligible.
-The namespace lookup path (`taurus_element_lookup_namespace`)
+The namespace lookup path (`leptris_element_lookup_namespace`)
 already walks the list — adding attr-scan overhead is ~1 cycle.
 
 ### Combined impact
@@ -79,13 +79,13 @@ With alignment, the struct might be 72 or 80 bytes. Either way,
 
 ## Migration plan
 
-1. Add `taurus_element_get_document(elem)` helper that walks to
+1. Add `leptris_element_get_document(elem)` helper that walks to
    root. Update all direct `elem->document` reads to use it.
    Keep `elem->document` field temporarily for compatibility.
 2. Set `elem->document` only on root. Non-root elements leave
    it NULL. The helper falls back to root walk on NULL.
 3. Migrate `namespaces` to attr-flag approach. Add
-   `TAURUS_ATTR_NS_DECL` bit. Update namespace accessors.
+   `LEPTRIS_ATTR_NS_DECL` bit. Update namespace accessors.
 4. Remove `elem->document` and `elem->namespaces` fields.
 5. Update `_Static_assert` to 72.
 
@@ -123,7 +123,7 @@ Phase 2e-A (drop `document` field) and Phase 2e-B-original (drop
 - **2e-B-original** (`namespaces` head pointer → attr flag): the
   linked list is deeply integrated into c14n (`serialize/c14n.c:192`,
   `:637`), serialize (`serialize/serialize.c:357`), and the
-  `taurus_namespace_*` public API (`element_query.c:920-1066`).
+  `leptris_namespace_*` public API (`element_query.c:920-1066`).
   Migrating to attr-flag semantics is a multi-file refactor with
   high regression risk on canonicalization conformance, which is
   W3C-xml-c14n-test-suite gated. Worth doing only with dedicated

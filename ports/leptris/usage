@@ -1,0 +1,28 @@
+libleptris provides CMake targets:
+
+    find_package(leptris CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE leptris::leptris)
+
+libleptris is a C99 XML parser and XPath 1.0 engine with zero required
+runtime dependencies. Optional features include utf8proc (Unicode
+validation) and iconv (encoding conversion for ISO-8859-1, Shift-JIS,
+UTF-16, etc.).
+
+Features:
+- Pool-based memory model with deterministic cleanup via
+  leptris_document_free.
+- Recursion depth guard (DoS protection).
+- Per-document strict mode.
+- Vtable-based dispatch for node types (extensible).
+- SAX event-driven parser.
+- Canonical XML (C14N) for digital signatures.
+- Stable C ABI with FFI bindings planned (Ruby, Python, Rust).
+
+Example usage:
+
+    #include <leptris.h>
+
+    LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
+    LeptrisElement root = leptris_document_root(doc);
+    leptris_xpath_eval(doc, NULL, "//item");
+    leptris_document_free(doc);

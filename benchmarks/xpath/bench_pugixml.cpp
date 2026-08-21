@@ -1,18 +1,18 @@
 /* xpath/bench_pugixml.cpp — XPath evaluation vs pugixml.
  *
  * Fills the gap noted in TODO 107: every XPath bench in the suite
- * compared taurus to libxml2 only.  pugixml has its own XPath
+ * compared leptris to libxml2 only.  pugixml has its own XPath
  * implementation (a separate compiler + evaluator) and is widely
  * used; not measuring it left a major blind spot.
  *
- * Queries are the same set used by bench_taurus.c / bench_libxml2.c
+ * Queries are the same set used by bench_leptris.c / bench_libxml2.c
  * so the three numbers are directly comparable.
  */
 
 #include "../common/benchmark.h"
 #include "../common/test_data.h"
 
-#include <taurus.h>
+#include <leptris.h>
 
 #include <pugixml.hpp>
 
@@ -20,30 +20,30 @@
 #include <string.h>
 
 /* -------------------------------------------------------------------------- */
-/* Taurus XPath                                                               */
+/* Leptris XPath                                                               */
 /* -------------------------------------------------------------------------- */
 
 typedef struct {
     const char* xml;
     size_t len;
     const char* query;
-} taurus_xpath_ctx_t;
+} leptris_xpath_ctx_t;
 
-static void taurus_xpath_eval(void* ctx) {
-    taurus_xpath_ctx_t* c = (taurus_xpath_ctx_t*)ctx;
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(c->xml, c->len, &st);
+static void leptris_xpath_eval(void* ctx) {
+    leptris_xpath_ctx_t* c = (leptris_xpath_ctx_t*)ctx;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(c->xml, c->len, &st);
     if (!doc) return;
 
-    TaurusXPathResult result = taurus_xpath_eval(doc, NULL, c->query);
+    LeptrisXPathResult result = leptris_xpath_eval(doc, NULL, c->query);
     if (result) {
-        /* Force evaluation to complete — taurus_xpath_eval is lazy
+        /* Force evaluation to complete — leptris_xpath_eval is lazy
          * for nodeset results in some paths.  Querying the type
          * flushes the nodeset. */
-        (void)taurus_xpath_result_type(result);
-        taurus_xpath_result_free(result);
+        (void)leptris_xpath_result_type(result);
+        leptris_xpath_result_free(result);
     }
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -97,16 +97,16 @@ int main(void) {
         { "count(//*)",                          "count(//*)" },
     };
 
-    bench_print_header("XPath Benchmark — taurus vs pugixml");
+    bench_print_header("XPath Benchmark — leptris vs pugixml");
 
     /* Use BENCH_XML_MEDIUM which has a library/books structure. */
-    taurus_xpath_ctx_t tc = { BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL };
+    leptris_xpath_ctx_t tc = { BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL };
     pugi_xpath_ctx_t   pc = { BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL };
 
     for (size_t i = 0; i < sizeof(queries) / sizeof(queries[0]); i++) {
         tc.query = queries[i].q;
         pc.query = queries[i].q;
-        BenchResult t = bench_run(queries[i].desc, taurus_xpath_eval, &tc, ITERS_SMALL);
+        BenchResult t = bench_run(queries[i].desc, leptris_xpath_eval, &tc, ITERS_SMALL);
         BenchResult p = bench_run(queries[i].desc, pugi_xpath_eval,   &pc, ITERS_SMALL);
         printf("\n  query: %s\n", queries[i].desc);
         bench_print_result(&t);

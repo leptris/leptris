@@ -4,7 +4,7 @@ Phase A of TODO 140.
 
 ## Problem
 
-`flat_promote_build_tree` calls `taurus_pool_alloc` once per element.
+`flat_promote_build_tree` calls `leptris_pool_alloc` once per element.
 Each call:
 - bumps the pool's current pointer
 - may allocate a new page (slow path)
@@ -19,7 +19,7 @@ Replace per-element pool_alloc with a single bulk allocation.
 
 ### API addition
 
-Add `taurus_pool_alloc_bulk(pool, count, elem_size, out_block)` that:
+Add `leptris_pool_alloc_bulk(pool, count, elem_size, out_block)` that:
 - Computes total bytes = count * elem_size
 - Single pool_alloc for the whole block
 - Returns base pointer; caller slices into individual elements
@@ -30,7 +30,7 @@ In `flat_promote_build_tree`:
 1. After the FlatDoc parse, count elements (= `flat->node_count`)
 2. Bulk-allocate all elements in one call BEFORE the walk
 3. In the walk, take element pointers from the pre-allocated block
-   instead of calling `taurus_pool_alloc` per element
+   instead of calling `leptris_pool_alloc` per element
 
 ### Risks
 

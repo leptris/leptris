@@ -5,7 +5,7 @@ public symbol — the natural point to also settle the public
 surface so 1.x can be frozen:
 
 - types.h as the single canonical public-types header (TODO 99
-  remainder: taurus.h historically re-declared some; verify the
+  remainder: leptris.h historically re-declared some; verify the
   rename left exactly one definition of each public type).
 - Public-API entry points write ONLY public status constants to
   their out-params (TODO 98 remainder; the internal enum must not

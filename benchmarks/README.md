@@ -1,12 +1,12 @@
-# Taurus Performance Benchmarks
+# Leptris Performance Benchmarks
 
-This directory contains performance benchmarks comparing Taurus against industry-leading XML libraries:
+This directory contains performance benchmarks comparing Leptris against industry-leading XML libraries:
 - **libxml2**: De facto XPath standard (used in Chrome, Firefox, Python lxml)
 - **pugixml**: Fastest C++ DOM parser (zero-copy, excellent cache locality)
 
 ## Goals
 
-**Phase 10 Mission**: Make Taurus the fastest XML library in C
+**Phase 10 Mission**: Make Leptris the fastest XML library in C
 - **≥1.2x faster than pugixml** in DOM operations
 - **≥1.5x faster than libxml2** in XPath queries
 
@@ -20,11 +20,11 @@ benchmarks/
 │   ├── test_data.h  # Test XML data declarations
 │   └── test_data.c  # Embedded XML strings
 ├── dom/             # DOM operation benchmarks
-│   ├── bench_taurus.c    # Taurus DOM tests
+│   ├── bench_leptris.c    # Leptris DOM tests
 │   ├── bench_pugixml.cpp # pugixml DOM tests
 │   └── bench_libxml2.c   # libxml2 DOM tests
 └── xpath/           # XPath query benchmarks
-    ├── bench_taurus.c    # Taurus XPath tests
+    ├── bench_leptris.c    # Leptris XPath tests
     └── bench_libxml2.c   # libxml2 XPath tests
 ```
 
@@ -40,7 +40,7 @@ Three XML files represent realistic workloads:
 ```bash
 # Enable benchmarks during configure
 cmake -B build -S .. \
-  -DTAURUS_BUILD_BENCHMARKS=ON \
+  -DLEPTRIS_BUILD_BENCHMARKS=ON \
   -DCMAKE_BUILD_TYPE=Release
 
 # Build all benchmarks
@@ -53,12 +53,12 @@ cmake --build build
 cd build/benchmarks
 
 # DOM benchmarks
-./bench_dom_taurus
+./bench_dom_leptris
 ./bench_dom_pugixml    # if pugixml available
 ./bench_dom_libxml2    # if libxml2 available
 
 # XPath benchmarks
-./bench_xpath_taurus
+./bench_xpath_leptris
 ./bench_xpath_libxml2  # if libxml2 available
 ```
 
@@ -94,10 +94,10 @@ anything from mixed-shape numbers.
 | P4 | 25k `<i>ab</i>` | per-text-node cost |
 | P5 | P2's shape scaled 117KB -> 937KB | size-scaling curve: separates fixed/setup costs and cache-footprint effects from per-node costs |
 | P6 | pretty-printed (`  <a/>\n`) | whitespace-only text nodes (one per element) |
-| P6b | P6 with `TAURUS_PARSE_DROP_WS_TEXT` | pugixml-default whitespace semantics |
+| P6b | P6 with `LEPTRIS_PARSE_DROP_WS_TEXT` | pugixml-default whitespace semantics |
 
 Readings (2026-08-19/20, Apple Silicon, min-of-30, pugixml anchored
-in-process): text streaming **taurus wins ~3x** (zero-copy views);
+in-process): text streaming **leptris wins ~3x** (zero-copy views);
 per-element and per-text-node **parity**; attributes **~1.5x** (the
 one structural gap); the small-document ratio is ~1.6x falling to
 ~1.2x by ~1MB — a cache-footprint effect; P6 pretty-ws ~1.6-1.7x
@@ -109,11 +109,11 @@ when the machine is loaded.
 
 ## SAX Benchmark (`benchmark_sax`)
 
-SAX-mode parse: taurus events vs libxml2 SAX2 (pugixml has no SAX interface,
+SAX-mode parse: leptris events vs libxml2 SAX2 (pugixml has no SAX interface,
 so libxml2 is the streaming reference). No-op handlers on both sides — the
 measurement is pure scan + callback dispatch with no tree construction.
 
-Readings (2026-08-20, Apple Silicon, min-of-30): taurus wins every corpus
+Readings (2026-08-20, Apple Silicon, min-of-30): leptris wins every corpus
 shape — small 0.40x, xsdtest 0.77x, large 0.92x, workflow 0.94x, catalog
 0.93x. (Before round 14 removed a per-element malloc+free from the element
 frame, large/catalog ran at 1.03-1.10x — a comment claiming the allocator
@@ -132,7 +132,7 @@ Tests query performance:
 ## Dependencies
 
 **Required**:
-- Taurus library (always built)
+- Leptris library (always built)
 
 **Optional** (gracefully disabled if missing):
 - libxml2 (via pkg-config)
@@ -158,7 +158,7 @@ Each benchmark reports:
 
 Example output:
 ```
-Taurus DOM Benchmarks (Medium XML, 1000 iterations)
+Leptris DOM Benchmarks (Medium XML, 1000 iterations)
 ====================================================
 
 Parse + Root:
@@ -175,11 +175,11 @@ vs libxml2: 2.10x faster ✓
 
 **libxml2 not found**:
 - Install via package manager
-- Or disable with `-DTAURUS_BUILD_BENCHMARKS=OFF`
+- Or disable with `-DLEPTRIS_BUILD_BENCHMARKS=OFF`
 
 **pugixml not found**:
 - Install via vcpkg: `vcpkg install pugixml`
-- Or disable with `-DTAURUS_BUILD_BENCHMARKS=OFF`
+- Or disable with `-DLEPTRIS_BUILD_BENCHMARKS=OFF`
 
 **Benchmarks crash**:
 - Verify XML is valid

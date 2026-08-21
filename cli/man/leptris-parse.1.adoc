@@ -1,0 +1,213 @@
+= leptris-parse(1)
+:doctype: manpage
+:man manual: Leptris Manual
+:man source: Leptris 0.1.0
+:man version: 0.1.0
+
+== NAME
+leptris-parse - parse and validate XML documents
+
+== SYNOPSIS
+*leptris parse* [_OPTIONS_] _FILE_
+
+== DESCRIPTION
+Parse and validate XML documents. The *parse* command reads an XML file, 
+validates its structure according to the XML 1.0 specification, and optionally 
+outputs the parsed document in various formats.
+
+This command is useful for:
+
+* Validating XML document syntax
+* Converting XML to different formats (JSON, text tree)
+* Checking well-formedness of XML files
+* Pretty-printing XML with validation
+
+== OPTIONS
+
+*--validate*::
+    Enable validation (not yet implemented). Future feature for DTD/Schema validation.
+
+*--recover*::
+    Enable error recovery mode (not yet implemented). Future feature for parsing 
+    malformed XML.
+
+*--noout*::
+    Suppress output. Only validate the document and report errors. Useful for 
+    checking XML validity without generating output. Exit code indicates success 
+    or failure.
+
+*--format* _FORMAT_::
+    Output format. Valid values:
+    * *xml* - Standard XML output (default)
+    * *json* - JSON representation of the document tree
+    * *text* - Human-readable text tree structure
+
+*-h, --help*::
+    Show help message for the parse command.
+
+== ARGUMENTS
+
+_FILE_::
+    Path to the XML file to parse. Use *-* to read from standard input.
+
+== OUTPUT FORMATS
+
+=== XML Format (default)
+Outputs the parsed XML in standard XML format with proper formatting.
+
+=== JSON Format
+Outputs a JSON representation of the document tree structure:
+
+[source,json]
+----
+{
+  "root": {
+    "name": "book",
+    "attributes": {"id": "1"},
+    "children": [...]
+  }
+}
+----
+
+=== Text Format
+Outputs a human-readable tree structure:
+
+----
+root
+  └─ book (id="1")
+     ├─ title
+     │  └─ "The C Programming Language"
+     └─ author
+        └─ "Kernighan and Ritchie"
+----
+
+== EXAMPLES
+
+=== Validate an XML file
+[source,bash]
+----
+leptris parse document.xml
+----
+
+Parses and validates `document.xml`. If successful, outputs the parsed XML.
+
+=== Validate without output
+[source,bash]
+----
+leptris parse --noout document.xml
+----
+
+Validates the XML file but suppresses output. Check exit code: 0 for success, 
+1 for parse errors.
+
+=== Parse with JSON output
+[source,bash]
+----
+leptris parse --format json library.xml
+----
+
+Parses the XML and outputs a JSON representation of the document tree.
+
+=== Parse with text tree output
+[source,bash]
+----
+leptris parse --format text library.xml
+----
+
+Outputs a human-readable tree structure showing the document hierarchy.
+
+=== Parse from stdin
+[source,bash]
+----
+cat document.xml | leptris parse -
+----
+
+Reads XML from standard input and parses it.
+
+=== Validate multiple files in a script
+[source,bash]
+----
+for file in *.xml; do
+    if leptris parse --noout "$file"; then
+        echo "✓ $file is valid"
+    else
+        echo "✗ $file has errors"
+    fi
+done
+----
+
+=== Check if file is well-formed
+[source,bash]
+----
+if leptris parse --noout document.xml 2>/dev/null; then
+    echo "Document is well-formed"
+fi
+----
+
+== EXIT STATUS
+
+*0*::
+    Success - XML is well-formed and valid
+
+*1*::
+    Parse error - XML is malformed or has syntax errors
+
+*3*::
+    I/O error - cannot read input file
+
+*4*::
+    Invalid arguments - incorrect options or missing file argument
+
+== ERROR HANDLING
+
+When parsing fails, *leptris parse* provides detailed error messages including:
+
+* Line and column numbers where the error occurred
+* Description of the syntax error
+* Context snippet showing the problematic area
+
+Example error output:
+----
+Error: Parse error at line 5, column 12
+  Unclosed tag 'book'
+  <book>
+      <title>Example
+  ----------^
+----
+
+== SEE ALSO
+
+*leptris*(1), *leptris-xpath*(1), *leptris-format*(1), *libleptris*(5)
+
+== STANDARDS
+
+Implements XML 1.0 (Fifth Edition) specification.
+
+== NOTES
+
+=== Future Features
+
+The *--validate* and *--recover* options are reserved for future implementation:
+
+* *--validate* will support DTD and XML Schema validation
+* *--recover* will attempt to parse malformed XML with error recovery
+
+=== Comparison with xmllint
+
+[cols="2,2",options="header"]
+|===
+|xmllint |leptris parse
+
+|`xmllint file.xml`
+|`leptris parse file.xml`
+
+|`xmllint --noout file.xml`
+|`leptris parse --noout file.xml`
+
+|`xmllint --format file.xml`
+|`leptris format file.xml`
+|===
+
+== COPYRIGHT
+
+Copyright (c) 2024 Ribose Inc. Licensed under the MIT License.

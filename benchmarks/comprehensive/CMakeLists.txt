@@ -47,7 +47,7 @@ if(PUGIXML_AVAILABLE)
     )
 
     target_link_libraries(benchmark_parse PRIVATE
-        taurus
+        leptris
         ${PUGIXML_LIBRARY}
     )
 
@@ -76,7 +76,7 @@ if(PUGIXML_AVAILABLE)
     )
 
     target_link_libraries(benchmark_first_access PRIVATE
-        taurus
+        leptris
         ${PUGIXML_LIBRARY}
     )
 
@@ -105,7 +105,7 @@ if(PUGIXML_AVAILABLE)
     )
 
     target_link_libraries(benchmark_parse_ops PRIVATE
-        taurus
+        leptris
         ${PUGIXML_LIBRARY}
     )
 
@@ -134,7 +134,7 @@ if(PUGIXML_AVAILABLE)
     )
 
     target_link_libraries(benchmark_memory PRIVATE
-        taurus
+        leptris
         ${PUGIXML_LIBRARY}
     )
 

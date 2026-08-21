@@ -13,7 +13,7 @@
  *
  * Expected results:
  * - pugixml: Fastest (no lazy work, everything ready after parse)
- * - Taurus: Slower due to lazy costs (StringView conversion, array rebuild)
+ * - Leptris: Slower due to lazy costs (StringView conversion, array rebuild)
  * - This is the REAL cost for single-access applications!
  *
  * IMPORTANT: This benchmark does NOT warm up - we WANT to measure cold costs!
@@ -28,9 +28,9 @@
 #include <numeric>
 #include <cmath>
 
-// Taurus API (C)
+// Leptris API (C)
 extern "C" {
-#include <taurus.h>
+#include <leptris.h>
 }
 
 // pugixml API (C++)
@@ -99,31 +99,31 @@ static const char* test_xml =
     "</root>";
 
 // ============================================================================
-// Benchmark Functions - Taurus
+// Benchmark Functions - Leptris
 // ============================================================================
 
-static Stats benchmark_taurus_first_access(int iterations) {
+static Stats benchmark_leptris_first_access(int iterations) {
     std::vector<uint64_t> times_ns;
     size_t len = strlen(test_xml);
 
     for (int i = 0; i < iterations; i++) {
         // Parse (pays lazy StringView parsing, but NOT string conversion)
-        TaurusDocument doc = taurus_parse_string(test_xml, len, NULL);
+        LeptrisDocument doc = leptris_parse_string(test_xml, len, NULL);
         if (!doc) continue;
 
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisElement root = leptris_document_root(doc);
 
         // MEASURE: First access operations (triggers lazy costs)
         uint64_t start = Timer::now_ns();
 
         // These are FIRST accesses:
-        size_t child_count = taurus_element_child_count(root);  // May rebuild array
+        size_t child_count = leptris_element_child_count(root);  // May rebuild array
         if (child_count > 0) {
-            TaurusElement child = taurus_element_child(root, 0);  // May rebuild array
+            LeptrisElement child = leptris_element_child(root, 0);  // May rebuild array
             if (child) {
-                const char* name = taurus_element_name(child);  // Triggers StringView→string conversion!
-                const char* id = taurus_element_attribute(child, "id");  // May build hash table!
-                const char* category = taurus_element_attribute(child, "category");  // O(1) if hash built
+                const char* name = leptris_element_name(child);  // Triggers StringView→string conversion!
+                const char* id = leptris_element_attribute(child, "id");  // May build hash table!
+                const char* category = leptris_element_attribute(child, "category");  // O(1) if hash built
                 (void)name; (void)id; (void)category;  // Use results
             }
         }
@@ -131,7 +131,7 @@ static Stats benchmark_taurus_first_access(int iterations) {
         uint64_t end = Timer::now_ns();
 
         times_ns.push_back(end - start);
-        taurus_document_free(doc);
+        leptris_document_free(doc);
     }
 
     return calculate_stats(times_ns);
@@ -186,20 +186,20 @@ static void print_result(const char* name, const Stats& stats) {
     printf("    Max:    %.2f µs\n", stats.max_ns / 1000.0);
 }
 
-static void print_comparison(const Stats& taurus, const Stats& pugixml) {
-    double taurus_mean = taurus.mean_ns;
+static void print_comparison(const Stats& leptris, const Stats& pugixml) {
+    double leptris_mean = leptris.mean_ns;
     double pugixml_mean = pugixml.mean_ns;
-    double ratio = pugixml_mean / taurus_mean;
+    double ratio = pugixml_mean / leptris_mean;
 
     printf("\n  Comparison:\n");
-    printf("    Taurus:  %.2f µs\n", taurus_mean / 1000.0);
+    printf("    Leptris:  %.2f µs\n", leptris_mean / 1000.0);
     printf("    pugixml:  %.2f µs\n", pugixml_mean / 1000.0);
     printf("    Ratio:   %.2fx (%s)\n", ratio,
-           ratio >= 1.2 ? "Taurus AHEAD ✅" :
+           ratio >= 1.2 ? "Leptris AHEAD ✅" :
            ratio > 0.8 ? "~ PARITY" : "pugixml AHEAD ⚠️");
 
     if (ratio < 1.0) {
-        printf("    ⚠️  NOTE: Taurus slower due to lazy initialization costs\n");
+        printf("    ⚠️  NOTE: Leptris slower due to lazy initialization costs\n");
         printf("    - StringView→string conversion on first name access\n");
         printf("    - Array rebuild on first child access\n");
         printf("    - Hash table build on first attribute access\n");
@@ -236,22 +236,22 @@ int main(int argc, char** argv) {
     printf("  4. Get 'id' attribute (may trigger hash table build)\n");
     printf("  5. Get 'category' attribute (O(1) if hash built)\n\n");
 
-    // Benchmark Taurus
-    Stats taurus_stats = benchmark_taurus_first_access(ITERATIONS);
-    print_result("Taurus", taurus_stats);
+    // Benchmark Leptris
+    Stats leptris_stats = benchmark_leptris_first_access(ITERATIONS);
+    print_result("Leptris", leptris_stats);
 
     // Benchmark pugixml
     Stats pugixml_stats = benchmark_pugixml_first_access(ITERATIONS);
     print_result("pugixml", pugixml_stats);
 
     // Comparison
-    print_comparison(taurus_stats, pugixml_stats);
+    print_comparison(leptris_stats, pugixml_stats);
 
     printf("\n");
     printf("═══════════════════════════════════════════════════════════\n");
     printf("Key Insights:\n");
     printf("  - First access includes LAZY initialization costs\n");
-    printf("  - Taurus pays: StringView conversion + array rebuild + hash build\n");
+    printf("  - Leptris pays: StringView conversion + array rebuild + hash build\n");
     printf("  - pugixml pays: Nothing (everything ready after parse)\n");
     printf("  → This is REAL-WORLD performance for single-access apps!\n");
     printf("═══════════════════════════════════════════════════════════\n");

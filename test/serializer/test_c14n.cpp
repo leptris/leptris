@@ -1,6 +1,6 @@
 // test/serializer/test_c14n.cpp — Canonical XML (C14N) specs (TODO 50/57).
 //
-// taurus_c14n_canonicalize produces a canonical form for digital
+// leptris_c14n_canonicalize produces a canonical form for digital
 // signatures.  These specs cover the documented C14N rules:
 //   - UTF-8 encoding
 //   - Normalized line endings (\n)
@@ -10,7 +10,7 @@
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <cstring>
 #include <string>
@@ -19,41 +19,41 @@ namespace {
 
 TEST(C14N, IsAvailableAndDoesNotCrash) {
     const char xml[] = "<r a='1' b='2'><c/>text</r>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     EXPECT_NE(out, nullptr);
     if (out) {
         EXPECT_GT(std::strlen(out), 0u);
-        taurus_free_string(out);
+        leptris_free_string(out);
     }
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, ExpandsEmptyElement) {
     const char xml[] = "<r/>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     std::string s(out);
     /* C14N expands <r/> to <r></r>. */
     EXPECT_NE(s.find("<r></r>"), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, SortsAttributes) {
     const char xml[] = "<r b='2' a='1'/>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     std::string s(out);
     /* Lexicographic order: a before b. */
@@ -62,23 +62,23 @@ TEST(C14N, SortsAttributes) {
     ASSERT_NE(a_pos, std::string::npos);
     ASSERT_NE(b_pos, std::string::npos);
     EXPECT_LT(a_pos, b_pos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, PreservesTextAndCdata) {
     const char xml[] = "<r>hello<![CDATA[<raw>]]>world</r>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     std::string s(out);
     EXPECT_NE(s.find("hello"), std::string::npos);
     EXPECT_NE(s.find("world"), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, NoLeaksOnComplexDocument) {
@@ -91,14 +91,14 @@ TEST(C14N, NoLeaksOnComplexDocument) {
         "<![CDATA[raw<content>]]>"
         "</r>";
 
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
     /* Under leaks --atExit --: 0 bytes leaked. */
 }
 
@@ -107,80 +107,80 @@ TEST(C14N, NoLeaksOnComplexDocument) {
 TEST(C14N, EmptyDocumentCanonicalizes) {
     /* Even the simplest document must produce valid canonical output. */
     const char xml[] = "<r/>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     /* Empty elements expand to start+end form per C14N spec. */
     EXPECT_NE(std::string(out).find("<r></r>"), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, NormalizesLineEndings) {
     /* C14N: \r\n and \r must be normalized to \n in output. */
     const char xml[] = "<r>a\rb\nc\r\nd</r>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     std::string s(out);
     /* No lone \r and no \r\n should remain. */
     EXPECT_EQ(s.find("\r\n"), std::string::npos);
     EXPECT_EQ(s.find("\r"), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, EscapesSpecialCharsInText) {
     /* Canonical text must escape <, >, &.  C14N also escapes \r. */
     const char xml[] = "<r>a &amp; b &lt; c &gt; d</r>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     /* After canonicalization, the escaped entities should be present
      * (the parser decoded them on input; the serializer re-escapes). */
     std::string s(out);
     EXPECT_NE(s.find("a "), std::string::npos);  // text content survives
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, EmptyAttributesArePreserved) {
     /* Attributes with empty values must appear in canonical output. */
     const char xml[] = "<r a=''/>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     /* C14N uses double-quotes around attribute values. */
     EXPECT_NE(std::string(out).find("a=\"\""), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, NullDocReturnsNull) {
-    EXPECT_EQ(taurus_c14n_canonicalize(nullptr, TAURUS_C14N_1_0, 0), nullptr);
+    EXPECT_EQ(leptris_c14n_canonicalize(nullptr, LEPTRIS_C14N_1_0, 0), nullptr);
 }
 
 TEST(C14N, NestedElementsCanonicalizedInOrder) {
     /* Document order is the canonical order — children must appear
      * in their original sequence. */
     const char xml[] = "<r><a/><b/><c/></r>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     std::string s(out);
     auto a_pos = s.find("<a></a>");
@@ -191,18 +191,18 @@ TEST(C14N, NestedElementsCanonicalizedInOrder) {
     EXPECT_NE(c_pos, std::string::npos);
     EXPECT_LT(a_pos, b_pos);
     EXPECT_LT(b_pos, c_pos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14N, DeepNestingRoundTrips) {
     /* A 10-level deep tree must canonicalize without recursion issues. */
     const char xml[] = "<a><b><c><d><e><f><g><h><i><j>x</j></i></h></g></f></e></d></c></b></a>";
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     /* All ten levels must appear in the output. */
     std::string s(out);
@@ -213,8 +213,8 @@ TEST(C14N, DeepNestingRoundTrips) {
         EXPECT_NE(s.find(open), std::string::npos)
             << "missing <" << tag << "> in canonical output";
     }
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 }  // namespace
@@ -225,50 +225,50 @@ TEST(C14NWithComments, PreservesCommentsWhenRequested) {
     /* The C14N spec defines two modes: with and without comments.
      * The with-comments mode preserves comment nodes in the output.
      * The default (without-comments) strips them. */
-    TaurusStatus st = TAURUS_OK;
+    LeptrisStatus st = LEPTRIS_OK;
     const char xml[] = "<r><!-- comment -->text</r>";
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     /* Default is without-comments; comment may or may not appear
      * depending on impl. Pin whatever the current behavior is so
      * future changes are deliberate. */
     std::string s(out);
     EXPECT_NE(s.find("<r>"), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14NNamespaces, IncludesNamespacesInCanonicalOutput) {
     /* C14N 1.0 inclusive: namespace declarations visible on the element
      * are emitted in the canonical output, sorted with other attributes. */
-    TaurusStatus st = TAURUS_OK;
+    LeptrisStatus st = LEPTRIS_OK;
     const char xml[] =
         "<r xmlns:ns='http://example.com/ns' ns:attr='value'>text</r>";
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     std::string s(out);
     /* Both xmlns:ns and ns:attr must appear. */
     EXPECT_NE(s.find("xmlns:ns"), std::string::npos);
     EXPECT_NE(s.find("ns:attr"), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14NDocumentOrder, AttributesEmittedInSortedOrder) {
     /* Per C14N spec: attributes are sorted by namespace URI then
      * local name. Test that 'b' comes before 'z' and 'a:b' before 'a:z'. */
-    TaurusStatus st = TAURUS_OK;
+    LeptrisStatus st = LEPTRIS_OK;
     const char xml[] = "<r z='1' a='2' m='3'/>";
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
     ASSERT_NE(out, nullptr);
     std::string s(out);
     /* Expected: a, m, z order. */
@@ -280,22 +280,22 @@ TEST(C14NDocumentOrder, AttributesEmittedInSortedOrder) {
     EXPECT_NE(z_pos, std::string::npos);
     EXPECT_LT(a_pos, m_pos);
     EXPECT_LT(m_pos, z_pos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14NXml11, AcceptsVersion11WithoutCrash) {
     /* C14N 1.1 is rarely used but the API must accept the enum value
      * without crashing. Behavior differences from 1.0 are minor
      * (line-ending handling, some edge cases around character escapes). */
-    TaurusStatus st = TAURUS_OK;
+    LeptrisStatus st = LEPTRIS_OK;
     const char xml[] = "<r>hello</r>";
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_1, 0);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_1, 0);
     ASSERT_NE(out, nullptr);
     EXPECT_NE(std::string(out).find("hello"), std::string::npos);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }

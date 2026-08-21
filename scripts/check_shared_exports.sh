@@ -2,10 +2,10 @@
 # scripts/check_shared_exports.sh — verify public symbols are exported.
 #
 # The library is built with CMAKE_C_VISIBILITY_PRESET=hidden.  Public
-# entry points must carry TAURUS_API; otherwise the symbol is missing
+# entry points must carry LEPTRIS_API; otherwise the symbol is missing
 # from the .so / .dylib export table and FFI bindings cannot dlsym it.
 #
-# SAX was missing TAURUS_API through v0.3.0 (TODO 122).  This script
+# SAX was missing LEPTRIS_API through v0.3.0 (TODO 122).  This script
 # builds a one-off shared library and asserts the SAX surface (and
 # a few DOM/XPath canaries) appear in the export table.
 #
@@ -19,19 +19,19 @@ BUILD="$ROOT/build-export-check"
 rm -rf "$BUILD"
 cmake -B "$BUILD" -S "$ROOT" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DTAURUS_BUILD_SHARED=ON \
-    -DTAURUS_BUILD_STATIC=OFF \
+    -DLEPTRIS_BUILD_SHARED=ON \
+    -DLEPTRIS_BUILD_STATIC=OFF \
     -DBUILD_TESTING=OFF \
-    -DTAURUS_BUILD_CLI=OFF \
-    -DTAURUS_BUILD_BENCHMARKS=OFF \
+    -DLEPTRIS_BUILD_CLI=OFF \
+    -DLEPTRIS_BUILD_BENCHMARKS=OFF \
     > /dev/null
 
-cmake --build "$BUILD" --target taurus_shared > /dev/null
+cmake --build "$BUILD" --target leptris_shared > /dev/null
 
-LIB=$(find "$BUILD" -name 'libtaurus.*.dylib' -o -name 'libtaurus.so*' \
+LIB=$(find "$BUILD" -name 'libleptris.*.dylib' -o -name 'libleptris.so*' \
         2>/dev/null | grep -v '[0-9]\.dylib$' | head -1)
 # Fall back to the unversioned symlink if the versioned name didn't match.
-[ -z "$LIB" ] && LIB=$(find "$BUILD" -name 'libtaurus.dylib' -o -name 'libtaurus.so' | head -1)
+[ -z "$LIB" ] && LIB=$(find "$BUILD" -name 'libleptris.dylib' -o -name 'libleptris.so' | head -1)
 
 if [ -z "$LIB" ]; then
     echo "FAIL: shared library not built" >&2
@@ -42,59 +42,59 @@ echo "Checking exports in: $LIB"
 
 # Symbols that must be exported for FFI bindings (Ruby / Python / Rust).
 REQUIRED=(
-    taurus_parse_string
-    taurus_document_root
-    taurus_document_free
-    taurus_document_encoding
-    taurus_element_name
-    taurus_element_text
-    taurus_element_attribute
-    taurus_element_attribute_count
-    taurus_element_attribute_name_at
-    taurus_element_attribute_value_at
-    taurus_element_child_count
-    taurus_element_child
-    taurus_element_parent
-    taurus_element_namespace_count
-    taurus_xpath_eval
-    taurus_xpath_result_count
-    taurus_xpath_result_type
-    taurus_xpath_result_get
-    taurus_xpath_result_boolean
-    taurus_xpath_result_number
-    taurus_xpath_result_string
-    taurus_xpath_result_free
-    taurus_status_string
-    taurus_document_serialize
-    taurus_element_serialize
-    taurus_document_save_file
-    taurus_text_node_create
-    taurus_comment_node_create
-    taurus_cdata_node_create
-    taurus_pi_node_create
-    taurus_text_node_set_content
-    taurus_comment_node_set_content
-    taurus_cdata_node_set_content
-    taurus_pi_node_set_target
-    taurus_pi_node_set_data
-    taurus_node_parent
-    taurus_node_unlink
-    taurus_node_line
-    taurus_node_compare
-    taurus_element_namespace_decl_prefix
-    taurus_element_namespace_decl_uri
-    taurus_c14n_canonicalize_subtree
-    taurus_c14n_canonicalize_ex
-    taurus_c14n_canonicalize_subtree_ex
-    taurus_element_add_namespace_definition
-    taurus_element_set_default_namespace
-    taurus_element_remove_namespace_definition
-    taurus_xpath_eval_with_vars_context
-    taurus_sax_parse
-    taurus_sax_parser_create
-    taurus_sax_parser_feed
-    taurus_sax_parser_free
-    taurus_sax_parser_set_streaming
+    leptris_parse_string
+    leptris_document_root
+    leptris_document_free
+    leptris_document_encoding
+    leptris_element_name
+    leptris_element_text
+    leptris_element_attribute
+    leptris_element_attribute_count
+    leptris_element_attribute_name_at
+    leptris_element_attribute_value_at
+    leptris_element_child_count
+    leptris_element_child
+    leptris_element_parent
+    leptris_element_namespace_count
+    leptris_xpath_eval
+    leptris_xpath_result_count
+    leptris_xpath_result_type
+    leptris_xpath_result_get
+    leptris_xpath_result_boolean
+    leptris_xpath_result_number
+    leptris_xpath_result_string
+    leptris_xpath_result_free
+    leptris_status_string
+    leptris_document_serialize
+    leptris_element_serialize
+    leptris_document_save_file
+    leptris_text_node_create
+    leptris_comment_node_create
+    leptris_cdata_node_create
+    leptris_pi_node_create
+    leptris_text_node_set_content
+    leptris_comment_node_set_content
+    leptris_cdata_node_set_content
+    leptris_pi_node_set_target
+    leptris_pi_node_set_data
+    leptris_node_parent
+    leptris_node_unlink
+    leptris_node_line
+    leptris_node_compare
+    leptris_element_namespace_decl_prefix
+    leptris_element_namespace_decl_uri
+    leptris_c14n_canonicalize_subtree
+    leptris_c14n_canonicalize_ex
+    leptris_c14n_canonicalize_subtree_ex
+    leptris_element_add_namespace_definition
+    leptris_element_set_default_namespace
+    leptris_element_remove_namespace_definition
+    leptris_xpath_eval_with_vars_context
+    leptris_sax_parse
+    leptris_sax_parser_create
+    leptris_sax_parser_feed
+    leptris_sax_parser_free
+    leptris_sax_parser_set_streaming
 )
 
 rc=0
@@ -113,7 +113,7 @@ for sym in "${REQUIRED[@]}"; do
 done
 
 if [ $rc -ne 0 ]; then
-    echo "FAIL: some public symbols not exported (TAURUS_API missing?)" >&2
+    echo "FAIL: some public symbols not exported (LEPTRIS_API missing?)" >&2
     exit $rc
 fi
 

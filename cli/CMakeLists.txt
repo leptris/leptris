@@ -1,7 +1,7 @@
-# Taurus CLI executable
+# Leptris CLI executable
 
 # CLI executable
-add_executable(taurus-cli
+add_executable(leptris-cli
     main.c
     cli.c
     options.c
@@ -13,31 +13,31 @@ add_executable(taurus-cli
     commands/format.c
 )
 
-# Link to libtaurus. When both static and shared are built, link the
+# Link to libleptris. When both static and shared are built, link the
 # CLI against the STATIC library: the CLI's output formatters use
-# internal accessors (taurus_element_get_name, compact-pointer
-# decoding, struct taurus_attribute walks) that are not exported
+# internal accessors (leptris_element_get_name, compact-pointer
+# decoding, struct leptris_attribute walks) that are not exported
 # from the shared library, so a shared-only link fails. TODO 191
 # tracks moving the CLI onto the public API only; until then this
-# keeps TAURUS_BUILD_SHARED=ON fully buildable.
-if(TARGET taurus_static)
-    target_link_libraries(taurus-cli PRIVATE taurus_static)
+# keeps LEPTRIS_BUILD_SHARED=ON fully buildable.
+if(TARGET leptris_static)
+    target_link_libraries(leptris-cli PRIVATE leptris_static)
 else()
-    target_link_libraries(taurus-cli PRIVATE taurus)
+    target_link_libraries(leptris-cli PRIVATE leptris)
 endif()
 
 # Include directories
-target_include_directories(taurus-cli PRIVATE
+target_include_directories(leptris-cli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src/include
 )
 
 # Set output name (without -cli suffix)
-set_target_properties(taurus-cli PROPERTIES
-    OUTPUT_NAME taurus
+set_target_properties(leptris-cli PROPERTIES
+    OUTPUT_NAME leptris
 )
 
 # Install
-install(TARGETS taurus-cli
+install(TARGETS leptris-cli
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

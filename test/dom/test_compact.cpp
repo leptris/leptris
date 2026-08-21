@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 extern "C" {
 #include "compact.h"
@@ -27,19 +27,19 @@ TEST(CompactAllocator, ParsesMultipleDocumentsWithoutLeak) {
     const char xml[] = "<r><a/><b/><c/></r>";
 
     for (int i = 0; i < 5; i++) {
-        TaurusStatus st;
-        TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+        LeptrisStatus st;
+        LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
         ASSERT_NE(doc, nullptr) << "iter " << i;
-        taurus_document_free(doc);
+        leptris_document_free(doc);
     }
     /* Under leaks --atExit --, zero bytes leaked is the contract. */
 }
 
 TEST(CompactAllocator, ExplicitCleanupDoesNotCrash) {
-    /* taurus_explicit_cleanup tears down the thread-local overflow
+    /* leptris_explicit_cleanup tears down the thread-local overflow
      * table.  Calling it when no documents are active must be safe. */
-    taurus_explicit_cleanup();
-    taurus_explicit_cleanup();  /* idempotent */
+    leptris_explicit_cleanup();
+    leptris_explicit_cleanup();  /* idempotent */
     SUCCEED();
 }
 
@@ -52,11 +52,11 @@ TEST(CompactAllocator, LargeDocumentDoesNotLeakOverflowEntries) {
     }
     xml += "</r>";
 
-    TaurusStatus st;
-    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
     ASSERT_NE(doc, nullptr);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     /* Zero leaks under valgrind/leaks. */
 }
 
@@ -66,11 +66,11 @@ TEST(CompactPtr8, NullRoundTrips) {
     /* base + non-null field address. Encode NULL → 0. Decode 0 → NULL. */
     int dummy_base;
     int8_t field = 42;
-    int8_t encoded = taurus_compact_ptr8_encode(&dummy_base, nullptr,
+    int8_t encoded = leptris_compact_ptr8_encode(&dummy_base, nullptr,
                                                  3 /* align_log2 */,
                                                  &field);
     EXPECT_EQ(encoded, 0);
-    EXPECT_EQ(taurus_compact_ptr8_decode(&dummy_base, 0, 3, &field), nullptr);
+    EXPECT_EQ(leptris_compact_ptr8_decode(&dummy_base, 0, 3, &field), nullptr);
 }
 
 TEST(CompactPtr8, EncodesPositiveOffsetWithinRange) {
@@ -80,10 +80,10 @@ TEST(CompactPtr8, EncodesPositiveOffsetWithinRange) {
     char* base = buf;
     char* target = buf + 256;  /* 256 / 8 = 32, fits in int8_t */
     int8_t field = 0;
-    int8_t encoded = taurus_compact_ptr8_encode(base, target, 3, &field);
+    int8_t encoded = leptris_compact_ptr8_encode(base, target, 3, &field);
     ASSERT_NE(encoded, 0);
-    ASSERT_NE(encoded, TAURUS_COMPACT_PTR8_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr8_decode(base, encoded, 3, &field), target);
+    ASSERT_NE(encoded, LEPTRIS_COMPACT_PTR8_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr8_decode(base, encoded, 3, &field), target);
 }
 
 TEST(CompactPtr8, EncodesNegativeOffsetWithinRange) {
@@ -91,10 +91,10 @@ TEST(CompactPtr8, EncodesNegativeOffsetWithinRange) {
     char* base = buf + 1024;  /* middle of buffer */
     char* target = buf + 512; /* 512 bytes before base; scaled -64 fits in int8_t */
     int8_t field = 0;
-    int8_t encoded = taurus_compact_ptr8_encode(base, target, 3, &field);
+    int8_t encoded = leptris_compact_ptr8_encode(base, target, 3, &field);
     ASSERT_NE(encoded, 0);
-    ASSERT_NE(encoded, TAURUS_COMPACT_PTR8_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr8_decode(base, encoded, 3, &field), target);
+    ASSERT_NE(encoded, LEPTRIS_COMPACT_PTR8_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr8_decode(base, encoded, 3, &field), target);
 }
 
 TEST(CompactPtr8, OverflowsBeyond1ByteRange) {
@@ -108,12 +108,12 @@ TEST(CompactPtr8, OverflowsBeyond1ByteRange) {
     target = (char*)((uintptr_t)target & ~(uintptr_t)7);
 
     int8_t field = 0;
-    int8_t encoded = taurus_compact_ptr8_encode(base, target, 3, &field);
-    EXPECT_EQ(encoded, TAURUS_COMPACT_PTR8_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr8_decode(base, encoded, 3, &field), target);
+    int8_t encoded = leptris_compact_ptr8_encode(base, target, 3, &field);
+    EXPECT_EQ(encoded, LEPTRIS_COMPACT_PTR8_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr8_decode(base, encoded, 3, &field), target);
 
     /* Cleanup so we don't leak the overflow entry. */
-    taurus_explicit_cleanup();
+    leptris_explicit_cleanup();
     std::free(big);
 }
 
@@ -123,10 +123,10 @@ TEST(CompactPtr8, MisalignedTargetOverflows) {
     char* base = buf;
     char* target = buf + 5;  /* not 8-byte aligned */
     int8_t field = 0;
-    int8_t encoded = taurus_compact_ptr8_encode(base, target, 3, &field);
-    EXPECT_EQ(encoded, TAURUS_COMPACT_PTR8_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr8_decode(base, encoded, 3, &field), target);
-    taurus_explicit_cleanup();
+    int8_t encoded = leptris_compact_ptr8_encode(base, target, 3, &field);
+    EXPECT_EQ(encoded, LEPTRIS_COMPACT_PTR8_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr8_decode(base, encoded, 3, &field), target);
+    leptris_explicit_cleanup();
 }
 
 TEST(CompactPtr8, DistinctFieldsOnSameBaseDoNotCollide) {
@@ -141,14 +141,14 @@ TEST(CompactPtr8, DistinctFieldsOnSameBaseDoNotCollide) {
     t2 = (char*)((uintptr_t)t2 & ~(uintptr_t)7);
 
     int8_t f1 = 0, f2 = 0;
-    int8_t e1 = taurus_compact_ptr8_encode(base, t1, 3, &f1);
-    int8_t e2 = taurus_compact_ptr8_encode(base, t2, 3, &f2);
-    EXPECT_EQ(e1, TAURUS_COMPACT_PTR8_OVERFLOW);
-    EXPECT_EQ(e2, TAURUS_COMPACT_PTR8_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr8_decode(base, e1, 3, &f1), t1);
-    EXPECT_EQ(taurus_compact_ptr8_decode(base, e2, 3, &f2), t2);
+    int8_t e1 = leptris_compact_ptr8_encode(base, t1, 3, &f1);
+    int8_t e2 = leptris_compact_ptr8_encode(base, t2, 3, &f2);
+    EXPECT_EQ(e1, LEPTRIS_COMPACT_PTR8_OVERFLOW);
+    EXPECT_EQ(e2, LEPTRIS_COMPACT_PTR8_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr8_decode(base, e1, 3, &f1), t1);
+    EXPECT_EQ(leptris_compact_ptr8_decode(base, e2, 3, &f2), t2);
 
-    taurus_explicit_cleanup();
+    leptris_explicit_cleanup();
     std::free(big);
 }
 
@@ -157,10 +157,10 @@ TEST(CompactPtr8, DistinctFieldsOnSameBaseDoNotCollide) {
 TEST(CompactPtr16, NullRoundTrips) {
     int dummy_base;
     int16_t field = 42;
-    int16_t encoded = taurus_compact_ptr16_encode(&dummy_base, nullptr,
+    int16_t encoded = leptris_compact_ptr16_encode(&dummy_base, nullptr,
                                                    3, &field);
     EXPECT_EQ(encoded, 0);
-    EXPECT_EQ(taurus_compact_ptr16_decode(&dummy_base, 0, 3, &field), nullptr);
+    EXPECT_EQ(leptris_compact_ptr16_decode(&dummy_base, 0, 3, &field), nullptr);
 }
 
 TEST(CompactPtr16, EncodesLargeOffsetWithinRange) {
@@ -171,10 +171,10 @@ TEST(CompactPtr16, EncodesLargeOffsetWithinRange) {
     char* base = (char*)big;
     char* target = (char*)big + 65536;  /* 64 KB away, fits in int16_t */
     int16_t field = 0;
-    int16_t encoded = taurus_compact_ptr16_encode(base, target, 3, &field);
+    int16_t encoded = leptris_compact_ptr16_encode(base, target, 3, &field);
     ASSERT_NE(encoded, 0);
-    ASSERT_NE(encoded, TAURUS_COMPACT_PTR16_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr16_decode(base, encoded, 3, &field), target);
+    ASSERT_NE(encoded, LEPTRIS_COMPACT_PTR16_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr16_decode(base, encoded, 3, &field), target);
     std::free(big);
 }
 
@@ -188,11 +188,11 @@ TEST(CompactPtr16, OverflowsBeyond256KB) {
     target = (char*)((uintptr_t)target & ~(uintptr_t)7);
 
     int16_t field = 0;
-    int16_t encoded = taurus_compact_ptr16_encode(base, target, 3, &field);
-    EXPECT_EQ(encoded, TAURUS_COMPACT_PTR16_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr16_decode(base, encoded, 3, &field), target);
+    int16_t encoded = leptris_compact_ptr16_encode(base, target, 3, &field);
+    EXPECT_EQ(encoded, LEPTRIS_COMPACT_PTR16_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr16_decode(base, encoded, 3, &field), target);
 
-    taurus_explicit_cleanup();
+    leptris_explicit_cleanup();
     std::free(big);
 }
 
@@ -208,14 +208,14 @@ TEST(CompactPtr8And16, ShareOverflowTableWithoutInterference) {
 
     int8_t f8 = 0;
     int16_t f16 = 0;
-    int8_t e8 = taurus_compact_ptr8_encode(base, target, 3, &f8);
-    int16_t e16 = taurus_compact_ptr16_encode(base, target, 3, &f16);
-    EXPECT_EQ(e8, TAURUS_COMPACT_PTR8_OVERFLOW);
-    EXPECT_EQ(e16, TAURUS_COMPACT_PTR16_OVERFLOW);
-    EXPECT_EQ(taurus_compact_ptr8_decode(base, e8, 3, &f8), target);
-    EXPECT_EQ(taurus_compact_ptr16_decode(base, e16, 3, &f16), target);
+    int8_t e8 = leptris_compact_ptr8_encode(base, target, 3, &f8);
+    int16_t e16 = leptris_compact_ptr16_encode(base, target, 3, &f16);
+    EXPECT_EQ(e8, LEPTRIS_COMPACT_PTR8_OVERFLOW);
+    EXPECT_EQ(e16, LEPTRIS_COMPACT_PTR16_OVERFLOW);
+    EXPECT_EQ(leptris_compact_ptr8_decode(base, e8, 3, &f8), target);
+    EXPECT_EQ(leptris_compact_ptr16_decode(base, e16, 3, &f16), target);
 
-    taurus_explicit_cleanup();
+    leptris_explicit_cleanup();
     std::free(big);
 }
 
@@ -224,8 +224,8 @@ TEST(CompactPtr8And16, ShareOverflowTableWithoutInterference) {
  * fixed 256-bucket chained hash; >256 entries degraded to linear
  * chain walks (the rising mutation-append cost). Load-factor growth
  * must preserve every entry across rehashes. */
-TEST(TaurusCompact, OverflowTableGrowsCorrectly) {
-    TaurusCompactOverflowTable* t = taurus_compact_overflow_table_create(16);
+TEST(LeptrisCompact, OverflowTableGrowsCorrectly) {
+    LeptrisCompactOverflowTable* t = leptris_compact_overflow_table_create(16);
     ASSERT_NE(t, nullptr);
 
     /* 5000 distinct keys — forces several doublings past the
@@ -233,18 +233,18 @@ TEST(TaurusCompact, OverflowTableGrowsCorrectly) {
     static void* keys[5000];
     for (int i = 0; i < 5000; i++) {
         keys[i] = (void*)(uintptr_t)(0x100000 + (size_t)i * 24);
-        ASSERT_EQ(taurus_compact_overflow_set(t, keys[i], keys[i], nullptr), 0);
+        ASSERT_EQ(leptris_compact_overflow_set(t, keys[i], keys[i], nullptr), 0);
     }
     for (int i = 0; i < 5000; i++) {
-        EXPECT_EQ(taurus_compact_overflow_get(t, keys[i]), keys[i])
+        EXPECT_EQ(leptris_compact_overflow_get(t, keys[i]), keys[i])
             << "entry " << i << " lost across growth rehash";
     }
     /* Overwrite one entry; the update must win over the old value. */
     void* sentinel = (void*)(uintptr_t)0xDEAD;
-    ASSERT_EQ(taurus_compact_overflow_set(t, keys[7], sentinel, nullptr), 0);
-    EXPECT_EQ(taurus_compact_overflow_get(t, keys[7]), sentinel);
+    ASSERT_EQ(leptris_compact_overflow_set(t, keys[7], sentinel, nullptr), 0);
+    EXPECT_EQ(leptris_compact_overflow_get(t, keys[7]), sentinel);
 
-    taurus_compact_overflow_table_destroy(t);
+    leptris_compact_overflow_table_destroy(t);
 }
 
 }  // namespace

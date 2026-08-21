@@ -7,14 +7,14 @@ added; registered in `benchmarks/CMakeLists.txt`.
 
 Benchmark output (Release + LTO, clang arm64, 1000 elements):
 
-| K attrs | taurus (µs) | pugixml (µs) | Ratio |
+| K attrs | leptris (µs) | pugixml (µs) | Ratio |
 |---------|-------------|--------------|-------|
 | 5       | 199         | 49           | 4.07× |
 | 20      | 629         | 245          | 2.57× |
 | 50      | 1320        | 450          | 2.93× |
 | 100     | 4391        | 830          | 5.29× |
 
-Per-attr cost computed: taurus ≈ 38 ns/attr, pugixml ≈ 8 ns/attr.
+Per-attr cost computed: leptris ≈ 38 ns/attr, pugixml ≈ 8 ns/attr.
 The 30 ns/attr delta is structural (FNV-1a hash + entity memchr +
 string-view setup + per-attr bookkeeping) — see TODO 161 survey
 for why we don't strip these features to match pugixml.
@@ -35,11 +35,11 @@ _before_ it became obvious from code inspection.
 
 Add `benchmarks/comprehensive/benchmark_many_attrs.cpp` that
 generates XML with 20, 50, and 100 attrs per element across 1000
-elements. Compare taurus vs pugixml on each.
+elements. Compare leptris vs pugixml on each.
 
 This serves two purposes:
 1. Catches future regressions in per-attr wiring.
-2. Documents where taurus is genuinely faster (the new O(K)
+2. Documents where leptris is genuinely faster (the new O(K)
    per-element wiring + bulk-allocated attr structs should make
    us competitive with pugixml even at K=100).
 

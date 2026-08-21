@@ -1,12 +1,12 @@
 /**
  * @file options.c
- * @brief Option parsing implementation for Taurus CLI
+ * @brief Option parsing implementation for Leptris CLI
  */
 
 #include "options.h"
 #include "cli.h"
 #include "error.h"
-#include "../src/taurus/common/port.h"
+#include "../src/leptris/common/port.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -212,9 +212,9 @@ char** option_parser_get_positional(option_parser_t* parser, int* count) {
 const char* get_env_string(const char* name, const char* default_value) {
     if (!name) return default_value;
 
-    /* Build TAURUS_NAME */
+    /* Build LEPTRIS_NAME */
     char env_name[256];
-    snprintf(env_name, sizeof(env_name), "TAURUS_%s", name);
+    snprintf(env_name, sizeof(env_name), "LEPTRIS_%s", name);
 
     const char* value = getenv(env_name);
     return value ? value : default_value;

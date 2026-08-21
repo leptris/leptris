@@ -6,7 +6,7 @@
 
 ## Problem
 
-The public API in `src/include/taurus/` has inline docstrings but
+The public API in `src/include/leptris/` has inline docstrings but
 they're inconsistent — some thorough, others one-line.  No generated
 API reference exists.
 
@@ -16,14 +16,14 @@ API reference exists.
 
 ```
 docs/Doxyfile:
-  PROJECT_NAME = libtaurus
+  PROJECT_NAME = libleptris
   INPUT        = src/include
   RECURSIVE    = YES
   ...
 
 CMakeLists.txt:
-  option(TAURUS_BUILD_DOCS "Build Doxygen API docs" OFF)
-  if(TAURUS_BUILD_DOCS)
+  option(LEPTRIS_BUILD_DOCS "Build Doxygen API docs" OFF)
+  if(LEPTRIS_BUILD_DOCS)
     find_package(Doxygen REQUIRED)
     add_custom_target(docs ...)
   endif()
@@ -44,7 +44,7 @@ Documentation itself is the deliverable.
 ## Verification
 
 ```bash
-cmake -B build -S . -DTAURUS_BUILD_DOCS=ON
+cmake -B build -S . -DLEPTRIS_BUILD_DOCS=ON
 cmake --build build --target docs
 ls docs/html/index.html
 ```

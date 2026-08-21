@@ -1,18 +1,18 @@
-# Taurus Architecture Review
+# Leptris Architecture Review
 
 **Status**: Snapshot as of 2026-08-03
 **Scope**: Post-phase-4 refactor, post-ASAN fixes
 
 ## Overview
 
-Taurus is a pure-C99 XML 1.0 parser, XPath 1.0 engine, and SAX parser.
+Leptris is a pure-C99 XML 1.0 parser, XPath 1.0 engine, and SAX parser.
 The codebase is structured as a layered library with strict separation
 between public API, internal types, and per-subsystem implementations.
 
 ```
 cli/                  Command-line interface (depends only on public API)
-src/include/taurus/   Public API surface (opaque handles, stable ABI)
-src/taurus/           Internal implementation
+src/include/leptris/   Public API surface (opaque handles, stable ABI)
+src/leptris/           Internal implementation
   dom/                DOM node tree
   parse/              XML parser
   xpath/              XPath lexer/parser/evaluator
@@ -31,11 +31,11 @@ These are the load-bearing rules. Breaking any of them is a bug.
 
 ### 1. Pool-ownership of DOM nodes
 
-Every byte reachable from a `TaurusDocument` is allocated from that
-document's pool. `taurus_document_free` destroys the pool, freeing
+Every byte reachable from a `LeptrisDocument` is allocated from that
+document's pool. `leptris_document_free` destroys the pool, freeing
 everything. There is no reference counting; no per-node free.
 
-**Implication**: A `TaurusElement` pointer is valid only as long as
+**Implication**: A `LeptrisElement` pointer is valid only as long as
 its owning document. Use-after-free is impossible *within* a document;
 only document-level lifetime matters.
 
@@ -48,13 +48,13 @@ types. Core never reaches up to the CLI.
 CLI → public API → core subsystems
 ```
 
-A `grep` for `taurus_internal.h` outside `src/taurus/` and `test/`
+A `grep` for `leptris_internal.h` outside `src/leptris/` and `test/`
 should return nothing.
 
 ### 3. Opaque handles
 
-All public types (`TaurusDocument`, `TaurusElement`, `TaurusNodeRef`,
-`TaurusXPathResult`, `TaurusNamespace`, ...) are pointer typedefs to
+All public types (`LeptrisDocument`, `LeptrisElement`, `LeptrisNodeRef`,
+`LeptrisXPathResult`, `LeptrisNamespace`, ...) are pointer typedefs to
 incomplete struct types. Callers never see struct fields.
 
 `_Static_assert` in `test/abi/test_header_hygiene.cpp` verifies all
@@ -65,13 +65,13 @@ opaque handles are pointer-sized — a baseline ABI stability check.
 Adding a node type is purely additive: register a new entry in the
 `g_node_vtables[]` array in `dom/node_vtable.c`. The serializer
 (`serialize/serialize.c`) and any other type-dispatched code picks it
-up automatically through `taurus_node_vtable_for(type)`.
+up automatically through `leptris_node_vtable_for(type)`.
 
 No `switch (node->type)` statements should be added to dispatch code.
 
 ### 5. Document-scoped configuration
 
-`TaurusDocument` carries its own strict-mode flag and allocator hooks,
+`LeptrisDocument` carries its own strict-mode flag and allocator hooks,
 inherited from the thread-default at creation. Two documents in the
 same thread can have different settings.
 
@@ -83,10 +83,10 @@ same thread can have different settings.
 
 - Element struct is ~96 bytes via compact architecture (compressed
   pointers + pool offsets).
-- All node types begin with `TaurusNode` header → safe casts.
-- `taurus_element_add_namespace_inplace` (element.c:549) is dead code
+- All node types begin with `LeptrisNode` header → safe casts.
+- `leptris_element_add_namespace_inplace` (element.c:549) is dead code
   with a misleading TODO. The real namespace tracking path
-  (`taurus_element_add_namespace` in taurus_memory.c) works correctly.
+  (`leptris_element_add_namespace` in leptris_memory.c) works correctly.
   Recommend removing the dead function in a future cleanup PR.
 
 ### `parse/` — XML parser
@@ -95,11 +95,11 @@ same thread can have different settings.
 
 - `parser_new.c` is the active parser. `compact_parser.c` is a
   parallel implementation that is NOT wired into the build's call
-  graph (no entry points called from `taurus_parse`). Either wire it
+  graph (no entry points called from `leptris_parse`). Either wire it
   in (it's an alternative code path for compact-mode documents) or
   document that it's experimental.
-- Depth limit (`TAURUS_MAX_ELEMENT_DEPTH=256`) is configurable via
-  `taurus_set_max_depth`.
+- Depth limit (`LEPTRIS_MAX_ELEMENT_DEPTH=256`) is configurable via
+  `leptris_set_max_depth`.
 - All node-creation sites route through the pool.
 
 ### `xpath/` — XPath engine
@@ -126,7 +126,7 @@ same thread can have different settings.
 - Namespace prefix events (`start_prefix_mapping` /
   `end_prefix_mapping`) iterate `attrs` directly — no per-prefix
   allocations (regression fix from PR #23).
-- Incremental parsing (`taurus_sax_parser_feed`) is currently
+- Incremental parsing (`leptris_sax_parser_feed`) is currently
   one-shot under the hood (TODO 89). True streaming remains a
   feature gap.
 
@@ -141,8 +141,8 @@ same thread can have different settings.
 - Entity resolution works via the document's pool (post-PR-#23 fix
   that routed DTD through the document pool rather than a private
   one).
-- `taurus_dtd_parse` now correctly releases its standalone pool
-  via `owns_pool` flag on `TaurusDTD` (PR #37).
+- `leptris_dtd_parse` now correctly releases its standalone pool
+  via `owns_pool` flag on `LeptrisDTD` (PR #37).
 - ATTLIST parsing was unblocked by the `_POSIX_C_SOURCE` define
   (PR #37) — without it, strdup linkage was broken on Linux.
 
@@ -165,7 +165,7 @@ What's still pending (TODO 91 Phase 3+):
 **Status**: Solid.
 
 - UTF-16 BOM detection always compiled.
-- iconv path optional via `TAURUS_ENABLE_ICONV`.
+- iconv path optional via `LEPTRIS_ENABLE_ICONV`.
 - `wrapper.c` extracted in TODO 73 — owns the encoding-detection
   parse path. Fixed a double-buffer leak during extraction.
 
@@ -174,8 +174,8 @@ What's still pending (TODO 91 Phase 3+):
 **Status**: Solid.
 
 - Pool uses chained pages; existing allocations don't move on growth.
-- Oversized allocations tracked via `TaurusBigAlloc` side-list,
-  freed in `taurus_pool_destroy`.
+- Oversized allocations tracked via `LeptrisBigAlloc` side-list,
+  freed in `leptris_pool_destroy`.
 - Hash table grows at 75% load factor.
 
 ## Test coverage
@@ -227,11 +227,11 @@ Twelve workflows, all currently green on `main`:
 ## Public API stability
 
 - Opaque handles verified pointer-sized via `_Static_assert`.
-- `TAURUS_FOR_BINDGEN` macro strips platform-specific attributes for
+- `LEPTRIS_FOR_BINDGEN` macro strips platform-specific attributes for
   binding generators.
 - SOVERSION tracked on shared library.
-- `taurus.h` umbrella header includes everything; subsystem headers
-  (`taurus/dom/document.h`, `taurus/xpath/xpath.h`, etc.) allow
+- `leptris.h` umbrella header includes everything; subsystem headers
+  (`leptris/dom/document.h`, `leptris/xpath/xpath.h`, etc.) allow
   finer-grained inclusion.
 
 See `docs/FFI.md` for the FFI contract.
@@ -243,8 +243,8 @@ See `docs/FFI.md` for the FFI contract.
 2. **TODO 91** — DTD validator not implemented. Big feature gap.
 3. **TODO 69** — W3C XPath conformance suite not integrated.
 4. **TODO 92** — XInclude classifier helpers shipped (PR #33) but
-   the full `taurus_xinclude_process` is a stub returning
-   `TAURUS_ERROR_NOT_IMPLEMENTED`.
+   the full `leptris_xinclude_process` is a stub returning
+   `LEPTRIS_ERROR_NOT_IMPLEMENTED`.
 5. **TODO 89** — SAX incremental parsing is one-shot under the hood.
 6. **TODO 79-85** — FFI design done; Ruby/Python/Rust bindings not
    implemented.
@@ -254,7 +254,7 @@ See `docs/FFI.md` for the FFI contract.
 - ASAN crashes fixed by initializing `Parser.dtd` and
   `has_namespace_prefixes` in `parser_create_writable`.
 - SAX leak fixed by eliminating per-prefix allocations entirely.
-- taurus.c split from 2646 lines to 900 lines across 4 phases.
+- leptris.c split from 2646 lines to 900 lines across 4 phases.
 - XPath nodeset variable support implemented (TODO 86).
 - Man page version drift corrected.
 - Docs refresh (building.md, CHANGELOG).
@@ -273,8 +273,8 @@ See `docs/FFI.md` for the FFI contract.
 ## Architecture decisions to revisit (low priority)
 
 - The `xml_buffer_needs_free` flag (TODO 41) was investigated and is
-  the correct design for the `taurus_parse_string_inplace` API
+  the correct design for the `leptris_parse_string_inplace` API
   contract. Don't change.
-- The duplicate `APPEND_STRING` macro in `taurus.c` and `c14n.c` is
+- The duplicate `APPEND_STRING` macro in `leptris.c` and `c14n.c` is
   intentional — making it a function would add overhead. Marked
   clearly in comments.

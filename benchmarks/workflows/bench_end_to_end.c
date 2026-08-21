@@ -4,7 +4,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <math.h>
-#include "../../lib/include/taurus.h"
+#include "../../lib/include/leptris.h"
 
 /* ============================================================================
  * Benchmark Context
@@ -45,9 +45,9 @@ static void warmup_cache(BenchContext* ctx, int iterations) {
         memcpy(xml_copy, ctx->xml, ctx->xml_len);
         xml_copy[ctx->xml_len] = '\0';
 
-        TaurusDocument doc = taurus_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
-        taurus_document_free(doc);
-        /* Note: xml_copy freed by taurus_document_free when using in-place */
+        LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
+        leptris_document_free(doc);
+        /* Note: xml_copy freed by leptris_document_free when using in-place */
     }
 }
 
@@ -122,9 +122,9 @@ static void benchmark_parse_only(BenchContext* ctx) {
 
         double start = get_time_us();
 
-        TaurusDocument doc = taurus_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
-        taurus_document_free(doc);
-        /* Note: xml_copy freed by taurus_document_free */
+        LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
+        leptris_document_free(doc);
+        /* Note: xml_copy freed by leptris_document_free */
 
         double elapsed = get_time_us() - start;
         ctx->samples_us[i] = elapsed;
@@ -154,13 +154,13 @@ static void benchmark_parse_query(BenchContext* ctx) {
 
         double start = get_time_us();
 
-        TaurusDocument doc = taurus_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
+        LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
 
         /* Execute XPath query */
-        TaurusXPathResult result = taurus_xpath_eval(doc, NULL, "//item");
-        taurus_xpath_result_free(result);
+        LeptrisXPathResult result = leptris_xpath_eval(doc, NULL, "//item");
+        leptris_xpath_result_free(result);
 
-        taurus_document_free(doc);
+        leptris_document_free(doc);
 
         double elapsed = get_time_us() - start;
         ctx->samples_us[i] = elapsed;
@@ -191,24 +191,24 @@ static void benchmark_parse_modify_serialize(BenchContext* ctx) {
         double start = get_time_us();
 
         /* 1. Parse */
-        TaurusDocument doc = taurus_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
+        LeptrisElement root = leptris_document_root(doc);
 
         /* 2. Modify - add 10 elements with attributes and text */
         for (int j = 0; j < 10; j++) {
-            TaurusElement item = taurus_element_create(doc, "item");
-            taurus_element_set_attribute(item, "id", "123");
-            taurus_element_set_attribute(item, "type", "test");
-            taurus_element_set_text(item, "Sample text content");
-            taurus_element_append_child(root, item);
+            LeptrisElement item = leptris_element_create(doc, "item");
+            leptris_element_set_attribute(item, "id", "123");
+            leptris_element_set_attribute(item, "type", "test");
+            leptris_element_set_text(item, "Sample text content");
+            leptris_element_append_child(root, item);
         }
 
         /* 3. Serialize */
-        char* xml = taurus_document_serialize(doc, NULL);
-        taurus_free_string(xml);
+        char* xml = leptris_document_serialize(doc, NULL);
+        leptris_free_string(xml);
 
         /* 4. Cleanup */
-        taurus_document_free(doc);
+        leptris_document_free(doc);
 
         double elapsed = get_time_us() - start;
         ctx->samples_us[i] = elapsed;
@@ -238,27 +238,27 @@ static void benchmark_complex_modification(BenchContext* ctx) {
 
         double start = get_time_us();
 
-        TaurusDocument doc = taurus_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
+        LeptrisElement root = leptris_document_root(doc);
 
         /* Complex modifications: nested elements, multiple attributes */
         for (int j = 0; j < 5; j++) {
-            TaurusElement section = taurus_element_create(doc, "section");
-            taurus_element_set_attribute(section, "id", "section1");
+            LeptrisElement section = leptris_element_create(doc, "section");
+            leptris_element_set_attribute(section, "id", "section1");
 
-            TaurusElement item = taurus_element_create(doc, "item");
-            taurus_element_set_attribute(item, "attr1", "value1");
-            taurus_element_set_attribute(item, "attr2", "value2");
-            taurus_element_set_attribute(item, "attr3", "value3");
-            taurus_element_set_text(item, "Complex text content");
-            taurus_element_append_child(section, item);
+            LeptrisElement item = leptris_element_create(doc, "item");
+            leptris_element_set_attribute(item, "attr1", "value1");
+            leptris_element_set_attribute(item, "attr2", "value2");
+            leptris_element_set_attribute(item, "attr3", "value3");
+            leptris_element_set_text(item, "Complex text content");
+            leptris_element_append_child(section, item);
 
-            taurus_element_append_child(root, section);
+            leptris_element_append_child(root, section);
         }
 
-        char* xml = taurus_document_serialize(doc, NULL);
-        taurus_free_string(xml);
-        taurus_document_free(doc);
+        char* xml = leptris_document_serialize(doc, NULL);
+        leptris_free_string(xml);
+        leptris_document_free(doc);
 
         double elapsed = get_time_us() - start;
         ctx->samples_us[i] = elapsed;
@@ -377,7 +377,7 @@ int main(int argc, char** argv) {
         if (iterations < 1) iterations = 100;
     }
 
-    printf("=== Taurus End-to-End Workflow Benchmarks ===\n");
+    printf("=== Leptris End-to-End Workflow Benchmarks ===\n");
     printf("Iterations: %d\n\n", iterations);
 
     /* Load test fixtures */

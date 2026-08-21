@@ -22,16 +22,16 @@ Moved `prefix_view`, `namespace_uri_view`, `prefix`, and
 cache struct:
 
 ```c
-struct taurus_attr_ns_cache {
-    TaurusStringView prefix_view;
-    TaurusStringView namespace_uri_view;
+struct leptris_attr_ns_cache {
+    LeptrisStringView prefix_view;
+    LeptrisStringView namespace_uri_view;
     char* prefix;
     char* namespace_uri;
 };
 ```
 
-The main `struct taurus_attribute` gets a single nullable pointer
-`struct taurus_attr_ns_cache* ns_cache`. When the attr has no
+The main `struct leptris_attribute` gets a single nullable pointer
+`struct leptris_attr_ns_cache* ns_cache`. When the attr has no
 namespace activity (the common case), `ns_cache == NULL` and zero
 overhead is paid. Attrs that DO have a prefix or namespace_uri
 pay one 48-byte pool allocation for the cache struct.
@@ -47,7 +47,7 @@ Readers use these helpers (in element.h):
 - `attr_get_prefix_view(a)` — returns empty StringView.
 - `attr_get_namespace_uri_view(a)` — same.
 
-Writers either allocate the cache directly via `taurus_pool_alloc`
+Writers either allocate the cache directly via `leptris_pool_alloc`
 (used in element_modify.c's copy path) or simply leave `ns_cache`
 NULL when not setting prefix/ns (the common case at parse time).
 
@@ -62,9 +62,9 @@ NULL when not setting prefix/ns (the common case at parse time).
 - `xpath/evaluator_axes.c` — `attr_get_namespace_uri` for the
   synthetic attribute-node construction.
 - `xpath/functions.c` — `xml:lang` lookup uses accessors.
-- `taurus_memory.c` — `taurus_attribute_free` releases ns_cache
+- `leptris_memory.c` — `leptris_attribute_free` releases ns_cache
   contents if present.
-- `taurus.c` — finalize_element_strings materializes
+- `leptris.c` — finalize_element_strings materializes
   namespace_uri from the side cache.
 
 ## Risk

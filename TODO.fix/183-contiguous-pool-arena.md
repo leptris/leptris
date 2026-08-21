@@ -6,7 +6,7 @@
 
 ## Goal
 
-Redesign `TaurusMemoryPool` to allocate one contiguous arena per
+Redesign `LeptrisMemoryPool` to allocate one contiguous arena per
 document, eliminating the multi-page layout that breaks compact
 pointer encodings wider than the page size.
 
@@ -19,7 +19,7 @@ tree migration to cp16). Three tests failed:
 - `SerializeRoundTrip.HugeTextContentStaysAttachedToParent` — silent data loss
 - `HighDocCountStress.ParseVerifyFree5000Docs` — segfault
 
-**Root cause**: `taurus_pool_alloc` allocates 32 KB pages via `malloc`.
+**Root cause**: `leptris_pool_alloc` allocates 32 KB pages via `malloc`.
 Distinct malloc'd pages for one document can land megabytes apart on
 macOS ASLR / Linux glibc. Element tree edges span the whole document,
 easily exceeding cp16's ±256 KB range when the document has more than
@@ -47,17 +47,17 @@ relocate and invalidate all internal pointers — a hard problem).
 
 ### Phase 1 — Arena allocator core
 
-New file `src/taurus/memory/arena.{h,c}`:
+New file `src/leptris/memory/arena.{h,c}`:
 
 ```c
-typedef struct taurus_arena {
+typedef struct leptris_arena {
     char* base;            /* Single contiguous malloc */
     size_t size;           /* Total bytes allocated */
     size_t used;           /* Bump pointer */
     /* Optional growth: list of "extension" arenas for overflow.
      * Each extension is its own malloc; pointers within an extension
      * are valid only within that extension. */
-} TaurusArena;
+} LeptrisArena;
 ```
 
 Initial size estimate: 2× document byte length + 64 KB (overhead for
@@ -65,8 +65,8 @@ node structs etc.). Tune via benchmarks.
 
 ### Phase 2 — Pool API compatibility
 
-`TaurusMemoryPool` becomes a thin wrapper around `TaurusArena`,
-preserving the existing `taurus_pool_alloc / taurus_pool_destroy`
+`LeptrisMemoryPool` becomes a thin wrapper around `LeptrisArena`,
+preserving the existing `leptris_pool_alloc / leptris_pool_destroy`
 API. Internal callers see no change.
 
 ### Phase 3 — Migrate direct_parse.c
@@ -102,7 +102,7 @@ by the actual allocation, not the bookkeeping.
 Medium-high. Changing the pool allocator touches every allocation
 site. Mitigations:
 
-1. Phase 2 preserves the `TaurusMemoryPool` API — internal callers
+1. Phase 2 preserves the `LeptrisMemoryPool` API — internal callers
    see no change.
 2. ASAN + UBSAN + leak check must pass on all 474 tests.
 3. Adversarial inputs (huge text content, 100K-element docs) must work.

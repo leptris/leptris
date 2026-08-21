@@ -29,7 +29,7 @@
  */
 #include "../common/benchmark.h"
 #include "../common/test_data.h"
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -53,50 +53,50 @@ static const char* kMicroDoc = "<r><a x='1'>t</a></r>";
 static const size_t kMicroDocLen = 24;
 
 typedef struct {
-    TaurusDocument doc;
-    TaurusElement root;
+    LeptrisDocument doc;
+    LeptrisElement root;
 } bench_ctx_t;
 
 static void setup_micro(void* p) {
     bench_ctx_t* c = (bench_ctx_t*)p;
-    TaurusStatus st = TAURUS_OK;
-    c->doc = taurus_parse_string(kMicroDoc, kMicroDocLen, &st);
-    c->root = taurus_document_root(c->doc);
+    LeptrisStatus st = LEPTRIS_OK;
+    c->doc = leptris_parse_string(kMicroDoc, kMicroDocLen, &st);
+    c->root = leptris_document_root(c->doc);
 }
 
 static void teardown_micro(void* p) {
     bench_ctx_t* c = (bench_ctx_t*)p;
-    taurus_document_free(c->doc);
+    leptris_document_free(c->doc);
 }
 
 /* Baseline: parse-only. Reveals the parse cost without any XPath. */
 static void bench_parse_only(void* p) {
     (void)p;
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument d = taurus_parse_string(kMicroDoc, kMicroDocLen, &st);
-    taurus_document_free(d);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(kMicroDoc, kMicroDocLen, &st);
+    leptris_document_free(d);
 }
 
 /* Self-axis on micro doc. This should be near-instant; the cost
  * is pure per-call overhead. */
 static void bench_self_axis_warm(void* p) {
     bench_ctx_t* c = (bench_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "self::*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "self::*");
+    leptris_xpath_result_free(r);
 }
 
 /* Boolean literal — no actual evaluation, just dispatch + result. */
 static void bench_literal_true(void* p) {
     bench_ctx_t* c = (bench_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "true()");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "true()");
+    leptris_xpath_result_free(r);
 }
 
 /* Number literal — same. */
 static void bench_literal_number(void* p) {
     bench_ctx_t* c = (bench_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "42");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "42");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -119,15 +119,15 @@ static void bench_unique_expr_cold(void* p) {
      * thrashes the 16-slot AST cache. */
     snprintf(g_unique_expr, sizeof(g_unique_expr), "%d", 42000 + g_unique_counter);
     g_unique_counter = (g_unique_counter + 1) % 1000;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, g_unique_expr);
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, g_unique_expr);
+    leptris_xpath_result_free(r);
 }
 
 /* Same expression every iter — fully cached. */
 static void bench_same_expr_warm(void* p) {
     bench_ctx_t* c = (bench_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "42");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "42");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -138,75 +138,75 @@ static void bench_same_expr_warm(void* p) {
  * ----------------------------------------------------------------------- */
 
 typedef struct {
-    TaurusDocument doc;
-    TaurusElement root;
+    LeptrisDocument doc;
+    LeptrisElement root;
 } medium_ctx_t;
 
 static void setup_medium(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusStatus st = TAURUS_OK;
-    c->doc = taurus_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), &st);
-    c->root = taurus_document_root(c->doc);
+    LeptrisStatus st = LEPTRIS_OK;
+    c->doc = leptris_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), &st);
+    c->root = leptris_document_root(c->doc);
 }
 
 static void teardown_medium(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    taurus_document_free(c->doc);
+    leptris_document_free(c->doc);
 }
 
 typedef struct {
-    TaurusDocument doc;
-    TaurusElement root;
+    LeptrisDocument doc;
+    LeptrisElement root;
 } large_ctx_t;
 
 static void setup_large(void* p) {
     large_ctx_t* c = (large_ctx_t*)p;
-    TaurusStatus st = TAURUS_OK;
-    c->doc = taurus_parse_string(BENCH_XML_LARGE, strlen(BENCH_XML_LARGE), &st);
-    c->root = taurus_document_root(c->doc);
+    LeptrisStatus st = LEPTRIS_OK;
+    c->doc = leptris_parse_string(BENCH_XML_LARGE, strlen(BENCH_XML_LARGE), &st);
+    c->root = leptris_document_root(c->doc);
 }
 
 static void teardown_large(void* p) {
     large_ctx_t* c = (large_ctx_t*)p;
-    taurus_document_free(c->doc);
+    leptris_document_free(c->doc);
 }
 
 /* self::* on each doc size — the cost difference is the document-walk
  * tax levied by xpath_context_init_from_document. */
 static void bench_large_self(void* p) {
     large_ctx_t* c = (large_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "self::*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "self::*");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_child_wild(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "child::*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "child::*");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_child_name(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "child::book");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "child::book");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_descendant_wild(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "descendant::*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "descendant::*");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_descendant_name(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "descendant::title");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "descendant::title");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_self(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "self::*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "self::*");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -217,20 +217,20 @@ static void bench_medium_self(void* p) {
 
 static void bench_medium_descendant_no_pred(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "descendant::*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "descendant::*");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_descendant_attr_exist(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "descendant::*[@id]");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "descendant::*[@id]");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_descendant_position_pred(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "descendant::*[1]");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "descendant::*[1]");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -243,20 +243,20 @@ static void bench_medium_descendant_position_pred(void* p) {
 
 static void bench_medium_attr_wild(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "attribute::*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "attribute::*");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_attr_named(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "attribute::id");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "attribute::id");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_attr_short(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "@id");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "@id");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -270,17 +270,17 @@ static void bench_medium_attr_short(void* p) {
 static void bench_medium_pred_literal_cmp(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
     /* RHS is a literal — compiler can inline. */
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root,
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root,
                                               "count(1 = 1)");
-    taurus_xpath_result_free(r);
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_pred_nodeset_cmp(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
     /* LHS is a path (nodeset) — falls back to evaluate_expr. */
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root,
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root,
                                               "count(//book[@id = 'b1'])");
-    taurus_xpath_result_free(r);
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -295,22 +295,22 @@ static void bench_medium_pred_nodeset_cmp(void* p) {
 static void bench_medium_absolute_root_match(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
     /* `/catalog` → BC_ABSOLUTE_ROOT_MATCH_NAME. */
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, NULL, "/catalog");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, NULL, "/catalog");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_absolute_descendant_or_self(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
     /* `//book` → BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME. */
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, NULL, "//book");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, NULL, "//book");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_absolute_descendant_wild(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
     /* `//*` → BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD. */
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, NULL, "//*");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, NULL, "//*");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -322,17 +322,17 @@ static void bench_medium_absolute_descendant_wild(void* p) {
 
 static void bench_medium_var_ref(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathVariableSet vars = taurus_xpath_variable_set_new();
-    taurus_xpath_variable_set_number(vars, "n", 42.0);
-    TaurusXPathResult r = taurus_xpath_eval_with_vars(c->doc, "$n", vars);
-    taurus_xpath_result_free(r);
-    taurus_xpath_variable_set_free(vars);
+    LeptrisXPathVariableSet vars = leptris_xpath_variable_set_new();
+    leptris_xpath_variable_set_number(vars, "n", 42.0);
+    LeptrisXPathResult r = leptris_xpath_eval_with_vars(c->doc, "$n", vars);
+    leptris_xpath_result_free(r);
+    leptris_xpath_variable_set_free(vars);
 }
 
 static void bench_medium_literal(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "42");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "42");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *
@@ -344,16 +344,16 @@ static void bench_medium_literal(void* p) {
 
 static void bench_micro_eval(void* p) {
     bench_ctx_t* c = (bench_ctx_t*)p;
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "child::a");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "child::a");
+    leptris_xpath_result_free(r);
 }
 
 static void bench_medium_eval_same(void* p) {
     medium_ctx_t* c = (medium_ctx_t*)p;
     /* Same expression shape but on the medium doc — isolates the
      * per-call setup cost that scales with document size. */
-    TaurusXPathResult r = taurus_xpath_eval(c->doc, c->root, "child::book");
-    taurus_xpath_result_free(r);
+    LeptrisXPathResult r = leptris_xpath_eval(c->doc, c->root, "child::book");
+    leptris_xpath_result_free(r);
 }
 
 /* ----------------------------------------------------------------------- *

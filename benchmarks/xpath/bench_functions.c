@@ -1,6 +1,6 @@
 #include "../common/benchmark.h"
 #include "../common/test_data.h"
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 #include <string.h>
@@ -8,8 +8,8 @@
 #include <stdlib.h>
 
 typedef struct {
-    TaurusDocument doc;
-    TaurusElement context;
+    LeptrisDocument doc;
+    LeptrisElement context;
 } xpath_ctx_t;
 
 /* ============================================================================
@@ -18,62 +18,62 @@ typedef struct {
 
 void bench_func_string(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "string(//book[1]/title)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "string(//book[1]/title)");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_concat(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "concat('Hello', ' ', 'World')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "concat('Hello', ' ', 'World')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_starts_with(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "starts-with('Hello', 'He')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "starts-with('Hello', 'He')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_contains(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "contains('Hello World', 'World')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "contains('Hello World', 'World')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_substring(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "substring('Hello', 2, 3)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "substring('Hello', 2, 3)");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_substring_before(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "substring-before('Hello World', ' ')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "substring-before('Hello World', ' ')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_substring_after(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "substring-after('Hello World', ' ')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "substring-after('Hello World', ' ')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_string_length(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "string-length('Hello')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "string-length('Hello')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_normalize_space(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "normalize-space('  Hello   World  ')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "normalize-space('  Hello   World  ')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_translate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "translate('Hello', 'el', 'EL')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "translate('Hello', 'el', 'EL')");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -82,32 +82,32 @@ void bench_func_translate(void* ctx) {
 
 void bench_func_number(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "number('123.45')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "number('123.45')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_sum(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "sum(//book/price)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "sum(//book/price)");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_floor(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "floor(3.7)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "floor(3.7)");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_ceiling(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "ceiling(3.2)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "ceiling(3.2)");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_round(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "round(3.5)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "round(3.5)");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -116,32 +116,32 @@ void bench_func_round(void* ctx) {
 
 void bench_func_boolean(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "boolean(//book)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "boolean(//book)");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_not(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "not(false())");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "not(false())");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_true(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "true()");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "true()");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_false(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "false()");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "false()");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_lang(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "lang('en')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "lang('en')");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -150,44 +150,44 @@ void bench_func_lang(void* ctx) {
 
 void bench_func_last(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "//book[last()]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "//book[last()]");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_position(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "//book[position() = 1]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "//book[position() = 1]");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_count(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "count(//book)");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "count(//book)");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_id(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "id('101')");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "id('101')");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_local_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "local-name(//book[1])");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "local-name(//book[1])");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_namespace_uri(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "namespace-uri(//book[1])");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "namespace-uri(//book[1])");
+    leptris_xpath_result_free(result);
 }
 
 void bench_func_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "name(//book[1])");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "name(//book[1])");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -198,14 +198,14 @@ int main(void) {
     const size_t ITERATIONS = 1000;
 
     /* Parse test document */
-    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL);
+    LeptrisDocument doc = leptris_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL);
     if (!doc) {
         fprintf(stderr, "Failed to parse test document\n");
         return 1;
     }
 
     /* Get root element for context */
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     xpath_ctx_t ctx = { doc, root };
 
     /* Allocate results array (27 tests - all XPath 1.0 functions) */
@@ -214,7 +214,7 @@ int main(void) {
 
     printf("\n");
     printf("================================================================\n");
-    printf("Taurus XPath Functions Benchmark\n");
+    printf("Leptris XPath Functions Benchmark\n");
     printf("================================================================\n");
     printf("Iterations: %zu\n", ITERATIONS);
     printf("Test count: 27 (all XPath 1.0 functions)\n");
@@ -261,10 +261,10 @@ int main(void) {
     }
 
     /* Write JSON results */
-    bench_write_json("taurus", results, idx, "results/xpath_functions_taurus.json");
+    bench_write_json("leptris", results, idx, "results/xpath_functions_leptris.json");
 
     /* Cleanup */
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 
     printf("\n✅ Benchmark complete: 27 function tests\n\n");
     return 0;

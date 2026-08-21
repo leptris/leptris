@@ -1,7 +1,7 @@
-# Doxyfile for libtaurus — generates HTML API reference from public headers.
+# Doxyfile for libleptris — generates HTML API reference from public headers.
 # See TODO 63.
 
-PROJECT_NAME           = libtaurus
+PROJECT_NAME           = libleptris
 PROJECT_NUMBER         = 0.1.0
 PROJECT_BRIEF          = "High-performance XML parser & XPath engine in C"
 
@@ -42,6 +42,6 @@ DISABLE_INDEX          = NO
 FULL_SIDEBAR           = NO
 
 # Preprocessing — pass feature macros so #ifdef'd docs render correctly
-PREDEFINED             = TAURUS_HAS_UTF8PROC=1 \
-                         TAURUS_HAS_ICONV=1 \
-                         TAURUS_API=
+PREDEFINED             = LEPTRIS_HAS_UTF8PROC=1 \
+                         LEPTRIS_HAS_ICONV=1 \
+                         LEPTRIS_API=

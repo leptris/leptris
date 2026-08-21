@@ -2,7 +2,7 @@
  * Copyright (c) 2024, Ribose Inc.
  * All rights reserved.
  *
- * Session 84: Modularized from taurus_parse.c
+ * Session 84: Modularized from leptris_parse.c
  * Main parsing entry points and document structure creation
  */
 
@@ -16,11 +16,11 @@
 /* Parse processing instruction <?target data?>
  * Assumes positioned after '<?'
  * Returns newly created PI or NULL on error */
-struct taurus_processing_instruction *parse_processing_instruction(TaurusParseContext *ctx) {
+struct leptris_processing_instruction *parse_processing_instruction(LeptrisParseContext *ctx) {
     const char *target_start, *data_start;
     size_t target_len, data_len;
     char *target, *data;
-    struct taurus_processing_instruction *pi;
+    struct leptris_processing_instruction *pi;
     
     /* Parse target (PI name) */
     target_start = parse_name(ctx, &target_len);
@@ -29,13 +29,13 @@ struct taurus_processing_instruction *parse_processing_instruction(TaurusParseCo
     }
     
     /* Copy target */
-    target = taurus_strndup(target_start, target_len);
+    target = leptris_strndup(target_start, target_len);
     if (!target) {
         return NULL;
     }
     
     /* Skip whitespace before data */
-    taurus_skip_whitespace(&ctx->pos, ctx->end);
+    leptris_skip_whitespace(&ctx->pos, ctx->end);
     
     /* Find '?>' end marker */
     data_start = ctx->pos;
@@ -48,22 +48,22 @@ struct taurus_processing_instruction *parse_processing_instruction(TaurusParseCo
     }
     
     if (ctx->pos + 1 >= ctx->end) {
-        taurus_parse_context_set_error(ctx, "Unterminated processing instruction at line %d, column %d", ctx->line, ctx->column);
-        taurus_free(target);
+        leptris_parse_context_set_error(ctx, "Unterminated processing instruction at line %d, column %d", ctx->line, ctx->column);
+        leptris_free(target);
         return NULL;
     }
     
     /* Extract data (between target and '?>') */
     data_len = ctx->pos - data_start;
-    data = (data_len > 0) ? taurus_strndup(data_start, data_len) : NULL;
+    data = (data_len > 0) ? leptris_strndup(data_start, data_len) : NULL;
     
     /* Skip '?>' */
     ctx->pos += 2;
     
     /* Create PI */
-    pi = taurus_pi_new(target, data);
-    taurus_free(target);
-    if (data) taurus_free(data);
+    pi = leptris_pi_new(target, data);
+    leptris_free(target);
+    if (data) leptris_free(data);
     
     return pi;
 }
@@ -73,28 +73,28 @@ struct taurus_processing_instruction *parse_processing_instruction(TaurusParseCo
  * ================================================================== */
 
 /* Parse XML string into document structure */
-struct taurus_document *taurus_parse(const char *xml,
+struct leptris_document *leptris_parse(const char *xml,
                                       size_t len,
-                                      TaurusParseOptions *opts) {
-    TaurusParseContext ctx;
-    struct taurus_document *doc;
-    struct taurus_element *root;
+                                      LeptrisParseOptions *opts) {
+    LeptrisParseContext ctx;
+    struct leptris_document *doc;
+    struct leptris_element *root;
     
     /* Initialize context */
-    if (taurus_parse_context_init(&ctx, xml, len, opts) < 0) {
+    if (leptris_parse_context_init(&ctx, xml, len, opts) < 0) {
         return NULL;
     }
     
     /* Create document */
-    doc = taurus_document_new();
+    doc = leptris_document_new();
     if (!doc) {
-        taurus_parse_context_free(&ctx);
+        leptris_parse_context_free(&ctx);
         return NULL;
     }
     ctx.doc = doc;
     
     /* Skip leading whitespace */
-    taurus_skip_whitespace(&ctx.pos, ctx.end);
+    leptris_skip_whitespace(&ctx.pos, ctx.end);
     
     /* Parse processing instructions (including XML declaration) */
     while (ctx.pos + 1 < ctx.end &&
@@ -102,10 +102,10 @@ struct taurus_document *taurus_parse(const char *xml,
         ctx.pos += 2;  /* Skip '<?' */
         
         /* Parse processing instruction */
-        struct taurus_processing_instruction *pi = parse_processing_instruction(&ctx);
+        struct leptris_processing_instruction *pi = parse_processing_instruction(&ctx);
         if (!pi) {
-            taurus_document_free_internal(doc);
-            taurus_parse_context_free(&ctx);
+            leptris_document_free_internal(doc);
+            leptris_parse_context_free(&ctx);
             return NULL;
         }
         
@@ -113,7 +113,7 @@ struct taurus_document *taurus_parse(const char *xml,
         pi->next = doc->pis;
         doc->pis = pi;
         
-        taurus_skip_whitespace(&ctx.pos, ctx.end);
+        leptris_skip_whitespace(&ctx.pos, ctx.end);
     }
     
     /* Parse root element */
@@ -121,37 +121,37 @@ struct taurus_document *taurus_parse(const char *xml,
         ctx.pos++;  /* Skip '<' */
         root = parse_element(&ctx, NULL);
         if (!root) {
-            taurus_document_free_internal(doc);
-            taurus_parse_context_free(&ctx);
+            leptris_document_free_internal(doc);
+            leptris_parse_context_free(&ctx);
             return NULL;
         }
         
         /* Set as document root */
         doc->root = root;
     } else {
-        taurus_parse_context_set_error(&ctx, "No root element found at line %d, column %d", ctx.line, ctx.column);
-        taurus_document_free_internal(doc);
-        taurus_parse_context_free(&ctx);
+        leptris_parse_context_set_error(&ctx, "No root element found at line %d, column %d", ctx.line, ctx.column);
+        leptris_document_free_internal(doc);
+        leptris_parse_context_free(&ctx);
         return NULL;
     }
     
     /* Cleanup context */
-    taurus_parse_context_free(&ctx);
+    leptris_parse_context_free(&ctx);
     
     return doc;
 }
 
 /* Parse XML with error reporting */
-struct taurus_document *taurus_parse_with_error(const char *xml,
+struct leptris_document *leptris_parse_with_error(const char *xml,
                                                   size_t len,
-                                                  TaurusParseOptions *opts,
+                                                  LeptrisParseOptions *opts,
                                                   char *error_buf,
                                                   size_t error_len) {
-    struct taurus_document *doc;
-    TaurusParseContext ctx;
+    struct leptris_document *doc;
+    LeptrisParseContext ctx;
     
     /* Initialize context */
-    if (taurus_parse_context_init(&ctx, xml, len, opts) < 0) {
+    if (leptris_parse_context_init(&ctx, xml, len, opts) < 0) {
         if (error_buf && error_len > 0) {
             snprintf(error_buf, error_len, "Failed to initialize parse context");
         }
@@ -159,18 +159,18 @@ struct taurus_document *taurus_parse_with_error(const char *xml,
     }
     
     /* Parse document */
-    doc = taurus_parse(xml, len, opts);
+    doc = leptris_parse(xml, len, opts);
     
     /* Copy error if parse failed */
     if (!doc && error_buf && error_len > 0) {
-        const char *err = taurus_parse_context_error(&ctx);
+        const char *err = leptris_parse_context_error(&ctx);
         if (err[0] != '\0') {
             snprintf(error_buf, error_len, "%s", err);
         }
     }
     
     /* Cleanup */
-    taurus_parse_context_free(&ctx);
+    leptris_parse_context_free(&ctx);
     
     return doc;
 }

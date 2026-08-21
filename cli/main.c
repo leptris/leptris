@@ -1,8 +1,9 @@
 /**
  * @file main.c
- * @brief Main entry point for Taurus CLI tool
+ * @brief Main entry point for Leptris CLI tool
  */
 
+#include "leptris.h"
 #include "cli.h"
 #include "options.h"
 #include "error.h"
@@ -16,7 +17,7 @@
 /* ------------------------------------------------------------------------- */
 
 static void print_usage(void) {
-    printf("Usage: taurus [OPTIONS] COMMAND [ARGS...]\n");
+    printf("Usage: leptris [OPTIONS] COMMAND [ARGS...]\n");
     printf("\n");
     printf("Commands:\n");
     printf("  parse      Parse and validate XML\n");
@@ -33,12 +34,12 @@ static void print_usage(void) {
     printf("  -h, --help          Show this help\n");
     printf("  --version           Show version\n");
     printf("\n");
-    printf("Use 'taurus COMMAND --help' for command-specific help.\n");
+    printf("Use 'leptris COMMAND --help' for command-specific help.\n");
 }
 
 static void print_version(void) {
-    printf("taurus version 0.1.0\n");
-    printf("C library (libtaurus) with public API\n");
+    printf("leptris version %s\n", leptris_version());
+    printf("C library (libleptris) with public API\n");
 }
 
 /* ------------------------------------------------------------------------- */

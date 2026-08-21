@@ -1,10 +1,10 @@
 /**
- * Benchmark Utilities for Taurus
+ * Benchmark Utilities for Leptris
  * High-resolution timing and statistical analysis
  */
 
-#ifndef TAURUS_BENCHMARK_UTILS_H
-#define TAURUS_BENCHMARK_UTILS_H
+#ifndef LEPTRIS_BENCHMARK_UTILS_H
+#define LEPTRIS_BENCHMARK_UTILS_H
 
 #include <stddef.h>
 
@@ -41,15 +41,15 @@ typedef struct {
 benchmark_stats benchmark_analyze(const double* samples, size_t count);
 
 /**
- * Print comparison results between Taurus and competitor
+ * Print comparison results between Leptris and competitor
  *
  * @param name Test name
- * @param taurus Taurus statistics
+ * @param leptris Leptris statistics
  * @param competitor Competitor statistics
  * @param competitor_name Name of competitor library
  */
 void benchmark_print_result(const char* name,
-                            benchmark_stats taurus,
+                            benchmark_stats leptris,
                             benchmark_stats competitor,
                             const char* competitor_name);
 
@@ -67,4 +67,4 @@ void benchmark_print_footer(void);
 }
 #endif
 
-#endif /* TAURUS_BENCHMARK_UTILS_H */
+#endif /* LEPTRIS_BENCHMARK_UTILS_H */

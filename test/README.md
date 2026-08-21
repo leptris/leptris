@@ -1,4 +1,4 @@
-# Taurus Test Suite
+# Leptris Test Suite
 
 C-based tests using [Google Test](https://github.com/google/googletest),
 registered with CTest via `gtest_discover_tests`.
@@ -17,7 +17,7 @@ test/
 └── serializer/test_serialize.cpp — Round-trip, escaping, realloc growth
 ```
 
-Each subdirectory maps to one module under `src/taurus/` (MECE).
+Each subdirectory maps to one module under `src/leptris/` (MECE).
 
 ## Policy
 
@@ -55,5 +55,5 @@ On Linux, under valgrind:
 valgrind --leak-check=full --error-exitcode=1 ./build/test/smoke/test_smoke
 ```
 
-A test that introduces a regression in `taurus_document_free` will surface
+A test that introduces a regression in `leptris_document_free` will surface
 as a nonzero exit code from these tools.

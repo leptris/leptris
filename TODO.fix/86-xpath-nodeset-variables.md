@@ -6,7 +6,7 @@
 
 ## Problem
 
-`src/taurus/xpath/evaluator.c:670`:
+`src/leptris/xpath/evaluator.c:670`:
 
 ```c
 /* TODO: Implement nodeset variable support */
@@ -18,7 +18,7 @@ through silently.
 
 ## Plan
 
-1. Extend `TaurusXPathVariable` to carry a `TaurusNode**` + count for
+1. Extend `LeptrisXPathVariable` to carry a `LeptrisNode**` + count for
    nodeset values (in addition to the existing string/number/boolean
    union).
 2. In the evaluator, when a `$var` reference resolves to a nodeset,

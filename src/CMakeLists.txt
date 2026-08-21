@@ -1,103 +1,103 @@
-# Taurus Library - Pure C XML parser and XPath evaluator
+# Leptris Library - Pure C XML parser and XPath evaluator
 
 # ============================================================================
 # Library Build Options
 # ============================================================================
 
-option(TAURUS_BUILD_STATIC "Build static library" ON)
-option(TAURUS_BUILD_SHARED "Build shared library" OFF)
-option(TAURUS_AMALGAMATED "Build the library from a single generated .c (TODO 170)" OFF)
+option(LEPTRIS_BUILD_STATIC "Build static library" ON)
+option(LEPTRIS_BUILD_SHARED "Build shared library" OFF)
+option(LEPTRIS_AMALGAMATED "Build the library from a single generated .c (TODO 170)" OFF)
 
 # Ensure at least one library type is built
-if(NOT TAURUS_BUILD_STATIC AND NOT TAURUS_BUILD_SHARED)
-    message(FATAL_ERROR "At least one of TAURUS_BUILD_STATIC or TAURUS_BUILD_SHARED must be enabled")
+if(NOT LEPTRIS_BUILD_STATIC AND NOT LEPTRIS_BUILD_SHARED)
+    message(FATAL_ERROR "At least one of LEPTRIS_BUILD_STATIC or LEPTRIS_BUILD_SHARED must be enabled")
 endif()
 
 # ============================================================================
 # Source Files
 # ============================================================================
 
-set(TAURUS_SOURCES
+set(LEPTRIS_SOURCES
     # Core: version + memory management (phase 2 extraction)
-    taurus/core.c
+    leptris/core.c
     # DOM nodes
-    taurus/dom/node.c
-    taurus/dom/node_vtable.c
-    taurus/dom/node_public.c
-    taurus/dom/element.c
-    taurus/dom/element_query.c
-    taurus/dom/element_modify.c
-    taurus/dom/element_index.c
-    taurus/dom/text.c
-    taurus/dom/comment.c
-    taurus/dom/cdata.c
-    taurus/dom/pi.c
-    taurus/dom/doctype.c
+    leptris/dom/node.c
+    leptris/dom/node_vtable.c
+    leptris/dom/node_public.c
+    leptris/dom/element.c
+    leptris/dom/element_query.c
+    leptris/dom/element_modify.c
+    leptris/dom/element_index.c
+    leptris/dom/text.c
+    leptris/dom/comment.c
+    leptris/dom/cdata.c
+    leptris/dom/pi.c
+    leptris/dom/doctype.c
 
     # Memory management
-    taurus/memory/pool.c
-    taurus/memory/arena.c
-    taurus/memory/compact_allocator.c
-    taurus/dom/compact.c
-    taurus/dom/root_doc_map.c
-    taurus/taurus_memory.c
+    leptris/memory/pool.c
+    leptris/memory/arena.c
+    leptris/memory/compact_allocator.c
+    leptris/dom/compact.c
+    leptris/dom/root_doc_map.c
+    leptris/leptris_memory.c
 
     # Common utilities
-    taurus/common/string_view.c
-    taurus/common/entities.c
-    taurus/common/chartype.c
+    leptris/common/string_view.c
+    leptris/common/entities.c
+    leptris/common/chartype.c
     # AOT SIMD framework (TODO 175): scalar impls + runtime dispatch
-    taurus/common/cpu.c
-    taurus/common/simd_text.c
+    leptris/common/cpu.c
+    leptris/common/simd_text.c
     # ISA-specific TUs added below (they need per-file compile flags)
 
     # Encoding (UTF-16 support - always available)
-    taurus/encoding/utf16.c
-    taurus/encoding/unicode.c
-    taurus/encoding/wrapper.c
+    leptris/encoding/utf16.c
+    leptris/encoding/unicode.c
+    leptris/encoding/wrapper.c
 
     # Parser and Serializer
-    taurus/serialize/serialize.c
-    taurus/serialize/c14n.c
+    leptris/serialize/serialize.c
+    leptris/serialize/c14n.c
 
     # XPath
-    taurus/xpath/lexer.c
-    taurus/xpath/parser.c
-    taurus/xpath/compiler.c
-    taurus/xpath/vm.c
-    taurus/xpath/evaluator.c
-    taurus/xpath/evaluator_types.c
-    taurus/xpath/evaluator_axes.c
-    taurus/xpath/evaluator_operators.c
-    taurus/xpath/evaluator_path.c
-    taurus/xpath/functions.c
-    taurus/xpath/xpath_variables.c
-    taurus/xpath/xpath_public.c
-    taurus/xpath/xpath_ast_cache.c
+    leptris/xpath/lexer.c
+    leptris/xpath/parser.c
+    leptris/xpath/compiler.c
+    leptris/xpath/vm.c
+    leptris/xpath/evaluator.c
+    leptris/xpath/evaluator_types.c
+    leptris/xpath/evaluator_axes.c
+    leptris/xpath/evaluator_operators.c
+    leptris/xpath/evaluator_path.c
+    leptris/xpath/functions.c
+    leptris/xpath/xpath_variables.c
+    leptris/xpath/xpath_public.c
+    leptris/xpath/xpath_ast_cache.c
 
     # SAX
-    taurus/sax/parser.c
-    taurus/sax/streaming.c
+    leptris/sax/parser.c
+    leptris/sax/streaming.c
 
     # DTD
-    taurus/dtd/model.c
-    taurus/dtd/parser.c
-    taurus/dtd/resolver.c
-    taurus/dtd/validator.c
-    taurus/dtd/content_check.c
+    leptris/dtd/model.c
+    leptris/dtd/parser.c
+    leptris/dtd/resolver.c
+    leptris/dtd/validator.c
+    leptris/dtd/content_check.c
 
     # XInclude
-    taurus/xinclude/xinclude.c
+    leptris/xinclude/xinclude.c
 
     # The sole XML parser: direct_parse (single-pass, zero-copy,
     # bulk-alloc, DTD-aware, UTF-8 names). See flat/direct_parse.c.
     # The FlatDoc + lazy-promote architecture (TODO 139) and the
     # legacy parser (TODO 90 Phase 1) have been removed.
-    taurus/flat/direct_parse.c
+    leptris/flat/direct_parse.c
 
     # Core library
-    taurus/taurus.c
-    taurus/error.c
+    leptris/leptris.c
+    leptris/error.c
 )
 
 # ============================================================================
@@ -108,82 +108,89 @@ set(TAURUS_SOURCES
 # cross-TU inlining without requiring LTO; useful for toolchains that lack
 # reliable LTO, or for distribution as a single source file.
 #
-# This is the pugixml approach (one 13,800-line .cpp). When TAURUS_AMALGAMATED
+# This is the pugixml approach (one 13,800-line .cpp). When LEPTRIS_AMALGAMATED
 # is ON, the object library wraps the single generated file instead of the
 # per-file source list.
-if(TAURUS_AMALGAMATED)
-    set(TAURUS_AMALGAMATED_C "${CMAKE_CURRENT_BINARY_DIR}/taurus_amalgamated.c")
-    file(WRITE "${TAURUS_AMALGAMATED_C}"
+if(LEPTRIS_AMALGAMATED)
+    set(LEPTRIS_AMALGAMATED_C "${CMAKE_CURRENT_BINARY_DIR}/leptris_amalgamated.c")
+    file(WRITE "${LEPTRIS_AMALGAMATED_C}"
 "/* Auto-generated amalgamation build (TODO 170). Do not edit.\n"
 " * Generated from ${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt at configure time.\n"
-" * Build with -DTAURUS_AMALGAMATED=ON. The whole library compiles as one\n"
+" * Build with -DLEPTRIS_AMALGAMATED=ON. The whole library compiles as one\n"
 " * translation unit so static helpers inline across what would otherwise be\n"
 " * TU boundaries — the same effect as LTO but at compile time.\n"
 " */\n\n")
 
     # Append #include for every source. Paths are relative to src/ so the
     # file's own #include directives resolve identically to the per-file build.
-    foreach(_src ${TAURUS_SOURCES})
-        file(APPEND "${TAURUS_AMALGAMATED_C}" "#include \"${_src}\"\n")
+    foreach(_src ${LEPTRIS_SOURCES})
+        file(APPEND "${LEPTRIS_AMALGAMATED_C}" "#include \"${_src}\"\n")
     endforeach()
 
     # Replace the source list with the amalgamated file so the object
     # library wraps a single TU.
-    set(TAURUS_SOURCES_AMALGAMATED "${TAURUS_AMALGAMATED_C}")
-    message(STATUS "Amalgamation build: ENABLED → ${TAURUS_AMALGAMATED_C}")
+    set(LEPTRIS_SOURCES_AMALGAMATED "${LEPTRIS_AMALGAMATED_C}")
+    message(STATUS "Amalgamation build: ENABLED → ${LEPTRIS_AMALGAMATED_C}")
 else()
-    set(TAURUS_SOURCES_AMALGAMATED "${TAURUS_SOURCES}")
+    set(LEPTRIS_SOURCES_AMALGAMATED "${LEPTRIS_SOURCES}")
 endif()
 
 # ============================================================================
 # Object Library (shared between static and shared)
 # ============================================================================
 
-if(TAURUS_AMALGAMATED)
-    add_library(taurus_objects OBJECT ${TAURUS_SOURCES_AMALGAMATED})
+if(LEPTRIS_AMALGAMATED)
+    add_library(leptris_objects OBJECT ${LEPTRIS_SOURCES_AMALGAMATED})
+
+target_compile_definitions(leptris_objects PRIVATE
+    LEPTRIS_VERSION="${PROJECT_VERSION}"
+    LEPTRIS_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    LEPTRIS_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    LEPTRIS_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+
     # The amalgamated TU needs the include search paths from src/ downward.
-    target_include_directories(taurus_objects PRIVATE
+    target_include_directories(leptris_objects PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
 else()
-    add_library(taurus_objects OBJECT ${TAURUS_SOURCES})
+    add_library(leptris_objects OBJECT ${LEPTRIS_SOURCES})
 endif()
 
-set_target_properties(taurus_objects PROPERTIES
+set_target_properties(leptris_objects PROPERTIES
     C_STANDARD 99
     C_STANDARD_REQUIRED ON
     C_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON  # Important for shared libraries
 )
 
-target_include_directories(taurus_objects
+target_include_directories(leptris_objects
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/dom
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/parse
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/serialize
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/xpath
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/dom
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/parse
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/serialize
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/xpath
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/encoding
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/memory
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/flat
 )
 
 # Math library: libm is separate on Linux/BSD, folded into libc on
 # macOS, and folded into the regular CRT on Windows. Set a list that
 # downstream targets link against; on Windows it's empty.
 if(WIN32)
-    set(TAURUS_MATH_LIBS "")
+    set(LEPTRIS_MATH_LIBS "")
 elseif(APPLE)
-    set(TAURUS_MATH_LIBS "")
+    set(LEPTRIS_MATH_LIBS "")
 else()
-    set(TAURUS_MATH_LIBS m)
+    set(LEPTRIS_MATH_LIBS m)
 endif()
 
 # Link libm only on platforms where it's a separate library.
-if(TAURUS_MATH_LIBS)
-    target_link_libraries(taurus_objects PUBLIC ${TAURUS_MATH_LIBS})
+if(LEPTRIS_MATH_LIBS)
+    target_link_libraries(leptris_objects PUBLIC ${LEPTRIS_MATH_LIBS})
 endif()
 
 # Define _POSIX_C_SOURCE so strdup() and other POSIX functions are
@@ -192,7 +199,7 @@ endif()
 # which truncates 64-bit pointers on Linux x86_64. macOS happens to
 # work because its libc returns pointers that fit in 32 bits.
 # See TODOs 94 / 95 for the bug this caused.
-target_compile_definitions(taurus_objects PUBLIC _POSIX_C_SOURCE=200809L)
+target_compile_definitions(leptris_objects PUBLIC _POSIX_C_SOURCE=200809L)
 
 # ============================================================================
 # AOT SIMD sources (TODO 175)
@@ -201,26 +208,26 @@ target_compile_definitions(taurus_objects PUBLIC _POSIX_C_SOURCE=200809L)
 # them all into the same library, dispatch at runtime via cpu.c. The
 # scalar TU (simd_text.c) is always built; these add accelerated paths.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|i[3-6]86)")
-    check_c_compiler_flag("-mavx2" TAURUS_HAVE_AVX2_FLAG)
-    if(TAURUS_HAVE_AVX2_FLAG)
-        target_sources(taurus_objects PRIVATE taurus/common/simd_text_avx2.c)
-        set_source_files_properties(taurus/common/simd_text_avx2.c
+    check_c_compiler_flag("-mavx2" LEPTRIS_HAVE_AVX2_FLAG)
+    if(LEPTRIS_HAVE_AVX2_FLAG)
+        target_sources(leptris_objects PRIVATE leptris/common/simd_text_avx2.c)
+        set_source_files_properties(leptris/common/simd_text_avx2.c
             PROPERTIES COMPILE_FLAGS "-mavx2")
         # Consumers (simd_text.c dispatch) reference the AVX2 symbol only
         # when this define is present — MSVC rejects -mavx2 (uses /arch:),
         # so the TU is skipped there and the dispatch falls back to scalar.
-        target_compile_definitions(taurus_objects PRIVATE TAURUS_HAS_AVX2_BUILD=1)
+        target_compile_definitions(leptris_objects PRIVATE LEPTRIS_HAS_AVX2_BUILD=1)
         message(STATUS "AOT SIMD: AVX2 text scan ENABLED")
     else()
         message(STATUS "AOT SIMD: AVX2 unavailable (flag rejected)")
     endif()
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64|ARM64)")
     # NEON is baseline on aarch64 — no special flags needed.
-    target_sources(taurus_objects PRIVATE taurus/common/simd_text_neon.c)
+    target_sources(leptris_objects PRIVATE leptris/common/simd_text_neon.c)
     message(STATUS "AOT SIMD: NEON text scan ENABLED")
 endif()
 
-target_compile_options(taurus_objects PRIVATE
+target_compile_options(leptris_objects PRIVATE
     $<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:
         -Wall -Wextra -Wno-unused-parameter>
     $<$<C_COMPILER_ID:MSVC>:
@@ -236,7 +243,7 @@ target_compile_options(taurus_objects PRIVATE
 # safely throughout, and the *_s variants have different signatures
 # that would be a much bigger portability headache.
 if(MSVC)
-    target_compile_definitions(taurus_objects PRIVATE
+    target_compile_definitions(leptris_objects PRIVATE
         _CRT_NONSTDC_NO_DEPRECATE
         _CRT_SECURE_NO_WARNINGS
         _CRT_SECURE_NO_DEPRECATE
@@ -248,56 +255,56 @@ endif()
 # ============================================================================
 
 # utf8proc for Unicode support
-if(TAURUS_ENABLE_UTF8PROC)
+if(LEPTRIS_ENABLE_UTF8PROC)
     # Three lookup strategies, in order of preference:
     #   1. Native utf8proc CONFIG package (Homebrew, system packages, from-source).
     #   2. vcpkg's unofficial-utf8proc CONFIG package.
     #   3. Module-mode finder shipped in cmake/FindUtf8proc.cmake.
     find_package(utf8proc CONFIG QUIET)
     if(utf8proc_FOUND)
-        set(TAURUS_UTF8PROC_TARGET utf8proc::utf8proc)
+        set(LEPTRIS_UTF8PROC_TARGET utf8proc::utf8proc)
     else()
         find_package(unofficial-utf8proc CONFIG QUIET)
         if(unofficial-utf8proc_FOUND)
-            set(TAURUS_UTF8PROC_TARGET unofficial::utf8proc)
+            set(LEPTRIS_UTF8PROC_TARGET unofficial::utf8proc)
         else()
             find_package(Utf8proc REQUIRED)
-            set(TAURUS_UTF8PROC_TARGET Utf8proc::Utf8proc)
+            set(LEPTRIS_UTF8PROC_TARGET Utf8proc::Utf8proc)
         endif()
     endif()
 
     # PUBLIC: the link dependency must propagate through $<TARGET_OBJECTS:...>
-    # aggregation into taurus_static / taurus_shared and onward to consumers.
-    target_link_libraries(taurus_objects PUBLIC ${TAURUS_UTF8PROC_TARGET})
-    target_compile_definitions(taurus_objects PUBLIC TAURUS_HAS_UTF8PROC=1)
+    # aggregation into leptris_static / leptris_shared and onward to consumers.
+    target_link_libraries(leptris_objects PUBLIC ${LEPTRIS_UTF8PROC_TARGET})
+    target_compile_definitions(leptris_objects PUBLIC LEPTRIS_HAS_UTF8PROC=1)
 
-    target_sources(taurus_objects PRIVATE
-        taurus/unicode/unicode.c
+    target_sources(leptris_objects PRIVATE
+        leptris/unicode/unicode.c
     )
 
-    target_include_directories(taurus_objects PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/unicode
+    target_include_directories(leptris_objects PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/unicode
     )
 
-    message(STATUS "utf8proc: ENABLED via ${TAURUS_UTF8PROC_TARGET}")
+    message(STATUS "utf8proc: ENABLED via ${LEPTRIS_UTF8PROC_TARGET}")
 else()
     message(STATUS "utf8proc: DISABLED")
 endif()
 
 # iconv for encoding conversion
-if(TAURUS_ENABLE_ICONV)
+if(LEPTRIS_ENABLE_ICONV)
     find_package(Iconv REQUIRED)
 
     # PUBLIC: see utf8proc note above.
-    target_link_libraries(taurus_objects PUBLIC Iconv::Iconv)
-    target_compile_definitions(taurus_objects PUBLIC TAURUS_HAS_ICONV=1)
+    target_link_libraries(leptris_objects PUBLIC Iconv::Iconv)
+    target_compile_definitions(leptris_objects PUBLIC LEPTRIS_HAS_ICONV=1)
 
-    target_sources(taurus_objects PRIVATE
-        taurus/encoding/encoding.c
+    target_sources(leptris_objects PRIVATE
+        leptris/encoding/encoding.c
     )
 
-    target_include_directories(taurus_objects PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
+    target_include_directories(leptris_objects PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/leptris/encoding
     )
 
     message(STATUS "iconv: ENABLED")
@@ -311,48 +318,48 @@ message(STATUS "Compact mode: ENABLED (96-byte elements vs 192-byte legacy = 2x 
 # Static Library
 # ============================================================================
 
-if(TAURUS_BUILD_STATIC)
-    add_library(taurus_static STATIC $<TARGET_OBJECTS:taurus_objects>)
+if(LEPTRIS_BUILD_STATIC)
+    add_library(leptris_static STATIC $<TARGET_OBJECTS:leptris_objects>)
 
-    set_target_properties(taurus_static PROPERTIES
-        OUTPUT_NAME taurus
+    set_target_properties(leptris_static PROPERTIES
+        OUTPUT_NAME leptris
         C_STANDARD 99
         C_STANDARD_REQUIRED ON
         C_EXTENSIONS OFF
     )
 
     # Include directories (same as object library)
-    target_include_directories(taurus_static
+    target_include_directories(leptris_static
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/dom
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/parse
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/serialize
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/xpath
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/dom
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/parse
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/serialize
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/xpath
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/encoding
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/memory
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/flat
     )
 
     # Pull in link dependencies (utf8proc, Iconv, m) declared on
-    # taurus_objects.  CMake's $<TARGET_OBJECTS:...> aggregation does NOT
+    # leptris_objects.  CMake's $<TARGET_OBJECTS:...> aggregation does NOT
     # propagate OBJECT-library link deps to the static lib's consumers
     # (CMake issue #16093), so we re-state them here as PUBLIC to ensure
-    # `taurus::taurus` consumers link iconv/utf8proc/m automatically.
-    if(TAURUS_MATH_LIBS)
-        target_link_libraries(taurus_static PUBLIC ${TAURUS_MATH_LIBS})
+    # `leptris::leptris` consumers link iconv/utf8proc/m automatically.
+    if(LEPTRIS_MATH_LIBS)
+        target_link_libraries(leptris_static PUBLIC ${LEPTRIS_MATH_LIBS})
     endif()
-    if(TAURUS_ENABLE_UTF8PROC)
-        target_link_libraries(taurus_static PUBLIC ${TAURUS_UTF8PROC_TARGET})
+    if(LEPTRIS_ENABLE_UTF8PROC)
+        target_link_libraries(leptris_static PUBLIC ${LEPTRIS_UTF8PROC_TARGET})
     endif()
-    if(TAURUS_ENABLE_ICONV)
-        target_link_libraries(taurus_static PUBLIC Iconv::Iconv)
+    if(LEPTRIS_ENABLE_ICONV)
+        target_link_libraries(leptris_static PUBLIC Iconv::Iconv)
     endif()
 
-    add_library(taurus::static ALIAS taurus_static)
+    add_library(leptris::static ALIAS leptris_static)
     message(STATUS "Static library: ENABLED")
 endif()
 
@@ -360,81 +367,81 @@ endif()
 # Shared Library
 # ============================================================================
 
-if(TAURUS_BUILD_SHARED)
-    add_library(taurus_shared SHARED $<TARGET_OBJECTS:taurus_objects>)
+if(LEPTRIS_BUILD_SHARED)
+    add_library(leptris_shared SHARED $<TARGET_OBJECTS:leptris_objects>)
 
     # Set version properties for shared library
-    # This creates: libtaurus.so.0.3.0 -> libtaurus.so.0 -> libtaurus.so
-    set_target_properties(taurus_shared PROPERTIES
+    # This creates: libleptris.so.0.3.0 -> libleptris.so.0 -> libleptris.so
+    set_target_properties(leptris_shared PROPERTIES
         VERSION ${PROJECT_VERSION}        # e.g., 0.3.0
         SOVERSION ${PROJECT_VERSION_MAJOR}  # e.g., 0
-        OUTPUT_NAME taurus
+        OUTPUT_NAME leptris
         C_STANDARD 99
         C_STANDARD_REQUIRED ON
         C_EXTENSIONS OFF
     )
 
     # Export symbols for Windows DLL. The definition must reach the
-    # compilation of the .c files, which happens in taurus_objects —
+    # compilation of the .c files, which happens in leptris_objects —
     # a PRIVATE definition here never propagates to an object
     # library's sources, so the DLL exported nothing and MSVC
     # emitted no import library (issue #278).
-    target_compile_definitions(taurus_shared PRIVATE TAURUS_BUILDING_DLL)
+    target_compile_definitions(leptris_shared PRIVATE LEPTRIS_BUILDING_DLL)
     if(WIN32)
-        target_compile_definitions(taurus_objects PRIVATE TAURUS_BUILDING_DLL)
+        target_compile_definitions(leptris_objects PRIVATE LEPTRIS_BUILDING_DLL)
     endif()
     if(WIN32)
-        target_compile_definitions(taurus_shared PUBLIC TAURUS_DLL)
+        target_compile_definitions(leptris_shared PUBLIC LEPTRIS_DLL)
     endif()
 
     # Include directories (same as object library)
-    target_include_directories(taurus_shared
+    target_include_directories(leptris_shared
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/dom
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/parse
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/serialize
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/xpath
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/encoding
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/memory
-            ${CMAKE_CURRENT_SOURCE_DIR}/taurus/flat
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/dom
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/parse
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/serialize
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/xpath
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/encoding
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/memory
+            ${CMAKE_CURRENT_SOURCE_DIR}/leptris/flat
     )
 
-    # See note on taurus_static above.
-    if(TAURUS_MATH_LIBS)
-        target_link_libraries(taurus_shared PUBLIC ${TAURUS_MATH_LIBS})
+    # See note on leptris_static above.
+    if(LEPTRIS_MATH_LIBS)
+        target_link_libraries(leptris_shared PUBLIC ${LEPTRIS_MATH_LIBS})
     endif()
-    if(TAURUS_ENABLE_UTF8PROC)
-        target_link_libraries(taurus_shared PUBLIC ${TAURUS_UTF8PROC_TARGET})
+    if(LEPTRIS_ENABLE_UTF8PROC)
+        target_link_libraries(leptris_shared PUBLIC ${LEPTRIS_UTF8PROC_TARGET})
     endif()
-    if(TAURUS_ENABLE_ICONV)
-        target_link_libraries(taurus_shared PUBLIC Iconv::Iconv)
+    if(LEPTRIS_ENABLE_ICONV)
+        target_link_libraries(leptris_shared PUBLIC Iconv::Iconv)
     endif()
 
-    add_library(taurus::shared ALIAS taurus_shared)
+    add_library(leptris::shared ALIAS leptris_shared)
     message(STATUS "Shared library: ENABLED")
 endif()
 
 # ============================================================================
-# Main "taurus" Target (Compatibility Alias)
+# Main "leptris" Target (Compatibility Alias)
 # ============================================================================
 
-# The main taurus target points to the appropriate library
-if(TAURUS_BUILD_SHARED AND NOT TAURUS_BUILD_STATIC)
+# The main leptris target points to the appropriate library
+if(LEPTRIS_BUILD_SHARED AND NOT LEPTRIS_BUILD_STATIC)
     # Shared only
-    add_library(taurus ALIAS taurus_shared)
-    add_library(taurus::taurus ALIAS taurus_shared)
-elseif(TAURUS_BUILD_STATIC AND NOT TAURUS_BUILD_SHARED)
+    add_library(leptris ALIAS leptris_shared)
+    add_library(leptris::leptris ALIAS leptris_shared)
+elseif(LEPTRIS_BUILD_STATIC AND NOT LEPTRIS_BUILD_SHARED)
     # Static only
-    add_library(taurus ALIAS taurus_static)
-    add_library(taurus::taurus ALIAS taurus_static)
+    add_library(leptris ALIAS leptris_static)
+    add_library(leptris::leptris ALIAS leptris_static)
 else()
     # Both built - default to shared for linking
-    add_library(taurus ALIAS taurus_shared)
-    add_library(taurus::taurus ALIAS taurus_shared)
+    add_library(leptris ALIAS leptris_shared)
+    add_library(leptris::leptris ALIAS leptris_shared)
 endif()
 
 # ============================================================================
@@ -444,61 +451,61 @@ endif()
 include(GNUInstallDirs)
 
 # Install static library (Development component)
-if(TAURUS_BUILD_STATIC)
-    install(TARGETS taurus_static
+if(LEPTRIS_BUILD_STATIC)
+    install(TARGETS leptris_static
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                COMPONENT taurus_Development
+                COMPONENT leptris_Development
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                COMPONENT taurus_Development
+                COMPONENT leptris_Development
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-                COMPONENT taurus_Development
+                COMPONENT leptris_Development
     )
 endif()
 
 # Install shared library (separate Runtime and Development components)
-if(TAURUS_BUILD_SHARED)
-    install(TARGETS taurus_shared
+if(LEPTRIS_BUILD_SHARED)
+    install(TARGETS leptris_shared
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                COMPONENT taurus_Development
+                COMPONENT leptris_Development
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                COMPONENT taurus_Runtime
-                NAMELINK_COMPONENT taurus_Development
+                COMPONENT leptris_Runtime
+                NAMELINK_COMPONENT leptris_Development
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-                COMPONENT taurus_Runtime
+                COMPONENT leptris_Runtime
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-                COMPONENT taurus_Development
+                COMPONENT leptris_Development
     )
 endif()
 
 # Install public headers (Development component)
 install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    COMPONENT taurus_Development
+    COMPONENT leptris_Development
     FILES_MATCHING PATTERN "*.h"
 )
 
 # Build Requires line for optional dependencies (pkg-config)
-set(TAURUS_PKG_CONFIG_REQUIRES "")
-if(TAURUS_ENABLE_UTF8PROC)
-    set(TAURUS_PKG_CONFIG_REQUIRES "${TAURUS_PKG_CONFIG_REQUIRES} utf8proc")
+set(LEPTRIS_PKG_CONFIG_REQUIRES "")
+if(LEPTRIS_ENABLE_UTF8PROC)
+    set(LEPTRIS_PKG_CONFIG_REQUIRES "${LEPTRIS_PKG_CONFIG_REQUIRES} utf8proc")
 endif()
-if(TAURUS_ENABLE_ICONV)
-    if(TAURUS_PKG_CONFIG_REQUIRES)
-        set(TAURUS_PKG_CONFIG_REQUIRES "${TAURUS_PKG_CONFIG_REQUIRES}, Iconv")
+if(LEPTRIS_ENABLE_ICONV)
+    if(LEPTRIS_PKG_CONFIG_REQUIRES)
+        set(LEPTRIS_PKG_CONFIG_REQUIRES "${LEPTRIS_PKG_CONFIG_REQUIRES}, Iconv")
     else()
-        set(TAURUS_PKG_CONFIG_REQUIRES "Iconv")
+        set(LEPTRIS_PKG_CONFIG_REQUIRES "Iconv")
     endif()
 endif()
 # pkg-config file (Development component)
 configure_file(
-    ${CMAKE_SOURCE_DIR}/cmake/taurus.pc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/taurus.pc
+    ${CMAKE_SOURCE_DIR}/cmake/leptris.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/leptris.pc
     @ONLY
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/taurus.pc
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/leptris.pc
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
-    COMPONENT taurus_Development
+    COMPONENT leptris_Development
 )
 
 # ============================================================================
@@ -509,15 +516,15 @@ include(CMakePackageConfigHelpers)
 
 # Generate the config file for find_package()
 configure_package_config_file(
-    ${CMAKE_SOURCE_DIR}/cmake/taurus-config.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/taurus-config.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/taurus
+    ${CMAKE_SOURCE_DIR}/cmake/leptris-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/leptris-config.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/leptris
 
 )
 
 # Generate the version file
 write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/taurus-config-version.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/leptris-config-version.cmake
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY AnyNewerVersion
 )
@@ -525,8 +532,8 @@ write_basic_package_version_file(
 # Install CMake config files
 install(
     FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/taurus-config.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/taurus-config-version.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/taurus
-    COMPONENT taurus_Development
+        ${CMAKE_CURRENT_BINARY_DIR}/leptris-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/leptris-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/leptris
+    COMPONENT leptris_Development
 )

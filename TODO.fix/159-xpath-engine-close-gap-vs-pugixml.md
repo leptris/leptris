@@ -4,7 +4,7 @@
 
 Benchmark `bench_xpath_pugixml` (1000-element XML):
 
-| Query                            | Taurus | pugixml | Ratio |
+| Query                            | Leptris | pugixml | Ratio |
 |----------------------------------|--------|---------|-------|
 | `count(//book)`                  | 44 µs  | 5.6 µs  | 7.9×  |
 | `/library/section/book`          | 27 µs  | 4.8 µs  | 5.6×  |
@@ -47,7 +47,7 @@ capacity based on element index size (we already have that count).
 
 ### Phase C — Direct pointer tree walk in VM
 
-The VM walks via `taurus_element_get_first_child` which goes
+The VM walks via `leptris_element_get_first_child` which goes
 through the compact-pointer decoder. The VM has access to the
 document's pool base, so it can use direct pointer arithmetic.
 Skip the decoder.
@@ -88,11 +88,11 @@ compaction (155) which speeds up tree walks → ~10 µs target.
 ## Status
 
 **Phase A0 DONE** — element `name_hash` field + fast child-name lookup.
-Added 16-bit FNV-1a hash of local name to `struct taurus_element`
+Added 16-bit FNV-1a hash of local name to `struct leptris_element`
 (fits in existing padding; struct stays 64 bytes). All element
-creation paths (`taurus_element_create_with_view`,
-`taurus_element_create_pooled`, parser bulk-alloc, copy/mutate)
-populate the hash. `taurus_element_first_child(elem, name)` now
+creation paths (`leptris_element_create_with_view`,
+`leptris_element_create_pooled`, parser bulk-alloc, copy/mutate)
+populate the hash. `leptris_element_first_child(elem, name)` now
 pre-filters via 2-byte hash compare before falling back to strcmp.
 
 With LTO the gap tightens from 5-13× to 1.6-4.4× on the
@@ -121,7 +121,7 @@ the same `BC_PRED_CHILD_NUM_CMP` opcode because `number()` is
 semantically equivalent to "read text content + strtod", which
 is exactly what the handler does.
 
-Benchmark impact (Release + LTO, `bench_xpath_taurus`):
+Benchmark impact (Release + LTO, `bench_xpath_leptris`):
 Complex Query `//book[number(price) > 30]/title` 18.65 µs →
 2.70 µs (6.9× speedup). Previously this fell back to the
 generic `apply_predicates` path that re-evaluated the AST
@@ -139,25 +139,25 @@ optimisations bundled together:
   `BC_PRED_ATTR_EQ_STRING` now hoist `strlen(attr_name)` /
   `strlen(expected)` out of the inner attr-walk loop and add a
   32-bit FNV-1a hash pre-filter using the existing
-  `taurus_attribute->name_hash` field.
+  `leptris_attribute->name_hash` field.
 - **Drive-by (combined AST+BC cache lookup):** new
   `xpath_ast_cache_get` returns both AST and bytecode in a single
   hash + scan. Replaces the previous two-call pattern in
-  `taurus_xpath_eval` that hashed the expression twice.
+  `leptris_xpath_eval` that hashed the expression twice.
 
 These don't move the needle visibly on `bench_xpath_pugixml`
 because parse dominates there, but they shave per-call overhead
 for high-frequency XPath workloads.
 
 **Phase F (PGO build mode) DONE** — new CMake option
-`TAURUS_ENABLE_PGO = OFF | GENERATE | USE`. Cross-platform:
+`LEPTRIS_ENABLE_PGO = OFF | GENERATE | USE`. Cross-platform:
 clang `-fprofile-instr-generate` / `-fprofile-instr-use`, GCC
 `-fprofile-generate` / `-fprofile-use`, MSVC `/GENPROFILE` /
 `/USEPROFILE`. Lets the compiler specialise the VM dispatch
 switch and parser scan loops based on real workload data —
 closes most of the gap vs computed-goto without GCC-isms.
 
-Benchmark impact (clang on macOS arm64, `bench_xpath_taurus`):
+Benchmark impact (clang on macOS arm64, `bench_xpath_leptris`):
 total wall 6.31 µs → 5.82 µs (~8% improvement). Documented in
 `docs/guide/building.md` with the three-step GENERATE → run
 workload → merge profraw → USE workflow.

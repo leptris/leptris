@@ -12,10 +12,10 @@ one loop finds the closing quote AND flags `&` for entity routing.
 
 Controlled Release A/B proved struct width (64 B attr) and cross-TU
 inlining (amalgamation) are each perf-neutral at K=100. The measured
-gap was ~2.8× (taurus 1986 µs vs pugixml 711 µs, medians) with a
+gap was ~2.8× (leptris 1986 µs vs pugixml 711 µs, medians) with a
 ~13 ns/attr delta.
 
-Root cause: taurus scanned every attr value TWICE —
+Root cause: leptris scanned every attr value TWICE —
 `memchr(val, quote, …)` for the closing quote, then a second pass
 for `&` (TODO 174's inline loop). libc `memchr` pays ~10 ns setup
 even on 6-byte values (the TODO 174 finding, which we applied only
@@ -28,7 +28,7 @@ once.
 `dp_parse_attrs` scans the first 48 bytes inline — byte loop stops
 at the quote (no entities) or flags `&` on the way past; values
 longer than 48 B fall back to SIMD (`memchr` for the quote +
-`taurus_text_contains` for `&` over the scanned span).
+`leptris_text_contains` for `&` over the scanned span).
 `dp_add_attr_inline` takes `has_amp` as a parameter instead of
 re-scanning. Semantics unchanged (lazy vs DTD entity routing
 preserved).
@@ -48,5 +48,5 @@ Next levers, in expected-value order:
 1. Same fused-inline principle for the text-content scan
    (memchr for `<` per text node) and the name scan dispatch.
 2. K=5/20/50 medians still trail (element wiring + text path).
-3. Buffer-copy accounting: taurus memcpy's the input per parse;
+3. Buffer-copy accounting: leptris memcpy's the input per parse;
    verify the harness gives pugixml identical copy semantics.

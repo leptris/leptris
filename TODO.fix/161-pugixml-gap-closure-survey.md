@@ -6,7 +6,7 @@ Single consolidated survey of what's actually left to close the
 gap vs pugixml, with realistic assessments. New work should
 reference this doc rather than re-deriving where the gap lives.
 
-## Where taurus is ahead of pugixml
+## Where leptris is ahead of pugixml
 
 - **XPath element index** (TODO 132): O(K) descendant lookups
   vs pugixml's O(N) tree walk.
@@ -22,7 +22,7 @@ reference this doc rather than re-deriving where the gap lives.
 
 ### Parse: ~3× gap
 
-pugixml parses the 24 KB medium doc at ~18 µs; taurus at ~57 µs.
+pugixml parses the 24 KB medium doc at ~18 µs; leptris at ~57 µs.
 Measured per-element gap is ~100 ns, dominated by per-attr work
 (see TODO 149 for the breakdown).
 
@@ -41,12 +41,12 @@ is structural — pugixml ships fewer features per attr.
 ### Full-cycle XPath (`bench_xpath_pugixml`): 2–4× gap
 
 `bench_xpath_pugixml` measures parse + xpath + free per
-iteration. The XPath layer is competitive (`bench_xpath_taurus`
+iteration. The XPath layer is competitive (`bench_xpath_leptris`
 is mostly sub-µs); the gap is dominated by the parse cost above.
 
 ### Per-call XPath overhead
 
-Each `taurus_xpath_eval` call pays:
+Each `leptris_xpath_eval` call pays:
 - `xpath_ast_cache_get` hash + scan: ~30 ns (was ~60 ns before
   TODO 159 Phase E drive-by)
 - `xpath_context_new` malloc: ~100 ns
@@ -73,11 +73,11 @@ Total ~600 ns per call plus VM run. pugixml's overhead is similar.
   correct in cases the inline version would miss (int32 overflow).
 
 - **Result struct free-list** (like the nodeset free-list in
-  Phase B but for `taurus_xpath_result`): saves one malloc/free
-  per eval. Est ~5% on bench_xpath_taurus.
+  Phase B but for `leptris_xpath_result`): saves one malloc/free
+  per eval. Est ~5% on bench_xpath_leptris.
 
 - **Stack-allocated XPathContext** (Phase G candidate): the
-  context is ~256 bytes. `taurus_xpath_eval` could stack-allocate
+  context is ~256 bytes. `leptris_xpath_eval` could stack-allocate
   it instead of malloc'ing. Saves ~100 ns per call. Risk: callers
   that stash the context pointer would break — needs an audit.
 
@@ -94,13 +94,13 @@ Total ~600 ns per call plus VM run. pugixml's overhead is similar.
 - **Compact attr list** (TODO 156): 32 call sites to migrate for
   a 4-byte-per-attr saving. The migration risk outweighs the gain.
 
-- **Field reordering based on access profiling**: taurus's element
+- **Field reordering based on access profiling**: leptris's element
   struct is already 64 B (one cache line). Reordering wouldn't
   move the needle.
 
 ## Strategic read
 
-taurus is already faster than pugixml on pure XPath workloads
+leptris is already faster than pugixml on pure XPath workloads
 where the element index kicks in. The remaining gap is in parse,
 where pugixml ships a deliberately minimal per-attr
 implementation. Closing it further would require giving up
@@ -109,7 +109,7 @@ for the index). Not worth it.
 
 For users who want maximum throughput on parse-dominated
 workloads, the recommendation is: enable PGO
-(`-DTAURUS_ENABLE_PGO=GENERATE` → run workload → `USE`) and
+(`-DLEPTRIS_ENABLE_PGO=GENERATE` → run workload → `USE`) and
 benchmark against the actual production XML, not the synthetic
 medium doc.
 

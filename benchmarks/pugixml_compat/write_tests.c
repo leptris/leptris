@@ -15,7 +15,7 @@ TEST_XML(test_write_basic_element, "<node/>")
     xml_document_load_string(doc, "<node/>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain node tag */
@@ -33,7 +33,7 @@ TEST_XML(test_write_element_with_text, "<node>text</node>")
     xml_document_load_string(doc, "<node>text</node>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain both tags and text */
@@ -53,7 +53,7 @@ TEST_XML(test_write_element_with_attribute, "<node attr='value'/>")
     xml_document_load_string(doc, "<node attr='value'/>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain attribute name and value */
@@ -73,7 +73,7 @@ TEST_XML(test_write_nested, "<root><child><grandchild/></child></root>")
     xml_document_load_string(doc, "<root><child><grandchild/></child></root>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain all element names */
@@ -95,7 +95,7 @@ TEST_XML(test_write_multiple_children, "<root><a/><b/><c/></root>")
     xml_document_load_string(doc, "<root><a/><b/><c/></root>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain all child elements */
@@ -117,7 +117,7 @@ TEST_XML(test_write_cdata, "<node><![CDATA[<escaped>]]></node>")
     xml_document_load_string(doc, "<node><![CDATA[<escaped>]]></node>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain CDATA marker */
@@ -135,7 +135,7 @@ TEST_XML(test_write_comment, "<node><!--comment--></node>")
     xml_document_load_string(doc, "<node><!--comment--></node>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain comment marker */
@@ -153,7 +153,7 @@ TEST_XML(test_write_declaration, "<?xml version='1.0'?><root/>")
     xml_document_load_string(doc, "<?xml version='1.0'?><root/>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain XML declaration */
@@ -176,7 +176,7 @@ TEST_XML(test_write_escape_text, "<node>text</node>")
     CHECK_NOT_NULL(node);
     xml_node_set_text(node, "<>\"'&");
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain escaped entities */
@@ -203,7 +203,7 @@ TEST_XML(test_write_escape_attribute, "<node attr=\"value\"/>")
     CHECK_NOT_NULL(node);
     xml_node_set_attribute(node, "attr", "<>\"'&");
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain escaped entities */
@@ -225,7 +225,7 @@ TEST_XML(test_write_utf8, "<node>\xc3\xa9\xc3\xa0\xc3\xbc</node>")
     xml_document_load_string(doc, "<node>\xc3\xa9\xc3\xa0\xc3\xbc</node>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should preserve UTF-8 bytes */
@@ -243,7 +243,7 @@ TEST_XML(test_write_whitespace, "<node>  \n  </node>")
     xml_document_load_string(doc, "<node>  \n  </node>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should preserve whitespace */
@@ -259,7 +259,7 @@ TEST(test_write_empty_document)
     xml_document doc = xml_document_create();
     CHECK_NOT_NULL(doc);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     free(xml);
@@ -274,7 +274,7 @@ TEST_XML(test_write_multiple_attributes, "<node a1='v1' a2='v2' a3='v3' a4='v4'/
     xml_document_load_string(doc, "<node a1='v1' a2='v2' a3='v3' a4='v4'/>");
     CHECK(doc != NULL);
 
-    char* xml = taurus_serialize(doc);
+    char* xml = leptris_serialize(doc);
     CHECK_NOT_NULL(xml);
 
     /* Should contain all attributes */

@@ -7,22 +7,22 @@
 ## Current state — 104 bytes
 
 ```
-TaurusNode base              8 B
-TaurusCompactHeader header   2 B
+LeptrisNode base              8 B
+LeptrisCompactHeader header   2 B
 uint8_t attr_count           1 B
 uint16_t child_count         2 B
 (pad)                        3 B
 char* name                   8 B
 char* prefix                 8 B
 char* namespace_uri          8 B
-struct taurus_element* parent          8 B   ← target of Phase 2b
-struct taurus_node* first_child        8 B   ← target of Phase 2b
-struct taurus_node* last_child         8 B   ← target of Phase 2b
-struct taurus_node* next_sibling       8 B   ← target of Phase 2b
-struct taurus_attribute* first_attribute  8 B   ← target of Phase 2d
-struct taurus_attribute* last_attribute   8 B   ← target of Phase 2d
-struct taurus_namespace* namespaces  8 B
-struct taurus_document* document     8 B
+struct leptris_element* parent          8 B   ← target of Phase 2b
+struct leptris_node* first_child        8 B   ← target of Phase 2b
+struct leptris_node* last_child         8 B   ← target of Phase 2b
+struct leptris_node* next_sibling       8 B   ← target of Phase 2b
+struct leptris_attribute* first_attribute  8 B   ← target of Phase 2d
+struct leptris_attribute* last_attribute   8 B   ← target of Phase 2d
+struct leptris_namespace* namespaces  8 B
+struct leptris_document* document     8 B
                              ─────
                              104 B
 ```
@@ -55,9 +55,9 @@ int32_t next_sibling_off;
 Accessors compute the pointer on read:
 
 ```c
-static inline TaurusElement taurus_elem_parent(const TaurusElement e) {
+static inline LeptrisElement leptris_elem_parent(const LeptrisElement e) {
     if (!e || e->parent_off == 0) return NULL;
-    return (TaurusElement)((const char*)e + e->parent_off);
+    return (LeptrisElement)((const char*)e + e->parent_off);
 }
 ```
 
@@ -72,13 +72,13 @@ in int32_t.
 
 ### Migration steps
 
-1. Add inline accessors (`taurus_elem_parent`, `taurus_elem_set_parent`,
+1. Add inline accessors (`leptris_elem_parent`, `leptris_elem_set_parent`,
    etc.) to element.h.
 2. Rename struct fields (`parent` → `parent_off`, etc.) so direct
    access breaks the build. The compiler enumerates every site.
 3. For each compile error, replace `elem->parent` (read) with
-   `taurus_elem_parent(elem)`, and `elem->parent = x` (write) with
-   `taurus_elem_set_parent(elem, x)`.
+   `leptris_elem_parent(elem)`, and `elem->parent = x` (write) with
+   `leptris_elem_set_parent(elem, x)`.
 4. Tighten the size static_assert from 112 → 88.
 5. Run full test suite.
 
@@ -89,9 +89,9 @@ aligned, so no two distinct elements can have offset 0 between them.
 
 ## Phase 2c: Other node types follow suit
 
-`struct taurus_text_node`, `taurus_comment_node`, `taurus_cdata_node`,
-`taurus_pi_node` each carry a `void* next_sibling`. Convert each to
-`int32_t next_sibling_off` and update `taurus_node_get_next_sibling()`
+`struct leptris_text_node`, `leptris_comment_node`, `leptris_cdata_node`,
+`leptris_pi_node` each carry a `void* next_sibling`. Convert each to
+`int32_t next_sibling_off` and update `leptris_node_get_next_sibling()`
 to dispatch on node type.
 
 No size win on the element struct itself, but consistency: every
@@ -118,7 +118,7 @@ string access. Hot path. Defer until Phase 2b/2c/2d land cleanly.
 
 After each phase:
 - Full test suite (`ctest -j4`) — all tests pass.
-- `_Static_assert(sizeof(struct taurus_element) <= N)` updated.
-- `nm build-shared/src/libtaurus.dylib | grep " T "` still shows
-  only `taurus_*` symbols (no accidental leakage).
+- `_Static_assert(sizeof(struct leptris_element) <= N)` updated.
+- `nm build-shared/src/libleptris.dylib | grep " T "` still shows
+  only `leptris_*` symbols (no accidental leakage).
 - macOS `leaks --atExit -- ./build/test/c/test_dom` clean.

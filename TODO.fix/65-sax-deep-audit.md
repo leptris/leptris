@@ -8,7 +8,7 @@
 
 TODO 31 added basic SAX specs but didn't cover:
 
-- Incremental parsing (`taurus_sax_parser_feed` with multiple chunks)
+- Incremental parsing (`leptris_sax_parser_feed` with multiple chunks)
 - Error recovery — what does SAX do on malformed input?
 - Memory model — does SAX leak on error paths?
 - Attribute iteration order — should match document order
@@ -25,7 +25,7 @@ TEST(SaxAttributes, ReturnedInDocumentOrder) { /* ... */ }
 TEST(SaxNamespaces, FiresPrefixMappingEvents) { /* ... */ }
 ```
 
-Audit `src/taurus/sax/parser.c` for:
+Audit `src/leptris/sax/parser.c` for:
 - calloc/strdup sites that aren't freed on error paths
 - buffer management on chunk boundaries
 - state machine correctness

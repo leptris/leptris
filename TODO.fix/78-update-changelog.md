@@ -34,14 +34,14 @@ Update `CHANGELOG.md` with:
 - DTD subsystem leak (was leaking 128 KB per DOCTYPE-bearing doc).
 
 ### Added
-- `taurus_document_set_strict` / `taurus_document_get_strict` —
+- `leptris_document_set_strict` / `leptris_document_get_strict` —
   per-document strict mode.
-- `taurus_set_max_depth` / `taurus_get_max_depth` — configurable
+- `leptris_set_max_depth` / `leptris_get_max_depth` — configurable
   parser depth limit.
-- `taurus_element_as_node` — element-to-node cast helper.
-- ASAN build target (`TAURUS_ENABLE_ASAN`).
-- libFuzzer harness (`TAURUS_ENABLE_FUZZING`).
-- Doxygen docs target (`TAURUS_BUILD_DOCS`).
+- `leptris_element_as_node` — element-to-node cast helper.
+- ASAN build target (`LEPTRIS_ENABLE_ASAN`).
+- libFuzzer harness (`LEPTRIS_ENABLE_FUZZING`).
+- Doxygen docs target (`LEPTRIS_BUILD_DOCS`).
 - CI workflows: ASAN + leak check on every PR; fuzzing nightly.
 - Node vtable registry — adding a node type is now additive.
 - 97 specs across 12 modules (smoke/parser/encoding/dom/vtable/
@@ -55,8 +55,8 @@ Update `CHANGELOG.md` with:
 - 12 disabled/legacy files moved to archive/.
 
 ### Removed
-- Dead `taurus_node_create` (non-pool variant).
-- Dead `taurus_element_add_namespace` static.
+- Dead `leptris_node_create` (non-pool variant).
+- Dead `leptris_element_add_namespace` static.
 - 50+ compile warnings (now zero).
 ```
 

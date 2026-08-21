@@ -1,6 +1,6 @@
 import pytest
 
-from pytaurus import Document, TaurusError
+from pyleptris import Document, LeptrisError
 
 XML = """<?xml version="1.0"?>
 <library>
@@ -24,7 +24,7 @@ class TestParse:
         assert doc.root.to_node().is_element()
 
     def test_parse_error_raises(self):
-        with pytest.raises(TaurusError):
+        with pytest.raises(LeptrisError):
             Document.parse("<unclosed>")
 
     def test_bytes_input(self):
@@ -121,7 +121,7 @@ class TestXPath:
         assert book.xpath("string(@id)") == "1"
 
     def test_error_raises(self, doc):
-        with pytest.raises(TaurusError):
+        with pytest.raises(LeptrisError):
             doc.xpath("///[")
 
 

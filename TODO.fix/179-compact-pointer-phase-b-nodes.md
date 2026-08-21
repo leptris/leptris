@@ -5,8 +5,8 @@
 
 ## Goal
 
-Migrate `taurus_text_node`, `taurus_comment_node`, `taurus_cdata_node`,
-`taurus_pi_node` to use `compact_pointer_1byte` for their
+Migrate `leptris_text_node`, `leptris_comment_node`, `leptris_cdata_node`,
+`leptris_pi_node` to use `compact_pointer_1byte` for their
 `next_sibling` field. Lowest-risk migration — simpler pointer
 topology than the element tree.
 
@@ -23,22 +23,22 @@ element migration in [[180-compact-pointer-phase-c-element]].
 
 ## Per-node-type phases
 
-### Phase 1 — `taurus_text_node`
+### Phase 1 — `leptris_text_node`
 
 - Rename `next_sibling` → `next_sibling_cp` (compact_pointer_1byte).
 - Add inline accessor `text_node_next(n, doc)`.
-- Update `taurus_node_get_next_sibling()` dispatch.
+- Update `leptris_node_get_next_sibling()` dispatch.
 - Update all writes (parser, mutation API) to call `cp1_set`.
 
-### Phase 2 — `taurus_comment_node`
+### Phase 2 — `leptris_comment_node`
 
 Same shape. Adds overflow-table awareness to comment mutation paths.
 
-### Phase 3 — `taurus_cdata_node`
+### Phase 3 — `leptris_cdata_node`
 
 Same shape.
 
-### Phase 4 — `taurus_pi_node`
+### Phase 4 — `leptris_pi_node`
 
 Same shape. PI nodes also live at the document level (siblings of
 the root element), so the document's PI chain also migrates.
@@ -46,7 +46,7 @@ the root element), so the document's PI chain also migrates.
 ### Phase 5 — Test + benchmark
 
 - All 464 tests pass.
-- `taurus_node_get_next_sibling` benchmark: should improve 5–10% on
+- `leptris_node_get_next_sibling` benchmark: should improve 5–10% on
   text-heavy docs.
 - Overflow-table stress test: docs with 1000+ text nodes spanning
   > 1 KB pool pages.

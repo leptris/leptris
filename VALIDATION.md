@@ -1,4 +1,4 @@
-# Taurus Validation Commands
+# Leptris Validation Commands
 
 ## Quick Validation (Run all tests and benchmarks)
 
@@ -58,13 +58,13 @@ valgrind --leak-check=full --error-exitcode=1 ./build/test/c/test_dom
 
 ```bash
 # Parse and display XML
-./build/cli/taurus parse test/fixtures/libxml2/svg1
+./build/cli/leptris parse test/fixtures/libxml2/svg1
 
 # XPath query
-./build/cli/taurus xpath test/fixtures/libxml2/svg1 "//svg"
+./build/cli/leptris xpath test/fixtures/libxml2/svg1 "//svg"
 
 # Format XML
-./build/cli/taurus format --indent 2 test/fixtures/libxml2/svg1
+./build/cli/leptris format --indent 2 test/fixtures/libxml2/svg1
 ```
 
 ## Build Commands
@@ -73,9 +73,9 @@ valgrind --leak-check=full --error-exitcode=1 ./build/test/c/test_dom
 ```bash
 cmake -B build -S . \
     -DCMAKE_BUILD_TYPE=Release \
-    -DTAURUS_BUILD_CLI=ON \
-    -DTAURUS_ENABLE_UTF8PROC=OFF \
-    -DTAURUS_ENABLE_ICONV=OFF
+    -DLEPTRIS_BUILD_CLI=ON \
+    -DLEPTRIS_ENABLE_UTF8PROC=OFF \
+    -DLEPTRIS_ENABLE_ICONV=OFF
 cmake --build build
 ```
 
@@ -83,10 +83,10 @@ cmake --build build
 ```bash
 cmake -B build -S . \
     -DCMAKE_BUILD_TYPE=Release \
-    -DTAURUS_BUILD_CLI=ON \
-    -DTAURUS_ENABLE_UTF8PROC=ON \
-    -DTAURUS_ENABLE_ICONV=ON \
-    -DTAURUS_BUILD_BENCHMARKS=ON \
+    -DLEPTRIS_BUILD_CLI=ON \
+    -DLEPTRIS_ENABLE_UTF8PROC=ON \
+    -DLEPTRIS_ENABLE_ICONV=ON \
+    -DLEPTRIS_BUILD_BENCHMARKS=ON \
     -DBUILD_TESTING=ON
 cmake --build build
 ```
@@ -96,7 +96,7 @@ cmake --build build
 cmake -B build -S . \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
-    -DTAURUS_BUILD_CLI=ON
+    -DLEPTRIS_BUILD_CLI=ON
 cmake --build build
 ```
 

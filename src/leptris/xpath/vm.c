@@ -1,0 +1,2236 @@
+/* lib/src/xpath/vm.c — XPath bytecode VM interpreter (TODO 120 Phase F)
+ *
+ * Stack-based interpreter for the bytecode emitted by compiler.c.
+ * The VM holds `struct leptris_xpath_result*` values on its stack.
+ *
+ * Inline handlers (Phase F):
+ *   BC_LITERAL_NUMBER / STRING / BOOL
+ *     → push a fresh XPathResult.
+ *   BC_PATH_ABSOLUTE
+ *     → push document root as single-node nodeset.
+ *   BC_PATH_RELATIVE
+ *     → push context node as single-node nodeset.
+ *   BC_AXIS_STEP
+ *     → pop input nodeset, call evaluate_step(ctx, ast, input),
+ *       push result nodeset. Reuses the existing axis + node-test
+ *       + predicate machinery.
+ *   BC_BINARY_OP
+ *     → pop two operands, apply arithmetic / comparison / boolean
+ *       logic inline. Avoids the AST-node walking that
+ *       evaluate_operator would do.
+ *   BC_FUNC_CALL
+ *     → call evaluate_function_call(ctx, ast) directly. Skips the
+ *       evaluate_expr AST-type switch.
+ *   BC_FALLBACK_EVAL
+ *     → call evaluate_expr(ctx, ast). Used for variable refs and
+ *       any AST shape the compiler doesn't specifically lower.
+ *   BC_RETURN
+ *     → pop and return as final result.
+ *
+ * The VM is COMPLETE: every XPath expression compiles to a sequence
+ * of these opcodes and evaluates correctly. The inline handlers
+ * exist to reduce dispatch overhead; correctness is identical to
+ * direct AST evaluation because the inline handlers call into the
+ * same evaluator helpers.
+ */
+#include "bytecode.h"
+#include "evaluator_internal.h"
+#include "functions.h"
+#include "../leptris_internal.h"
+#include "../dom/element.h"
+#include "../dom/element_index.h"
+#include "../dom/text.h"
+#include "../dom/node.h"
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+typedef struct {
+    struct leptris_xpath_result** stack;
+    size_t sp;
+    size_t cap;
+    int error;
+} XPathVM;
+
+static int vm_push(XPathVM* vm, struct leptris_xpath_result* v) {
+    if (vm->sp >= vm->cap) {
+        size_t new_cap = vm->cap ? vm->cap * 2 : 16;
+        struct leptris_xpath_result** grown =
+            (struct leptris_xpath_result**)realloc(vm->stack,
+                new_cap * sizeof(struct leptris_xpath_result*));
+        if (!grown) { vm->error = 1; return -1; }
+        vm->stack = grown;
+        vm->cap = new_cap;
+    }
+    vm->stack[vm->sp++] = v;
+    return 0;
+}
+
+static struct leptris_xpath_result* vm_pop(XPathVM* vm) {
+    if (vm->sp == 0) { vm->error = 1; return NULL; }
+    return vm->stack[--vm->sp];
+}
+
+static uint8_t read_u8(const unsigned char** pc) {
+    uint8_t v = *pc[0];
+    *pc += 1;
+    return v;
+}
+
+static uint16_t read_u16(const unsigned char** pc) {
+    uint16_t v = ((uint16_t)(*pc)[0] << 8) | (*pc)[1];
+    *pc += 2;
+    return v;
+}
+
+static double read_double(const unsigned char** pc) {
+    double v;
+    memcpy(&v, *pc, sizeof(double));
+    *pc += sizeof(double);
+    return v;
+}
+
+/* Build a single-node nodeset from a context element. Caller owns
+ * the returned result. */
+static struct leptris_xpath_result* make_singleton_nodeset(void* node) {
+    struct leptris_xpath_result* r =
+        (struct leptris_xpath_result*)calloc(1, sizeof(*r));
+    if (!r) return NULL;
+    r->type = XPATH_RESULT_NODESET;
+    r->value.nodeset_value = xpath_nodeset_new();
+    if (!r->value.nodeset_value) {
+        free(r);
+        return NULL;
+    }
+    if (node) xpath_nodeset_add(r->value.nodeset_value, node);
+    return r;
+}
+
+/* ----------------------------------------------------------------------- *
+ * Specialized axis handlers (TODO 126).
+ *
+ * Each handler pops the input nodeset from the VM stack, walks the
+ * tree inline (bypassing evaluate_step / apply_axis / matches_node_test),
+ * and returns a freshly-allocated result.
+ *
+ * `name` is NULL for wildcards; otherwise a NUL-terminated C string
+ * to match against element names. The compiler only emits these
+ * opcodes for the no-namespace-prefix case (no ':' in test value).
+ * ----------------------------------------------------------------------- */
+
+/* Common preamble: pop input nodeset, detach it from the result
+ * wrapper, free the wrapper. Returns the detached nodeset or NULL
+ * on error (vm->error is set). */
+static XPathNodeSet* vm_detach_input_nodeset(XPathVM* vm) {
+    struct leptris_xpath_result* input = vm_pop(vm);
+    if (!input || input->type != XPATH_RESULT_NODESET) {
+        if (input) xpath_result_free(input);
+        vm->error = 1;
+        return NULL;
+    }
+    XPathNodeSet* ns = input->value.nodeset_value;
+    input->value.nodeset_value = NULL;
+    xpath_result_free(input);
+    return ns;
+}
+
+/* Helper: is this node an element (vs attribute / text / etc.)?
+ * The VM opcodes only accept element input; non-element inputs are
+ * skipped (matches the existing axis behavior for non-element context). */
+static int node_is_element(void* node) {
+    if (!node) return 0;
+    /* Element vs attribute distinguishing: the attribute node struct
+     * begins with LeptrisNodeType node_type == LEPTRIS_NODE_ATTRIBUTE.
+     * Elements begin with the compact header (LeptrisCompactHeader)
+     * whose first int is the page offset, never matches the attribute
+     * tag reliably. Use a conservative check that mirrors
+     * evaluator_path.c's node_as_element. */
+    LeptrisNodeType first = *(LeptrisNodeType*)node;
+    return first != LEPTRIS_NODE_ATTRIBUTE &&
+           first != LEPTRIS_NODE_NAMESPACE &&
+           first != LEPTRIS_NODE_TEXT;
+}
+
+struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
+                                                 const char* name, int wild);
+struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* vm,
+                                                     const char* name, int wild);
+struct leptris_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
+                                                const char* name, int wild);
+struct leptris_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
+                                                  const char* name, int wild);
+struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM* vm,
+                                                      const char* name, int wild,
+                                                      int include_self);
+
+/* Forward decl for fused handler (TODO 134). */
+static struct leptris_xpath_result* vm_apply_axis_descendant_pred_attr(
+    XPathContext* ctx, XPathVM* vm,
+    const char* attr_name, const char* attr_value,
+    int value_match, int include_self);
+
+/* Forward decl: descendant_walk is defined below, but vm_apply_absolute
+ * uses it. */
+static void descendant_walk(XPathNodeSet* out, LeptrisElement elem,
+                              const char* name, int wild, int include_self);
+
+/* Absolute-path handlers (TODO 129). Like vm_apply_axis_descendant
+ * but starts from the document root element directly, with the
+ * document-root semantics: `/foo` matches root itself (not its
+ * children), `//foo` walks the entire tree.
+ *
+ * `mode` controls behavior:
+ *   0 = root-match only: push [root] if root matches name/wild.
+ *       Used for BC_ABSOLUTE_ROOT_MATCH (child axis from document).
+ *   1 = descendant: push all descendants of root matching name.
+ *       Used for BC_ABSOLUTE_DESCENDANT (descendant axis).
+ *   2 = descendant-or-self: push root if matches + descendants
+ *       matching. Used for BC_ABSOLUTE_DESCENDANT_OR_SELF. */
+static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
+                                                      const char* name,
+                                                      int wild,
+                                                      int mode) {
+    if (!ctx || !ctx->document) return NULL;
+    LeptrisElement root = (LeptrisElement)ctx->document->new_dom_root;
+    if (!root) return NULL;
+
+    /* Mode 0 (root match only) — short-circuit, no descendant walk. */
+    if (mode == 0) {
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) return NULL;
+        if (wild) {
+            xpath_nodeset_add_fast(out, root);
+        } else {
+            const char* rn = leptris_element_get_name(root);
+            if (rn && strcmp(rn, name) == 0) {
+                xpath_nodeset_add_fast(out, root);
+            }
+        }
+        struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+        if (!r) { xpath_nodeset_free(out); return NULL; }
+        r->value.nodeset_value = out;
+        return r;
+    }
+
+    /* Modes 1 and 2: use the element index with a memcpy fast path
+     * (TODO 137). Replaces the per-element fast_add loop with a
+     * single malloc+memcpy of the relevant index slice. ~10x faster
+     * for the loop portion of descendant::*.
+     *
+     * Layout invariants:
+     *   - all_elements[0] = root (preorder starts at root)
+     *   - name_bucket.matches: all elements with that name in preorder
+     */
+    struct leptris_element_index* idx = ctx->document->element_index;
+    /* TODO 190: build on the SECOND axis query. The build costs
+     * two tree walks + per-name bucket allocations; a document
+     * that sees one query pays less walking directly. */
+    if (!idx && ++ctx->document->axis_query_count >= 2) {
+        idx = leptris_element_index_build(ctx->document);
+        ctx->document->element_index = idx;
+    }
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) return NULL;
+
+    if (idx) {
+        if (wild) {
+            /* Mode 2 (double-slash wildcard): result = all_elements.
+             * Mode 1 (descendant wildcard): result = all_elements[1..]. */
+            void** src = (void**)idx->all_elements;
+            size_t n = idx->all_count;
+            if (mode == 1 && n > 0) { src++; n--; }
+            if (n > 0) {
+                void** arr = (void**)malloc(n * sizeof(void*));
+                if (arr) {
+                    memcpy(arr, src, n * sizeof(void*));
+                    out->nodes = arr;
+                    out->count = n;
+                    out->capacity = n;
+                }
+            }
+        } else {
+            const LeptrisElementIndexBucket* bucket =
+                leptris_element_index_lookup(idx, name);
+            if (bucket) {
+                void** src = (void**)bucket->matches;
+                size_t n = bucket->count;
+                /* Mode 1: skip root if it's in the bucket. */
+                if (mode == 1) {
+                    size_t skip = (size_t)-1;
+                    for (size_t i = 0; i < n; i++) {
+                        if (bucket->matches[i] == root) { skip = i; break; }
+                    }
+                    if (skip != (size_t)-1) {
+                        /* Allocate n-1, copy [0..skip) + (skip..n). */
+                        if (n > 1) {
+                            void** arr = (void**)malloc((n - 1) * sizeof(void*));
+                            if (arr) {
+                                size_t k = 0;
+                                for (size_t i = 0; i < skip; i++) arr[k++] = src[i];
+                                for (size_t i = skip + 1; i < n; i++) arr[k++] = src[i];
+                                out->nodes = arr;
+                                out->count = n - 1;
+                                out->capacity = n - 1;
+                            }
+                        }
+                    } else if (n > 0) {
+                        void** arr = (void**)malloc(n * sizeof(void*));
+                        if (arr) {
+                            memcpy(arr, src, n * sizeof(void*));
+                            out->nodes = arr;
+                            out->count = n;
+                            out->capacity = n;
+                        }
+                    }
+                } else if (n > 0) {
+                    /* Mode 2: copy all matches. */
+                    void** arr = (void**)malloc(n * sizeof(void*));
+                    if (arr) {
+                        memcpy(arr, src, n * sizeof(void*));
+                        out->nodes = arr;
+                        out->count = n;
+                        out->capacity = n;
+                    }
+                }
+            }
+        }
+    } else {
+        /* Index build failed — fall back to walk. */
+        int include_self = (mode == 2);
+        /* descendant-or-self::name matches the root only when the
+         * root's name matches (or it's a wildcard). The index path
+         * applies the same filter via the name bucket; this walk
+         * path ran only on index-build failure until TODO 190 made
+         * first queries walk directly — the unconditional root add
+         * was a latent off-by-one for named // queries (exposed by
+         * count(//book) returning root+books). */
+        if (include_self &&
+            (wild || (root->name &&
+                      leptris_elem_name_is(root, name,
+                                          leptris_name_hash_compute(name))))) {
+            xpath_nodeset_add_fast(out, root);
+        }
+        descendant_walk(out, root, name, wild, 0);
+    }
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
+                                                 const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        LeptrisElement child = leptris_element_get_first_child(elem);
+        while (child) {
+            if (wild) {
+                xpath_nodeset_add_fast(out, child);
+            } else {
+                const char* cn = leptris_element_get_name(child);
+                if (cn && strcmp(cn, name) == 0) {
+                    xpath_nodeset_add_fast(out, child);
+                }
+            }
+            child = leptris_element_get_next_sibling(child);
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* vm,
+                                                     const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    /* Attribute axis produces LeptrisAttributeNode* entries. The
+     * result must own them so they're freed when the result is. */
+    out->owns_attributes = 1;
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
+        while (attr) {
+            LeptrisStringView nv = attr->name_view;
+            int matches = 0;
+            if (wild) {
+                matches = 1;
+            } else if (name && nv.length > 0 && nv.data) {
+                matches = (strlen(name) == nv.length &&
+                           memcmp(name, nv.data, nv.length) == 0);
+            }
+
+            if (matches) {
+                /* Allocate a LeptrisAttributeNode mirroring
+                 * create_attribute_node in evaluator_axes.c. */
+                LeptrisAttributeNode* an = LEPTRIS_ALLOC(LeptrisAttributeNode);
+                if (!an) { attr = leptris_attr_next(attr); continue; }
+                an->node_type = LEPTRIS_NODE_ATTRIBUTE;
+
+                /* Copy name (single representation: from the view) */
+                if (nv.length > 0 && nv.data) {
+                    an->name = (char*)malloc(nv.length + 1);
+                    if (an->name) {
+                        memcpy(an->name, nv.data, nv.length);
+                        an->name[nv.length] = '\0';
+                    }
+                } else {
+                    an->name = NULL;
+                }
+
+                /* Copy value (single representation: from the view) */
+                LeptrisStringView vv = attr->value_view;
+                if (vv.length > 0 && vv.data) {
+                    an->value = (char*)malloc(vv.length + 1);
+                    if (an->value) {
+                        memcpy(an->value, vv.data, vv.length);
+                        an->value[vv.length] = '\0';
+                    }
+                } else {
+                    an->value = NULL;
+                }
+
+                an->namespace_uri = NULL;
+                an->owner = elem;
+
+                xpath_nodeset_add_fast(out, an);
+            }
+            attr = leptris_attr_next(attr);
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+struct leptris_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
+                                                const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        if (wild) {
+            xpath_nodeset_add_fast(out, elem);
+        } else {
+            const char* en = leptris_element_get_name(elem);
+            if (en && strcmp(en, name) == 0) {
+                xpath_nodeset_add_fast(out, elem);
+            }
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+struct leptris_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm,
+                                                  const char* name, int wild) {
+    (void)ctx;
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    /* Parent axis can produce duplicates (multiple children → same
+     * parent). Inline a pointer-equality dedup. */
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        LeptrisElement parent = leptris_element_get_parent(elem);
+        if (!parent) continue;
+
+        if (!wild) {
+            const char* pn = leptris_element_get_name(parent);
+            if (!pn || strcmp(pn, name) != 0) continue;
+        }
+
+        /* Dedup */
+        int dup = 0;
+        for (size_t j = 0; j < out->count; j++) {
+            if (out->nodes[j] == parent) { dup = 1; break; }
+        }
+        if (!dup) xpath_nodeset_add_fast(out, parent);
+    }
+
+    xpath_nodeset_free(input);
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+/* Recursive subtree walk for descendant / descendant-or-self.
+ * Appends matching elements to `out`. No dedup at this layer —
+ * the caller decides based on input size. */
+/* Process a single element during a subtree walk: add to out if it
+ * matches the name filter. Inlined for tight loop performance. */
+static inline void descendant_visit(XPathNodeSet* out, LeptrisElement elem,
+                                      const char* name, int wild) {
+    if (wild) {
+        xpath_nodeset_add_fast(out, elem);
+    } else {
+        const char* en = leptris_element_get_name(elem);
+        if (en && strcmp(en, name) == 0) {
+            xpath_nodeset_add_fast(out, elem);
+        }
+    }
+}
+
+/* Iterative pre-order subtree walk (TODO 131). Replaces the previous
+ * recursive version which paid function-call overhead per element.
+ *
+ * The walk uses the tree's own parent / first_child / next_sibling
+ * links to track position — no explicit stack needed. For an N-element
+ * subtree, total work is O(N) with constant per-element overhead.
+ *
+ * `name` / `wild` filter which elements get added to `out`.
+ * `include_self`: if 1, visit `elem` itself before descending; if 0,
+ * skip `elem` (it's been handled by the caller, e.g., vm_apply_absolute
+ * adds root separately for descendant-or-self). */
+static void descendant_walk(XPathNodeSet* out, LeptrisElement elem,
+                              const char* name, int wild, int include_self) {
+    if (!elem) return;
+
+    /* Pre-grow the output nodeset to skip the inline→heap transition
+     * that would otherwise trigger on the 17th add. For typical
+     * medium docs (~50 elements) this avoids 1-2 grow operations. */
+    if (out->capacity < 32) {
+        void** new_nodes = (void**)malloc(32 * sizeof(void*));
+        if (new_nodes) {
+            if (out->count > 0) {
+                memcpy(new_nodes, out->nodes, out->count * sizeof(void*));
+            }
+            /* Inline storage is part of the struct; nothing to free. */
+            out->nodes = new_nodes;
+            out->capacity = 32;
+        }
+    }
+
+    if (include_self) {
+        descendant_visit(out, elem, name, wild);
+    }
+
+    LeptrisElement cur = leptris_element_get_first_child(elem);
+    while (cur) {
+        descendant_visit(out, cur, name, wild);
+
+        LeptrisElement next = leptris_element_get_first_child(cur);
+        if (next) {
+            cur = next;
+            continue;
+        }
+
+        /* No child — walk up via parent links until we find a sibling
+         * or reach `elem` (the subtree root). */
+        while (cur && cur != elem) {
+            LeptrisElement sib = leptris_element_get_next_sibling(cur);
+            if (sib) {
+                cur = sib;
+                break;
+            }
+            cur = leptris_element_get_parent(cur);
+        }
+        if (cur == elem) break;  /* exhausted subtree */
+    }
+}
+
+struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM* vm,
+                                                      const char* name, int wild,
+                                                      int include_self) {
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    /* Fast path: single-element input that IS the document root.
+     * Use the element index (TODO 132) for O(K) lookup. */
+    LeptrisElement doc_root = (ctx && ctx->document)
+        ? (LeptrisElement)ctx->document->new_dom_root : NULL;
+
+    if (input->count == 1 && doc_root &&
+        input->nodes[0] == doc_root && node_is_element(input->nodes[0])) {
+        struct leptris_element_index* idx = ctx->document->element_index;
+        /* TODO 190: build on the SECOND axis query. The build costs
+         * two tree walks + per-name bucket allocations; a document
+         * that sees one query pays less walking directly. */
+        if (!idx && ++ctx->document->axis_query_count >= 2) {
+            idx = leptris_element_index_build(ctx->document);
+            ctx->document->element_index = idx;
+        }
+        if (idx) {
+            /* Memcpy fast path (TODO 137). Single malloc + memcpy
+             * instead of per-element add. Root at all_elements[0]. */
+            if (wild) {
+                if (include_self) {
+                    /* root + all descendants = all_elements */
+                    if (idx->all_count > 0) {
+                        void** arr = (void**)malloc(idx->all_count * sizeof(void*));
+                        if (arr) {
+                            memcpy(arr, idx->all_elements, idx->all_count * sizeof(void*));
+                            out->nodes = arr;
+                            out->count = idx->all_count;
+                            out->capacity = idx->all_count;
+                        }
+                    }
+                } else {
+                    /* all descendants except root = all_elements[1..] */
+                    if (idx->all_count > 1) {
+                        size_t n = idx->all_count - 1;
+                        void** arr = (void**)malloc(n * sizeof(void*));
+                        if (arr) {
+                            memcpy(arr, idx->all_elements + 1, n * sizeof(void*));
+                            out->nodes = arr;
+                            out->count = n;
+                            out->capacity = n;
+                        }
+                    }
+                }
+            } else {
+                const LeptrisElementIndexBucket* bucket =
+                    leptris_element_index_lookup(idx, name);
+                if (bucket) {
+                    if (include_self) {
+                        /* all matches including root */
+                        if (bucket->count > 0) {
+                            void** arr = (void**)malloc(bucket->count * sizeof(void*));
+                            if (arr) {
+                                memcpy(arr, bucket->matches, bucket->count * sizeof(void*));
+                                out->nodes = arr;
+                                out->count = bucket->count;
+                                out->capacity = bucket->count;
+                            }
+                        }
+                    } else {
+                        /* matches except root */
+                        size_t skip = (size_t)-1;
+                        for (size_t i = 0; i < bucket->count; i++) {
+                            if (bucket->matches[i] == doc_root) { skip = i; break; }
+                        }
+                        if (skip == (size_t)-1) {
+                            if (bucket->count > 0) {
+                                void** arr = (void**)malloc(bucket->count * sizeof(void*));
+                                if (arr) {
+                                    memcpy(arr, bucket->matches, bucket->count * sizeof(void*));
+                                    out->nodes = arr;
+                                    out->count = bucket->count;
+                                    out->capacity = bucket->count;
+                                }
+                            }
+                        } else if (bucket->count > 1) {
+                            size_t n = bucket->count - 1;
+                            void** arr = (void**)malloc(n * sizeof(void*));
+                            if (arr) {
+                                size_t k = 0;
+                                for (size_t i = 0; i < skip; i++) arr[k++] = bucket->matches[i];
+                                for (size_t i = skip + 1; i < bucket->count; i++) arr[k++] = bucket->matches[i];
+                                out->nodes = arr;
+                                out->count = n;
+                                out->capacity = n;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (out->count > 0 || !include_self) {
+                xpath_nodeset_free(input);
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(out); return NULL; }
+                r->value.nodeset_value = out;
+                return r;
+            }
+        }
+        /* Index build failed — fall through to walk. */
+    }
+
+    /* TODO 192: subtree-interval index for non-root contexts — the
+     * fast path above handled the doc-root input; this one serves
+     * .//name and chained a//b steps from any context set. Intervals
+     * are preorder ranges; name-bucket matches store their preorder
+     * positions, so each context costs a binary search plus its own
+     * hits instead of a subtree walk. */
+    if (!wild && ctx && ctx->document && input->count > 0) {
+        struct leptris_element_index* idx = ctx->document->element_index;
+        if (!idx && ++ctx->document->axis_query_count >= 2) {
+            idx = leptris_element_index_build(ctx->document);
+            ctx->document->element_index = idx;
+        }
+        if (idx && idx->subtree_end) {
+            const LeptrisElementIndexBucket* bucket =
+                leptris_element_index_lookup(idx, name);
+            /* No bucket / empty bucket: the name does not occur in
+             * this document, so every subtree yields empty — but a
+             * partially-built index without positions must fall back. */
+            if (!bucket || (bucket->count > 0 && bucket->match_positions)) {
+                size_t n_ctx = 0;
+                for (size_t i = 0; i < input->count; i++) {
+                    if (node_is_element(input->nodes[i])) n_ctx++;
+                }
+                if (n_ctx > 0) {
+                    size_t* los = (size_t*)malloc(n_ctx * sizeof(size_t));
+                    size_t* his = (size_t*)malloc(n_ctx * sizeof(size_t));
+                    int all_found = (los && his);
+                    size_t k = 0;
+                    for (size_t i = 0; all_found && i < input->count; i++) {
+                        if (!node_is_element(input->nodes[i])) continue;
+                        all_found = leptris_element_index_subtree_interval(
+                            idx, (LeptrisElement)input->nodes[i],
+                            &los[k], &his[k]);
+                        if (all_found) k++;
+                    }
+                    if (all_found) {
+                        /* Sort intervals by start; subtrees are either
+                         * disjoint or nested, so skipping any interval
+                         * contained in a previous one removes all overlap
+                         * — no dedup pass needed and output stays in
+                         * document order (bucket positions ascend). */
+                        for (size_t a = 1; a < k; a++) {
+                            size_t l = los[a], h = his[a], b = a;
+                            while (b > 0 && los[b - 1] > l) {
+                                los[b] = los[b - 1];
+                                his[b] = his[b - 1];
+                                b--;
+                            }
+                            los[b] = l;
+                            his[b] = h;
+                        }
+                        size_t prev_hi = 0;
+                        int have_prev = 0;
+                        for (size_t a = 0; a < k; a++) {
+                            if (have_prev && los[a] <= prev_hi) continue;
+                            if (bucket && bucket->count > 0) {
+                                size_t lo2 = los[a], hi2 = his[a];
+                                size_t l = 0, r = bucket->count;
+                                while (l < r) {
+                                    size_t mid = l + (r - l) / 2;
+                                    if (bucket->match_positions[mid] < lo2) {
+                                        l = mid + 1;
+                                    } else {
+                                        r = mid;
+                                    }
+                                }
+                                for (size_t j = l;
+                                     j < bucket->count &&
+                                     bucket->match_positions[j] <= hi2;
+                                     j++) {
+                                    if (!include_self &&
+                                        bucket->match_positions[j] == lo2) {
+                                        continue;
+                                    }
+                                    xpath_nodeset_add_fast(
+                                        out, bucket->matches[j]);
+                                }
+                            }
+                            prev_hi = his[a];
+                            have_prev = 1;
+                        }
+                        free(los);
+                        free(his);
+                        xpath_nodeset_free(input);
+                        struct leptris_xpath_result* r =
+                            xpath_result_new(XPATH_RESULT_NODESET);
+                        if (!r) {
+                            xpath_nodeset_free(out);
+                            return NULL;
+                        }
+                        r->value.nodeset_value = out;
+                        return r;
+                    }
+                    free(los);
+                    free(his);
+                }
+            }
+        }
+    }
+
+    /* General path: walk subtrees from each input element. */
+    int need_dedup = (input->count > 1);
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+
+        size_t mark = out->count;
+        descendant_walk(out, elem, name, wild, include_self);
+
+        if (need_dedup) {
+            for (size_t k = mark; k < out->count; k++) {
+                int dup = 0;
+                for (size_t j = 0; j < mark; j++) {
+                    if (out->nodes[j] == out->nodes[k]) {
+                        dup = 1;
+                        break;
+                    }
+                }
+                if (dup) {
+                    out->nodes[k] = out->nodes[out->count - 1];
+                    out->count--;
+                    k--;
+                }
+            }
+        }
+    }
+
+    xpath_nodeset_free(input);
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+/* Fused axis+predicate handler (TODO 134). Walks descendant::* and
+ * filters by attribute in a single pass — no intermediate nodeset.
+ * When input is the document root, uses the attribute index for
+ * O(K) lookup where K = match count.
+ *
+ * `value_match`: if 0, presence check (attr exists). If 1, equality
+ * check (attr value == attr_value). */
+
+/* Attribute-predicate matcher — pulled out of the previous macro so
+ * the file compiles under MSVC (which rejects GCC statement-expression
+ * extension `({ ... })`). Walks the element's attribute list once. */
+static int attr_pred_match(LeptrisElement e,
+                           const char* attr_name, size_t attr_name_len,
+                           int value_match,
+                           const char* attr_value, size_t value_len) {
+    struct leptris_attribute* a = leptris_element_get_first_attribute(e);
+    while (a) {
+        LeptrisStringView nv = a->name_view;
+        if (attr_name && nv.length == attr_name_len && nv.length > 0 && nv.data &&
+            memcmp(attr_name, nv.data, nv.length) == 0) {
+            if (!value_match) return 1;
+            LeptrisStringView vv = a->value_view;
+            if (vv.length == value_len && vv.length > 0 && vv.data &&
+                memcmp(attr_value, vv.data, vv.length) == 0) {
+                return 1;
+            }
+        }
+        a = leptris_attr_next(a);
+    }
+    return 0;
+}
+
+static struct leptris_xpath_result* vm_apply_axis_descendant_pred_attr(
+    XPathContext* ctx, XPathVM* vm,
+    const char* attr_name, const char* attr_value,
+    int value_match, int include_self) {
+
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    LeptrisElement doc_root = (ctx && ctx->document)
+        ? (LeptrisElement)ctx->document->new_dom_root : NULL;
+
+    /* Index fast path: single-element input that IS the document root.
+     * Look up attr_bucket directly. */
+    if (input->count == 1 && doc_root &&
+        input->nodes[0] == doc_root && node_is_element(input->nodes[0])) {
+
+        struct leptris_element_index* idx = ctx->document->element_index;
+        /* TODO 190: build on the SECOND axis query. The build costs
+         * two tree walks + per-name bucket allocations; a document
+         * that sees one query pays less walking directly. */
+        if (!idx && ++ctx->document->axis_query_count >= 2) {
+            idx = leptris_element_index_build(ctx->document);
+            ctx->document->element_index = idx;
+        }
+        if (idx) {
+            const LeptrisElementIndexAttrBucket* abucket =
+                leptris_element_index_lookup_attr(idx, attr_name);
+            if (abucket) {
+                if (!value_match) {
+                    /* [@attr] — return all matches (root is in the
+                     * bucket iff it has the attr; same for both
+                     * descendant and descendant-or-self). */
+                    for (size_t i = 0; i < abucket->count; i++) {
+                        if (!include_self && abucket->matches[i] == doc_root) continue;
+                        xpath_nodeset_add_fast(out, abucket->matches[i]);
+                    }
+                } else {
+                    const LeptrisElementIndexAttrValue* vbucket =
+                        leptris_element_index_attr_lookup_value(abucket, attr_value);
+                    if (vbucket) {
+                        for (size_t i = 0; i < vbucket->count; i++) {
+                            if (!include_self && vbucket->matches[i] == doc_root) continue;
+                            xpath_nodeset_add_fast(out, vbucket->matches[i]);
+                        }
+                    }
+                }
+            }
+            xpath_nodeset_free(input);
+            struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+            if (!r) { xpath_nodeset_free(out); return NULL; }
+            r->value.nodeset_value = out;
+            return r;
+        }
+        /* Index build failed — fall through to walk+filter. */
+    }
+
+    /* Walk+filter fallback. Single pass: visit each descendant and
+     * check the attribute inline. Avoids the intermediate nodeset
+     * that the two-opcode form would allocate. */
+    size_t attr_name_len = attr_name ? strlen(attr_name) : 0;
+    size_t value_len = attr_value ? strlen(attr_value) : 0;
+
+    /* Helper: check if `e` has the matching attr. */
+    #define ATTR_MATCHES(e) \
+        attr_pred_match((e), attr_name, attr_name_len, \
+                        value_match, attr_value, value_len)
+
+    for (size_t i = 0; i < input->count; i++) {
+        if (!node_is_element(input->nodes[i])) continue;
+        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+
+        /* include_self: check the input element itself. */
+        if (include_self && ATTR_MATCHES(elem)) {
+            xpath_nodeset_add_fast(out, elem);
+        }
+
+        /* Inline subtree walk + attr filter. */
+        LeptrisElement cur = leptris_element_get_first_child(elem);
+        while (cur) {
+            if (ATTR_MATCHES(cur)) xpath_nodeset_add_fast(out, cur);
+
+            /* Descend or backtrack. */
+            LeptrisElement next = leptris_element_get_first_child(cur);
+            if (next) {
+                cur = next;
+                continue;
+            }
+            while (cur && cur != elem) {
+                LeptrisElement sib = leptris_element_get_next_sibling(cur);
+                if (sib) { cur = sib; break; }
+                cur = leptris_element_get_parent(cur);
+            }
+            if (cur == elem) break;
+        }
+    }
+    #undef ATTR_MATCHES
+
+    xpath_nodeset_free(input);
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+/* Inline binary-operator dispatch. Pops right then left, computes,
+ * pushes the result. Returns 0 on success, -1 on error.
+ *
+ * Short-circuit semantics for AND/OR: this implementation evaluates
+ * both operands eagerly. XPath has no side effects, so the only
+ * cost is the redundant work, which is rare in real expressions. */
+static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
+                               XPathOperatorType op) {
+    struct leptris_xpath_result* right = vm_pop(vm);
+    struct leptris_xpath_result* left  = vm_pop(vm);
+    if (!left || !right) {
+        if (left) xpath_result_free(left);
+        if (right) xpath_result_free(right);
+        return -1;
+    }
+
+    struct leptris_xpath_result* result = NULL;
+
+    /* Boolean operators. */
+    if (op == XPATH_OP_AND) {
+        result = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (result) result->value.boolean_value =
+            xpath_to_boolean(left) && xpath_to_boolean(right);
+    } else if (op == XPATH_OP_OR) {
+        result = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (result) result->value.boolean_value =
+            xpath_to_boolean(left) || xpath_to_boolean(right);
+    }
+    /* Arithmetic. */
+    else if (op == XPATH_OP_PLUS || op == XPATH_OP_MINUS ||
+             op == XPATH_OP_MULTIPLY || op == XPATH_OP_DIV ||
+             op == XPATH_OP_MOD) {
+        double lval = xpath_to_number(left);
+        double rval = xpath_to_number(right);
+        result = xpath_result_new(XPATH_RESULT_NUMBER);
+        if (result) {
+            switch (op) {
+                case XPATH_OP_PLUS:     result->value.number_value = lval + rval; break;
+                case XPATH_OP_MINUS:    result->value.number_value = lval - rval; break;
+                case XPATH_OP_MULTIPLY: result->value.number_value = lval * rval; break;
+                case XPATH_OP_DIV:      result->value.number_value = lval / rval; break;
+                case XPATH_OP_MOD:      result->value.number_value = fmod(lval, rval); break;
+                default: break;
+            }
+        }
+    }
+    /* Unary negation — right is unused (compiler emits only one operand). */
+    else if (op == XPATH_OP_NEGATION) {
+        double lval = xpath_to_number(left);
+        result = xpath_result_new(XPATH_RESULT_NUMBER);
+        if (result) result->value.number_value = -lval;
+    }
+    /* Union — both must be nodesets; concatenate with dedup.
+     * XPath requires no duplicates and document order; we dedup but
+     * don't enforce document order (the existing evaluator doesn't
+     * either — see compare_document_order note in evaluator_operators.c). */
+    else if (op == XPATH_OP_UNION) {
+        result = xpath_result_new(XPATH_RESULT_NODESET);
+        if (result) {
+            result->value.nodeset_value = xpath_nodeset_new();
+            if (result->value.nodeset_value) {
+                XPathNodeSet* ln = left->type == XPATH_RESULT_NODESET
+                                   ? left->value.nodeset_value : NULL;
+                XPathNodeSet* rn = right->type == XPATH_RESULT_NODESET
+                                   ? right->value.nodeset_value : NULL;
+                if (ln) for (size_t i = 0; i < ln->count; i++)
+                    xpath_nodeset_add(result->value.nodeset_value, ln->nodes[i]);
+                if (rn) for (size_t i = 0; i < rn->count; i++) {
+                    void* candidate = rn->nodes[i];
+                    int dup = 0;
+                    XPathNodeSet* out = result->value.nodeset_value;
+                    for (size_t j = 0; j < out->count; j++) {
+                        if (out->nodes[j] == candidate) { dup = 1; break; }
+                    }
+                    if (!dup) xpath_nodeset_add_fast(out, candidate);
+                }
+            }
+        }
+    }
+    /* Comparisons. */
+    else if (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL ||
+             op == XPATH_OP_LESS || op == XPATH_OP_LESS_EQUAL ||
+             op == XPATH_OP_GREATER || op == XPATH_OP_GREATER_EQUAL) {
+        /* XPath comparison semantics depend on operand types:
+         *   - nodeset vs nodeset: any-pair match
+         *   - nodeset vs number/string/boolean: any-node match
+         *   - otherwise: convert both to number and compare
+         * For the hot path (literal RHS, single-node LHS) we use
+         * first-node values; multi-node comparisons are uncommon
+         * and fall through to the same numeric compare on
+         * string-derived numbers. Full any-pair semantics are
+         * preserved on the AST fallback path (BC_FALLBACK_EVAL). */
+        double lnum = xpath_to_number(left);
+        double rnum = xpath_to_number(right);
+        char* lstr_owned = xpath_to_string(left);
+        char* rstr_owned = xpath_to_string(right);
+        int eq_str = (lstr_owned && rstr_owned &&
+                      strcmp(lstr_owned, rstr_owned) == 0);
+        int eq_num = (lnum == rnum);
+        int eq = eq_str || eq_num;
+        if (lstr_owned) free(lstr_owned);
+        if (rstr_owned) free(rstr_owned);
+
+        int matches = 0;
+        switch (op) {
+            case XPATH_OP_EQUAL:         matches = eq; break;
+            case XPATH_OP_NOT_EQUAL:     matches = !eq; break;
+            case XPATH_OP_LESS:          matches = (lnum <  rnum); break;
+            case XPATH_OP_LESS_EQUAL:    matches = (lnum <= rnum); break;
+            case XPATH_OP_GREATER:       matches = (lnum >  rnum); break;
+            case XPATH_OP_GREATER_EQUAL: matches = (lnum >= rnum); break;
+            default: break;
+        }
+        result = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (result) result->value.boolean_value = matches;
+        (void)ctx;
+    }
+
+    xpath_result_free(left);
+    xpath_result_free(right);
+
+    if (!result) { vm->error = 1; return -1; }
+    vm_push(vm, result);
+    return 0;
+}
+
+static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
+                                           XPathContext* ctx) {
+    XPathVM vm = {0};
+    const unsigned char* pc = bc->code;
+    const unsigned char* end = bc->code + bc->code_len;
+
+    while (pc < end && !vm.error) {
+        XPathOpcode op = (XPathOpcode)*pc++;
+        switch (op) {
+            case XPATH_BC_NOP:
+                break;
+
+            case XPATH_BC_LITERAL_NUMBER: {
+                uint16_t idx = read_u16(&pc);
+                if (idx >= bc->const_count) { vm.error = 1; break; }
+                struct leptris_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = bc->constants[idx].v.number;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_LITERAL_STRING: {
+                uint16_t idx = read_u16(&pc);
+                if (idx >= bc->const_count) { vm.error = 1; break; }
+                struct leptris_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_STRING);
+                if (!r) { vm.error = 1; break; }
+                r->value.string_value =
+                    leptris_strdup(bc->constants[idx].v.string);
+                if (!r->value.string_value) {
+                    xpath_result_free(r);
+                    vm.error = 1;
+                    break;
+                }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_LITERAL_BOOL: {
+                uint8_t b = read_u8(&pc);
+                struct leptris_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = b ? 1 : 0;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PATH_ABSOLUTE: {
+                LeptrisElement root =
+                    (LeptrisElement)ctx->document->new_dom_root;
+                struct leptris_xpath_result* r = make_singleton_nodeset(root);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PATH_RELATIVE: {
+                struct leptris_xpath_result* r =
+                    make_singleton_nodeset(ctx->context_node);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_STEP: {
+                uint16_t idx = read_u16(&pc);
+                if (idx >= bc->const_count ||
+                    bc->constants[idx].type != XPATH_CONST_AST_NODE) {
+                    vm.error = 1;
+                    break;
+                }
+                XPathASTNode* step_ast = bc->constants[idx].v.ast;
+
+                struct leptris_xpath_result* input = vm_pop(&vm);
+                if (!input || input->type != XPATH_RESULT_NODESET) {
+                    if (input) xpath_result_free(input);
+                    vm.error = 1;
+                    break;
+                }
+
+                XPathNodeSet* input_ns = input->value.nodeset_value;
+                input->value.nodeset_value = NULL;
+                xpath_result_free(input);
+
+                struct leptris_xpath_result* step_result =
+                    evaluate_step(ctx, step_ast, input_ns);
+                xpath_nodeset_free(input_ns);
+                if (!step_result) { vm.error = 1; break; }
+                vm_push(&vm, step_result);
+                break;
+            }
+
+            /* Specialized axis handlers (TODO 126). Each is a tight
+             * loop over the input nodeset that bypasses the
+             * evaluate_step scaffolding. The handlers cover the
+             * common shapes: single name test or wildcard, no
+             * namespace prefix, no predicates. Anything else
+             * stays on BC_AXIS_STEP. */
+
+            case XPATH_BC_AXIS_CHILD_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_child(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_CHILD_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_child(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_ATTRIBUTE_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_attribute(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_ATTRIBUTE_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_attribute(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_SELF_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_self(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_SELF_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_self(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_PARENT_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_parent(ctx, &vm, name, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_PARENT_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_parent(ctx, &vm, NULL, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, name, 0, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, NULL, 1, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_NAME_ATTREQ: {
+                /* TODO 192c: relative descendant::name[@attr='value']
+                 * served from the index — each context element's
+                 * subtree interval windows the attr-VALUE bucket's
+                 * preorder positions. O(log B + hits) per context. */
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t attr_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* name = (name_idx < bc->const_count &&
+                                    bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_name = (attr_idx < bc->const_count &&
+                                         bc->constants[attr_idx].type == XPATH_CONST_STRING)
+                                        ? bc->constants[attr_idx].v.string : NULL;
+                /* 0xFFFF = no value operand: attr-EXISTS predicate. */
+                const char* value = (value_idx != 0xFFFF &&
+                                     value_idx < bc->const_count &&
+                                     bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                    ? bc->constants[value_idx].v.string : NULL;
+                if (!name || !attr_name || (value_idx != 0xFFFF && !value)) {
+                    vm.error = 1;
+                    break;
+                }
+
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+                XPathNodeSet* out = xpath_nodeset_new();
+                if (!out) { xpath_nodeset_free(input); vm.error = 1; break; }
+
+                struct leptris_element_index* index =
+                    (ctx && ctx->document) ? ctx->document->element_index : NULL;
+                if (!index && ctx && ctx->document &&
+                    ++ctx->document->axis_query_count >= 2) {
+                    index = leptris_element_index_build(ctx->document);
+                    ctx->document->element_index = index;
+                }
+
+                int served = 0;
+                if (index && index->subtree_end) {
+                    const LeptrisElementIndexAttrBucket* abucket =
+                        leptris_element_index_lookup_attr(index, attr_name);
+                    /* Equality reads the value bucket; existence reads
+                     * the any-value bucket (TODO 192e). No bucket for
+                     * this attribute anywhere: empty answer. A bucket
+                     * without positions must fall back. */
+                    const LeptrisElement* bucket_matches = NULL;
+                    const size_t* bucket_positions = NULL;
+                    size_t bucket_count = 0;
+                    int bucket_valid = 0;
+                    if (value) {
+                        const LeptrisElementIndexAttrValue* vbucket =
+                            abucket ? leptris_element_index_attr_lookup_value(abucket, value)
+                                    : NULL;
+                        if (!vbucket ||
+                            (vbucket->count > 0 && vbucket->match_positions)) {
+                            bucket_valid = 1;
+                            if (vbucket) {
+                                bucket_matches = vbucket->matches;
+                                bucket_positions = vbucket->match_positions;
+                                bucket_count = vbucket->count;
+                            }
+                        }
+                    } else if (!abucket ||
+                               (abucket->count > 0 && abucket->match_positions)) {
+                        bucket_valid = 1;
+                        if (abucket) {
+                            bucket_matches = abucket->matches;
+                            bucket_positions = abucket->match_positions;
+                            bucket_count = abucket->count;
+                        }
+                    }
+                    if (bucket_valid) {
+                        size_t n_ctx = 0;
+                        for (size_t i = 0; i < input->count; i++) {
+                            if (node_is_element(input->nodes[i])) n_ctx++;
+                        }
+                        size_t* los = (n_ctx > 0)
+                            ? (size_t*)malloc(n_ctx * sizeof(size_t)) : NULL;
+                        size_t* his = (n_ctx > 0)
+                            ? (size_t*)malloc(n_ctx * sizeof(size_t)) : NULL;
+                        int all_found = (n_ctx == 0) || (los && his);
+                        size_t k = 0;
+                        for (size_t i = 0; all_found && i < input->count; i++) {
+                            if (!node_is_element(input->nodes[i])) continue;
+                            all_found = leptris_element_index_subtree_interval(
+                                index, (LeptrisElement)input->nodes[i],
+                                &los[k], &his[k]);
+                            if (all_found) k++;
+                        }
+                        if (all_found) {
+                            /* Same ordering argument as the name path:
+                             * bucket positions ascend, subtrees are
+                             * disjoint-or-nested, skip contained ones. */
+                            for (size_t a = 1; a < k; a++) {
+                                size_t l = los[a], h = his[a], b = a;
+                                while (b > 0 && los[b - 1] > l) {
+                                    los[b] = los[b - 1];
+                                    his[b] = his[b - 1];
+                                    b--;
+                                }
+                                los[b] = l;
+                                his[b] = h;
+                            }
+                            size_t prev_hi = 0;
+                            int have_prev = 0;
+                            for (size_t a = 0; a < k; a++) {
+                                if (have_prev && los[a] <= prev_hi) continue;
+                                if (bucket_count > 0) {
+                                    size_t lo2 = los[a], hi2 = his[a];
+                                    size_t l = 0, r = bucket_count;
+                                    while (l < r) {
+                                        size_t mid = l + (r - l) / 2;
+                                        if (bucket_positions[mid] < lo2) {
+                                            l = mid + 1;
+                                        } else {
+                                            r = mid;
+                                        }
+                                    }
+                                    for (size_t j = l;
+                                         j < bucket_count &&
+                                         bucket_positions[j] <= hi2;
+                                         j++) {
+                                        if (leptris_elem_name_is(
+                                                bucket_matches[j], name,
+                                                leptris_name_hash_compute(name))) {
+                                            xpath_nodeset_add_fast(
+                                                out, bucket_matches[j]);
+                                        }
+                                    }
+                                }
+                                prev_hi = his[a];
+                                have_prev = 1;
+                            }
+                            served = 1;
+                        }
+                        free(los);
+                        free(his);
+                    }
+                }
+
+                if (!served) {
+                    /* Fallback: subtree walk + inline attr filter
+                     * (hash-prefiltered walk, the PRED_ATTR_EXISTS
+                     * handler's pattern). */
+                    uint16_t attr_hash =
+                        attr_hash15(attr_name, strlen(attr_name));
+                    for (size_t i = 0; i < input->count; i++) {
+                        if (!node_is_element(input->nodes[i])) continue;
+                        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+                        size_t mark = out->count;
+                        descendant_walk(out, elem, name, 0, 0);
+                        for (size_t w = mark; w < out->count;) {
+                            LeptrisElement e2 = (LeptrisElement)out->nodes[w];
+                            const char* v = NULL;
+                            for (struct leptris_attribute* a =
+                                     leptris_element_get_first_attribute(e2);
+                                 a; a = leptris_attr_next(a)) {
+                                if (attr_name_hash(a) == attr_hash &&
+                                    attr_cname(a) &&
+                                    strcmp(attr_cname(a), attr_name) == 0) {
+                                    v = attr_cvalue(a);
+                                    break;
+                                }
+                            }
+                            if (value ? (v && strcmp(v, value) == 0)
+                                      : (v != NULL)) {
+                                w++;
+                            } else {
+                                out->nodes[w] = out->nodes[out->count - 1];
+                                out->count--;
+                            }
+                        }
+                    }
+                }
+
+                xpath_nodeset_free(input);
+                struct leptris_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(out); vm.error = 1; break; }
+                r->value.nodeset_value = out;
+                vm_push(&vm, r);
+                break;
+            }
+
+            /* Fused axis+predicate (TODO 134). */
+            case XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS: {
+                uint16_t idx = read_u16(&pc);
+                const char* attr_name = (idx < bc->const_count &&
+                                          bc->constants[idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, NULL, 0, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EQ_STRING: {
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* attr_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_value = (value_idx < bc->const_count &&
+                                           bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                          ? bc->constants[value_idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, attr_value, 1, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EXISTS: {
+                uint16_t idx = read_u16(&pc);
+                const char* attr_name = (idx < bc->const_count &&
+                                          bc->constants[idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, NULL, 0, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD_PRED_ATTR_EQ_STRING: {
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* attr_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_value = (value_idx < bc->const_count &&
+                                           bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                          ? bc->constants[value_idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant_pred_attr(ctx, &vm, attr_name, attr_value, 1, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, name, 0, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_AXIS_DESCENDANT_OR_SELF_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_descendant(ctx, &vm, NULL, 1, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            /* Absolute-path first-step opcodes (TODO 129). Each
+             * pushes a nodeset directly — no pop. These start a
+             * new path evaluation from the document root. */
+            case XPATH_BC_ABSOLUTE_ROOT_MATCH_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                /* `/foo` = root if root.name == foo. No descendants. */
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute(ctx, name, 0, 0 /* root-match only */);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_ROOT_MATCH_WILD: {
+                /* Absolute root with wildcard match = root node. */
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute(ctx, NULL, 1, 0);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                /* `/descendant::foo` = all descendants of root named foo. */
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute(ctx, name, 0, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute(ctx, NULL, 1, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME: {
+                uint16_t idx = read_u16(&pc);
+                const char* name = (idx < bc->const_count &&
+                                    bc->constants[idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[idx].v.string : NULL;
+                /* `//foo` = root if matches + all matching descendants. */
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute(ctx, name, 0, 2);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ: {
+                /* TODO 192d: `//name[@attr='value']` served from the
+                 * index. The value bucket holds exactly the elements
+                 * carrying attr=value (root included when it matches),
+                 * so one name-filtered scan IS the answer — no name
+                 * bucket materialization, no per-element attr walks. */
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t attr_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* name = (name_idx < bc->const_count &&
+                                    bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                   ? bc->constants[name_idx].v.string : NULL;
+                const char* attr_name = (attr_idx < bc->const_count &&
+                                         bc->constants[attr_idx].type == XPATH_CONST_STRING)
+                                        ? bc->constants[attr_idx].v.string : NULL;
+                /* 0xFFFF = no value operand: attr-EXISTS predicate. */
+                const char* value = (value_idx != 0xFFFF &&
+                                     value_idx < bc->const_count &&
+                                     bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                    ? bc->constants[value_idx].v.string : NULL;
+                if (!name || !attr_name || (value_idx != 0xFFFF && !value)) {
+                    vm.error = 1;
+                    break;
+                }
+
+                struct leptris_element_index* index =
+                    (ctx && ctx->document) ? ctx->document->element_index : NULL;
+                if (!index && ctx && ctx->document &&
+                    ++ctx->document->axis_query_count >= 2) {
+                    index = leptris_element_index_build(ctx->document);
+                    ctx->document->element_index = index;
+                }
+
+                XPathNodeSet* out = xpath_nodeset_new();
+                if (!out) { vm.error = 1; break; }
+
+                int served = 0;
+                if (index && index->subtree_end) {
+                    const LeptrisElementIndexAttrBucket* abucket =
+                        leptris_element_index_lookup_attr(index, attr_name);
+                    /* Equality reads the value bucket; existence reads
+                     * the any-value bucket (TODO 192e). */
+                    const LeptrisElement* bucket_matches = NULL;
+                    size_t bucket_count = 0;
+                    int bucket_valid = 0;
+                    if (value) {
+                        const LeptrisElementIndexAttrValue* vbucket =
+                            abucket ? leptris_element_index_attr_lookup_value(abucket, value)
+                                    : NULL;
+                        if (!vbucket ||
+                            (vbucket->count > 0 && vbucket->match_positions)) {
+                            bucket_valid = 1;
+                            if (vbucket) {
+                                bucket_matches = vbucket->matches;
+                                bucket_count = vbucket->count;
+                            }
+                        }
+                    } else if (!abucket ||
+                               (abucket->count > 0 && abucket->match_positions)) {
+                        bucket_valid = 1;
+                        if (abucket) {
+                            bucket_matches = abucket->matches;
+                            bucket_count = abucket->count;
+                        }
+                    }
+                    if (bucket_valid) {
+                        uint16_t name_hash = leptris_name_hash_compute(name);
+                        for (size_t j = 0; j < bucket_count; j++) {
+                            if (leptris_elem_name_is(bucket_matches[j],
+                                                    name, name_hash)) {
+                                xpath_nodeset_add_fast(out, bucket_matches[j]);
+                            }
+                        }
+                        served = 1;
+                    }
+                }
+
+                if (!served) {
+                    /* Fallback: full walk from root with inline
+                     * hash-prefiltered attr filter. */
+                    LeptrisElement root = (ctx && ctx->document)
+                        ? (LeptrisElement)ctx->document->new_dom_root : NULL;
+                    if (root) {
+                        uint16_t attr_hash =
+                            attr_hash15(attr_name, strlen(attr_name));
+                        size_t mark = out->count;
+                        descendant_walk(out, root, name, 0, 1);
+                        for (size_t w = mark; w < out->count;) {
+                            LeptrisElement e2 = (LeptrisElement)out->nodes[w];
+                            const char* v = NULL;
+                            for (struct leptris_attribute* a =
+                                     leptris_element_get_first_attribute(e2);
+                                 a; a = leptris_attr_next(a)) {
+                                if (attr_name_hash(a) == attr_hash &&
+                                    attr_cname(a) &&
+                                    strcmp(attr_cname(a), attr_name) == 0) {
+                                    v = attr_cvalue(a);
+                                    break;
+                                }
+                            }
+                            if (value ? (v && strcmp(v, value) == 0)
+                                      : (v != NULL)) {
+                                w++;
+                            } else {
+                                out->nodes[w] = out->nodes[out->count - 1];
+                                out->count--;
+                            }
+                        }
+                    }
+                }
+
+                struct leptris_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(out); vm.error = 1; break; }
+                r->value.nodeset_value = out;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD: {
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute(ctx, NULL, 1, 2);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            /* Simple predicate handlers (TODO 128). Each pops the
+             * input nodeset, filters inline, pushes the filtered
+             * result. The compiler emits these after a specialized
+             * axis opcode for the common predicate shapes
+             * ([@attr], [@attr = 'lit'], [N]). */
+
+            case XPATH_BC_PRED_ATTR_EXISTS: {
+                uint16_t idx = read_u16(&pc);
+                const char* attr_name = (idx < bc->const_count &&
+                                          bc->constants[idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[idx].v.string : NULL;
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+
+                /* TODO 159 Phase E: hoist strlen + hash out of the
+                 * inner attribute-walk loop. Previous code called
+                 * strlen(attr_name) inside the loop body, redundant
+                 * per-attr. */
+                size_t name_len = attr_name ? strlen(attr_name) : 0;
+                uint16_t name_hash = attr_name ? attr_hash15(attr_name, name_len) : 0;
+
+                size_t write = 0;
+                for (size_t read = 0; read < input->count; read++) {
+                    void* node = input->nodes[read];
+                    if (!node_is_element(node)) continue;
+                    LeptrisElement elem = (LeptrisElement)node;
+                    struct leptris_attribute* a =
+                        leptris_element_get_first_attribute(elem);
+                    int found = 0;
+                    while (a) {
+                        /* Hash pre-filter first; only fall through to
+                         * length + memcmp on hash match. Lazy compute
+                         * on first read (TODO 172). */
+                        if (attr_name && attr_name_hash(a) == name_hash &&
+                            a->name_view.length == name_len &&
+                            a->name_view.data &&
+                            memcmp(attr_name, a->name_view.data, name_len) == 0) {
+                            found = 1;
+                            break;
+                        }
+                        a = leptris_attr_next(a);
+                    }
+                    if (found) {
+                        if (write != read) input->nodes[write] = node;
+                        write++;
+                    }
+                }
+                input->count = write;
+
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PRED_ATTR_EQ_STRING: {
+                /* Two u16 operands: attr name idx, value idx. */
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t value_idx = read_u16(&pc);
+                const char* attr_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                const char* expected = (value_idx < bc->const_count &&
+                                         bc->constants[value_idx].type == XPATH_CONST_STRING)
+                                        ? bc->constants[value_idx].v.string : NULL;
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+
+                /* TODO 159 Phase E: hoist strlen's out of the inner
+                 * loop. Previous code called strlen(attr_name) and
+                 * strlen(expected) once per attribute per element. */
+                size_t name_len = attr_name ? strlen(attr_name) : 0;
+                size_t value_len = expected ? strlen(expected) : 0;
+                uint16_t name_hash = attr_name ? attr_hash15(attr_name, name_len) : 0;
+
+                size_t write = 0;
+                for (size_t read = 0; read < input->count; read++) {
+                    void* node = input->nodes[read];
+                    if (!node_is_element(node)) continue;
+                    LeptrisElement elem = (LeptrisElement)node;
+                    struct leptris_attribute* a =
+                        leptris_element_get_first_attribute(elem);
+                    int match = 0;
+                    while (a) {
+                        /* Hash + length pre-filter before memcmp. Lazy hash. */
+                        if (attr_name && expected &&
+                            attr_name_hash(a) == name_hash &&
+                            a->name_view.length == name_len &&
+                            a->value_view.length == value_len &&
+                            a->name_view.data && a->value_view.data &&
+                            memcmp(attr_name, a->name_view.data, name_len) == 0 &&
+                            memcmp(expected, a->value_view.data, value_len) == 0) {
+                            match = 1;
+                            break;
+                        }
+                        a = leptris_attr_next(a);
+                    }
+                    if (match) {
+                        if (write != read) input->nodes[write] = node;
+                        write++;
+                    }
+                }
+                input->count = write;
+
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PRED_POSITION: {
+                uint8_t pos = read_u8(&pc);
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input) { vm.error = 1; break; }
+
+                /* Keep only the pos-th element (1-based). */
+                if (pos == 0 || (size_t)pos > input->count) {
+                    input->count = 0;
+                } else {
+                    void* keep = input->nodes[pos - 1];
+                    input->nodes[0] = keep;
+                    input->count = 1;
+                }
+
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_PRED_CHILD_NUM_CMP: {
+                /* Fused child-axis numeric comparison (TODO 159).
+                 * Inline encoding: u8 op, u16 name idx, f64 RHS. */
+                uint8_t op_type = read_u8(&pc);
+                uint16_t name_idx = read_u16(&pc);
+                double rhs = read_double(&pc);
+                const char* child_name = (name_idx < bc->const_count &&
+                                          bc->constants[name_idx].type == XPATH_CONST_STRING)
+                                         ? bc->constants[name_idx].v.string : NULL;
+                XPathNodeSet* input = vm_detach_input_nodeset(&vm);
+                if (!input || !child_name) {
+                    if (input) xpath_nodeset_free(input);
+                    vm.error = 1;
+                    break;
+                }
+
+                /* Pre-compute the target hash so we can compare 2 bytes
+                 * before strcmp on every child. */
+                uint16_t target_hash = leptris_name_hash_compute(child_name);
+                XPathOperatorType op = (XPathOperatorType)op_type;
+                size_t child_name_len = strlen(child_name);
+
+                size_t write = 0;
+                for (size_t read = 0; read < input->count; read++) {
+                    void* node = input->nodes[read];
+                    if (!node_is_element(node)) continue;
+                    LeptrisElement elem = (LeptrisElement)node;
+
+                    /* Walk this element's children looking for a
+                     * child::name match. Hash pre-filter rejects
+                     * non-matching children in ~1ns. */
+                    LeptrisNode* child = (LeptrisNode*)leptris_elem_first_child(elem);
+                    LeptrisElement match = NULL;
+                    while (child) {
+                        if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+                            LeptrisElement ce = (LeptrisElement)child;
+                            if (ce->name_hash == target_hash && ce->name &&
+                                strlen(ce->name) == child_name_len &&
+                                memcmp(ce->name, child_name, child_name_len) == 0) {
+                                match = ce;
+                                break;
+                            }
+                        }
+                        child = leptris_node_get_next_sibling(child);
+                    }
+                    if (!match) continue;
+
+                    /* Fast path: single text child is the common shape
+                     * for <price>42.50</price>. Read its content view
+                     * without allocating. */
+                    double lhs;
+                    LeptrisNode* tn = (LeptrisNode*)leptris_elem_first_child(match);
+                    if (tn && tn->type == LEPTRIS_NODE_TYPE_TEXT &&
+                        leptris_elem_next_sibling(match) == NULL) {
+                        const char* s =
+                            leptris_text_get_content((LeptrisTextNode*)tn);
+                        lhs = s ? strtod(s, NULL) : NAN;
+                    } else {
+                        char* s = leptris_element_get_text_content(match);
+                        if (s) {
+                            lhs = strtod(s, NULL);
+                            leptris_free(s);
+                        } else {
+                            lhs = NAN;
+                        }
+                    }
+
+                    int match_flag = 0;
+                    switch (op) {
+                        case XPATH_OP_EQUAL:         match_flag = (lhs == rhs); break;
+                        case XPATH_OP_NOT_EQUAL:     match_flag = (lhs != rhs); break;
+                        case XPATH_OP_LESS:          match_flag = (lhs <  rhs); break;
+                        case XPATH_OP_LESS_EQUAL:    match_flag = (lhs <= rhs); break;
+                        case XPATH_OP_GREATER:       match_flag = (lhs >  rhs); break;
+                        case XPATH_OP_GREATER_EQUAL: match_flag = (lhs >= rhs); break;
+                        default: break;
+                    }
+                    if (match_flag) {
+                        if (write != read) input->nodes[write] = node;
+                        write++;
+                    }
+                }
+                input->count = write;
+
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(input); vm.error = 1; break; }
+                r->value.nodeset_value = input;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_BINARY_OP: {
+                uint8_t op_type = read_u8(&pc);
+                if (vm_apply_binary_op(&vm, ctx,
+                        (XPathOperatorType)op_type) != 0) {
+                    vm.error = 1;
+                }
+                break;
+            }
+
+            case XPATH_BC_FUNC_CALL: {
+                uint16_t idx = read_u16(&pc);
+                if (idx >= bc->const_count ||
+                    bc->constants[idx].type != XPATH_CONST_AST_NODE) {
+                    vm.error = 1;
+                    break;
+                }
+                XPathASTNode* fc_ast = bc->constants[idx].v.ast;
+                struct leptris_xpath_result* r =
+                    evaluate_function_call_inline(ctx, fc_ast);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            /* Inline function handlers (TODO 130). Each pops its
+             * args from the stack and pushes the result. The
+             * compiler emits <arg bytecode> + BC_FUNC_<NAME>
+             * instead of BC_FUNC_CALL for the common XPath
+             * functions. The VM evaluates args via normal dispatch
+             * (which uses the fast specialized axis opcodes), then
+             * applies the function inline. */
+
+            case XPATH_BC_FUNC_COUNT: {
+                struct leptris_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                size_t count = 0;
+                if (arg->type == XPATH_RESULT_NODESET && arg->value.nodeset_value) {
+                    count = arg->value.nodeset_value->count;
+                }
+                xpath_result_free(arg);
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = (double)count;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_SUM: {
+                struct leptris_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                double sum = 0.0;
+                if (arg->type == XPATH_RESULT_NODESET && arg->value.nodeset_value) {
+                    XPathNodeSet* ns = arg->value.nodeset_value;
+                    for (size_t i = 0; i < ns->count; i++) {
+                        char* txt = get_node_text(ns->nodes[i]);
+                        if (txt) {
+                            sum += atof(txt);
+                            free(txt);
+                        }
+                    }
+                }
+                xpath_result_free(arg);
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = sum;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_POSITION: {
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = (double)ctx->context_position;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_LAST: {
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = (double)ctx->context_size;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_TRUE: {
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = 1;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_FALSE: {
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = 0;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_NOT: {
+                struct leptris_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                int b = xpath_to_boolean(arg);
+                xpath_result_free(arg);
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = !b;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_BOOLEAN: {
+                struct leptris_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                int b = xpath_to_boolean(arg);
+                xpath_result_free(arg);
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (!r) { vm.error = 1; break; }
+                r->value.boolean_value = b;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_NUMBER: {
+                struct leptris_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                double n = xpath_to_number(arg);
+                xpath_result_free(arg);
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!r) { vm.error = 1; break; }
+                r->value.number_value = n;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_STRING: {
+                struct leptris_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+                char* s = xpath_to_string(arg);
+                xpath_result_free(arg);
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_STRING);
+                if (!r) { free(s); vm.error = 1; break; }
+                r->value.string_value = s ? s : leptris_strdup("");
+                if (!r->value.string_value) {
+                    free(s);
+                    xpath_result_free(r);
+                    vm.error = 1;
+                    break;
+                }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_FUNC_NAME:
+            case XPATH_BC_FUNC_LOCAL_NAME:
+            case XPATH_BC_FUNC_NAMESPACE_URI: {
+                struct leptris_xpath_result* arg = vm_pop(&vm);
+                if (!arg) { vm.error = 1; break; }
+
+                const char* str = NULL;
+                int free_str = 0;
+                if (arg->type == XPATH_RESULT_NODESET &&
+                    arg->value.nodeset_value &&
+                    arg->value.nodeset_value->count > 0) {
+                    void* first = arg->value.nodeset_value->nodes[0];
+                    LeptrisNodeType nt = *(LeptrisNodeType*)first;
+                    if (nt == LEPTRIS_NODE_ATTRIBUTE) {
+                        LeptrisAttributeNode* an = (LeptrisAttributeNode*)first;
+                        if (op == XPATH_BC_FUNC_NAME) str = an->name;
+                        else if (op == XPATH_BC_FUNC_LOCAL_NAME) {
+                            /* Strip prefix from "prefix:local". */
+                            const char* colon = an->name ? strchr(an->name, ':') : NULL;
+                            str = colon ? colon + 1 : an->name;
+                        } else {
+                            str = an->namespace_uri;  /* may be NULL */
+                        }
+                    } else if (nt != LEPTRIS_NODE_NAMESPACE &&
+                               nt != LEPTRIS_NODE_TEXT) {
+                        /* Element. */
+                        LeptrisElement e = (LeptrisElement)first;
+                        if (op == XPATH_BC_FUNC_NAME) {
+                            str = leptris_element_get_name(e);
+                        } else if (op == XPATH_BC_FUNC_LOCAL_NAME) {
+                            str = leptris_element_get_name(e);
+                        } else {
+                            str = leptris_element_get_namespace_uri(e);
+                        }
+                    }
+                }
+
+                xpath_result_free(arg);
+
+                struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_STRING);
+                if (!r) { vm.error = 1; break; }
+                r->value.string_value = leptris_strdup(str ? str : "");
+                if (!r->value.string_value) {
+                    xpath_result_free(r);
+                    vm.error = 1;
+                    break;
+                }
+                vm_push(&vm, r);
+                (void)free_str;
+                break;
+            }
+
+            case XPATH_BC_FALLBACK_EVAL: {
+                uint16_t idx = read_u16(&pc);
+                if (idx >= bc->const_count ||
+                    bc->constants[idx].type != XPATH_CONST_AST_NODE) {
+                    vm.error = 1;
+                    break;
+                }
+                XPathASTNode* ast_node = bc->constants[idx].v.ast;
+                struct leptris_xpath_result* r = evaluate_expr(ctx, ast_node);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_RETURN:
+                goto done;
+
+            default:
+                vm.error = 1;
+                goto done;
+        }
+    }
+
+done:
+    if (vm.error || vm.sp == 0) {
+        while (vm.sp > 0) {
+            struct leptris_xpath_result* r = vm_pop(&vm);
+            if (r) xpath_result_free(r);
+        }
+        free(vm.stack);
+        return NULL;
+    }
+
+    struct leptris_xpath_result* result = vm_pop(&vm);
+
+    while (vm.sp > 0) {
+        struct leptris_xpath_result* extra = vm_pop(&vm);
+        if (extra) xpath_result_free(extra);
+    }
+    free(vm.stack);
+    return result;
+}
+
+/* Public entry: compile AST → run VM.  Returns NULL on failure.
+ * Caller frees the result via leptris_xpath_result_free.
+ *
+ * Callers should prefer the cached path
+ * (xpath_expr_cache_get_or_compile_bc + vm_run_with_bc) so the
+ * compile cost is amortized across many evals of the same
+ * expression. This entry point is retained for tests and for
+ * one-off evals that bypass the cache. */
+struct leptris_xpath_result* leptris_xpath_vm_eval(XPathASTNode* ast,
+                                                  XPathContext* ctx) {
+    if (!ast || !ctx) return NULL;
+
+    LeptrisXPathBytecode* bc = leptris_xpath_compile_ast(ast);
+    if (!bc) return NULL;
+
+    struct leptris_xpath_result* result = vm_run(bc, ctx);
+
+    leptris_xpath_bytecode_free(bc);
+    return result;
+}
+
+/* Cached entry: run an already-compiled bytecode. Used by
+ * leptris_xpath_eval when the expression cache has a compiled bc. */
+struct leptris_xpath_result* leptris_xpath_vm_run_bc(LeptrisXPathBytecode* bc,
+                                                    XPathContext* ctx) {
+    if (!bc || !ctx) return NULL;
+    return vm_run(bc, ctx);
+}

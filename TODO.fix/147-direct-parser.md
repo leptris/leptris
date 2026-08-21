@@ -1,11 +1,11 @@
-# TODO 147 — Direct parser: single-pass parse into TaurusElement tree
+# TODO 147 — Direct parser: single-pass parse into LeptrisElement tree
 
 ## Why
 
 The flat_parse → FlatDoc → promote pipeline has THREE passes over
 the input:
 1. flat_parse: scan XML, build FlatDoc (28B records)
-2. flat_promote: walk FlatDoc, build TaurusElement tree (96B records)
+2. flat_promote: walk FlatDoc, build LeptrisElement tree (96B records)
 3. freeze: walk tree, mark frozen
 
 pugixml does ONE pass: scan XML, write directly into the tree.
@@ -19,7 +19,7 @@ XML input
     ↓ (single pass)
   direct_parse
     ↓
-  TaurusElement tree (bulk-allocated, zero-copy names, direct edges)
+  LeptrisElement tree (bulk-allocated, zero-copy names, direct edges)
 ```
 
 ### Key techniques (from pugixml architecture study)
@@ -59,10 +59,10 @@ These are Phase 2+ optimizations on top of the direct parser.
 
 ### Phase A — Core direct parser (this PR)
 
-New file `src/taurus/flat/direct_parse.c`:
-- `direct_parse(xml, len) → TaurusDocument`
+New file `src/leptris/flat/direct_parse.c`:
+- `direct_parse(xml, len) → LeptrisDocument`
 - Single pass producing a complete tree
-- Reuses flat_parser's tokenizer logic but writes TaurusElement
+- Reuses flat_parser's tokenizer logic but writes LeptrisElement
   records instead of FlatNode records
 
 ### Phase B — Lookup table name scanning

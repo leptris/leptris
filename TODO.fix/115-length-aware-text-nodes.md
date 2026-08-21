@@ -7,8 +7,8 @@
 
 | Phase | PR | Effect |
 | --- | --- | --- |
-| A | #114 | `size_t content_len` field on `TaurusTextNode`. Foundation, no behavior change. |
-| B+C | #115 | `taurus_text_create_borrowed()` + parser wiring + consumer updates. Zero-copy text on the parse hot path. |
+| A | #114 | `size_t content_len` field on `LeptrisTextNode`. Foundation, no behavior change. |
+| B+C | #115 | `leptris_text_create_borrowed()` + parser wiring + consumer updates. Zero-copy text on the parse hot path. |
 | D | #116 | Acceptance: perf measurement + TODO status flip. |
 
 Perf (M-series Mac, Release+LTO, median of 5000):
@@ -30,7 +30,7 @@ at 8.08 µs.
 
 ## Why
 
-`taurus_text_create` originally did one pool allocation + memcpy per
+`leptris_text_create` originally did one pool allocation + memcpy per
 text node even after TODO 114 Phase 1 eliminated the intermediate
 buffer. For a 5 MB text body that's a 5 MB memcpy on the parse hot
 path. pugixml stores text as a non-owning pointer into a mutable input
@@ -39,21 +39,21 @@ buffer + a length; the copy is avoided entirely.
 ## Plan
 
 ### Phase A — add content_len to text node (DONE, PR #114)
-- Add `size_t content_len` to `TaurusTextNode`.
+- Add `size_t content_len` to `LeptrisTextNode`.
 - All existing constructors set `content_len = strlen(content)` to preserve NUL-terminated behavior.
 - Foundation, no behavior change.
 
 ### Phase B — zero-copy constructor (DONE, PR #115)
-- New `taurus_text_create_borrowed(content, len, pool)`:
-  - Allocates only `sizeof(TaurusTextNode)` from the pool — no content copy.
+- New `leptris_text_create_borrowed(content, len, pool)`:
+  - Allocates only `sizeof(LeptrisTextNode)` from the pool — no content copy.
   - Stores pointer + length; content is NOT NUL-terminated.
 - Parser uses this when `p->writable` and `has_entities == 0`.
 
 ### Phase C — update consumers (DONE, PR #115, same PR as B)
 - Serializer: bound the loop by `content_len`, not NUL.
-- `taurus_element_text`: route through `taurus_text_get_content` so materialization fires.
-- `taurus_text_get_content`: when borrowed, lazily allocate a NUL-terminated copy on demand via the stored pool.
-- Plus all other consumers found by audit: `element_modify.c` deep-copy paths, `xinclude.c deep_copy_node`, `cli/output.c xml_print_element_recursive`, `node_public.c taurus_text_node_get_content`.
+- `leptris_element_text`: route through `leptris_text_get_content` so materialization fires.
+- `leptris_text_get_content`: when borrowed, lazily allocate a NUL-terminated copy on demand via the stored pool.
+- Plus all other consumers found by audit: `element_modify.c` deep-copy paths, `xinclude.c deep_copy_node`, `cli/output.c xml_print_element_recursive`, `node_public.c leptris_text_node_get_content`.
 
 ### Phase D — acceptance (DONE, PR #116)
 - Text-heavy doc: parse+free under 10 µs for ~1 KB — measured 8.08 µs.

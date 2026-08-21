@@ -43,9 +43,9 @@ jobs:
         run: |
           cmake -B build -S . -G Ninja \
             -DBUILD_TESTING=ON \
-            -DTAURUS_BUILD_CLI=ON \
-            -DTAURUS_ENABLE_ASAN=ON \
-            -DTAURUS_ENABLE_ICONV=OFF \
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DLEPTRIS_ENABLE_ASAN=ON \
+            -DLEPTRIS_ENABLE_ICONV=OFF \
             -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
@@ -69,9 +69,9 @@ jobs:
         run: |
           cmake -B build -S . -G Ninja \
             -DBUILD_TESTING=ON \
-            -DTAURUS_BUILD_CLI=ON \
-            -DTAURUS_ENABLE_UTF8PROC=ON \
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DLEPTRIS_ENABLE_UTF8PROC=ON \
+            -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Build
         run: cmake --build build
@@ -84,7 +84,7 @@ jobs:
           set -e
           for f in basic.xml small.xml; do
             echo "=== $f ==="
-            leaks --atExit -- build/cli/taurus parse test/fixtures/$f \
+            leaks --atExit -- build/cli/leptris parse test/fixtures/$f \
               | tee /tmp/leak_$f.log
             grep -q "0 leaks for 0 total" /tmp/leak_$f.log \
               || { echo "FAIL: leaks on $f"; exit 1; }

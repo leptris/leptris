@@ -29,8 +29,8 @@
 
 ### Naming
 
-- [ ] Public API uses `taurus_*` prefix consistently.
-- [ ] Internal API uses `taurus_*` or subsystem-specific prefix.
+- [ ] Public API uses `leptris_*` prefix consistently.
+- [ ] Internal API uses `leptris_*` or subsystem-specific prefix.
 - [ ] No name collisions with C standard library or libc.
 
 ### Build
@@ -56,7 +56,7 @@
 ### ABI
 
 - [ ] `_Static_assert` guards on opaque handle sizes.
-- [ ] `TAURUS_FOR_BINDGEN` macro present where binding generators need it.
+- [ ] `LEPTRIS_FOR_BINDGEN` macro present where binding generators need it.
 - [ ] Versioning: SOVERSION bumps on ABI breaks.
 
 ### Performance

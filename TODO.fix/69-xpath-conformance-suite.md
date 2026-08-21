@@ -23,7 +23,7 @@ Download and commit (or git-submodule) the XPath subset.
 
 Write a harness that:
 1. Reads each XML + XPath query + expected result from the suite.
-2. Runs `taurus_xpath_eval(doc, ctx, expr)`.
+2. Runs `leptris_xpath_eval(doc, ctx, expr)`.
 3. Asserts result matches expected.
 
 ### Phase 3: gaps

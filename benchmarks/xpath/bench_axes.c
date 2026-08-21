@@ -1,6 +1,6 @@
 #include "../common/benchmark.h"
 #include "../common/test_data.h"
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 #include <string.h>
@@ -8,8 +8,8 @@
 #include <stdlib.h>
 
 typedef struct {
-    TaurusDocument doc;
-    TaurusElement context;
+    LeptrisDocument doc;
+    LeptrisElement context;
 } xpath_ctx_t;
 
 /* ============================================================================
@@ -18,20 +18,20 @@ typedef struct {
 
 void bench_child_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "child::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "child::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_child_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "child::book");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "child::book");
+    leptris_xpath_result_free(result);
 }
 
 void bench_child_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "child::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "child::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -40,20 +40,20 @@ void bench_child_predicate(void* ctx) {
 
 void bench_descendant_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "descendant::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "descendant::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_descendant_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "descendant::title");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "descendant::title");
+    leptris_xpath_result_free(result);
 }
 
 void bench_descendant_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "descendant::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "descendant::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -62,20 +62,20 @@ void bench_descendant_predicate(void* ctx) {
 
 void bench_descendant_or_self_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "descendant-or-self::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "descendant-or-self::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_descendant_or_self_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "descendant-or-self::book");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "descendant-or-self::book");
+    leptris_xpath_result_free(result);
 }
 
 void bench_descendant_or_self_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "descendant-or-self::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "descendant-or-self::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -84,20 +84,20 @@ void bench_descendant_or_self_predicate(void* ctx) {
 
 void bench_parent_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "parent::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "parent::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_parent_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "parent::catalog");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "parent::catalog");
+    leptris_xpath_result_free(result);
 }
 
 void bench_parent_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "parent::*[@version]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "parent::*[@version]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -106,20 +106,20 @@ void bench_parent_predicate(void* ctx) {
 
 void bench_ancestor_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "ancestor::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "ancestor::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_ancestor_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "ancestor::catalog");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "ancestor::catalog");
+    leptris_xpath_result_free(result);
 }
 
 void bench_ancestor_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "ancestor::*[@version]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "ancestor::*[@version]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -128,20 +128,20 @@ void bench_ancestor_predicate(void* ctx) {
 
 void bench_ancestor_or_self_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "ancestor-or-self::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "ancestor-or-self::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_ancestor_or_self_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "ancestor-or-self::book");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "ancestor-or-self::book");
+    leptris_xpath_result_free(result);
 }
 
 void bench_ancestor_or_self_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "ancestor-or-self::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "ancestor-or-self::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -150,20 +150,20 @@ void bench_ancestor_or_self_predicate(void* ctx) {
 
 void bench_following_sibling_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "following-sibling::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "following-sibling::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_following_sibling_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "following-sibling::book");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "following-sibling::book");
+    leptris_xpath_result_free(result);
 }
 
 void bench_following_sibling_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "following-sibling::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "following-sibling::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -172,20 +172,20 @@ void bench_following_sibling_predicate(void* ctx) {
 
 void bench_preceding_sibling_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "preceding-sibling::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "preceding-sibling::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_preceding_sibling_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "preceding-sibling::book");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "preceding-sibling::book");
+    leptris_xpath_result_free(result);
 }
 
 void bench_preceding_sibling_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "preceding-sibling::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "preceding-sibling::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -194,20 +194,20 @@ void bench_preceding_sibling_predicate(void* ctx) {
 
 void bench_following_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "following::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "following::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_following_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "following::title");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "following::title");
+    leptris_xpath_result_free(result);
 }
 
 void bench_following_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "following::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "following::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -216,20 +216,20 @@ void bench_following_predicate(void* ctx) {
 
 void bench_preceding_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "preceding::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "preceding::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_preceding_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "preceding::title");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "preceding::title");
+    leptris_xpath_result_free(result);
 }
 
 void bench_preceding_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "preceding::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "preceding::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -238,20 +238,20 @@ void bench_preceding_predicate(void* ctx) {
 
 void bench_attribute_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "attribute::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "attribute::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_attribute_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "attribute::id");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "attribute::id");
+    leptris_xpath_result_free(result);
 }
 
 void bench_attribute_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "@*[string-length() > 0]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "@*[string-length() > 0]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -260,20 +260,20 @@ void bench_attribute_predicate(void* ctx) {
 
 void bench_namespace_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "namespace::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "namespace::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_namespace_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "namespace::xml");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "namespace::xml");
+    leptris_xpath_result_free(result);
 }
 
 void bench_namespace_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "namespace::*[local-name() != 'xml']");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "namespace::*[local-name() != 'xml']");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -282,20 +282,20 @@ void bench_namespace_predicate(void* ctx) {
 
 void bench_self_simple(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "self::*");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "self::*");
+    leptris_xpath_result_free(result);
 }
 
 void bench_self_name(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "self::book");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "self::book");
+    leptris_xpath_result_free(result);
 }
 
 void bench_self_predicate(void* ctx) {
     xpath_ctx_t* xctx = (xpath_ctx_t*)ctx;
-    TaurusXPathResult result = taurus_xpath_eval(xctx->doc, xctx->context, "self::*[@id]");
-    taurus_xpath_result_free(result);
+    LeptrisXPathResult result = leptris_xpath_eval(xctx->doc, xctx->context, "self::*[@id]");
+    leptris_xpath_result_free(result);
 }
 
 /* ============================================================================
@@ -306,14 +306,14 @@ int main(void) {
     const size_t ITERATIONS = 1000;
 
     /* Parse test document */
-    TaurusDocument doc = taurus_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL);
+    LeptrisDocument doc = leptris_parse_string(BENCH_XML_MEDIUM, strlen(BENCH_XML_MEDIUM), NULL);
     if (!doc) {
         fprintf(stderr, "Failed to parse test document\n");
         return 1;
     }
 
     /* Get root element for context */
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     xpath_ctx_t ctx = { doc, root };
 
     /* Allocate results array (39 tests) */
@@ -322,7 +322,7 @@ int main(void) {
 
     printf("\n");
     printf("================================================================\n");
-    printf("Taurus XPath Axes Benchmark\n");
+    printf("Leptris XPath Axes Benchmark\n");
     printf("================================================================\n");
     printf("Iterations: %zu\n", ITERATIONS);
     printf("Test count: 39 (13 axes × 3 variants)\n");
@@ -401,10 +401,10 @@ int main(void) {
     }
 
     /* Write JSON results */
-    bench_write_json("taurus", results, idx, "results/xpath_axes_taurus.json");
+    bench_write_json("leptris", results, idx, "results/xpath_axes_leptris.json");
 
     /* Cleanup */
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 
     printf("\n✅ Benchmark complete: 39 axes tests\n\n");
     return 0;

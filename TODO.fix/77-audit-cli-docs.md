@@ -33,5 +33,5 @@ If a doc is more historical than current, move to `archive/`.
 
 ```bash
 # Spot-check each documented command against the current code.
-grep -rn "taurus_parse\|taurus_xpath" cli/commands/   # match docs
+grep -rn "leptris_parse\|leptris_xpath" cli/commands/   # match docs
 ```

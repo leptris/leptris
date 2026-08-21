@@ -2,7 +2,7 @@
  * Copyright (c) 2024, Ribose Inc.
  * All rights reserved.
  *
- * Session 84: Modularized from taurus_parse.c
+ * Session 84: Modularized from leptris_parse.c
  * Session 85: Added entity reference expansion
  * Functions for processing element content, namespace declarations, and attributes
  */
@@ -83,7 +83,7 @@ char* expand_entity_reference(const char* ref, size_t len) {
         
         /* Convert code point to UTF-8 (simplified: only ASCII for now) */
         if (code <= 0x7F) {
-            result = (char*)taurus_malloc(2);
+            result = (char*)leptris_malloc(2);
             if (result) {
                 result[0] = (char)code;
                 result[1] = '\0';
@@ -100,7 +100,7 @@ char* expand_entity_reference(const char* ref, size_t len) {
         size_t name_len = strlen(builtin_entities[i].name);
         if (len == name_len && memcmp(ref, builtin_entities[i].name, len) == 0) {
             /* Found match - return copy of value */
-            return taurus_strdup(builtin_entities[i].value);
+            return leptris_strdup(builtin_entities[i].value);
         }
     }
     
@@ -113,7 +113,7 @@ char* expand_entity_reference(const char* ref, size_t len) {
  * ================================================================== */
 
 /* Add text content to element with entity expansion */
-void add_text_to_element(struct taurus_element *elem, const char *text, size_t len) {
+void add_text_to_element(struct leptris_element *elem, const char *text, size_t len) {
     char *text_copy;
     char *expanded_text;
     char *new_content;
@@ -140,21 +140,21 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
     
     /* No entities found - simple path */
     if (!entity_start) {
-        text_copy = taurus_strndup(text, len);
+        text_copy = leptris_strndup(text, len);
         if (!text_copy) return;
         
         if (!elem->text_content) {
             elem->text_content = text_copy;
         } else {
             existing_len = strlen(elem->text_content);
-            new_content = (char*)taurus_realloc(elem->text_content, existing_len + len + 1);
+            new_content = (char*)leptris_realloc(elem->text_content, existing_len + len + 1);
             if (new_content) {
                 memcpy(new_content + existing_len, text, len);
                 new_content[existing_len + len] = '\0';
                 elem->text_content = new_content;
-                taurus_free(text_copy);
+                leptris_free(text_copy);
             } else {
-                taurus_free(text_copy);
+                leptris_free(text_copy);
             }
         }
         return;
@@ -162,7 +162,7 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
     
     /* Entities found - expand them */
     result_cap = len + 64;  /* Initial capacity with some padding */
-    result = (char*)taurus_malloc(result_cap);
+    result = (char*)leptris_malloc(result_cap);
     if (!result) return;
     result_len = 0;
     
@@ -176,7 +176,7 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
                 size_t copy_len = p - start;
                 if (result_len + copy_len >= result_cap) {
                     result_cap = (result_len + copy_len + 1) * 2;
-                    result = (char*)taurus_realloc(result, result_cap);
+                    result = (char*)leptris_realloc(result, result_cap);
                     if (!result) return;
                 }
                 memcpy(result + result_len, start, copy_len);
@@ -194,7 +194,7 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
                 /* Unterminated entity - keep as-is */
                 if (result_len + 1 >= result_cap) {
                     result_cap = (result_len + 2) * 2;
-                    result = (char*)taurus_realloc(result, result_cap);
+                    result = (char*)leptris_realloc(result, result_cap);
                     if (!result) return;
                 }
                 result[result_len++] = '&';
@@ -212,15 +212,15 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
                 size_t value_len = strlen(entity_value);
                 if (result_len + value_len >= result_cap) {
                     result_cap = (result_len + value_len + 1) * 2;
-                    result = (char*)taurus_realloc(result, result_cap);
+                    result = (char*)leptris_realloc(result, result_cap);
                     if (!result) {
-                        taurus_free(entity_value);
+                        leptris_free(entity_value);
                         return;
                     }
                 }
                 memcpy(result + result_len, entity_value, value_len);
                 result_len += value_len;
-                taurus_free(entity_value);
+                leptris_free(entity_value);
                 
                 /* Move past entity */
                 p = entity_end + 1;
@@ -230,7 +230,7 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
                 size_t keep_len = entity_end - p + 1;  /* Include & and ; */
                 if (result_len + keep_len >= result_cap) {
                     result_cap = (result_len + keep_len + 1) * 2;
-                    result = (char*)taurus_realloc(result, result_cap);
+                    result = (char*)leptris_realloc(result, result_cap);
                     if (!result) return;
                 }
                 memcpy(result + result_len, p, keep_len);
@@ -248,7 +248,7 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
         size_t copy_len = (text + len) - start;
         if (result_len + copy_len >= result_cap) {
             result_cap = result_len + copy_len + 1;
-            result = (char*)taurus_realloc(result, result_cap);
+            result = (char*)leptris_realloc(result, result_cap);
             if (!result) return;
         }
         memcpy(result + result_len, start, copy_len);
@@ -264,14 +264,14 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
         elem->text_content = expanded_text;
     } else {
         existing_len = strlen(elem->text_content);
-        new_content = (char*)taurus_realloc(elem->text_content, existing_len + result_len + 1);
+        new_content = (char*)leptris_realloc(elem->text_content, existing_len + result_len + 1);
         if (new_content) {
             memcpy(new_content + existing_len, expanded_text, result_len);
             new_content[existing_len + result_len] = '\0';
             elem->text_content = new_content;
-            taurus_free(expanded_text);
+            leptris_free(expanded_text);
         } else {
-            taurus_free(expanded_text);
+            leptris_free(expanded_text);
         }
     }
 }
@@ -282,16 +282,16 @@ void add_text_to_element(struct taurus_element *elem, const char *text, size_t l
 
 /* Process namespace declarations from attribute stack
  * Extracts xmlns and xmlns:prefix attributes and creates namespace objects */
-void process_namespace_declarations(struct taurus_element *elem, TaurusAttrStack *attr_stack) {
+void process_namespace_declarations(struct leptris_element *elem, LeptrisAttrStack *attr_stack) {
     size_t i, count;
     ParseAttribute *attrs;
     const char *name;
-    struct taurus_namespace *ns;
+    struct leptris_namespace *ns;
     
     if (!elem || !attr_stack) return;
     
-    count = taurus_attr_stack_size(attr_stack);
-    attrs = taurus_attr_stack_to_array(attr_stack);
+    count = leptris_attr_stack_size(attr_stack);
+    attrs = leptris_attr_stack_to_array(attr_stack);
     
     for (i = 0; i < count; i++) {
         name = attrs[i].name;
@@ -300,22 +300,22 @@ void process_namespace_declarations(struct taurus_element *elem, TaurusAttrStack
         if (strncmp(name, "xmlns", 5) == 0) {
             if (name[5] == '\0') {
                 /* Default namespace: xmlns="uri" */
-                char *uri = taurus_strndup(attrs[i].value, strlen(attrs[i].value));
-                ns = taurus_namespace_new(NULL, uri);
-                taurus_free(uri);
+                char *uri = leptris_strndup(attrs[i].value, strlen(attrs[i].value));
+                ns = leptris_namespace_new(NULL, uri);
+                leptris_free(uri);
                 if (ns) {
-                    taurus_element_add_namespace(elem, ns);
+                    leptris_element_add_namespace(elem, ns);
                 }
             } else if (name[5] == ':') {
                 /* Prefixed namespace: xmlns:prefix="uri" */
                 const char *prefix = name + 6;
-                char *uri = taurus_strndup(attrs[i].value, strlen(attrs[i].value));
-                char *prefix_copy = taurus_strdup(prefix);
-                ns = taurus_namespace_new(prefix_copy, uri);
-                taurus_free(uri);
-                taurus_free(prefix_copy);
+                char *uri = leptris_strndup(attrs[i].value, strlen(attrs[i].value));
+                char *prefix_copy = leptris_strdup(prefix);
+                ns = leptris_namespace_new(prefix_copy, uri);
+                leptris_free(uri);
+                leptris_free(prefix_copy);
                 if (ns) {
-                    taurus_element_add_namespace(elem, ns);
+                    leptris_element_add_namespace(elem, ns);
                 }
             }
         }
@@ -323,27 +323,27 @@ void process_namespace_declarations(struct taurus_element *elem, TaurusAttrStack
 }
 
 /* Set element namespace from prefix or parent inheritance */
-void set_element_namespace(struct taurus_element *elem, const char *prefix,
-                          struct taurus_element *parent) {
-    struct taurus_namespace *ns;
+void set_element_namespace(struct leptris_element *elem, const char *prefix,
+                          struct leptris_element *parent) {
+    struct leptris_namespace *ns;
     
     if (!elem) return;
     
     /* Set prefix if provided */
     if (prefix) {
-        elem->prefix = taurus_strdup(prefix);
+        elem->prefix = leptris_strdup(prefix);
     }
     
     /* Find namespace URI - search element first, then parent if provided
      * (parent relationship not yet established at call time) */
-    ns = taurus_namespace_find(elem, prefix);
+    ns = leptris_namespace_find(elem, prefix);
     if (!ns && parent) {
         /* Not found on element, search parent for inheritance */
-        ns = taurus_namespace_find(parent, prefix);
+        ns = leptris_namespace_find(parent, prefix);
     }
     
     if (ns && ns->uri) {
-        elem->namespace_uri = taurus_strdup(ns->uri);
+        elem->namespace_uri = leptris_strdup(ns->uri);
     }
 }
 
@@ -352,19 +352,19 @@ void set_element_namespace(struct taurus_element *elem, const char *prefix,
  * ================================================================== */
 
 /* Add non-xmlns attributes to element */
-void add_attributes_to_element(struct taurus_element *elem, TaurusAttrStack *attr_stack,
+void add_attributes_to_element(struct leptris_element *elem, LeptrisAttrStack *attr_stack,
                                StringInternTable *intern_table) {
     size_t i, count;
     ParseAttribute *attrs;
     const char *name;
-    struct taurus_attribute *attr;
+    struct leptris_attribute *attr;
     const char *interned_name;
     char *value_copy;
     
     if (!elem || !attr_stack) return;
     
-    count = taurus_attr_stack_size(attr_stack);
-    attrs = taurus_attr_stack_to_array(attr_stack);
+    count = leptris_attr_stack_size(attr_stack);
+    attrs = leptris_attr_stack_to_array(attr_stack);
     
     for (i = 0; i < count; i++) {
         name = attrs[i].name;
@@ -382,14 +382,14 @@ void add_attributes_to_element(struct taurus_element *elem, TaurusAttrStack *att
         }
         
         /* Create attribute value copy */
-        value_copy = taurus_strndup(attrs[i].value, strlen(attrs[i].value));
+        value_copy = leptris_strndup(attrs[i].value, strlen(attrs[i].value));
         
         /* Create attribute */
-        attr = taurus_attribute_new(interned_name, value_copy);
-        taurus_free(value_copy);
+        attr = leptris_attribute_new(interned_name, value_copy);
+        leptris_free(value_copy);
         
         if (attr) {
-            taurus_element_add_attribute(elem, attr);
+            leptris_element_add_attribute(elem, attr);
         }
     }
 }

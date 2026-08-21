@@ -1,6 +1,6 @@
-# Taurus C Examples
+# Leptris C Examples
 
-This directory contains comprehensive examples demonstrating the libtaurus API.
+This directory contains comprehensive examples demonstrating the libleptris API.
 
 ## Building Examples
 
@@ -24,7 +24,7 @@ make run_examples
 
 ### 1. basic_example.c (79 lines)
 
-**Purpose**: Introduction to Taurus API basics
+**Purpose**: Introduction to Leptris API basics
 
 **Demonstrates**:
 - Parsing XML documents
@@ -38,11 +38,11 @@ make run_examples
 ```
 
 **Key APIs**:
-- `taurus_parse()` - Parse XML string
-- `taurus_document_root()` - Get root element
-- `taurus_element_name()` - Get element name
-- `taurus_xpath_eval()` - Evaluate XPath
-- `taurus_document_free()` - Cleanup
+- `leptris_parse()` - Parse XML string
+- `leptris_document_root()` - Get root element
+- `leptris_element_name()` - Get element name
+- `leptris_xpath_eval()` - Evaluate XPath
+- `leptris_document_free()` - Cleanup
 
 ---
 
@@ -66,13 +66,13 @@ make run_examples
 ```
 
 **Key APIs**:
-- `taurus_xpath_eval()` - Evaluate XPath
-- `taurus_xpath_result_nodeset_size()` - Get result count
-- `taurus_xpath_result_nodeset_get()` - Get node from result
-- `taurus_xpath_result_as_boolean()` - Convert to boolean
-- `taurus_xpath_result_as_number()` - Convert to number
-- `taurus_xpath_result_as_string()` - Convert to string
-- `taurus_xpath_result_free()` - Free result
+- `leptris_xpath_eval()` - Evaluate XPath
+- `leptris_xpath_result_nodeset_size()` - Get result count
+- `leptris_xpath_result_nodeset_get()` - Get node from result
+- `leptris_xpath_result_as_boolean()` - Convert to boolean
+- `leptris_xpath_result_as_number()` - Convert to number
+- `leptris_xpath_result_as_string()` - Convert to string
+- `leptris_xpath_result_free()` - Free result
 
 ---
 
@@ -95,13 +95,13 @@ make run_examples
 ```
 
 **Key APIs**:
-- `taurus_element_namespace()` - Get namespace URI
-- `taurus_element_prefix()` - Get namespace prefix
-- `taurus_element_namespace_count()` - Count declarations
-- `taurus_element_namespace_decl()` - Get declaration
-- `taurus_element_resolve_namespace()` - Resolve prefix
-- `taurus_namespace_prefix()` - Get namespace prefix
-- `taurus_namespace_uri()` - Get namespace URI
+- `leptris_element_namespace()` - Get namespace URI
+- `leptris_element_prefix()` - Get namespace prefix
+- `leptris_element_namespace_count()` - Count declarations
+- `leptris_element_namespace_decl()` - Get declaration
+- `leptris_element_resolve_namespace()` - Resolve prefix
+- `leptris_namespace_prefix()` - Get namespace prefix
+- `leptris_namespace_uri()` - Get namespace URI
 
 ---
 
@@ -126,14 +126,14 @@ make run_examples
 ```
 
 **Key APIs**:
-- `taurus_last_error()` - Get error message
-- `taurus_last_error_code()` - Get error code
-- `taurus_error_string()` - Convert code to string
-- `taurus_parse_error_line()` - Get error line
-- `taurus_parse_error_column()` - Get error column
-- `taurus_clear_error()` - Clear error state
-- `taurus_parse_options_init()` - Initialize options
-- `taurus_parse_with_options()` - Parse with options
+- `leptris_last_error()` - Get error message
+- `leptris_last_error_code()` - Get error code
+- `leptris_error_string()` - Convert code to string
+- `leptris_parse_error_line()` - Get error line
+- `leptris_parse_error_column()` - Get error column
+- `leptris_clear_error()` - Clear error state
+- `leptris_parse_options_init()` - Initialize options
+- `leptris_parse_with_options()` - Parse with options
 
 ---
 
@@ -156,16 +156,16 @@ make run_examples
 ```
 
 **Key APIs**:
-- `taurus_element_name()` - Get element name
-- `taurus_element_parent()` - Get parent
-- `taurus_element_child_count()` - Count children
-- `taurus_element_child()` - Get child by index
-- `taurus_element_attribute_count()` - Count attributes
-- `taurus_element_attribute()` - Get attribute by index
-- `taurus_element_get_attribute()` - Get attribute by name
-- `taurus_element_has_attribute()` - Check attribute exists
-- `taurus_element_text()` - Get text content
-- `taurus_xpath_eval_with_context()` - XPath from context
+- `leptris_element_name()` - Get element name
+- `leptris_element_parent()` - Get parent
+- `leptris_element_child_count()` - Count children
+- `leptris_element_child()` - Get child by index
+- `leptris_element_attribute_count()` - Count attributes
+- `leptris_element_attribute()` - Get attribute by index
+- `leptris_element_get_attribute()` - Get attribute by name
+- `leptris_element_has_attribute()` - Check attribute exists
+- `leptris_element_text()` - Get text content
+- `leptris_xpath_eval_with_context()` - XPath from context
 
 ---
 
@@ -265,56 +265,56 @@ For automated leak checking in GitHub Actions:
 These examples cover:
 
 **Parse API** (100%):
-- `taurus_parse()`
-- `taurus_parse_with_options()`
-- `taurus_parse_options_init()`
-- `taurus_document_free()`
-- `taurus_document_root()`
-- `taurus_document_encoding()`
+- `leptris_parse()`
+- `leptris_parse_with_options()`
+- `leptris_parse_options_init()`
+- `leptris_document_free()`
+- `leptris_document_root()`
+- `leptris_document_encoding()`
 
 **Element API** (100%):
-- `taurus_element_name()`
-- `taurus_element_namespace()`
-- `taurus_element_prefix()`
-- `taurus_element_text()`
-- `taurus_element_parent()`
-- `taurus_element_child_count()`
-- `taurus_element_child()`
+- `leptris_element_name()`
+- `leptris_element_namespace()`
+- `leptris_element_prefix()`
+- `leptris_element_text()`
+- `leptris_element_parent()`
+- `leptris_element_child_count()`
+- `leptris_element_child()`
 
 **Attribute API** (100%):
-- `taurus_element_attribute_count()`
-- `taurus_element_attribute()`
-- `taurus_element_get_attribute()`
-- `taurus_element_has_attribute()`
-- `taurus_attribute_name()`
-- `taurus_attribute_value()`
-- `taurus_attribute_namespace()`
+- `leptris_element_attribute_count()`
+- `leptris_element_attribute()`
+- `leptris_element_get_attribute()`
+- `leptris_element_has_attribute()`
+- `leptris_attribute_name()`
+- `leptris_attribute_value()`
+- `leptris_attribute_namespace()`
 
 **Namespace API** (100%):
-- `taurus_element_namespace_count()`
-- `taurus_element_namespace_decl()`
-- `taurus_element_resolve_namespace()`
-- `taurus_namespace_prefix()`
-- `taurus_namespace_uri()`
+- `leptris_element_namespace_count()`
+- `leptris_element_namespace_decl()`
+- `leptris_element_resolve_namespace()`
+- `leptris_namespace_prefix()`
+- `leptris_namespace_uri()`
 
 **XPath API** (100%):
-- `taurus_xpath_eval()`
-- `taurus_xpath_eval_with_context()`
-- `taurus_xpath_result_free()`
-- `taurus_xpath_result_get_type()`
-- `taurus_xpath_result_as_boolean()`
-- `taurus_xpath_result_as_number()`
-- `taurus_xpath_result_as_string()`
-- `taurus_xpath_result_nodeset_size()`
-- `taurus_xpath_result_nodeset_get()`
+- `leptris_xpath_eval()`
+- `leptris_xpath_eval_with_context()`
+- `leptris_xpath_result_free()`
+- `leptris_xpath_result_get_type()`
+- `leptris_xpath_result_as_boolean()`
+- `leptris_xpath_result_as_number()`
+- `leptris_xpath_result_as_string()`
+- `leptris_xpath_result_nodeset_size()`
+- `leptris_xpath_result_nodeset_get()`
 
 **Error API** (100%):
-- `taurus_last_error()`
-- `taurus_last_error_code()`
-- `taurus_error_string()`
-- `taurus_parse_error_line()`
-- `taurus_parse_error_column()`
-- `taurus_clear_error()`
+- `leptris_last_error()`
+- `leptris_last_error_code()`
+- `leptris_error_string()`
+- `leptris_parse_error_line()`
+- `leptris_parse_error_column()`
+- `leptris_clear_error()`
 
 ## Next Steps
 

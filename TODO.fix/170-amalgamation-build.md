@@ -21,9 +21,9 @@ wins are:
 
 ### Phase A — CMake generation
 
-Add `TAURUS_AMALGAMATED` option (default OFF). When enabled:
-1. Generate `${CMAKE_BINARY_DIR}/taurus_amalgamated.c` from
-   `${TAURUS_SOURCES}` via `configure_file` or `file(WRITE)`.
+Add `LEPTRIS_AMALGAMATED` option (default OFF). When enabled:
+1. Generate `${CMAKE_BINARY_DIR}/leptris_amalgamated.c` from
+   `${LEPTRIS_SOURCES}` via `configure_file` or `file(WRITE)`.
 2. Build the library from this single file instead of the
    separate .c files.
 3. The generated file is just a series of `#include "foo.c"`
@@ -31,7 +31,7 @@ Add `TAURUS_AMALGAMATED` option (default OFF). When enabled:
 
 ### Phase B — Verification
 
-- Build with `-DTAURUS_AMALGAMATED=ON` and run all 464 tests.
+- Build with `-DLEPTRIS_AMALGAMATED=ON` and run all 464 tests.
 - Verify no symbol collisions on static functions (audit by
   listing all `static` definitions and checking uniqueness).
 - Benchmark: amalgamation vs multi-TU+LTO. The expectation is
@@ -45,7 +45,7 @@ Add `TAURUS_AMALGAMATED` option (default OFF). When enabled:
 - **Macro re-definition.** Two .c files might `#define FOO`
   differently. Need to check.
 - **Conditional compilation.** Source files guarded by
-  `TAURUS_HAS_ICONV` etc. must keep their guards.
+  `LEPTRIS_HAS_ICONV` etc. must keep their guards.
 
 ## Expected impact
 

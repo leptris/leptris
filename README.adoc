@@ -1,4 +1,4 @@
-= libtaurus: High-Performance XML Parser & XPath Engine in C
+= libleptris: High-Performance XML Parser & XPath Engine in C
 :toc:
 :toclevels: 2
 :sectanchors:
@@ -7,11 +7,11 @@
 image:https://img.shields.io/badge/C99-✓-blue.svg[Language]
 image:https://img.shields.io/badge/dependencies-zero-brightgreen.svg[Runtime Dependencies]
 image:https://img.shields.io/badge/license-MIT-blue.svg[License]
-image:https://github.com/lutaml/taurus/actions/workflows/test.yml/badge.svg[Tests,link="https://github.com/lutaml/taurus/actions/workflows/test.yml"]
-image:https://github.com/lutaml/taurus/actions/workflows/asan.yml/badge.svg[ASAN,link="https://github.com/lutaml/taurus/actions/workflows/asan.yml"]
-image:https://github.com/lutaml/taurus/actions/workflows/fuzz-nightly.yml/badge.svg[Fuzzing,link="https://github.com/lutaml/taurus/actions/workflows/fuzz-nightly.yml"]
+image:https://github.com/leptris/leptris/actions/workflows/test.yml/badge.svg[Tests,link="https://github.com/leptris/leptris/actions/workflows/test.yml"]
+image:https://github.com/leptris/leptris/actions/workflows/asan.yml/badge.svg[ASAN,link="https://github.com/leptris/leptris/actions/workflows/asan.yml"]
+image:https://github.com/leptris/leptris/actions/workflows/fuzz-nightly.yml/badge.svg[Fuzzing,link="https://github.com/leptris/leptris/actions/workflows/fuzz-nightly.yml"]
 
-**libtaurus** is a C99 library providing fast XML 1.0 parsing, complete
+**libleptris** is a C99 library providing fast XML 1.0 parsing, complete
 XPath 1.0 evaluation, event-based SAX processing, and document
 canonicalization (C14N).  It is designed for low-latency,
 memory-efficient workloads where predictable performance and safe
@@ -38,7 +38,7 @@ memory handling matter.
 * **Canonical XML (C14N)** for digital signatures and cryptographic
   hashing.
 * **Pool-based memory model** — every allocation reachable from a
-  document is released in a single `taurus_document_free` call.  Zero
+  document is released in a single `leptris_document_free` call.  Zero
   leaks across the test suite.
 * **Compact-pointer architecture** — tree edges stored as int32_t byte
   offsets with overflow-table fallback for macOS ASLR (TODO 121).
@@ -48,13 +48,13 @@ memory handling matter.
   in the same thread.
 * **Vtable-based dispatch** — adding a new node type is purely
   additive; no switches to edit.
-* **CLI tool** — `taurus parse`, `taurus xpath`, `taurus format`,
-  `taurus version` for command-line XML processing.
-* **Ruby FFI binding** — `Taurus::Document.parse`, XPath, serialize,
+* **CLI tool** — `leptris parse`, `leptris xpath`, `leptris format`,
+  `leptris version` for command-line XML processing.
+* **Ruby FFI binding** — `Leptris::Document.parse`, XPath, serialize,
   and event-driven SAX (one-shot + incremental streaming) via the
   `ffi` gem. No C extension compilation needed. See
   link:bindings/ruby/[Ruby binding].
-* **Python binding** — `pytaurus` via `cffi` (ABI mode, single
+* **Python binding** — `pyleptris` via `cffi` (ABI mode, single
   `cdef` mirroring the public headers): `Document.parse`, element
   navigation, typed XPath results, serialize. See
   link:bindings/python/[Python binding].
@@ -63,11 +63,11 @@ memory handling matter.
 * **Stable C ABI** with a documented FFI contract; bindings shipped
   for Ruby and Python (Rust planned).  See <<FFI,FFI Design>>.
 
-== When to use libtaurus
+== When to use libleptris
 
 [cols="1,1",options="header"]
 |===
-|Use libtaurus when |Consider alternatives when
+|Use libleptris when |Consider alternatives when
 
 |You need a C library with a small footprint and no required runtime dependencies.
 |You need full XML Schema 1.1 validation.
@@ -89,28 +89,28 @@ memory handling matter.
 
 [source,c]
 ----
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 
 int main(void) {
     const char* xml = "<root><item>hello</item></root>";
 
-    TaurusStatus status = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+    LeptrisStatus status = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &status);
     if (!doc) {
         fprintf(stderr, "parse failed: %d\n", status);
         return 1;
     }
 
-    TaurusElement root = taurus_document_root(doc);
-    printf("root element: %s\n", taurus_element_name(root));
+    LeptrisElement root = leptris_document_root(doc);
+    printf("root element: %s\n", leptris_element_name(root));
 
-    TaurusXPathResult items = taurus_xpath_eval(doc, NULL, "//item");
-    printf("item count: %zu\n", taurus_xpath_result_count(items));
-    taurus_xpath_result_free(items);
+    LeptrisXPathResult items = leptris_xpath_eval(doc, NULL, "//item");
+    printf("item count: %zu\n", leptris_xpath_result_count(items));
+    leptris_xpath_result_free(items);
 
-    taurus_document_free(doc);  /* releases the entire pool */
+    leptris_document_free(doc);  /* releases the entire pool */
     return 0;
 }
 ----
@@ -121,8 +121,8 @@ Compile and run:
 ----
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/cli/taurus parse 'fixtures/basic.xml'
-./build/cli/taurus xpath 'fixtures/basic.xml' 'count(//item)'
+./build/cli/leptris parse 'fixtures/basic.xml'
+./build/cli/leptris xpath 'fixtures/basic.xml' 'count(//item)'
 ----
 
 == Installation
@@ -136,29 +136,29 @@ cmake --build build
 sudo cmake --install build --prefix /usr/local
 ----
 
-After install, the library is discoverable via `find_package(taurus)`:
+After install, the library is discoverable via `find_package(leptris)`:
 
 [source,cmake]
 ----
 cmake_minimum_required(VERSION 3.20)
 project(myapp LANGUAGES C CXX)
 
-find_package(taurus CONFIG REQUIRED)
-target_link_libraries(myapp PRIVATE taurus::taurus)
+find_package(leptris CONFIG REQUIRED)
+target_link_libraries(myapp PRIVATE leptris::leptris)
 ----
 
 Or via pkg-config:
 
 [source,bash]
 ----
-gcc myapp.c $(pkg-config --cflags --libs taurus)
+gcc myapp.c $(pkg-config --cflags --libs leptris)
 ----
 
 === Via vcpkg
 
 ```bash
 git clone https://github.com/microsoft/vcpkg
-./vcpkg/vcpkg install taurus
+./vcpkg/vcpkg install leptris
 ```
 
 *See <<vcpkg,vcpkg integration>> for the portfile template.*
@@ -170,16 +170,16 @@ git clone https://github.com/microsoft/vcpkg
 |Distro |Install command
 
 |Alpine
-|`apk add libtaurus-dev` (pending)
+|`apk add libleptris-dev` (pending)
 
 |Debian/Ubuntu
-|`apt install libtaurus-dev` (pending)
+|`apt install libleptris-dev` (pending)
 
 |Homebrew
-|`brew install taurus` (pending)
+|`brew install leptris` (pending)
 
 |MSYS2 (Windows)
-|`pacman -S mingw-w64-taurus` (pending)
+|`pacman -S mingw-w64-leptris` (pending)
 |===
 
 == Building
@@ -194,35 +194,35 @@ git clone https://github.com/microsoft/vcpkg
 |`ON`
 |Build the Google Test suite under `test/`.
 
-|`TAURUS_BUILD_CLI`
+|`LEPTRIS_BUILD_CLI`
 |`ON`
-|Build the `taurus` command-line tool.
+|Build the `leptris` command-line tool.
 
-|`TAURUS_BUILD_BENCHMARKS`
+|`LEPTRIS_BUILD_BENCHMARKS`
 |`OFF`
 |Build performance comparison targets (libxml2 / pugixml).
 
-|`TAURUS_BUILD_MAN_PAGES`
+|`LEPTRIS_BUILD_MAN_PAGES`
 |`OFF`
 |Generate man pages from the AsciiDoc sources.
 
-|`TAURUS_ENABLE_UTF8PROC`
+|`LEPTRIS_ENABLE_UTF8PROC`
 |`ON`
 |UTF-8 validation via utf8proc.
 
-|`TAURUS_ENABLE_ICONV`
+|`LEPTRIS_ENABLE_ICONV`
 |`ON`
 |Encoding conversion via iconv (ISO-8859-1, Shift-JIS, etc.).
 
-|`TAURUS_ENABLE_ASAN`
+|`LEPTRIS_ENABLE_ASAN`
 |`OFF`
 |Build with AddressSanitizer.
 
-|`TAURUS_ENABLE_FUZZING`
+|`LEPTRIS_ENABLE_FUZZING`
 |`OFF`
 |Build the libFuzzer harness.
 
-|`TAURUS_BUILD_DOCS`
+|`LEPTRIS_BUILD_DOCS`
 |`OFF`
 |Generate Doxygen API docs.
 |===
@@ -231,7 +231,7 @@ git clone https://github.com/microsoft/vcpkg
 
 [source,bash]
 ----
-cmake -B build-asan -S . -DTAURUS_ENABLE_ASAN=ON -DBUILD_TESTING=ON
+cmake -B build-asan -S . -DLEPTRIS_ENABLE_ASAN=ON -DBUILD_TESTING=ON
 cmake --build build-asan
 ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-asan
 ----
@@ -242,7 +242,7 @@ ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-asan
 ----
 brew install llvm   # macOS
 export CC=/opt/homebrew/opt/llvm/bin/clang
-cmake -B build-fuzz -S . -DTAURUS_ENABLE_FUZZING=ON
+cmake -B build-fuzz -S . -DLEPTRIS_ENABLE_FUZZING=ON
 cmake --build build-fuzz --target fuzz_parse
 ./build-fuzz/fuzz_parse -max_total_time=600 corpus/
 ----
@@ -252,7 +252,7 @@ cmake --build build-fuzz --target fuzz_parse
 [source,bash]
 ----
 brew install doxygen
-cmake -B build -S . -DTAURUS_BUILD_DOCS=ON
+cmake -B build -S . -DLEPTRIS_BUILD_DOCS=ON
 cmake --build build --target docs
 open build/docs/api-generated/html/index.html
 ----
@@ -263,13 +263,13 @@ The library exposes a single import target:
 
 [source,cmake]
 ----
-target_link_libraries(your_app PRIVATE taurus::taurus)
+target_link_libraries(your_app PRIVATE leptris::leptris)
 ----
 
 [source,meson]
 ----
-taurus_dep = dependency('taurus')
-executable('your_app', 'main.c', dependencies: taurus_dep)
+leptris_dep = dependency('leptris')
+executable('your_app', 'main.c', dependencies: leptris_dep)
 ----
 
 == Usage
@@ -277,21 +277,21 @@ executable('your_app', 'main.c', dependencies: taurus_dep)
 [#parse-string]
 === Parsing
 
-`taurus_parse_string` is the entry point.  It accepts a UTF-8 buffer
+`leptris_parse_string` is the entry point.  It accepts a UTF-8 buffer
 and a status output parameter:
 
 [source,c]
 ----
-TaurusStatus status;
-TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+LeptrisStatus status;
+LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &status);
 if (!doc) {
-    /* status is one of TAURUS_ERROR_PARSE, TAURUS_ERROR_MEMORY, ... */
+    /* status is one of LEPTRIS_ERROR_PARSE, LEPTRIS_ERROR_MEMORY, ... */
 }
 
 /* Document is now a pool of nodes; no need to track them individually. */
 
 /* Always release the document — the pool is destroyed too. */
-taurus_document_free(doc);
+leptris_document_free(doc);
 ----
 
 [#xpath]
@@ -299,14 +299,14 @@ taurus_document_free(doc);
 
 [source,c]
 ----
-TaurusXPathResult r = taurus_xpath_eval(doc, NULL, "//item[@price > 10]");
+LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, "//item[@price > 10]");
 if (r) {
-    size_t n = taurus_xpath_result_count(r);
+    size_t n = leptris_xpath_result_count(r);
     for (size_t i = 0; i < n; i++) {
-        TaurusNodeRef node = taurus_xpath_result_node(r, i);
-        printf("  %s\n", taurus_node_name(node));
+        LeptrisNodeRef node = leptris_xpath_result_node(r, i);
+        printf("  %s\n", leptris_node_name(node));
     }
-    taurus_xpath_result_free(r);
+    leptris_xpath_result_free(r);
 }
 ----
 
@@ -322,10 +322,10 @@ static void on_start(void* ud, const char* name, const char** attrs) {
     fprintf(stderr, "<%s>\n", name);
 }
 
-TaurusSAXHandler handler = {0};
+LeptrisSAXHandler handler = {0};
 handler.start_element = on_start;
 
-taurus_sax_parse(xml, len, &handler, NULL);
+leptris_sax_parse(xml, len, &handler, NULL);
 ----
 
 [#serialize]
@@ -333,10 +333,10 @@ taurus_sax_parse(xml, len, &handler, NULL);
 
 [source,c]
 ----
-TaurusSerializeOptions opts = { .indent = 2, .xml_declaration = 1 };
-char* out = taurus_document_serialize(doc, &opts);
+LeptrisSerializeOptions opts = { .indent = 2, .xml_declaration = 1 };
+char* out = leptris_document_serialize(doc, &opts);
 puts(out);
-taurus_free_string(out);
+leptris_free_string(out);
 ----
 
 [#c14n]
@@ -344,17 +344,17 @@ taurus_free_string(out);
 
 [source,c]
 ----
-char* canonical = taurus_c14n_canonicalize(doc, TAURUS_C14N_1_0, 0);
+char* canonical = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
 fputs(canonical, stdout);
 putchar('\n');  /* canonical output may not end with newline */
-taurus_free_string(canonical);
-taurus_free_string(canonical);
+leptris_free_string(canonical);
+leptris_free_string(canonical);
 ----
 
 == Memory model
 
 Every byte the parser allocates that ends up referenced by a document
-lives in the document's pool.  `taurus_document_free` destroys the
+lives in the document's pool.  `leptris_document_free` destroys the
 pool and releases everything in one call.
 
 [cols="1,3",options="header"]
@@ -390,7 +390,7 @@ Opaque handles are pointer-sized — enforced at compile time:
 
 [source,c]
 ----
-_Static_assert(sizeof(TaurusDocument) == sizeof(void*), "...");
+_Static_assert(sizeof(LeptrisDocument) == sizeof(void*), "...");
 ----
 
 To pin enum values (bindings hard-code these):
@@ -403,10 +403,10 @@ ctest --test-dir build -R HeaderHygiene
 [#FFI]
 == FFI design
 
-libtaurus exposes a stable C ABI.  Bindings:
+libleptris exposes a stable C ABI.  Bindings:
 
 * *Ruby* — shipped. Uses `ffi` gem. See link:bindings/ruby/[Ruby binding].
-* *Python* — shipped as `pytaurus` via `cffi` (ABI mode). See
+* *Python* — shipped as `pyleptris` via `cffi` (ABI mode). See
   link:bindings/python/[Python binding].
 * *Rust* — planned via `bindgen` + idiomatic wrapper
 
@@ -414,9 +414,9 @@ libtaurus exposes a stable C ABI.  Bindings:
 
 [source,ruby]
 ----
-require 'taurus'
+require 'leptris'
 
-doc = Taurus::Document.parse('<root><item id="1">hello</item></root>')
+doc = Leptris::Document.parse('<root><item id="1">hello</item></root>')
 root = doc.root
 puts root.name                     # => "root"
 puts root.first_child_element['id']  # => "1"
@@ -424,14 +424,14 @@ puts doc.xpath('count(//item)')    # => 1.0
 doc.free
 ----
 
-Install: set `TAURUS_LIB_PATH` to your `libtaurus.dylib` / `.so`, or
-install libtaurus system-wide. The `ffi` gem is the only dependency.
+Install: set `LEPTRIS_LIB_PATH` to your `libleptris.dylib` / `.so`, or
+install libleptris system-wide. The `ffi` gem is the only dependency.
 
 [source,bash]
 ----
 gem install ffi
-TAURUS_LIB_PATH=/path/to/libtaurus.0.dylib ruby -Ilib -rtaurus -e '
-  doc = Taurus::Document.parse("<r/>")
+LEPTRIS_LIB_PATH=/path/to/libleptris.0.dylib ruby -Ilib -rleptris -e '
+  doc = Leptris::Document.parse("<r/>")
   puts doc.root.name
   doc.free
 '
@@ -441,14 +441,14 @@ To parse the headers from a binding tool:
 
 [source,bash]
 ----
-cc -DTAURUS_FOR_BINDGEN -E src/include/taurus.h   # strips TAURUS_API
+cc -DLEPTRIS_FOR_BINDGEN -E src/include/leptris.h   # strips LEPTRIS_API
 ----
 
 === Python quick start
 
 [source,python]
 ----
-from pytaurus import Document
+from pyleptris import Document
 
 doc = Document.parse('<root><item id="1">hello</item></root>')
 root = doc.root
@@ -458,14 +458,14 @@ print(doc.xpath('count(//item)'))       # => 1.0
 doc.close()
 ----
 
-Install: `pip install cffi` and point `TAURUS_LIB_PATH` at your
-`libtaurus.dylib` / `.so` (or install libtaurus system-wide).
+Install: `pip install cffi` and point `LEPTRIS_LIB_PATH` at your
+`libleptris.dylib` / `.so` (or install libleptris system-wide).
 
 [source,bash]
 ----
-cmake -B build -S . -DTAURUS_BUILD_SHARED=ON
-cmake --build build --target taurus_shared
-TAURUS_LIB_PATH=$PWD/build/src/libtaurus.dylib \
+cmake -B build -S . -DLEPTRIS_BUILD_SHARED=ON
+cmake --build build --target leptris_shared
+LEPTRIS_LIB_PATH=$PWD/build/src/libleptris.dylib \
   python3 -m pytest bindings/python/tests/
 ----
 
@@ -477,9 +477,9 @@ text and attribute values arrive expanded (XML 1.0):
 
 [source,ruby]
 ----
-require 'taurus'
+require 'leptris'
 
-Taurus::SAX.parse('<books><book id="1">title &amp; more</book></books>',
+Leptris::SAX.parse('<books><book id="1">title &amp; more</book></books>',
   start_element: ->(name, attrs) { puts "#{name} #{attrs.inspect}" },
   end_element:   ->(name) { },
   characters:    ->(text) { },
@@ -495,7 +495,7 @@ uses; the default buffers chunks and parses on the final feed):
 
 [source,ruby]
 ----
-parser = Taurus::SAX::Parser.new({ characters: ->(t) { print t } },
+parser = Leptris::SAX::Parser.new({ characters: ->(t) { print t } },
                                  streaming: true)
 IO.popen('curl -s https://example.com/feed.xml') do |io|
   io.each(4096) { |chunk| parser.feed(chunk) }
@@ -519,23 +519,23 @@ See link:docs/FFI.md[docs/FFI.md] for the full design document.
 [source,bash]
 ----
 # Parse a document
-taurus parse document.xml
+leptris parse document.xml
 
 # Round-trip via XPath count
-taurus xpath --count document.xml 'count(//item)'
+leptris xpath --count document.xml 'count(//item)'
 
 # Pretty-print
-taurus format --indent 4 document.xml < ugly.xml > pretty.xml
+leptris format --indent 4 document.xml < ugly.xml > pretty.xml
 
 # Validate / version
-taurus version
+leptris version
 ----
 
 Exit codes: 0 on success, 1 on parse error or invalid usage.
 
 == Performance
 
-Taurus is benchmarked against libxml2 and pugixml on every push via CI
+Leptris is benchmarked against libxml2 and pugixml on every push via CI
 (GitHub Actions, Linux + macOS).  Numbers below are from Apple Silicon,
 `clang -O3 -flto=thin` (LTO is default for Release builds since TODO 110).
 
@@ -543,7 +543,7 @@ Taurus is benchmarked against libxml2 and pugixml on every push via CI
 
 [cols="2,>1,>1,>1",options="header"]
 |===
-|Benchmark |Taurus |libxml2 |Advantage
+|Benchmark |Leptris |libxml2 |Advantage
 
 |SAX small (~1 KB)
 |2.8 µs (377 MB/s)
@@ -565,7 +565,7 @@ Taurus is benchmarked against libxml2 and pugixml on every push via CI
 
 [cols="2,>1,>1,>1",options="header"]
 |===
-|Benchmark |Taurus |libxml2 |Advantage
+|Benchmark |Leptris |libxml2 |Advantage
 
 |Attribute lookup by name
 |1.6 µs
@@ -585,7 +585,7 @@ Taurus is benchmarked against libxml2 and pugixml on every push via CI
 
 === XPath evaluation (vs libxml2)
 
-Taurus's XPath engine uses a bytecode VM with per-axis
+Leptris's XPath engine uses a bytecode VM with per-axis
 specialization, predicate fast paths, absolute-path fusion, a
 per-document element index with attribute buckets, fused
 axis+predicate opcodes, and memcpy fast paths for index-backed
@@ -595,7 +595,7 @@ CPU time.
 
 [cols="2,>1,>1,>1",options="header"]
 |===
-|Benchmark |Taurus |libxml2 |Advantage
+|Benchmark |Leptris |libxml2 |Advantage
 
 |`self::*` (per-call floor)
 |0.57 µs
@@ -648,19 +648,19 @@ CPU time.
 |**1.9× faster**
 |===
 
-Taurus BEATS libxml2 on **all 10** XPath benchmarks.
+Leptris BEATS libxml2 on **all 10** XPath benchmarks.
 
 === DOM writes (vs pugixml)
 
 Quiet-machine, in-process comparison (min-of-N). Pugixml's
 `append_attribute` does not reject duplicates; the fair comparison
 for attribute setting is find-then-set (or find-then-append), which
-is what a correct program must do. Taurus rejects duplicates per
+is what a correct program must do. Leptris rejects duplicates per
 the XML 1.0 attribute uniqueness rule.
 
 [cols="2,>1,>1,>1",options="header"]
 |===
-|Benchmark |Taurus |pugixml |Advantage
+|Benchmark |Leptris |pugixml |Advantage
 
 |Append 10000 children (one parent)
 |~70 µs
@@ -680,13 +680,13 @@ the XML 1.0 attribute uniqueness rule.
 
 See also `benchmarks/README.md` for the decomposition benchmark
 (`benchmark_decomp`: isolates text/element/attr/text-node costs)
-and the SAX benchmark (`benchmark_sax`: taurus vs libxml2 SAX2 —
-pugixml has no SAX interface; taurus leads every corpus shape).
+and the SAX benchmark (`benchmark_sax`: leptris vs libxml2 SAX2 —
+pugixml has no SAX interface; leptris leads every corpus shape).
 
 === Building with LTO
 
 LTO is enabled by default for `Release` and `RelWithDebInfo` builds.
-Disable with `-DTAURUS_ENABLE_LTO=OFF`:
+Disable with `-DLEPTRIS_ENABLE_LTO=OFF`:
 
 [source,bash]
 ----
@@ -694,7 +694,7 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build          # LTO is on automatically
 
 # or explicitly:
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DTAURUS_ENABLE_LTO=ON
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DLEPTRIS_ENABLE_LTO=ON
 ----
 
 === Running benchmarks
@@ -703,12 +703,12 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DTAURUS_ENABLE_LTO=ON
 ----
 cmake -B build -S . \
   -DCMAKE_BUILD_TYPE=Release \
-  -DTAURUS_BUILD_BENCHMARKS=ON
+  -DLEPTRIS_BUILD_BENCHMARKS=ON
 cmake --build build
 
 # Run individual benchmarks:
-./build/benchmarks/bench_dom_taurus
-./build/benchmarks/bench_sax_taurus
+./build/benchmarks/bench_dom_leptris
+./build/benchmarks/bench_sax_leptris
 ./build/benchmarks/benchmark_write     # vs pugixml + libxml2
 ./build/benchmarks/bench_xpath_pugixml  # XPath vs pugixml
 ----
@@ -732,12 +732,12 @@ A vcpkg port pattern follows the jemalloc convention (see
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
-        -DTAURUS_BUILD_CLI=OFF
-        -DTAURUS_ENABLE_UTF8PROC=ON
-        -DTAURUS_ENABLE_ICONV=ON
+        -DLEPTRIS_BUILD_CLI=OFF
+        -DLEPTRIS_ENABLE_UTF8PROC=ON
+        -DLEPTRIS_ENABLE_ICONV=ON
 )
 vcpkg_cmake_install()
-vcpkg_cmake_config_fixup(CONFIG_PATH lib/cmake/taurus)
+vcpkg_cmake_config_fixup(CONFIG_PATH lib/cmake/leptris)
 ----
 
 == Dependencies
@@ -772,10 +772,10 @@ No runtime dependencies when built without utf8proc/iconv.
 
 [source,text]
 ----
-taurus/
+leptris/
   src/                  # library + CLI + tests source
     include/            # public C API headers
-    taurus/              # internal C source
+    leptris/              # internal C source
       dom/              # DOM node types + pool
       parse/            # parser
       xpath/            # XPath evaluator
@@ -827,7 +827,7 @@ Shipped post-v0.3.0 (XPath perf track):
 * ✓ Fused axis+predicate opcodes — `descendant::*[@id]` now BEATS libxml2 (TODO 134)
 * ✓ Fast inline nodeset_add for VM hot paths (TODO 135)
 * ✓ Descendant-or-self fused predicate opcodes (TODO 136)
-* ✓ Memcpy fast path for index-backed descendant queries — Taurus BEATS libxml2 on ALL XPath benchmarks (TODO 137)
+* ✓ Memcpy fast path for index-backed descendant queries — Leptris BEATS libxml2 on ALL XPath benchmarks (TODO 137)
 * ✓ Contiguous per-document arena + content-derived block sizing (TODO 183)
 * ✓ Single-representation attribute strings — views only, one cache line per attr (TODO 184)
 * ✓ Fused attribute/text scans — K=100 parse gap vs pugixml 7.8x → ~1.5x (TODO 184)
@@ -850,7 +850,7 @@ Planned:
 == Contributing
 
 Issues and pull requests at
-https://github.com/lutaml/taurus[github.com/lutaml/taurus].
+https://github.com/leptris/leptris[github.com/leptris/leptris].
 
 For C contribution, see link:docs/guide/building.md[docs/guide/building.md].
 For the testing policy, see `test/README.md`.

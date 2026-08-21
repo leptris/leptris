@@ -7,16 +7,16 @@
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <cstring>
 #include <string>
 
 namespace {
 
-TaurusDocument Parse(const char* xml) {
-    TaurusStatus st = TAURUS_OK;
-    return taurus_parse_string(xml, std::strlen(xml), &st);
+LeptrisDocument Parse(const char* xml) {
+    LeptrisStatus st = LEPTRIS_OK;
+    return leptris_parse_string(xml, std::strlen(xml), &st);
 }
 
 }  // namespace
@@ -28,32 +28,32 @@ TaurusDocument Parse(const char* xml) {
 TEST(NamespaceReadBug, DefaultNamespaceResolves) {
     auto doc = Parse("<root xmlns='http://default'><child/></root>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
-    const char* ns = taurus_element_namespace(root);
+    const char* ns = leptris_element_namespace(root);
     EXPECT_STREQ(ns, "http://default");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(NamespaceReadBug, PrefixedNamespaceResolvesViaLookup) {
     auto doc = Parse("<root xmlns:foo='http://foo'><foo:child/></root>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
 
     // The declaration is enumerable.
-    EXPECT_EQ(taurus_element_namespace_count(root), 1u);
-    EXPECT_STREQ(taurus_element_namespace_decl_prefix(root, 0), "foo");
-    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 0), "http://foo");
+    EXPECT_EQ(leptris_element_namespace_count(root), 1u);
+    EXPECT_STREQ(leptris_element_namespace_decl_prefix(root, 0), "foo");
+    EXPECT_STREQ(leptris_element_namespace_decl_uri(root, 0), "http://foo");
 
     // namespace_for_prefix must find the declared prefix.
-    const char* uri = taurus_element_namespace_for_prefix(root, "foo");
+    const char* uri = leptris_element_namespace_for_prefix(root, "foo");
     EXPECT_STREQ(uri, "http://foo");
 
     // An unknown prefix returns NULL.
-    EXPECT_EQ(taurus_element_namespace_for_prefix(root, "missing"), nullptr);
+    EXPECT_EQ(leptris_element_namespace_for_prefix(root, "missing"), nullptr);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(NamespaceReadBug, NamespaceInheritsFromParent) {
@@ -64,40 +64,40 @@ TEST(NamespaceReadBug, NamespaceInheritsFromParent) {
           "</foo:child>"
         "</root>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement child = taurus_element_first_child(root, "child");
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement child = leptris_element_first_child(root, "child");
     ASSERT_NE(child, nullptr);
-    TaurusElement grandchild = taurus_element_first_child(child, "grandchild");
+    LeptrisElement grandchild = leptris_element_first_child(child, "grandchild");
     ASSERT_NE(grandchild, nullptr);
 
     // grandchild's namespace must resolve via parent lookup chain.
-    const char* ns = taurus_element_namespace(grandchild);
+    const char* ns = leptris_element_namespace(grandchild);
     EXPECT_STREQ(ns, "http://foo");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // =====================================================================
-// Issue #223 — taurus_node_line
+// Issue #223 — leptris_node_line
 // =====================================================================
 
-/* TAURUS_PARSE_DROP_WS_TEXT (pugixml-parity mode): default keeps
+/* LEPTRIS_PARSE_DROP_WS_TEXT (pugixml-parity mode): default keeps
  * whitespace-only text nodes (libxml2-faithful, byte round-trips);
  * the flag drops them and starts mixed runs at the first non-ws
  * byte. Both modes pinned. */
 TEST(ParseFlags, DropWsTextSemantics) {
     const char pretty[] = "<r>\n  <a/>\n  <b>x</b>\n</r>";
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument def = taurus_parse_string(pretty, strlen(pretty), &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument def = leptris_parse_string(pretty, strlen(pretty), &st);
     ASSERT_NE(def, nullptr);
-    TaurusDocument drop = taurus_parse_string_flags(
-        pretty, strlen(pretty), TAURUS_PARSE_DROP_WS_TEXT, &st);
+    LeptrisDocument drop = leptris_parse_string_flags(
+        pretty, strlen(pretty), LEPTRIS_PARSE_DROP_WS_TEXT, &st);
     ASSERT_NE(drop, nullptr);
 
-    auto cc = [](TaurusDocument d) {
+    auto cc = [](LeptrisDocument d) {
         int c = 0;
-        TaurusNodeRef n = taurus_node_first_child(
-            taurus_element_as_node(taurus_document_root(d)));
-        while (n) { c++; n = taurus_node_next_sibling(n); }
+        LeptrisNodeRef n = leptris_node_first_child(
+            leptris_element_as_node(leptris_document_root(d)));
+        while (n) { c++; n = leptris_node_next_sibling(n); }
         return c;
     };
     /* default: <a/> + ws + <b/> + ws + <b>'s text "x" ... children of r:
@@ -106,33 +106,33 @@ TEST(ParseFlags, DropWsTextSemantics) {
     /* flagged: ws runs dropped = a, b = 2 */
     EXPECT_EQ(cc(drop), 2);
     /* mixed run "x" inside <b> survives in both */
-    TaurusElement b = taurus_element_first_child(taurus_document_root(drop), "b");
+    LeptrisElement b = leptris_element_first_child(leptris_document_root(drop), "b");
     ASSERT_NE(b, nullptr);
-    TaurusNodeRef bn = taurus_node_first_child(taurus_element_as_node(b));
+    LeptrisNodeRef bn = leptris_node_first_child(leptris_element_as_node(b));
     ASSERT_NE(bn, nullptr);
-    EXPECT_STREQ(taurus_text_node_get_content(bn), "x");
+    EXPECT_STREQ(leptris_text_node_get_content(bn), "x");
 
-    taurus_document_free(def);
-    taurus_document_free(drop);
+    leptris_document_free(def);
+    leptris_document_free(drop);
 }
 
 TEST(ParseFlags, DefaultFlagsEqualPlainParse) {
     const char xml[] = "<r>\n  <a/>\n</r>";
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument a = taurus_parse_string(xml, strlen(xml), &st);
-    TaurusDocument b = taurus_parse_string_flags(
-        xml, strlen(xml), TAURUS_PARSE_DEFAULT, &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument a = leptris_parse_string(xml, strlen(xml), &st);
+    LeptrisDocument b = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_DEFAULT, &st);
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
-    char* sa = taurus_document_serialize(a, NULL);
-    char* sb = taurus_document_serialize(b, NULL);
+    char* sa = leptris_document_serialize(a, NULL);
+    char* sb = leptris_document_serialize(b, NULL);
     ASSERT_NE(sa, nullptr);
     ASSERT_NE(sb, nullptr);
     EXPECT_STREQ(sa, sb);
     free(sa);
     free(sb);
-    taurus_document_free(a);
-    taurus_document_free(b);
+    leptris_document_free(a);
+    leptris_document_free(b);
 }
 
 /* Regression: the retained-arena free list recycles dirty pages, so
@@ -143,27 +143,27 @@ TEST(NodeBindingWrapper, NullOnAllParseCreatedNodesAcrossArenaReuse) {
     const char xml[] =
         "<r>text<c/><!--co--><![CDATA[cd]]><?pi data?></r>";
     for (int round = 0; round < 2; round++) {
-        TaurusStatus st = TAURUS_OK;
-        TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &st);
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
         ASSERT_NE(doc, nullptr);
-        TaurusElement r = taurus_document_root(doc);
+        LeptrisElement r = leptris_document_root(doc);
         ASSERT_NE(r, nullptr);
-        TaurusNodeRef n = taurus_node_first_child(taurus_element_as_node(r));
+        LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(r));
         int checked = 0;
         while (n) {
-            EXPECT_EQ(taurus_node_get_binding_wrapper(n), nullptr)
+            EXPECT_EQ(leptris_node_get_binding_wrapper(n), nullptr)
                 << "round " << round << " node " << checked;
-            n = taurus_node_next_sibling(n);
+            n = leptris_node_next_sibling(n);
             checked++;
         }
         ASSERT_GE(checked, 4);   /* text, element, comment, cdata, pi */
-        EXPECT_EQ(taurus_node_get_binding_wrapper(
-                      taurus_element_as_node(r)), nullptr);
-        taurus_document_free(doc);
+        EXPECT_EQ(leptris_node_get_binding_wrapper(
+                      leptris_element_as_node(r)), nullptr);
+        leptris_document_free(doc);
     }
 }
 
-/* Lazy resolution (parse stores byte offsets; taurus_node_line
+/* Lazy resolution (parse stores byte offsets; leptris_node_line
  * resolves against the doc's newline table and caches): repeated
  * queries must be stable, resolution order must not matter, and
  * text/comment nodes must resolve through their parent edge. */
@@ -175,42 +175,42 @@ TEST(NodeLineBug, LazyResolutionIsIdempotentAndOrderIndependent) {
         "  <b/>\n"
         "</root>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement a = taurus_element_first_child(root, "a");
-    TaurusElement b = taurus_element_first_child(root, "b");
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement a = leptris_element_first_child(root, "a");
+    LeptrisElement b = leptris_element_first_child(root, "b");
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
 
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);  /* cached */
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(b)), 4);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);  /* after other */
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(root)), 1);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(a)), 2);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(a)), 2);  /* cached */
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(b)), 4);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(a)), 2);  /* after other */
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(root)), 1);
 
     /* Text child of <a> shares line 2. */
-    TaurusNodeRef n = taurus_node_first_child(taurus_element_as_node(a));
+    LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(a));
     ASSERT_NE(n, nullptr);
-    EXPECT_EQ(taurus_node_line(n), 2);
-    EXPECT_EQ(taurus_node_line(n), 2);
-    taurus_document_free(doc);
+    EXPECT_EQ(leptris_node_line(n), 2);
+    EXPECT_EQ(leptris_node_line(n), 2);
+    leptris_document_free(doc);
 }
 
 TEST(NodeLineBug, RootReportsLine1) {
     auto doc = Parse("<root>\n  <a/>\n</root>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(root)), 1);
-    taurus_document_free(doc);
+    LeptrisElement root = leptris_document_root(doc);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(root)), 1);
+    leptris_document_free(doc);
 }
 
 TEST(NodeLineBug, ChildOnSecondLineReportsTwo) {
     auto doc = Parse("<root>\n  <a/>\n</root>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement a = taurus_element_first_child(root, "a");
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement a = leptris_element_first_child(root, "a");
     ASSERT_NE(a, nullptr);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);
-    taurus_document_free(doc);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(a)), 2);
+    leptris_document_free(doc);
 }
 
 TEST(NodeLineBug, MultilineDocLinesIncrease) {
@@ -221,68 +221,68 @@ TEST(NodeLineBug, MultilineDocLinesIncrease) {
         "  <c/>\n"
         "</root>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement a = taurus_element_first_child(root, "a");
-    TaurusElement b = taurus_element_first_child(root, "b");
-    TaurusElement c = taurus_element_first_child(root, "c");
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement a = leptris_element_first_child(root, "a");
+    LeptrisElement b = leptris_element_first_child(root, "b");
+    LeptrisElement c = leptris_element_first_child(root, "c");
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
     ASSERT_NE(c, nullptr);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(a)), 2);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(b)), 3);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(c)), 4);
-    taurus_document_free(doc);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(a)), 2);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(b)), 3);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(c)), 4);
+    leptris_document_free(doc);
 }
 
 TEST(NodeLineBug, ProgrammaticNodeReportsZero) {
     auto doc = Parse("<root/>");
-    TaurusElement created = taurus_element_create(doc, "fresh");
+    LeptrisElement created = leptris_element_create(doc, "fresh");
     ASSERT_NE(created, nullptr);
-    EXPECT_EQ(taurus_node_line(taurus_element_as_node(created)), 0);
-    taurus_document_free(doc);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(created)), 0);
+    leptris_document_free(doc);
 }
 
 TEST(NodeLineBug, NullReturnsZero) {
-    EXPECT_EQ(taurus_node_line(nullptr), 0);
+    EXPECT_EQ(leptris_node_line(nullptr), 0);
 }
 
 // =====================================================================
-// Minor — taurus_element_has_attribute
+// Minor — leptris_element_has_attribute
 // =====================================================================
 
 TEST(ElementHasAttribute, Returns1ForPresentAttribute) {
     auto doc = Parse("<r a='1' b='2'/>");
-    TaurusElement root = taurus_document_root(doc);
-    EXPECT_EQ(taurus_element_has_attribute(root, "a"), 1);
-    EXPECT_EQ(taurus_element_has_attribute(root, "b"), 1);
-    taurus_document_free(doc);
+    LeptrisElement root = leptris_document_root(doc);
+    EXPECT_EQ(leptris_element_has_attribute(root, "a"), 1);
+    EXPECT_EQ(leptris_element_has_attribute(root, "b"), 1);
+    leptris_document_free(doc);
 }
 
 TEST(ElementHasAttribute, Returns0ForMissingAttribute) {
     auto doc = Parse("<r a='1'/>");
-    TaurusElement root = taurus_document_root(doc);
-    EXPECT_EQ(taurus_element_has_attribute(root, "missing"), 0);
-    taurus_document_free(doc);
+    LeptrisElement root = leptris_document_root(doc);
+    EXPECT_EQ(leptris_element_has_attribute(root, "missing"), 0);
+    leptris_document_free(doc);
 }
 
 TEST(ElementHasAttribute, NullArgsReturn0) {
-    EXPECT_EQ(taurus_element_has_attribute(nullptr, "a"), 0);
+    EXPECT_EQ(leptris_element_has_attribute(nullptr, "a"), 0);
     auto doc = Parse("<r/>");
-    TaurusElement root = taurus_document_root(doc);
-    EXPECT_EQ(taurus_element_has_attribute(root, nullptr), 0);
-    taurus_document_free(doc);
+    LeptrisElement root = leptris_document_root(doc);
+    EXPECT_EQ(leptris_element_has_attribute(root, nullptr), 0);
+    leptris_document_free(doc);
 }
 
 // =====================================================================
-// Minor — taurus_xinclude_get_encoding now exported
+// Minor — leptris_xinclude_get_encoding now exported
 // =====================================================================
 
 TEST(XincludeEncodingAccessor, ReturnsNullForNonIncludeElement) {
     auto doc = Parse("<root/>");
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     // Not an xi:include element → NULL.
-    EXPECT_EQ(taurus_xinclude_get_encoding(root), nullptr);
-    taurus_document_free(doc);
+    EXPECT_EQ(leptris_xinclude_get_encoding(root), nullptr);
+    leptris_document_free(doc);
 }
 
 TEST(XincludeEncodingAccessor, ReturnsEncodingAttr) {
@@ -290,10 +290,10 @@ TEST(XincludeEncodingAccessor, ReturnsEncodingAttr) {
         "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
           "<xi:include href='a.txt' parse='text' encoding='UTF-8'/>"
         "</root>");
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement xi = taurus_element_first_child(root, "include");
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement xi = leptris_element_first_child(root, "include");
     ASSERT_NE(xi, nullptr);
-    const char* enc = taurus_xinclude_get_encoding(xi);
+    const char* enc = leptris_xinclude_get_encoding(xi);
     EXPECT_STREQ(enc, "UTF-8");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }

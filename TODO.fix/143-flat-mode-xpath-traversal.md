@@ -4,7 +4,7 @@ Phase C of TODO 140. The biggest single perf win.
 
 ## Problem
 
-Today, every XPath query triggers promote via taurus_document_root.
+Today, every XPath query triggers promote via leptris_document_root.
 For read-only queries (count, exists, name lookup), the promote
 cost (1.5 µs/elem) is pure overhead — we don't need the
 compact-pointer tree, just the data.
@@ -29,12 +29,12 @@ require promote. The fast paths trigger when:
 ## Implementation sketch
 
 1. Add a `FlatDocNodeset` XPath result variant that holds a list
-   of flat indices instead of TaurusNode pointers.
+   of flat indices instead of LeptrisNode pointers.
 2. Add XPath VM dispatch: if the doc has flat_doc and the expression
    is `count(//name)`, return FlatDocNodeset-based count.
 3. Lazy materialization: when the caller does
-   `taurus_xpath_result_get(result, i)`, promote (if needed) and
-   return the corresponding TaurusElement.
+   `leptris_xpath_result_get(result, i)`, promote (if needed) and
+   return the corresponding LeptrisElement.
 
 ## Expected impact
 

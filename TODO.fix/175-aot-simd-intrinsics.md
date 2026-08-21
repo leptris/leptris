@@ -17,24 +17,24 @@ are achievable AOT:
 
 - Hand-written intrinsics per ISA, compiled once.
 - `__builtin_cpu_supports()` at first call, dispatch table populated.
-- Zero runtime deps, ~2 MB binary, works on every taurus target.
+- Zero runtime deps, ~2 MB binary, works on every leptris target.
 
-taurus's inline amp check (TODO 174) is already this pattern in
+leptris's inline amp check (TODO 174) is already this pattern in
 microcosm. Formalize it.
 
 ## Scope — five phases, one PR each
 
 ### Phase 1 — Compile-time detection (`common/cpu.h`)
 
-- `TAURUS_HAS_SSE42`, `TAURUS_HAS_AVX2`, `TAURUS_HAS_AVX512`,
-  `TAURUS_HAS_NEON`, `TAURUS_HAS_WASM_SIMD` macros.
+- `LEPTRIS_HAS_SSE42`, `LEPTRIS_HAS_AVX2`, `LEPTRIS_HAS_AVX512`,
+  `LEPTRIS_HAS_NEON`, `LEPTRIS_HAS_WASM_SIMD` macros.
 - Detect via `__builtin_cpu_supports` (GCC/Clang) /
   `IsProcessorFeaturePresent` (MSVC) at process startup.
 - CMake `target_compile_definitions` per-ISA source file.
 
 ### Phase 2 — Dispatch table (`common/dispatch.h`)
 
-- `TAURUS_DISPATCH(name, scalar_fn, sse42_fn, avx2_fn, neon_fn)` macro
+- `LEPTRIS_DISPATCH(name, scalar_fn, sse42_fn, avx2_fn, neon_fn)` macro
   expands to a function-pointer resolved at first call.
 - TLS-resolved cache (one indirect call per process, not per parse).
 - Fallback chain: AVX2 → SSE4.2 → NEON → scalar.

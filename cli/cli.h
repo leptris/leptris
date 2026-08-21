@@ -1,8 +1,8 @@
 /**
  * @file cli.h
- * @brief Command interface for Taurus CLI tool
+ * @brief Command interface for Leptris CLI tool
  *
- * This file defines the core command pattern infrastructure for the Taurus
+ * This file defines the core command pattern infrastructure for the Leptris
  * CLI. It provides a registry-based, extensible architecture where each
  * command implements a common interface.
  *
@@ -13,8 +13,8 @@
  * - Separation of Concerns: CLI → API → Library (clear layers)
  */
 
-#ifndef TAURUS_CLI_H
-#define TAURUS_CLI_H
+#ifndef LEPTRIS_CLI_H
+#define LEPTRIS_CLI_H
 
 #include <stddef.h>
 
@@ -67,7 +67,7 @@ typedef enum {
  * }
  *
  * void parse_print_help(void) {
- *     printf("Usage: taurus parse [OPTIONS] FILE\n");
+ *     printf("Usage: leptris parse [OPTIONS] FILE\n");
  *     // ... more help text
  * }
  *
@@ -95,8 +95,8 @@ typedef struct cli_command {
     /**
      * Print command-specific help
      *
-     * Called when user runs: taurus help <command>
-     * or: taurus <command> --help
+     * Called when user runs: leptris help <command>
+     * or: leptris <command> --help
      */
     void (*print_help)(void);
 } cli_command_t;
@@ -179,7 +179,7 @@ void cli_registry_print_all(const cli_registry_t* registry);
 /**
  * Get the 'parse' command
  *
- * Command: taurus parse [OPTIONS] FILE
+ * Command: leptris parse [OPTIONS] FILE
  * Purpose: Parse and validate XML files
  */
 extern cli_command_t* cli_command_parse(void);
@@ -187,7 +187,7 @@ extern cli_command_t* cli_command_parse(void);
 /**
  * Get the 'xpath' command
  *
- * Command: taurus xpath [OPTIONS] FILE EXPR
+ * Command: leptris xpath [OPTIONS] FILE EXPR
  * Purpose: Execute XPath queries
  */
 extern cli_command_t* cli_command_xpath(void);
@@ -195,7 +195,7 @@ extern cli_command_t* cli_command_xpath(void);
 /**
  * Get the 'format' command
  *
- * Command: taurus format [OPTIONS] FILE
+ * Command: leptris format [OPTIONS] FILE
  * Purpose: Pretty-print XML
  */
 extern cli_command_t* cli_command_format(void);
@@ -203,7 +203,7 @@ extern cli_command_t* cli_command_format(void);
 /**
  * Get the 'version' command
  *
- * Command: taurus version
+ * Command: leptris version
  * Purpose: Show version information
  */
 extern cli_command_t* cli_command_version(void);
@@ -212,4 +212,4 @@ extern cli_command_t* cli_command_version(void);
 }
 #endif
 
-#endif /* TAURUS_CLI_H */
+#endif /* LEPTRIS_CLI_H */

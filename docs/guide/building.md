@@ -1,4 +1,4 @@
-# Building Taurus
+# Building Leptris
 
 ## Prerequisites
 
@@ -28,31 +28,31 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The default build produces the static library (`libtaurus.a`), the `taurus` CLI binary, and the full Google Test suite.
+The default build produces the static library (`libleptris.a`), the `leptris` CLI binary, and the full Google Test suite.
 
 ## Build Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `BUILD_TESTING` | `ON` | Build Google Test suite |
-| `TAURUS_BUILD_CLI` | `ON` | Build the `taurus` CLI tool |
-| `TAURUS_BUILD_STATIC` | `ON` | Build `libtaurus.a` |
-| `TAURUS_BUILD_SHARED` | `OFF` | Build `libtaurus.{so,dylib,dll}` |
-| `TAURUS_BUILD_BENCHMARKS` | `OFF` | Performance comparison targets |
-| `TAURUS_BUILD_MAN_PAGES` | `OFF` | Generate man pages from AsciiDoc |
-| `TAURUS_BUILD_DOCS` | `OFF` | Generate Doxygen HTML docs |
-| `TAURUS_ENABLE_UTF8PROC` | `ON` | UTF-8 validation via utf8proc |
-| `TAURUS_ENABLE_ICONV` | `ON` | Encoding conversion via iconv |
-| `TAURUS_ENABLE_ASAN` | `OFF` | Build with AddressSanitizer |
-| `TAURUS_ENABLE_FUZZING` | `OFF` | Build libFuzzer harness |
-| `TAURUS_ENABLE_PGO` | `OFF` | Profile-guided optimization phase: `OFF`, `GENERATE`, or `USE`. See [PGO](#pgo-build) below. |
+| `LEPTRIS_BUILD_CLI` | `ON` | Build the `leptris` CLI tool |
+| `LEPTRIS_BUILD_STATIC` | `ON` | Build `libleptris.a` |
+| `LEPTRIS_BUILD_SHARED` | `OFF` | Build `libleptris.{so,dylib,dll}` |
+| `LEPTRIS_BUILD_BENCHMARKS` | `OFF` | Performance comparison targets |
+| `LEPTRIS_BUILD_MAN_PAGES` | `OFF` | Generate man pages from AsciiDoc |
+| `LEPTRIS_BUILD_DOCS` | `OFF` | Generate Doxygen HTML docs |
+| `LEPTRIS_ENABLE_UTF8PROC` | `ON` | UTF-8 validation via utf8proc |
+| `LEPTRIS_ENABLE_ICONV` | `ON` | Encoding conversion via iconv |
+| `LEPTRIS_ENABLE_ASAN` | `OFF` | Build with AddressSanitizer |
+| `LEPTRIS_ENABLE_FUZZING` | `OFF` | Build libFuzzer harness |
+| `LEPTRIS_ENABLE_PGO` | `OFF` | Profile-guided optimization phase: `OFF`, `GENERATE`, or `USE`. See [PGO](#pgo-build) below. |
 
 ## PGO build
 
 Profile-guided optimization lets the compiler specialise the
 hot paths in the bytecode VM dispatch loop, the parser's tight
 scan loops, and the XPath predicate filter loops. In our tests
-on macOS arm64 + clang, PGO shaves ~8% off `bench_xpath_taurus`
+on macOS arm64 + clang, PGO shaves ~8% off `bench_xpath_leptris`
 total time vs the LTO-only baseline. Works on clang, GCC, and
 MSVC — no GCC-isms.
 
@@ -61,16 +61,16 @@ The build is a three-step process:
 ```bash
 # 1. Build with instrumentation.
 cmake -B build-pgo -S . -DCMAKE_BUILD_TYPE=Release \
-                     -DTAURUS_ENABLE_PGO=GENERATE \
-                     -DTAURUS_BUILD_BENCHMARKS=ON
+                     -DLEPTRIS_ENABLE_PGO=GENERATE \
+                     -DLEPTRIS_BUILD_BENCHMARKS=ON
 cmake --build build-pgo -j
 
 # 2. Run a representative workload against the instrumented
 #    binary. The test suite + benchmark suite is a good default;
-#    if you ship taurus inside another app, use *its* test suite
+#    if you ship leptris inside another app, use *its* test suite
 #    instead so the profile matches real traffic.
 ctest --test-dir build-pgo
-build-pgo/benchmarks/bench_xpath_taurus > /dev/null
+build-pgo/benchmarks/bench_xpath_leptris > /dev/null
 build-pgo/benchmarks/bench_xpath_pugixml > /dev/null
 
 # 3a. clang only: merge the .profraw into a single .profdata.
@@ -81,8 +81,8 @@ xcrun llvm-profdata merge \
 
 # 3b. Rebuild with the profile applied.
 cmake -B build-pgo -S . -DCMAKE_BUILD_TYPE=Release \
-                     -DTAURUS_ENABLE_PGO=USE \
-                     -DTAURUS_BUILD_BENCHMARKS=ON
+                     -DLEPTRIS_ENABLE_PGO=USE \
+                     -DLEPTRIS_BUILD_BENCHMARKS=ON
 cmake --build build-pgo -j
 ```
 
@@ -95,16 +95,16 @@ last ~10% on XPath dispatch should enable it.
 Default is static. To build a shared library instead:
 
 ```bash
-cmake -B build -S . -DTAURUS_BUILD_STATIC=OFF -DTAURUS_BUILD_SHARED=ON \
+cmake -B build -S . -DLEPTRIS_BUILD_STATIC=OFF -DLEPTRIS_BUILD_SHARED=ON \
                 -DCMAKE_BUILD_TYPE=Release
 ```
 
-The shared library carries an SOVERSION matching the major version (`libtaurus.so.0`).
+The shared library carries an SOVERSION matching the major version (`libleptris.so.0`).
 
 ## ASAN Build
 
 ```bash
-cmake -B build-asan -S . -DTAURUS_ENABLE_ASAN=ON -DBUILD_TESTING=ON \
+cmake -B build-asan -S . -DLEPTRIS_ENABLE_ASAN=ON -DBUILD_TESTING=ON \
                      -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-asan
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ctest --test-dir build-asan
@@ -121,7 +121,7 @@ leaks --atExit -- ./build/test/test_dom
 ```bash
 brew install llvm   # macOS
 export CC=/opt/homebrew/opt/llvm/bin/clang
-cmake -B build-fuzz -S . -DTAURUS_ENABLE_FUZZING=ON
+cmake -B build-fuzz -S . -DLEPTRIS_ENABLE_FUZZING=ON
 cmake --build build-fuzz --target fuzz_parse
 ./build-fuzz/test/fuzz_parse test/fixtures/*.xml
 ```
@@ -130,7 +130,7 @@ cmake --build build-fuzz --target fuzz_parse
 
 ```bash
 brew install doxygen     # or: sudo apt-get install doxygen
-cmake -B build -S . -DTAURUS_BUILD_DOCS=ON
+cmake -B build -S . -DLEPTRIS_BUILD_DOCS=ON
 cmake --build build --target docs
 # Open build/docs/api-generated/html/index.html
 ```
@@ -141,24 +141,24 @@ cmake --build build --target docs
 cmake --install build --prefix /usr/local
 ```
 
-Installs headers under `include/taurus/`, the static library under `lib/`, and the CLI under `bin/`. pkg-config and CMake config files are installed for downstream consumers.
+Installs headers under `include/leptris/`, the static library under `lib/`, and the CLI under `bin/`. pkg-config and CMake config files are installed for downstream consumers.
 
 ### Downstream CMake
 
 ```cmake
-find_package(taurus CONFIG REQUIRED)
-target_link_libraries(my_app PRIVATE taurus::taurus)
+find_package(leptris CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE leptris::leptris)
 ```
 
 ### Downstream pkg-config
 
 ```bash
-gcc app.c $(pkg-config --cflags --libs taurus)
+gcc app.c $(pkg-config --cflags --libs leptris)
 ```
 
 ## Using vcpkg
 
-Taurus ships a vcpkg overlay port under `ports/taurus/`. Use it directly:
+Leptris ships a vcpkg overlay port under `ports/leptris/`. Use it directly:
 
 ```bash
 cmake -B build -S . \
@@ -166,18 +166,18 @@ cmake -B build -S . \
     -DCMAKE_SOURCE_PATH=$PWD
 ```
 
-Or copy `ports/taurus/` into your vcpkg overlay ports directory.
+Or copy `ports/leptris/` into your vcpkg overlay ports directory.
 
 ## Runtime Configuration
 
-Taurus exposes thread-default configuration that is inherited by every document parsed on that thread:
+Leptris exposes thread-default configuration that is inherited by every document parsed on that thread:
 
-- `taurus_set_max_depth(int)` — overrides the 256-element nesting cap (DoS protection).
-- `taurus_set_strict_mode(int)` — enables strict XML well-formedness checks (rejects unknown entities, missing semicolons, etc.).
-- `taurus_document_set_strict(doc, int)` — overrides strict mode per-document.
-- `taurus_document_set_allocators(doc, alloc, dealloc)` — routes document-scoped allocations through custom hooks.
+- `leptris_set_max_depth(int)` — overrides the 256-element nesting cap (DoS protection).
+- `leptris_set_strict_mode(int)` — enables strict XML well-formedness checks (rejects unknown entities, missing semicolons, etc.).
+- `leptris_document_set_strict(doc, int)` — overrides strict mode per-document.
+- `leptris_document_set_allocators(doc, alloc, dealloc)` — routes document-scoped allocations through custom hooks.
 
-See `src/include/taurus.h` for the complete public API.
+See `src/include/leptris.h` for the complete public API.
 
 ## Running Tests
 

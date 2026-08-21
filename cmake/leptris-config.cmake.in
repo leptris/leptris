@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# leptris records its link dependencies (utf8proc, Iconv, m) on the
+# leptris_static / leptris_shared targets' INTERFACE_LINK_LIBRARIES,
+# so a downstream project does not need to find_dependency() them
+# manually.  No additional find_dependency() calls here.
+
+if(NOT TARGET leptris::leptris)
+    include("${CMAKE_CURRENT_LIST_DIR}/leptris-targets.cmake")
+endif()
+
+check_required_components(leptris)

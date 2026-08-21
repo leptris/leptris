@@ -1,7 +1,7 @@
 // test/xpath/test_xpath_conformance.cpp
 //
 // Exhaustive per-feature coverage of the XPath 1.0 surface that
-// taurus exposes. This is the in-tree fallback for TODO 69 (the
+// leptris exposes. This is the in-tree fallback for TODO 69 (the
 // full W3C XPath 1.0 conformance suite is not committed; this file
 // gives every function, axis, and operator at least one direct
 // spec so regressions surface quickly).
@@ -13,12 +13,12 @@
 // Engine gaps previously documented here have been fixed:
 //   - //comment() and //processing-instruction() now traverse correctly
 //     (TODO 109, fixed by the matches_node_test / axis dispatcher
-//     rewrite that accepts TaurusNode* and skips non-element contexts
+//     rewrite that accepts LeptrisNode* and skips non-element contexts
 //     for the element-only axes).
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <cmath>
 #include <cstring>
@@ -26,47 +26,47 @@
 
 namespace {
 
-TaurusDocument Parse(const char* xml) {
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, std::strlen(xml), &st);
+LeptrisDocument Parse(const char* xml) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     EXPECT_NE(doc, nullptr);
     return doc;
 }
 
-double Num(TaurusDocument doc, const char* expr) {
-    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, expr);
+double Num(LeptrisDocument doc, const char* expr) {
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
     EXPECT_NE(r, nullptr);
-    double v = r ? taurus_xpath_result_number(r) : NAN;
-    if (r) taurus_xpath_result_free(r);
+    double v = r ? leptris_xpath_result_number(r) : NAN;
+    if (r) leptris_xpath_result_free(r);
     return v;
 }
 
-int Bool(TaurusDocument doc, const char* expr) {
-    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, expr);
+int Bool(LeptrisDocument doc, const char* expr) {
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
     EXPECT_NE(r, nullptr);
-    int v = r ? taurus_xpath_result_boolean(r) : 0;
-    if (r) taurus_xpath_result_free(r);
+    int v = r ? leptris_xpath_result_boolean(r) : 0;
+    if (r) leptris_xpath_result_free(r);
     return v;
 }
 
-std::string Str(TaurusDocument doc, const char* expr) {
-    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, expr);
+std::string Str(LeptrisDocument doc, const char* expr) {
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
     EXPECT_NE(r, nullptr);
     std::string out;
     if (r) {
-        char* s = taurus_xpath_result_string(r);
+        char* s = leptris_xpath_result_string(r);
         if (s) out = s;
-        taurus_free_string(s);
-        taurus_xpath_result_free(r);
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
     }
     return out;
 }
 
-size_t Count(TaurusDocument doc, const char* expr) {
-    TaurusXPathResult r = taurus_xpath_eval(doc, nullptr, expr);
+size_t Count(LeptrisDocument doc, const char* expr) {
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
     EXPECT_NE(r, nullptr);
-    size_t n = r ? taurus_xpath_result_count(r) : 0u;
-    if (r) taurus_xpath_result_free(r);
+    size_t n = r ? leptris_xpath_result_count(r) : 0u;
+    if (r) leptris_xpath_result_free(r);
     return n;
 }
 
@@ -96,7 +96,7 @@ TEST(XPathConformanceString, ConcatJoinsAllArgs) {
     EXPECT_EQ(Str(doc, "concat('foo','bar','baz')"), "foobarbaz");
     EXPECT_EQ(Str(doc, "concat('a','b')"), "ab");
     EXPECT_EQ(Str(doc, "concat('', '')"), "");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, StartsWithIsPrefixTest) {
@@ -105,7 +105,7 @@ TEST(XPathConformanceString, StartsWithIsPrefixTest) {
     EXPECT_TRUE(Bool(doc, "starts-with('hello','hello')"));
     EXPECT_FALSE(Bool(doc, "starts-with('hello','world')"));
     EXPECT_TRUE(Bool(doc, "starts-with('hello','')"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, ContainsIsSubstringTest) {
@@ -113,7 +113,7 @@ TEST(XPathConformanceString, ContainsIsSubstringTest) {
     EXPECT_TRUE(Bool(doc, "contains('hello','ell')"));
     EXPECT_TRUE(Bool(doc, "contains('hello','')"));
     EXPECT_FALSE(Bool(doc, "contains('hello','xyz')"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, SubstringIsOneIndexed) {
@@ -121,7 +121,7 @@ TEST(XPathConformanceString, SubstringIsOneIndexed) {
     EXPECT_EQ(Str(doc, "substring('hello',2)"), "ello");
     EXPECT_EQ(Str(doc, "substring('hello',2,3)"), "ell");
     EXPECT_EQ(Str(doc, "substring('hello',1,5)"), "hello");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, SubstringMatchesW3CSpecExamples) {
@@ -134,7 +134,7 @@ TEST(XPathConformanceString, SubstringMatchesW3CSpecExamples) {
     EXPECT_EQ(Str(doc, "substring('12345', 0, 3)"), "12");
     // -1 div 0 = -Inf start: no positions satisfy p >= -Inf AND p < -Inf+5.
     EXPECT_EQ(Str(doc, "substring('12345', -1 div 0, 5)"), "");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, SubstringHandlesNanAndInf) {
@@ -144,21 +144,21 @@ TEST(XPathConformanceString, SubstringHandlesNanAndInf) {
     EXPECT_EQ(Str(doc, "substring('hello', 1, 0 div 0)"), "");
     // +Inf length yields the suffix from `start`.
     EXPECT_EQ(Str(doc, "substring('hello', 2, 1 div 0)"), "ello");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, SubstringBeforeReturnsPrefix) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Str(doc, "substring-before('hello world',' ')"), "hello");
     EXPECT_EQ(Str(doc, "substring-before('hello','x')"), "");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, SubstringAfterReturnsSuffix) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Str(doc, "substring-after('hello world',' ')"), "world");
     EXPECT_EQ(Str(doc, "substring-after('hello','x')"), "");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, StringLengthCountsChars) {
@@ -166,7 +166,7 @@ TEST(XPathConformanceString, StringLengthCountsChars) {
     EXPECT_DOUBLE_EQ(Num(doc, "string-length('hello')"), 5.0);
     EXPECT_DOUBLE_EQ(Num(doc, "string-length('')"), 0.0);
     EXPECT_DOUBLE_EQ(Num(doc, "string-length('a b c')"), 5.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, NormalizeSpaceCollapsesRuns) {
@@ -174,7 +174,7 @@ TEST(XPathConformanceString, NormalizeSpaceCollapsesRuns) {
     EXPECT_EQ(Str(doc, "normalize-space('  hello   world  ')"), "hello world");
     EXPECT_EQ(Str(doc, "normalize-space('single')"), "single");
     EXPECT_EQ(Str(doc, "normalize-space('   ')"), "");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceString, TranslateSubstitutesChars) {
@@ -182,7 +182,7 @@ TEST(XPathConformanceString, TranslateSubstitutesChars) {
     EXPECT_EQ(Str(doc, "translate('abc','ab','AB')"), "ABc");
     EXPECT_EQ(Str(doc, "translate('abc','ab','')"), "c");
     EXPECT_EQ(Str(doc, "translate('foobar','fo','ba')"), "baabar");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // ============================================================================
@@ -196,7 +196,7 @@ TEST(XPathConformanceBoolean, BooleanIsTrueForNonEmpty) {
     EXPECT_TRUE(Bool(doc, "boolean(1)"));
     EXPECT_FALSE(Bool(doc, "boolean(0)"));
     EXPECT_TRUE(Bool(doc, "boolean(/catalog/book)"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceBoolean, NotInvertsValue) {
@@ -204,20 +204,20 @@ TEST(XPathConformanceBoolean, NotInvertsValue) {
     EXPECT_FALSE(Bool(doc, "not(true())"));
     EXPECT_TRUE(Bool(doc, "not(false())"));
     EXPECT_TRUE(Bool(doc, "not('')"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceBoolean, TrueAndFalseAreConstants) {
     auto doc = Parse(kCatalog);
     EXPECT_TRUE(Bool(doc, "true()"));
     EXPECT_FALSE(Bool(doc, "false()"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceBoolean, LangMatchesLanguage) {
     auto doc = Parse("<r xml:lang='en'><a/></r>");
     EXPECT_TRUE(Bool(doc, "lang('en')"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // ============================================================================
@@ -229,13 +229,13 @@ TEST(XPathConformanceNumber, NumberParsesString) {
     EXPECT_DOUBLE_EQ(Num(doc, "number('42.5')"), 42.5);
     EXPECT_DOUBLE_EQ(Num(doc, "number('0')"), 0.0);
     EXPECT_TRUE(std::isnan(Num(doc, "number('hello')")));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNumber, SumAggregatesNodeSetText) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "sum(//price)"), 60.0);  // 10 + 20 + 30
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNumber, FloorRoundsDown) {
@@ -243,7 +243,7 @@ TEST(XPathConformanceNumber, FloorRoundsDown) {
     EXPECT_DOUBLE_EQ(Num(doc, "floor(3.7)"), 3.0);
     EXPECT_DOUBLE_EQ(Num(doc, "floor(-3.7)"), -4.0);
     EXPECT_DOUBLE_EQ(Num(doc, "floor(3.0)"), 3.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNumber, CeilingRoundsUp) {
@@ -251,7 +251,7 @@ TEST(XPathConformanceNumber, CeilingRoundsUp) {
     EXPECT_DOUBLE_EQ(Num(doc, "ceiling(3.2)"), 4.0);
     EXPECT_DOUBLE_EQ(Num(doc, "ceiling(-3.2)"), -3.0);
     EXPECT_DOUBLE_EQ(Num(doc, "ceiling(3.0)"), 3.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNumber, RoundRoundsHalfToPositiveInfinity) {
@@ -259,7 +259,7 @@ TEST(XPathConformanceNumber, RoundRoundsHalfToPositiveInfinity) {
     EXPECT_DOUBLE_EQ(Num(doc, "round(3.5)"), 4.0);
     EXPECT_DOUBLE_EQ(Num(doc, "round(3.4)"), 3.0);
     EXPECT_DOUBLE_EQ(Num(doc, "round(-3.5)"), -3.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // ============================================================================
@@ -270,38 +270,38 @@ TEST(XPathConformanceNodeSet, CountReturnsNodeSetSize) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "count(//book)"), 3.0);
     EXPECT_DOUBLE_EQ(Num(doc, "count(//*)"), 10.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeSet, LocalNameReturnsElementLocalName) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Str(doc, "local-name(/catalog/book[1])"), "book");
     EXPECT_EQ(Str(doc, "local-name(/catalog)"), "catalog");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeSet, NameReturnsQualifiedElementName) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Str(doc, "name(/catalog/book[1])"), "book");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeSet, NamespaceUriReturnsUriForNamespacedNode) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Str(doc, "namespace-uri(/catalog/book[1])"), "");
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeSet, PositionReturnsContextPosition) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "position()"), 1.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeSet, LastReturnsContextSize) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "last()"), 1.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeSet, IdSelectsByIdAttribute) {
@@ -309,7 +309,7 @@ TEST(XPathConformanceNodeSet, IdSelectsByIdAttribute) {
     EXPECT_EQ(Count(doc, "id('b1')"), 1u);
     EXPECT_EQ(Count(doc, "id('b1 b2')"), 2u);
     EXPECT_EQ(Count(doc, "id('nope')"), 0u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // ============================================================================
@@ -320,33 +320,33 @@ TEST(XPathConformanceAxes, ChildAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "/catalog/child::book"), 3u);
     EXPECT_EQ(Count(doc, "/catalog/book"), 3u);  // child is default
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, DescendantAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "/catalog/descendant::*"), 9u);  // 3 books + 3 titles + 3 prices
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, DescendantOrSelfAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "/catalog/descendant-or-self::*"), 10u);  // catalog + 9 descendants
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, ParentAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "//book/parent::*"), 1u);  // all books share parent — deduped
     EXPECT_EQ(Count(doc, "//title/parent::book"), 3u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, AncestorAxis) {
     auto doc = Parse(kCatalog);
     // Each title has 2 ancestors (book, catalog); dedup across titles = 4.
     EXPECT_EQ(Count(doc, "//title/ancestor::*"), 4u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, AncestorOrSelfAxis) {
@@ -356,56 +356,56 @@ TEST(XPathConformanceAxes, AncestorOrSelfAxis) {
     EXPECT_EQ(Count(doc, "//title[1]/ancestor-or-self::*"), 7u);
     // A single-title path collapses to title + book + catalog = 3.
     EXPECT_EQ(Count(doc, "/catalog/book[1]/title/ancestor-or-self::*"), 3u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, FollowingSiblingAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "//book[1]/following-sibling::*"), 2u);
     EXPECT_EQ(Count(doc, "//book[3]/following-sibling::*"), 0u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, PrecedingSiblingAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "//book[2]/preceding-sibling::*"), 1u);
     EXPECT_EQ(Count(doc, "//book[1]/preceding-sibling::*"), 0u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, FollowingAxis) {
     auto doc = Parse(kCatalog);
     // book[1] is followed by: book2 + title + price + book3 + title + price = 6.
     EXPECT_EQ(Count(doc, "//book[1]/following::*"), 6u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, PrecedingAxis) {
     auto doc = Parse(kCatalog);
     // book[3] is preceded by: book1 + title + price + book2 + title + price = 6.
     EXPECT_EQ(Count(doc, "//book[3]/preceding::*"), 6u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, SelfAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "/catalog/self::*"), 1u);
     EXPECT_EQ(Count(doc, "//book/self::*"), 3u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, AttributeAxis) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "//book/@id"), 3u);
     EXPECT_EQ(Count(doc, "//book[1]/attribute::id"), 1u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceAxes, NamespaceAxisIncludesImplicitXml) {
     auto doc = Parse(kCatalog);
     // namespace:: axis always returns at least the implicit 'xml' binding.
     EXPECT_GE(Count(doc, "//book/namespace::*"), 1u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // ============================================================================
@@ -416,14 +416,14 @@ TEST(XPathConformanceOperators, ArithmeticAddition) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "1 + 2"), 3.0);
     EXPECT_DOUBLE_EQ(Num(doc, "1.5 + 2.5"), 4.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, ArithmeticSubtraction) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "10 - 3"), 7.0);
     EXPECT_DOUBLE_EQ(Num(doc, "10 - 3 - 2"), 5.0);  // left-associative
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, ArithmeticMultiplication) {
@@ -431,42 +431,42 @@ TEST(XPathConformanceOperators, ArithmeticMultiplication) {
     EXPECT_DOUBLE_EQ(Num(doc, "3 * 4"), 12.0);
     EXPECT_DOUBLE_EQ(Num(doc, "1 + 2 * 3"), 7.0);  // precedence
     EXPECT_DOUBLE_EQ(Num(doc, "(1 + 2) * 3"), 9.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, ArithmeticDivision) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "10 div 2"), 5.0);
     EXPECT_NEAR(Num(doc, "10 div 3"), 3.33333, 0.0001);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, ArithmeticModulo) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "10 mod 3"), 1.0);
     EXPECT_DOUBLE_EQ(Num(doc, "10 mod 4"), 2.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, UnaryNegation) {
     auto doc = Parse(kCatalog);
     EXPECT_DOUBLE_EQ(Num(doc, "-5"), -5.0);
     EXPECT_DOUBLE_EQ(Num(doc, "-3 + 5"), 2.0);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, Equality) {
     auto doc = Parse(kCatalog);
     EXPECT_TRUE(Bool(doc, "1 = 1"));
     EXPECT_FALSE(Bool(doc, "1 = 2"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, Inequality) {
     auto doc = Parse(kCatalog);
     EXPECT_TRUE(Bool(doc, "1 != 2"));
     EXPECT_FALSE(Bool(doc, "1 != 1"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, LessThan) {
@@ -474,7 +474,7 @@ TEST(XPathConformanceOperators, LessThan) {
     EXPECT_TRUE(Bool(doc, "1 < 2"));
     EXPECT_FALSE(Bool(doc, "2 < 1"));
     EXPECT_FALSE(Bool(doc, "2 < 2"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, LessOrEqual) {
@@ -482,7 +482,7 @@ TEST(XPathConformanceOperators, LessOrEqual) {
     EXPECT_TRUE(Bool(doc, "2 <= 2"));
     EXPECT_TRUE(Bool(doc, "1 <= 2"));
     EXPECT_FALSE(Bool(doc, "3 <= 2"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, GreaterThan) {
@@ -490,7 +490,7 @@ TEST(XPathConformanceOperators, GreaterThan) {
     EXPECT_TRUE(Bool(doc, "3 > 2"));
     EXPECT_FALSE(Bool(doc, "2 > 3"));
     EXPECT_FALSE(Bool(doc, "2 > 2"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, GreaterOrEqual) {
@@ -498,7 +498,7 @@ TEST(XPathConformanceOperators, GreaterOrEqual) {
     EXPECT_TRUE(Bool(doc, "2 >= 2"));
     EXPECT_TRUE(Bool(doc, "3 >= 2"));
     EXPECT_FALSE(Bool(doc, "1 >= 2"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, BooleanAnd) {
@@ -506,7 +506,7 @@ TEST(XPathConformanceOperators, BooleanAnd) {
     EXPECT_TRUE(Bool(doc, "true() and true()"));
     EXPECT_FALSE(Bool(doc, "true() and false()"));
     EXPECT_FALSE(Bool(doc, "false() and false()"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, BooleanOr) {
@@ -514,14 +514,14 @@ TEST(XPathConformanceOperators, BooleanOr) {
     EXPECT_TRUE(Bool(doc, "true() or false()"));
     EXPECT_TRUE(Bool(doc, "false() or true()"));
     EXPECT_FALSE(Bool(doc, "false() or false()"));
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceOperators, UnionCombinesNodeSets) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "//book | //price"), 6u);
     EXPECT_EQ(Count(doc, "//book[1] | //book[1]"), 1u);  // deduped
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // ============================================================================
@@ -531,7 +531,7 @@ TEST(XPathConformanceOperators, UnionCombinesNodeSets) {
 TEST(XPathConformanceNodeTest, TextMatchesTextNodes) {
     auto doc = Parse(kCatalog);
     EXPECT_EQ(Count(doc, "//title/text()"), 3u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeTest, CommentMatchesComments) {
@@ -539,13 +539,13 @@ TEST(XPathConformanceNodeTest, CommentMatchesComments) {
     EXPECT_EQ(Count(doc, "//comment()"), 2u);
     EXPECT_EQ(Count(doc, "/r/comment()"), 2u);
     EXPECT_EQ(Count(doc, "count(//comment()) > 0"), 0u);  // count returns number
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeTest, ProcessingInstructionMatchesAny) {
     auto doc = Parse("<r>x<?xml-stylesheet href='x.y'?><?other data?></r>");
     EXPECT_EQ(Count(doc, "//processing-instruction()"), 2u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeTest, ProcessingInstructionMatchesByTarget) {
@@ -553,7 +553,7 @@ TEST(XPathConformanceNodeTest, ProcessingInstructionMatchesByTarget) {
     EXPECT_EQ(Count(doc, "//processing-instruction('xml-stylesheet')"), 1u);
     EXPECT_EQ(Count(doc, "//processing-instruction('other')"), 1u);
     EXPECT_EQ(Count(doc, "//processing-instruction('nope')"), 0u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(XPathConformanceNodeTest, NodeMatchesAnyKind) {
@@ -564,5 +564,5 @@ TEST(XPathConformanceNodeTest, NodeMatchesAnyKind) {
     auto doc = Parse("<r><!-- one --><!-- two -->x<?pi data?></r>");
     EXPECT_EQ(Count(doc, "/r/node()"), 4u);
     EXPECT_EQ(Count(doc, "//node()"), 4u);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
