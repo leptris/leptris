@@ -182,11 +182,13 @@ static TAURUS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
  *
  * TODO 179 Phase B: text/comment/cdata/pi siblings migrated to cp16
  * (2-byte compact pointer). Element still uses int32 — split tables. */
-static const size_t dp_ns_off_int32[1] = {
+static const size_t dp_ns_off_int32[2] = {
     offsetof(struct taurus_element,  next_sibling_off),
+    offsetof(TaurusTextNode,        next_sibling_off),
 };
-static const size_t dp_ns_off_cp16[4] = {
-    offsetof(TaurusTextNode,        next_sibling_cp),
+/* comment/cdata/pi siblings: cp16 through the encoder (overflow
+ * table covers far pairs). Index by node type - 2. */
+static const size_t dp_ns_off_cp16[3] = {
     offsetof(TaurusCommentNode,     next_sibling_cp),
     offsetof(TaurusCDATANode,       next_sibling_cp),
     offsetof(TaurusPINode,          next_sibling_cp),
@@ -212,11 +214,14 @@ static inline void dp_wire_child(DParser* p, TaurusElement parent,
     TaurusNode* prev_last = p->last_child_stack[p->depth - 1];
     if (prev_last) {
         unsigned pt = (unsigned)prev_last->type;
-        if (pt == TAURUS_NODE_TYPE_ELEMENT) {
-            /* Element siblings: int32 byte offset. */
+        if (pt == TAURUS_NODE_TYPE_ELEMENT ||
+            pt == TAURUS_NODE_TYPE_TEXT) {
+            /* Element AND text siblings: int32 byte offset (#450
+             * moved text off cp16 — element↔text block distances
+             * exceed cp16's ±256 KB on large documents). */
             int32_t sib_off = (int32_t)((char*)child - (char*)prev_last);
-            *(int32_t*)((char*)prev_last + dp_ns_off_int32[0]) = sib_off;
-        } else if (pt >= TAURUS_NODE_TYPE_TEXT && pt <= TAURUS_NODE_TYPE_PI) {
+            *(int32_t*)((char*)prev_last + dp_ns_off_int32[pt == TAURUS_NODE_TYPE_TEXT]) = sib_off;
+        } else if (pt >= TAURUS_NODE_TYPE_COMMENT && pt <= TAURUS_NODE_TYPE_PI) {
             /* text/comment/cdata/pi siblings: cp16 compact pointer.
              * (#450) MUST go through the encoder: a text node
              * followed by an element sibling spans the elem↔text
@@ -230,7 +235,7 @@ static inline void dp_wire_child(DParser* p, TaurusElement parent,
              * O(1) since v0.25.11) handles the far case; the common
              * in-range case still compiles to the same direct store
              * plus one bounds check. */
-            int16_t* field = (int16_t*)((char*)prev_last + dp_ns_off_cp16[pt - 1]);
+            int16_t* field = (int16_t*)((char*)prev_last + dp_ns_off_cp16[pt - 2]);
             *field = taurus_compact_ptr16_encode(prev_last, child, 3, field);
         }
     } else {
@@ -684,7 +689,7 @@ static inline TaurusTextNode* dp_text_create(DParser* p,
     tn->pool = p->pool;
     tn->borrowed = 1;
     tn->parent_off = 0;
-    tn->next_sibling_cp = 0;
+    tn->next_sibling_off = 0;
     return tn;
 }
 
