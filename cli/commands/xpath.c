@@ -303,6 +303,8 @@ static cli_result_t xpath_execute(int argc, char** argv) {
             case XPATH_RESULT_STRING:
                 result_type = "string";
                 break;
+            case XPATH_RESULT_CACHED:
+                break;
         }
         fprintf(stderr, "[leptris] Parsed: %s\n", opts->input_file);
         fprintf(stderr, "[leptris] XPath: %s\n", opts->expression);
@@ -376,6 +378,9 @@ static cli_result_t xpath_execute(int argc, char** argv) {
                     stdout,
                     fmt->context
                 );
+                break;
+
+            case XPATH_RESULT_CACHED:
                 break;
         }
     }
