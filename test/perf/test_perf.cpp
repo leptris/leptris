@@ -75,26 +75,28 @@ double MemcpyRefUs(const char* xml, size_t len, int iters) {
 
 TEST(PerfRegression, SmallDocumentParseIsFast) {
     const char xml[] = "<root><item id='1'>text</item><item id='2'/></root>";
-    /* Min-of-3 both sides: shared runners preempt the CPU-bound
-     * parse while the cache-resident memcpy reference sails through,
-     * inflating the ratio without any regression. */
-    double parse_us = 1e18, ref_us = 1e18;
-    for (int rep = 0; rep < 3; rep++) {
-        double a = ParseBenchUs(xml, std::strlen(xml), 5000);
-        double b = MemcpyRefUs(xml, std::strlen(xml), 5000);
-        if (a < parse_us) parse_us = a;
-        if (b < ref_us) ref_us = b;
+    /* Per-rep ratio, min of 4 reps: parse and its memcpy reference
+     * are measured back-to-back within a rep, so uniform background
+     * load inflates both sides and the ratio survives; a transient
+     * preemption hitting one rep's parse is filtered out by the min.
+     * (Taking independent minimums of the two sides mixed load
+     * regimes and flaked on shared CI runners — the parse side is
+     * CPU-bound while the cache-resident memcpy sails through.) */
+    double best = 1e18;
+    for (int rep = 0; rep < 4; rep++) {
+        double ratio = ParseBenchUs(xml, std::strlen(xml), 5000) /
+                       MemcpyRefUs(xml, std::strlen(xml), 5000);
+        if (ratio < best) best = ratio;
     }
     /* Parse does far more work than memcpy over the same bytes, but
      * the multiple is a property of the algorithm, not the machine.
      * Healthy parse measures in the low hundreds x memcpy; a 10x
      * algorithmic regression still clears 100x with margin. */
 #if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
-        EXPECT_LT(parse_us, 1000.0 * ref_us)
-            << "Small-doc parse regression: parse " << parse_us
-            << " us vs memcpy reference " << ref_us << " us";
+        EXPECT_LT(best, 1000.0)
+            << "Small-doc parse regression: parse/memcpy ratio " << best;
 #else
-    (void)parse_us; (void)ref_us;
+    (void)best;
 #endif
 }
 
@@ -108,19 +110,20 @@ TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
     }
     xml += ">text</root>";
 
-    double parse_us = 1e18, ref_us = 1e18;
-    for (int rep = 0; rep < 3; rep++) {
-        double a = ParseBenchUs(xml.data(), xml.size(), 1000);
-        double b = MemcpyRefUs(xml.data(), xml.size(), 1000);
-        if (a < parse_us) parse_us = a;
-        if (b < ref_us) ref_us = b;
+    /* Per-rep ratio, min of 4 — same load-regime discipline as
+     * SmallDocumentParseIsFast above. */
+    double best = 1e18;
+    for (int rep = 0; rep < 4; rep++) {
+        double ratio = ParseBenchUs(xml.data(), xml.size(), 1000) /
+                       MemcpyRefUs(xml.data(), xml.size(), 1000);
+        if (ratio < best) best = ratio;
     }
 #if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
-        EXPECT_LT(parse_us, 20000.0 * ref_us)
-            << "Attribute-heavy parse regression: parse " << parse_us
-            << " us vs memcpy reference " << ref_us << " us";
+        EXPECT_LT(best, 20000.0)
+            << "Attribute-heavy parse regression: parse/memcpy ratio "
+            << best;
 #else
-    (void)parse_us; (void)ref_us;
+    (void)best;
 #endif
 }
 
