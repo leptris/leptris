@@ -708,7 +708,7 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
     struct leptris_document* mut_doc = doc;
     LeptrisNode* mut_tail =
         (mut_doc && mut_doc->mut_tail_parent == elem && mut_doc->mut_tail_child &&
-         leptris_node_parent(mut_doc->mut_tail_child) == (LeptrisNode*)elem)
+         leptris_node_parent(mut_doc->mut_tail_child) == elem)
             ? mut_doc->mut_tail_child
             : NULL;
 

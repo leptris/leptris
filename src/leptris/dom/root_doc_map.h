@@ -3,9 +3,9 @@
 #define LEPTRIS_DOM_ROOT_DOC_MAP_H
 
 #include "element.h"
+#include "../memory/pool.h"  /* LeptrisMemoryPool — single canonical typedef */
 
 struct leptris_document;
-typedef struct leptris_memory_pool LeptrisMemoryPool;
 
 #ifdef __cplusplus
 extern "C" {

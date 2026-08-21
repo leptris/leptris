@@ -617,7 +617,8 @@ struct leptris_xpath_result* xpath_result_new(XPathResultType type) {
 
     result->type = type;
 
-    /* Initialize union based on type */
+    /* Initialize union based on type. XPATH_RESULT_CACHED is the
+     * free-list sentinel — a fresh result never carries it. */
     switch (type) {
         case XPATH_RESULT_BOOLEAN:
             result->value.boolean_value = 0;
@@ -630,6 +631,8 @@ struct leptris_xpath_result* xpath_result_new(XPathResultType type) {
             break;
         case XPATH_RESULT_NODESET:
             result->value.nodeset_value = NULL;
+            break;
+        case XPATH_RESULT_CACHED:
             break;
     }
 
