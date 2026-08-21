@@ -6,6 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Allocation hooks (core.c): honoring the public
+ * taurus_set_memory_management_functions contract for arena
+ * allocations too — OOM injection and custom allocators must see
+ * every byte the library takes. */
+void* taurus_alloc_hook(size_t size);
+void taurus_free_hook(void* ptr);
+
 #define ARENA_ALIGNMENT 8u
 
 static inline size_t align_up(size_t n) {
@@ -96,14 +103,14 @@ static char* retain_take(size_t request, size_t* capacity) {
 
 static void retain_give(char* base, size_t size) {
     if (size < ARENA_RETAIN_MIN) {
-        free(base);
+        taurus_free_hook(base);
         return;
     }
     retain_lock();
     if (g_retain.count >= ARENA_RETAIN_MAX_BLOCKS ||
         g_retain.bytes + size > ARENA_RETAIN_MAX_BYTES) {
         retain_unlock();
-        free(base);
+        taurus_free_hook(base);
         return;
     }
     g_retain.base[g_retain.count] = base;
@@ -116,7 +123,7 @@ static void retain_give(char* base, size_t size) {
 char* taurus_arena_buffer_alloc(size_t size) {
     size_t capacity = size;
     char* base = retain_take(size, &capacity);
-    return base ? base : (char*)malloc(size);
+    return base ? base : (char*)taurus_alloc_hook(size);
 }
 
 void taurus_arena_buffer_release(void* p, size_t size) {
@@ -126,15 +133,15 @@ void taurus_arena_buffer_release(void* p, size_t size) {
 
 TaurusArena* taurus_arena_create(size_t size) {
     if (size == 0 || size > (size_t)-1 - ARENA_ALIGNMENT) return NULL;
-    TaurusArena* arena = (TaurusArena*)malloc(sizeof(TaurusArena));
+    TaurusArena* arena = (TaurusArena*)taurus_alloc_hook(sizeof(TaurusArena));
     if (!arena) return NULL;
     size_t capacity = size;
     char* base = retain_take(size, &capacity);
     if (!base) {
-        base = (char*)malloc(size);
+        base = (char*)taurus_alloc_hook(size);
         capacity = size;
         if (!base) {
-            free(arena);
+            taurus_free_hook(arena);
             return NULL;
         }
     }
@@ -151,7 +158,7 @@ TaurusArena* taurus_arena_create(size_t size) {
 void taurus_arena_destroy(TaurusArena* arena) {
     if (!arena) return;
     retain_give(arena->base, arena->size);
-    free(arena);
+    taurus_free_hook(arena);
 }
 
 void* taurus_arena_alloc(TaurusArena* arena, size_t size) {

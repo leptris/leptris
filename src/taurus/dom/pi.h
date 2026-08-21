@@ -20,7 +20,9 @@ typedef struct taurus_pi_node {
     TaurusNode base;                   /* MUST be first */
     char* target;                      /* PI target (e.g., "xml-stylesheet") */
     char* data;                        /* PI data/content */
-    int16_t next_sibling_cp;           /* 2-byte compact ptr to next sibling (0=NULL) */
+    int32_t next_sibling_off;          /* (#450) unscaled int32 sibling edge — cp16's
+                                      ±256 KB range cannot hold cross-block sibling
+                                      links on large documents. 0 = NULL. */
     int32_t parent_off;                /* Byte offset to parent element (0=NULL) */
 } TaurusPINode;
 
@@ -48,13 +50,13 @@ const char* taurus_pi_get_data(TaurusPINode* pi);
 /* Compact next_sibling accessors (TODO 179 Phase B — cp16). */
 static inline TaurusNode* taurus_pi_next_sibling(const TaurusPINode* p) {
     return (p)
-        ? (TaurusNode*)taurus_compact_ptr16_decode((void*)p, p->next_sibling_cp, 3, &p->next_sibling_cp)
+        ? (TaurusNode*)taurus_compact_int32_decode((void*)p, p->next_sibling_off, &p->next_sibling_off)
         : NULL;
 }
 
 static inline void taurus_pi_set_next_sibling(TaurusPINode* p, TaurusNode* sibling) {
     if (!p) return;
-    p->next_sibling_cp = taurus_compact_ptr16_encode(p, sibling, 3, &p->next_sibling_cp);
+    p->next_sibling_off = taurus_compact_int32_encode(p, sibling, &p->next_sibling_off);
 }
 
 /* Compact parent accessors (issue #168). */

@@ -216,8 +216,11 @@ void taurus_compact_cleanup_document(struct taurus_document* doc) {
 
         while (entry) {
             if (entry->doc == doc) {
+                /* Unlink only — entries live in SLABS owned by the
+                 * table; free()ing them corrupted the heap whenever
+                 * a document had overflow entries (common since the
+                 * #450 sibling-edge work routed far links here). */
                 *entry_ptr = entry->next;
-                free(entry);
                 entry = *entry_ptr;
                 removed_count++;
             } else {

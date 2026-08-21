@@ -26,7 +26,7 @@ TaurusCommentNode* taurus_comment_create(const char* content,
     node->base.version = 0;
       node->base.binding_wrapper = NULL;
     node->parent_off = 0;
-    node->next_sibling_cp = 0;
+    node->next_sibling_off = 0;
 
     if (content && content_len > 0) {
         memcpy(content_storage, content, content_len);

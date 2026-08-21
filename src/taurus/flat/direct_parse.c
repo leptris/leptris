@@ -98,6 +98,17 @@ typedef struct {
      * attr blocks. Overflow falls back to the pool path. */
     struct taurus_text_node* text_cursor;
     struct taurus_text_node* text_end;
+    /* Comment/CDATA/PI bulk block (#450 endgame): carved from the
+     * same combined allocation as elem/text so sibling and parent
+     * edges stay intra-block (raw int32, < 2 GB). The per-node
+     * pool allocations these types previously used land in a
+     * different malloc REGION than the arena on macOS — distances
+     * beyond ±2 GB that no compact edge can hold raw. Overflow
+     * falls back to the pool path whose setters route far links
+     * through the overflow table. */
+    char* cpi_cursor;
+    char* cpi_end;
+    size_t cpi_stride;
     unsigned cur_attr_count;
     /* 1 when the parser owns an over-allocated copy: probe windows
      * may read up to 48 bytes past p->end because the 64-byte zeroed
@@ -180,18 +191,15 @@ static TAURUS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
  * dp_wire_child — one array lookup + one store replaces 5-way branch.
  * TODO 158: branchless tree wiring.
  *
- * TODO 179 Phase B: text/comment/cdata/pi siblings migrated to cp16
- * (2-byte compact pointer). Element still uses int32 — split tables. */
-static const size_t dp_ns_off_int32[2] = {
+ * (#450) ALL node types use unscaled int32 sibling edges — every
+ * compact-encoding range assumption broke at document scale; the
+ * uniform encoding removes the overflow table from the parse path. */
+static const size_t dp_ns_off_int32[5] = {
     offsetof(struct taurus_element,  next_sibling_off),
     offsetof(TaurusTextNode,        next_sibling_off),
-};
-/* comment/cdata/pi siblings: cp16 through the encoder (overflow
- * table covers far pairs). Index by node type - 2. */
-static const size_t dp_ns_off_cp16[3] = {
-    offsetof(TaurusCommentNode,     next_sibling_cp),
-    offsetof(TaurusCDATANode,       next_sibling_cp),
-    offsetof(TaurusPINode,          next_sibling_cp),
+    offsetof(TaurusCommentNode,     next_sibling_off),
+    offsetof(TaurusCDATANode,       next_sibling_off),
+    offsetof(TaurusPINode,          next_sibling_off),
 };
 static const size_t dp_par_off[5] = {
     offsetof(struct taurus_element,  parent_off),
@@ -214,29 +222,12 @@ static inline void dp_wire_child(DParser* p, TaurusElement parent,
     TaurusNode* prev_last = p->last_child_stack[p->depth - 1];
     if (prev_last) {
         unsigned pt = (unsigned)prev_last->type;
-        if (pt == TAURUS_NODE_TYPE_ELEMENT ||
-            pt == TAURUS_NODE_TYPE_TEXT) {
-            /* Element AND text siblings: int32 byte offset (#450
-             * moved text off cp16 — element↔text block distances
-             * exceed cp16's ±256 KB on large documents). */
+        if (pt <= TAURUS_NODE_TYPE_PI) {
+            /* All sibling edges: unscaled int32 byte offsets (#450 —
+             * cp16 ranges cannot hold cross-block sibling links on
+             * large documents). */
             int32_t sib_off = (int32_t)((char*)child - (char*)prev_last);
-            *(int32_t*)((char*)prev_last + dp_ns_off_int32[pt == TAURUS_NODE_TYPE_TEXT]) = sib_off;
-        } else if (pt >= TAURUS_NODE_TYPE_COMMENT && pt <= TAURUS_NODE_TYPE_PI) {
-            /* text/comment/cdata/pi siblings: cp16 compact pointer.
-             * (#450) MUST go through the encoder: a text node
-             * followed by an element sibling spans the elem↔text
-             * block distance, which scales with document size and
-             * exceeds cp16's ±256 KB on large documents (a 35 KB
-             * pretty-printed input already crosses it once the
-             * element block is pre-sized). The raw store silently
-             * truncated, and the walk later decoded into stale
-             * arena memory — heap-layout-dependent segfaults in
-             * serialize. The encoder's overflow-table path (grown
-             * O(1) since v0.25.11) handles the far case; the common
-             * in-range case still compiles to the same direct store
-             * plus one bounds check. */
-            int16_t* field = (int16_t*)((char*)prev_last + dp_ns_off_cp16[pt - 2]);
-            *field = taurus_compact_ptr16_encode(prev_last, child, 3, field);
+            *(int32_t*)((char*)prev_last + dp_ns_off_int32[pt]) = sib_off;
         }
     } else {
         int32_t child_off = (int32_t)((char*)child - (char*)parent);
@@ -660,6 +651,19 @@ static int dp_parse_attrs(DParser* p, TaurusElement elem) {
 /* Inline borrowed-text creation from the bulk block (round 8): the
  * same stores taurus_text_create_borrowed performs, minus the
  * out-of-line pool_alloc call per node. */
+/* Carve a comment/CDATA/PI node from the bulk block. Returns a
+ * zeroed node with base.type set; callers stamp line/frozen and the
+ * content pointers (zero-copy into the document buffer). Returns
+ * NULL on exhaustion — callers fall back to the pool constructors. */
+static inline void* dp_cpi_carve(DParser* p, int node_type) {
+    if (p->cpi_cursor >= p->cpi_end) return NULL;
+    void* n = (void*)p->cpi_cursor;
+    p->cpi_cursor += p->cpi_stride;
+    memset(n, 0, p->cpi_stride);
+    ((TaurusNode*)n)->type = (unsigned char)node_type;
+    return n;
+}
+
 static inline TaurusTextNode* dp_text_create(DParser* p,
                                              const char* content,
                                              size_t content_len) {
@@ -811,8 +815,14 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len,
      * over-reserve (~56 B per tag) — bounded, and the retained arena
      * absorbs it after the first parse of each size. */
     size_t text_bytes = lt_count * sizeof(struct taurus_text_node);
+    size_t cpi_stride =
+        sizeof(TaurusPINode) > sizeof(TaurusCommentNode)
+            ? sizeof(TaurusPINode) : sizeof(TaurusCommentNode);
+    if (cpi_stride < sizeof(TaurusCDATANode)) cpi_stride = sizeof(TaurusCDATANode);
+    cpi_stride = (cpi_stride + 7u) & ~(size_t)7u;
+    size_t cpi_bytes = lt_count * cpi_stride;  /* each markup node starts with '<' */
     char* combined = (char*)taurus_pool_alloc(
-        pool, elem_bytes + attr_bytes + text_bytes);
+        pool, elem_bytes + attr_bytes + text_bytes + cpi_bytes);
     if (!combined) {
         taurus_pool_destroy(pool);
         if (owns_buffer == 1)
@@ -825,6 +835,7 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len,
         (struct taurus_attribute*)(combined + elem_bytes);
     struct taurus_text_node* text_block =
         (struct taurus_text_node*)(combined + elem_bytes + attr_bytes);
+    char* cpi_block = combined + elem_bytes + attr_bytes + text_bytes;
     /* No memset on attr_block — dp_add_attr_inline initializes every
      * field of each attr it uses. */
     size_t elem_idx = 0;
@@ -879,6 +890,9 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len,
     p.attr_end = attr_block + attr_capacity;
     p.text_cursor = text_block;
     p.text_end = text_block + lt_count;
+    p.cpi_cursor = cpi_block;
+    p.cpi_end = cpi_block + cpi_bytes;
+    p.cpi_stride = cpi_stride;
     /* owns_buffer==2 was converted to 1 above; only the parser's own
      * copy carries the zeroed slack. */
     p.probe_slack = owns_buffer == 1 && buf_is_owned_copy;
@@ -1137,9 +1151,14 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len,
                 if (hit < 0) goto fail;
                 p.pos += hit;
                 *p.pos = '\0'; /* NUL-terminate content */
-                TaurusCommentNode* cn = taurus_comment_create(
-                    start, p.pos - start, pool);
-                if (!cn) goto fail;
+                TaurusCommentNode* cn = (TaurusCommentNode*)
+                    dp_cpi_carve(&p, TAURUS_NODE_TYPE_COMMENT);
+                if (cn) {
+                    cn->content = start;  /* zero-copy, buf-lifetime */
+                } else {
+                    cn = taurus_comment_create(start, p.pos - start, pool);
+                    if (!cn) goto fail;
+                }
                 cn->base.line = markup_off;
                 cn->base.frozen = 1;  /* at creation — TODO 187 */
                 if (p.depth > 0) {
@@ -1157,9 +1176,14 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len,
                 if (hit < 0) goto fail;
                 p.pos += hit;
                 *p.pos = '\0';
-                TaurusCDATANode* cd = taurus_cdata_create(
-                    start, p.pos - start, pool);
-                if (!cd) goto fail;
+                TaurusCDATANode* cd = (TaurusCDATANode*)
+                    dp_cpi_carve(&p, TAURUS_NODE_TYPE_CDATA);
+                if (cd) {
+                    cd->content = start;  /* zero-copy, buf-lifetime */
+                } else {
+                    cd = taurus_cdata_create(start, p.pos - start, pool);
+                    if (!cd) goto fail;
+                }
                 cd->base.line = markup_off;
                 cd->base.frozen = 1;  /* at creation — TODO 187 */
                 if (p.depth > 0) {
@@ -1235,10 +1259,18 @@ static struct taurus_document* direct_parse_internal(char* buf, size_t len,
                 continue;
             }
 
-            TaurusPINode* pi = taurus_pi_create(
-                target_start, strlen(target_start),
-                data_start, data_len, pool);
-            if (!pi) goto fail;
+            TaurusPINode* pi = (TaurusPINode*)
+                dp_cpi_carve(&p, TAURUS_NODE_TYPE_PI);
+            if (pi) {
+                pi->target = target_start;  /* zero-copy, buf-lifetime */
+                pi->data = data_start;
+                (void)data_len;
+            } else {
+                pi = taurus_pi_create(
+                    target_start, strlen(target_start),
+                    data_start, data_len, pool);
+                if (!pi) goto fail;
+            }
             pi->base.line = pi_off;
             pi->base.frozen = 1;  /* at creation — TODO 187 */
             if (p.depth > 0) {
