@@ -1,13 +1,32 @@
 ## [Unreleased]
 
-## [0.26.8] - Y-08-21
+## [0.26.8] - 2026-08-21
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
+- **Serialize crash on ~300 KB+ documents containing comments/CDATA/PIs mixed
+  with text** (same family as #450, found by the new large-document suite):
+  those nodes were individually pool-malloc'd, landing in a different malloc
+  region than the parse arena — sibling distances beyond ±2 GB that no compact
+  edge can hold raw. They now carve from the same contiguous parse block as
+  elements and text; their sibling edges widened to int32 (size-neutral).
+- Heap corruption on document free when a document had overflow-table
+  entries (common since v0.26.6): cleanup unlinked-and-freed entries that
+  live in table-owned slabs. Entries are now unlinked only.
+- The public allocation hooks (`taurus_set_memory_management_functions`)
+  now cover arena allocations — custom allocators see every byte, and
+  allocation-failure injection works on the parse path.
+- CodeQL high (bounded accumulator pattern) in the decomposition benchmark.
 
-- (describe changes here)
+### Added
+
+- CI large-document suite: six document shapes × sizes from 30 KB to 48 MB
+  (30 KB–1 MB under sanitizers), each running the full lifecycle twice —
+  parse → complete tree walk → XPath → serialize → reparse → idempotence →
+  free — plus mutation-at-scale and inplace-parse specs.
+- CI allocation-failure suite: parse/serialize/mutate under a countdown
+  allocator across the first 256–512 allocation sites; any outcome except a
+  crash is acceptable; a canary spec fails if the hook stops covering parse.
 
 
 ## [0.26.7] - 2026-08-21
