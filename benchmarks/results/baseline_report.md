@@ -1,7 +1,7 @@
-# Taurus Benchmark Report - Baseline (Phase 10 Session 1)
+# Leptris Benchmark Report - Baseline (Phase 10 Session 1)
 
 **Date**: [To be filled after running benchmarks]
-**Taurus Version**: 0.2.0 (Phase 9 complete - 2.74x speedup)
+**Leptris Version**: 0.2.0 (Phase 9 complete - 2.74x speedup)
 **Hardware**: [To be filled]
 **OS**: [To be filled]
 **Compiler**: [To be filled]
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-Taurus performance compared to industry-leading XML libraries:
+Leptris performance compared to industry-leading XML libraries:
 
 ### DOM Operations (vs pugixml)
 - **Overall**: [X]x ([faster/slower]) ⚠️/✅
@@ -36,7 +36,7 @@ Taurus performance compared to industry-leading XML libraries:
 - **Operating System**: [e.g., macOS 14.1, Ubuntu 22.04]
 - **Compiler**: [e.g., Apple clang 15.0.0, GCC 11.3.0]
 - **Build Type**: Release (-O3)
-- **Taurus Version**: 0.2.0
+- **Leptris Version**: 0.2.0
 - **pugixml Version**: [e.g., 1.13]
 - **libxml2 Version**: [e.g., 2.11.5]
 
@@ -67,7 +67,7 @@ Taurus performance compared to industry-leading XML libraries:
 
 ### Test File: small.xml (3.8 KB, 1000 iterations)
 
-| Operation | Taurus (µs) | pugixml (µs) | Speedup | Status |
+| Operation | Leptris (µs) | pugixml (µs) | Speedup | Status |
 |-----------|-------------|--------------|---------|--------|
 | Parse + Build DOM | [X] | [X] | [X]x | ⚠️/✅ |
 | Root Access | [X] | [X] | [X]x | ⚠️/✅ |
@@ -83,10 +83,10 @@ Taurus performance compared to industry-leading XML libraries:
 [To be filled after running benchmarks]
 
 **Strengths**:
-- [List operations where Taurus is faster]
+- [List operations where Leptris is faster]
 
 **Weaknesses**:
-- [List operations where Taurus is slower]
+- [List operations where Leptris is slower]
 
 **Insights**:
 - [Key observations about performance patterns]
@@ -97,7 +97,7 @@ Taurus performance compared to industry-leading XML libraries:
 
 ### Test File: medium.xml (177 KB, 1000 iterations)
 
-| Query | Description | Taurus (µs) | libxml2 (µs) | Speedup | Status |
+| Query | Description | Leptris (µs) | libxml2 (µs) | Speedup | Status |
 |-------|-------------|-------------|--------------|---------|--------|
 | `//item` | Simple descendant | [X] | [X] | [X]x | ⚠️/✅ |
 | `/catalog/item` | Absolute path | [X] | [X] | [X]x | ⚠️/✅ |
@@ -120,10 +120,10 @@ Taurus performance compared to industry-leading XML libraries:
 [To be filled after running benchmarks]
 
 **Strengths**:
-- [List query types where Taurus is faster]
+- [List query types where Leptris is faster]
 
 **Weaknesses**:
-- [List query types where Taurus is slower]
+- [List query types where Leptris is slower]
 
 **Insights**:
 - [Key observations about XPath performance]

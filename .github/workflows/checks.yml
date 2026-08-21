@@ -82,9 +82,9 @@ jobs:
           cmake -B build -S . -G Ninja \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DBUILD_TESTING=OFF \
-            -DTAURUS_BUILD_CLI=OFF \
-            -DTAURUS_ENABLE_UTF8PROC=OFF \
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_CLI=OFF \
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF \
+            -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Run cppcheck
         run: ./scripts/run_static_analysis.sh

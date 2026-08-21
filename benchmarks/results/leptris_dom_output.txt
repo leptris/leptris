@@ -1,6 +1,6 @@
 
 ================================================================
-Taurus DOM Benchmarks
+Leptris DOM Benchmarks
 ================================================================
 Test Data: Medium XML (~10KB)
 Iterations: 1000 per benchmark
@@ -11,7 +11,7 @@ Iterations: 1000 per benchmark
   Text Extraction (100x)    Mean:    20.25 µs  ±310.99 µs  Min:     2.00 µs  Max:  8866.00 µs
   Child Iteration (100x)    Mean:     8.76 µs  ±100.11 µs  Min:     1.00 µs  Max:  2586.00 µs
 
-Taurus DOM Summary:
+Leptris DOM Summary:
 ----------------------------------------------------------
   Parse + Root              24.29 µs
   Tree Traversal            0.94 µs
