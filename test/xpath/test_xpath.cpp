@@ -687,3 +687,29 @@ TEST(XPathSubtreeIndex, AttrExistsRelativeFromContext) {
     leptris_xpath_result_free(r);
     leptris_document_free(doc);
 }
+
+// Regression (CodeQL critical, alert #32): freeing the same result
+// twice used to treat the thread-local free-list next-pointer as a
+// live nodeset — heap corruption reachable from public-API misuse.
+// The free-list now parks entries behind an internal CACHED sentinel
+// and a second free is a no-op.
+TEST(XPathResults, DoubleFreeIsANoOp) {
+    const char xml[] = "<r><a x='1'/><a x='2'/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    for (int i = 0; i < 3; i++) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//a[@x='1']");
+        ASSERT_NE(r, (LeptrisXPathResult)0);
+        leptris_xpath_result_free(r);
+        leptris_xpath_result_free(r);  /* must be a silent no-op */
+    }
+
+    /* The engine (and its free-list) must still work afterwards. */
+    LeptrisXPathResult r2 = leptris_xpath_eval(doc, nullptr, "//a");
+    ASSERT_NE(r2, (LeptrisXPathResult)0);
+    leptris_xpath_result_free(r2);
+
+    leptris_document_free(doc);
+}
