@@ -218,12 +218,20 @@ static inline void dp_wire_child(DParser* p, TaurusElement parent,
             *(int32_t*)((char*)prev_last + dp_ns_off_int32[0]) = sib_off;
         } else if (pt >= TAURUS_NODE_TYPE_TEXT && pt <= TAURUS_NODE_TYPE_PI) {
             /* text/comment/cdata/pi siblings: cp16 compact pointer.
-             * Direct store (no overflow table) — direct_parse is
-             * overflow-free by design; cp16's ±256 KB range covers
-             * any realistic document. */
+             * (#450) MUST go through the encoder: a text node
+             * followed by an element sibling spans the elem↔text
+             * block distance, which scales with document size and
+             * exceeds cp16's ±256 KB on large documents (a 35 KB
+             * pretty-printed input already crosses it once the
+             * element block is pre-sized). The raw store silently
+             * truncated, and the walk later decoded into stale
+             * arena memory — heap-layout-dependent segfaults in
+             * serialize. The encoder's overflow-table path (grown
+             * O(1) since v0.25.11) handles the far case; the common
+             * in-range case still compiles to the same direct store
+             * plus one bounds check. */
             int16_t* field = (int16_t*)((char*)prev_last + dp_ns_off_cp16[pt - 1]);
-            ptrdiff_t d = (char*)child - (char*)prev_last;
-            *field = (int16_t)(d >> 3);
+            *field = taurus_compact_ptr16_encode(prev_last, child, 3, field);
         }
     } else {
         int32_t child_off = (int32_t)((char*)child - (char*)parent);
