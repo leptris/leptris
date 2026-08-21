@@ -6,7 +6,7 @@
 
 ## Problem
 
-The public API in `src/include/taurus/` is the FFI contract.  Today
+The public API in `src/include/leptris/` is the FFI contract.  Today
 it's clean (opaque handles, status params, ownership docs) but there
 are a few rough edges that would trip up bindings:
 
@@ -22,10 +22,10 @@ are a few rough edges that would trip up bindings:
    Cross-language FFI prefers `size_t` everywhere.
 
 4. **Output parameters vs. return values.** Some functions return
-   the result; others take `TaurusStatus*` as out-param.  Pick one
+   the result; others take `LeptrisStatus*` as out-param.  Pick one
    pattern per category.
 
-5. **Macro pollution.** `TAURUS_API` macro may expand differently
+5. **Macro pollution.** `LEPTRIS_API` macro may expand differently
    on Windows vs. Unix; bindings need to know.
 
 ## Fix
@@ -46,15 +46,15 @@ Fix the inconsistencies.  Most are mechanical.
 Add a linker version script:
 
 ```
-taurus.map:
-TAURUS_0.1 {
+leptris.map:
+LEPTRIS_0.1 {
     global:
-        taurus_*;
+        leptris_*;
     local: *;
 };
 ```
 
-Only `taurus_*` symbols are exported.  Internal helpers stay private.
+Only `leptris_*` symbols are exported.  Internal helpers stay private.
 
 ### Smoke test
 
@@ -64,7 +64,7 @@ accidental removals.
 ## Tests
 
 - ABI test (above).
-- `nm build/src/libtaurus.so | grep ' T '` shows only `taurus_*`
+- `nm build/src/libleptris.so | grep ' T '` shows only `leptris_*`
   symbols.
 
 ## Architecture notes

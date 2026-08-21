@@ -1,4 +1,4 @@
-# Remaining work — leptris (formerly taurus)
+# Remaining work — leptris (formerly taurus, pre-1.0)
 
 Snapshot taken at the v0.26.8 → leptris rebrand (2026-08-21).
 Each file is one task; numbering is sequential, not priority.

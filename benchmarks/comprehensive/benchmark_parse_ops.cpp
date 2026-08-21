@@ -16,7 +16,7 @@
  * - Combined metric shows TRUE performance for real apps
  * - Parse cost + first-access cost = total workflow cost
  * - May favor pugixml for simple workflows
- * - May favor Taurus for complex workflows (amortized over multiple ops)
+ * - May favor Leptris for complex workflows (amortized over multiple ops)
  */
 
 #include <stdio.h>
@@ -28,9 +28,9 @@
 #include <numeric>
 #include <cmath>
 
-// Taurus API (C)
+// Leptris API (C)
 extern "C" {
-#include <taurus.h>
+#include <leptris.h>
 }
 
 // pugixml API (C++)
@@ -103,24 +103,24 @@ static const char* test_xml =
 static uint64_t workflow_parse_and_read_simple() {
     uint64_t start, end;
 
-    // Taurus version
+    // Leptris version
     start = Timer::now_ns();
     {
-        TaurusDocument doc = taurus_parse_string(test_xml, strlen(test_xml), NULL);
+        LeptrisDocument doc = leptris_parse_string(test_xml, strlen(test_xml), NULL);
         if (doc) {
-            TaurusElement root = taurus_document_root(doc);
+            LeptrisElement root = leptris_document_root(doc);
             // Navigate: root > header > title
-            size_t count = taurus_element_child_count(root);
+            size_t count = leptris_element_child_count(root);
             for (size_t i = 0; i < count; i++) {
-                TaurusElement child = taurus_element_child(root, i);
-                const char* name = taurus_element_name(child);
+                LeptrisElement child = leptris_element_child(root, i);
+                const char* name = leptris_element_name(child);
                 if (name && strcmp(name, "header") == 0) {
-                    size_t header_children = taurus_element_child_count(child);
+                    size_t header_children = leptris_element_child_count(child);
                     for (size_t j = 0; j < header_children; j++) {
-                        TaurusElement header_child = taurus_element_child(child, j);
-                        const char* hname = taurus_element_name(header_child);
+                        LeptrisElement header_child = leptris_element_child(child, j);
+                        const char* hname = leptris_element_name(header_child);
                         if (hname && strcmp(hname, "title") == 0) {
-                            const char* text = taurus_element_text(header_child);
+                            const char* text = leptris_element_text(header_child);
                             (void)text;  // Use result
                             break;
                         }
@@ -128,11 +128,11 @@ static uint64_t workflow_parse_and_read_simple() {
                     break;
                 }
             }
-            taurus_document_free(doc);
+            leptris_document_free(doc);
         }
     }
     end = Timer::now_ns();
-    uint64_t taurus_time = end - start;
+    uint64_t leptris_time = end - start;
 
     // pugixml version
     start = Timer::now_ns();
@@ -149,20 +149,20 @@ static uint64_t workflow_parse_and_read_simple() {
     uint64_t pugixml_time = end - start;
 
     // Return combined (we'll compare separately in real benchmark)
-    return taurus_time + pugixml_time;
+    return leptris_time + pugixml_time;
 }
 
 // Workflow 2: Parse + Attribute Query (find items by category)
-static void taurus_workflow_attribute_query() {
-    TaurusDocument doc = taurus_parse_string(test_xml, strlen(test_xml), NULL);
+static void leptris_workflow_attribute_query() {
+    LeptrisDocument doc = leptris_parse_string(test_xml, strlen(test_xml), NULL);
     if (!doc) return;
 
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement data = NULL;
-    size_t count = taurus_element_child_count(root);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement data = NULL;
+    size_t count = leptris_element_child_count(root);
     for (size_t i = 0; i < count; i++) {
-        TaurusElement child = taurus_element_child(root, i);
-        const char* name = taurus_element_name(child);
+        LeptrisElement child = leptris_element_child(root, i);
+        const char* name = leptris_element_name(child);
         if (name && strcmp(name, "data") == 0) {
             data = child;
             break;
@@ -170,11 +170,11 @@ static void taurus_workflow_attribute_query() {
     }
 
     if (data) {
-        size_t item_count = taurus_element_child_count(data);
+        size_t item_count = leptris_element_child_count(data);
         int category_a_count = 0;
         for (size_t i = 0; i < item_count; i++) {
-            TaurusElement item = taurus_element_child(data, i);
-            const char* category = taurus_element_attribute(item, "category");
+            LeptrisElement item = leptris_element_child(data, i);
+            const char* category = leptris_element_attribute(item, "category");
             if (category && strcmp(category, "A") == 0) {
                 category_a_count++;
             }
@@ -182,7 +182,7 @@ static void taurus_workflow_attribute_query() {
         (void)category_a_count;
     }
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 static void pugixml_workflow_attribute_query() {
@@ -202,11 +202,11 @@ static void pugixml_workflow_attribute_query() {
 }
 
 // Workflow 3: Parse + Tree Traversal (visit all nodes)
-static void taurus_workflow_tree_traversal() {
-    TaurusDocument doc = taurus_parse_string(test_xml, strlen(test_xml), NULL);
+static void leptris_workflow_tree_traversal() {
+    LeptrisDocument doc = leptris_parse_string(test_xml, strlen(test_xml), NULL);
     if (!doc) return;
 
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     int node_count = 0;
 
     /* Recursive traversal via functor — C++11 GCC rejects the
@@ -214,11 +214,11 @@ static void taurus_workflow_tree_traversal() {
      * under two-phase lookup.  Plain recursion is unambiguous. */
     struct walker {
         int& count;
-        void operator()(TaurusElement elem) const {
+        void operator()(LeptrisElement elem) const {
             count++;
-            size_t n = taurus_element_child_count(elem);
+            size_t n = leptris_element_child_count(elem);
             for (size_t i = 0; i < n; i++) {
-                TaurusElement child = taurus_element_child(elem, i);
+                LeptrisElement child = leptris_element_child(elem, i);
                 if (child) (*this)(child);
             }
         }
@@ -226,7 +226,7 @@ static void taurus_workflow_tree_traversal() {
     walker w{node_count};
     w(root);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 static void pugixml_workflow_tree_traversal() {
@@ -252,7 +252,7 @@ static void pugixml_workflow_tree_traversal() {
 // Benchmark Functions
 // ============================================================================
 
-static Stats benchmark_taurus_parse_ops(void (*workflow_func)(), int iterations) {
+static Stats benchmark_leptris_parse_ops(void (*workflow_func)(), int iterations) {
     std::vector<uint64_t> times_ns;
 
     for (int i = 0; i < iterations; i++) {
@@ -288,10 +288,10 @@ static void print_result(const char* name, const Stats& stats) {
     printf("    Median: %.2f µs\n", stats.median_ns / 1000.0);
 }
 
-static void print_comparison(const Stats& taurus, const Stats& pugixml) {
-    double ratio = pugixml.mean_ns / taurus.mean_ns;
+static void print_comparison(const Stats& leptris, const Stats& pugixml) {
+    double ratio = pugixml.mean_ns / leptris.mean_ns;
     printf("    Ratio: %.2fx (%s)\n", ratio,
-           ratio >= 1.2 ? "Taurus AHEAD ✅" :
+           ratio >= 1.2 ? "Leptris AHEAD ✅" :
            ratio > 0.8 ? "~ PARITY" : "pugixml AHEAD ⚠️");
 }
 
@@ -316,22 +316,22 @@ int main(int argc, char** argv) {
     printf("═══ Workflow 1: Parse + Simple Read ═══\n");
     printf("Operation: Parse document, extract title value\n\n");
 
-    Stats taurus_simple = benchmark_taurus_parse_ops([]() {
-        // Inline simple read workflow for Taurus
-        TaurusDocument doc = taurus_parse_string(test_xml, strlen(test_xml), NULL);
+    Stats leptris_simple = benchmark_leptris_parse_ops([]() {
+        // Inline simple read workflow for Leptris
+        LeptrisDocument doc = leptris_parse_string(test_xml, strlen(test_xml), NULL);
         if (doc) {
-            TaurusElement root = taurus_document_root(doc);
-            size_t count = taurus_element_child_count(root);
+            LeptrisElement root = leptris_document_root(doc);
+            size_t count = leptris_element_child_count(root);
             for (size_t i = 0; i < count; i++) {
-                TaurusElement child = taurus_element_child(root, i);
-                const char* name = taurus_element_name(child);
+                LeptrisElement child = leptris_element_child(root, i);
+                const char* name = leptris_element_name(child);
                 if (name && strcmp(name, "header") == 0) {
-                    size_t hcount = taurus_element_child_count(child);
+                    size_t hcount = leptris_element_child_count(child);
                     for (size_t j = 0; j < hcount; j++) {
-                        TaurusElement hc = taurus_element_child(child, j);
-                        const char* hname = taurus_element_name(hc);
+                        LeptrisElement hc = leptris_element_child(child, j);
+                        const char* hname = leptris_element_name(hc);
                         if (hname && strcmp(hname, "title") == 0) {
-                            const char* text = taurus_element_text(hc);
+                            const char* text = leptris_element_text(hc);
                             (void)text;
                             break;
                         }
@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
                     break;
                 }
             }
-            taurus_document_free(doc);
+            leptris_document_free(doc);
         }
     }, ITERATIONS);
 
@@ -351,33 +351,33 @@ int main(int argc, char** argv) {
         (void)text;
     }, ITERATIONS);
 
-    print_result("Taurus", taurus_simple);
+    print_result("Leptris", leptris_simple);
     print_result("pugixml", pugixml_simple);
-    print_comparison(taurus_simple, pugixml_simple);
+    print_comparison(leptris_simple, pugixml_simple);
     printf("\n");
 
     // Workflow 2: Attribute Query
     printf("═══ Workflow 2: Parse + Attribute Query ═══\n");
     printf("Operation: Parse document, find items with category='A'\n\n");
 
-    Stats taurus_attr = benchmark_taurus_parse_ops(taurus_workflow_attribute_query, ITERATIONS);
+    Stats leptris_attr = benchmark_leptris_parse_ops(leptris_workflow_attribute_query, ITERATIONS);
     Stats pugixml_attr = benchmark_pugixml_parse_ops(pugixml_workflow_attribute_query, ITERATIONS);
 
-    print_result("Taurus", taurus_attr);
+    print_result("Leptris", leptris_attr);
     print_result("pugixml", pugixml_attr);
-    print_comparison(taurus_attr, pugixml_attr);
+    print_comparison(leptris_attr, pugixml_attr);
     printf("\n");
 
     // Workflow 3: Tree Traversal
     printf("═══ Workflow 3: Parse + Tree Traversal ═══\n");
     printf("Operation: Parse document, visit all nodes recursively\n\n");
 
-    Stats taurus_traverse = benchmark_taurus_parse_ops(taurus_workflow_tree_traversal, ITERATIONS);
+    Stats leptris_traverse = benchmark_leptris_parse_ops(leptris_workflow_tree_traversal, ITERATIONS);
     Stats pugixml_traverse = benchmark_pugixml_parse_ops(pugixml_workflow_tree_traversal, ITERATIONS);
 
-    print_result("Taurus", taurus_traverse);
+    print_result("Leptris", leptris_traverse);
     print_result("pugixml", pugixml_traverse);
-    print_comparison(taurus_traverse, pugixml_traverse);
+    print_comparison(leptris_traverse, pugixml_traverse);
     printf("\n");
 
     printf("═══════════════════════════════════════════════════════════\n");

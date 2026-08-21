@@ -7,7 +7,7 @@
 #include "../options.h"
 #include "../error.h"
 #include "../output.h"
-#include "../src/include/taurus.h"
+#include "../src/include/leptris.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -225,7 +225,7 @@ static cli_result_t parse_execute(int argc, char** argv) {
     cli_result_t result = CLI_SUCCESS;
     parse_options_t* opts = NULL;
     char* xml_content = NULL;
-    struct taurus_document* doc = NULL;
+    struct leptris_document* doc = NULL;
     output_formatter_t* fmt = NULL;
 
     /* Parse options */
@@ -252,8 +252,8 @@ static cli_result_t parse_execute(int argc, char** argv) {
     }
 
     /* Parse XML - use encoding-aware parser for UTF-16 support */
-    TaurusStatus status;
-    doc = taurus_parse_string_with_encoding(xml_content, xml_len, &status);
+    LeptrisStatus status;
+    doc = leptris_parse_string_with_encoding(xml_content, xml_len, &status);
     if (!doc) {
         cli_error("failed to parse XML: %s", opts->input_file);
         result = CLI_ERROR_PARSE;
@@ -262,11 +262,11 @@ static cli_result_t parse_execute(int argc, char** argv) {
 
     /* Verbose output - print document info to stderr */
     if (opts->verbose) {
-        TaurusElement root = taurus_document_root(doc);
-        const char* root_name = root ? taurus_element_name(root) : "(unknown)";
-        fprintf(stderr, "[taurus] Parsed: %s\n", opts->input_file);
-        fprintf(stderr, "[taurus] Root element: %s\n", root_name);
-        fprintf(stderr, "[taurus] Size: %zu bytes\n", xml_len);
+        LeptrisElement root = leptris_document_root(doc);
+        const char* root_name = root ? leptris_element_name(root) : "(unknown)";
+        fprintf(stderr, "[leptris] Parsed: %s\n", opts->input_file);
+        fprintf(stderr, "[leptris] Root element: %s\n", root_name);
+        fprintf(stderr, "[leptris] Size: %zu bytes\n", xml_len);
         fflush(stderr);
     }
 
@@ -296,7 +296,7 @@ static cli_result_t parse_execute(int argc, char** argv) {
 
 cleanup:
     if (fmt) output_formatter_free(fmt);
-    if (doc) taurus_document_free(doc);
+    if (doc) leptris_document_free(doc);
     if (xml_content) free(xml_content);
     if (opts) parse_options_free(opts);
 
@@ -304,7 +304,7 @@ cleanup:
 }
 
 static void parse_print_help(void) {
-    printf("Usage: taurus parse [OPTIONS] FILE\n");
+    printf("Usage: leptris parse [OPTIONS] FILE\n");
     printf("\n");
     printf("Parse and validate XML document.\n");
     printf("\n");

@@ -10,7 +10,7 @@ Everything in one translation unit = compiler sees the entire
 parser, allocator, and serializer at once = aggressive inlining
 across what would otherwise be TU boundaries.
 
-## The tricks (ranked by impact for taurus)
+## The tricks (ranked by impact for leptris)
 
 ### 1. Chartype lookup table (line 1929)
 
@@ -35,10 +35,10 @@ Categorizing a char is **one byte load + one AND + one branch**:
 #define PUGI_IMPL_IS_CHARTYPE(c, ct) (chartype_table[(unsigned char)(c)] & (ct))
 ```
 
-vs taurus's pattern of `c == ' ' || c == '\t' || c == '\n' || c == '\r'`
+vs leptris's pattern of `c == ' ' || c == '\t' || c == '\n' || c == '\r'`
 which is **3-4 branches**.
 
-**Impact for taurus**: replace `sax_is_whitespace`, `sax_is_name_start`,
+**Impact for leptris**: replace `sax_is_whitespace`, `sax_is_name_start`,
 `sax_is_name_char`, `parser_is_*_inline` with table lookups. Should
 save 20-40% on the SAX scan loops. Big win.
 
@@ -65,7 +65,7 @@ Manually unrolls scan loops 4 iterations at a time:
 Reduces loop overhead (compare + branch) by 4x.  Especially
 helpful when the body is one instruction (the table lookup above).
 
-**Impact for taurus**: replace the body of `sax_skip_whitespace`,
+**Impact for leptris**: replace the body of `sax_skip_whitespace`,
 `parse_name_view`'s scan loop, the attribute value scan, etc.
 Should save 10-20% on each.
 
@@ -92,18 +92,18 @@ next_sibling, first_attribute) is 1 byte.
   - `xml_attribute_struct`: **8 bytes** total
   - `xml_node_struct`: **12 bytes** total
 
-vs taurus's regular-pointer layout:
-  - taurus `taurus_attribute`: ~96 bytes
-  - taurus `taurus_element`: ~104 bytes
+vs leptris's regular-pointer layout:
+  - leptris `leptris_attribute`: ~96 bytes
+  - leptris `leptris_element`: ~104 bytes
 
-pugixml's element is **8.6x smaller** than taurus's.  Better cache
+pugixml's element is **8.6x smaller** than leptris's.  Better cache
 locality, fewer allocations per page, fewer cycles per node walk.
 
-**Impact for taurus**: architectural change.  Taurus already HAS a
+**Impact for leptris**: architectural change.  Leptris already HAS a
 compact-pointer implementation (`dom/compact.h`) but it's not the
 default and not wired into the parser (TODO 90).  Adopting the
 compact-pointer layout as the primary storage would deliver the
-single largest perf improvement taurus could get — but it's
+single largest perf improvement leptris could get — but it's
 multi-week work.
 
 ### 4. Compact string encoding (line 1002)
@@ -115,11 +115,11 @@ string.  Each `compact_string<offset, base_offset>` is 2 bytes.
 ### 5. Single-page allocator with freelist tracking
 
 `xml_allocator` (line 556) is a single 32 KB page with bump-pointer
-allocation.  Same as taurus's pool.  But pugixml ALSO tracks
+allocation.  Same as leptris's pool.  But pugixml ALSO tracks
 `freed_size` — when an entire page is freed, the page is reused.
 This is why pugixml's repeated parse-then-free benchmarks are fast.
 
-Taurus's pool allocator already does bump-pointer; it lacks the
+Leptris's pool allocator already does bump-pointer; it lacks the
 freelist tracking, so a high-churn workload pays repeated page
 allocations.
 
@@ -129,7 +129,7 @@ Text in XML can be split across CDATA sections, entity references,
 and adjacent text nodes.  pugixml uses a "gap buffer" to accumulate
 text in-place without allocations, then writes it once.
 
-Taurus allocates per-text-node.  Each text segment is a separate
+Leptris allocates per-text-node.  Each text segment is a separate
 pool allocation.
 
 ### 7. Header-only — everything inlines
@@ -139,11 +139,11 @@ pugixml is a header-only library.  Every function is `inline` or
 includes `pugixml.hpp`, it sees the entire parser/serializer and
 can inline aggressively.
 
-Taurus is compiled as a static/shared library.  Even with `static
+Leptris is compiled as a static/shared library.  Even with `static
 inline` annotations, the compiler can't inline across TUs without
 LTO.  This is a fundamental architectural difference.
 
-For taurus to match this, it would need to either:
+For leptris to match this, it would need to either:
 - Ship as a header-only library (breaking ABI stability)
 - Add LTO to the build (already a CMake option, just not on by default)
 
@@ -159,16 +159,16 @@ become single-instruction bit tests:
 When the option set is a compile-time constant, the compiler
 eliminates the branch entirely.
 
-Taurus's strict_mode caching (PR #62) achieves a similar effect
+Leptris's strict_mode caching (PR #62) achieves a similar effect
 but is a runtime branch.
 
 ### 9. No name interning
 
 pugixml doesn't dedupe attribute or element names by default.
 Strings are stored once per use.  Saves the hash-table cost that
-taurus pays.
+leptris pays.
 
-taurus interns names via the pool's hash table (TODO 22).  Useful
+leptris interns names via the pool's hash table (TODO 22).  Useful
 when many elements share attr names (parse case), pure overhead
 when names are unique (mutation case — addressed in PR #70).
 
@@ -178,7 +178,7 @@ pugixml stores names/values as plain `char_t*` pointers.  No
 StringView abstraction.  When the user calls `node.name()`, they
 get the char* directly.
 
-Taurus has StringView (zero-copy during parse) PLUS a cached
+Leptris has StringView (zero-copy during parse) PLUS a cached
 NUL-terminated char* (eager-converted for thread-safety — see
 TODO 103 Phase 2).  Each element pays 24 bytes for StringView +
 24 bytes for cached cstrs = 48 bytes of "name" storage per element.
@@ -187,7 +187,7 @@ in the page.
 
 ## Most-impactful-to-adopt-now
 
-Ranked by effort × impact for taurus:
+Ranked by effort × impact for leptris:
 
 | # | Trick | Effort | Impact | Phase |
 |---|---|---|---|---|
@@ -204,15 +204,15 @@ Ranked by effort × impact for taurus:
 ## The honest answer
 
 pugixml is fast primarily because of **compact node layout** (trick
-3+4: 8-12 byte nodes vs taurus's 96-104).  Every other trick
+3+4: 8-12 byte nodes vs leptris's 96-104).  Every other trick
 accelerates work proportional to the node size — the smaller the
 node, the fewer cache misses, the more nodes per page, the faster
 every walk.
 
-Taurus can adopt tricks 1, 2, 4, 8 incrementally for incremental
+Leptris can adopt tricks 1, 2, 4, 8 incrementally for incremental
 gains.  Trick 3 (compact layout) is the only path to true pugixml
 parity and it's multi-week work.
 
-Until taurus adopts compact layout, "WRITE dominance over pugixml"
+Until leptris adopts compact layout, "WRITE dominance over pugixml"
 is not achievable — we can close the gap by maybe 30%, but not
 match the ~6-7x speed advantage that compact storage gives.

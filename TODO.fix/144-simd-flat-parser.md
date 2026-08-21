@@ -11,7 +11,7 @@ cycle for name-end characters.
 ## Fix
 
 Vectorize the name-scan loop in flat_parser.c using the existing
-`src/taurus/simd_helpers.h` already used by the legacy parser.
+`src/leptris/simd_helpers.h` already used by the legacy parser.
 The ASCII tight loop becomes a 16-byte vectorized scan.
 
 ## Expected impact

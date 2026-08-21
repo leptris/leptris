@@ -38,11 +38,11 @@ Linux + ASAN are unaffected.
 Ten encode sites silently drop on overflow:
 
 ```
-src/taurus/dom/element.h:193,204,215,226,253,261
-src/taurus/dom/text.h:94
-src/taurus/dom/comment.h:49
-src/taurus/dom/cdata.h:49
-src/taurus/dom/pi.h:56
+src/leptris/dom/element.h:193,204,215,226,253,261
+src/leptris/dom/text.h:94
+src/leptris/dom/comment.h:49
+src/leptris/dom/cdata.h:49
+src/leptris/dom/pi.h:56
 ```
 
 Each has the same pattern:
@@ -53,8 +53,8 @@ off = (int32_t)d;
 ```
 
 The 8-bit compact pointer system (`compact_ptr8`) has the same
-problem but solved it via `taurus_compact_overflow_set` /
-`taurus_compact_overflow_get` — keyed on the field's address,
+problem but solved it via `leptris_compact_overflow_set` /
+`leptris_compact_overflow_get` — keyed on the field's address,
 stored in a global hash table that's cleaned up per-document.
 
 ## Plan
@@ -64,9 +64,9 @@ stored in a global hash table that's cleaned up per-document.
 Add public-to-the-DOM-subsystem functions in `compact.c`:
 
 ```c
-int32_t taurus_compact_int32_encode(void* base, void* target,
+int32_t leptris_compact_int32_encode(void* base, void* target,
                                      const int32_t* field_addr);
-void*   taurus_compact_int32_decode(void* base, int32_t off,
+void*   leptris_compact_int32_decode(void* base, int32_t off,
                                      const int32_t* field_addr);
 ```
 

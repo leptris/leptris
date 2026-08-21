@@ -20,8 +20,8 @@ TEST(PerfRegression, ParseThroughputStaysAboveBudget) {
     /* Parse small.xml 1000 times; assert < N ms total. */
     auto start = steady_clock::now();
     for (int i = 0; i < 1000; i++) {
-        TaurusDocument doc = taurus_parse_string(...);
-        taurus_document_free(doc);
+        LeptrisDocument doc = leptris_parse_string(...);
+        leptris_document_free(doc);
     }
     auto ms = duration_cast<milliseconds>(steady_clock::now() - start);
     EXPECT_LT(ms.count(), 100);  /* budget: 100 ms for 1000 parses */
@@ -48,7 +48,7 @@ Perf budgets are tricky — they depend on the machine.  Options:
 1. **Absolute**: "less than 100ms".  Fragile across CI runners.
 2. **Relative to a baseline**: "within 10% of the previous build".
    Requires storing a baseline; more work.
-3. **Relative to libxml2**: "taurus time / libxml2 time < 1.5".
+3. **Relative to libxml2**: "leptris time / libxml2 time < 1.5".
    Requires libxml2 as a test dependency.
 
 Start with absolute; refine later.

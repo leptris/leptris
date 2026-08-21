@@ -1,5 +1,5 @@
-#ifndef TAURUS_BENCH_BENCHMARK_H
-#define TAURUS_BENCH_BENCHMARK_H
+#ifndef LEPTRIS_BENCH_BENCHMARK_H
+#define LEPTRIS_BENCH_BENCHMARK_H
 
 #include <stddef.h>
 
@@ -54,7 +54,7 @@ void bench_print_result(const BenchResult* result);
 void bench_print_header(const char* title);
 
 /* Print side-by-side comparison. */
-void bench_print_comparison(const BenchResult* taurus,
+void bench_print_comparison(const BenchResult* leptris,
                             const BenchResult* competitor,
                             const char* competitor_name);
 
@@ -74,4 +74,4 @@ void bench_write_json(const char* library,
 }
 #endif
 
-#endif /* TAURUS_BENCH_BENCHMARK_H */
+#endif /* LEPTRIS_BENCH_BENCHMARK_H */

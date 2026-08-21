@@ -1,6 +1,6 @@
 // test/sax/test_streaming.cpp — TODO 116 streaming SAX state machine specs.
 //
-// The streaming path is opt-in via taurus_sax_parser_set_streaming(1).
+// The streaming path is opt-in via leptris_sax_parser_set_streaming(1).
 // These specs verify that the state machine produces the same event
 // stream as the legacy one-shot path for documents fed in arbitrarily
 // small chunks.
@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-#include "taurus.h"
-#include "taurus/sax/sax.h"
+#include "leptris.h"
+#include "leptris/sax/sax.h"
 
 namespace {
 
@@ -26,8 +26,8 @@ static void log_event(EventLog* log, const char* prefix, const char* body) {
     log->events.push_back(s);
 }
 
-static TaurusSAXHandler make_handler(EventLog* log) {
-    TaurusSAXHandler h;
+static LeptrisSAXHandler make_handler(EventLog* log) {
+    LeptrisSAXHandler h;
     h = {};
     h.start_document = [](void* ud) {
         static_cast<EventLog*>(ud)->events.push_back("START_DOC");
@@ -73,20 +73,20 @@ static TaurusSAXHandler make_handler(EventLog* log) {
 /* Feed `xml` to a streaming-enabled parser in `chunk_size`-byte chunks.
  * Returns the event log.  Asserts no parse error. */
 static EventLog feed_streaming(const char* xml, size_t chunk_size,
-                               TaurusSAXHandler* h) {
+                               LeptrisSAXHandler* h) {
     EventLog log;
-    TaurusSAXParser* p = taurus_sax_parser_create(h, &log);
+    LeptrisSAXParser* p = leptris_sax_parser_create(h, &log);
     EXPECT_NE(p, nullptr);
-    EXPECT_EQ(taurus_sax_parser_set_streaming(p, 1), 0);
+    EXPECT_EQ(leptris_sax_parser_set_streaming(p, 1), 0);
 
     size_t total = std::strlen(xml);
     for (size_t i = 0; i < total; i += chunk_size) {
         size_t n = (total - i < chunk_size) ? (total - i) : chunk_size;
         int is_final = (i + n >= total) ? 1 : 0;
-        int rc = taurus_sax_parser_feed(p, xml + i, n, is_final);
+        int rc = leptris_sax_parser_feed(p, xml + i, n, is_final);
         if (rc != 0) break;  /* parse error; log will show ERR */
     }
-    taurus_sax_parser_free(p);
+    leptris_sax_parser_free(p);
     return log;
 }
 
@@ -104,7 +104,7 @@ static std::string join_text(const std::vector<std::string>& events) {
 TEST(StreamingSax, SimplestElementRoundTrips) {
     const char xml[] = "<r/>";
     EventLog log;
-    TaurusSAXHandler h = make_handler(&log);
+    LeptrisSAXHandler h = make_handler(&log);
     EventLog got = feed_streaming(xml, 1024, &h);
     /* Should fire: START_DOC, S:r, E:r, END_DOC. */
     ASSERT_EQ(got.events.size(), 4u);
@@ -117,7 +117,7 @@ TEST(StreamingSax, SimplestElementRoundTrips) {
 TEST(StreamingSax, TextContent) {
     const char xml[] = "<r>hello</r>";
     EventLog log;
-    TaurusSAXHandler h = make_handler(&log);
+    LeptrisSAXHandler h = make_handler(&log);
     EventLog got = feed_streaming(xml, 1024, &h);
     ASSERT_EQ(got.events.size(), 5u);
     EXPECT_EQ(got.events[0], "START_DOC");
@@ -130,7 +130,7 @@ TEST(StreamingSax, TextContent) {
 TEST(StreamingSax, AttributesRoundTrip) {
     const char xml[] = "<r a=\"1\" b=\"two\"/>";
     EventLog log;
-    TaurusSAXHandler h = make_handler(&log);
+    LeptrisSAXHandler h = make_handler(&log);
     EventLog got = feed_streaming(xml, 1024, &h);
     ASSERT_EQ(got.events.size(), 4u);
     EXPECT_EQ(got.events[1], "S:r @a=\"1\" @b=\"two\"");
@@ -139,7 +139,7 @@ TEST(StreamingSax, AttributesRoundTrip) {
 TEST(StreamingSax, NestedElements) {
     const char xml[] = "<a><b><c/></b></a>";
     EventLog log;
-    TaurusSAXHandler h = make_handler(&log);
+    LeptrisSAXHandler h = make_handler(&log);
     EventLog got = feed_streaming(xml, 1024, &h);
     ASSERT_EQ(got.events.size(), 8u);
     EXPECT_EQ(got.events[0], "START_DOC");
@@ -156,7 +156,7 @@ TEST(StreamingSax, SingleByteChunks) {
     /* Feed 1 byte at a time -- exercises carry-over on every token. */
     const char xml[] = "<a x=\"1\">hi<b/>bye</a>";
     EventLog log;
-    TaurusSAXHandler h = make_handler(&log);
+    LeptrisSAXHandler h = make_handler(&log);
     EventLog got = feed_streaming(xml, 1, &h);
     EXPECT_EQ(got.events[0], "START_DOC");
     EXPECT_EQ(got.events[1], "S:a @x=\"1\"");
@@ -179,7 +179,7 @@ TEST(StreamingSax, ChunkSizeBoundaryOnName) {
     /* Chunk boundary right in the middle of the element name. */
     const char xml[] = "<very_long_element_name>text</very_long_element_name>";
     EventLog log;
-    TaurusSAXHandler h = make_handler(&log);
+    LeptrisSAXHandler h = make_handler(&log);
     EventLog got = feed_streaming(xml, 5, &h);
     EXPECT_EQ(got.events[1], "S:very_long_element_name");
     EXPECT_EQ(join_text(got.events), std::string("text"));
@@ -189,7 +189,7 @@ TEST(StreamingSax, ChunkSizeBoundaryOnAttrValue) {
     /* Chunk boundary right in the middle of an attribute value. */
     const char xml[] = "<r value=\"hello world\"/>";
     EventLog log;
-    TaurusSAXHandler h = make_handler(&log);
+    LeptrisSAXHandler h = make_handler(&log);
     EventLog got = feed_streaming(xml, 10, &h);
     EXPECT_EQ(got.events[1], "S:r @value=\"hello world\"");
 }
@@ -209,14 +209,14 @@ static bool differential_match(const char* xml, size_t chunk_size,
                                std::string* why = nullptr,
                                bool tolerate_legacy_whitespace_bug = false) {
     EventLog legacy_log;
-    TaurusSAXHandler h1 = make_handler(&legacy_log);
-    if (taurus_sax_parse(xml, std::strlen(xml), &h1, &legacy_log) != 0) {
+    LeptrisSAXHandler h1 = make_handler(&legacy_log);
+    if (leptris_sax_parse(xml, std::strlen(xml), &h1, &legacy_log) != 0) {
         if (why) *why = "legacy parse failed";
         return false;
     }
 
     EventLog streaming_log;
-    TaurusSAXHandler h2 = make_handler(&streaming_log);
+    LeptrisSAXHandler h2 = make_handler(&streaming_log);
     EventLog got = feed_streaming(xml, chunk_size, &h2);
 
     auto count_prefix = [](const std::vector<std::string>& v, const char* p) {
@@ -284,11 +284,11 @@ TEST(StreamingSax, MatchesLegacyOneShot) {
         "</root>";
 
     EventLog legacy_log;
-    TaurusSAXHandler h = make_handler(&legacy_log);
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &h, &legacy_log), 0);
+    LeptrisSAXHandler h = make_handler(&legacy_log);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &h, &legacy_log), 0);
 
     EventLog streaming_log;
-    TaurusSAXHandler h2 = make_handler(&streaming_log);
+    LeptrisSAXHandler h2 = make_handler(&streaming_log);
     EventLog got = feed_streaming(xml, 8, &h2);
 
     /* Diagnostic: dump events on failure. */

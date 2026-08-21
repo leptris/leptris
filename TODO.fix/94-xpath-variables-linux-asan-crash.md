@@ -13,7 +13,7 @@ near-NULL address 0x570. Same code passed on macOS.
 
 ## Root cause (discovered via CI-driven debugging)
 
-Taurus compiled with `-std=c99 -C_EXTENSIONS OFF` (strict C99 mode).
+Leptris compiled with `-std=c99 -C_EXTENSIONS OFF` (strict C99 mode).
 In that mode, `strdup()` — a POSIX function — is **not declared** by
 `<string.h>`. Without a declaration, the compiler implicitly treated
 it as `int strdup(...)` returning 4 bytes.
@@ -40,7 +40,7 @@ real heap address.
 `src/CMakeLists.txt` now declares:
 
 ```cmake
-target_compile_definitions(taurus_objects PUBLIC _POSIX_C_SOURCE=200809L)
+target_compile_definitions(leptris_objects PUBLIC _POSIX_C_SOURCE=200809L)
 ```
 
 This makes `<string.h>` declare `strdup()` with its correct `char*`

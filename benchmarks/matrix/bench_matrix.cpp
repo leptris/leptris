@@ -1,4 +1,4 @@
-// benchmarks/matrix/bench_matrix.cpp — Full feature matrix: taurus vs pugixml vs libxml2.
+// benchmarks/matrix/bench_matrix.cpp — Full feature matrix: leptris vs pugixml vs libxml2.
 //
 // Produces one YAML file per library (build/bench-matrix/<library>.yaml) with
 // latency (min/median), throughput, CPU (user/sys) and peak-RSS metrics for
@@ -25,8 +25,8 @@
 #include <mach/mach.h>
 #endif
 
-#include <taurus.h>
-#include <taurus/sax/sax.h>
+#include <leptris.h>
+#include <leptris/sax/sax.h>
 
 #ifdef HAVE_PUGIXML
 #include <pugixml.hpp>
@@ -314,12 +314,12 @@ static void bench_dom_parse(Library& lib, const std::vector<Fixture>& fixtures,
         size_t len = fx.xml.size();
         const char* data = fx.xml.data();
 
-        if (lib.name == "taurus") {
+        if (lib.name == "leptris") {
             lib.add(run_bench(id, "DOM parse", fx.label.c_str(), len, iters,
                 [&]() {
-                    TaurusStatus st = (TaurusStatus)0;
-                    TaurusDocument d = taurus_parse_string(data, len, &st);
-                    if (d) taurus_document_free(d);
+                    LeptrisStatus st = (LeptrisStatus)0;
+                    LeptrisDocument d = leptris_parse_string(data, len, &st);
+                    if (d) leptris_document_free(d);
                 }));
         }
 #ifdef HAVE_PUGIXML
@@ -343,7 +343,7 @@ static void bench_dom_parse(Library& lib, const std::vector<Fixture>& fixtures,
     }
 }
 
-// -- SAX Parse (taurus + libxml2) --
+// -- SAX Parse (leptris + libxml2) --
 
 static volatile size_t g_sax_events;
 static void ts_start(void* u, const char* n, const char** a) {
@@ -378,15 +378,15 @@ static void bench_sax_parse(Library& lib, const std::vector<Fixture>& fixtures,
         size_t len = fx.xml.size();
         const char* data = fx.xml.data();
 
-        if (lib.name == "taurus") {
+        if (lib.name == "leptris") {
             lib.add(run_bench(id, "SAX parse", fx.label.c_str(), len, iters,
                 [&]() {
-                    TaurusSAXHandler h;
+                    LeptrisSAXHandler h;
                     memset(&h, 0, sizeof(h));
                     h.start_element = ts_start;
                     h.end_element = ts_end;
                     h.characters = ts_chars;
-                    taurus_sax_parse(data, len, &h, NULL);
+                    leptris_sax_parse(data, len, &h, NULL);
                 }));
         }
 #ifdef HAVE_LIBXML2
@@ -407,7 +407,7 @@ static void bench_sax_parse(Library& lib, const std::vector<Fixture>& fixtures,
     }
 }
 
-// -- Serialize (taurus + pugixml) --
+// -- Serialize (leptris + pugixml) --
 
 static void bench_serialize(Library& lib, const Fixture& attr_heavy,
                             const Fixture& text_heavy, int iters) {
@@ -420,15 +420,15 @@ static void bench_serialize(Library& lib, const Fixture& attr_heavy,
         size_t len = sh.fx->xml.size();
         const char* data = sh.fx->xml.data();
 
-        if (lib.name == "taurus") {
-            TaurusStatus st = (TaurusStatus)0;
-            TaurusDocument doc = taurus_parse_string(data, len, &st);
+        if (lib.name == "leptris") {
+            LeptrisStatus st = (LeptrisStatus)0;
+            LeptrisDocument doc = leptris_parse_string(data, len, &st);
             lib.add(run_bench(id, "serialize", sh.label, len, iters,
                 [&]() {
-                    char* s = taurus_document_serialize(doc, NULL);
+                    char* s = leptris_document_serialize(doc, NULL);
                     if (s) free(s);
                 }));
-            taurus_document_free(doc);
+            leptris_document_free(doc);
         }
 #ifdef HAVE_PUGIXML
         else if (lib.name == "pugixml") {
@@ -464,33 +464,33 @@ static void bench_serialize(Library& lib, const Fixture& attr_heavy,
     }
 }
 
-// -- Mutation (taurus + pugixml) --
+// -- Mutation (leptris + pugixml) --
 
 static void bench_mutation(Library& lib, int iters) {
-    if (lib.name == "taurus") {
+    if (lib.name == "leptris") {
         lib.add(run_bench("mutation_append_10k", "mutation", "append-10k", 0, iters,
             [&]() {
-                TaurusStatus st = (TaurusStatus)0;
-                TaurusDocument d = taurus_parse_string("<r/>", 4, &st);
-                TaurusElement root = taurus_document_root(d);
+                LeptrisStatus st = (LeptrisStatus)0;
+                LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
+                LeptrisElement root = leptris_document_root(d);
                 for (int i = 0; i < 10000; i++) {
-                    TaurusElement c = taurus_element_create(d, "c");
-                    taurus_element_append_child(root, c);
+                    LeptrisElement c = leptris_element_create(d, "c");
+                    leptris_element_append_child(root, c);
                 }
-                taurus_document_free(d);
+                leptris_document_free(d);
             }));
         lib.add(run_bench("mutation_set_attr_2k", "mutation", "set-attr-2k", 0, iters,
             [&]() {
-                TaurusStatus st = (TaurusStatus)0;
-                TaurusDocument d = taurus_parse_string("<r/>", 4, &st);
-                TaurusElement root = taurus_document_root(d);
+                LeptrisStatus st = (LeptrisStatus)0;
+                LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
+                LeptrisElement root = leptris_document_root(d);
                 char n[16], v[16];
                 for (int i = 0; i < 2000; i++) {
                     snprintf(n, 16, "a%d", i);
                     snprintf(v, 16, "v%d", i);
-                    taurus_element_set_attribute(root, n, v);
+                    leptris_element_set_attribute(root, n, v);
                 }
-                taurus_document_free(d);
+                leptris_document_free(d);
             }));
     }
 #ifdef HAVE_PUGIXML
@@ -543,7 +543,7 @@ static void bench_mutation(Library& lib, int iters) {
 #endif
 }
 
-// -- XPath (taurus + pugixml + libxml2) --
+// -- XPath (leptris + pugixml + libxml2) --
 
 static void bench_xpath(Library& lib, const Fixture& catalog, int iters) {
     const char* queries[] = {
@@ -558,15 +558,15 @@ static void bench_xpath(Library& lib, const Fixture& catalog, int iters) {
         char id[128];
         snprintf(id, sizeof(id), "xpath_q%d", q);
 
-        if (lib.name == "taurus") {
-            TaurusStatus st = (TaurusStatus)0;
-            TaurusDocument doc = taurus_parse_string(data, len, &st);
+        if (lib.name == "leptris") {
+            LeptrisStatus st = (LeptrisStatus)0;
+            LeptrisDocument doc = leptris_parse_string(data, len, &st);
             lib.add(run_bench(id, "XPath", queries[q], len, iters,
                 [&]() {
-                    TaurusXPathResult r = taurus_xpath_eval(doc, NULL, queries[q]);
-                    if (r) taurus_xpath_result_free(r);
+                    LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, queries[q]);
+                    if (r) leptris_xpath_result_free(r);
                 }));
-            taurus_document_free(doc);
+            leptris_document_free(doc);
         }
 #ifdef HAVE_PUGIXML
         else if (lib.name == "pugixml") {
@@ -636,12 +636,12 @@ int main(int argc, char** argv) {
 
     std::vector<Library> libraries;
 
-    // taurus
+    // leptris
     {
         Library lib;
-        lib.name = "taurus";
+        lib.name = "leptris";
         lib.version = "0.25.11";
-        printf("running taurus...\n");
+        printf("running leptris...\n");
         bench_dom_parse(lib, parse_fixtures, iters);
         bench_sax_parse(lib, parse_fixtures, iters);
         bench_serialize(lib, attr_heavy, text_heavy, iters);

@@ -1,6 +1,6 @@
 # 01 — Fix the use-after-free in xpath/evaluator.c (CodeQL CRITICAL, alert #32)
 
-Open alert `cpp/use-after-free` at `src/taurus/xpath/evaluator.c:645`
+Open alert `cpp/use-after-free` at `src/leptris/xpath/evaluator.c:645`
 (severity: critical; open since 2026-08-13).
 
 CodeQL is the only thing flagging it — the ASAN suite passes 585/585,

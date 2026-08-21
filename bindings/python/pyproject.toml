@@ -3,9 +3,9 @@ requires = ["cffi"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pytaurus"
+name = "pyleptris"
 version = "0.1.0"
-description = "Python bindings for libtaurus — fast XML 1.0 parsing and XPath 1.0"
+description = "Python bindings for libleptris — fast XML 1.0 parsing and XPath 1.0"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
@@ -16,4 +16,4 @@ dependencies = ["cffi"]
 test = ["pytest"]
 
 [tool.setuptools]
-packages = ["pytaurus"]
+packages = ["pyleptris"]

@@ -1,90 +1,90 @@
 // test/abi/test_previous_sibling_and_c14n_ex.cpp — Bug fixes for #182, #183.
 //
-// #182: taurus_node_previous_sibling now works for any node type.
-// #183: Extended C14N API (taurus_c14n_canonicalize_ex / _subtree_ex)
+// #182: leptris_node_previous_sibling now works for any node type.
+// #183: Extended C14N API (leptris_c14n_canonicalize_ex / _subtree_ex)
 // with mode, inclusive namespaces, and with_comments toggle.
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <cstring>
 #include <string>
 
 namespace {
 
-TaurusDocument Parse(const char* xml) {
-    TaurusStatus st = TAURUS_OK;
-    return taurus_parse_string(xml, std::strlen(xml), &st);
+LeptrisDocument Parse(const char* xml) {
+    LeptrisStatus st = LEPTRIS_OK;
+    return leptris_parse_string(xml, std::strlen(xml), &st);
 }
 
 // =====================================================================
-// Issue #182 — taurus_node_previous_sibling for non-elements
+// Issue #182 — leptris_node_previous_sibling for non-elements
 // =====================================================================
 
 TEST(PreviousSibling, TextPreviousIsElement) {
     // The exact reproduce from issue #182.
-    TaurusDocument doc = Parse("<x><a/>middle<b/></x>");
+    LeptrisDocument doc = Parse("<x><a/>middle<b/></x>");
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
 
     // Walk forward: a -> "middle" -> b
-    TaurusNodeRef a = taurus_node_first_child(taurus_element_as_node(root));
+    LeptrisNodeRef a = leptris_node_first_child(leptris_element_as_node(root));
     ASSERT_NE(a, nullptr);
-    TaurusNodeRef mid = taurus_node_next_sibling(a);
+    LeptrisNodeRef mid = leptris_node_next_sibling(a);
     ASSERT_NE(mid, nullptr);
-    EXPECT_EQ(taurus_node_get_type(mid), 1);  // text
-    TaurusNodeRef b = taurus_node_next_sibling(mid);
+    EXPECT_EQ(leptris_node_get_type(mid), 1);  // text
+    LeptrisNodeRef b = leptris_node_next_sibling(mid);
     ASSERT_NE(b, nullptr);
 
     // Walk backward from b: previous should be "middle" text.
-    TaurusNodeRef mid2 = taurus_node_previous_sibling(b);
+    LeptrisNodeRef mid2 = leptris_node_previous_sibling(b);
     ASSERT_NE(mid2, nullptr);
-    EXPECT_EQ(taurus_node_get_type(mid2), 1);  // text
+    EXPECT_EQ(leptris_node_get_type(mid2), 1);  // text
 
     // previous_sibling of "middle" should be <a/> (this was the bug).
-    TaurusNodeRef a2 = taurus_node_previous_sibling(mid2);
+    LeptrisNodeRef a2 = leptris_node_previous_sibling(mid2);
     ASSERT_NE(a2, nullptr);
-    EXPECT_EQ(taurus_node_get_type(a2), 0);  // element
-    EXPECT_STREQ(taurus_element_name(taurus_node_as_element(a2)), "a");
+    EXPECT_EQ(leptris_node_get_type(a2), 0);  // element
+    EXPECT_STREQ(leptris_element_name(leptris_node_as_element(a2)), "a");
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(PreviousSibling, CommentPreviousIsElement) {
-    TaurusDocument doc = Parse("<r><a/><!-- note --></r>");
-    TaurusElement r = taurus_document_root(doc);
-    TaurusNodeRef a = taurus_node_first_child(taurus_element_as_node(r));
-    TaurusNodeRef c = taurus_node_next_sibling(a);
+    LeptrisDocument doc = Parse("<r><a/><!-- note --></r>");
+    LeptrisElement r = leptris_document_root(doc);
+    LeptrisNodeRef a = leptris_node_first_child(leptris_element_as_node(r));
+    LeptrisNodeRef c = leptris_node_next_sibling(a);
 
-    EXPECT_EQ(taurus_node_get_type(c), 2);  // comment
-    TaurusNodeRef prev = taurus_node_previous_sibling(c);
+    EXPECT_EQ(leptris_node_get_type(c), 2);  // comment
+    LeptrisNodeRef prev = leptris_node_previous_sibling(c);
     ASSERT_NE(prev, nullptr);
-    EXPECT_EQ(taurus_node_get_type(prev), 0);  // element
-    EXPECT_STREQ(taurus_element_name(taurus_node_as_element(prev)), "a");
+    EXPECT_EQ(leptris_node_get_type(prev), 0);  // element
+    EXPECT_STREQ(leptris_element_name(leptris_node_as_element(prev)), "a");
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(PreviousSibling, FirstChildHasNoPrevious) {
-    TaurusDocument doc = Parse("<r><a/></r>");
-    TaurusElement r = taurus_document_root(doc);
-    TaurusNodeRef a = taurus_node_first_child(taurus_element_as_node(r));
-    EXPECT_EQ(taurus_node_previous_sibling(a), nullptr);
-    taurus_document_free(doc);
+    LeptrisDocument doc = Parse("<r><a/></r>");
+    LeptrisElement r = leptris_document_root(doc);
+    LeptrisNodeRef a = leptris_node_first_child(leptris_element_as_node(r));
+    EXPECT_EQ(leptris_node_previous_sibling(a), nullptr);
+    leptris_document_free(doc);
 }
 
 TEST(PreviousSibling, DetachedNodeReturnsNull) {
-    TaurusDocument doc = Parse("<r/>");
-    TaurusElement r = taurus_document_root(doc);
-    EXPECT_EQ(taurus_node_previous_sibling(taurus_element_as_node(r)),
+    LeptrisDocument doc = Parse("<r/>");
+    LeptrisElement r = leptris_document_root(doc);
+    EXPECT_EQ(leptris_node_previous_sibling(leptris_element_as_node(r)),
               nullptr);
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(PreviousSibling, NullSafe) {
-    EXPECT_EQ(taurus_node_previous_sibling(nullptr), nullptr);
+    EXPECT_EQ(leptris_node_previous_sibling(nullptr), nullptr);
 }
 
 // =====================================================================
@@ -93,51 +93,51 @@ TEST(PreviousSibling, NullSafe) {
 
 TEST(C14NEx, CanonicalWithoutComments) {
     const char xml[] = "<r><!-- a comment --><a>text</a></r>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize_ex(
-        doc, TAURUS_C14N_1_0, TAURUS_C14N_MODE_CANONICAL, nullptr, 0);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_CANONICAL, nullptr, 0);
     ASSERT_NE(out, nullptr);
     EXPECT_EQ(std::string(out).find("<!-- a comment -->"),
               std::string::npos);  // comment stripped
     EXPECT_NE(std::string(out).find("<a>text</a>"), std::string::npos);
-    taurus_free_string(out);
+    leptris_free_string(out);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, CanonicalWithComments) {
     const char xml[] = "<r><!-- a comment --><a/></r>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize_ex(
-        doc, TAURUS_C14N_1_0, TAURUS_C14N_MODE_CANONICAL, nullptr, 1);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_CANONICAL, nullptr, 1);
     ASSERT_NE(out, nullptr);
     EXPECT_NE(std::string(out).find("<!-- a comment -->"),
               std::string::npos);  // comment kept
-    taurus_free_string(out);
+    leptris_free_string(out);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, SubtreeWithoutComments) {
     const char xml[] = "<r><sub><!-- c --><a/></sub></r>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
-    TaurusElement r = taurus_document_root(doc);
-    TaurusElement sub = (TaurusElement)taurus_node_first_child(
-        taurus_element_as_node(r));
+    LeptrisElement r = leptris_document_root(doc);
+    LeptrisElement sub = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(r));
 
-    char* out = taurus_c14n_canonicalize_subtree_ex(
-        sub, TAURUS_C14N_1_0, TAURUS_C14N_MODE_CANONICAL, nullptr, 0);
+    char* out = leptris_c14n_canonicalize_subtree_ex(
+        sub, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_CANONICAL, nullptr, 0);
     ASSERT_NE(out, nullptr);
     EXPECT_EQ(std::string(out).find("<!-- c -->"), std::string::npos);
     EXPECT_NE(std::string(out).find("<a>"), std::string::npos);
-    taurus_free_string(out);
+    leptris_free_string(out);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, ExclusiveModeDropsUnusedNamespaces) {
@@ -149,15 +149,15 @@ TEST(C14NEx, ExclusiveModeDropsUnusedNamespaces) {
     const char xml[] =
         "<SignedRoot xmlns:ds='http://ds' xmlns:foo='http://foo'>"
         "<inner/></SignedRoot>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
 
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement inner = (TaurusElement)taurus_node_first_child(
-        taurus_element_as_node(root));
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement inner = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(root));
 
-    char* excl = taurus_c14n_canonicalize_subtree_ex(
-        inner, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, nullptr, 1);
+    char* excl = leptris_c14n_canonicalize_subtree_ex(
+        inner, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_EXCLUSIVE, nullptr, 1);
     ASSERT_NE(excl, nullptr);
     std::string s(excl);
     /* No xmlns declarations because <inner/> visibly uses nothing. */
@@ -165,9 +165,9 @@ TEST(C14NEx, ExclusiveModeDropsUnusedNamespaces) {
         << "exclusive output should not emit unused ns: " << s;
     EXPECT_EQ(s.find("xmlns="), std::string::npos)
         << "exclusive output should not emit default ns: " << s;
-    taurus_free_string(excl);
+    leptris_free_string(excl);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, ExclusiveModeKeepsUsedNamespaces) {
@@ -176,31 +176,31 @@ TEST(C14NEx, ExclusiveModeKeepsUsedNamespaces) {
     const char xml[] =
         "<SignedRoot xmlns:ds='http://www.w3.org/2000/09/xmldsig#'>"
         "<ds:Signature/></SignedRoot>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
 
     /* Force promote first to ensure the tree is materialized. */
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
 
-    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(root));
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
     ASSERT_NE(child, nullptr);
-    ASSERT_EQ(taurus_node_get_type(child), 0);  // element
+    ASSERT_EQ(leptris_node_get_type(child), 0);  // element
 
-    TaurusElement sig = taurus_node_as_element(child);
+    LeptrisElement sig = leptris_node_as_element(child);
     ASSERT_NE(sig, nullptr);
-    EXPECT_STREQ(taurus_element_name(sig), "Signature");
+    EXPECT_STREQ(leptris_element_name(sig), "Signature");
 
-    char* excl = taurus_c14n_canonicalize_subtree_ex(
-        sig, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, nullptr, 1);
+    char* excl = leptris_c14n_canonicalize_subtree_ex(
+        sig, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_EXCLUSIVE, nullptr, 1);
     ASSERT_NE(excl, nullptr);
     std::string s(excl);
     EXPECT_NE(s.find("xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\""),
               std::string::npos)
         << "exclusive output must include visibly-used ns: " << s;
-    taurus_free_string(excl);
+    leptris_free_string(excl);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, InclusiveNsPrefixesForceInclude) {
@@ -209,25 +209,25 @@ TEST(C14NEx, InclusiveNsPrefixesForceInclude) {
     const char xml[] =
         "<SignedRoot xmlns:ds='http://ds' xmlns:xenc='http://xenc'>"
         "<ds:Signature/></SignedRoot>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
 
-    TaurusElement root = taurus_document_root(doc);
-    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(root));
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
     ASSERT_NE(child, nullptr);
-    ASSERT_EQ(taurus_node_get_type(child), 0);
-    TaurusElement sig = taurus_node_as_element(child);
+    ASSERT_EQ(leptris_node_get_type(child), 0);
+    LeptrisElement sig = leptris_node_as_element(child);
     ASSERT_NE(sig, nullptr);
 
     const char* prefixes[] = {"xenc", nullptr};
-    char* excl = taurus_c14n_canonicalize_subtree_ex(
-        sig, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, prefixes, 1);
+    char* excl = leptris_c14n_canonicalize_subtree_ex(
+        sig, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_EXCLUSIVE, prefixes, 1);
     ASSERT_NE(excl, nullptr);
     std::string s(excl);
     EXPECT_NE(s.find("xmlns:ds="), std::string::npos);
     EXPECT_NE(s.find("xmlns:xenc="), std::string::npos);
-    taurus_free_string(excl);
-    taurus_document_free(doc);
+    leptris_free_string(excl);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, InclusiveAndVisibleNoDuplicate) {
@@ -237,17 +237,17 @@ TEST(C14NEx, InclusiveAndVisibleNoDuplicate) {
     const char xml[] =
         "<SignedRoot xmlns:ds='http://ds'>"
         "<ds:Signature/></SignedRoot>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
-    TaurusNodeRef child = taurus_node_first_child(taurus_element_as_node(root));
-    TaurusElement sig = taurus_node_as_element(child);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
+    LeptrisElement sig = leptris_node_as_element(child);
 
     /* Pass "ds" in the inclusive list — it's also visibly used by
      * the element name. */
     const char* prefixes[] = {"ds", nullptr};
-    char* excl = taurus_c14n_canonicalize_subtree_ex(
-        sig, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, prefixes, 1);
+    char* excl = leptris_c14n_canonicalize_subtree_ex(
+        sig, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_EXCLUSIVE, prefixes, 1);
     ASSERT_NE(excl, nullptr);
     std::string s(excl);
     /* Must contain exactly ONE xmlns:ds declaration. */
@@ -256,30 +256,30 @@ TEST(C14NEx, InclusiveAndVisibleNoDuplicate) {
     size_t second = s.find("xmlns:ds=", first + 1);
     EXPECT_EQ(second, std::string::npos)
         << "duplicate xmlns:ds in output: " << s;
-    taurus_free_string(excl);
-    taurus_document_free(doc);
+    leptris_free_string(excl);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, ExclusiveOnEmptyDoc) {
     // Exclusive mode on a doc without namespaces — should produce
     // the same output as canonical (no ns filtering needed).
     const char xml[] = "<r><a/></r>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     ASSERT_NE(doc, nullptr);
 
-    char* out = taurus_c14n_canonicalize_ex(
-        doc, TAURUS_C14N_1_0, TAURUS_C14N_MODE_EXCLUSIVE, nullptr, 1);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_EXCLUSIVE, nullptr, 1);
     EXPECT_NE(out, nullptr);
-    if (out) taurus_free_string(out);
-    taurus_document_free(doc);
+    if (out) leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 TEST(C14NEx, NullDocReturnsNull) {
-    EXPECT_EQ(taurus_c14n_canonicalize_ex(
-        nullptr, TAURUS_C14N_1_0, TAURUS_C14N_MODE_CANONICAL, nullptr, 1),
+    EXPECT_EQ(leptris_c14n_canonicalize_ex(
+        nullptr, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_CANONICAL, nullptr, 1),
         nullptr);
-    EXPECT_EQ(taurus_c14n_canonicalize_subtree_ex(
-        nullptr, TAURUS_C14N_1_0, TAURUS_C14N_MODE_CANONICAL, nullptr, 1),
+    EXPECT_EQ(leptris_c14n_canonicalize_subtree_ex(
+        nullptr, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_CANONICAL, nullptr, 1),
         nullptr);
 }
 
@@ -287,13 +287,13 @@ TEST(C14NEx, InclusiveNsPrefixesAccepted) {
     // The inclusive_ns_prefixes parameter is currently accepted but
     // not used (canonical mode). Verify the call doesn't crash.
     const char xml[] = "<r><a/></r>";
-    TaurusDocument doc = Parse(xml);
+    LeptrisDocument doc = Parse(xml);
     const char* prefixes[] = {"ds", "xenc", nullptr};
-    char* out = taurus_c14n_canonicalize_ex(
-        doc, TAURUS_C14N_1_0, TAURUS_C14N_MODE_CANONICAL, prefixes, 1);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_0, LEPTRIS_C14N_MODE_CANONICAL, prefixes, 1);
     EXPECT_NE(out, nullptr);
-    if (out) taurus_free_string(out);
-    taurus_document_free(doc);
+    if (out) leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 }  // namespace

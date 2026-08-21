@@ -1,6 +1,6 @@
 /**
  * @file output.c
- * @brief Output formatting implementation for Taurus CLI
+ * @brief Output formatting implementation for Leptris CLI
  */
 
 #include "output.h"
@@ -16,12 +16,12 @@
 #endif
 
 /* Need access to internal structures for formatters */
-#include "../src/taurus/taurus_internal.h"
-#include "../src/taurus/dom/element.h"  /* For TaurusElement and API */
-#include "../src/taurus/dom/text.h"    /* For TaurusTextNode */
-#include "../src/taurus/dom/cdata.h"   /* For TaurusCDATANode */
-#include "../src/taurus/dom/comment.h" /* For TaurusCommentNode */
-#include "../src/taurus/dom/pi.h"      /* For TaurusPINode */
+#include "../src/leptris/leptris_internal.h"
+#include "../src/leptris/dom/element.h"  /* For LeptrisElement and API */
+#include "../src/leptris/dom/text.h"    /* For LeptrisTextNode */
+#include "../src/leptris/dom/cdata.h"   /* For LeptrisCDATANode */
+#include "../src/leptris/dom/comment.h" /* For LeptrisCommentNode */
+#include "../src/leptris/dom/pi.h"      /* For LeptrisPINode */
 
 /* ------------------------------------------------------------------------- */
 /* Format Conversion                                                         */
@@ -61,7 +61,7 @@ static void xml_print_indent(int level, int indent, FILE* out) {
 }
 
 static void xml_print_element_recursive(
-    TaurusElement elem,
+    LeptrisElement elem,
     FILE* out,
     int level,
     xml_formatter_context_t* ctx
@@ -74,11 +74,11 @@ static void xml_print_element_recursive(
     }
 
     /* Opening tag - use API to get name */
-    const char* name = taurus_element_get_name(elem);
+    const char* name = leptris_element_get_name(elem);
     fprintf(out, "<%s", name ? name : "");
 
     /* Attributes - iterate using compact accessor functions */
-    size_t attr_count = taurus_element_attribute_count(elem);
+    size_t attr_count = leptris_element_attribute_count(elem);
     for (size_t i = 0; i < attr_count; i++) {
         /* Get attribute by index using accessor function */
         const char* attr_name = NULL;
@@ -86,9 +86,9 @@ static void xml_print_element_recursive(
 
         /* Use API to get attribute name and value by index */
         /* Walk the attribute linked list manually to get the i-th attribute */
-        struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+        struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
         for (size_t j = 0; j < i && attr; j++) {
-            attr = taurus_attr_next(attr);
+            attr = leptris_attr_next(attr);
         }
         if (!attr) continue;
 
@@ -117,8 +117,8 @@ static void xml_print_element_recursive(
     }
 
     /* Namespace declarations - output xmlns attributes if element has namespace */
-    const char* ns_uri = taurus_element_get_namespace_uri(elem);
-    const char* ns_prefix = taurus_element_get_prefix(elem);
+    const char* ns_uri = leptris_element_get_namespace_uri(elem);
+    const char* ns_prefix = leptris_element_get_prefix(elem);
     if (ns_uri) {
         fprintf(out, " xmlns");
         if (ns_prefix) {
@@ -128,7 +128,7 @@ static void xml_print_element_recursive(
     }
 
     /* Namespace declarations stored on this element (xmlns:prefix="uri") */
-    struct taurus_namespace* ns = taurus_elem_namespaces(elem);
+    struct leptris_namespace* ns = leptris_elem_namespaces(elem);
     while (ns) {
         fprintf(out, " xmlns");
         if (ns->prefix) {
@@ -139,9 +139,9 @@ static void xml_print_element_recursive(
     }
 
     /* Check if element has children (including text nodes) */
-    TaurusNode* first_child = taurus_elem_first_child(elem);
+    LeptrisNode* first_child = leptris_elem_first_child(elem);
     int has_children = (first_child != NULL);
-    int first_is_element = first_child && TAURUS_NODE_IS_ELEMENT(first_child);
+    int first_is_element = first_child && LEPTRIS_NODE_IS_ELEMENT(first_child);
 
     if (!has_children) {
         /* Self-closing tag */
@@ -161,18 +161,18 @@ static void xml_print_element_recursive(
     }
 
     /* Children - iterate through ALL children (including text nodes) */
-    TaurusNode* child = taurus_elem_first_child(elem);
+    LeptrisNode* child = leptris_elem_first_child(elem);
     while (child) {
-        if (TAURUS_NODE_IS_ELEMENT(child)) {
+        if (LEPTRIS_NODE_IS_ELEMENT(child)) {
             /* Element child - recurse with indentation */
-            xml_print_element_recursive((TaurusElement)child, out, level + 1, ctx);
+            xml_print_element_recursive((LeptrisElement)child, out, level + 1, ctx);
         }
-        else if (TAURUS_NODE_IS_TEXT(child)) {
+        else if (LEPTRIS_NODE_IS_TEXT(child)) {
             /* Text node - escape and print */
-            TaurusTextNode* text_node = TAURUS_NODE_AS_TEXT(child);
+            LeptrisTextNode* text_node = LEPTRIS_NODE_AS_TEXT(child);
             /* text may be borrowed (non-NUL-terminated); materialize so the
              * whitespace check and output loop below can rely on NUL. */
-            const char* content = taurus_text_get_content(text_node);
+            const char* content = leptris_text_get_content(text_node);
             if (text_node && content) {
                 /* In compact mode, skip whitespace-only text nodes */
                 if (!ctx->options.pretty_print) {
@@ -183,7 +183,7 @@ static void xml_print_element_recursive(
                     }
                     if (*p == '\0') {
                         /* Whitespace-only, skip in compact mode */
-                        child = taurus_node_get_next_sibling(child);
+                        child = leptris_node_get_next_sibling(child);
                         continue;
                     }
                 }
@@ -197,30 +197,30 @@ static void xml_print_element_recursive(
                 }
             }
             /* Get next sibling via the type-dispatching accessor */
-            child = taurus_node_get_next_sibling(child);
+            child = leptris_node_get_next_sibling(child);
             continue;
         }
-        else if (TAURUS_NODE_IS_CDATA(child)) {
+        else if (LEPTRIS_NODE_IS_CDATA(child)) {
             /* CDATA node - print as <![CDATA[...]]> */
-            TaurusCDATANode* cdata = TAURUS_NODE_AS_CDATA(child);
+            LeptrisCDATANode* cdata = LEPTRIS_NODE_AS_CDATA(child);
             if (cdata && cdata->content) {
                 fprintf(out, "<![CDATA[%s]]>", cdata->content);
             }
-            child = taurus_node_get_next_sibling(child);
+            child = leptris_node_get_next_sibling(child);
             continue;
         }
-        else if (TAURUS_NODE_IS_COMMENT(child)) {
+        else if (LEPTRIS_NODE_IS_COMMENT(child)) {
             /* Comment node - print as <!--...--> */
-            TaurusCommentNode* comment = TAURUS_NODE_AS_COMMENT(child);
+            LeptrisCommentNode* comment = LEPTRIS_NODE_AS_COMMENT(child);
             if (comment && comment->content) {
                 fprintf(out, "<!--%s-->", comment->content);
             }
-            child = taurus_node_get_next_sibling(child);
+            child = leptris_node_get_next_sibling(child);
             continue;
         }
-        else if (TAURUS_NODE_IS_PI(child)) {
+        else if (LEPTRIS_NODE_IS_PI(child)) {
             /* Processing Instruction - print as <?target data?> */
-            TaurusPINode* pi = TAURUS_NODE_AS_PI(child);
+            LeptrisPINode* pi = LEPTRIS_NODE_AS_PI(child);
             if (pi && pi->target) {
                 fprintf(out, "<?%s", pi->target);
                 if (pi->data) {
@@ -228,13 +228,13 @@ static void xml_print_element_recursive(
                 }
                 fprintf(out, "?>");
             }
-            child = taurus_node_get_next_sibling(child);
+            child = leptris_node_get_next_sibling(child);
             continue;
         }
         /* DOCTYPE nodes are not printed as children of elements */
 
         /* For element nodes, get next sibling using node API */
-        child = taurus_node_get_next_sibling(child);
+        child = leptris_node_get_next_sibling(child);
     }
 
     /* Closing tag */
@@ -248,7 +248,7 @@ static void xml_print_element_recursive(
 }
 
 static void xml_print_document_impl(
-    struct taurus_document* doc,
+    struct leptris_document* doc,
     FILE* out,
     void* ctx
 ) {
@@ -263,15 +263,15 @@ static void xml_print_document_impl(
     }
 
     /* Root element - use compact accessor */
-    taurus_document_ensure_promoted(doc);
+    leptris_document_ensure_promoted(doc);
     if (doc->new_dom_root) {
-        TaurusElement root = (TaurusElement)doc->new_dom_root;
+        LeptrisElement root = (LeptrisElement)doc->new_dom_root;
         xml_print_element_recursive(root, out, 0, xml_ctx);
     }
 }
 
 static void xml_print_element_impl(
-    TaurusElement elem,
+    LeptrisElement elem,
     FILE* out,
     void* ctx
 ) {
@@ -282,7 +282,7 @@ static void xml_print_element_impl(
 }
 
 static void xml_print_nodeset_impl(
-    struct taurus_xpath_result* result,
+    struct leptris_xpath_result* result,
     FILE* out,
     void* ctx
 ) {
@@ -301,7 +301,7 @@ static void xml_print_nodeset_impl(
         /* Check node type - attribute nodes have different structure than elements */
         if (IS_ATTRIBUTE_NODE(node_ptr)) {
             /* Attribute node - print as name="value" format */
-            TaurusAttributeNode* attr = (TaurusAttributeNode*)node_ptr;
+            LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
             if (attr && attr->name && attr->name[0] != '\0') {
                 fprintf(out, "%s", attr->name);
                 if (attr->value) {
@@ -317,7 +317,7 @@ static void xml_print_nodeset_impl(
             }
         } else if (IS_ELEMENT_NODE(node_ptr)) {
             /* Element node - use existing recursive print function */
-            TaurusElement elem = (TaurusElement)node_ptr;
+            LeptrisElement elem = (LeptrisElement)node_ptr;
             xml_print_element_recursive(elem, out, 0, xml_ctx);
         } else {
             /* Unknown node type - skip */
@@ -432,7 +432,7 @@ static void json_escape_string(const char* str, FILE* out) {
 }
 
 static void json_print_element_recursive(
-    TaurusElement elem,
+    LeptrisElement elem,
     FILE* out,
     int level
 ) {
@@ -441,18 +441,18 @@ static void json_print_element_recursive(
     fprintf(out, "{");
 
     /* Element name - use API */
-    const char* name = taurus_element_get_name(elem);
+    const char* name = leptris_element_get_name(elem);
     fprintf(out, "\"name\":\"");
     json_escape_string(name ? name : "", out);
     fprintf(out, "\"");
 
     /* Attributes - handle both StringView and C string attributes */
-    size_t attr_count = taurus_element_attribute_count(elem);
+    size_t attr_count = leptris_element_attribute_count(elem);
     if (attr_count > 0) {
         fprintf(out, ",\"attributes\":{");
         int first_attr = 1;
         /* Walk the attribute linked list */
-        struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+        struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
         while (attr) {
             /* Single representation: views ARE the C strings. */
             const char* attr_name = attr_cname(attr);
@@ -472,33 +472,33 @@ static void json_print_element_recursive(
             }
 
             /* Move to next attribute */
-            attr = taurus_attr_next(attr);
+            attr = leptris_attr_next(attr);
         }
         fprintf(out, "}");
     }
 
     /* Text content - use API and free result */
-    char* text_content = taurus_element_get_text_content(elem);
+    char* text_content = leptris_element_get_text_content(elem);
     if (text_content && text_content[0] != '\0') {
         fprintf(out, ",\"text\":\"");
         json_escape_string(text_content, out);
         fprintf(out, "\"");
     }
-    TAURUS_FREE(text_content);
+    LEPTRIS_FREE(text_content);
 
     /* Children - iterate using compact accessor functions */
-    TaurusNode* first_child = taurus_elem_first_child(elem);
+    LeptrisNode* first_child = leptris_elem_first_child(elem);
     if (first_child != NULL) {
         fprintf(out, ",\"children\":[");
         int first = 1;
-        TaurusNode* child = first_child;
+        LeptrisNode* child = first_child;
         while (child) {
-            if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
+            if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
                 if (!first) fprintf(out, ",");
                 first = 0;
-                json_print_element_recursive((TaurusElement)child, out, level + 1);
+                json_print_element_recursive((LeptrisElement)child, out, level + 1);
             }
-            child = taurus_node_get_next_sibling(child);
+            child = leptris_node_get_next_sibling(child);
         }
         fprintf(out, "]");
     }
@@ -507,16 +507,16 @@ static void json_print_element_recursive(
 }
 
 static void json_print_document_impl(
-    struct taurus_document* doc,
+    struct leptris_document* doc,
     FILE* out,
     void* ctx
 ) {
     (void)ctx;
     if (!doc || !out) return;
 
-    taurus_document_ensure_promoted(doc);
+    leptris_document_ensure_promoted(doc);
     if (doc->new_dom_root) {
-        TaurusElement root = (TaurusElement)doc->new_dom_root;
+        LeptrisElement root = (LeptrisElement)doc->new_dom_root;
         json_print_element_recursive(root, out, 0);
         fprintf(out, "\n");
     } else {
@@ -525,7 +525,7 @@ static void json_print_document_impl(
 }
 
 static void json_print_element_impl(
-    TaurusElement elem,
+    LeptrisElement elem,
     FILE* out,
     void* ctx
 ) {
@@ -537,7 +537,7 @@ static void json_print_element_impl(
 }
 
 static void json_print_nodeset_impl(
-    struct taurus_xpath_result* result,
+    struct leptris_xpath_result* result,
     FILE* out,
     void* ctx
 ) {
@@ -559,7 +559,7 @@ static void json_print_nodeset_impl(
         /* Check node type - attribute nodes have different structure than elements */
         if (IS_ATTRIBUTE_NODE(node_ptr)) {
             /* Attribute node - print as {"name":"value"} format */
-            TaurusAttributeNode* attr = (TaurusAttributeNode*)node_ptr;
+            LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
             if (!attr) {
                 fprintf(out, "null");
                 continue;
@@ -590,7 +590,7 @@ static void json_print_nodeset_impl(
             }
         } else if (IS_ELEMENT_NODE(node_ptr)) {
             /* Element node - use existing recursive print function */
-            TaurusElement elem = (TaurusElement)node_ptr;
+            LeptrisElement elem = (LeptrisElement)node_ptr;
             json_print_element_recursive(elem, out, 0);
         } else {
             /* Unknown node type - print as null */
@@ -623,7 +623,7 @@ static output_formatter_t* create_json_formatter(void) {
 /* ------------------------------------------------------------------------- */
 
 static void text_print_element_recursive(
-    TaurusElement elem,
+    LeptrisElement elem,
     FILE* out,
     int level
 ) {
@@ -635,16 +635,16 @@ static void text_print_element_recursive(
     }
 
     /* Element name - use API */
-    const char* name = taurus_element_get_name(elem);
+    const char* name = leptris_element_get_name(elem);
     fprintf(out, "%s", name ? name : "");
 
     /* Attributes - use compact accessor functions */
-    size_t attr_count = taurus_element_attribute_count(elem);
+    size_t attr_count = leptris_element_attribute_count(elem);
     if (attr_count > 0) {
         fprintf(out, " {");
         int first_attr = 1;
         /* Walk the attribute linked list */
-        struct taurus_attribute* attr = taurus_element_get_first_attribute(elem);
+        struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
         while (attr) {
             if (!first_attr) fprintf(out, ", ");
             first_attr = 0;
@@ -652,47 +652,47 @@ static void text_print_element_recursive(
             const char* av = attr_cvalue(attr);
             fprintf(out, "\"%s\"", av ? av : "");
             /* Move to next attribute */
-            attr = taurus_attr_next(attr);
+            attr = leptris_attr_next(attr);
         }
         fprintf(out, "}");
     }
 
     /* Text content - use API and free result */
-    char* text_content = taurus_element_get_text_content(elem);
+    char* text_content = leptris_element_get_text_content(elem);
     if (text_content && text_content[0] != '\0') {
         fprintf(out, ": %s", text_content);
     }
-    TAURUS_FREE(text_content);
+    LEPTRIS_FREE(text_content);
 
     fprintf(out, "\n");
 
     /* Children - iterate through ALL children (including text nodes) */
-    TaurusNode* child = taurus_elem_first_child(elem);
+    LeptrisNode* child = leptris_elem_first_child(elem);
     while (child) {
-        if (child->type == TAURUS_NODE_TYPE_ELEMENT) {
-            text_print_element_recursive((TaurusElement)child, out, level + 1);
+        if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            text_print_element_recursive((LeptrisElement)child, out, level + 1);
         }
-        child = taurus_node_get_next_sibling(child);
+        child = leptris_node_get_next_sibling(child);
     }
 }
 
 static void text_print_document_impl(
-    struct taurus_document* doc,
+    struct leptris_document* doc,
     FILE* out,
     void* ctx
 ) {
     (void)ctx;
     if (!doc || !out) return;
 
-    taurus_document_ensure_promoted(doc);
+    leptris_document_ensure_promoted(doc);
     if (doc->new_dom_root) {
-        TaurusElement root = (TaurusElement)doc->new_dom_root;
+        LeptrisElement root = (LeptrisElement)doc->new_dom_root;
         text_print_element_recursive(root, out, 0);
     }
 }
 
 static void text_print_element_impl(
-    TaurusElement elem,
+    LeptrisElement elem,
     FILE* out,
     void* ctx
 ) {
@@ -703,7 +703,7 @@ static void text_print_element_impl(
 }
 
 static void text_print_nodeset_impl(
-    struct taurus_xpath_result* result,
+    struct leptris_xpath_result* result,
     FILE* out,
     void* ctx
 ) {
@@ -720,7 +720,7 @@ static void text_print_nodeset_impl(
         /* Check node type - attribute nodes have different structure than elements */
         if (IS_ATTRIBUTE_NODE(node_ptr)) {
             /* Attribute node - print as name="value" format */
-            TaurusAttributeNode* attr = (TaurusAttributeNode*)node_ptr;
+            LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
             if (attr && attr->name) {
                 fprintf(out, "%s", attr->name);
                 if (attr->value) {
@@ -736,7 +736,7 @@ static void text_print_nodeset_impl(
             }
         } else if (IS_ELEMENT_NODE(node_ptr)) {
             /* Element node - use existing recursive print function */
-            TaurusElement elem = (TaurusElement)node_ptr;
+            LeptrisElement elem = (LeptrisElement)node_ptr;
             text_print_element_recursive(elem, out, 0);
         }
     }
@@ -825,7 +825,7 @@ void output_formatter_set_text_options(
 /* ------------------------------------------------------------------------- */
 
 void output_print_xpath_result(
-    struct taurus_xpath_result* result,
+    struct leptris_xpath_result* result,
     FILE* out,
     output_formatter_t* fmt
 ) {

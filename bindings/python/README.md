@@ -1,27 +1,27 @@
-# pytaurus — Python bindings for libtaurus
+# pyleptris — Python bindings for libleptris
 
-`pytaurus` wraps the libtaurus C API (XML 1.0 parsing, XPath 1.0)
-using `cffi` in ABI mode — the `cdef` in `pytaurus/_ffi.py` mirrors
-the public headers in `src/include/taurus/`.
+`pyleptris` wraps the libleptris C API (XML 1.0 parsing, XPath 1.0)
+using `cffi` in ABI mode — the `cdef` in `pyleptris/_ffi.py` mirrors
+the public headers in `src/include/leptris/`.
 
 ## Requirements
 
 - Python 3.8+
 - `cffi` (`pip install cffi`)
-- libtaurus as a shared library (`libtaurus.dylib` / `libtaurus.so`)
-  on the loader path, or pointed to by `TAURUS_LIB_PATH`. For a
+- libleptris as a shared library (`libleptris.dylib` / `libleptris.so`)
+  on the loader path, or pointed to by `LEPTRIS_LIB_PATH`. For a
   development checkout:
 
 ```bash
-cmake -B build -S . -DTAURUS_BUILD_SHARED=ON
-cmake --build build --target taurus_shared
-export TAURUS_LIB_PATH=$PWD/build/src/libtaurus.dylib
+cmake -B build -S . -DLEPTRIS_BUILD_SHARED=ON
+cmake --build build --target leptris_shared
+export LEPTRIS_LIB_PATH=$PWD/build/src/libleptris.dylib
 ```
 
 ## Quick start
 
 ```python
-from pytaurus import Document
+from pyleptris import Document
 
 doc = Document.parse("<library><book id='1'>Ulysses</book></library>")
 
@@ -39,11 +39,11 @@ doc.close()   # or: with Document.parse(xml) as doc: ...
 
 ## Layout
 
-- `pytaurus/_ffi.py` — cdef + shared-library loading (single source
-  of the C surface, mirroring the Ruby binding's `lib/taurus.rb`)
-- `pytaurus/document.py`, `element.py`, `node.py`, `xpath.py`,
+- `pyleptris/_ffi.py` — cdef + shared-library loading (single source
+  of the C surface, mirroring the Ruby binding's `lib/leptris.rb`)
+- `pyleptris/document.py`, `element.py`, `node.py`, `xpath.py`,
   `error.py` — typed wrappers
-- `tests/` — pytest suite (run: `pytest` with `TAURUS_LIB_PATH` set)
+- `tests/` — pytest suite (run: `pytest` with `LEPTRIS_LIB_PATH` set)
 
 ## Memory model
 

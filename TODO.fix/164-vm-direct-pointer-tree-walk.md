@@ -4,7 +4,7 @@
 
 **Investigated, deferred.** Two factors pushed this out:
 
-1. The existing `taurus_compact_int32_decode` already has the
+1. The existing `leptris_compact_int32_decode` already has the
    fast path inline in its body. With LTO (the default for
    Release) the compiler inlines the function across TUs, so the
    call overhead disappears. The inline-fast-path version would
@@ -13,14 +13,14 @@
 2. Touching 5+ DOM headers (element.h, text.h, comment.h, cdata.h,
    pi.h) for a no-op-under-LTO change risks introducing subtle
    sentinel-value mismatches. The current `INT32_MIN` sentinel
-   lives in compact.c as `TAURUS_INT32_OVERFLOW_SENTINEL`; an
+   lives in compact.c as `LEPTRIS_INT32_OVERFLOW_SENTINEL`; an
    inline version in compact.h must match exactly.
 
 If a future profile shows the compact decode as a hot spot
 (likely only on non-LTO builds or with a much smaller working
 set), revisit by:
-- Moving `TAURUS_INT32_OVERFLOW_SENTINEL` from compact.c to compact.h
-- Adding `static inline taurus_compact_int32_decode_inline` with
+- Moving `LEPTRIS_INT32_OVERFLOW_SENTINEL` from compact.c to compact.h
+- Adding `static inline leptris_compact_int32_decode_inline` with
   the same fast-path/slow-path split
 - Updating the 13 call sites in element.h/text.h/comment.h/cdata.h/pi.h
 
@@ -29,13 +29,13 @@ case.
 
 ## Why
 
-The VM walks the tree via `taurus_elem_first_child`,
-`taurus_elem_next_sibling`, etc., which call
-`taurus_compact_int32_decode`. Each decode is:
+The VM walks the tree via `leptris_elem_first_child`,
+`leptris_elem_next_sibling`, etc., which call
+`leptris_compact_int32_decode`. Each decode is:
 
 ```c
 if (off == 0) return NULL;
-if (off == TAURUS_INT32_OVERFLOW_SENTINEL) {
+if (off == LEPTRIS_INT32_OVERFLOW_SENTINEL) {
     /* overflow-table lookup */
 }
 return (char*)base + off;
@@ -58,15 +58,15 @@ traversals.
 Add inline helpers in `vm.c` that bypass the overflow check:
 
 ```c
-static inline TaurusElement vm_first_child_fast(TaurusElement e) {
+static inline LeptrisElement vm_first_child_fast(LeptrisElement e) {
     int32_t off = e->first_child_off;
-    return off ? (TaurusElement)((char*)e + off) : NULL;
+    return off ? (LeptrisElement)((char*)e + off) : NULL;
 }
 ```
 
 Use these in the VM's tree-walk loops (`vm_apply_axis_descendant`,
 `vm_apply_axis_child`, the fused child-num-cmp handler, etc.).
-Keep using the safe `taurus_elem_first_child` for any path where
+Keep using the safe `leptris_elem_first_child` for any path where
 the node could have been allocated far from the pool base.
 
 ### Phase B — Compile-time overflow guarantee

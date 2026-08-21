@@ -1,18 +1,18 @@
-# Getting Started with Taurus
+# Getting Started with Leptris
 
-This guide will help you get started with the Taurus XML parser library.
+This guide will help you get started with the Leptris XML parser library.
 
 ## Quick Start
 
 ### Minimal Example
 
 ```c
-#include <taurus.h>
+#include <leptris.h>
 
 int main() {
     /* Parse an XML document from a string */
     const char* xml = "<root>Hello, World!</root>";
-    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), NULL);
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), NULL);
 
     if (!doc) {
         fprintf(stderr, "Failed to parse XML\n");
@@ -20,15 +20,15 @@ int main() {
     }
 
     /* Get the root element */
-    TaurusElement root = taurus_document_root(doc);
-    const char* name = taurus_element_name(root);
-    const char* text = taurus_element_text(root);
+    LeptrisElement root = leptris_document_root(doc);
+    const char* name = leptris_element_name(root);
+    const char* text = leptris_element_text(root);
 
     printf("Element: %s\n", name);
     printf("Text: %s\n", text);
 
     /* Clean up */
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     return 0;
 }
 ```
@@ -37,15 +37,15 @@ int main() {
 
 ```bash
 # Using pkg-config
-gcc -o myprogram myprogram.c $(pkg-config --cflags --libs taurus)
+gcc -o myprogram myprogram.c $(pkg-config --cflags --libs leptris)
 
 # Or manually
-gcc -o myprogram myprogram.c -I/usr/local/include -L/usr/local/lib -ltaurus -lm
+gcc -o myprogram myprogram.c -I/usr/local/include -L/usr/local/lib -lleptris -lm
 ```
 
-## What is Taurus?
+## What is Leptris?
 
-Taurus is a high-performance XML parser and XPath 1.0 engine implemented in pure C. It provides:
+Leptris is a high-performance XML parser and XPath 1.0 engine implemented in pure C. It provides:
 
 - **Fast XML parsing**: Optimized for performance with zero-copy parsing
 - **DOM API**: Tree-based navigation and manipulation
@@ -57,24 +57,24 @@ Taurus is a high-performance XML parser and XPath 1.0 engine implemented in pure
 
 ### Memory Management
 
-Taurus uses pool allocation for efficient memory management:
+Leptris uses pool allocation for efficient memory management:
 
 ```c
-TaurusDocument doc = taurus_parse_string(xml, len, NULL);
+LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
 /* All DOM nodes are allocated from the document's pool */
-taurus_document_free(doc);  /* Frees all nodes at once */
+leptris_document_free(doc);  /* Frees all nodes at once */
 ```
 
 ### Zero-Copy Parsing
 
-When parsing from a string, Taurus can use the original buffer without copying:
+When parsing from a string, Leptris can use the original buffer without copying:
 
 ```c
-/* In-place parsing - Taurus takes ownership of the buffer */
+/* In-place parsing - Leptris takes ownership of the buffer */
 char* xml_copy = strdup(xml_string);
-TaurusDocument doc = taurus_parse_string_inplace(xml_copy, strlen(xml_copy), NULL);
-/* Don't free xml_copy - taurus_document_free() will do it */
-taurus_document_free(doc);
+LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, strlen(xml_copy), NULL);
+/* Don't free xml_copy - leptris_document_free() will do it */
+leptris_document_free(doc);
 ```
 
 ### XPath Queries
@@ -82,17 +82,17 @@ taurus_document_free(doc);
 Execute XPath queries on your documents:
 
 ```c
-TaurusXPathResult* result = taurus_xpath_eval(doc, "//book[price > 30]", NULL);
+LeptrisXPathResult* result = leptris_xpath_eval(doc, "//book[price > 30]", NULL);
 
-if (result && taurus_xpath_result_type(result) == TAURUS_XPATH_NODESET) {
-    int count = taurus_xpath_result_nodeset_count(result);
+if (result && leptris_xpath_result_type(result) == LEPTRIS_XPATH_NODESET) {
+    int count = leptris_xpath_result_nodeset_count(result);
     for (int i = 0; i < count; i++) {
-        TaurusElement elem = taurus_xpath_result_nodeset_item(result, i);
-        printf("Found: %s\n", taurus_element_name(elem));
+        LeptrisElement elem = leptris_xpath_result_nodeset_item(result, i);
+        printf("Found: %s\n", leptris_element_name(elem));
     }
 }
 
-taurus_xpath_result_free(result);
+leptris_xpath_result_free(result);
 ```
 
 ## Next Steps
@@ -104,29 +104,29 @@ taurus_xpath_result_free(result);
 
 ## Error Handling
 
-Taurus uses status codes for error handling:
+Leptris uses status codes for error handling:
 
 ```c
 const char* xml = "<root>...</root>";
-TaurusStatus status;
-TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &status);
+LeptrisStatus status;
+LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &status);
 
-if (status != TAURUS_OK) {
+if (status != LEPTRIS_OK) {
     fprintf(stderr, "Parse error: %d\n", status);
     return 1;
 }
 ```
 
 Common status codes:
-- `TAURUS_OK` (0) - Success
-- `TAURUS_ERROR_MEMORY` (-1) - Memory allocation failed
-- `TAURUS_ERROR_PARSE` (-2) - XML syntax error
-- `TAURUS_ERROR_NULL_ARG` (-4) - NULL argument passed
-- `TAURUS_ERROR_IO` (-7) - I/O error
+- `LEPTRIS_OK` (0) - Success
+- `LEPTRIS_ERROR_MEMORY` (-1) - Memory allocation failed
+- `LEPTRIS_ERROR_PARSE` (-2) - XML syntax error
+- `LEPTRIS_ERROR_NULL_ARG` (-4) - NULL argument passed
+- `LEPTRIS_ERROR_IO` (-7) - I/O error
 
 ## Thread Safety
 
-Taurus is thread-safe with the following rules:
+Leptris is thread-safe with the following rules:
 
 - Multiple threads can parse different documents simultaneously
 - Multiple threads can query different documents with XPath simultaneously

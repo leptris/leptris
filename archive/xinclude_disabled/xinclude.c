@@ -16,15 +16,15 @@
 #include <string.h>
 
 /* Check if namespace URI matches XInclude namespace */
-static int is_xinclude_namespace(TaurusElement elem) {
-    const char* ns = taurus_element_get_namespace_uri(elem);
+static int is_xinclude_namespace(LeptrisElement elem) {
+    const char* ns = leptris_element_get_namespace_uri(elem);
     if (!ns) return 0;
-    return strcmp(ns, TAURUS_XINCLUDE_NS) == 0;
+    return strcmp(ns, LEPTRIS_XINCLUDE_NS) == 0;
 }
 
 /* Check if element name matches */
-static int element_name_equals(TaurusElement elem, const char* name) {
-    const char* elem_name = taurus_element_name(elem);
+static int element_name_equals(LeptrisElement elem, const char* name) {
+    const char* elem_name = leptris_element_name(elem);
     if (!elem_name) return 0;
     return strcmp(elem_name, name) == 0;
 }
@@ -33,38 +33,38 @@ static int element_name_equals(TaurusElement elem, const char* name) {
  * Public API Implementation
  * =========================================================================== */
 
-int taurus_xinclude_is_include_element(TaurusElement elem) {
+int leptris_xinclude_is_include_element(LeptrisElement elem) {
     if (!elem) return 0;
     return is_xinclude_namespace(elem) &&
-           element_name_equals(elem, TAURUS_XINCLUDE_INCLUDE);
+           element_name_equals(elem, LEPTRIS_XINCLUDE_INCLUDE);
 }
 
-int taurus_xinclude_is_fallback_element(TaurusElement elem) {
+int leptris_xinclude_is_fallback_element(LeptrisElement elem) {
     if (!elem) return 0;
     return is_xinclude_namespace(elem) &&
-           element_name_equals(elem, TAURUS_XINCLUDE_FALLBACK);
+           element_name_equals(elem, LEPTRIS_XINCLUDE_FALLBACK);
 }
 
-const char* taurus_xinclude_get_href(TaurusElement include_elem) {
+const char* leptris_xinclude_get_href(LeptrisElement include_elem) {
     if (!include_elem) return NULL;
-    return taurus_element_attribute(include_elem, TAURUS_XINCLUDE_ATTR_HREF);
+    return leptris_element_attribute(include_elem, LEPTRIS_XINCLUDE_ATTR_HREF);
 }
 
-const char* taurus_xinclude_get_parse(TaurusElement include_elem) {
+const char* leptris_xinclude_get_parse(LeptrisElement include_elem) {
     if (!include_elem) return NULL;
-    const char* parse = taurus_element_attribute(include_elem, TAURUS_XINCLUDE_ATTR_PARSE);
+    const char* parse = leptris_element_attribute(include_elem, LEPTRIS_XINCLUDE_ATTR_PARSE);
     /* Default to XML if not specified */
-    return parse ? parse : TAURUS_XINCLUDE_PARSE_XML;
+    return parse ? parse : LEPTRIS_XINCLUDE_PARSE_XML;
 }
 
-const char* taurus_xinclude_get_xpointer(TaurusElement include_elem) {
+const char* leptris_xinclude_get_xpointer(LeptrisElement include_elem) {
     if (!include_elem) return NULL;
-    return taurus_element_attribute(include_elem, TAURUS_XINCLUDE_ATTR_XPOINTER);
+    return leptris_element_attribute(include_elem, LEPTRIS_XINCLUDE_ATTR_XPOINTER);
 }
 
-const char* taurus_xinclude_get_encoding(TaurusElement include_elem) {
+const char* leptris_xinclude_get_encoding(LeptrisElement include_elem) {
     if (!include_elem) return NULL;
-    return taurus_element_attribute(include_elem, TAURUS_XINCLUDE_ATTR_ENCODING);
+    return leptris_element_attribute(include_elem, LEPTRIS_XINCLUDE_ATTR_ENCODING);
 }
 
 /* Read file into buffer */
@@ -122,12 +122,12 @@ static char* resolve_href(const char* href, const char* base_url) {
 }
 
 /* Find fallback child element */
-static TaurusElement find_fallback_child(TaurusElement include_elem) {
-    TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)include_elem);
+static LeptrisElement find_fallback_child(LeptrisElement include_elem) {
+    LeptrisNode* child = leptris_node_first_child_internal((LeptrisNode*)include_elem);
     while (child) {
-        if (TAURUS_NODE_IS_ELEMENT(child)) {
-            TaurusElement elem = (TaurusElement)child;
-            if (taurus_xinclude_is_fallback_element(elem)) {
+        if (LEPTRIS_NODE_IS_ELEMENT(child)) {
+            LeptrisElement elem = (LeptrisElement)child;
+            if (leptris_xinclude_is_fallback_element(elem)) {
                 return elem;
             }
         }
@@ -137,131 +137,131 @@ static TaurusElement find_fallback_child(TaurusElement include_elem) {
 }
 
 /* Process XML include */
-static TaurusStatus process_xml_include(TaurusElement include_elem,
+static LeptrisStatus process_xml_include(LeptrisElement include_elem,
                                         const char* href,
                                         const char* xpointer,
-                                        TaurusDocument target_doc) {
+                                        LeptrisDocument target_doc) {
     /* Read included file */
     size_t file_len;
     char* file_content = read_file(href, &file_len);
     if (!file_content) {
-        return TAURUS_ERROR_IO;
+        return LEPTRIS_ERROR_IO;
     }
 
     /* Parse included document */
-    TaurusStatus status;
-    TaurusDocument included_doc = taurus_parse_string_inplace(file_content, file_len, &status);
+    LeptrisStatus status;
+    LeptrisDocument included_doc = leptris_parse_string_inplace(file_content, file_len, &status);
     if (!included_doc) {
         free(file_content);
         return status;
     }
 
     /* Get root element of included document */
-    TaurusElement included_root = taurus_document_root(included_doc);
+    LeptrisElement included_root = leptris_document_root(included_doc);
     if (!included_root) {
-        taurus_document_free(included_doc);
+        leptris_document_free(included_doc);
         free(file_content);
-        return TAURUS_ERROR_PARSE;
+        return LEPTRIS_ERROR_PARSE;
     }
 
     /* TODO: If xpointer specified, evaluate it to select specific nodes
      * For now, we just include the entire document */
 
     /* Get include node for insertion */
-    TaurusNode* include_node = (TaurusNode*)include_elem;
+    LeptrisNode* include_node = (LeptrisNode*)include_elem;
 
     /* Clone and insert all children of included root */
-    TaurusNode* child = taurus_node_first_child_internal((TaurusNode*)included_root);
+    LeptrisNode* child = leptris_node_first_child_internal((LeptrisNode*)included_root);
     while (child) {
-        TaurusNode* next = child->next_sibling;
+        LeptrisNode* next = child->next_sibling;
 
         /* Detach from included document */
-        taurus_node_remove(child);
+        leptris_node_remove(child);
 
         /* Change parent to target document */
-        if (TAURUS_NODE_IS_ELEMENT(child)) {
-            TaurusElement elem_child = (TaurusElement)child;
+        if (LEPTRIS_NODE_IS_ELEMENT(child)) {
+            LeptrisElement elem_child = (LeptrisElement)child;
             elem_child->document = target_doc;
         }
 
         /* Insert before include element using internal API */
-        taurus_node_insert_before(include_node, child);
+        leptris_node_insert_before(include_node, child);
 
         child = next;
     }
 
     /* Clean up */
-    taurus_document_free(included_doc);
+    leptris_document_free(included_doc);
     free(file_content);
 
-    return TAURUS_OK;
+    return LEPTRIS_OK;
 }
 
 /* Process text include */
-static TaurusStatus process_text_include(TaurusElement include_elem,
+static LeptrisStatus process_text_include(LeptrisElement include_elem,
                                         const char* href,
                                         const char* encoding,
-                                        TaurusDocument target_doc) {
+                                        LeptrisDocument target_doc) {
     /* Read included file */
     size_t file_len;
     char* file_content = read_file(href, &file_len);
     if (!file_content) {
-        return TAURUS_ERROR_IO;
+        return LEPTRIS_ERROR_IO;
     }
 
     /* Get pool from target document */
-    TaurusMemoryPool* pool = target_doc->pool;
+    LeptrisMemoryPool* pool = target_doc->pool;
 
     /* Create text node with file content */
-    TaurusTextNode* text_node = taurus_text_create_fast(file_content, file_len, pool);
+    LeptrisTextNode* text_node = leptris_text_create_fast(file_content, file_len, pool);
     if (!text_node) {
         free(file_content);
-        return TAURUS_ERROR_MEMORY;
+        return LEPTRIS_ERROR_MEMORY;
     }
 
     /* Set document */
-    text_node->base.parent = ((TaurusNode*)include_elem)->parent;
+    text_node->base.parent = ((LeptrisNode*)include_elem)->parent;
 
     /* Insert text before include element */
-    taurus_node_insert_before((TaurusNode*)include_elem, (TaurusNode*)text_node);
+    leptris_node_insert_before((LeptrisNode*)include_elem, (LeptrisNode*)text_node);
 
     free(file_content);
-    return TAURUS_OK;
+    return LEPTRIS_OK;
 }
 
 /* Recursively process XInclude elements in subtree */
-static TaurusStatus process_xinclude_recursive(TaurusNode* node,
+static LeptrisStatus process_xinclude_recursive(LeptrisNode* node,
                                               const char* base_url,
-                                              TaurusDocument doc) {
-    if (!node) return TAURUS_OK;
+                                              LeptrisDocument doc) {
+    if (!node) return LEPTRIS_OK;
 
     /* Process element nodes */
-    if (TAURUS_NODE_IS_ELEMENT(node)) {
-        TaurusElement elem = (TaurusElement)node;
+    if (LEPTRIS_NODE_IS_ELEMENT(node)) {
+        LeptrisElement elem = (LeptrisElement)node;
 
         /* Check if this is an XInclude include element */
-        if (taurus_xinclude_is_include_element(elem)) {
-            const char* href = taurus_xinclude_get_href(elem);
-            const char* parse = taurus_xinclude_get_parse(elem);
-            const char* xpointer = taurus_xinclude_get_xpointer(elem);
-            const char* encoding = taurus_xinclude_get_encoding(elem);
+        if (leptris_xinclude_is_include_element(elem)) {
+            const char* href = leptris_xinclude_get_href(elem);
+            const char* parse = leptris_xinclude_get_parse(elem);
+            const char* xpointer = leptris_xinclude_get_xpointer(elem);
+            const char* encoding = leptris_xinclude_get_encoding(elem);
 
             if (!href) {
                 /* Missing href - check for fallback */
-                TaurusElement fallback = find_fallback_child(elem);
+                LeptrisElement fallback = find_fallback_child(elem);
                 if (fallback) {
                     /* Process fallback content recursively */
-                    return process_xinclude_recursive((TaurusNode*)fallback, base_url, doc);
+                    return process_xinclude_recursive((LeptrisNode*)fallback, base_url, doc);
                 }
-                return TAURUS_ERROR_PARSE; /* No href, no fallback */
+                return LEPTRIS_ERROR_PARSE; /* No href, no fallback */
             }
 
             /* Resolve href */
             char* resolved_href = resolve_href(href, base_url);
 
             /* Process based on parse mode */
-            TaurusStatus status;
-            if (strcmp(parse, TAURUS_XINCLUDE_PARSE_TEXT) == 0) {
+            LeptrisStatus status;
+            if (strcmp(parse, LEPTRIS_XINCLUDE_PARSE_TEXT) == 0) {
                 status = process_text_include(elem, resolved_href, encoding, doc);
             } else {
                 /* Default to XML */
@@ -270,19 +270,19 @@ static TaurusStatus process_xinclude_recursive(TaurusNode* node,
 
             free(resolved_href);
 
-            if (status != TAURUS_OK) {
+            if (status != LEPTRIS_OK) {
                 /* Include failed - check for fallback */
-                TaurusElement fallback = find_fallback_child(elem);
+                LeptrisElement fallback = find_fallback_child(elem);
                 if (fallback) {
                     /* Process fallback content recursively */
-                    status = process_xinclude_recursive((TaurusNode*)fallback, base_url, doc);
+                    status = process_xinclude_recursive((LeptrisNode*)fallback, base_url, doc);
                 }
             }
 
             /* Remove include element (whether success or fallback) */
-            if (status == TAURUS_OK) {
-                taurus_node_remove(node);
-                return TAURUS_OK; /* Don't process children of removed element */
+            if (status == LEPTRIS_OK) {
+                leptris_node_remove(node);
+                return LEPTRIS_OK; /* Don't process children of removed element */
             }
 
             return status;
@@ -290,28 +290,28 @@ static TaurusStatus process_xinclude_recursive(TaurusNode* node,
     }
 
     /* Recursively process children */
-    TaurusNode* child = taurus_node_first_child_internal(node);
+    LeptrisNode* child = leptris_node_first_child_internal(node);
     while (child) {
-        TaurusNode* next = child->next_sibling;
-        TaurusStatus status = process_xinclude_recursive(child, base_url, doc);
-        if (status != TAURUS_OK) {
+        LeptrisNode* next = child->next_sibling;
+        LeptrisStatus status = process_xinclude_recursive(child, base_url, doc);
+        if (status != LEPTRIS_OK) {
             return status;
         }
         child = next;
     }
 
-    return TAURUS_OK;
+    return LEPTRIS_OK;
 }
 
 /* ===========================================================================
  * Main API
  * =========================================================================== */
 
-TaurusStatus taurus_xinclude_process(TaurusDocument doc, const char* base_url) {
-    if (!doc) return TAURUS_ERROR_NULL_ARG;
+LeptrisStatus leptris_xinclude_process(LeptrisDocument doc, const char* base_url) {
+    if (!doc) return LEPTRIS_ERROR_NULL_ARG;
 
-    TaurusElement root = taurus_document_root(doc);
-    if (!root) return TAURUS_OK; /* Empty document */
+    LeptrisElement root = leptris_document_root(doc);
+    if (!root) return LEPTRIS_OK; /* Empty document */
 
-    return process_xinclude_recursive((TaurusNode*)root, base_url, doc);
+    return process_xinclude_recursive((LeptrisNode*)root, base_url, doc);
 }

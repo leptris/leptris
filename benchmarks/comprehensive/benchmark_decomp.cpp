@@ -3,7 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdarg.h>
-#include "taurus.h"
+#include "leptris.h"
 #include "pugixml.hpp"
 static double now_us(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec*1e6+t.tv_nsec/1e3;}
 /* snprintf accumulator that can never run past the buffer: clamps
@@ -21,18 +21,18 @@ static size_t snappend(char* buf, size_t off, size_t cap,
 }
 
 static void bench(const char* label, const char* xml, size_t n, int iters=30) {
-    TaurusStatus st=(TaurusStatus)0;
+    LeptrisStatus st=(LeptrisStatus)0;
     double bt=1e18;
     for(int r=0;r<iters;r++){
-        double t0=now_us(); TaurusDocument d=taurus_parse_string(xml,n,&st);
-        double dt=now_us()-t0; if(d){if(dt<bt)bt=dt; taurus_document_free(d);} else {printf("%-28s PARSE FAIL\n",label);return;}
+        double t0=now_us(); LeptrisDocument d=leptris_parse_string(xml,n,&st);
+        double dt=now_us()-t0; if(d){if(dt<bt)bt=dt; leptris_document_free(d);} else {printf("%-28s PARSE FAIL\n",label);return;}
     }
     double pt=1e18;
     for(int r=0;r<iters;r++){
         double t0=now_us(); pugi::xml_document pd; pd.load_buffer(xml,n);
         double dt=now_us()-t0; if(dt<pt)pt=dt;
     }
-    printf("%-28s %6zuKB taurus=%8.1fus pugi=%8.1fus ratio=%.2fx  (taurus %.2f GB/s)\n",
+    printf("%-28s %6zuKB leptris=%8.1fus pugi=%8.1fus ratio=%.2fx  (leptris %.2f GB/s)\n",
            label, n/1024, bt, pt, bt/pt, n/bt/1000.0);
 }
 int main(void){
@@ -85,7 +85,7 @@ int main(void){
     }
     /* P6: pretty-printed — one ws-only text node per element.
      * Default keeps them (libxml2-faithful). P6b drops them via
-     * TAURUS_PARSE_DROP_WS_TEXT (pugixml-default semantics). */
+     * LEPTRIS_PARSE_DROP_WS_TEXT (pugixml-default semantics). */
     {   size_t cap=1u<<20; char* b=(char*)malloc(cap); size_t n=0;
         n=snappend(b,n,cap,"<r>\n");
         while (n < cap-32) n=snappend(b,n,cap,"  <a/>\n");
@@ -93,16 +93,16 @@ int main(void){
         bench("P6 pretty-ws elements", b, n);
         double bt=1e18;
         for(int r=0;r<30;r++){
-            TaurusStatus st=(TaurusStatus)0; double t0=now_us();
-            TaurusDocument d=taurus_parse_string_flags(
-                b,n,TAURUS_PARSE_DROP_WS_TEXT,&st);
+            LeptrisStatus st=(LeptrisStatus)0; double t0=now_us();
+            LeptrisDocument d=leptris_parse_string_flags(
+                b,n,LEPTRIS_PARSE_DROP_WS_TEXT,&st);
             double dt=now_us()-t0;
-            if(d){if(dt<bt)bt=dt; taurus_document_free(d);} }
+            if(d){if(dt<bt)bt=dt; leptris_document_free(d);} }
         double pt=1e18;
         for(int r=0;r<30;r++){
             double t0=now_us(); pugi::xml_document pd; pd.load_buffer(b,n);
             double dt=now_us()-t0; if(dt<pt)pt=dt; }
-        printf("%-28s %6zuKB taurus=%8.1fus pugi=%8.1fus ratio=%.2fx  (DROP_WS)\n",
+        printf("%-28s %6zuKB leptris=%8.1fus pugi=%8.1fus ratio=%.2fx  (DROP_WS)\n",
                "P6b pretty, DROP_WS flag", n/1024, bt, pt, bt/pt);
         free(b);
     }

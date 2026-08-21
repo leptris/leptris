@@ -1,4 +1,4 @@
-# libtaurus clang-format config (matches codebase conventions).
+# libleptris clang-format config (matches codebase conventions).
 # Targets clang-format 14+.
 
 Language:        C
@@ -27,7 +27,7 @@ BraceWrapping:
   SplitEmptyFunction: false
   SplitEmptyRecord:   false
 
-# Pointers bind to the name (TaurusElement* foo, not TaurusElement *foo).
+# Pointers bind to the name (LeptrisElement* foo, not LeptrisElement *foo).
 PointerAlignment: Right
 DerivePointerAlignment: false
 

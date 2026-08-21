@@ -1,10 +1,10 @@
-= Taurus Benchmark Suite
+= Leptris Benchmark Suite
 :toc:
 :toclevels: 3
 
 == Overview
 
-The Taurus benchmark suite compares performance against libxml2 and pugixml across:
+The Leptris benchmark suite compares performance against libxml2 and pugixml across:
 
 * DOM parsing
 * DOM traversal
@@ -18,9 +18,9 @@ The Taurus benchmark suite compares performance against libxml2 and pugixml acro
 ----
 cmake -B build -S . \
   -DCMAKE_BUILD_TYPE=Release \
-  -DTAURUS_BUILD_BENCHMARKS=ON \
-  -DTAURUS_ENABLE_LIBXML2_BENCH=ON \
-  -DTAURUS_ENABLE_PUGIXML_BENCH=ON
+  -DLEPTRIS_BUILD_BENCHMARKS=ON \
+  -DLEPTRIS_ENABLE_LIBXML2_BENCH=ON \
+  -DLEPTRIS_ENABLE_PUGIXML_BENCH=ON
 
 cmake --build build --target benchmarks
 ----
@@ -141,12 +141,12 @@ Benchmark results are reported in table format:
 
 [source]
 ----
-Benchmark                    | Taurus  | libxml2 | pugixml | Winner
+Benchmark                    | Leptris  | libxml2 | pugixml | Winner
 -----------------------------|---------|---------|---------|--------
 DOM Parse Small             |  5.3µs  |  8.2µs  |  2.4µs  | pugixml
 DOM Parse Medium            | 42.1µs  | 67.3µs  | 31.2µs  | pugixml
-XPath child::               |  3.1µs  |  5.4µs  |   N/A   | Taurus
-XPath descendant::          | 12.3µs  | 18.7µs  |   N/A   | Taurus
+XPath child::               |  3.1µs  |  5.4µs  |   N/A   | Leptris
+XPath descendant::          | 12.3µs  | 18.7µs  |   N/A   | Leptris
 ...
 ----
 
@@ -186,8 +186,8 @@ public:
         load_document("data/medium.xml");
     }
 
-    void run_taurus() override {
-        // Taurus implementation
+    void run_leptris() override {
+        // Leptris implementation
     }
 
     void run_libxml2() override {
@@ -225,4 +225,4 @@ add_benchmark(bench_my_feature src/bench_my_feature.cc)
 
 == License
 
-Benchmark code follows Taurus license (MIT).
+Benchmark code follows Leptris license (MIT).

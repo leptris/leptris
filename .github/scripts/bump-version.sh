@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bump-version.sh — Bump taurus version.
+# bump-version.sh — Bump leptris version.
 # Source of truth: git tags (latest vX.Y.Z).
 # Usage: .github/scripts/bump-version.sh [major|minor|patch|X.Y.Z]
 #
@@ -7,7 +7,7 @@
 # (tamatebako/jemalloc/.github/scripts/bump-version.sh).
 #
 # Files updated:
-#   - CMakeLists.txt  (project(taurus VERSION ...))
+#   - CMakeLists.txt  (project(leptris VERSION ...))
 #   - vcpkg.json      (version-semver + version-string)
 #   - CHANGELOG.md    (new entry template)
 #
@@ -68,7 +68,7 @@ print_info "New version: $NEXT"
 # --- Update CMakeLists.txt ---
 # project() is multi-line; use perl -0777 to match across lines.
 if [ -f "$CMAKE_FILE" ]; then
-    perl -i -0777 -pe "s/(project\(\s*taurus\b[^)]*?)VERSION\s+[0-9]+\.[0-9]+\.[0-9]+/\${1}VERSION $NEXT/s" "$CMAKE_FILE"
+    perl -i -0777 -pe "s/(project\(\s*leptris\b[^)]*?)VERSION\s+[0-9]+\.[0-9]+\.[0-9]+/\${1}VERSION $NEXT/s" "$CMAKE_FILE"
     print_info "Updated CMakeLists.txt"
 fi
 

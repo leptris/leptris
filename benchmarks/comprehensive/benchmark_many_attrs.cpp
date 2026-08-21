@@ -2,12 +2,12 @@
 //
 // Regression benchmark for TODO 159 Phase G. Generates XML with
 // varying numbers of attributes per element (K = 5, 20, 50, 100)
-// and measures parse time for both taurus and pugixml.
+// and measures parse time for both leptris and pugixml.
 //
-// Before Phase G, taurus's per-element attr wiring was O(K^2) due
+// Before Phase G, leptris's per-element attr wiring was O(K^2) due
 // to walking the existing attr list to find the tail on every
 // insertion. This benchmark catches that regression and documents
-// where taurus is competitive (or ahead) on high-attr inputs.
+// where leptris is competitive (or ahead) on high-attr inputs.
 
 #include <cstdio>
 #include <cstdlib>
@@ -18,7 +18,7 @@
 #include <chrono>
 #include <cmath>
 
-#include <taurus.h>
+#include <leptris.h>
 
 #include <pugixml.hpp>
 
@@ -75,16 +75,16 @@ std::string generate_xml(size_t n_elements, size_t k_attrs) {
     return s;
 }
 
-Stats bench_taurus(const std::string& xml, int iterations) {
+Stats bench_leptris(const std::string& xml, int iterations) {
     std::vector<double> samples;
     samples.reserve(iterations);
     for (int i = 0; i < iterations; i++) {
         auto t0 = std::chrono::high_resolution_clock::now();
-        TaurusStatus st;
-        TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+        LeptrisStatus st;
+        LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
         auto t1 = std::chrono::high_resolution_clock::now();
         if (doc) {
-            taurus_document_free(doc);
+            leptris_document_free(doc);
         }
         double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
         samples.push_back(us);
@@ -124,14 +124,14 @@ int main() {
         std::string xml = generate_xml(N_ELEMENTS, k);
         printf("\n--- %zu attrs/element, %zu bytes ---\n", k, xml.size());
 
-        Stats t = bench_taurus(xml, ITERS);
+        Stats t = bench_leptris(xml, ITERS);
         Stats p = bench_pugixml(xml, ITERS);
-        print_stats("taurus:", t);
+        print_stats("leptris:", t);
         print_stats("pugixml:", p);
 
         double ratio = (p.mean_us > 0) ? t.mean_us / p.mean_us : 0;
-        const char* verdict = (ratio < 1.0) ? "taurus AHEAD"
-                              : (ratio < 1.5) ? "taurus competitive"
+        const char* verdict = (ratio < 1.0) ? "leptris AHEAD"
+                              : (ratio < 1.5) ? "leptris competitive"
                                               : "pugixml ahead";
         printf("  ratio %.2fx (%s)\n", ratio, verdict);
     }
@@ -139,8 +139,8 @@ int main() {
     printf("\n");
     printf("=================================================================\n");
     printf("Interpretation:\n");
-    printf("  - taurus should be competitive with pugixml on K <= 20\n");
-    printf("  - For K >= 50, taurus's per-attr work (hash, entity check,\n");
+    printf("  - leptris should be competitive with pugixml on K <= 20\n");
+    printf("  - For K >= 50, leptris's per-attr work (hash, entity check,\n");
     printf("    string view setup) shows up; pugixml ships fewer features\n");
     printf("    per attr. The gap is structural, not a bug.\n");
     printf("  - Regression check: any per-attr cost increase should be\n");

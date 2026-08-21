@@ -1,5 +1,5 @@
 /* sax/bench_libxml2.c — libxml2 SAX reader benchmark, same shape as
- * bench_taurus.c for direct comparison. */
+ * bench_leptris.c for direct comparison. */
 
 #include "../common/benchmark.h"
 #include "../common/test_data.h"

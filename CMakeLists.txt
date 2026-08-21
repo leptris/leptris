@@ -1,8 +1,8 @@
-# Taurus - Fast XML Parser and XPath Evaluator
+# Leptris - Fast XML Parser and XPath Evaluator
 # Pure C library with Ruby bindings and CLI
 cmake_minimum_required(VERSION 3.20)
 
-project(taurus
+project(leptris
     VERSION 0.26.8
     DESCRIPTION "Fast XML parser and XPath evaluator in pure C"
     LANGUAGES C CXX
@@ -25,30 +25,30 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)  # Default to static
 option(BUILD_TESTING "Build tests" ON)
 option(BUILD_EXAMPLES "Build examples" OFF)
-option(TAURUS_BUILD_CLI "Build CLI tool" ON)
-option(TAURUS_BUILD_MAN_PAGES "Generate man pages with asciidoctor" OFF)
-option(TAURUS_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
-option(TAURUS_ENABLE_UTF8PROC "Enable Unicode support via utf8proc" ON)
-option(TAURUS_ENABLE_ICONV "Enable encoding conversion via iconv" ON)
-option(TAURUS_ENABLE_ASAN "Enable AddressSanitizer (catches heap bugs at runtime)" OFF)
-option(TAURUS_ENABLE_FUZZING "Build libFuzzer harness" OFF)
-option(TAURUS_BUILD_DOCS "Build Doxygen API docs" OFF)
+option(LEPTRIS_BUILD_CLI "Build CLI tool" ON)
+option(LEPTRIS_BUILD_MAN_PAGES "Generate man pages with asciidoctor" OFF)
+option(LEPTRIS_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
+option(LEPTRIS_ENABLE_UTF8PROC "Enable Unicode support via utf8proc" ON)
+option(LEPTRIS_ENABLE_ICONV "Enable encoding conversion via iconv" ON)
+option(LEPTRIS_ENABLE_ASAN "Enable AddressSanitizer (catches heap bugs at runtime)" OFF)
+option(LEPTRIS_ENABLE_FUZZING "Build libFuzzer harness" OFF)
+option(LEPTRIS_BUILD_DOCS "Build Doxygen API docs" OFF)
 
 # LTO default: ON for Release/RelWithDebInfo, OFF for Debug/empty.
-# The user can override with -DTAURUS_ENABLE_LTO=OFF.
+# The user can override with -DLEPTRIS_ENABLE_LTO=OFF.
 # LTO delivers 1.3-3.5x speedups on parse/SAX/DOM benchmarks — see
 # PR #74 for the benchmark data.  Downside: 5-30s longer link time.
 # CheckIPOSupported guards against unsupported toolchains.
-if(NOT DEFINED TAURUS_ENABLE_LTO)
+if(NOT DEFINED LEPTRIS_ENABLE_LTO)
     if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-        set(TAURUS_ENABLE_LTO_DEFAULT ON)
+        set(LEPTRIS_ENABLE_LTO_DEFAULT ON)
     else()
-        set(TAURUS_ENABLE_LTO_DEFAULT OFF)
+        set(LEPTRIS_ENABLE_LTO_DEFAULT OFF)
     endif()
 else()
-    set(TAURUS_ENABLE_LTO_DEFAULT ${TAURUS_ENABLE_LTO})
+    set(LEPTRIS_ENABLE_LTO_DEFAULT ${LEPTRIS_ENABLE_LTO})
 endif()
-option(TAURUS_ENABLE_LTO "Enable link-time optimization (default ON for Release)" ${TAURUS_ENABLE_LTO_DEFAULT})
+option(LEPTRIS_ENABLE_LTO "Enable link-time optimization (default ON for Release)" ${LEPTRIS_ENABLE_LTO_DEFAULT})
 
 # Optimization level (TODO 167 Phase A). CMake's default for Release is
 # -O2; -O3 enables more aggressive inlining, loop transforms, and
@@ -57,8 +57,8 @@ option(TAURUS_ENABLE_LTO "Enable link-time optimization (default ON for Release)
 #
 #   default      — use CMake's choice (-O2 for Release)
 #   aggressive   — force -O3 for Release/RelWithDebInfo
-set(TAURUS_OPT_LEVEL "default" CACHE STRING "Optimization level: default (-O2) or aggressive (-O3)")
-set_property(CACHE TAURUS_OPT_LEVEL PROPERTY STRINGS default aggressive)
+set(LEPTRIS_OPT_LEVEL "default" CACHE STRING "Optimization level: default (-O2) or aggressive (-O3)")
+set_property(CACHE LEPTRIS_OPT_LEVEL PROPERTY STRINGS default aggressive)
 
 # Target architecture (TODO 167 Phase B). -march=native lets the compiler use
 # the host's full ISA (AVX2, AVX-512, BMI2, etc). The resulting binary is NOT
@@ -66,11 +66,11 @@ set_property(CACHE TAURUS_OPT_LEVEL PROPERTY STRINGS default aggressive)
 #
 #   default   — baseline (runs on any x86-64 / ARM64)
 #   native    — -march=native (gcc/clang) or /arch:AVX2 (MSVC)
-set(TAURUS_TARGET_ARCH "default" CACHE STRING "Target CPU arch: default (portable) or native (host ISA)")
-set_property(CACHE TAURUS_TARGET_ARCH PROPERTY STRINGS default native)
+set(LEPTRIS_TARGET_ARCH "default" CACHE STRING "Target CPU arch: default (portable) or native (host ISA)")
+set_property(CACHE LEPTRIS_TARGET_ARCH PROPERTY STRINGS default native)
 
 # AddressSanitizer — see TODO 35.
-if(TAURUS_ENABLE_ASAN)
+if(LEPTRIS_ENABLE_ASAN)
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=address)
     message(STATUS "AddressSanitizer: ENABLED")
@@ -81,29 +81,29 @@ endif()
 # Lets the compiler inline across translation-unit boundaries.  Without
 # LTO, every "static inline" helper in element_modify.c / element_query.c
 # that crosses a TU boundary from a caller in another .c file is a real
-# function call — including taurus_pool_alloc, taurus_element_set_attribute,
+# function call — including leptris_pool_alloc, leptris_element_set_attribute,
 # the chartype table lookups, etc.  With LTO, the compiler sees the whole
 # program at link time and inlines aggressively.
 #
 # Off by default because:
-#   - LTO significantly increases link time (5-30s for taurus)
+#   - LTO significantly increases link time (5-30s for leptris)
 #   - Some older toolchains have LTO bugs
 #   - Debug builds don't benefit
 #
 # Recommended for release builds where every cycle counts.
-if(TAURUS_ENABLE_LTO)
+if(LEPTRIS_ENABLE_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT lto_supported OUTPUT lto_error)
     if(lto_supported)
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
         message(STATUS "Link-time optimization: ENABLED")
     else()
-        message(WARNING "TAURUS_ENABLE_LTO requested but not supported: ${lto_error}")
+        message(WARNING "LEPTRIS_ENABLE_LTO requested but not supported: ${lto_error}")
     endif()
 endif()
 
 # Optimization level (TODO 167 Phase A).
-if(TAURUS_OPT_LEVEL STREQUAL "aggressive")
+if(LEPTRIS_OPT_LEVEL STREQUAL "aggressive")
     if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang"
        OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
         # CMake sets -O2 by default for Release; -O3 replaces it.
@@ -132,7 +132,7 @@ else()
 endif()
 
 # Target architecture (TODO 167 Phase B).
-if(TAURUS_TARGET_ARCH STREQUAL "native")
+if(LEPTRIS_TARGET_ARCH STREQUAL "native")
     if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang"
        OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
         add_compile_options(-march=native)
@@ -158,8 +158,8 @@ if(BUILD_SHARED_LIBS)
         # allow interposition of defined symbols anyway), but explicitly
         # setting -fvisibility-no-protects the inlining decision.
         # Apple Clang ignores the flag; suppress the warning.
-        check_c_compiler_flag("-fno-semantic-interposition" _taurus_fsi_supported)
-        if(_taurus_fsi_supported)
+        check_c_compiler_flag("-fno-semantic-interposition" _leptris_fsi_supported)
+        if(_leptris_fsi_supported)
             add_compile_options(-fno-semantic-interposition)
             message(STATUS "Semantic interposition: disabled (shared-lib build)")
         endif()
@@ -167,7 +167,7 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 # libFuzzer — see TODO 40.  Implies ASAN.
-if(TAURUS_ENABLE_FUZZING)
+if(LEPTRIS_ENABLE_FUZZING)
     add_compile_options(-fsanitize=fuzzer-no-link,address -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=fuzzer,address)
     message(STATUS "libFuzzer: ENABLED (implies ASAN)")
@@ -176,14 +176,14 @@ endif()
 # Profile-guided optimization (TODO 159 Phase F).
 #
 # Three-step build process:
-#   1. cmake -B build-pgo -DTAURUS_ENABLE_PGO=GENERATE ...
+#   1. cmake -B build-pgo -DLEPTRIS_ENABLE_PGO=GENERATE ...
 #      cmake --build build-pgo
 #   2. Run a representative workload against the instrumented binary
 #      (e.g. `ctest --test-dir build-pgo` or your app's test suite).
 #      For clang: `llvm-profdata merge build-pgo/pgo-data/*.profraw
 #      -o build-pgo/pgo-data/default.profdata` between steps 2 and 3.
 #      GCC and MSVC generate the profile directly.
-#   3. cmake -B build-pgo -DTAURUS_ENABLE_PGO=USE ...
+#   3. cmake -B build-pgo -DLEPTRIS_ENABLE_PGO=USE ...
 #      cmake --build build-pgo
 #
 # Closes the switch-dispatch gap vs computed-goto without GCC-isms.
@@ -193,49 +193,49 @@ endif()
 # bother. Distributions / packagers who want the last ~10-15% on the
 # XPath VM dispatch loop should enable it; on the DOM parse path the
 # measured gain is smaller (~1-2%, TODO 185 round 3).
-set(TAURUS_ENABLE_PGO "OFF" CACHE STRING "Profile-guided optimization phase: OFF, GENERATE, or USE")
-set_property(CACHE TAURUS_ENABLE_PGO PROPERTY STRINGS OFF GENERATE USE)
-set(TAURUS_PGO_DIR "${CMAKE_BINARY_DIR}/pgo-data" CACHE PATH "PGO profile directory")
+set(LEPTRIS_ENABLE_PGO "OFF" CACHE STRING "Profile-guided optimization phase: OFF, GENERATE, or USE")
+set_property(CACHE LEPTRIS_ENABLE_PGO PROPERTY STRINGS OFF GENERATE USE)
+set(LEPTRIS_PGO_DIR "${CMAKE_BINARY_DIR}/pgo-data" CACHE PATH "PGO profile directory")
 
-if(NOT TAURUS_ENABLE_PGO STREQUAL "OFF")
+if(NOT LEPTRIS_ENABLE_PGO STREQUAL "OFF")
     if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
-        if(TAURUS_ENABLE_PGO STREQUAL "GENERATE")
-            add_compile_options(-fprofile-instr-generate=${TAURUS_PGO_DIR}/default.profraw)
-            add_link_options(-fprofile-instr-generate=${TAURUS_PGO_DIR}/default.profraw)
-            file(MAKE_DIRECTORY ${TAURUS_PGO_DIR})
-            message(STATUS "PGO (clang): GENERATE → ${TAURUS_PGO_DIR}")
-        elseif(TAURUS_ENABLE_PGO STREQUAL "USE")
-            add_compile_options(-fprofile-instr-use=${TAURUS_PGO_DIR}/default.profdata)
-            message(STATUS "PGO (clang): USE ← ${TAURUS_PGO_DIR}/default.profdata")
+        if(LEPTRIS_ENABLE_PGO STREQUAL "GENERATE")
+            add_compile_options(-fprofile-instr-generate=${LEPTRIS_PGO_DIR}/default.profraw)
+            add_link_options(-fprofile-instr-generate=${LEPTRIS_PGO_DIR}/default.profraw)
+            file(MAKE_DIRECTORY ${LEPTRIS_PGO_DIR})
+            message(STATUS "PGO (clang): GENERATE → ${LEPTRIS_PGO_DIR}")
+        elseif(LEPTRIS_ENABLE_PGO STREQUAL "USE")
+            add_compile_options(-fprofile-instr-use=${LEPTRIS_PGO_DIR}/default.profdata)
+            message(STATUS "PGO (clang): USE ← ${LEPTRIS_PGO_DIR}/default.profdata")
         endif()
     elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-        if(TAURUS_ENABLE_PGO STREQUAL "GENERATE")
-            add_compile_options(-fprofile-generate=${TAURUS_PGO_DIR})
-            add_link_options(-fprofile-generate=${TAURUS_PGO_DIR})
-            file(MAKE_DIRECTORY ${TAURUS_PGO_DIR})
-            message(STATUS "PGO (gcc): GENERATE → ${TAURUS_PGO_DIR}")
-        elseif(TAURUS_ENABLE_PGO STREQUAL "USE")
-            add_compile_options(-fprofile-use=${TAURUS_PGO_DIR} -Wno-coverage-mismatch)
-            message(STATUS "PGO (gcc): USE ← ${TAURUS_PGO_DIR}")
+        if(LEPTRIS_ENABLE_PGO STREQUAL "GENERATE")
+            add_compile_options(-fprofile-generate=${LEPTRIS_PGO_DIR})
+            add_link_options(-fprofile-generate=${LEPTRIS_PGO_DIR})
+            file(MAKE_DIRECTORY ${LEPTRIS_PGO_DIR})
+            message(STATUS "PGO (gcc): GENERATE → ${LEPTRIS_PGO_DIR}")
+        elseif(LEPTRIS_ENABLE_PGO STREQUAL "USE")
+            add_compile_options(-fprofile-use=${LEPTRIS_PGO_DIR} -Wno-coverage-mismatch)
+            message(STATUS "PGO (gcc): USE ← ${LEPTRIS_PGO_DIR}")
         endif()
     elseif(MSVC)
-        if(TAURUS_ENABLE_PGO STREQUAL "GENERATE")
+        if(LEPTRIS_ENABLE_PGO STREQUAL "GENERATE")
             add_compile_options(/GL)
-            add_link_options(/GENPROFILE:${TAURUS_PGO_DIR} /LTCG)
-            file(MAKE_DIRECTORY ${TAURUS_PGO_DIR})
-            message(STATUS "PGO (MSVC): GENERATE → ${TAURUS_PGO_DIR}")
-        elseif(TAURUS_ENABLE_PGO STREQUAL "USE")
+            add_link_options(/GENPROFILE:${LEPTRIS_PGO_DIR} /LTCG)
+            file(MAKE_DIRECTORY ${LEPTRIS_PGO_DIR})
+            message(STATUS "PGO (MSVC): GENERATE → ${LEPTRIS_PGO_DIR}")
+        elseif(LEPTRIS_ENABLE_PGO STREQUAL "USE")
             add_compile_options(/GL)
-            add_link_options(/USEPROFILE:${TAURUS_PGO_DIR} /LTCG)
-            message(STATUS "PGO (MSVC): USE ← ${TAURUS_PGO_DIR}")
+            add_link_options(/USEPROFILE:${LEPTRIS_PGO_DIR} /LTCG)
+            message(STATUS "PGO (MSVC): USE ← ${LEPTRIS_PGO_DIR}")
         endif()
     else()
-        message(WARNING "TAURUS_ENABLE_PGO=${TAURUS_ENABLE_PGO} not supported for ${CMAKE_C_COMPILER_ID}; ignoring")
+        message(WARNING "LEPTRIS_ENABLE_PGO=${LEPTRIS_ENABLE_PGO} not supported for ${CMAKE_C_COMPILER_ID}; ignoring")
     endif()
 endif()
 
 # Doxygen API docs — see TODO 63.
-if(TAURUS_BUILD_DOCS)
+if(LEPTRIS_BUILD_DOCS)
     find_package(Doxygen)
     if(DOXYGEN_FOUND)
         add_custom_target(docs
@@ -244,7 +244,7 @@ if(TAURUS_BUILD_DOCS)
             COMMENT "Generating Doxygen API documentation")
         message(STATUS "Doxygen: ENABLED (target: docs)")
     else()
-        message(WARNING "TAURUS_BUILD_DOCS=ON but Doxygen not found; skipping")
+        message(WARNING "LEPTRIS_BUILD_DOCS=ON but Doxygen not found; skipping")
     endif()
 endif()
 
@@ -252,8 +252,8 @@ endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Hide all symbols by default; the public surface is exactly the
-# functions marked TAURUS_API. Cuts the shared-library export table
-# from ~445 entries down to the ~295 taurus_* symbols. See TODO 80.
+# functions marked LEPTRIS_API. Cuts the shared-library export table
+# from ~445 entries down to the ~295 leptris_* symbols. See TODO 80.
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
@@ -268,14 +268,14 @@ include(CheckCCompilerFlag)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 # Include AdocMan for man page generation
-if(TAURUS_BUILD_MAN_PAGES)
+if(LEPTRIS_BUILD_MAN_PAGES)
     include(AdocMan)
 endif()
 
 # Add subdirectories
 add_subdirectory(src)
 
-if(TAURUS_BUILD_CLI)
+if(LEPTRIS_BUILD_CLI)
     add_subdirectory(cli)
 endif()
 
@@ -288,57 +288,57 @@ if(BUILD_EXAMPLES)
     add_subdirectory(examples/c)
 endif()
 
-if(TAURUS_BUILD_BENCHMARKS)
+if(LEPTRIS_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif()
 
 # Zero-copy test executable (disabled - not needed for benchmarks)
 # add_executable(test_zero_copy test_zero_copy.c)
-# target_link_libraries(test_zero_copy taurus)
+# target_link_libraries(test_zero_copy leptris)
 
 # Install CMake config files
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/taurus-config-version.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/leptris-config-version.cmake"
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/taurus-config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/taurus-config.cmake"
-    INSTALL_DESTINATION lib/cmake/taurus
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/leptris-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/leptris-config.cmake"
+    INSTALL_DESTINATION lib/cmake/leptris
 )
 
 install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/taurus-config.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/taurus-config-version.cmake"
-    DESTINATION lib/cmake/taurus
+    "${CMAKE_CURRENT_BINARY_DIR}/leptris-config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/leptris-config-version.cmake"
+    DESTINATION lib/cmake/leptris
 )
 
 
 # pkg-config file
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/taurus.pc.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/taurus.pc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/leptris.pc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/leptris.pc"
     @ONLY
 )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/taurus.pc"
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/leptris.pc"
     DESTINATION lib/pkgconfig
 )
 
 # Generate and install man pages (when building CLI)
-if(TAURUS_BUILD_CLI AND TAURUS_BUILD_MAN_PAGES)
+if(LEPTRIS_BUILD_CLI AND LEPTRIS_BUILD_MAN_PAGES)
     # Use AdocMan.cmake to generate man pages from AsciiDoc sources
-    # CLI man pages (section 1): cli/man/taurus.1.adoc, etc.
+    # CLI man pages (section 1): cli/man/leptris.1.adoc, etc.
     set(ADOC_MAN_SOURCES
-        cli/man/taurus.1.adoc
-        cli/man/taurus-parse.1.adoc
-        cli/man/taurus-xpath.1.adoc
-        cli/man/taurus-format.1.adoc
+        cli/man/leptris.1.adoc
+        cli/man/leptris-parse.1.adoc
+        cli/man/leptris-xpath.1.adoc
+        cli/man/leptris-format.1.adoc
     )
 
     foreach(ADOC_SOURCE ${ADOC_MAN_SOURCES})
@@ -349,9 +349,9 @@ if(TAURUS_BUILD_CLI AND TAURUS_BUILD_MAN_PAGES)
 endif()
 
 # Generate library API man page (section 5)
-if(TAURUS_BUILD_MAN_PAGES)
-    # Library man page (section 5): src/man/libtaurus.5.adoc
-    set(LIB_MAN_SOURCE src/man/libtaurus.5.adoc)
+if(LEPTRIS_BUILD_MAN_PAGES)
+    # Library man page (section 5): src/man/libleptris.5.adoc
+    set(LIB_MAN_SOURCE src/man/libleptris.5.adoc)
 
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${LIB_MAN_SOURCE}")
         add_adoc_man("${CMAKE_CURRENT_SOURCE_DIR}/${LIB_MAN_SOURCE}")
@@ -360,18 +360,18 @@ endif()
 
 # Summary
 message(STATUS "")
-message(STATUS "Taurus ${PROJECT_VERSION} Configuration:")
+message(STATUS "Leptris ${PROJECT_VERSION} Configuration:")
 message(STATUS "  C Compiler: ${CMAKE_C_COMPILER}")
 message(STATUS "  C Standard: C${CMAKE_C_STANDARD}")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Optimization Level: ${TAURUS_OPT_LEVEL}")
-message(STATUS "  Target Architecture: ${TAURUS_TARGET_ARCH}")
+message(STATUS "  Optimization Level: ${LEPTRIS_OPT_LEVEL}")
+message(STATUS "  Target Architecture: ${LEPTRIS_TARGET_ARCH}")
 message(STATUS "  Shared Libraries: ${BUILD_SHARED_LIBS}")
 message(STATUS "  Build Tests: ${BUILD_TESTING}")
 message(STATUS "  Build Examples: ${BUILD_EXAMPLES}")
-message(STATUS "  Build CLI: ${TAURUS_BUILD_CLI}")
-message(STATUS "  Generate Man Pages: ${TAURUS_BUILD_MAN_PAGES}")
+message(STATUS "  Build CLI: ${LEPTRIS_BUILD_CLI}")
+message(STATUS "  Generate Man Pages: ${LEPTRIS_BUILD_MAN_PAGES}")
 message(STATUS "  Install Prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "")
 # Update the summary to include benchmarks
-message(STATUS "  Build Benchmarks: ${TAURUS_BUILD_BENCHMARKS}")
+message(STATUS "  Build Benchmarks: ${LEPTRIS_BUILD_BENCHMARKS}")

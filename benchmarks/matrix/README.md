@@ -1,6 +1,6 @@
 # Benchmark Matrix (`bench_matrix` + `bench2html.rb`)
 
-Full-feature comparison matrix: taurus vs pugixml vs libxml2, measuring
+Full-feature comparison matrix: leptris vs pugixml vs libxml2, measuring
 **latency** (min/median µs), **throughput** (MB/s), **CPU** (user/sys ms) and
 **peak RSS** (KB) across every supported capability.
 
@@ -10,7 +10,7 @@ rendered as `—` in the HTML report.
 
 ## Covered features
 
-| Feature | taurus | pugixml | libxml2 |
+| Feature | leptris | pugixml | libxml2 |
 |---|---|---|---|
 | DOM parse (4 shapes) | ✓ | ✓ | ✓ |
 | SAX parse (4 shapes) | ✓ | — | ✓ |
@@ -22,7 +22,7 @@ rendered as `—` in the HTML report.
 
 ```bash
 # 1. Build with all optional dependencies found
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DTAURUS_BUILD_BENCHMARKS=ON
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DLEPTRIS_BUILD_BENCHMARKS=ON
 cmake --build build --target bench_matrix
 
 # 2. Run — produces one YAML per library
@@ -39,11 +39,11 @@ open build/bench_report.html    # macOS
 
 ## YAML format
 
-Each library gets one file (`taurus.yaml`, `pugixml.yaml`, `libxml2.yaml`):
+Each library gets one file (`leptris.yaml`, `pugixml.yaml`, `libxml2.yaml`):
 
 ```yaml
 meta:
-  library: 'taurus'
+  library: 'leptris'
   version: '0.25.11'
   timestamp: '2026-08-20T10:00:00'
   platform: 'macOS-arm64'

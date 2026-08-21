@@ -1,6 +1,6 @@
 /**
  * @file output.h
- * @brief Output formatting for Taurus CLI
+ * @brief Output formatting for Leptris CLI
  *
  * This file defines a pluggable output formatting system that supports
  * multiple output formats (XML, JSON, text) through a common interface.
@@ -12,12 +12,12 @@
  * - Separation of Concerns: Formatting separate from business logic
  */
 
-#ifndef TAURUS_CLI_OUTPUT_H
-#define TAURUS_CLI_OUTPUT_H
+#ifndef LEPTRIS_CLI_OUTPUT_H
+#define LEPTRIS_CLI_OUTPUT_H
 
 #include <stdio.h>
 #include <stdbool.h>
-#include "../src/include/taurus.h"
+#include "../src/include/leptris.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,13 +62,13 @@ const char* output_format_to_string(output_format_t format);
  * Output formatter interface
  *
  * Each formatter implements this interface to provide format-specific
- * rendering of Taurus results.
+ * rendering of Leptris results.
  *
  * Example usage:
  *
  * ```c
  * output_formatter_t* fmt = output_formatter_create(OUTPUT_FORMAT_XML);
- * struct taurus_document* doc = taurus_parse(xml, len);
+ * struct leptris_document* doc = leptris_parse(xml, len);
  *
  * fmt->print_document(doc, stdout, fmt->context);
  *
@@ -87,7 +87,7 @@ typedef struct output_formatter {
      * @param ctx Format-specific context
      */
     void (*print_document)(
-        struct taurus_document* doc,
+        struct leptris_document* doc,
         FILE* out,
         void* ctx
     );
@@ -100,7 +100,7 @@ typedef struct output_formatter {
      * @param ctx Format-specific context
      */
     void (*print_element)(
-        TaurusElement elem,
+        LeptrisElement elem,
         FILE* out,
         void* ctx
     );
@@ -113,7 +113,7 @@ typedef struct output_formatter {
      * @param ctx Format-specific context
      */
     void (*print_nodeset)(
-        struct taurus_xpath_result* result,
+        struct leptris_xpath_result* result,
         FILE* out,
         void* ctx
     );
@@ -293,7 +293,7 @@ void output_formatter_set_text_options(
  * @param fmt Formatter
  */
 void output_print_xpath_result(
-    struct taurus_xpath_result* result,
+    struct leptris_xpath_result* result,
     FILE* out,
     output_formatter_t* fmt
 );
@@ -358,4 +358,4 @@ void output_print_colored(
 }
 #endif
 
-#endif /* TAURUS_CLI_OUTPUT_H */
+#endif /* LEPTRIS_CLI_OUTPUT_H */

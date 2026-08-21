@@ -7,14 +7,14 @@
 // NULL-check forgotten at ANY early allocation turns into a test
 // failure instead of a user's segfault.
 //
-// The hook (taurus_set_memory_management_functions) covers the pool/
+// The hook (leptris_set_memory_management_functions) covers the pool/
 // arena-backed allocations the parser and DOM use. Paths that raw-
 // malloc (serialize's output buffer, mutation bump blocks) are out
 // of scope here — they are covered by the large-document suite.
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -36,12 +36,12 @@ void passthrough_free(void* p) { std::free(p); }
 class OomInjection : public ::testing::Test {
 protected:
     void SetUp() override {
-        taurus_set_memory_management_functions(countdown_alloc,
+        leptris_set_memory_management_functions(countdown_alloc,
                                                 passthrough_free);
     }
     void TearDown() override {
         g_alloc_countdown = -1;
-        taurus_set_memory_management_functions(NULL, NULL);
+        leptris_set_memory_management_functions(NULL, NULL);
     }
 };
 
@@ -65,16 +65,16 @@ TEST_F(OomInjection, ParseSurvivesFailureAtEveryEarlyAllocation) {
         SCOPED_TRACE(std::string("parse fail at alloc #") +
                      std::to_string(k));
         g_alloc_countdown = k;
-        TaurusStatus st = (TaurusStatus)0;
-        TaurusDocument doc =
-            taurus_parse_string(kDoc, std::strlen(kDoc), &st);
+        LeptrisStatus st = (LeptrisStatus)0;
+        LeptrisDocument doc =
+            leptris_parse_string(kDoc, std::strlen(kDoc), &st);
         if (doc) {
             /* Valid doc: must be usable and freeable. */
-            TaurusElement root = taurus_document_root(doc);
+            LeptrisElement root = leptris_document_root(doc);
             EXPECT_NE(root, nullptr);
-            taurus_document_free(doc);
+            leptris_document_free(doc);
         } else {
-            EXPECT_NE(st, (TaurusStatus)0) << "NULL doc needs a status";
+            EXPECT_NE(st, (LeptrisStatus)0) << "NULL doc needs a status";
         }
         g_alloc_countdown = -1;
     }
@@ -85,8 +85,8 @@ TEST_F(OomInjection, ParseSurvivesFailureAtEveryEarlyAllocation) {
 // countdown applies during serialize only.
 TEST_F(OomInjection, SerializeSurvivesFailureAtEveryEarlyAllocation) {
     g_alloc_countdown = -1;
-    TaurusStatus st = (TaurusStatus)0;
-    TaurusDocument doc = taurus_parse_string(kDoc, std::strlen(kDoc), &st);
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisDocument doc = leptris_parse_string(kDoc, std::strlen(kDoc), &st);
     ASSERT_NE(doc, nullptr);
 
     const int cap = 256;
@@ -94,19 +94,19 @@ TEST_F(OomInjection, SerializeSurvivesFailureAtEveryEarlyAllocation) {
         SCOPED_TRACE(std::string("serialize fail at alloc #") +
                      std::to_string(k));
         g_alloc_countdown = k;
-        char* out = taurus_document_serialize(doc, NULL);
-        if (out) taurus_free_string(out);
+        char* out = leptris_document_serialize(doc, NULL);
+        if (out) leptris_free_string(out);
         g_alloc_countdown = -1;
         /* Document must survive every serialize failure intact. */
     }
 
     /* After all the failures, a clean serialize must still work
      * (no corrupted internal state). */
-    char* ok = taurus_document_serialize(doc, NULL);
+    char* ok = leptris_document_serialize(doc, NULL);
     ASSERT_NE(ok, nullptr);
     EXPECT_NE(std::strstr(ok, "User 1"), nullptr);
-    taurus_free_string(ok);
-    taurus_document_free(doc);
+    leptris_free_string(ok);
+    leptris_document_free(doc);
 }
 
 // Mutation under injected failures: create elements, set
@@ -118,23 +118,23 @@ TEST_F(OomInjection, MutationSurvivesFailureAtEveryEarlyAllocation) {
         SCOPED_TRACE(std::string("mutation fail at alloc #") +
                      std::to_string(k));
         g_alloc_countdown = k;
-        TaurusStatus st = (TaurusStatus)0;
-        TaurusDocument doc = taurus_parse_string(kDoc, std::strlen(kDoc), &st);
+        LeptrisStatus st = (LeptrisStatus)0;
+        LeptrisDocument doc = leptris_parse_string(kDoc, std::strlen(kDoc), &st);
         if (!doc) { g_alloc_countdown = -1; continue; }
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisElement root = leptris_document_root(doc);
 
         for (int i = 0; i < 20; i++) {
-            TaurusElement c = taurus_element_create(doc, "n");
+            LeptrisElement c = leptris_element_create(doc, "n");
             if (!c) break; /* allocation failed: allowed */
-            taurus_element_set_attribute(c, "k", "v");
-            taurus_element_append_child(root, c);
+            leptris_element_set_attribute(c, "k", "v");
+            leptris_element_append_child(root, c);
         }
         g_alloc_countdown = -1;
 
         /* The tree must still be consistent: walk it and free. */
-        char* out = taurus_document_serialize(doc, NULL);
-        if (out) taurus_free_string(out);
-        taurus_document_free(doc);
+        char* out = leptris_document_serialize(doc, NULL);
+        if (out) leptris_free_string(out);
+        leptris_document_free(doc);
     }
 }
 
@@ -142,12 +142,12 @@ TEST_F(OomInjection, MutationSurvivesFailureAtEveryEarlyAllocation) {
 // failures exhausted so no allocation during teardown can crash.
 TEST_F(OomInjection, FreeNeverCrashesUnderHook) {
     g_alloc_countdown = -1;
-    TaurusStatus st = (TaurusStatus)0;
-    TaurusDocument doc = taurus_parse_string(kDoc, std::strlen(kDoc), &st);
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisDocument doc = leptris_parse_string(kDoc, std::strlen(kDoc), &st);
     ASSERT_NE(doc, nullptr);
     /* Make the allocator refuse everything during teardown. */
     g_alloc_countdown = 0;
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     g_alloc_countdown = -1;
 }
 
@@ -157,13 +157,13 @@ TEST_F(OomInjection, FreeNeverCrashesUnderHook) {
 // which would make every sweep above vacuous.
 TEST_F(OomInjection, HookIsActuallyWired) {
     g_alloc_countdown = 1;
-    TaurusStatus st = (TaurusStatus)0;
-    TaurusDocument doc =
-        taurus_parse_string(kDoc, std::strlen(kDoc), &st);
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisDocument doc =
+        leptris_parse_string(kDoc, std::strlen(kDoc), &st);
     /* Either it fails cleanly (expected) or allocations bypass the
      * hook (vacuous suite) — a valid doc here means the latter. */
     if (doc) {
-        taurus_document_free(doc);
+        leptris_document_free(doc);
         FAIL() << "allocation hook does not cover the parse path — "
                   "the OOM sweeps above are vacuous";
     }

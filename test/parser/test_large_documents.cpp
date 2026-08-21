@@ -16,7 +16,7 @@
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
+#include "leptris.h"
 
 #include <cstring>
 #include <string>
@@ -29,17 +29,17 @@ constexpr int kNodeTypeElement = 0;
 
 #if defined(__has_feature)
 #  if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
-#    define TAURUS_STRESS_SANITIZER 1
+#    define LEPTRIS_STRESS_SANITIZER 1
 #  endif
 #elif defined(__SANITIZE_ADDRESS__)
-#  define TAURUS_STRESS_SANITIZER 1
+#  define LEPTRIS_STRESS_SANITIZER 1
 #endif
 
 /* Byte sizes to sweep. 90 KB is the #450 reproduction threshold
  * (block gap crosses cp16 range); 300 KB/1 MB add margin; the big
  * ones prove nothing dies at scale. */
 std::vector<size_t> stress_sizes() {
-#ifdef TAURUS_STRESS_SANITIZER
+#ifdef LEPTRIS_STRESS_SANITIZER
     return {30u << 10, 90u << 10, 300u << 10, 1u << 20};
 #else
     return {30u << 10, 90u << 10, 300u << 10,
@@ -157,21 +157,21 @@ std::string gen_entities(size_t target) {
  * children pushed to a work stack. This is the traversal that died
  * in #450 — a truncated sibling edge walks into garbage (crash,
  * caught by ASAN/segv) or loops forever (bounded by the guard). */
-size_t walk_tree(TaurusElement root, size_t node_limit) {
+size_t walk_tree(LeptrisElement root, size_t node_limit) {
     size_t visited = 0;
-    std::vector<TaurusElement> work;
+    std::vector<LeptrisElement> work;
     work.push_back(root);
     while (!work.empty()) {
-        TaurusElement e = work.back();
+        LeptrisElement e = work.back();
         work.pop_back();
         visited++;
         if (visited > node_limit) return visited; /* cycle guard */
-        for (TaurusNodeRef c = taurus_node_first_child((TaurusNodeRef)e); c;
-             c = taurus_node_next_sibling(c)) {
+        for (LeptrisNodeRef c = leptris_node_first_child((LeptrisNodeRef)e); c;
+             c = leptris_node_next_sibling(c)) {
             visited++;
             if (visited > node_limit) return visited;
-            if (taurus_node_get_type(c) == kNodeTypeElement)
-                work.push_back((TaurusElement)c);
+            if (leptris_node_get_type(c) == kNodeTypeElement)
+                work.push_back((LeptrisElement)c);
         }
     }
     return visited;
@@ -180,17 +180,17 @@ size_t walk_tree(TaurusElement root, size_t node_limit) {
 void run_lifecycle_exact(const std::string& xml,
                          const std::string& expected) {
     for (int cycle = 0; cycle < 2; cycle++) {
-        TaurusStatus st = (TaurusStatus)0;
-        TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+        LeptrisStatus st = (LeptrisStatus)0;
+        LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
         ASSERT_NE(doc, nullptr) << "cycle " << cycle << ": parse failed";
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisElement root = leptris_document_root(doc);
         ASSERT_NE(root, nullptr);
         ASSERT_GE(walk_tree(root, 100u << 20), 2u);
-        char* out = taurus_document_serialize(doc, NULL);
+        char* out = leptris_document_serialize(doc, NULL);
         ASSERT_NE(out, nullptr);
         EXPECT_EQ(std::string(out), expected);
-        taurus_free_string(out);
-        taurus_document_free(doc);
+        leptris_free_string(out);
+        leptris_document_free(doc);
     }
 }
 
@@ -198,30 +198,30 @@ void run_lifecycle(const std::string& xml, bool byte_exact_round_trip) {
     /* Two cycles: the second parse reuses retained arena blocks —
      * the dirty-memory class behind #450's stale reads. */
     for (int cycle = 0; cycle < 2; cycle++) {
-        TaurusStatus st = (TaurusStatus)0;
-        TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+        LeptrisStatus st = (LeptrisStatus)0;
+        LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
         ASSERT_NE(doc, nullptr) << "cycle " << cycle << ": parse failed";
 
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisElement root = leptris_document_root(doc);
         ASSERT_NE(root, nullptr);
 
         size_t visited = walk_tree(root, 100u << 20);
         ASSERT_GE(visited, 2u) << "tree walk lost the tree";
 
         /* XPath over the full tree. */
-        TaurusXPathResult r = taurus_xpath_eval(doc, NULL, "//*");
-        ASSERT_NE(r, (TaurusXPathResult)0);
-        taurus_xpath_result_free(r);
+        LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, "//*");
+        ASSERT_NE(r, (LeptrisXPathResult)0);
+        leptris_xpath_result_free(r);
 
         /* Serialize, reparse, re-serialize: output must be
          * idempotent — catches content corruption that survives a
          * single round trip. */
-        char* out1 = taurus_document_serialize(doc, NULL);
+        char* out1 = leptris_document_serialize(doc, NULL);
         ASSERT_NE(out1, nullptr);
-        TaurusDocument doc2 =
-            taurus_parse_string(out1, std::strlen(out1), NULL);
+        LeptrisDocument doc2 =
+            leptris_parse_string(out1, std::strlen(out1), NULL);
         ASSERT_NE(doc2, nullptr) << "reparse of serialized output failed";
-        char* out2 = taurus_document_serialize(doc2, NULL);
+        char* out2 = leptris_document_serialize(doc2, NULL);
         ASSERT_NE(out2, nullptr);
         EXPECT_STREQ(out1, out2) << "serialize is not idempotent";
 
@@ -230,10 +230,10 @@ void run_lifecycle(const std::string& xml, bool byte_exact_round_trip) {
             EXPECT_EQ(std::string(out1), xml);
         }
 
-        taurus_free_string(out2);
-        taurus_free_string(out1);
-        taurus_document_free(doc2);
-        taurus_document_free(doc);
+        leptris_free_string(out2);
+        leptris_free_string(out1);
+        leptris_document_free(doc2);
+        leptris_document_free(doc);
     }
 }
 
@@ -291,24 +291,24 @@ TEST(LargeDocuments, EntitiesSurviveAllSizes) {
 
 TEST(LargeDocuments, MutateSerializeAndWalkLargeTree) {
     std::string xml = gen_pretty_mixed(300u << 10);
-    TaurusStatus st = (TaurusStatus)0;
-    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
 
     /* Build 2000 fresh elements and attach them to the tree. */
     for (int i = 0; i < 2000; i++) {
-        TaurusElement c = taurus_element_create(doc, "added");
+        LeptrisElement c = leptris_element_create(doc, "added");
         ASSERT_NE(c, nullptr);
         char n[16], v[16];
         std::snprintf(n, sizeof n, "i%d", i);
         std::snprintf(v, sizeof v, "v%d", i);
-        ASSERT_EQ(taurus_element_set_attribute(c, n, v), TAURUS_OK);
-        ASSERT_EQ(taurus_element_append_child(root, c), TAURUS_OK);
+        ASSERT_EQ(leptris_element_set_attribute(c, n, v), LEPTRIS_OK);
+        ASSERT_EQ(leptris_element_append_child(root, c), LEPTRIS_OK);
     }
-    EXPECT_GT(taurus_element_child_count(root), 2000u);
+    EXPECT_GT(leptris_element_child_count(root), 2000u);
 
-    char* out = taurus_document_serialize(doc, NULL);
+    char* out = leptris_document_serialize(doc, NULL);
     ASSERT_NE(out, nullptr);
     EXPECT_GT(std::strlen(out), xml.size());
 
@@ -316,8 +316,8 @@ TEST(LargeDocuments, MutateSerializeAndWalkLargeTree) {
      * the bump-block/parse-arena gap. */
     EXPECT_GT(walk_tree(root, 100u << 20), 2000u);
 
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }
 
 // ---- inplace variant at the boundary size ------------------------------
@@ -326,15 +326,15 @@ TEST(LargeDocuments, InplaceParseSurvivesBoundarySize) {
     std::string xml = gen_pretty_mixed(90u << 10);
     std::vector<char> buf(xml.begin(), xml.end());
     buf.push_back('\0');
-    TaurusStatus st = (TaurusStatus)0;
-    TaurusDocument doc =
-        taurus_parse_string_inplace(buf.data(), buf.size() - 1, &st);
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisDocument doc =
+        leptris_parse_string_inplace(buf.data(), buf.size() - 1, &st);
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
     EXPECT_GT(walk_tree(root, 100u << 20), 100u);
-    char* out = taurus_document_serialize(doc, NULL);
+    char* out = leptris_document_serialize(doc, NULL);
     ASSERT_NE(out, nullptr);
-    taurus_free_string(out);
-    taurus_document_free(doc);
+    leptris_free_string(out);
+    leptris_document_free(doc);
 }

@@ -14,9 +14,9 @@ validation passes.  This is the roadmap for future work.
 ### 1. Unify string ownership (TODO 41)
 
 **Current**: three string lifetimes
-- Pool-owned (calloc'd via `taurus_pool_strdup`).
+- Pool-owned (calloc'd via `leptris_pool_strdup`).
 - Document-buffer (StringView pointing into `doc->xml_buffer`).
-- Heap-allocated (`taurus_strdup` / `taurus_sv_to_cstr` — calloc'd
+- Heap-allocated (`leptris_strdup` / `leptris_sv_to_cstr` — calloc'd
   with manual free).
 
 **Target**: one — pool-owned.  Every string reachable from a document
@@ -27,17 +27,17 @@ the validation pass chased.  Eliminating the calloc path makes leaks
 structurally impossible.
 
 **Approach**: mechanical migration.  Every `strdup` / `calloc` for
-strings becomes `taurus_pool_strdup`.  `StringView` becomes a
+strings becomes `leptris_pool_strdup`.  `StringView` becomes a
 parsing-only optimization (zero-copy from `xml_buffer`); every
 StringView is converted to a pool-owned C string before being stored
 on a node.
 
-### 2. Split `taurus.c` (TODOs 24/42/45/54)
+### 2. Split `leptris.c` (TODOs 24/42/45/54)
 
-**Current**: `taurus.c` is 2900+ lines mixing 10+ concerns.
+**Current**: `leptris.c` is 2900+ lines mixing 10+ concerns.
 
-**Target**: 5-6 focused modules under `src/taurus/dom/` and
-`src/taurus/encoding/`.
+**Target**: 5-6 focused modules under `src/leptris/dom/` and
+`src/leptris/encoding/`.
 
 **Why it matters**: navigability, lower cognitive load for changes,
 each file <500 lines.
@@ -58,7 +58,7 @@ thread-default.
 FFI, embedded scripting).
 
 **Approach**: same pattern as TODO 38 — add fields to
-`TaurusDocument`, propagate through the parser and pool.
+`LeptrisDocument`, propagate through the parser and pool.
 
 ## What we have now
 
@@ -83,7 +83,7 @@ Sequence the refactors:
 1. **Unify string ownership first** — eliminates an entire class of
    potential bugs; the migration touches the same code paths as the
    split, so do them in this order.
-2. **Split `taurus.c`** — easier once string ownership is unified
+2. **Split `leptris.c`** — easier once string ownership is unified
    (fewer cross-module allocations to reason about).
 3. **Per-doc allocators last** — depends on the pool refactor being
    in place.

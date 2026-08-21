@@ -1,8 +1,9 @@
 /**
  * @file version.c
- * @brief Version command implementation for Taurus CLI
+ * @brief Version command implementation for Leptris CLI
  */
 
+#include "leptris.h"
 #include "../cli.h"
 #include "../error.h"
 #include <stdio.h>
@@ -16,15 +17,15 @@ static cli_result_t version_execute(int argc, char** argv) {
     (void)argv;
 
     /* Print version information */
-    printf("taurus version 0.1.0\n");
-    printf("C library (libtaurus) with public API\n");
+    printf("leptris version %s\n", leptris_version());
+    printf("C library (libleptris) with public API\n");
     printf("Built with CMake\n");
 
     return CLI_SUCCESS;
 }
 
 static void version_print_help(void) {
-    printf("Usage: taurus version [OPTIONS]\n");
+    printf("Usage: leptris version [OPTIONS]\n");
     printf("\n");
     printf("Show version information.\n");
     printf("\n");

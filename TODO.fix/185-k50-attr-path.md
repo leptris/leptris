@@ -16,7 +16,7 @@ source + CMake) flag-for-flag and trick-for-trick:
 - **Build flags: nothing to copy.** Their CMake ships zero
   optimization flags (no -O3/LTO/arch); Homebrew builds plain
   Release. We already ship -O3 + thin-LTO + hidden visibility.
-  `TAURUS_TARGET_ARCH=native` measured MIXED (K=20 −8.9%,
+  `LEPTRIS_TARGET_ARCH=native` measured MIXED (K=20 −8.9%,
   K=5 +6.8%, K=100 +1.4%) — not a lever, not apples-to-apples.
 - **Correction to TODO 182 notes: pugixml attrs are 40 B**
   (5 raw pointers, doubly-linked via prev_attribute_c), nodes
@@ -50,7 +50,7 @@ direct_parse_internal. Only changes fully OUTSIDE the function
 dp_add_text_inline with a text_block in the parser (mirroring the
 attr bulk block): eliminated the per-text-node pool_alloc call.
 535 tests + ASAN + leaks clean; measured PARITY at every gate
-(parse K=5/20/50/100 and the XPath cycle) — taurus_pool_alloc is
+(parse K=5/20/50/100 and the XPath cycle) — leptris_pool_alloc is
 a bump allocator costing ~3 ns amortized; removing the call is
 below the measurement floor. Reverted. (Post-190 cycle profile:
 parse 83.5%, eval 13.8%, free 1.4% — the cycle is parse-bound and
@@ -61,7 +61,7 @@ the parse loop is closed.)
 The encoding detour for `<?xml ... encoding="UTF-8"?>` documents
 (full-document memcpy + two strdups in auto_convert before
 direct_parse copies again) was bypassed by a bounded declaration
-scan in the taurus_parse_string fast path. Correct for all gate
+scan in the leptris_parse_string fast path. Correct for all gate
 cases (UTF-8/lower/no-enc/latin1/UTF-16 probes + 535 tests + 19
 encoding tests), but measured: cycle CPU PARITY (the detour is
 ~0.15 µs on the 10 KB cycle doc — below the noise floor) and the
@@ -141,9 +141,9 @@ Remaining: TODO 182 split-stream for K=100 recovery.
    647→637, 1027→1015 µs, interleaved). Real and free of source
    risk, but far below the ~10-15% it yields on the XPath VM
    dispatch loop. Worth enabling for packagers; not a gap-closer.
-   Workflow: `-DTAURUS_ENABLE_PGO=GENERATE` → train → `llvm-profdata
-   merge` → `-DTAURUS_ENABLE_PGO=USE -DTAURUS_PGO_DIR=<gen dir>`.
-   NOTE: USE defaults to its own binary dir — point TAURUS_PGO_DIR
+   Workflow: `-DLEPTRIS_ENABLE_PGO=GENERATE` → train → `llvm-profdata
+   merge` → `-DLEPTRIS_ENABLE_PGO=USE -DLEPTRIS_PGO_DIR=<gen dir>`.
+   NOTE: USE defaults to its own binary dir — point LEPTRIS_PGO_DIR
    at the GENERATE dir explicitly.
 
 ## Remaining paths (the only two left)
@@ -157,7 +157,7 @@ Remaining: TODO 182 split-stream for K=100 recovery.
 ## Measured state (2026-08-15, Release, best-of interleaved)
 
 Gap by K (median): K=5 1.60x, K=20 2.05x, K=50 2.24x, K=100 1.55x.
-Per-attr cost curve (taurus, best-of): K=1 21ns, K=5 11.6,
+Per-attr cost curve (leptris, best-of): K=1 21ns, K=5 11.6,
 K=20 15.0, K=50 14.3, K=100 10.7 — non-monotonic dip at K=100.
 pugixml: flat ~7 ns/attr at every K.
 
@@ -249,7 +249,7 @@ K=20-50 mid-range.
 ## Round 11 (2026-08-17): out-of-line attr split = mid-K regression, reverted
 
 The parse-endgame architectural test: `dp_parse_attrs` forced
-TAURUS_NOINLINE (it was being inlined back into the mega-function;
+LEPTRIS_NOINLINE (it was being inlined back into the mega-function;
 89% of K=50 parse time sits in that loop region per the fresh
 767-sample profile; only 8% in the fused copy, <3% everything
 else). Hypothesis: an out-of-line attr parser gives clang an

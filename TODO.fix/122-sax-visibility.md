@@ -1,23 +1,23 @@
 # TODO 122 — SAX shared-library visibility fix
 
 ## Problem
-`src/include/taurus/sax/sax.h` declares all SAX entry points
-(`taurus_sax_parse`, `taurus_sax_parser_create`, `taurus_sax_parser_feed`,
-`taurus_sax_parser_free`, `taurus_sax_parser_set_streaming`) without
-the `TAURUS_API` macro.
+`src/include/leptris/sax/sax.h` declares all SAX entry points
+(`leptris_sax_parse`, `leptris_sax_parser_create`, `leptris_sax_parser_feed`,
+`leptris_sax_parser_free`, `leptris_sax_parser_set_streaming`) without
+the `LEPTRIS_API` macro.
 
 The library builds with `CMAKE_C_VISIBILITY_PRESET=hidden` (see
-`src/include/taurus.h` docstring and TODO 80). Without `TAURUS_API`,
-the SAX symbols are hidden from the link table when libtaurus is
-built as a shared library — so `Taurus::SAX` (Ruby FFI) and any other
+`src/include/leptris.h` docstring and TODO 80). Without `LEPTRIS_API`,
+the SAX symbols are hidden from the link table when libleptris is
+built as a shared library — so `Leptris::SAX` (Ruby FFI) and any other
 binding that wants streaming SAX cannot dlsym them.
 
 The DOM / XPath headers don't have this issue because every public
-function carries `TAURUS_API`. Only `sax/sax.h` was missed.
+function carries `LEPTRIS_API`. Only `sax/sax.h` was missed.
 
 ## Plan (single phase)
-1. Add `TAURUS_API` to every public SAX function declaration in
-   `src/include/taurus/sax/sax.h`.
+1. Add `LEPTRIS_API` to every public SAX function declaration in
+   `src/include/leptris/sax/sax.h`.
 2. Build a shared library locally and verify `nm -D` lists the SAX
    symbols.
 3. Add a header-hygiene test that grep-checks the header for the

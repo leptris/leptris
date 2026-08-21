@@ -86,7 +86,7 @@ const char* string_intern_get(StringInternTable *table, const char *str, size_t 
         /* Empty slot - insert new entry */
         if (entry->key == NULL) {
             /* Allocate and copy string */
-            char *copy = (char*)taurus_malloc(len + 1);
+            char *copy = (char*)leptris_malloc(len + 1);
             memcpy(copy, str, len);
             copy[len] = '\0';
 
@@ -105,7 +105,7 @@ const char* string_intern_get(StringInternTable *table, const char *str, size_t 
 
     /* Table is full - fall back to allocating new string
      * (This should be rare with 128 slots) */
-    char *copy = (char*)taurus_malloc(len + 1);
+    char *copy = (char*)leptris_malloc(len + 1);
     memcpy(copy, str, len);
     copy[len] = '\0';
     return copy;
@@ -126,7 +126,7 @@ void string_intern_table_clear(StringInternTable *table) {
                 table->entries[i].key != g_intern_style &&
                 table->entries[i].key != g_intern_value &&
                 table->entries[i].key != g_intern_lang) {
-                taurus_free((void*)table->entries[i].key);
+                leptris_free((void*)table->entries[i].key);
             }
             table->entries[i].key = NULL;
             table->entries[i].hash = 0;

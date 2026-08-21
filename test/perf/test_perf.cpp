@@ -21,20 +21,20 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <cstdlib>
-#include "taurus.h"
+#include "leptris.h"
 
 #include <chrono>
 #include <string>
 
 #if defined(__has_feature)
 #  if __has_feature(address_sanitizer)
-#    define TAURUS_TEST_ASAN 1
+#    define LEPTRIS_TEST_ASAN 1
 #  endif
 #elif defined(__SANITIZE_ADDRESS__)
-#  define TAURUS_TEST_ASAN 1
+#  define LEPTRIS_TEST_ASAN 1
 #endif
-#ifndef TAURUS_TEST_ASAN
-#  define TAURUS_TEST_ASAN 0
+#ifndef LEPTRIS_TEST_ASAN
+#  define LEPTRIS_TEST_ASAN 0
 #endif
 
 namespace {
@@ -50,9 +50,9 @@ double ElapsedUs(clock_type::time_point start) {
 double ParseBenchUs(const char* xml, size_t len, int iters) {
     auto start = clock_type::now();
     for (int i = 0; i < iters; i++) {
-        TaurusStatus st;
-        TaurusDocument doc = taurus_parse_string(xml, len, &st);
-        if (doc) taurus_document_free(doc);
+        LeptrisStatus st;
+        LeptrisDocument doc = leptris_parse_string(xml, len, &st);
+        if (doc) leptris_document_free(doc);
     }
     return ElapsedUs(start);
 }
@@ -89,7 +89,7 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
      * the multiple is a property of the algorithm, not the machine.
      * Healthy parse measures in the low hundreds x memcpy; a 10x
      * algorithmic regression still clears 100x with margin. */
-#if defined(NDEBUG) && !TAURUS_TEST_ASAN
+#if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
         EXPECT_LT(parse_us, 1000.0 * ref_us)
             << "Small-doc parse regression: parse " << parse_us
             << " us vs memcpy reference " << ref_us << " us";
@@ -100,7 +100,7 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
 
 TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
     /* The attrs.xml regression (TODO 22) was 3.4x slower than libxml2.
-     * After the fix, taurus is 1.3x faster.  This spec catches
+     * After the fix, leptris is 1.3x faster.  This spec catches
      * regressions by asserting the intern-bypass is still in place. */
     std::string xml = "<root";
     for (int i = 0; i < 25; i++) {
@@ -115,7 +115,7 @@ TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
         if (a < parse_us) parse_us = a;
         if (b < ref_us) ref_us = b;
     }
-#if defined(NDEBUG) && !TAURUS_TEST_ASAN
+#if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
         EXPECT_LT(parse_us, 20000.0 * ref_us)
             << "Attribute-heavy parse regression: parse " << parse_us
             << " us vs memcpy reference " << ref_us << " us";
@@ -133,9 +133,9 @@ TEST(PerfRegression, DeepNestingIsRejectedQuickly) {
     xml += 'x';
     for (int i = 0; i < 50000; i++) xml += "</a>";
 
-    TaurusStatus st;
+    LeptrisStatus st;
     auto start = clock_type::now();
-    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
     double parse_us = ElapsedUs(start);
     double ref_us = MemcpyRefUs(xml.data(), xml.size(), 1);
 
@@ -167,16 +167,16 @@ TEST(PerfRegression, AppendChildDoesNotRegress) {
      * catastrophe. A last-child edge is the known structural fix;
      * see TODO 155. */
     auto append_us = [](int n) {
-        TaurusStatus st;
-        TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisStatus st;
+        LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+        LeptrisElement root = leptris_document_root(doc);
         auto start = clock_type::now();
         for (int i = 0; i < n; i++) {
-            TaurusElement c = taurus_element_create(doc, "c");
-            taurus_element_append_child(root, c);
+            LeptrisElement c = leptris_element_create(doc, "c");
+            leptris_element_append_child(root, c);
         }
         double us = ElapsedUs(start);
-        taurus_document_free(doc);
+        leptris_document_free(doc);
         return us;
     };
     double small = 1e18, large = 1e18;
@@ -199,18 +199,18 @@ TEST(PerfRegression, SetAttributeDoesNotRegress) {
      * ~100x in practice (superlinear allocator effects on fresh
      * documents); budget 150x. */
     auto setattr_us = [](int n) {
-        TaurusStatus st;
-        TaurusDocument doc = taurus_parse_string("<r/>", 4, &st);
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisStatus st;
+        LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+        LeptrisElement root = leptris_document_root(doc);
         char name[16], value[32];
         auto start = clock_type::now();
         for (int i = 0; i < n; i++) {
             snprintf(name, sizeof(name), "a%d", i);
             snprintf(value, sizeof(value), "v-%d", i);
-            taurus_element_set_attribute(root, name, value);
+            leptris_element_set_attribute(root, name, value);
         }
         double us = ElapsedUs(start);
-        taurus_document_free(doc);
+        leptris_document_free(doc);
         return us;
     };
     double small = 1e18, large = 1e18;
@@ -237,20 +237,20 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
         std::string xml = "<r>";
         for (int i = 0; i < n; i++) xml += "<c/>";
         xml += "</r>";
-        TaurusStatus st;
-        TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisStatus st;
+        LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+        LeptrisElement root = leptris_document_root(doc);
         auto start = clock_type::now();
         volatile size_t sink = 0;
         for (int iter = 0; iter < iters; iter++) {
             for (int i = 0; i < n; i++) {
-                TaurusElement child = taurus_element_child(root, (size_t)i);
+                LeptrisElement child = leptris_element_child(root, (size_t)i);
                 sink += (size_t)child;
             }
         }
         double us = ElapsedUs(start);
         (void)sink;
-        taurus_document_free(doc);
+        leptris_document_free(doc);
         return us;
     };
 

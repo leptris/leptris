@@ -6,32 +6,32 @@
 ## Symptom
 
 ```
-Taurus DOM
+Leptris DOM
   Parse + Root (medium ~10KB)    98.50 us   9.9k ops/s
 
 libxml2 DOM
   Parse + Root (medium ~10KB)    47 us     ~21k ops/s
 ```
 
-Taurus is ~2.1x slower at DOM parse. The access operations
+Leptris is ~2.1x slower at DOM parse. The access operations
 (Tree Traversal, Attribute Access, etc.) are already fast on
-Taurus — the gap is in the parse itself.
+Leptris — the gap is in the parse itself.
 
 ## What's already optimized in the DOM parser
 
-Reading `src/taurus/parse/parser_new.c`, the parser is already
+Reading `src/leptris/parse/parser_new.c`, the parser is already
 well-tuned:
 
 - `parser_peek_inline` / `parser_is_name_char_inline` /
   `parser_skip_whitespace_inline` are `static inline` — compiler
   inlines them
-- `parse_name_view` returns a `TaurusStringView` (zero-copy) instead
+- `parse_name_view` returns a `LeptrisStringView` (zero-copy) instead
   of malloc'ing
 - `parse_attribute_value_view` uses `memchr` to find the closing
   quote — vectorized
-- Element creation uses `taurus_element_create_with_view` (pool
+- Element creation uses `leptris_element_create_with_view` (pool
   bump alloc, no malloc)
-- Strict-mode validation guarded by `if (taurus_get_strict_mode())`
+- Strict-mode validation guarded by `if (leptris_get_strict_mode())`
   — pays no cost when strict mode is off
 - Fast paths for `<tag/>` and `<tag></tag>` (no children, no attrs)
 
@@ -40,13 +40,13 @@ remaining cost?
 
 ## Hypotheses (need profiling to confirm)
 
-1. **Per-element eager name conversion** (`taurus_sv_to_cstr_pooled`
+1. **Per-element eager name conversion** (`leptris_sv_to_cstr_pooled`
    at element.c:1229). The comment says this is "eager" to work
    around the document pointer being NULL during parsing. Lazy
    conversion would save one pool_strdup per element.
 
 2. **Strict-mode function call overhead**. Each check is
-   `if (taurus_get_strict_mode())` — a thread-local variable read
+   `if (leptris_get_strict_mode())` — a thread-local variable read
    wrapped in a function call. The function isn't `static inline`.
    8 call sites in `parser_new.c` × 200 elements = 1600 calls.
 
@@ -56,18 +56,18 @@ remaining cost?
 
 4. **Per-attribute malloc**. Looking at `parser_parse_element_impl`
    around line 1339+, each attribute goes through
-   `taurus_element_add_namespace` or `taurus_element_add_attribute_pooled`
+   `leptris_element_add_namespace` or `leptris_element_add_attribute_pooled`
    — both pool-routed. Should be fast, but worth profiling.
 
 ## Plan
 
 ### Phase 1 — cache strict_mode in parser struct (quick win)
 Add `int strict_mode` to `Parser`. Set once at `parser_create`.
-Replace `taurus_get_strict_mode()` calls in `parser_new.c` with
+Replace `leptris_get_strict_mode()` calls in `parser_new.c` with
 `p->strict_mode` reads. Saves a function call per check.
 
 ### Phase 2 — lazy name conversion (medium win)
-Defer `elem->name = taurus_sv_to_cstr_pooled(...)` until first
+Defer `elem->name = leptris_sv_to_cstr_pooled(...)` until first
 access. Requires setting `elem->document` during parsing OR
 stashing the parser's pool in the element temporarily. Saves
 one pool_strdup per element (~50ns × 200 = 10us).

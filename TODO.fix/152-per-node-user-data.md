@@ -13,12 +13,12 @@ would find the cached wrapper without any FFI call.
 
 ## Plan
 
-1. Add `void* user_data` to `TaurusNode` base struct (+8 bytes per
+1. Add `void* user_data` to `LeptrisNode` base struct (+8 bytes per
    node). Element goes from 80→88 bytes. Text/comment/etc. also grow.
 
 2. Add public API:
-   - `taurus_node_get_user_data(node)` — returns the cached pointer.
-   - `taurus_node_set_user_data(node, data)` — sets the cached pointer.
+   - `leptris_node_get_user_data(node)` — returns the cached pointer.
+   - `leptris_node_set_user_data(node, data)` — sets the cached pointer.
 
 3. The binding sets `user_data` on first wrap. On subsequent access,
    it checks `user_data` first. If non-NULL, reuse the cached wrapper.
@@ -35,5 +35,5 @@ would find the cached wrapper without any FFI call.
 ## Status
 
 Completed (v0.12.0). Shipped as `binding_wrapper` field on
-TaurusNode base struct. `taurus_node_get/set_binding_wrapper`
+LeptrisNode base struct. `leptris_node_get/set_binding_wrapper`
 public API. Element struct: 80→88 bytes.

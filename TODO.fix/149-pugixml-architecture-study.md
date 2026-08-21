@@ -130,7 +130,7 @@ faster unwinding. We already do this (C99).
 
 Measured on 24 KB plain XML, ~2300 attrs:
 
-| Stage                      | pugixml | libtaurus | Δ      |
+| Stage                      | pugixml | libleptris | Δ      |
 |----------------------------|---------|-----------|--------|
 | Bulk node alloc           | ~5 ns   | ~5 ns     | same   |
 | Per-node init             | 5 ns    | 30 ns     | +25 ns |
@@ -145,7 +145,7 @@ Measured on 24 KB plain XML, ~2300 attrs:
 ## Phase ordering
 
 1. **Phase 1 — Chartype consolidation** (DONE v0.6.2): shared
-   `taurus_chartype_table` with CT_NAME_START / CT_NAME / CT_WS flags.
+   `leptris_chartype_table` with CT_NAME_START / CT_NAME / CT_WS flags.
    direct_parse and flat_parser migrated; binary shrinks by 3 × 256 B
    per TU.
 2. **Phase 2 — Computed-goto dispatch** (ANALYZED, DEFERRED): the

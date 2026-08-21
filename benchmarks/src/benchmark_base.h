@@ -5,7 +5,7 @@
 #ifndef BENCHMARK_BASE_H
 #define BENCHMARK_BASE_H
 
-#include <taurus.h>
+#include <leptris.h>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -16,10 +16,10 @@ class BenchmarkBase {
 public:
     struct Result {
         std::string name;
-        double taurus_time_us;
+        double leptris_time_us;
         double libxml2_time_us;
         double pugixml_time_us;
-        size_t taurus_memory;
+        size_t leptris_memory;
         size_t libxml2_memory;
         size_t pugixml_memory;
     };
@@ -34,10 +34,10 @@ public:
 
         std::cout << "Running " << name_ << " benchmark..." << std::endl;
 
-        // Run Taurus benchmark
-        auto taurus_result = benchmark([this]() { run_taurus(); });
-        results_.taurus_time_us = taurus_result.first;
-        results_.taurus_memory = taurus_result.second;
+        // Run Leptris benchmark
+        auto leptris_result = benchmark([this]() { run_leptris(); });
+        results_.leptris_time_us = leptris_result.first;
+        results_.leptris_memory = leptris_result.second;
 
         // Run libxml2 benchmark (if available)
         #ifdef HAVE_LIBXML2
@@ -65,9 +65,9 @@ public:
     void report() const {
         std::cout << std::fixed << std::setprecision(2);
         std::cout << "\nResults for " << name_ << ":" << std::endl;
-        std::cout << "  Taurus:  " << std::setw(8) << results_.taurus_time_us << " µs";
-        if (results_.taurus_memory > 0) {
-            std::cout << " (" << results_.taurus_memory << " bytes)";
+        std::cout << "  Leptris:  " << std::setw(8) << results_.leptris_time_us << " µs";
+        if (results_.leptris_memory > 0) {
+            std::cout << " (" << results_.leptris_memory << " bytes)";
         }
         std::cout << std::endl;
 
@@ -88,8 +88,8 @@ public:
         }
 
         // Determine and report winner
-        double best_time = results_.taurus_time_us;
-        std::string winner = "Taurus";
+        double best_time = results_.leptris_time_us;
+        std::string winner = "Leptris";
 
         if (results_.libxml2_time_us >= 0 && results_.libxml2_time_us < best_time) {
             best_time = results_.libxml2_time_us;
@@ -109,7 +109,7 @@ protected:
     // Override these in derived classes
     virtual void setup() {}
     virtual void teardown() {}
-    virtual void run_taurus() = 0;
+    virtual void run_leptris() = 0;
     virtual void run_libxml2() {}
     virtual void run_pugixml() {}
 

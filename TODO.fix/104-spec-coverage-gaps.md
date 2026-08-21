@@ -33,7 +33,7 @@ Encoding edge cases that aren't covered:
 The vtable dispatch is internal. Specs cover element, text,
 comment, CDATA, PI, doctype. Missing: serialization via vtable
 on a complex tree; the dispatch-on-type for arbitrary node
-handle (e.g., `taurus_node_get_type` returning each type).
+handle (e.g., `leptris_node_get_type` returning each type).
 
 ### `test/serializer/test_c14n.cpp` — 5 specs
 
@@ -60,7 +60,7 @@ Serialization edge cases missing:
 
 Public ABI tests. Missing:
 
-- Forward-compatibility: include only `taurus/types.h` and confirm
+- Forward-compatibility: include only `leptris/types.h` and confirm
   only type defs leak (no function decls)
 - C++ compatibility (`extern "C"`)
 - No internal headers leaked into the public API surface

@@ -2,7 +2,7 @@
 
 ## Problem
 
-Diagnostic benchmark (TODO 123) reveals where taurus loses to libxml2:
+Diagnostic benchmark (TODO 123) reveals where leptris loses to libxml2:
 
 ```
 micro (~24 B) self::*    1.13 µs   ← near libxml2 parity
@@ -140,7 +140,7 @@ themselves via `evaluate_expr`. This means each function call
 walks the AST.
 
 If the VM pre-evaluates args onto the stack and the function
-handler accepts pre-evaluated `taurus_xpath_result**` instead of
+handler accepts pre-evaluated `leptris_xpath_result**` instead of
 `XPathASTNode**`, we save the AST walk per arg.
 
 Implementation:
@@ -176,7 +176,7 @@ Phases 1-2 close most of the per-call floor gap (5× → 1×).
 Phases 3-5 close most of the axis-traversal gap.
 Phases 6-7 are incremental.
 
-After Phases 1-5, taurus will be at libxml2 parity on most
+After Phases 1-5, leptris will be at libxml2 parity on most
 non-predicate axes. Predicate-heavy expressions will still lag
 but by ~20× instead of 42×.
 

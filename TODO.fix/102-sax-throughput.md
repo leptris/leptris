@@ -6,7 +6,7 @@
 ## Baseline (pre-this-PR)
 
 ```
-Taurus SAX
+Leptris SAX
   SAX small                    mean  16.17 us   rss  1712 KB    54.3 MB/s
   SAX medium                   mean  88.25 us   rss  2032 KB    62.5 MB/s
 
@@ -15,16 +15,16 @@ libxml2 SAX
   SAX medium                   mean  17.62 us   rss  3168 KB   313.3 MB/s
 ```
 
-Taurus was 3-5x slower than libxml2 on SAX. The dominant cause was
+Leptris was 3-5x slower than libxml2 on SAX. The dominant cause was
 a `malloc`/`free` pair **per element name** and **per attribute
 value** — a 100-element doc with 200 attrs was doing ~500 heap
 operations just for parsing.
 
 ## Phase 1 (this PR)
 
-### Scratch arena (`src/taurus/sax/parser.c`)
+### Scratch arena (`src/leptris/sax/parser.c`)
 
-Added a growable scratch buffer to `TaurusSAXParser`:
+Added a growable scratch buffer to `LeptrisSAXParser`:
 
 * `sax_parse_name` and `sax_parse_attr_value` now return
   parser-owned `const char*` pointers into the scratch arena
@@ -49,7 +49,7 @@ Added a growable scratch buffer to `TaurusSAXParser`:
 ### Result
 
 ```
-Taurus SAX
+Leptris SAX
   SAX small                    mean   8.47 us   rss  1552 KB   103.6 MB/s
   SAX medium                   mean  35.21 us   rss  1936 KB   156.8 MB/s
 
@@ -63,7 +63,7 @@ libxml2 SAX
 * Throughput nearly doubled
 * RSS slightly lower (arena is one allocation, not N)
 
-Taurus still trails libxml2 by ~1.5x small / ~2x medium — the gap
+Leptris still trails libxml2 by ~1.5x small / ~2x medium — the gap
 is now architecture, not micro-allocation. See Phase 2.
 
 ## Phase 2 (next)

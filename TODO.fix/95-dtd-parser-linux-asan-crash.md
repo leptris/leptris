@@ -7,15 +7,15 @@
 ## Original bug
 
 The DTD validator stub spec (PR #34) called
-`taurus_dtd_parse("<!ELEMENT root EMPTY>")` before invoking the
+`leptris_dtd_parse("<!ELEMENT root EMPTY>")` before invoking the
 validator. On Linux (regular build and ASAN), the parse call SEGV'd:
 
 ```
 ==3579==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000290
 #0 strlen (sanitizer_common_interceptors.inc:389)
 #1 ttdtd_add_element model.c:260
-#2 taurus_dtd_parse_internal_subset parser.c:341
-#3 taurus_dtd_parse parser.c:393
+#2 leptris_dtd_parse_internal_subset parser.c:341
+#3 leptris_dtd_parse parser.c:393
 ```
 
 Same code passed on macOS.
@@ -41,11 +41,11 @@ that previously crashed.
 
 ## Followup: leak fix
 
-The same PR fixed a related leak: `taurus_dtd_parse` created its
+The same PR fixed a related leak: `leptris_dtd_parse` created its
 own pool but `ttdtd_free` was a no-op. Now:
 
-- `TaurusDTD` has an `owns_pool` flag.
-- `taurus_dtd_parse` sets `owns_pool = 1`.
+- `LeptrisDTD` has an `owns_pool` flag.
+- `leptris_dtd_parse` sets `owns_pool = 1`.
 - `ttdtd_free` destroys the pool only when `owns_pool` is set.
 - Document-pool DTDs (created internally by the parser) leave
   `owns_pool = 0`; their pool is destroyed with the document.

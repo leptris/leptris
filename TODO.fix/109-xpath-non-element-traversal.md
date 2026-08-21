@@ -23,9 +23,9 @@ the tree, including comments and PIs.
 
 ## Cause (initial inspection)
 
-The descendant-axis walker in `src/taurus/xpath/evaluator_axes.c`
+The descendant-axis walker in `src/leptris/xpath/evaluator_axes.c`
 iterates `first_child`/`next_sibling` but filters via `node->type ==
-TAURUS_NODE_TYPE_ELEMENT` for the `*` node test, and the `node()`
+LEPTRIS_NODE_TYPE_ELEMENT` for the `*` node test, and the `node()`
 case in the node-test matcher appears to short-circuit on the same
 filter. Needs a closer read.
 

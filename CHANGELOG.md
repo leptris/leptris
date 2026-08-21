@@ -13,7 +13,7 @@
 - Heap corruption on document free when a document had overflow-table
   entries (common since v0.26.6): cleanup unlinked-and-freed entries that
   live in table-owned slabs. Entries are now unlinked only.
-- The public allocation hooks (`taurus_set_memory_management_functions`)
+- The public allocation hooks (`leptris_set_memory_management_functions`)
   now cover arena allocations — custom allocators see every byte, and
   allocation-failure injection works on the parse path.
 - CodeQL high (bounded accumulator pattern) in the decomposition benchmark.
@@ -33,7 +33,7 @@
 
 ### Changed
 
-- `taurus_element_set_attribute` 13% faster (180 → 157 ns/call, flat scaling to
+- `leptris_element_set_attribute` 13% faster (180 → 157 ns/call, flat scaling to
   4000 attributes): mutation attributes now carve from a per-document
   40-byte-stride block (adjacent attributes keep their compact sibling edges
   in-range), with names and values from the shared mutation name block. Long
@@ -72,7 +72,7 @@
 
 ### Fixed
 
-- `taurus_element_set_name` never updated the element's cached name
+- `leptris_element_set_name` never updated the element's cached name
   length, so a renamed element serialized only the first N bytes of its
   new name (N = the OLD name's length). The document is also now resolved
   before the rename replaces name storage, keeping later mutations
@@ -99,7 +99,7 @@
 
 ### Fixed
 
-- **Critical**: `taurus_element_set_attribute` on a name it had previously
+- **Critical**: `leptris_element_set_attribute` on a name it had previously
   created inserted a duplicate attribute instead of updating it
   (`<r x="1" x="2"/>` — an XML spec violation). The doc-level attribute
   index stored hash 0 for every mutation-created attribute, so the
@@ -140,7 +140,7 @@
   (TODO 194d); builds are warning-clean again.
 
 ## [0.26.0] - 2026-08-20
-### Added — full-feature benchmark matrix (taurus vs pugixml vs libxml2)
+### Added — full-feature benchmark matrix (leptris vs pugixml vs libxml2)
 
 Two new benchmark tools under `benchmarks/matrix/`:
 
@@ -178,7 +178,7 @@ The first SAX benchmark (`benchmark_sax`, libxml2-gated — pugixml has no SAX i
 - Names up to 47 bytes and attribute arrays up to 12 entries now live inline in the element frame — the LIFO nesting discipline makes frame storage exactly the right lifetime, surviving scratch-arena reallocs across feed() chunks. Oversized cases spill to the heap via malloc-and-copy.
 - **Fixed en route**: a no-attribute `start_element` handed handlers a non-NULL attrs array with an uninitialized first slot — caught by the ASAN differential suite as a handler SEGV, now NULL-terminated on push.
 
-SAX vs libxml2 SAX2 (min-of-30, no-op handlers both sides): small **0.40x**, xsdtest **0.76x**, large **0.91x**, workflow **0.93x**, catalog **0.89x** — taurus ahead on every shape (the three large shapes were losing at 1.03-1.10x before). Method and readings documented in benchmarks/README.md.
+SAX vs libxml2 SAX2 (min-of-30, no-op handlers both sides): small **0.40x**, xsdtest **0.76x**, large **0.91x**, workflow **0.93x**, catalog **0.89x** — leptris ahead on every shape (the three large shapes were losing at 1.03-1.10x before). Method and readings documented in benchmarks/README.md.
 
 Read-mode scoreboard: DOM parse (attributes at the measured 1.5x source floor, everything else parity-or-won), SAX **won**, XPath **won up to 87x**.
 
@@ -186,7 +186,7 @@ Read-mode scoreboard: DOM parse (attributes at the measured 1.5x source floor, e
 ## [0.25.9] - 2026-08-20
 ### Performance — round 12: the attribute floor, measured
 
-- **Header-inline StringView constructors**: `taurus_sv_from_ptr` / `_from_cstr` / `_empty` are pure two-field initializers called twice per attribute by the parser; they now inline from the header in every build configuration (thinLTO already did; non-LTO builds and drivers get the guarantee). Perf-neutral in Release, gated at ±0.4%.
+- **Header-inline StringView constructors**: `leptris_sv_from_ptr` / `_from_cstr` / `_empty` are pure two-field initializers called twice per attribute by the parser; they now inline from the header in every build configuration (thinLTO already did; non-LTO builds and drivers get the guarantee). Perf-neutral in Release, gated at ±0.4%.
 - **The attribute investigation's conclusions, on the record**: the out-of-line calls seen in profiling were a no-LTO artifact; the table-driven value probe (pugixml's single-lookup shape) measured as an exact wash (one table load plus re-dispatch equals two register compares); every remaining per-attribute item is ±1ns and the layout wall blocks their fusion. Attributes at ~1.5x are the measured source-level floor of the current architecture.
 
 Full standings vs pugixml on this build: text streaming won ~3x; elements and text nodes at parity; whitespace mode 1.35x; attributes ~1.5x (floor); append 2.5x ahead; set_attribute ~20x ahead of the duplicate-checking equivalent; serialize at parity-or-ahead on every shape; XPath ahead up to 87x. The decomposition benchmark (`benchmark_decomp`) and its README section document how each component is measured.
@@ -195,8 +195,8 @@ Full standings vs pugixml on this build: text streaming won ~3x; elements and te
 ## [0.25.8] - 2026-08-19
 ### Performance — pugixml-parity whitespace mode + the decomposition benchmark
 
-- **`TAURUS_PARSE_DROP_WS_TEXT`** (new `taurus_parse_string_flags` API): the decomposition benchmark's whitespace probe found the corpus gap's hidden driver — whitespace-only text nodes, one per element in pretty-printed documents, each paying the full text-path entry machinery. pugixml discards them by default; libxml2 keeps them. The taurus **default keeps them** (libxml2-faithful, required for byte-exact pretty round-trips); under the flag, whitespace after markup is eaten in the main loop before the text path engages and mixed runs start at the first non-whitespace byte — pugixml's observable semantics, pinned by specs. Whitespace-heavy shapes: 1.68x -> 1.35x vs pugixml; default-mode timing unchanged everywhere.
-- **`benchmark_decomp`**: five shape-isolating probes (text streaming / tiny elements / attributes / text nodes / size scaling) that answer "is the gap time or throughput?" — documented in benchmarks/README.md. Readings: text streaming taurus wins ~3x (zero-copy views); per-element and per-text-node at parity; attributes ~1.5x; small-document ratios are a cache-footprint effect.
+- **`LEPTRIS_PARSE_DROP_WS_TEXT`** (new `leptris_parse_string_flags` API): the decomposition benchmark's whitespace probe found the corpus gap's hidden driver — whitespace-only text nodes, one per element in pretty-printed documents, each paying the full text-path entry machinery. pugixml discards them by default; libxml2 keeps them. The leptris **default keeps them** (libxml2-faithful, required for byte-exact pretty round-trips); under the flag, whitespace after markup is eaten in the main loop before the text path engages and mixed runs start at the first non-whitespace byte — pugixml's observable semantics, pinned by specs. Whitespace-heavy shapes: 1.68x -> 1.35x vs pugixml; default-mode timing unchanged everywhere.
+- **`benchmark_decomp`**: five shape-isolating probes (text streaming / tiny elements / attributes / text nodes / size scaling) that answer "is the gap time or throughput?" — documented in benchmarks/README.md. Readings: text streaming leptris wins ~3x (zero-copy views); per-element and per-text-node at parity; attributes ~1.5x; small-document ratios are a cache-footprint effect.
 
 ### Fixed
 
@@ -222,7 +222,7 @@ Corpus standings: large **1.32x**, workflow **1.34x**, catalog **1.47x**, medium
 A line-level profile of the corpus (the honest battleground — the attribute benchmark had been flattering us) found two items:
 
 - **Chunked text-block growth.** The v0.25.5 bulk text block sized itself by the tag count, which under-counts when comments/PIs/CDATA interleave with text (each interleave can split a run); overflow fell back to the out-of-line pool path per node (8% of the xsdtest profile). The cursor now grows by 128-node arena chunks — one bump per 128 nodes.
-- **Deterministic split-inline.** The element name walk's inlining was left to the compiler's per-build choice; `TAURUS_ALWAYS_INLINE` pins the round-7 win across build configurations.
+- **Deterministic split-inline.** The element name walk's inlining was left to the compiler's per-build choice; `LEPTRIS_ALWAYS_INLINE` pins the round-7 win across build configurations.
 
 Corpus standings: medium 1.50x, large 1.39x, xsdtest 1.72x, workflow 1.39x, catalog 1.54x (from 1.60/1.44/1.81/1.51/1.64 at round 8). Attribute benchmark flat. Cumulative day: attr benchmark 1.41/1.44/1.87/2.05x -> 1.38/1.40/1.48/1.51x; corpus 1.54-1.91x -> 1.39-1.72x.
 
@@ -234,7 +234,7 @@ Corpus standings: medium 1.50x, large 1.39x, xsdtest 1.72x, workflow 1.39x, cata
 ## [0.25.5] - 2026-08-19
 ### Fixed — critical: binding_wrapper NULL on all parse-created nodes (#421)
 
-The text/comment/CDATA/PI node creators initialize every base field except `binding_wrapper`. Fresh mmap-backed arenas had zeroed it by luck for the library's entire life; the retained-arena free list introduced in v0.25.3 recycles dirty pages, so a second parse in the same process could return a stale, non-NULL wrapper pointer into the previous document's memory from `taurus_node_get_binding_wrapper` — dangling by construction, and reachable from the language bindings. All four creators now set it explicitly, pinned by a spec that parses the same document twice (the second parse draws recycled arena memory) and asserts NULL on every node type.
+The text/comment/CDATA/PI node creators initialize every base field except `binding_wrapper`. Fresh mmap-backed arenas had zeroed it by luck for the library's entire life; the retained-arena free list introduced in v0.25.3 recycles dirty pages, so a second parse in the same process could return a stale, non-NULL wrapper pointer into the previous document's memory from `leptris_node_get_binding_wrapper` — dangling by construction, and reachable from the language bindings. All four creators now set it explicitly, pinned by a spec that parses the same document twice (the second parse draws recycled arena memory) and asserts NULL on every node type.
 
 ### Performance — bulk text-node block (round 8, modest)
 
@@ -260,14 +260,14 @@ Also in this release (v0.25.3 items, for the record): the retained-block free li
 ### Performance — the page-fault tax, the attr-loop diet, and lazy lines: high-attr parse −18% to −21%
 
 - **Retained-block free list (#415):** libc mmaps large blocks and munmaps them on free, so every parse/free/parse cycle re-faulted the whole arena (0.21 us/page — ~400 us of a 1.36 ms parse at 100 attrs/element). Freed arena blocks and the parser's input-copy buffer now round through a bounded free list (4 blocks / 32 MB) and keep their pages mapped. K=50 −15.5%, K=100 −17.3%; macOS leaks still 0.
-- **Attr-loop diet + lazy line resolution (#416):** a running attr cursor (no per-attr stride multiply), first-attr-only offset math, a parser-local attr counter, and unconditional probe windows over a 64-byte zeroed slack on the owned copy. Line numbers (#223) became lazy: parse stores byte offsets and `taurus_node_line` resolves via a per-document newline table with in-place caching — the scan loops carry zero '\n' compares. Identical results through the resolver (all #223 and nokogiri line specs pass); documents ≥ 2 GiB report unknown lines.
+- **Attr-loop diet + lazy line resolution (#416):** a running attr cursor (no per-attr stride multiply), first-attr-only offset math, a parser-local attr counter, and unconditional probe windows over a 64-byte zeroed slack on the owned copy. Line numbers (#223) became lazy: parse stores byte offsets and `leptris_node_line` resolves via a per-document newline table with in-place caching — the scan loops carry zero '\n' compares. Identical results through the resolver (all #223 and nokogiri line specs pass); documents ≥ 2 GiB report unknown lines.
 - Standings vs pugixml on the many-attrs benchmark: **1.40x/1.42x/1.48x/1.52x** (was 1.41/1.44/1.87/2.05 at the start of the day).
 
 ### Changed
 
-- `taurus_node_line` now resolves lazily and caches; the buffer-immutability contract (already required by StringViews) covers the resolution
+- `leptris_node_line` now resolves lazily and caches; the buffer-immutability contract (already required by StringViews) covers the resolution
 
-- **Mutation attribute index + attr-tail cache (#417):** `taurus_element_set_attribute` carried two hidden O(N^2) walks — the duplicate-name check and the append tail walk. A lazily-built per-document (element, name-hash) attribute index plus an attr-tail cache (the child-tail twin) makes programmatic attribute builds O(1): 2000 attributes on one element went from 11.1 ms to 426 us — 20-30x faster than pugixml's duplicate-checking equivalent. Append re-measured: 2.5x ahead of pugixml.
+- **Mutation attribute index + attr-tail cache (#417):** `leptris_element_set_attribute` carried two hidden O(N^2) walks — the duplicate-name check and the append tail walk. A lazily-built per-document (element, name-hash) attribute index plus an attr-tail cache (the child-tail twin) makes programmatic attribute builds O(1): 2000 attributes on one element went from 11.1 ms to 426 us — 20-30x faster than pugixml's duplicate-checking equivalent. Append re-measured: 2.5x ahead of pugixml.
 
 
 ## [0.25.2] - 2026-08-18
@@ -275,7 +275,7 @@ Also in this release (v0.25.3 items, for the record): the retained-block free li
 ### Performance — serialization at parity or ahead of pugixml on every shape
 
 The write side of the pugixml parity mandate is now closed. Measured
-on the same driver, same process (taurus vs pugixml, min-of-N):
+on the same driver, same process (leptris vs pugixml, min-of-N):
 
 - attr-heavy (K=50, 847 KB): **1.4x faster than pugixml**
   (0.67-0.73x ratio) — attribute values serialize from the stored
@@ -305,7 +305,7 @@ DLL export fix for #278 (#410).
 
 ### Fixed
 
-- Windows: `TAURUS_API` now accepts `TAURUS_BUILDING_DLL` so
+- Windows: `LEPTRIS_API` now accepts `LEPTRIS_BUILDING_DLL` so
   shared-library builds export the full surface; CI gained a
   shared-only Windows build to keep it green (issue #278)
 
@@ -402,7 +402,7 @@ pointer decode constant, near the memory model's floor.
 
 ### Performance — single document resolution per append (TODO 195c)
 
-The public `taurus_element_append_child` resolved the document
+The public `leptris_element_append_child` resolved the document
 three times per call — twice in the wrapper's index-invalidation
 guard, once inside the internal function for the tail cache —
 each resolution paying the parent-chain walk plus the root-map
@@ -454,7 +454,7 @@ append_attribute).
 
 ### Performance — mutation tail cache, appends 45x faster (TODO 195)
 
-The public `taurus_element_append_child` walked to the child-list
+The public `leptris_element_append_child` walked to the child-list
 tail on every append — elements carry no last-child edge by design
 (the 64 B layout law) — making N sequential appends O(N^2). A
 document-level one-entry (parent, last-child) cache now serves the
@@ -467,7 +467,7 @@ Measured: 10,000 sequential appends 212,458 us -> 4,742 us
 (**45x**; the quadratic is gone). ~474 ns per append remains
 against pugixml's ~18 ns — version increment, index-invalidation
 check, and the document lookup walk are the identified next trim.
-`taurus_element_set_attribute` is unchanged: its cost is the
+`leptris_element_set_attribute` is unchanged: its cost is the
 existing-attribute name check (O(N^2) per add; the list tail is
 already O(1)), which needs a mutation-side attribute hash —
 scoped as the follow-up.
@@ -540,7 +540,7 @@ The serializer's hot paths no longer pay per-piece writer costs:
 Measured on the 847 KB K=50 benchmark document (min of 10,
 Release): 1501 us -> 779 us (0.56 -> 1.09 GB/s) — 48% faster.
 pugixml's raw save to a string sink measures 856 us (0.99 GB/s)
-on the same machine: serialization now favors taurus.
+on the same machine: serialization now favors leptris.
 
 Output is byte-identical; 558 tests including the serialize
 round-trip specs, ASAN clean, zero leaks. The indexed-walk perf
@@ -552,7 +552,7 @@ and loaded runners.
 
 ### Added — SIMD structural span scanner (TODO 193 Phase 1)
 
-`taurus_text_scan_events` records every XML structural byte
+`leptris_text_scan_events` records every XML structural byte
 (`< > / ' " = &` and the `c <= ' '` class) as a positioned event,
 via NEON marker detection (8 vector compares per 16-byte chunk,
 per-hit class from a shared table; portable scalar reference
@@ -570,7 +570,7 @@ benchmark document — 88.5% of the entire current 600 us parse,
 tree building included (event density is 1 per 4.1 bytes; pass 2
 re-walks what the fused single pass does once). With rounds 2-11
 and the split experiment, every architectural class for the parse
-gap is now measured: taurus parses 6-14x faster than libxml2 and
+gap is now measured: leptris parses 6-14x faster than libxml2 and
 sits 1.5-1.8x behind pugixml at a compiler-global optimum.
 
 ### Testing
@@ -606,7 +606,7 @@ event index with NEON/AVX2 (branch-free, reusing the proven
 simd_text framework) instead of the byte-at-a-time
 classify-by-table loop both we and pugixml pay today; pass 2
 materializes the tree from spans through the existing correctness
-paths. Ship behind a build flag, flip after gates. Context: taurus
+paths. Ship behind a build flag, flip after gates. Context: leptris
 already parses 6-14x faster than libxml2 across the K matrix; the
 1.5-1.8x gap to pugixml is the target.
 
@@ -660,7 +660,7 @@ attribute filter.
 Measured on `//item[@n='5']` over a 5000-element document
 (Release, min of 5): 38.8 us -> 1.27 us per query (30x vs
 0.23.2). pugixml with a reused compiled `xpath_query` measures
-110.8 us on the same workload — 87x in taurus's favor.
+110.8 us on the same workload — 87x in leptris's favor.
 
 ### Fixed — cold fused-attribute queries returned empty (latent in 0.23.2)
 
@@ -694,7 +694,7 @@ Measured on `.//item[@n='5']` from 200 section contexts
 than the UNPREDICATED `.//item` (0.30 us), because the value
 bucket pre-narrows candidates below the name bucket's density.
 pugixml with a reused compiled `xpath_query` measures 0.55 us
-on the same workload — 2.2x in taurus's favor; 6.7x over the
+on the same workload — 2.2x in leptris's favor; 6.7x over the
 v0.23.0 expanded-walk form.
 
 549 tests, full XPath conformance, ASAN clean, zero leaks.
@@ -718,7 +718,7 @@ global in the fused one, and a new spec pins that distinction
 Measured on `.//item[@n='5']` from 200 section contexts
 (Release, min of 5): 1.67 us -> 0.50 us per query (3.3x vs
 0.23.0). pugixml with a reused compiled `xpath_query` measures
-0.55 us — taurus is ahead on predicated relative queries as
+0.55 us — leptris is ahead on predicated relative queries as
 well. The unpredicated path is unchanged (0.30 us).
 
 549 tests (3 new specs), full XPath conformance on the fused
@@ -732,13 +732,13 @@ bytecode, ASAN clean, zero leaks.
 Relative descendant queries (`.//name`, `a//b`, chained steps)
 from any context are now answered from the element index in
 O(log N + hits) instead of walking each context subtree — the
-first XPath axis where taurus is faster than pugixml rather
+first XPath axis where leptris is faster than pugixml rather
 than at parity.
 
 Measured on `.//item` evaluated from 200 section contexts
 (Release, min of 5): 2.0 us -> 0.30 us per query (6.6x vs
 0.22.1). pugixml with a reused compiled `xpath_query` measures
-0.42 us on the same workload — taurus is 1.4x faster (2.2x
+0.42 us on the same workload — leptris is 1.4x faster (2.2x
 against pugixml's one-shot `select_nodes`).
 
 How it works:
@@ -762,9 +762,9 @@ How it works:
 
 ### Fixed — stale element index after child removal
 
-`taurus_element_remove_child` and
-`taurus_element_remove_all_children` never invalidated the
-cached per-document element index (`taurus_element_append_child`
+`leptris_element_remove_child` and
+`leptris_element_remove_all_children` never invalidated the
+cached per-document element index (`leptris_element_append_child`
 did), so descendant queries after a removal could serve
 pre-mutation results. Found by the new TODO 192 specs; both now
 invalidate. Five new XPath specs cover chained `//section//item`
@@ -797,11 +797,11 @@ No code changes in this release; documentation only.
 
 ## [0.22.0] - 2026-08-16
 
-### Added — Python bindings (`pytaurus`, TODO 82)
+### Added — Python bindings (`pyleptris`, TODO 82)
 
 `bindings/python/` ships a cffi (ABI-mode) binding mirroring the
-public headers in a single `cdef` (`pytaurus/_ffi.py`, the same
-architecture as the Ruby binding's `lib/taurus.rb`):
+public headers in a single `cdef` (`pyleptris/_ffi.py`, the same
+architecture as the Ruby binding's `lib/leptris.rb`):
 
 - `Document.parse(str | bytes)` with `close()`, context-manager
   support, and a refcounting `__del__` safety net
@@ -819,12 +819,12 @@ architecture as the Ruby binding's `lib/taurus.rb`):
   against the shared library's exported symbols
 - README.adoc: Python quick start in the FFI section
 
-### Fixed — `TAURUS_BUILD_SHARED=ON` failed to link
+### Fixed — `LEPTRIS_BUILD_SHARED=ON` failed to link
 
-The CLI and the test tree linked the `taurus` alias, which points
+The CLI and the test tree linked the `leptris` alias, which points
 at the shared library when both variants are built — but
 `cli/output.c` and specs use internal accessors that the shared
-library does not export. Both now link `taurus_static` when it is
+library does not export. Both now link `leptris_static` when it is
 built (no source changes). This unblocks the shared-library
 workflow documented for the Python binding.
 
@@ -846,7 +846,7 @@ against ours, recorded in `TODO.fix/185-k50-attr-path.md`:
 - **Build flags: nothing left to copy.** pugixml's CMake ships no
   optimization flags; our Release build (`-O3`, thin LTO, hidden
   visibility) is already ahead of the Homebrew artifacts we
-  benchmark against. `TAURUS_TARGET_ARCH=native` measured mixed
+  benchmark against. `LEPTRIS_TARGET_ARCH=native` measured mixed
   across the K matrix and is not a lever.
 - **Struct density is not the residual gap.** pugixml attributes
   are 40 B (5 pointers) and nodes 64 B; our 48 B attribute /
@@ -899,7 +899,7 @@ unchanged.
 Measured on the parse+XPath+free cycle benchmark (CPU time):
 count(//*) 5.24 → 5.03 µs, count(//book) 5.15 → 5.03 µs, parity
 elsewhere; parse benchmarks unchanged. Also documented in the PR:
-taurus is at CPU parity with pugixml (~5 µs) on the full cycle
+leptris is at CPU parity with pugixml (~5 µs) on the full cycle
 for the 10 KB benchmark document — earlier "3-6x slower" ratios
 were wall-time artifacts of machine load.
 
@@ -945,7 +945,7 @@ Also in this release: the post-parse freeze tree walk removed
 ### Performance — post-parse freeze walk removed (TODO 187)
 
 The parser froze the tree it had just built by walking it —
-`taurus_document_freeze_tree` after every parse, an iterative DFS
+`leptris_document_freeze_tree` after every parse, an iterative DFS
 through every element and sibling edge to set a single
 immutability bit per node. The first K=5 sample profile (only K=50
 had ever been profiled) showed the walk plus its decoders costing
@@ -954,7 +954,7 @@ had ever been profiled) showed the walk plus its decoders costing
 Every node is created by the parser, which knows it is immutable
 the moment it creates it: `frozen = 1` is now set at the creation
 sites (elements, text, comments, CDATA, PIs) and the walk is
-deleted. The public `taurus_document_freeze` API is unchanged.
+deleted. The public `leptris_document_freeze` API is unchanged.
 
 Measured (8-run interleaved Release A/B, best-of):
 
@@ -1018,8 +1018,8 @@ zero leaks at the new size. Full table and reasoning recorded in
   do-not-reopen-without-architectural-change note.
 - **PGO measured on the current parser**: 1.2-2.2% faster on every
   many-attrs K section (far below its 10-15% on the XPath VM
-  dispatch loop). Documented in the `TAURUS_ENABLE_PGO` CMake
-  comment for packagers, including the `TAURUS_PGO_DIR` pointer
+  dispatch loop). Documented in the `LEPTRIS_ENABLE_PGO` CMake
+  comment for packagers, including the `LEPTRIS_PGO_DIR` pointer
   from GENERATE to USE builds.
 - **TODO 182 marked the remaining endgame**: 32-byte attrs
   (2 per cache line, pugixml density) is the only lever with >5%
@@ -1039,17 +1039,17 @@ No code changes in this release.
 
 ### Added — Ruby SAX binding (TODO 118 Phase B)
 
-`Taurus::SAX` is real. The module previously existed as a stub
-that called `taurus_sax_parse` with NULL callbacks and never fired
+`Leptris::SAX` is real. The module previously existed as a stub
+that called `leptris_sax_parse` with NULL callbacks and never fired
 a handler.
 
-- **`Taurus::SAX.parse(xml, handlers)`** — one-shot parse of a
+- **`Leptris::SAX.parse(xml, handlers)`** — one-shot parse of a
   String. handlers is a Hash of procs; all keys optional:
   `:start_document`, `:end_document`, `:start_element` (name,
   attrs-as-Hash), `:end_element`, `:characters`, `:comment`,
   `:cdata`, `:processing_instruction`, `:start_prefix_mapping`,
   `:end_prefix_mapping`, `:error` (message, line, column).
-- **`Taurus::SAX::Parser`** — incremental parsing for streams:
+- **`Leptris::SAX::Parser`** — incremental parsing for streams:
   `feed(chunk, final:)` + `free`; `streaming: true` selects the
   constant-memory state machine (the same machine the one-shot
   path uses; the default buffers and parses on the final feed).
@@ -1086,9 +1086,9 @@ Two conformance gaps in the SAX streaming state machine:
 
 Every `get_attribute_by_index(elem, i)` loop — an O(K²) re-walk of
 the attribute list per index — is replaced by a single direct
-`taurus_attr_next` walk. Converted sites:
+`leptris_attr_next` walk. Converted sites:
 
-- `finalize_element_strings` (taurus.c) — the per-element NUL-
+- `finalize_element_strings` (leptris.c) — the per-element NUL-
   termination pass
 - DTD validator (`dtd/validator.c`) — default-value and #FIXED
   checks, twice
@@ -1097,7 +1097,7 @@ the attribute list per index — is replaced by a single direct
 Measured effect at K=100 (5M indexed walks) is ~2 µs — parity, by
 design: this was a correctness/complexity hazard (quadratic
 scaling latent in every future caller), not a perf win. Also
-const-cleans `taurus_attribute_free`'s owned-copy releases.
+const-cleans `leptris_attribute_free`'s owned-copy releases.
 
 ### Docs
 
@@ -1113,7 +1113,7 @@ const-cleans `taurus_attribute_free`'s owned-copy releases.
 ### Architecture — single-representation attribute strings (TODO 184 round 4)
 
 The attribute struct's `char* name`/`char* value` fields are
-**deleted**. The `TaurusStringView` fields are the only string
+**deleted**. The `LeptrisStringView` fields are the only string
 representation:
 
 - **Parse path**: zero-copy views into the document buffer, NUL-
@@ -1132,7 +1132,7 @@ first — a pre-existing exposure, now closed).
 
 #### Measured layout law (documented in element.h)
 
-`sizeof(struct taurus_attribute)` **must stay 64** — exactly one
+`sizeof(struct leptris_attribute)` **must stay 64** — exactly one
 cache line per attribute. The natural 48-byte struct was built and
 benchmarked: it **regressed K=100 by 22%** (1252–1309 vs 1025–1041
 µs, interleaved Release A/B on fresh build trees) because 48-byte
@@ -1157,7 +1157,7 @@ the (pointer, length) views.
 
 Simplifications this unlocks:
 
-- `finalize_element_strings` and `taurus_element_attribute` only
+- `finalize_element_strings` and `leptris_element_attribute` only
   materialize ENTITY values; the per-attr plain pool-copies were
   historical defensiveness (that walk runs over every attribute of
   every parse).
@@ -1165,7 +1165,7 @@ Simplifications this unlocks:
   read view data directly — c14n now frees only copies it allocated
   (the old `!= attr->value` test would have freed view data under
   the new contract).
-- `taurus_attribute_new` zeroes the struct — the view fields were
+- `leptris_attribute_new` zeroes the struct — the view fields were
   uninitialized garbage, a pre-existing landmine.
 
 ### Fixed
@@ -1189,7 +1189,7 @@ Round 2 of the pugixml parse-loop port: two more applications of
 the "one pass beats setup + re-walk" finding that drove v0.20.0's
 45% win.
 
-1. **`taurus_text_count3`** — the arena sizing pre-scan counted
+1. **`leptris_text_count3`** — the arena sizing pre-scan counted
    `<`, `"`, and `'` in three separate traversals of the document.
    One SIMD pass now maintains all three counters (three `vceqq`
    per 16-byte chunk with the widen-then-add idiom). At 884 KB
@@ -1200,7 +1200,7 @@ the "one pass beats setup + re-walk" finding that drove v0.20.0's
    tracking): two passes and a `memchr` setup per text node. One
    inline loop now finds `<` and folds newline counts; spans
    beyond 48 bytes fall back to `memchr` +
-   `taurus_text_count_char` over the skipped region only.
+   `leptris_text_count_char` over the skipped region only.
 
 #### Measured impact (controlled Release builds, fresh dirs)
 
@@ -1235,7 +1235,7 @@ One fused loop now finds the closing quote AND flags `&` on the
 way past, modeled on pugixml's `ct_parse_attr` single-pass loop:
 the first 48 bytes scan inline (a byte loop beats `memchr` setup
 at that size), longer values fall back to SIMD (`memchr` for the
-quote + `taurus_text_contains` for `&` over the scanned span).
+quote + `leptris_text_contains` for `&` over the scanned span).
 `dp_add_attr_inline` receives `has_amp` from the caller; its
 internal re-scan is deleted. Entity routing semantics (lazy
 accessor vs DTD-aware eager decode) are unchanged.
@@ -1259,7 +1259,7 @@ removes its largest component.
    the name-scan dispatch.
 2. The K=5/20/50 element-wiring path (still trails there).
 3. Buffer-copy accounting parity in the benchmark harness
-   (taurus memcpy's the input per parse; verify pugixml's harness
+   (leptris memcpy's the input per parse; verify pugixml's harness
    gives identical semantics).
 
 All 508 tests pass.
@@ -1269,7 +1269,7 @@ All 508 tests pass.
 ### Performance — attribute struct 72 → 64 bytes via cp16 list edge (TODO 181 Phase D / TODO 183 Phase 5)
 
 The first compact-pointer migration enabled by the contiguous arena
-(v0.19.8). `struct taurus_attribute`'s 8-byte `next` pointer becomes
+(v0.19.8). `struct leptris_attribute`'s 8-byte `next` pointer becomes
 a 2-byte cp16 edge: the attr `next` edge only connects attrs of the
 SAME element, which the parser allocates as adjacent attr_block
 slots — contiguous by construction since the arena migration;
@@ -1281,7 +1281,7 @@ Field reorder packs `next_cp` + `has_entities` + `name_hash` into
 one 8-byte tail: sizeof 72 → 64. Attr and element are now both
 exactly one cache line. 12.5% less attr memory (800 KB less on the
 K=100 document). 46 call sites across 14 files migrated to
-`taurus_attr_next`/`taurus_attr_set_next`; the parser hot path wires
+`leptris_attr_next`/`leptris_attr_set_next`; the parser hot path wires
 the edge with a direct cp16 store (no encoder call). No raw list
 pointers remain in the tree.
 
@@ -1324,7 +1324,7 @@ capacity follows the document's actual shape instead of the len/10
 heuristic. K=100 many-attrs allocates 9.6 MB at 87% utilization vs
 the old path's 43.7 MB oversized block — 5× less over-allocation.
 
-New `taurus_text_count_char` in the AOT SIMD framework: AVX2 via
+New `leptris_text_count_char` in the AOT SIMD framework: AVX2 via
 movemask popcount; NEON via `vpaddlq_u8`→`vaddvq_u16`. The naive
 NEON form (`vaddvq_u8`) is WRONG on real hardware — ARM's `ADDV.16b`
 accumulates in a byte register, so 255×match overflows mod 256 and
@@ -1366,7 +1366,7 @@ outside the span), `MutationGrowthNeverFails` (1000 × 72 B from a
 region rounds to the 8-byte grid — an odd-sized region previously
 misaligned every subsequent allocation, mangling comments/PIs).
 
-Diagnostics: `TAURUS_DEBUG_PARSE=1` prints parse-failure position,
+Diagnostics: `LEPTRIS_DEBUG_PARSE=1` prints parse-failure position,
 arena used/capacity, elem/attr indices, and sizing inputs (env
 lookup cached off the hot path).
 
@@ -1379,7 +1379,7 @@ C/D on the now-contiguous layout.
 ### Foundation — arena-backed pool mode (TODO 183 Phase 2)
 
 The pool can now route every allocation through one contiguous
-arena: `taurus_pool_create_arena_backed(arena, owns_arena)`.
+arena: `leptris_pool_create_arena_backed(arena, owns_arena)`.
 With `pool->arena` set, `alloc`/`calloc`/`alloc_batch`/`strdup`/
 string-interning and `alloc_node_with_content` all bump-allocate
 inside the single arena span — every pointer the pool hands out
@@ -1396,7 +1396,7 @@ TODO 180 Phase C attempt.
 the shape the parser will use in Phase 3. Page mode is completely
 untouched; zero behavioral change for existing callers.
 
-Routing: `taurus_pool_alloc` → `taurus_arena_alloc`;
+Routing: `leptris_pool_alloc` → `leptris_arena_alloc`;
 `alloc_batch` → single arena bump; `node_with_content` → arena
 node+content; `get_base` → arena base; `total_size`/`used_size`/
 `page_count` → arena size/used/1; `destroy` → arena (when owned).
@@ -1420,12 +1420,12 @@ layout.
 
 ### Foundation — contiguous per-document arena (TODO 183 Phase 1)
 
-New `src/taurus/memory/arena.{h,c}`: a fail-fast bump allocator
+New `src/leptris/memory/arena.{h,c}`: a fail-fast bump allocator
 backed by one single contiguous malloc per document. Purely
 additive — no existing code path touched yet.
 
 **The contract — fail-fast, no silent fallback.**
-`taurus_arena_alloc` returns NULL when a request does not fit in
+`leptris_arena_alloc` returns NULL when a request does not fit in
 the remaining space; it never falls back to malloc. Every returned
 pointer is guaranteed to lie within `[base, base + size)`. That
 guarantee is the property the page-based pool cannot provide: its
@@ -1463,8 +1463,8 @@ ahead-of-time with per-file flags, runtime dispatch via
 `__builtin_cpu_supports` (x86) / architectural baseline (arm64 NEON).
 No JIT, no LLVM dependency, zero runtime deps.
 
-New `common/cpu.{h,c}` (ISA macros + `taurus_cpu_detect()`) and
-`common/simd_text.{h,c}` (`taurus_text_contains`/`find`/`find3`
+New `common/cpu.{h,c}` (ISA macros + `leptris_cpu_detect()`) and
+`common/simd_text.{h,c}` (`leptris_text_contains`/`find`/`find3`
 primitives, function-pointer dispatch). `simd_text_avx2.c` compiled
 with `-mavx2`; `simd_text_neon.c` baseline on aarch64. CMake wires
 per-ISA TUs and reports at configure time.
@@ -1486,7 +1486,7 @@ separator comments) no longer re-verify at every candidate byte.
 #### Correctness hardening
 
 Two defects caught and fixed by CI + new specs: MSVC rejects
-`-mavx2` (Windows link failure → `TAURUS_HAS_AVX2_BUILD` build guard
+`-mavx2` (Windows link failure → `LEPTRIS_HAS_AVX2_BUILD` build guard
 dispatches to scalar there), and an inverted `vextq_u8` operand order
 made the NEON vector loop silently miss matches — the existing specs
 only exercised the scalar tail. New specs pin the vector-loop region:
@@ -1531,8 +1531,8 @@ requires shrinking tree-edge storage from 4-byte int32 offsets to
 
 ### Performance — compact pointer encoding primitives (TODO 178)
 
-Adds `taurus_compact_ptr8_encode/decode` and
-`taurus_compact_ptr16_encode/decode` to `dom/compact.{h,c}`,
+Adds `leptris_compact_ptr8_encode/decode` and
+`leptris_compact_ptr16_encode/decode` to `dom/compact.{h,c}`,
 alongside the existing int32 path. Same overflow-table mechanism;
 no migrations yet. Pure additive infrastructure.
 
@@ -1545,8 +1545,8 @@ distinct-fields-on-same-base.
 
 ### Performance — migrate text/comment/cdata/pi sibling to cp16 (TODO 179)
 
-First consumer of the TODO 178 primitives. `TaurusTextNode`,
-`TaurusCommentNode`, `TaurusCDATANode`, `TaurusPINode` `next_sibling`
+First consumer of the TODO 178 primitives. `LeptrisTextNode`,
+`LeptrisCommentNode`, `LeptrisCDATANode`, `LeptrisPINode` `next_sibling`
 field migrated from 4-byte int32 offset to 2-byte cp16 compact
 pointer. Saves 2 bytes per non-element node.
 
@@ -1630,8 +1630,8 @@ All 464 tests pass.
 ### Performance — attr struct shrink 112 → 72 bytes (TODO 173)
 
 Moved `prefix` / `namespace_uri` (both StringView and cached-cstr
-forms, 48 bytes total) out of `struct taurus_attribute` into a
-side cache struct (`taurus_attr_ns_cache`) allocated only when one
+forms, 48 bytes total) out of `struct leptris_attribute` into a
+side cache struct (`leptris_attr_ns_cache`) allocated only when one
 of them is set. The common case (attr has no namespace activity)
 has `ns_cache == NULL` — zero overhead. Attrs that do have a
 namespace prefix or resolved namespace_uri pay one 48-byte pool
@@ -1644,11 +1644,11 @@ and corresponding cache-traffic savings.
 New accessor helpers in `element.h`: `attr_get_prefix`,
 `attr_get_namespace_uri`, `attr_get_prefix_view`,
 `attr_get_namespace_uri_view`. Readers use these; writers allocate
-the cache via `taurus_pool_alloc`.
+the cache via `leptris_pool_alloc`.
 
 25 call sites updated across `element.c`, `element_modify.c`,
 `direct_parse.c`, `xpath/functions.c`, `xpath/evaluator_axes.c`,
-`taurus.c`, `taurus_memory.c`.
+`leptris.c`, `leptris_memory.c`.
 
 #### Measured impact (benchmark_many_attrs K=100, median, 7 runs)
 
@@ -1680,7 +1680,7 @@ K=100 attrs/element × 1000 elements = 100,000 attrs, that's
 Reads updated:
 - `vm.c` PRED_ATTR_EXISTS / PRED_ATTR_EQ_STRING bytecode handlers
   (lazy compute + cache on first walk; subsequent walks are fast).
-- `element.c taurus_element_get_attribute_by_name` (same pattern).
+- `element.c leptris_element_get_attribute_by_name` (same pattern).
 
 Parse-path creation (`dp_add_attr_inline` in `direct_parse.c`) sets
 `name_hash = 0` instead of computing inline. User-facing attr
@@ -1703,8 +1703,8 @@ amalgamation build mode as an additional cross-TU inlining path.
 
 #### TODO 167 — Build-system wins
 
-- `TAURUS_OPT_LEVEL=aggressive` opt-in for `-O3` (default stays `-O2`).
-- `TAURUS_TARGET_ARCH=native` opt-in for `-march=native` (gcc/clang)
+- `LEPTRIS_OPT_LEVEL=aggressive` opt-in for `-O3` (default stays `-O2`).
+- `LEPTRIS_TARGET_ARCH=native` opt-in for `-march=native` (gcc/clang)
   or `/arch:AVX2` (MSVC).
 - `-fno-semantic-interposition` auto-applied on shared-library builds
   when supported (~5% on shared lib builds).
@@ -1723,7 +1723,7 @@ amalgamation build mode as an additional cross-TU inlining path.
 
 benchmark_many_attrs (median, gap to pugixml):
 
-| K attrs/elem | default taurus | fast taurus | default ratio | fast ratio |
+| K attrs/elem | default leptris | fast leptris | default ratio | fast ratio |
 |---|---|---|---|---|
 | 5 | 329 µs | 148 µs | 10.05× | **4.34×** |
 | 50 | 2505 µs | 1078 µs | 8.48× | **2.78×** |
@@ -1731,7 +1731,7 @@ benchmark_many_attrs (median, gap to pugixml):
 
 #### TODO 170 — Amalgamation build
 
-- `TAURUS_AMALGAMATED=ON` generates a single `taurus_amalgamated.c`
+- `LEPTRIS_AMALGAMATED=ON` generates a single `leptris_amalgamated.c`
   that #includes all 55 internal sources as one translation unit.
   The compiler sees the whole library at once and inlines across
   what would otherwise be TU boundaries — same effect as LTO but at
@@ -1743,10 +1743,10 @@ benchmark_many_attrs (median, gap to pugixml):
 
 #### Drive-by — dead code removal
 
-Removed dead declarations of `taurus_pi_free` / `taurus_pi_free_chain`
-for doc-level PIs from `taurus_memory.h`. These were never implemented
+Removed dead declarations of `leptris_pi_free` / `leptris_pi_free_chain`
+for doc-level PIs from `leptris_memory.h`. These were never implemented
 (doc-level PIs are malloc'd/freed inline in `direct_parse.c` and
-`taurus.c`). Their names collided with the tree-node version in
+`leptris.c`). Their names collided with the tree-node version in
 `dom/pi.h` under amalgamation.
 
 ### Deferred (documented in TODO.fix/)
@@ -1758,7 +1758,7 @@ for doc-level PIs from `taurus_memory.h`. These were never implemented
   (5 phases). Would deliver another 1.5-2× on cache-bound workloads.
   Documented scope; Phase A (encoding primitives) is the recommended
   starting point.
-- **TODO 171 — Gap-based text accumulation.** Marginal for taurus's
+- **TODO 171 — Gap-based text accumulation.** Marginal for leptris's
   typical workload (mostly plain-text XML, sparse CDATA).
 
 
@@ -1772,12 +1772,12 @@ ARM HTML scanning). Landed the realistic, non-regressing changes;
 
 kept the rest as documented decisions.
 
-- **Phase A — cold-path extraction.** Added portable `TAURUS_NOINLINE`
-  and `TAURUS_ALWAYS_INLINE` macros to `common/port.h` (GCC/Clang/MSVC).
+- **Phase A — cold-path extraction.** Added portable `LEPTRIS_NOINLINE`
+  and `LEPTRIS_ALWAYS_INLINE` macros to `common/port.h` (GCC/Clang/MSVC).
   Extracted the DOCTYPE handling body (~140 lines covering PUBLIC/SYSTEM
   ID re-scan, internal-subset extraction, DTD construction) from
   `direct_parse_internal` into a new `dp_parse_doctype` helper marked
-  `TAURUS_NOINLINE`. The hot parse loop's instruction-cache footprint
+  `LEPTRIS_NOINLINE`. The hot parse loop's instruction-cache footprint
   no longer carries the DOCTYPE code.
 - **Phase C — IS_WS DRY cleanup.** Replaced 6 ad-hoc
   `*scan == ' ' || *scan == '\t' || *scan == '\n' || *scan == '\r'`
@@ -1790,7 +1790,7 @@ kept the rest as documented decisions.
   (median 3328µs → ~4100µs across 3 runs). The memcpy + mask + 4 byte
   extractions cost more than 4 byte loads, while modern branch predictors
   already make the byte loop nearly free for typical 5–10 char XML names.
-  Kept `dp_scan_name` as a `TAURUS_ALWAYS_INLINE` DRY wrapper for the
+  Kept `dp_scan_name` as a `LEPTRIS_ALWAYS_INLINE` DRY wrapper for the
   6 name-scan call sites in `direct_parse.c`.
 - **Phase D — digit trick (skipped).** No applicable call sites in the
   parser (version/standalone already use `memcmp` / `strcmp`).
@@ -1801,10 +1801,10 @@ Computed-goto dispatch (GCC-only — PGO covers it); SIMD 16-byte ASCII
 classify (TODO 157 — overhead exceeded gain for short tokens); boolean
 template specialization for parse flags (4× code size for <5% win);
 null-terminator trick (correctness risk); compact 1-byte in-page
-pointers (multi-week refactor — taurus's int32 compact pointers are
+pointers (multi-week refactor — leptris's int32 compact pointers are
 already on parity for our cache-line-sized element struct).
 
-No measurable perf delta on `bench_dom_taurus` / `bench_xpath_taurus`
+No measurable perf delta on `bench_dom_leptris` / `bench_xpath_leptris`
 (within noise). Best read: this is a code-quality + architecture
 release, not a measurable perf release.
 
@@ -1813,7 +1813,7 @@ release, not a measurable perf release.
 
 ### Performance — stack-allocated XPathContext (TODO 163)
 
-`taurus_xpath_eval` and `taurus_xpath_eval_with_vars` previously
+`leptris_xpath_eval` and `leptris_xpath_eval_with_vars` previously
 malloc'd a ~320-byte `XPathContext` per call and free'd it at the
 end. The struct lives for the duration of one eval; no caller
 stashes the pointer past return. Stack-allocate via
@@ -1822,27 +1822,27 @@ stashes the pointer past return. Stack-allocate via
 preserved as thin wrappers). Saves one malloc/free syscall pair
 per eval.
 
-Benchmark delta in the noise floor on `bench_xpath_taurus`
+Benchmark delta in the noise floor on `bench_xpath_leptris`
 (4.59 µs → 4.44–4.54 µs total CPU); the structural win matters
 more than the wall-time delta at high call rates.
 
 ### Tooling — high-attribute-count parse benchmark (TODO 165)
 
 New `benchmarks/comprehensive/benchmark_many_attrs.cpp` generates
-XML with K = 5, 20, 50, 100 attrs per element and compares taurus
+XML with K = 5, 20, 50, 100 attrs per element and compares leptris
 vs pugixml on each. Regression coverage for the v0.18.3 Phase G
 O(K²) attr-wiring fix.
 
 Baseline numbers (Release + LTO, clang arm64, 1000 elements):
 
-| K attrs | taurus (µs) | pugixml (µs) | Ratio |
+| K attrs | leptris (µs) | pugixml (µs) | Ratio |
 |---------|-------------|--------------|-------|
 | 5       | 199         | 49           | 4.07× |
 | 20      | 629         | 245          | 2.57× |
 | 50      | 1320        | 450          | 2.93× |
 | 100     | 4391        | 830          | 5.29× |
 
-Per-attr cost: taurus ≈ 38 ns, pugixml ≈ 8 ns. The 30 ns/attr
+Per-attr cost: leptris ≈ 38 ns, pugixml ≈ 8 ns. The 30 ns/attr
 delta is structural (per-attr hash + entity memchr + string-view
 setup + bookkeeping) — see TODO 161 survey for why we don't strip
 these features to match pugixml.
@@ -1865,8 +1865,8 @@ mid-parse" case. Correctness unchanged.
 ### Performance — `xpath_result` struct free-list (TODO 162)
 
 Mirror of the nodeset free-list (v0.18.2 Phase B) but for
-`struct taurus_xpath_result`. Thread-local singly-linked free-list
-(cap 32). After warmup, zero heap ops per `taurus_xpath_eval` for
+`struct leptris_xpath_result`. Thread-local singly-linked free-list
+(cap 32). After warmup, zero heap ops per `leptris_xpath_eval` for
 the result struct. The value union is reused as the next-pointer
 slot while the struct is on the free-list — no struct size change.
 
@@ -1874,7 +1874,7 @@ slot while the struct is on the free-list — no struct size change.
 
 `TODO.fix/161-pugixml-gap-closure-survey.md` is an honest survey
 of the realistic remaining perf gap vs pugixml. The headline:
-taurus is already ahead on pure XPath (sub-µs simple, 2.7 µs
+leptris is already ahead on pure XPath (sub-µs simple, 2.7 µs
 complex) and competitive on full cycle (~3× slower than pugixml
 with the gap dominated by per-attr parse work, which is structural
 — pugixml ships fewer features per attr).
@@ -1900,26 +1900,26 @@ free-list (cap 64). After warmup, zero heap ops per nodeset.
 `BC_PRED_ATTR_EXISTS` and `BC_PRED_ATTR_EQ_STRING` previously
 called `strlen(attr_name)` and `strlen(expected)` *inside* the
 inner attribute-walk loop. Now hoisted out, plus a 32-bit FNV-1a
-hash pre-filter using the existing `taurus_attribute->name_hash`
+hash pre-filter using the existing `leptris_attribute->name_hash`
 field rejects non-matching attrs in one integer compare before
 `memcmp`.
 
 ### Performance — combined AST + bytecode cache lookup
 
-`taurus_xpath_eval` previously called `xpath_ast_cache_lookup`
+`leptris_xpath_eval` previously called `xpath_ast_cache_lookup`
 and `xpath_ast_cache_get_bc` — same FNV-1a hash computed twice.
 New `xpath_ast_cache_get(expr, len, &out)` returns both pointers
 in a single hash + scan.
 
 ### Build — PGO CMake option (TODO 159 Phase F)
 
-New `TAURUS_ENABLE_PGO = OFF | GENERATE | USE` option for
+New `LEPTRIS_ENABLE_PGO = OFF | GENERATE | USE` option for
 profile-guided optimisation. Cross-platform (clang, GCC, MSVC)
 — lets the compiler specialise the bytecode VM dispatch switch
 and parser scan loops based on real workload data, without
 GCC-specific extensions.
 
-Benchmark impact (clang on macOS arm64, `bench_xpath_taurus`,
+Benchmark impact (clang on macOS arm64, `bench_xpath_leptris`,
 LTO+PGO vs LTO-only):
 
 | Query                                              | LTO     | LTO+PGO | Δ     |
@@ -1946,7 +1946,7 @@ text content + `strtod`", which is exactly what the existing
 `XPATH_BC_PRED_CHILD_NUM_CMP` handler does — so the same opcode covers
 both shapes with no VM changes.
 
-Benchmark impact (Release + LTO, `bench_xpath_taurus`):
+Benchmark impact (Release + LTO, `bench_xpath_leptris`):
 
 | Query                                              | Before   | After   | Speedup |
 |----------------------------------------------------|----------|---------|---------|
@@ -1961,14 +1961,14 @@ path that re-evaluated the predicate AST per input node.
 ### Performance — 16-bit FNV-1a element name hash (TODO 159 Phase A0)
 
 Added a `name_hash` field (uint16 FNV-1a of the element's local
-name) to `struct taurus_element`. Fits in existing padding; the
+name) to `struct leptris_element`. Fits in existing padding; the
 struct stays 64 bytes (one cache line). Populated at every
-creation path: `direct_parse` bulk-alloc, `taurus_element_create_*
-`, `taurus_element_set_name`, deep-copy. New inline helpers
-`taurus_name_hash_compute()` and `taurus_elem_name_is()` compare
+creation path: `direct_parse` bulk-alloc, `leptris_element_create_*
+`, `leptris_element_set_name`, deep-copy. New inline helpers
+`leptris_name_hash_compute()` and `leptris_elem_name_is()` compare
 2 bytes before falling back to `strcmp`.
 
-`taurus_element_first_child(elem, name)` and the new fused
+`leptris_element_first_child(elem, name)` and the new fused
 predicate opcode (below) pre-filter via the hash, rejecting
 non-matching children in ~1 ns.
 
@@ -2016,8 +2016,8 @@ under LTO), but the code is cleaner: no switch, no cast-per-type.
 
 ### Performance — free-list for root_doc_map entries
 
-`taurus_root_doc_register` previously `malloc`'d a `RootDocEntry` on
-every parse. `taurus_root_doc_unregister` freed it on every
+`leptris_root_doc_register` previously `malloc`'d a `RootDocEntry` on
+every parse. `leptris_root_doc_unregister` freed it on every
 `document_free`. Now uses a thread-local free-list: register pops
 from the free-list (or mallocs on first use), unregister pushes back.
 After warmup, zero heap ops per parse cycle.
@@ -2029,7 +2029,7 @@ After warmup, zero heap ops per parse cycle.
 
 Element struct: **72 → 64 bytes**. Fits exactly one 64-byte cache line.
 The `document` field (8 bytes) is removed. Non-root elements reach
-their document via `taurus_element_get_document(elem)` which walks
+their document via `leptris_element_get_document(elem)` which walks
 `parent_off` to the root, then looks up the root in a thread-local
 256-bucket hash table (`dom/root_doc_map.c`).
 
@@ -2037,19 +2037,19 @@ their document via `taurus_element_get_document(elem)` which walks
 
 New files:
 - `dom/root_doc_map.h` / `dom/root_doc_map.c`: thread-local
-  root→document hash table with `taurus_element_get_document()` and
-  `taurus_element_get_pool()` accessors.
+  root→document hash table with `leptris_element_get_document()` and
+  `leptris_element_get_pool()` accessors.
 
 Registration lifecycle:
 - `direct_parse_internal`: register root on parse commit.
-- `taurus_element_create_doc`: register as a temporary root.
-- `taurus_element_*_copy`: register copy for recursive child-copy.
-- `taurus_document_free`: unregister root before pool destroy.
+- `leptris_element_create_doc`: register as a temporary root.
+- `leptris_element_*_copy`: register copy for recursive child-copy.
+- `leptris_document_free`: unregister root before pool destroy.
 
 The migration touched 16 files and ~60 reference sites. A Python
 helper script handled the bulk read→accessor transformation. The
 XPathContext->document accesses were manually restored (the script
-couldn't distinguish TaurusElement from XPathContext).
+couldn't distinguish LeptrisElement from XPathContext).
 
 **ABI break**: element struct size changes (72 → 64 bytes).
 
@@ -2068,12 +2068,12 @@ were O(1) caches for "find last child/attribute".
 open element. `dp_wire_child` takes a `DParser*` parameter and
 reads/updates this cache. O(1) per wire, same as before.
 
-**Mutation paths**: `taurus_elem_last_child()` /
-`taurus_elem_last_attribute()` now walk the list to find the tail.
+**Mutation paths**: `leptris_elem_last_child()` /
+`leptris_elem_last_attribute()` now walk the list to find the tail.
 O(N) where N is child/attr count. For typical elements (≤ 10
 children/attrs) this is fast.
 
-The setters (`taurus_elem_set_last_child`, `_set_last_attribute`)
+The setters (`leptris_elem_set_last_child`, `_set_last_attribute`)
 are retained as no-ops for ABI compatibility.
 
 ### Bug fix in dp_add_attr_inline
@@ -2087,8 +2087,8 @@ UB).
 
 ### Other
 
-`node.h` gained `extern "C"` wrappers — `taurus_elem_last_child`
-now calls `taurus_node_get_next_sibling` inline, and C++ consumers
+`node.h` gained `extern "C"` wrappers — `leptris_elem_last_child`
+now calls `leptris_node_get_next_sibling` inline, and C++ consumers
 (`test_abi`) need C linkage for symbol resolution.
 
 **ABI break**: element struct size changes (80 → 72 bytes). Minor
@@ -2103,7 +2103,7 @@ version bump.
 separately from the doc's pool. Now the buf copy lives inside the
 doc's pool, reclaimed by `pool_destroy` alongside everything else.
 
-Saves one malloc+free pair per `taurus_parse_string` call. Combined
+Saves one malloc+free pair per `leptris_parse_string` call. Combined
 with TODO 154 Phases A+B (single-arena pool + pool-allocated doc
 struct), per-parse malloc count is now **1** (was 4 before v0.14).
 
@@ -2134,14 +2134,14 @@ overhead. Elements that declare namespaces OR have a prefix pay one
 16-byte pool allocation for the cache struct.
 
 Two new inline accessors in `element.h`:
-- `taurus_elem_namespaces(elem)` — read the declarations list (NULL-safe)
-- `taurus_elem_namespaces_ptr(elem, pool)` — writable handle for append
+- `leptris_elem_namespaces(elem)` — read the declarations list (NULL-safe)
+- `leptris_elem_namespaces_ptr(elem, pool)` — writable handle for append
 
-Updated 7 read/write sites in taurus_memory.c, serialize.c, c14n.c,
+Updated 7 read/write sites in leptris_memory.c, serialize.c, c14n.c,
 element.c, element_query.c, output.c.
 
-`taurus_element_add_namespace` now allocates ns_cache on demand from
-`elem->document->pool`. `taurus_element_remove_namespace_definition`
+`leptris_element_add_namespace` now allocates ns_cache on demand from
+`elem->document->pool`. `leptris_element_remove_namespace_definition`
 returns NOT_FOUND early when no ns_cache exists.
 
 **ABI break**: element struct size changes (88 → 80 bytes). Minor
@@ -2150,9 +2150,9 @@ version bump.
 
 ## [0.14.0] - 2026-08-11
 
-### New API — `taurus_node_traverse` (#273)
+### New API — `leptris_node_traverse` (#273)
 
-Added `taurus_node_traverse(root, order, callback, user_data)` — a
+Added `leptris_node_traverse(root, order, callback, user_data)` — a
 single-FFI-boundary subtree walk that lets language bindings implement
 `Node#traverse` / `Node#each` without crossing the FFI boundary once
 per node. Iterative DFS with a 256-deep explicit stack, zero heap
@@ -2165,16 +2165,16 @@ Expected ~400 µs vs Nokogiri's ~500 µs on a 1000-node subtree.
 
 ### Performance — parse fast path (TODO 154 + parse hot path)
 
-`taurus_parse_string` on a 37-byte input was 0.86 µs vs pugixml's
+`leptris_parse_string` on a 37-byte input was 0.86 µs vs pugixml's
 0.10 µs. Three changes close about half the gap:
 
-1. **Encoding-detection fast path** in `taurus_parse_string` that
+1. **Encoding-detection fast path** in `leptris_parse_string` that
    bypasses iconv auto-convert for the overwhelmingly common case
    (input starts with `<`, no `<?xml` declaration, no UTF-16 BOM,
    no embedded NULs). Mirrors pugixml's parse_fast check.
 2. **Tighter `est_elems` formula** in direct_parse (`len/10 + 8`
    instead of `len/10 + 128`). Element overflow now falls back to
-   `taurus_pool_alloc` instead of failing.
+   `leptris_pool_alloc` instead of failing.
 3. **Single-arena per-parse allocation** (TODO 154 Phases A+B).
    Pool struct + first memory_page + page data live in one malloc
    (was two). Doc struct pool-allocated (was calloc). Cuts per-parse
@@ -2186,7 +2186,7 @@ absolute time halved). Small (512 B) 6.6 → 2.8 µs. Medium (24 KB)
 
 ### Platform support — MSVC / Windows CI
 
-libtaurus now builds cleanly under MSVC. Windows-latest added to the
+libleptris now builds cleanly under MSVC. Windows-latest added to the
 CI matrix on both `build.yml` and `test.yml`. The Windows job uses
 the Visual Studio generator, disables utf8proc/iconv to stay
 hermetic, and runs the full ctest suite under MSVC.
@@ -2197,20 +2197,20 @@ Fixes:
   generator expressions. GCC/Clang keep `-Wall -Wextra`; MSVC gets
   `/W4` with noise suppressions. `_CRT_*_NO_WARNINGS` defines
   silence strdup/strncpy deprecation. `libm` link guarded by
-  `TAURUS_MATH_LIBS` (empty on Windows/macOS).
-- New `src/taurus/common/port.h` centralizes compiler-specific
-  shims: `TAURUS_CTZ`, `TAURUS_CONSTRUCTOR`, `TAURUS_THREAD_LOCAL`,
-  `TAURUS_STATIC_ASSERT`. MSVC shims for `strdup`/`strndup`/
+  `LEPTRIS_MATH_LIBS` (empty on Windows/macOS).
+- New `src/leptris/common/port.h` centralizes compiler-specific
+  shims: `LEPTRIS_CTZ`, `LEPTRIS_CONSTRUCTOR`, `LEPTRIS_THREAD_LOCAL`,
+  `LEPTRIS_STATIC_ASSERT`. MSVC shims for `strdup`/`strndup`/
   `strcasecmp`/`strncasecmp`/`strtok_r`. POSIX path: includes
   `<strings.h>` for `strcasecmp`.
-- All 11 `__thread` sites → `TAURUS_THREAD_LOCAL`. 4 `__builtin_ctz`
-  → `TAURUS_CTZ`. chartype.c constructor → `TAURUS_CONSTRUCTOR`.
-  `_Static_assert` → `TAURUS_STATIC_ASSERT`.
+- All 11 `__thread` sites → `LEPTRIS_THREAD_LOCAL`. 4 `__builtin_ctz`
+  → `LEPTRIS_CTZ`. chartype.c constructor → `LEPTRIS_CONSTRUCTOR`.
+  `_Static_assert` → `LEPTRIS_STATIC_ASSERT`.
 - `xpath/vm.c` GCC statement-expression macro → static helper
   function. `xpath_variables.c` `(0.0/0.0)` → `NAN`.
 - C standard bumped from C99 to C11 (`_Static_assert` standard
   there; MSVC requires C11 to recognize it as keyword).
-- `cli/error.h` `__attribute__((format(...)))` → `TAURUS_PRINTF`
+- `cli/error.h` `__attribute__((format(...)))` → `LEPTRIS_PRINTF`
   macro. `cli/output.c` `<unistd.h>` → `<io.h>` on Windows.
 
 ### Architecture — TODOs 154-160 added
@@ -2237,13 +2237,13 @@ caller-owned writable buffer without copying. Eliminates one malloc
 + one memcpy per parse for callers who own their buffer (Ruby FFI,
 in-place parse API).
 
-`taurus_parse_inplace` now calls `direct_parse_inplace` directly
-(was delegating to `taurus_parse` which copies). The document does
+`leptris_parse_inplace` now calls `direct_parse_inplace` directly
+(was delegating to `leptris_parse` which copies). The document does
 NOT free the buffer — caller owns it.
 
 ### Architecture — dead code removal (-360 lines)
 
-Removed unused compact pointer types (TaurusCompactPtr8, Ptr16,
+Removed unused compact pointer types (LeptrisCompactPtr8, Ptr16,
 CompactString) from compact.h/compact.c. These were defined but
 never used — all compact pointer edges use int32_t offsets.
 
@@ -2262,16 +2262,16 @@ compact.c: 482 → 246 lines. compact.h: 318 → 177 lines.
 
 ### New API — per-node binding_wrapper (#262)
 
-Added `void* binding_wrapper` to `TaurusNode` base struct. Language
+Added `void* binding_wrapper` to `LeptrisNode` base struct. Language
 bindings (Ruby FFI, Python, etc.) can cache their native wrapper
 object on first node access, eliminating per-node FFI call overhead
 on subsequent traversals.
 
 **New functions:**
-- `taurus_node_get_binding_wrapper(node)` → `void*`
-- `taurus_node_set_binding_wrapper(node, void* wrapper)`
+- `leptris_node_get_binding_wrapper(node)` → `void*`
+- `leptris_node_set_binding_wrapper(node, void* wrapper)`
 
-**ABI change:** TaurusNode grows from 12→20 bytes. Element struct
+**ABI change:** LeptrisNode grows from 12→20 bytes. Element struct
 grows from 80→88 bytes. Minor version bump.
 
 **Measured impact** (from #262 benchmark data):
@@ -2286,10 +2286,10 @@ first traversal, the binding wraps each node and caches the wrapper.
 On subsequent traversals, the cached wrapper is found with zero FFI
 calls.
 
-The field is opaque to libtaurus — never dereferenced or freed.
+The field is opaque to libleptris — never dereferenced or freed.
 Initialized to NULL on node creation.
 
-Combined with the batch accessor (`taurus_xpath_result_get_nodes`,
+Combined with the batch accessor (`leptris_xpath_result_get_nodes`,
 shipped in v0.11.4), this addresses the complete #262 proposal.
 
 
@@ -2300,7 +2300,7 @@ shipped in v0.11.4), this addresses the complete #262 proposal.
 Eliminated all 9 compiler warnings across the codebase:
 - Nested `/*` in block comments (element_index.h, vm.c)
 - Unused functions (node_public.c `append_path_segment`,
-  taurus.c `taurus_input_has_internal_dtd_subset`)
+  leptris.c `leptris_input_has_internal_dtd_subset`)
 - Const qualifier discard (serialize.c attr caching)
 - Scalar initializer style (c14n.c, dtd/validator.c)
 
@@ -2321,11 +2321,11 @@ The build is now completely `-Wall -Wextra` clean.
 
 ### Fixes
 
-- **#253**: `taurus_doctype_get_internal_subset` now returns the raw
+- **#253**: `leptris_doctype_get_internal_subset` now returns the raw
   DTD internal subset text. Previously `direct_parse` extracted the
   subset for entity parsing but didn't store it on the DOCTYPE node.
 
-- **#217**: `taurus_element_append_child` correctly unlinks a child
+- **#217**: `leptris_element_append_child` correctly unlinks a child
   before re-appending, even when the parent is the same element
   (re-ordering). The old `old_parent != elem` check skipped
   unlinking for same-parent moves, causing duplicate children and
@@ -2333,7 +2333,7 @@ The build is now completely `-Wall -Wextra` clean.
 
 ### New API
 
-- **#262**: `taurus_xpath_result_get_nodes(result, out, max)` —
+- **#262**: `leptris_xpath_result_get_nodes(result, out, max)` —
   batch-copy all nodes from a nodeset result in one call. Eliminates
   per-node FFI overhead for bindings iterating large nodesets
   (100+ nodes).
@@ -2349,7 +2349,7 @@ Under benchmark-ips (which keeps every return value alive), the
 table accumulated entries from 15,000+ simultaneously-alive
 documents. Combined with malloc address reuse, this caused
 cross-document pointer corruption and a segfault in
-`taurus_node_freeze`.
+`leptris_node_freeze`.
 
 Three-part fix (all in `direct_parse.c`):
 
@@ -2391,7 +2391,7 @@ bare name, SYSTEM, PUBLIC, PUBLIC+subset, name+subset.
 
 The v0.11.1 fix (clearing `g_current_document`) addressed the
 thread-local stale pointer but the crash persisted for some inputs.
-`taurus_node_freeze` was **recursive** — under tight parse loops
+`leptris_node_freeze` was **recursive** — under tight parse loops
 on deeply nested documents, the unbounded recursion could exhaust
 the thread stack.
 
@@ -2404,14 +2404,14 @@ vector entirely.
 
 ### Fix — segfault under tight parse loops (#256)
 
-`taurus_parse_string` could segfault under tight parse/free cycles
+`leptris_parse_string` could segfault under tight parse/free cycles
 (Ruby benchmark-ips with delayed GC). Root cause: the thread-local
 `g_current_document` retained a dangling pointer to the returned
 document after the caller freed it, corrupting overflow-table
 cleanup for subsequent parses.
 
 Fix: clear `g_current_document` (call
-`taurus_compact_set_current_document(NULL)`) on the `direct_parse`
+`leptris_compact_set_current_document(NULL)`) on the `direct_parse`
 success path, not just on failure. The thread-local is now NULL
 between parse cycles, preventing stale-pointer contamination of
 the compact-pointer overflow table.
@@ -2444,16 +2444,16 @@ flat_serialize, flat_xpath) is deleted. One parser, like pugixml.
     `flat_fast.c/h`, `flat_serialize.c/h`, `flat_xpath.c/h`
   - `test/flat/` directory + `test_flat_promote_line.cpp`
   - `benchmarks/flat/bench_flat_parse.c`
-  - `flat_doc`/`flat_promoted` fields from `struct taurus_document`
+  - `flat_doc`/`flat_promoted` fields from `struct leptris_document`
   - Flat fast-path checks in `xpath_public.c` and `serialize.c`
 
-- `taurus_parse` calls `direct_parse` directly — no fallback chain.
-- `taurus_document_ensure_promoted` is now a no-op chokepoint.
+- `leptris_parse` calls `direct_parse` directly — no fallback chain.
+- `leptris_document_ensure_promoted` is now a no-op chokepoint.
 
 #### Architecture
 
-- `src/taurus/parse/` — empty (legacy parser deleted v0.10.0)
-- `src/taurus/flat/` — only `direct_parse.c` and `direct_parse.h`
+- `src/leptris/parse/` — empty (legacy parser deleted v0.10.0)
+- `src/leptris/flat/` — only `direct_parse.c` and `direct_parse.h`
 
 One parser, one codebase, ~7500 lines of parser code removed across
 v0.10.0 + v0.11.0.
@@ -2468,20 +2468,20 @@ The legacy parser (`parser_new.c`, 1956 lines) is gone. `direct_parse`
 set. The three-parser architecture collapses to two.
 
 #### Deleted
-- `src/taurus/parse/parser_new.c` — 1956 lines
-- `src/taurus/parse/parser_new.h` — 175 lines
-- `src/taurus/parse/compact_parser.c` — 654 lines (was dead code)
-- Legacy parser fallback in `taurus_parse` — 319 lines
-- Legacy parser path in `taurus_parse_inplace` — delegates to `taurus_parse`
+- `src/leptris/parse/parser_new.c` — 1956 lines
+- `src/leptris/parse/parser_new.h` — 175 lines
+- `src/leptris/parse/compact_parser.c` — 654 lines (was dead code)
+- Legacy parser fallback in `leptris_parse` — 319 lines
+- Legacy parser path in `leptris_parse_inplace` — delegates to `leptris_parse`
 
-The `src/taurus/parse/` directory is now empty.
+The `src/leptris/parse/` directory is now empty.
 
 #### Changes
-- `taurus_parse`: when `direct_parse` and `flat_parse` both fail,
+- `leptris_parse`: when `direct_parse` and `flat_parse` both fail,
   returns NULL. No legacy fallback.
-- `taurus_parse_inplace`: delegates to `taurus_parse` (direct_parse
+- `leptris_parse_inplace`: delegates to `leptris_parse` (direct_parse
   copies the caller's buffer for in-place NUL termination).
-- `direct_parse` and `flat_parser`: now respect `g_taurus_max_depth`
+- `direct_parse` and `flat_parser`: now respect `g_leptris_max_depth`
   (custom depth limit) via `__thread extern`. Falls back to
   `DP_MAX_DEPTH` (256) / `FLAT_MAX_DEPTH` when the limit is 0.
 
@@ -2509,21 +2509,21 @@ legacy parser in a future release.
 
 - **DOCTYPE extraction**: when `direct_parse` encounters
   `<!DOCTYPE name [subset]>`, it extracts the internal subset and
-  parses it via `taurus_dtd_parse_internal_subset` (reusing the
+  parses it via `leptris_dtd_parse_internal_subset` (reusing the
   existing DTD parser). A DOCTYPE node is created so
-  `taurus_document_internal_subset` exposes the name.
+  `leptris_document_internal_subset` exposes the name.
 
 - **Entity expansion**: when a DTD is present and text/attr content
   contains `&`, entities are eagerly expanded via
-  `taurus_decode_entities_view_with_dtd`. Predefined entities
+  `leptris_decode_entities_view_with_dtd`. Predefined entities
   (`&amp;` etc.) still use the lazy expansion path when no DTD.
 
-- **Parse-path gate**: the DTD internal-subset gate in `taurus_parse`
+- **Parse-path gate**: the DTD internal-subset gate in `leptris_parse`
   is removed. `direct_parse` now handles DTD inputs directly —
   no more forced legacy-parser fallback for `<!DOCTYPE>` inputs.
 
 - **Serializer**: `serialize_text_internal` now routes through
-  `taurus_text_get_content` so borrowed text nodes with entities
+  `leptris_text_get_content` so borrowed text nodes with entities
   are materialized + expanded before output.
 
 #### Verified
@@ -2536,7 +2536,7 @@ before this change).
 
 Once confidence builds that `direct_parse` handles all real-world
 DTD inputs:
-- Remove `flat_parse` fallback from `taurus_parse`.
+- Remove `flat_parse` fallback from `leptris_parse`.
 - Delete the legacy parser (`parser_new.c`, ~1955 lines).
 - Delete `flat_parser.c` + `flat_promote.c` (~1245 lines).
 - Total: ~3200 lines of parser code removed.
@@ -2564,12 +2564,12 @@ majority of inputs.
 `flat_promote`) now handles predefined entities via lazy expansion:
 - `direct_parse` and `flat_promote` detect `&` in attr values, set
   `has_entities=1`, leave `attr->value=NULL` so the accessor expands
-  via `taurus_decode_entities_view` on first read.
-- `taurus_text_get_content` checks for `&` in borrowed content and
+  via `leptris_decode_entities_view` on first read.
+- `leptris_text_get_content` checks for `&` in borrowed content and
   expands before materializing.
 - The serializer expands entity-containing attrs before re-escaping.
-- `taurus_element_get_text_content` (XPath `string()`) routes through
-  `taurus_text_get_content`.
+- `leptris_element_get_text_content` (XPath `string()`) routes through
+  `leptris_text_get_content`.
 
 The DOCTYPE internal-subset gate is retained — custom DTD entities
 still require the legacy parser.
@@ -2595,9 +2595,9 @@ for typical 5-20 char names (vector setup cost not amortized).
 
 - Remove duplicate unreachable `return` in `fp_is_name_char`
   (flat_parser.c).
-- Remove dead `taurus_input_has_entities` / `taurus_input_has_namespaces`
+- Remove dead `leptris_input_has_entities` / `leptris_input_has_namespaces`
   functions after entity-gate removal.
-- Fix two nested-comment warnings in `taurus.c`.
+- Fix two nested-comment warnings in `leptris.c`.
 
 
 ## [0.7.1] - 2026-08-09
@@ -2605,7 +2605,7 @@ for typical 5-20 char names (vector setup cost not amortized).
 ### Performance
 
 - Migrate legacy parser (`parser_new.c`) to the shared
-  `taurus_chartype_table` for ASCII name/whitespace classification
+  `leptris_chartype_table` for ASCII name/whitespace classification
   (TODO 149 Phase 3). `direct_parse`, `flat_parser`, and
   `parser_new` now all share one 256-byte LUT — DRY and smaller
   binary. UTF-8 multibyte name fallback preserved.
@@ -2629,13 +2629,13 @@ for typical 5-20 char names (vector setup cost not amortized).
 `prefix` (8B) + `namespace_uri` (8B) into a single nullable
 `ns_cache` pointer (8B). Net savings: **8 bytes per element**.
 
-New `struct taurus_ns_cache` is pool-allocated lazily only for
+New `struct leptris_ns_cache` is pool-allocated lazily only for
 elements that actually have a prefix or resolved namespace URI.
 Most elements (plain XML) have `ns_cache == NULL` — zero overhead.
 
 This is an internal ABI change. The public API surface is
-unchanged — `taurus_element_get_prefix`,
-`taurus_element_get_namespace_uri`, and the namespace accessors
+unchanged — `leptris_element_get_prefix`,
+`leptris_element_get_namespace_uri`, and the namespace accessors
 all work identically.
 
 ### pugixml architecture study (TODO 149)
@@ -2705,24 +2705,24 @@ duplicated `.rodata` per TU. DRY win.
 
 ### Added — DOCTYPE public access API (TODO 148 Phase 2)
 
-- `taurus_document_internal_subset(doc)` → opaque `TaurusDoctype`
+- `leptris_document_internal_subset(doc)` → opaque `LeptrisDoctype`
   handle (or NULL when no DOCTYPE, or when direct_parse skipped it
   on plain-XML input)
-- `taurus_doctype_get_name` / `_get_root_name` (alias matching the
+- `leptris_doctype_get_name` / `_get_root_name` (alias matching the
   Nokogiri `DocType#name` convention)
-- `taurus_doctype_get_public_id`
-- `taurus_doctype_get_system_id`
-- `taurus_doctype_get_internal_subset`
+- `leptris_doctype_get_public_id`
+- `leptris_doctype_get_system_id`
+- `leptris_doctype_get_internal_subset`
 
-New opaque typedef `TaurusDoctype` in `taurus/types.h`. Backs
+New opaque typedef `LeptrisDoctype` in `leptris/types.h`. Backs
 `Document#internal_subset`, `#doctype`, and the `DocType#name` /
 `#public_id` / `#system_id` / `#internal_subset` family in the
 Ruby binding.
 
 ### Added — Custom XPath function handlers (TODO 148 Phase 5)
 
-- `taurus_xpath_register_function(doc, name, fn, user_data)`
-- `typedef char* (*TaurusXPathFn)(const char* const* args, int argc, void* user_data)`
+- `leptris_xpath_register_function(doc, name, fn, user_data)`
+- `typedef char* (*LeptrisXPathFn)(const char* const* args, int argc, void* user_data)`
 
 Registered functions live on the document and are merged AFTER
 the standard XPath 1.0 library in the per-context registry, so
@@ -2746,19 +2746,19 @@ TODO 114 Phase 4.
 Four new public primitives unblock commonly-used Nokogiri methods
 in the Ruby binding:
 
-- **`taurus_element_copy(src, dest_doc)`** — detached deep copy of
+- **`leptris_element_copy(src, dest_doc)`** — detached deep copy of
   an element subtree into a destination document. Backs `Node#dup`,
   `Element#dup`, in-context fragment parsing, and `Node#replace`
   with markup strings.
-- **`taurus_document_copy(src)`** — full-document deep copy
+- **`leptris_document_copy(src)`** — full-document deep copy
   (tree + XML declaration + document-level PIs). Backs
   `Document#dup` / `#clone`.
-- **`taurus_node_get_xpath(node)`** — canonical unique XPath
+- **`leptris_node_get_xpath(node)`** — canonical unique XPath
   string identifying a node. Format matches Nokogiri's
   `Node#path`: `/{qname}[N]` for elements with same-named
   siblings, `/text()`, `/comment()`, `/processing-instruction()`
   for typed leaves. Backs `Node#path`, `#css_path`, `#matches?`.
-- **`taurus_parse_fragment(xml, len, dest_doc, status)`** — parses
+- **`leptris_parse_fragment(xml, len, dest_doc, status)`** — parses
   XML fragments (multiple top-level nodes allowed) into a
   `#document-fragment` synthetic container element owned by the
   destination document. Backs `Document#fragment`, `Node#fragment`,
@@ -2766,12 +2766,12 @@ in the Ruby binding:
 
 ### Added — minor API surface
 
-- **`taurus_element_has_attribute(elem, name)`** — boolean form of
+- **`leptris_element_has_attribute(elem, name)`** — boolean form of
   the `attribute(name) != NULL` idiom.
 
 ### Fixed — flat_promote line tracking (TODO 148 Phase 6)
 
-Closed the v0.5.14 known limitation: `taurus_node_line` returned 0
+Closed the v0.5.14 known limitation: `leptris_node_line` returned 0
 for documents that fell through the `flat_parse + flat_promote`
 path. `FlatNode` grew from 28 to 32 bytes; `flat_parser` tracks
 source line via an `fp_advance_line` helper and snapshots it at
@@ -2793,14 +2793,14 @@ Two new TODO docs frame the remaining work in this initiative:
 
 ### Fixed — namespace read API (#222), node line tracking (#223)
 
-- **#222**: `taurus_element_namespace` returned NULL for default-namespace
+- **#222**: `leptris_element_namespace` returned NULL for default-namespace
   elements because the lazy resolver only triggered when the element
-  had a prefix. `taurus_element_namespace_for_prefix` checked only the
+  had a prefix. `leptris_element_namespace_for_prefix` checked only the
   element's own prefix field instead of searching the `xmlns`
-  declarations. Both now route through `taurus_element_lookup_namespace`,
+  declarations. Both now route through `leptris_element_lookup_namespace`,
   which walks the declarations list and inherits up the tree.
-- **#223**: `taurus_node_line` was hardcoded to return 0. Added a
-  `uint32_t line` field to `TaurusNode` (base struct, inherited by
+- **#223**: `leptris_node_line` was hardcoded to return 0. Added a
+  `uint32_t line` field to `LeptrisNode` (base struct, inherited by
   every node type). `direct_parse` snapshots the source line at each
   token and folds newlines crossed by memchr-driven text scans.
   Programmatic nodes still report 0 (creators memset the struct).
@@ -2810,32 +2810,32 @@ Two new TODO docs frame the remaining work in this initiative:
 
 ### Added — minor visibility gaps from the v0.5.13 audit
 
-- `taurus_xinclude_get_encoding` was declared in the public header but
+- `leptris_xinclude_get_encoding` was declared in the public header but
   had no implementation, so the symbol was missing from the shared
   library export table. Body added (returns the `encoding=` attribute
   of an `xi:include` element).
-- `taurus_element_has_attribute` (new). Natural boolean form of the
-  existing `taurus_element_attribute(name) != NULL` idiom.
+- `leptris_element_has_attribute` (new). Natural boolean form of the
+  existing `leptris_element_attribute(name) != NULL` idiom.
 
 
 ## [0.5.13] - 2026-08-08
 
 ### Fixed — DOM tree mutation bugs (#213, #216, #217)
 
-- **#213**: `taurus_element_child_count` / `taurus_node_child_count`
+- **#213**: `leptris_element_child_count` / `leptris_node_child_count`
   always returned 0 on parsed documents because `direct_parse` and
   `flat_promote` (the parse hot paths) never incremented
   `elem->child_count`. Counter is now maintained for element children
   in both parsers, matching the man-page contract.
-- **#216**: `taurus_element_insert_after` / `_before` silently rejected
+- **#216**: `leptris_element_insert_after` / `_before` silently rejected
   any non-element `new_node` (text/comment/cdata/pi). Now supports all
   child node types via type-dispatched parent and sibling setters.
-- **#217**: `taurus_element_append_child_internal` (and the related
+- **#217**: `leptris_element_append_child_internal` (and the related
   prepend/insert paths) spliced the child into the new parent without
   unlinking it from its current parent, corrupting both trees. Now
-  unlinks via `taurus_node_unlink` before re-parenting.
-- Latent crash surfaced by the #217 fix: `taurus_comment_create`,
-  `taurus_cdata_create`, `taurus_pi_create`, and `taurus_text_create`
+  unlinks via `leptris_node_unlink` before re-parenting.
+- Latent crash surfaced by the #217 fix: `leptris_comment_create`,
+  `leptris_cdata_create`, `leptris_pi_create`, and `leptris_text_create`
   did not initialize `parent_off`. Pool reuse left stale values that
   decoded into wild pointers. All five creators now initialize
   `parent_off = 0` alongside `next_sibling_off`.
@@ -2857,7 +2857,7 @@ Medium (~5 KB, ~50 attrs):   37 µs → 34 µs (8% faster)
 
 ### Fixed
 
-- `taurus_document_encoding` and `taurus_document_xml_version`
+- `leptris_document_encoding` and `leptris_document_xml_version`
   returned NULL on documents produced via the direct-parse fast
   path. The direct parser now scans the XML declaration for
   version/encoding/standalone (previously discarded after noting
@@ -2875,7 +2875,7 @@ Pre-warmed the direct_parse pool with a page sized from estimated
 node count. All per-node allocations (text, comment, attr, namespace
 structs) now hit the bump-pointer fast path.
 
-The direct parser now produces a complete TaurusElement tree in a
+The direct parser now produces a complete LeptrisElement tree in a
 single pass — no FlatDoc intermediate, no separate promote pass.
 Combined with all prior optimizations:
 
@@ -2908,9 +2908,9 @@ hardware, down from 16× at session start.
 
 ### Added — Single-pass direct parser (TODO 147 Phase A)
 
-New `direct_parse` function: parses XML directly into TaurusElement
+New `direct_parse` function: parses XML directly into LeptrisElement
 records in a single pass — no FlatDoc intermediate, no promote pass.
-`taurus_parse` tries direct_parse first, falling back to flat_parse +
+`leptris_parse` tries direct_parse first, falling back to flat_parse +
 lazy promote on failure.
 
 Key pugixml techniques applied:
@@ -2982,7 +2982,7 @@ Promote cost for 5 KB doc (Apple M1, CPU time):
 
 Bulk element allocation in the flat promote pass. Pre-allocates all
 element nodes in a single `pool_alloc + memset` instead of calling
-`taurus_element_create_with_view` per element.
+`leptris_element_create_with_view` per element.
 
 | Operation       | Before  | After   | Speedup |
 |-----------------|---------|---------|---------|
@@ -3005,7 +3005,7 @@ orphan tracking.
 
 ### Added — Flat XPath (TODO 145 Phase 3)
 
-`taurus_xpath_eval` now tries a flat fast-path dispatcher before
+`leptris_xpath_eval` now tries a flat fast-path dispatcher before
 falling back to the compact-tree XPath evaluation. For primitive-
 returning query patterns on documents that haven't been promoted,
 the dispatcher walks FlatDoc directly and skips promote entirely.
@@ -3049,7 +3049,7 @@ and splits qualified element names on the first ':' into prefix +
 local name. Unblocks ~70% of real-world XML documents from the
 fast path.
 
-**Phase 2: flat serialize.** `taurus_document_serialize` now
+**Phase 2: flat serialize.** `leptris_document_serialize` now
 dispatches to `flat_serialize_document` when `doc->flat_doc` is
 set and not yet promoted. The flat path walks the FlatDoc node
 array directly, producing identical output without triggering
@@ -3058,7 +3058,7 @@ promote. Parse-then-serialize workloads skip the entire pool-alloc
 
 ### Fixed
 
-- Pre-existing leak in `taurus_element_get_namespace_uri` where
+- Pre-existing leak in `leptris_element_get_namespace_uri` where
   lazy namespace resolution used heap strdup. Pool-allocate via
   the element's owning document so pool destroy releases the copy.
 
@@ -3081,7 +3081,7 @@ for parse-then-serialize workloads.
 
 ### Fixed — Full exclusive C14N (#183, real implementation)
 
-v0.5.2 shipped `taurus_c14n_canonicalize_ex` with the EXCLUSIVE
+v0.5.2 shipped `leptris_c14n_canonicalize_ex` with the EXCLUSIVE
 mode flag accepted but routed to canonical. That was a stub. This
 release implements the real W3C Exclusive XML Canonicalization
 1.0 algorithm:
@@ -3107,7 +3107,7 @@ the subtree.
 ### Performance — TODO 141 Phase A
 
 Inline `promote_wire_child` helper in the flat promote pass.
-Bypasses `taurus_element_append_child_internal`'s validation,
+Bypasses `leptris_element_append_child_internal`'s validation,
 type dispatch, and version increment for the hot path.
 
 | Doc size  | parse+promote before | after   | speedup |
@@ -3121,13 +3121,13 @@ type dispatch, and version increment for the hot path.
 
 ### Added — Nokogiri-compatible API (#181, #183)
 
-- `taurus_element_add_namespace_definition(elem, prefix, href)`
-- `taurus_element_set_default_namespace(elem, href)`
-- `taurus_element_remove_namespace_definition(elem, prefix)`
-- `taurus_c14n_canonicalize_ex(doc, version, mode, prefixes, with_comments)`
-- `taurus_c14n_canonicalize_subtree_ex(elem, version, mode, prefixes, with_comments)`
-- New `TaurusC14NMode` enum (`TAURUS_C14N_MODE_CANONICAL`,
-  `TAURUS_C14N_MODE_EXCLUSIVE`).
+- `leptris_element_add_namespace_definition(elem, prefix, href)`
+- `leptris_element_set_default_namespace(elem, href)`
+- `leptris_element_remove_namespace_definition(elem, prefix)`
+- `leptris_c14n_canonicalize_ex(doc, version, mode, prefixes, with_comments)`
+- `leptris_c14n_canonicalize_subtree_ex(elem, version, mode, prefixes, with_comments)`
+- New `LeptrisC14NMode` enum (`LEPTRIS_C14N_MODE_CANONICAL`,
+  `LEPTRIS_C14N_MODE_EXCLUSIVE`).
 
 The C14N `with_comments` toggle is fully implemented — comments are
 emitted by the canonical walk when the flag is set. Exclusive mode
@@ -3136,11 +3136,11 @@ fall back to canonical pending the namespace-use-tracking follow-up.
 
 ### Fixed
 
-- `taurus_node_previous_sibling` now works for any node type,
+- `leptris_node_previous_sibling` now works for any node type,
   not just elements (#179). Previously returned NULL for text,
   comment, CDATA, or PI nodes even when they had a real previous
   sibling.
-- `taurus_element_create` (and the typed node creators) no longer
+- `leptris_element_create` (and the typed node creators) no longer
   return NULL on freshly-parsed FlatDoc documents (#184). The fix
   triggers lazy promote at the top of each creator so `doc->pool`
   is allocated before the new node is pool-allocated.
@@ -3152,7 +3152,7 @@ fall back to canonical pending the namespace-use-tracking follow-up.
 ### Performance — TODO 141 Phase A
 
 Inline `promote_wire_child` helper in the flat promote pass.
-Bypasses `taurus_element_append_child_internal`'s validation,
+Bypasses `leptris_element_append_child_internal`'s validation,
 type dispatch, and version increment for the hot path where we
 know the structure (preorder DFS walk).
 
@@ -3198,34 +3198,34 @@ On a 5 KB plain-XML document (Apple M1, mean per iteration):
 
 Fourteen new public entry points for the Ruby FFI binding:
 
-- `taurus_text_node_create`, `taurus_comment_node_create`,
-  `taurus_cdata_node_create`, `taurus_pi_node_create` (#167)
-- `taurus_text_node_set_content`,
-  `taurus_comment_node_set_content`,
-  `taurus_cdata_node_set_content`,
-  `taurus_pi_node_set_target`, `taurus_pi_node_set_data` (#167)
-- `taurus_node_parent`, `taurus_node_unlink` (#168) — work on any
+- `leptris_text_node_create`, `leptris_comment_node_create`,
+  `leptris_cdata_node_create`, `leptris_pi_node_create` (#167)
+- `leptris_text_node_set_content`,
+  `leptris_comment_node_set_content`,
+  `leptris_cdata_node_set_content`,
+  `leptris_pi_node_set_target`, `leptris_pi_node_set_data` (#167)
+- `leptris_node_parent`, `leptris_node_unlink` (#168) — work on any
   node type, not just elements. Required adding `parent_off` to the
   text/comment/cdata/pi node structs (+4 bytes each).
-- `taurus_c14n_canonicalize_subtree` (#169)
-- `taurus_xpath_eval_with_vars_context` (#170)
-- `taurus_element_namespace_decl_prefix`,
-  `taurus_element_namespace_decl_uri` (#171)
-- `taurus_node_line`, `taurus_node_compare` (#172)
+- `leptris_c14n_canonicalize_subtree` (#169)
+- `leptris_xpath_eval_with_vars_context` (#170)
+- `leptris_element_namespace_decl_prefix`,
+  `leptris_element_namespace_decl_uri` (#171)
+- `leptris_node_line`, `leptris_node_compare` (#172)
 
 ### Added — Flat document buffer (TODO 139, Phases A–D)
 
 Foundational architecture for closing the parse performance gap vs
 pugixml. Plain-XML parses now route through `flat_parse → FlatDoc`
 and only build the compact-pointer tree on first access. New
-internal subsystem under `src/taurus/flat/`:
+internal subsystem under `src/leptris/flat/`:
 
 - `FlatNode` (28 B) + `FlatAttr` (12 B) — zero-copy records into
   the input buffer.
 - `flat_parse()` — single-pass XML scanner that handles elements,
   attributes, text, comments, CDATA, PIs, DOCTYPE skipping, BOM.
 - `flat_promote_into(doc)` — lazy promote from FlatDoc to the
-  compact-pointer tree, triggered by `taurus_document_root`,
+  compact-pointer tree, triggered by `leptris_document_root`,
   serialize, c14n, or any other tree-accessing entry point.
 
 Parse-only workloads (parse + free, parse + count) skip the
@@ -3235,14 +3235,14 @@ fall back to the legacy parser.
 
 ### Fixed
 
-- `taurus_document_serialize`, `taurus_element_serialize`, and
-  `taurus_document_save_file` are now exported from the shared
-  library with `TAURUS_API` (regression in v0.4.4, issue #166).
-- `taurus_element_namespace_count` now correctly counts xmlns
+- `leptris_document_serialize`, `leptris_element_serialize`, and
+  `leptris_document_save_file` are now exported from the shared
+  library with `LEPTRIS_API` (regression in v0.4.4, issue #166).
+- `leptris_element_namespace_count` now correctly counts xmlns
   declarations (was returning 0 because it only walked the
   regular attribute list; the parser moves xmlns to
   `elem->namespaces`).
-- `taurus_element_add_namespace` now appends in source order
+- `leptris_element_add_namespace` now appends in source order
   (was prepending, giving consumers a reversed view).
 
 
@@ -3266,7 +3266,7 @@ fall back to the legacy parser.
 - (describe changes here)
 
 
-All notable changes to Taurus will be documented in this file.
+All notable changes to Leptris will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -3275,7 +3275,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.2] - 2026-08-07
 
-Memcpy fast path closes the last gap — **Taurus now beats libxml2
+Memcpy fast path closes the last gap — **Leptris now beats libxml2
 on ALL 10 XPath benchmarks**.
 
 ### Changed — Memcpy fast path for index-backed descendant (TODO 137)
@@ -3290,9 +3290,9 @@ Key insight: the element index stores `all_elements` in preorder
 `all_elements[1..]` — one pointer offset + memcpy. For `//*`, the
 result IS `all_elements` — direct copy. No per-element work needed.
 
-### Performance — Taurus beats libxml2 on ALL XPath benchmarks
+### Performance — Leptris beats libxml2 on ALL XPath benchmarks
 
-| Benchmark | Taurus | libxml2 | Advantage |
+| Benchmark | Leptris | libxml2 | Advantage |
 |---|---|---|---|
 | `self::*` | 0.57 µs | 0.89 µs | 1.6× faster |
 | `child::*` | 0.71 µs | 0.94 µs | 1.3× faster |
@@ -3332,7 +3332,7 @@ fused predicate opcodes.
 
 `bench_xpath_diagnostic` CPU time (final v0.4.1 numbers):
 
-| Benchmark | Taurus | libxml2 | vs libxml2 |
+| Benchmark | Leptris | libxml2 | vs libxml2 |
 |---|---|---|---|
 | `self::*` | 0.57 µs | 0.89 µs | **1.6× faster** |
 | `child::*` | 0.71 µs | 0.94 µs | **1.3× faster** |
@@ -3345,7 +3345,7 @@ fused predicate opcodes.
 | `descendant::*` | 1.19 µs | 0.96 µs | 1.2× slower |
 | `//*` | 1.10 µs | ~1 µs | 1.1× slower |
 
-Taurus BEATS libxml2 on 8 of 10 XPath benchmarks. The remaining 1.1-1.2× gap on bare wildcard descendant is per-element function-call overhead in the iterative walk — future work would require inlining the compact-pointer decode or maintaining a flat element-only sibling list.
+Leptris BEATS libxml2 on 8 of 10 XPath benchmarks. The remaining 1.1-1.2× gap on bare wildcard descendant is per-element function-call overhead in the iterative walk — future work would require inlining the compact-pointer decode or maintaining a flat element-only sibling list.
 
 ### Specs
 
@@ -3359,20 +3359,20 @@ descendant-axis and count() go from 5-12× slower to within 2-6×.
 
 ### Added — SAX shared-library export (TODO 122)
 
-- `src/include/taurus/sax/sax.h` now annotates every public SAX function with `TAURUS_API`, matching the DOM / XPath headers.
-- Without this, SAX symbols were hidden from `libtaurus.dylib` / `.so` export tables under `CMAKE_C_VISIBILITY_PRESET=hidden` (the default). FFI bindings cannot `dlsym` them.
+- `src/include/leptris/sax/sax.h` now annotates every public SAX function with `LEPTRIS_API`, matching the DOM / XPath headers.
+- Without this, SAX symbols were hidden from `libleptris.dylib` / `.so` export tables under `CMAKE_C_VISIBILITY_PRESET=hidden` (the default). FFI bindings cannot `dlsym` them.
 - New `scripts/check_shared_exports.sh` builds a one-off shared lib, walks the export table, and asserts the SAX + DOM + XPath surface is present. Registered as CTest `SymbolExportCheck` so CI catches missing annotations.
 
 ### Added — XPath diagnostic benchmark (TODO 123)
 
-- `benchmarks/xpath/bench_diagnostic.c` — 8-group taurus-only suite isolating per-component costs (parse vs eval, cold vs warm cache, setup floor, predicate cost, named-attribute mystery, comparison ops, variable refs, doc-size scaling).
+- `benchmarks/xpath/bench_diagnostic.c` — 8-group leptris-only suite isolating per-component costs (parse vs eval, cold vs warm cache, setup floor, predicate cost, named-attribute mystery, comparison ops, variable refs, doc-size scaling).
 - Revealed that `self::*` on a 100 KB doc took 9.29 µs vs 1.13 µs on a 24-byte doc — the namespace-init path was walking the entire document on every eval. TODO 125 fixed it.
 
 ### Changed — Bytecode VM inline dispatch + cache (TODO 120 Phase F)
 
 - The bytecode VM (TODO 120 Phases A-E) was recompiling bytecode on every eval. Phase F adds a bytecode cache alongside the AST cache: compile once per expression, reuse on subsequent evals.
 - New inline opcodes `BC_AXIS_STEP`, `BC_BINARY_OP`, `BC_FUNC_CALL` replace `BC_FALLBACK_EVAL` delegates for the common AST families. Open/closed: new opcodes = new enum + new VM case + new compiler case.
-- `taurus_xpath_eval` flow: AST cache lookup → bytecode cache lookup → if bytecode missing, compile + cache → run VM. Falls back to `xpath_evaluate` (AST evaluator) if VM fails for any reason.
+- `leptris_xpath_eval` flow: AST cache lookup → bytecode cache lookup → if bytecode missing, compile + cache → run VM. Falls back to `xpath_evaluate` (AST evaluator) if VM fails for any reason.
 
 ### Changed — Lazy namespace init (TODO 125)
 
@@ -3432,8 +3432,8 @@ Per-call floor and basic axes are at libxml2 parity. The remaining gap is on sub
 
 ### Changed — Element index for O(1) descendant (TODO 132)
 
-- New `src/taurus/dom/element_index.{h,c}` — per-document flat array of elements in preorder + per-name buckets.
-- Built lazily on first descendant-axis access, cached on `TaurusDocument`, freed in `taurus_document_free`, invalidated by `taurus_element_append_child`.
+- New `src/leptris/dom/element_index.{h,c}` — per-document flat array of elements in preorder + per-name buckets.
+- Built lazily on first descendant-axis access, cached on `LeptrisDocument`, freed in `leptris_document_free`, invalidated by `leptris_element_append_child`.
 - `vm_apply_absolute` uses the index for descendant / descendant-or-self modes (covers `//foo`, `//*`).
 - `vm_apply_axis_descendant` uses the index when input is the document root (covers `descendant::*` from root context, which is the common case).
 - Non-root input falls back to the iterative walk from TODO 131.
@@ -3442,7 +3442,7 @@ Per-call floor and basic axes are at libxml2 parity. The remaining gap is on sub
 
 `bench_xpath_diagnostic` (CPU time):
 
-| Benchmark | Taurus | libxml2 | Verdict |
+| Benchmark | Leptris | libxml2 | Verdict |
 |---|---|---|---|
 | `self::*` (medium) | 0.92 µs | 0.89 µs | parity |
 | `child::*` | 1.04 µs | 0.94 µs | parity |
@@ -3467,23 +3467,23 @@ Parse-perf push + streaming SAX rewrite + XInclude ownership transfer.
 
 ### Added — Streaming SAX state machine (TODO 116)
 
-- New `taurus_sax_parser_set_streaming(parser, 1)` API.
-- `taurus_sax_parser_create` now defaults to streaming for `feed()`. Events emit as chunks arrive; memory bounded by max nesting depth, not document size.
-- `taurus_sax_parse` (one-shot) routes through the state machine too — the recursive-descent parser is gone (~840 lines removed from `parser.c`).
+- New `leptris_sax_parser_set_streaming(parser, 1)` API.
+- `leptris_sax_parser_create` now defaults to streaming for `feed()`. Events emit as chunks arrive; memory bounded by max nesting depth, not document size.
+- `leptris_sax_parse` (one-shot) routes through the state machine too — the recursive-descent parser is gone (~840 lines removed from `parser.c`).
 - 20 new specs cover chunk-boundary edge cases: element names, attribute values, `-->` / `]]>` / `?>` close delimiters that straddle feeds, deep nesting, namespace prefixes, mixed content.
 - Bug fixes the legacy parser had and streaming does not: legacy trimmed inter-element whitespace via `sax_skip_whitespace` at the top of the content loop. Streaming correctly preserves whitespace per the SAX contract.
 
 ### Added — XInclude ownership transfer (TODO 117)
 
-- `taurus_document_adopt_child(parent, child)` — public API for transferring ownership of a freshly-parsed included doc into a parent's lifecycle.
+- `leptris_document_adopt_child(parent, child)` — public API for transferring ownership of a freshly-parsed included doc into a parent's lifecycle.
 - `xi:include parse="xml"` (the common case) now **moves** the included root into the parent tree instead of deep-copying. O(1) pointer detach instead of O(subtree-size) per include.
 - Cycle detection: thread ancestor URIs through `xi:include` recursion via a `CycleNode` linked list. Catches `A → B → A` before the depth guard burns through 32 levels.
 - 2 new specs: `XIncludePhaseA.AdoptedRootHasParentDocPointer`, `XIncludePhaseC.MutualIncludeCycleDoesNotLeak`.
 
 ### Added — Zero-copy text nodes (TODO 115)
 
-- `taurus_text_create_borrowed(content, len, pool)` — non-owning pointer into the parser's writable input buffer. Content is intentionally not NUL-terminated; `content_len` is authoritative.
-- Lazy materialization in `taurus_text_get_content` preserves the public NUL-terminated contract.
+- `leptris_text_create_borrowed(content, len, pool)` — non-owning pointer into the parser's writable input buffer. Content is intentionally not NUL-terminated; `content_len` is authoritative.
+- Lazy materialization in `leptris_text_get_content` preserves the public NUL-terminated contract.
 - 5 new specs in `test/dom/test_text_borrowed.cpp`.
 - New `benchmarks/dom/bench_text_borrowed.c` — permanent perf target for the borrowed-text path.
 
@@ -3495,7 +3495,7 @@ Parse-perf push + streaming SAX rewrite + XInclude ownership transfer.
 
 ### Fixed
 
-- `evaluator_axes.c`: 11 `matches_node_test` call sites now cast `TaurusElement` → `TaurusNode*` explicitly. Pre-existing; clang/macOS with `-Werror` failed the build. The macOS CI Benchmarks check is now clean.
+- `evaluator_axes.c`: 11 `matches_node_test` call sites now cast `LeptrisElement` → `LeptrisNode*` explicitly. Pre-existing; clang/macOS with `-Werror` failed the build. The macOS CI Benchmarks check is now clean.
 - `parser_new.c`: XML-declaration probe save/restore used `size_t` for a pointer (`size_t save = p->pos`), truncating the upper bits on 64-bit. Use `const char*` so no conversion happens.
 - Two stale `static` helpers removed from `evaluator_axes.c` (were tripping `-Wunused-function`).
 
@@ -3517,38 +3517,38 @@ First tagged release.
 
 ### Added
 
-- `taurus_document_set_strict` / `taurus_document_get_strict` — per-document strict mode.
-- `taurus_set_max_depth` / `taurus_get_max_depth` — configurable parser depth limit.
-- `taurus_element_as_node` — element-to-node cast helper.
-- `TAURUS_ENABLE_ASAN` CMake option — AddressSanitizer build.
-- `TAURUS_ENABLE_FUZZING` CMake option — libFuzzer harness.
-- `TAURUS_BUILD_DOCS` CMake option — Doxygen API reference.
+- `leptris_document_set_strict` / `leptris_document_get_strict` — per-document strict mode.
+- `leptris_set_max_depth` / `leptris_get_max_depth` — configurable parser depth limit.
+- `leptris_element_as_node` — element-to-node cast helper.
+- `LEPTRIS_ENABLE_ASAN` CMake option — AddressSanitizer build.
+- `LEPTRIS_ENABLE_FUZZING` CMake option — libFuzzer harness.
+- `LEPTRIS_BUILD_DOCS` CMake option — Doxygen API reference.
 - Node vtable registry — adding a node type is now purely additive (no switch to edit).
 - Hash table dynamic growth past 75% load factor.
 - Pool oversized-allocation tracking via side list.
 - 105 specs across 14 modules (smoke, parser, encoding, dom, vtable, compact, memory, xpath, serializer, c14n, perf, sax, cli, abi).
 - CI: ASAN + leak check on every PR; fuzzing nightly.
-- vcpkg overlay port under `ports/taurus/`.
-- ABI-stability guards: `_Static_assert` on opaque handle sizes; `TAURUS_FOR_BINDGEN` macro for FFI generators.
+- vcpkg overlay port under `ports/leptris/`.
+- ABI-stability guards: `_Static_assert` on opaque handle sizes; `LEPTRIS_FOR_BINDGEN` macro for FFI generators.
 
 ### Changed
 
 - Every node allocation routes through the document pool — single ownership model.
 - Attribute values bypass string interning (3.4x perf improvement on attrs.xml; now 1.3x faster than libxml2).
-- `taurus_parse_string_with_encoding` frees the intermediate UTF-8 buffer after parse (was overwriting `doc->xml_buffer` and leaking the copy).
-- DTD container (`TaurusDTD`) is now pool-allocated; entity declarations pool-allocated.
+- `leptris_parse_string_with_encoding` frees the intermediate UTF-8 buffer after parse (was overwriting `doc->xml_buffer` and leaking the copy).
+- DTD container (`LeptrisDTD`) is now pool-allocated; entity declarations pool-allocated.
 - All DOM node create functions consolidated to a single pool-routed entry point per type (no more `_create` / `_create_fast` split).
-- Magic-number node-type checks replaced with `TAURUS_NODE_TYPE_*` enum constants.
+- Magic-number node-type checks replaced with `LEPTRIS_NODE_TYPE_*` enum constants.
 - Single source of truth for internal typedefs (`common/types_internal.h`).
 - `SerializeBuffer` struct tagged for forward-declaration compatibility.
 
 ### Removed
 
-- Dead `taurus_node_create` (non-pool variant) — pool owns all node lifetime.
-- Dead `taurus_element_add_namespace` static.
+- Dead `leptris_node_create` (non-pool variant) — pool owns all node lifetime.
+- Dead `leptris_element_add_namespace` static.
 - Legacy `_create_fast` wrappers per node type.
 - 50+ compile warnings (now zero).
-- Stray 0-byte `src/taurus/dom/compact_allocator.c`.
+- Stray 0-byte `src/leptris/dom/compact_allocator.c`.
 - `gtest` from `vcpkg.json` (tests use CMake FetchContent).
 
 ## [0.1.0] - Pre-release baseline
@@ -3569,7 +3569,7 @@ Initial development snapshot, never formally tagged.
 - Attribute access and modification
 - Text, Comment, CDATA, and Processing Instruction nodes
 - Mixed content support
-- Node iteration API (`TaurusNodeRef`)
+- Node iteration API (`LeptrisNodeRef`)
 
 **XPath 1.0**
 - Complete XPath 1.0 engine
@@ -3597,11 +3597,11 @@ Initial development snapshot, never formally tagged.
 - Content model validation
 
 **CLI Tool**
-- `taurus parse` - Parse and display XML structure
-- `taurus xpath` - Execute XPath queries
-- `taurus format` - Format and pretty-print XML
-- `taurus validate` - Validate against DTD
-- `taurus version` - Display version information
+- `leptris parse` - Parse and display XML structure
+- `leptris xpath` - Execute XPath queries
+- `leptris format` - Format and pretty-print XML
+- `leptris validate` - Validate against DTD
+- `leptris version` - Display version information
 
 **Features**
 - Memory pool allocator for O(1) allocations

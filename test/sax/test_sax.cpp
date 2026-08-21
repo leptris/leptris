@@ -7,8 +7,8 @@
 
 #include <gtest/gtest.h>
 
-#include "taurus.h"
-#include "taurus/sax/sax.h"
+#include "leptris.h"
+#include "leptris/sax/sax.h"
 
 #include <cstring>
 #include <string>
@@ -76,7 +76,7 @@ struct EventLog {
 class SaxParser : public ::testing::Test {
 protected:
     EventLog log;
-    TaurusSAXHandler handler = {};
+    LeptrisSAXHandler handler = {};
 
     void SetUp() override {
         log.reset();
@@ -94,7 +94,7 @@ protected:
 
 TEST_F(SaxParser, FiresStartAndEndDocument) {
     const char xml[] = "<r/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     ASSERT_GE(log.events.size(), 2u);
     EXPECT_EQ(log.events.front(), "start_document");
     EXPECT_EQ(log.events.back(),  "end_document");
@@ -102,7 +102,7 @@ TEST_F(SaxParser, FiresStartAndEndDocument) {
 
 TEST_F(SaxParser, FiresElementEventsWithAttributes) {
     const char xml[] = "<r a='1' b='2'/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     bool found = false;
     for (const auto& e : log.events) {
@@ -117,7 +117,7 @@ TEST_F(SaxParser, FiresElementEventsWithAttributes) {
 
 TEST_F(SaxParser, FiresCharacters) {
     const char xml[] = "<r>hello</r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     bool found = false;
     for (const auto& e : log.events) {
@@ -128,7 +128,7 @@ TEST_F(SaxParser, FiresCharacters) {
 
 TEST_F(SaxParser, FiresComment) {
     const char xml[] = "<r><!--c--></r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     bool found = false;
     for (const auto& e : log.events) {
@@ -139,7 +139,7 @@ TEST_F(SaxParser, FiresComment) {
 
 TEST_F(SaxParser, FiresCdata) {
     const char xml[] = "<r><![CDATA[raw<content>]]></r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     bool found = false;
     for (const auto& e : log.events) {
@@ -150,7 +150,7 @@ TEST_F(SaxParser, FiresCdata) {
 
 TEST_F(SaxParser, FiresProcessingInstruction) {
     const char xml[] = "<r><?pi data?></r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     bool found = false;
     for (const auto& e : log.events) {
@@ -161,7 +161,7 @@ TEST_F(SaxParser, FiresProcessingInstruction) {
 
 TEST_F(SaxParser, HandlesNestedElements) {
     const char xml[] = "<a><b><c>x</c></b></a>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     /* Verify nesting order: start:a, start:b, start:c, text:x, end:c, end:b, end:a. */
     std::vector<std::string> expected = {
@@ -189,7 +189,7 @@ TEST_F(SaxParser, NoLeaksOnComplexDocument) {
         "<ns:child>kid</ns:child></r>";
 
     EventLog local_log;
-    TaurusSAXHandler h = {};
+    LeptrisSAXHandler h = {};
     h.start_element  = &EventLog::on_start_element;
     h.end_element    = &EventLog::on_end_element;
     h.characters     = &EventLog::on_characters;
@@ -197,20 +197,20 @@ TEST_F(SaxParser, NoLeaksOnComplexDocument) {
     h.cdata          = &EventLog::on_cdata;
     h.processing_instruction = &EventLog::on_pi;
 
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &h, &local_log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &h, &local_log), 0);
     EXPECT_FALSE(local_log.events.empty());
 }
 
 // ---- Deep audit (TODO 65) ------------------------------------------------
 
 TEST_F(SaxParser, EmptyInputReturnsError) {
-    EXPECT_NE(taurus_sax_parse("", 0, &handler, &log), 0);
+    EXPECT_NE(leptris_sax_parse("", 0, &handler, &log), 0);
 }
 
 TEST_F(SaxParser, HandlesUnclosedTagGracefully) {
     /* SAX is lenient; unclosed tags don't necessarily fail.  The
      * contract is "no crash" — either parse partially or return error. */
-    int rc = taurus_sax_parse("<a>", 3, &handler, &log);
+    int rc = leptris_sax_parse("<a>", 3, &handler, &log);
     (void)rc;  /* Either 0 (lenient partial) or -1 (rejected) is OK. */
     SUCCEED() << "no crash on unclosed tag";
 }
@@ -218,14 +218,14 @@ TEST_F(SaxParser, HandlesUnclosedTagGracefully) {
 TEST_F(SaxParser, NoLeaksOnParseError) {
     /* Even malformed input must not leak SAX-side allocations. */
     const char xml[] = "<a><b></a></b>";
-    taurus_sax_parse(xml, std::strlen(xml), &handler, &log);
+    leptris_sax_parse(xml, std::strlen(xml), &handler, &log);
     /* Under leaks --atExit --: 0 bytes leaked. */
 }
 
 TEST_F(SaxParser, AttributesPreserveOrder) {
     /* SAX should report attributes in document order. */
     const char xml[] = "<r z='1' a='2' m='3'/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     /* Find the start:r event and verify z precedes a precedes m. */
     std::string start_event;
@@ -261,11 +261,11 @@ TEST_F(SaxParser, FiresNamespacePrefixMapping) {
     };
 
     NsLog ns_log;
-    TaurusSAXHandler ns_handler = {};
+    LeptrisSAXHandler ns_handler = {};
     ns_handler.start_element = &NsLog::on_start_element;
     ns_handler.start_prefix_mapping = &NsLog::on_start_prefix;
 
-    taurus_sax_parse(xml, std::strlen(xml), &ns_handler, &ns_log);
+    leptris_sax_parse(xml, std::strlen(xml), &ns_handler, &ns_log);
 
     EXPECT_FALSE(ns_log.mappings.empty());
     if (!ns_log.mappings.empty()) {
@@ -287,7 +287,7 @@ TEST_F(SaxParser, SelfClosingWithoutAttributes) {
     /* The closing-tag fast path uses memcmp on the already-parsed
      * opening name.  Empty self-closing elements are the simplest case. */
     const char xml[] = "<r/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     ASSERT_GE(log.events.size(), 4u);
     EXPECT_EQ(log.events[0], "start_document");
     EXPECT_EQ(log.events[1], "start:r");
@@ -298,7 +298,7 @@ TEST_F(SaxParser, SelfClosingWithoutAttributes) {
 TEST_F(SaxParser, SelfClosingWithAttributes) {
     /* Exercises both attribute parsing and the self-closing fast path. */
     const char xml[] = "<r a='1' b='2'/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto start_it = std::find(log.events.begin(), log.events.end(), "start:r a=1 b=2");
     EXPECT_NE(start_it, log.events.end());
 }
@@ -315,7 +315,7 @@ TEST_F(SaxParser, ManyAttributesExceedInlineThreshold) {
     }
     xml += "/>";
 
-    EXPECT_EQ(taurus_sax_parse(xml.c_str(), xml.size(), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml.c_str(), xml.size(), &handler, &log), 0);
     auto it = std::find_if(log.events.begin(), log.events.end(),
         [](const std::string& e) { return e.find("start:r") == 0; });
     ASSERT_NE(it, log.events.end());
@@ -337,7 +337,7 @@ TEST_F(SaxParser, DeepNestingDoesNotExhaustStack) {
     for (int i = 0; i < 200; i++) xml += "<a>";
     for (int i = 0; i < 200; i++) xml += "</a>";
 
-    EXPECT_EQ(taurus_sax_parse(xml.c_str(), xml.size(), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml.c_str(), xml.size(), &handler, &log), 0);
     int start_count = 0, end_count = 0;
     for (const auto& e : log.events) {
         if (e == "start:a") start_count++;
@@ -351,7 +351,7 @@ TEST_F(SaxParser, MixedContentPreservesTextOrder) {
     /* The vectorized body-text scan uses memchr to find '<'.  Verify
      * that text-between-elements still fires in document order. */
     const char xml[] = "<r>hello<x/>world</r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
 
     /* Expected sequence (1-indexed event names):
      *   start_document, start:r, text:hello, start:x, end:x,
@@ -367,7 +367,7 @@ TEST_F(SaxParser, MixedContentPreservesTextOrder) {
 TEST_F(SaxParser, CommentEmbeddedInContent) {
     /* The switch-dispatch body loop recognizes comments mid-content. */
     const char xml[] = "<r>before<!--c-->after</r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto c = std::find(log.events.begin(), log.events.end(), "comment:c");
     EXPECT_NE(c, log.events.end());
     /* Text events still fire on both sides of the comment. */
@@ -381,7 +381,7 @@ TEST_F(SaxParser, CommentEmbeddedInContent) {
 
 TEST_F(SaxParser, CdataEmbeddedInContent) {
     const char xml[] = "<r>before<![CDATA[raw]]>after</r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto cd = std::find(log.events.begin(), log.events.end(), "cdata:raw");
     EXPECT_NE(cd, log.events.end());
 }
@@ -390,7 +390,7 @@ TEST_F(SaxParser, ProcessingInstructionWithNoData) {
     /* PIs with just a target and no data — the rewrite handles this
      * without crashing on empty memchr results. */
     const char xml[] = "<r><?php?></r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     /* The PI handler should fire; data may be empty. */
     bool found_pi = false;
     for (const auto& e : log.events) {
@@ -405,7 +405,7 @@ TEST_F(SaxParser, AttributeValueWithSpecialChars) {
      * least not crash on memchr-based quote scanning.  Quotes inside
      * the value (when matched by the OTHER quote char) must work. */
     const char xml[] = "<r a=\"it's &apos;ok&apos;\"/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto it = std::find_if(log.events.begin(), log.events.end(),
         [](const std::string& e) { return e.find("a=") != std::string::npos; });
     ASSERT_NE(it, log.events.end());
@@ -414,7 +414,7 @@ TEST_F(SaxParser, AttributeValueWithSpecialChars) {
 
 TEST_F(SaxParser, EmptyAttributeValue) {
     const char xml[] = "<r a=''/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto it = std::find_if(log.events.begin(), log.events.end(),
         [](const std::string& e) { return e.find("a=") != std::string::npos; });
     ASSERT_NE(it, log.events.end());
@@ -427,7 +427,7 @@ TEST_F(SaxParser, XmlDeclarationSkippedCleanly) {
      * to the user — it's skipped silently by the parser.  The body
      * loop must not fire the PI callback for it. */
     const char xml[] = "<?xml version='1.0'?><r/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     for (const auto& e : log.events) {
         EXPECT_EQ(e.find("pi:xml"), std::string::npos)
             << "declaration must not fire as a PI: " << e;
@@ -440,7 +440,7 @@ TEST_F(SaxParser, EntityReferencesExpandedInText) {
      * Found via the Ruby binding round-trip (TODO 118 Phase B):
      * the raw span used to be handed out with "&amp;" intact. */
     const char xml[] = "<r>a &amp; b &lt;c&gt; &#65;&#x42;</r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto it = std::find_if(log.events.begin(), log.events.end(),
         [](const std::string& e) { return e.find("text:") == 0; });
     ASSERT_NE(it, log.events.end());
@@ -450,7 +450,7 @@ TEST_F(SaxParser, EntityReferencesExpandedInText) {
 TEST_F(SaxParser, EntityReferencesExpandedInAttrValues) {
     /* XML 1.0 3.3.3: attribute values arrive expanded. */
     const char xml[] = "<r tag='r&amp;d' code='&#65;'/>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto it = std::find_if(log.events.begin(), log.events.end(),
         [](const std::string& e) { return e.find("start:r ") == 0; });
     ASSERT_NE(it, log.events.end());
@@ -462,7 +462,7 @@ TEST_F(SaxParser, CdataIsNotEntityDecoded) {
     /* CDATA sections are character data verbatim — references inside
      * must NOT be expanded. */
     const char xml[] = "<r><![CDATA[a &amp; b]]></r>";
-    EXPECT_EQ(taurus_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
     auto it = std::find_if(log.events.begin(), log.events.end(),
         [](const std::string& e) { return e.find("cdata:") == 0; });
     ASSERT_NE(it, log.events.end());
@@ -480,7 +480,7 @@ TEST(SaxIncremental, EventsMatchAcrossChunkBoundaries) {
 
     /* One-shot */
     std::vector<std::string> one_shot_events;
-    TaurusSAXHandler handler1 = {0};
+    LeptrisSAXHandler handler1 = {0};
     handler1.start_element = [](void* ud, const char* name, const char** attrs) {
         auto* ev = static_cast<std::vector<std::string>*>(ud);
         ev->push_back(std::string("S:") + name);
@@ -493,21 +493,21 @@ TEST(SaxIncremental, EventsMatchAcrossChunkBoundaries) {
         auto* ev = static_cast<std::vector<std::string>*>(ud);
         ev->push_back(std::string("T:") + std::string(text, len));
     };
-    taurus_sax_parse(xml, strlen(xml), &handler1, &one_shot_events);
+    leptris_sax_parse(xml, strlen(xml), &handler1, &one_shot_events);
 
     /* Incremental: feed in 5-byte chunks */
     std::vector<std::string> chunk_events;
-    TaurusSAXParser* parser = taurus_sax_parser_create(&handler1, &chunk_events);
+    LeptrisSAXParser* parser = leptris_sax_parser_create(&handler1, &chunk_events);
     ASSERT_NE(parser, nullptr);
 
     size_t total = strlen(xml);
     for (size_t i = 0; i < total; i += 5) {
         size_t chunk = (total - i < 5) ? (total - i) : 5;
         int is_final = (i + chunk >= total) ? 1 : 0;
-        int rc = taurus_sax_parser_feed(parser, xml + i, chunk, is_final);
+        int rc = leptris_sax_parser_feed(parser, xml + i, chunk, is_final);
         EXPECT_EQ(rc, 0);
     }
-    taurus_sax_parser_free(parser);
+    leptris_sax_parser_free(parser);
 
     /* Both paths should have emitted at least root start/end.
      * The exact event count may differ (incremental may split
@@ -521,17 +521,17 @@ TEST(SaxIncremental, EventsMatchAcrossChunkBoundaries) {
 TEST(SaxIncremental, SingleByteChunksWork) {
     /* Stress test: feed 1 byte at a time. Must not crash. */
     const char xml[] = "<r/>";
-    TaurusSAXHandler handler = {0};
+    LeptrisSAXHandler handler = {0};
     handler.start_element = [](void*, const char*, const char**) {};
     handler.end_element = [](void*, const char*) {};
 
-    TaurusSAXParser* parser = taurus_sax_parser_create(&handler, nullptr);
+    LeptrisSAXParser* parser = leptris_sax_parser_create(&handler, nullptr);
     ASSERT_NE(parser, nullptr);
 
     for (size_t i = 0; i < strlen(xml); i++) {
         int is_final = (i == strlen(xml) - 1) ? 1 : 0;
-        int rc = taurus_sax_parser_feed(parser, xml + i, 1, is_final);
+        int rc = leptris_sax_parser_feed(parser, xml + i, 1, is_final);
         EXPECT_EQ(rc, 0) << "Failed at byte " << i;
     }
-    taurus_sax_parser_free(parser);
+    leptris_sax_parser_free(parser);
 }

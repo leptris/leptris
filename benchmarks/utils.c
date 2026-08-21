@@ -119,7 +119,7 @@ benchmark_stats benchmark_analyze(const double* samples, size_t count) {
 /* Print table header */
 void benchmark_print_header(const char* competitor_name) {
     printf("┌────────────────────────────────┬──────────┬──────────┬──────────┐\n");
-    printf("│ %-30s │ Taurus   │ %-8s │ Speedup  │\n", "Operation", competitor_name);
+    printf("│ %-30s │ Leptris   │ %-8s │ Speedup  │\n", "Operation", competitor_name);
     printf("├────────────────────────────────┼──────────┼──────────┼──────────┤\n");
 }
 
@@ -145,21 +145,21 @@ static void format_time(char* buf, size_t bufsize, double us) {
 
 /* Print benchmark result row */
 void benchmark_print_result(const char* name,
-                            benchmark_stats taurus,
+                            benchmark_stats leptris,
                             benchmark_stats competitor,
                             const char* competitor_name) {
-    char taurus_str[32];
+    char leptris_str[32];
     char competitor_str[32];
     char speedup_str[32];
 
     (void)competitor_name; /* Unused, name is in header */
 
     /* Use median for comparison (more robust than mean) */
-    format_time(taurus_str, sizeof(taurus_str), taurus.median);
+    format_time(leptris_str, sizeof(leptris_str), leptris.median);
     format_time(competitor_str, sizeof(competitor_str), competitor.median);
 
     /* Calculate speedup */
-    double speedup = competitor.median / taurus.median;
+    double speedup = competitor.median / leptris.median;
     if (speedup >= 1.0) {
         snprintf(speedup_str, sizeof(speedup_str), "%.2fx ✅", speedup);
     } else {
@@ -167,5 +167,5 @@ void benchmark_print_result(const char* name,
     }
 
     printf("│ %-30s │ %8s │ %8s │ %8s │\n",
-           name, taurus_str, competitor_str, speedup_str);
+           name, leptris_str, competitor_str, speedup_str);
 }

@@ -5,7 +5,7 @@
 
 ## Goal
 
-Migrate `struct taurus_element`'s tree pointers (`parent_off`,
+Migrate `struct leptris_element`'s tree pointers (`parent_off`,
 `first_child_off`, `last_child_off`, `next_sibling_off`,
 `first_attribute_off`) from `int32_t` self-relative offsets to
 `compact_pointer_1byte` with overflow side-table. Element struct
@@ -18,7 +18,7 @@ shrinks 64 → ~24 bytes (3 cache lines saved per walk step).
 - `SerializeRoundTrip.HugeTextContentStaysAttachedToParent` — silent data loss
 - `HighDocCountStress.ParseVerifyFree5000Docs` — segfault
 
-**Root cause**: taurus's pool allocator (`src/taurus/memory/pool.c`)
+**Root cause**: leptris's pool allocator (`src/leptris/memory/pool.c`)
 allocates pages of 32 KB each via `malloc`. Distinct malloc'd pages
 for one document can land **megabytes apart** in the process address
 space (especially on macOS ASLR and Linux glibc). Element tree edges
@@ -41,7 +41,7 @@ Using the overflow table from direct_parse would reintroduce that bug.
 
 ### Option A — Contiguous pool arena (preferred)
 
-Redesign `TaurusMemoryPool` to allocate one contiguous arena per
+Redesign `LeptrisMemoryPool` to allocate one contiguous arena per
 document (single `malloc` for the whole doc), bump-pointer within.
 Tree edges stay within the arena, ±256 KB covers docs up to 256 KB
 (extendable to int32 for larger docs).
@@ -52,9 +52,9 @@ via its `xml_allocator` which pre-allocates pages and chains them.
 
 ### Option B — Per-document overflow table
 
-Add `struct taurus_pointer_overflow* ptr_overflow` to `TaurusDocument`.
+Add `struct leptris_pointer_overflow* ptr_overflow` to `LeptrisDocument`.
 Lazy-allocated on first overflow. `direct_parse.c` calls
-`taurus_compact_set_current_document(doc)` at parse start; the
+`leptris_compact_set_current_document(doc)` at parse start; the
 overflow table tags entries by document for safe cleanup.
 
 Trade-off: re-introduces overflow-table cost on the parse hot path.
@@ -87,7 +87,7 @@ proceed in limited form:
 
 ## Estimated impact (when unblocked)
 
-1.5–2× on tree-walk benchmarks (`bench_dom_taurus` traversal).
+1.5–2× on tree-walk benchmarks (`bench_dom_leptris` traversal).
 Likely 1.3–1.5× on K=100 attr benchmark (attr struct still 72 B
 until [[181-compact-pointer-phase-d-attributes]]).
 

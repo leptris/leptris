@@ -56,9 +56,9 @@ jobs:
         run: |
           cmake -B build -S . -G Ninja \
             -DBUILD_TESTING=ON \
-            -DTAURUS_BUILD_CLI=ON \
+            -DLEPTRIS_BUILD_CLI=ON \
             -DCMAKE_BUILD_TYPE=Release \
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Configure (Windows / MSVC)
         if: runner.os == 'Windows'
@@ -68,9 +68,9 @@ jobs:
           # require Unicode; the goal of this job is to verify the MSVC build.
           cmake -B build -S . `
             -DBUILD_TESTING=ON `
-            -DTAURUS_BUILD_CLI=ON `
-            -DTAURUS_ENABLE_UTF8PROC=OFF `
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_CLI=ON `
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF `
+            -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Build
         run: cmake --build build --config Release
@@ -94,21 +94,21 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           # The default build never links the shared library, so the
-          # TAURUS_API dllexport path went untested and #278 (macro
+          # LEPTRIS_API dllexport path went untested and #278 (macro
           # name mismatch; definition never reaching the objects;
           # mirrored-declaration linkage) shipped. This step builds
-          # taurus_shared: MSVC emits no import library unless symbols
-          # actually export, so a broken TAURUS_API fails here with
+          # leptris_shared: MSVC emits no import library unless symbols
+          # actually export, so a broken LEPTRIS_API fails here with
           # LNK1181/MSB3073-class errors. CLI is OFF — the CLI uses
           # internal accessors that a shared-only build cannot link
           # (TODO 191, the documented interim contract).
           cmake -B build-shared -S . `
             -DBUILD_TESTING=OFF `
-            -DTAURUS_BUILD_CLI=OFF `
-            -DTAURUS_BUILD_STATIC=OFF `
-            -DTAURUS_BUILD_SHARED=ON `
-            -DTAURUS_ENABLE_UTF8PROC=OFF `
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_CLI=OFF `
+            -DLEPTRIS_BUILD_STATIC=OFF `
+            -DLEPTRIS_BUILD_SHARED=ON `
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF `
+            -DLEPTRIS_ENABLE_ICONV=OFF
           cmake --build build-shared --config Release
 
       - name: Check for memory leaks (Linux only)

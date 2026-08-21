@@ -1,13 +1,13 @@
 /**
  * @file options.h
- * @brief Option handling for Taurus CLI
+ * @brief Option handling for Leptris CLI
  *
  * This file defines the MECE (Mutually Exclusive, Collectively Exhaustive)
- * option handling system for the Taurus CLI.
+ * option handling system for the Leptris CLI.
  *
  * Option Resolution Hierarchy (most specific wins):
  * 1. CLI arguments (--option value)
- * 2. Environment variables (TAURUS_OPTION)
+ * 2. Environment variables (LEPTRIS_OPTION)
  * 3. API defaults (hardcoded)
  *
  * Design Principles:
@@ -17,8 +17,8 @@
  * - Type-safe: Separate int/string/bool getters
  */
 
-#ifndef TAURUS_CLI_OPTIONS_H
-#define TAURUS_CLI_OPTIONS_H
+#ifndef LEPTRIS_CLI_OPTIONS_H
+#define LEPTRIS_CLI_OPTIONS_H
 
 #include "cli.h"
 #include <stdbool.h>
@@ -63,7 +63,7 @@ const char* option_source_to_string(option_source_t source);
  * the command is dispatched.
  *
  * Example:
- *   taurus --verbose --format json parse file.xml
+ *   leptris --verbose --format json parse file.xml
  *           ^^^^^^^^^ ^^^^^^^^^^^^ global options
  */
 typedef struct cli_global_options {
@@ -124,7 +124,7 @@ cli_result_t cli_global_options_parse(
 /**
  * Parse command options
  *
- * Options for 'taurus parse' command
+ * Options for 'leptris parse' command
  */
 typedef struct cli_parse_options {
     const char* input_file;     /**< Input file (required) */
@@ -138,7 +138,7 @@ typedef struct cli_parse_options {
 /**
  * XPath command options
  *
- * Options for 'taurus xpath' command
+ * Options for 'leptris xpath' command
  */
 typedef struct cli_xpath_options {
     const char* input_file;     /**< Input file (required) */
@@ -153,7 +153,7 @@ typedef struct cli_xpath_options {
 /**
  * Format command options
  *
- * Options for 'taurus format' command
+ * Options for 'leptris format' command
  */
 typedef struct cli_format_options {
     const char* input_file;     /**< Input file (required) */
@@ -170,7 +170,7 @@ typedef struct cli_format_options {
 /**
  * Version command options
  *
- * Options for 'taurus version' command (minimal)
+ * Options for 'leptris version' command (minimal)
  */
 typedef struct cli_version_options {
     bool short_form;            /**< --short: Just version number */
@@ -283,9 +283,9 @@ char** option_parser_get_positional(option_parser_t* parser, int* count);
 /**
  * Get string option from environment
  *
- * Checks TAURUS_{NAME} environment variable.
+ * Checks LEPTRIS_{NAME} environment variable.
  *
- * Example: get_env_string("FORMAT") checks TAURUS_FORMAT
+ * Example: get_env_string("FORMAT") checks LEPTRIS_FORMAT
  *
  * @param name Option name (uppercase)
  * @param default_value Default if not set
@@ -375,4 +375,4 @@ bool resolve_bool_option(
 }
 #endif
 
-#endif /* TAURUS_CLI_OPTIONS_H */
+#endif /* LEPTRIS_CLI_OPTIONS_H */

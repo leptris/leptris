@@ -21,14 +21,14 @@ Comments and text don't trigger the bug — only leading PIs.
 
 ## Cause (initial inspection)
 
-`src/taurus/parse/parser_new.c` parses children of an element in a
+`src/leptris/parse/parser_new.c` parses children of an element in a
 loop. Each iteration checks for closing tag, then parses one child.
 The PI parsing path appears to consume but not append the first PI
 correctly when `elem->first_child` and `elem->last_child` are both
 still NULL. A quick look at the parse loop's PI branch (around
 `parser_parse_pi`) is the next step.
 
-The compact parser (`src/taurus/parse/compact_parser.c`) is a
+The compact parser (`src/leptris/parse/compact_parser.c`) is a
 separate code path that doesn't share this bug.
 
 ## Fix

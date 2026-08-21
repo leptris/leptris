@@ -3,13 +3,13 @@
 
 /**
  * @file test_adapter_fast.h
- * @brief Ultra-fast adapter using TaurusElementFast with direct pointers
+ * @brief Ultra-fast adapter using LeptrisElementFast with direct pointers
  *
- * This adapter uses the new TaurusElementFast structure which eliminates
+ * This adapter uses the new LeptrisElementFast structure which eliminates
  * the encode/decode overhead of compact pointers by using direct pointers.
  */
 
-#include <taurus.h>
+#include <leptris.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -31,41 +31,41 @@ static inline double get_time_us(void) {
     return tv.tv_sec * 1000000.0 + tv.tv_usec;
 }
 
-/* Type mappings - use TaurusElement (TaurusElementNode*) */
-typedef TaurusDocument xml_document;
-typedef TaurusElement xml_node;
-typedef TaurusAttribute xml_attribute;
+/* Type mappings - use LeptrisElement (LeptrisElementNode*) */
+typedef LeptrisDocument xml_document;
+typedef LeptrisElement xml_node;
+typedef LeptrisAttribute xml_attribute;
 
 /* Map fast API to regular public API */
-#define taurus_element_fast_create(name, doc) taurus_element_create(doc, name)
-#define taurus_element_fast_append_child(parent, child) taurus_element_append_child(parent, child)
-#define taurus_element_fast_prepend_child(parent, child) taurus_element_prepend_child(parent, child)
-#define taurus_element_fast_insert_after(sibling, child) taurus_element_insert_after(sibling, child)
-#define taurus_element_fast_insert_before(sibling, child) taurus_element_insert_before(sibling, child)
-#define taurus_element_fast_remove_child(parent, child) taurus_element_remove_child(parent, child)
-#define taurus_element_fast_set_name(elem, name) taurus_element_set_name(elem, name)
-#define taurus_element_fast_copy(elem, doc) taurus_element_create(doc, taurus_element_name(elem))  /* Create new with same name */
-#define taurus_element_fast_set_document(doc) ((void)0)  /* No-op */
-#define taurus_element_first_attribute(n) taurus_element_first_attribute(n)
+#define leptris_element_fast_create(name, doc) leptris_element_create(doc, name)
+#define leptris_element_fast_append_child(parent, child) leptris_element_append_child(parent, child)
+#define leptris_element_fast_prepend_child(parent, child) leptris_element_prepend_child(parent, child)
+#define leptris_element_fast_insert_after(sibling, child) leptris_element_insert_after(sibling, child)
+#define leptris_element_fast_insert_before(sibling, child) leptris_element_insert_before(sibling, child)
+#define leptris_element_fast_remove_child(parent, child) leptris_element_remove_child(parent, child)
+#define leptris_element_fast_set_name(elem, name) leptris_element_set_name(elem, name)
+#define leptris_element_fast_copy(elem, doc) leptris_element_create(doc, leptris_element_name(elem))  /* Create new with same name */
+#define leptris_element_fast_set_document(doc) ((void)0)  /* No-op */
+#define leptris_element_first_attribute(n) leptris_element_first_attribute(n)
 
 /* String macro */
 #define STR(x) x
 typedef char char_t;
 
 /* Compile-time string length macro */
-#define TAURUS_STRLEN(s) (sizeof(s) - 1)
+#define LEPTRIS_STRLEN(s) (sizeof(s) - 1)
 
 /* Compiler optimization hints */
 #if defined(__GNUC__) || defined(__clang__)
-    #define TAURUS_ALWAYS_INLINE __attribute__((always_inline)) inline
-    #define TAURUS_HOT __attribute__((hot))
+    #define LEPTRIS_ALWAYS_INLINE __attribute__((always_inline)) inline
+    #define LEPTRIS_HOT __attribute__((hot))
 #else
-    #define TAURUS_ALWAYS_INLINE inline
-    #define TAURUS_HOT
+    #define LEPTRIS_ALWAYS_INLINE inline
+    #define LEPTRIS_HOT
 #endif
 
 /* Thread-local document tracking */
-static __thread TaurusDocument g_fast_current_doc = NULL;
+static __thread LeptrisDocument g_fast_current_doc = NULL;
 static __thread xml_node g_fast_root = NULL;  /* Fast root element */
 
 /* Node type enum */
@@ -114,76 +114,76 @@ typedef struct {
     static int bench_##name(void)
 
 /* ============================================================================
- * Element Operations (using TaurusElementFast with direct pointers)
+ * Element Operations (using LeptrisElementFast with direct pointers)
  * ============================================================================ */
 
 /* Create element */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_create_element(const char* name) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_create_element(const char* name) {
     if (!g_fast_current_doc) return NULL;
-    return taurus_element_fast_create(name, g_fast_current_doc);
+    return leptris_element_fast_create(name, g_fast_current_doc);
 }
 
 /* Append child - uses direct pointer operations (no encode/decode!) */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_append_child(xml_node parent, const char* name) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_append_child(xml_node parent, const char* name) {
     if (!parent || !name || !g_fast_current_doc) return NULL;
 
-    xml_node child = taurus_element_fast_create(name, g_fast_current_doc);
+    xml_node child = leptris_element_fast_create(name, g_fast_current_doc);
     if (!child) return NULL;
 
-    taurus_element_fast_append_child(parent, child);
+    leptris_element_fast_append_child(parent, child);
     return child;
 }
 
 /* Prepend child */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_prepend_child(xml_node parent, const char* name) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_prepend_child(xml_node parent, const char* name) {
     if (!parent || !name || !g_fast_current_doc) return NULL;
 
-    xml_node child = taurus_element_fast_create(name, g_fast_current_doc);
+    xml_node child = leptris_element_fast_create(name, g_fast_current_doc);
     if (!child) return NULL;
 
-    taurus_element_fast_prepend_child(parent, child);
+    leptris_element_fast_prepend_child(parent, child);
     return child;
 }
 
 /* Insert after */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_insert_child_after(xml_node parent, const char* name, xml_node sibling) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_insert_child_after(xml_node parent, const char* name, xml_node sibling) {
     if (!sibling || !name || !g_fast_current_doc) return NULL;
 
-    xml_node child = taurus_element_fast_create(name, g_fast_current_doc);
+    xml_node child = leptris_element_fast_create(name, g_fast_current_doc);
     if (!child) return NULL;
 
-    taurus_element_fast_insert_after(sibling, child);
+    leptris_element_fast_insert_after(sibling, child);
     return child;
 }
 
 /* Insert before */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_insert_child_before(xml_node parent, const char* name, xml_node sibling) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_insert_child_before(xml_node parent, const char* name, xml_node sibling) {
     if (!sibling || !name || !g_fast_current_doc) return NULL;
 
-    xml_node child = taurus_element_fast_create(name, g_fast_current_doc);
+    xml_node child = leptris_element_fast_create(name, g_fast_current_doc);
     if (!child) return NULL;
 
-    taurus_element_fast_insert_before(sibling, child);
+    leptris_element_fast_insert_before(sibling, child);
     return child;
 }
 
 /* Remove child by direct pointer (internal helper) */
-static TAURUS_ALWAYS_INLINE void xml_node_remove_child_node(xml_node parent, xml_node child) {
+static LEPTRIS_ALWAYS_INLINE void xml_node_remove_child_node(xml_node parent, xml_node child) {
     if (!parent || !child) return;
-    taurus_element_fast_remove_child(parent, child);
+    leptris_element_fast_remove_child(parent, child);
 }
 
 /* Set name */
-static TAURUS_ALWAYS_INLINE int xml_node_set_name(xml_node elem, const char* name) {
+static LEPTRIS_ALWAYS_INLINE int xml_node_set_name(xml_node elem, const char* name) {
     if (!elem || !name) return 0;
-    taurus_element_fast_set_name(elem, name);
+    leptris_element_fast_set_name(elem, name);
     return 1;
 }
 
 /* Get name */
 static inline const char* xml_node_get_name(xml_node elem) {
     if (!elem) return NULL;
-    return taurus_element_name(elem);
+    return leptris_element_name(elem);
 }
 
 /* Get name (alias for compatibility) */
@@ -194,36 +194,36 @@ static inline const char* xml_node_name(xml_node elem) {
 /* Get first child */
 static inline xml_node xml_node_first_child(xml_node elem) {
     if (!elem) return NULL;
-    return taurus_element_first_child(elem, NULL);
+    return leptris_element_first_child(elem, NULL);
 }
 
 /* Get last child */
 static inline xml_node xml_node_last_child(xml_node elem) {
     if (!elem) return NULL;
-    return taurus_element_last_child(elem, NULL);
+    return leptris_element_last_child(elem, NULL);
 }
 
 /* Get next sibling */
 static inline xml_node xml_node_next_sibling(xml_node elem) {
     if (!elem) return NULL;
-    return taurus_element_next_sibling(elem, NULL);  /* NULL = any sibling */
+    return leptris_element_next_sibling(elem, NULL);  /* NULL = any sibling */
 }
 
 /* Get parent */
 static inline xml_node xml_node_get_parent(xml_node elem) {
     if (!elem) return NULL;
-    return taurus_element_parent(elem);
+    return leptris_element_parent(elem);
 }
 
 /* Remove child by name (finds child first, then removes it) */
-static TAURUS_ALWAYS_INLINE int xml_node_remove_child(xml_node parent, const char* name) {
+static LEPTRIS_ALWAYS_INLINE int xml_node_remove_child(xml_node parent, const char* name) {
     if (!parent || !name) return 0;
 
     /* Find child by name using the API */
-    xml_node child = taurus_element_find_child(parent, name);
+    xml_node child = leptris_element_find_child(parent, name);
     if (child) {
         /* Found child - remove it */
-        taurus_element_remove_child(parent, child);
+        leptris_element_remove_child(parent, child);
         return 1;
     }
 
@@ -235,9 +235,9 @@ static TAURUS_ALWAYS_INLINE int xml_node_remove_child(xml_node parent, const cha
  * ============================================================================ */
 
 /* Forward declarations for internal functions */
-extern TaurusDocument taurus_document_new(void);
-extern TaurusMemoryPool* taurus_pool_create(void);
-extern void* taurus_pool_alloc(TaurusMemoryPool* pool, size_t size);
+extern LeptrisDocument leptris_document_new(void);
+extern LeptrisMemoryPool* leptris_pool_create(void);
+extern void* leptris_pool_alloc(LeptrisMemoryPool* pool, size_t size);
 
 static inline xml_document xml_document_create(void) {
     /* Create/reuse document for benchmark */
@@ -246,11 +246,11 @@ static inline xml_document xml_document_create(void) {
     }
 
     /* Create a minimal document directly (no XML parsing overhead) */
-    g_fast_current_doc = taurus_document_new();
+    g_fast_current_doc = leptris_document_new();
     if (!g_fast_current_doc) return NULL;
 
     /* Create memory pool for fast element allocation */
-    TaurusMemoryPool* pool = taurus_pool_create();
+    LeptrisMemoryPool* pool = leptris_pool_create();
     if (!pool) {
         free(g_fast_current_doc);
         g_fast_current_doc = NULL;
@@ -261,10 +261,10 @@ static inline xml_document xml_document_create(void) {
     g_fast_current_doc->pool = pool;
 
     /* Set thread-local document for element_fast.c */
-    taurus_element_fast_set_document(g_fast_current_doc);
+    leptris_element_fast_set_document(g_fast_current_doc);
 
     /* Create fast root element */
-    g_fast_root = taurus_element_fast_create("root", g_fast_current_doc);
+    g_fast_root = leptris_element_fast_create("root", g_fast_current_doc);
 
     return g_fast_current_doc;
 }
@@ -289,7 +289,7 @@ static inline xml_node xml_document_append_child(xml_document doc, const char* n
     xml_node child = xml_node_create_element(name);
     if (!child) return NULL;
 
-    taurus_element_fast_append_child(g_fast_root, child);
+    leptris_element_fast_append_child(g_fast_root, child);
     return child;
 }
 
@@ -303,7 +303,7 @@ static inline xml_node xml_document_prepend_child(xml_document doc, const char* 
     xml_node child = xml_node_create_element(name);
     if (!child) return NULL;
 
-    taurus_element_fast_prepend_child(g_fast_root, child);
+    leptris_element_fast_prepend_child(g_fast_root, child);
     return child;
 }
 
@@ -312,46 +312,46 @@ static inline xml_node xml_document_prepend_child(xml_document doc, const char* 
  * ============================================================================ */
 
 /* Append copy (shallow copy - just the element, no children) */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_append_copy(xml_node parent, xml_node source) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_append_copy(xml_node parent, xml_node source) {
     if (!parent || !source || !g_fast_current_doc) return NULL;
 
-    xml_node copy = taurus_element_fast_copy(source, g_fast_current_doc);
+    xml_node copy = leptris_element_fast_copy(source, g_fast_current_doc);
     if (!copy) return NULL;
 
-    taurus_element_fast_append_child(parent, copy);
+    leptris_element_fast_append_child(parent, copy);
     return copy;
 }
 
 /* Prepend copy */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_prepend_copy(xml_node parent, xml_node source) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_prepend_copy(xml_node parent, xml_node source) {
     if (!parent || !source || !g_fast_current_doc) return NULL;
 
-    xml_node copy = taurus_element_fast_copy(source, g_fast_current_doc);
+    xml_node copy = leptris_element_fast_copy(source, g_fast_current_doc);
     if (!copy) return NULL;
 
-    taurus_element_fast_prepend_child(parent, copy);
+    leptris_element_fast_prepend_child(parent, copy);
     return copy;
 }
 
 /* Insert copy after */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_insert_copy_after(xml_node parent, xml_node source, xml_node sibling) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_insert_copy_after(xml_node parent, xml_node source, xml_node sibling) {
     if (!sibling || !source || !g_fast_current_doc) return NULL;
 
-    xml_node copy = taurus_element_fast_copy(source, g_fast_current_doc);
+    xml_node copy = leptris_element_fast_copy(source, g_fast_current_doc);
     if (!copy) return NULL;
 
-    taurus_element_fast_insert_after(sibling, copy);
+    leptris_element_fast_insert_after(sibling, copy);
     return copy;
 }
 
 /* Insert copy before */
-static TAURUS_ALWAYS_INLINE xml_node xml_node_insert_copy_before(xml_node parent, xml_node source, xml_node sibling) {
+static LEPTRIS_ALWAYS_INLINE xml_node xml_node_insert_copy_before(xml_node parent, xml_node source, xml_node sibling) {
     if (!sibling || !source || !g_fast_current_doc) return NULL;
 
-    xml_node copy = taurus_element_fast_copy(source, g_fast_current_doc);
+    xml_node copy = leptris_element_fast_copy(source, g_fast_current_doc);
     if (!copy) return NULL;
 
-    taurus_element_fast_insert_before(sibling, copy);
+    leptris_element_fast_insert_before(sibling, copy);
     return copy;
 }
 

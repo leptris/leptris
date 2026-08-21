@@ -21,7 +21,7 @@ on a 1000-element doc.
 ## Risk
 
 Low. The document pointer is used by:
-- taurus_element_get_document (XPath context resolution)
+- leptris_element_get_document (XPath context resolution)
 - COW version propagation
 - Element index build
 

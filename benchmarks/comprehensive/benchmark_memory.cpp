@@ -7,8 +7,8 @@
  * - Per-element memory (normalized)
  *
  * Key metrics:
- * - TAURUS_COMPACT_MODE: 32 bytes/element (6x reduction!)
- * - Regular Taurus: ~192 bytes/element (pool allocation)
+ * - LEPTRIS_COMPACT_MODE: 32 bytes/element (6x reduction!)
+ * - Regular Leptris: ~192 bytes/element (pool allocation)
  * - pugixml: Variable (malloc overhead)
  * - libxml2: Highest (full feature overhead)
  */
@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <taurus.h>
+#include <leptris.h>
 #include <pugixml.hpp>
 
 // ============================================================================
@@ -73,18 +73,18 @@ static const char* test_xml =
 // Memory Benchmark Functions
 // ============================================================================
 
-static void measure_taurus_memory() {
-    printf("  Taurus:\n");
+static void measure_leptris_memory() {
+    printf("  Leptris:\n");
 
     size_t baseline = get_current_memory();
     (void)baseline;
 
-    TaurusDocument doc = taurus_parse_string(test_xml, strlen(test_xml), NULL);
+    LeptrisDocument doc = leptris_parse_string(test_xml, strlen(test_xml), NULL);
     size_t post_parse = get_current_memory();
 
     if (doc) {
-        TaurusElement root = taurus_document_root(doc);
-        size_t child_count = taurus_element_child_count(root);
+        LeptrisElement root = leptris_document_root(doc);
+        size_t child_count = leptris_element_child_count(root);
 
         size_t per_element = 0;
         if (child_count > 0 && post_parse > baseline) {
@@ -95,13 +95,13 @@ static void measure_taurus_memory() {
         printf("    Element count: %zu\n", child_count + 1);
         printf("    Per-element: ~%zu bytes\n", per_element);
 
-#ifdef TAURUS_COMPACT_MODE
+#ifdef LEPTRIS_COMPACT_MODE
         printf("    Mode: COMPACT (32 bytes/element target)\n");
 #else
         printf("    Mode: REGULAR (~192 bytes/element)\n");
 #endif
 
-        taurus_document_free(doc);
+        leptris_document_free(doc);
     }
 
     size_t after_free = get_current_memory();
@@ -164,19 +164,19 @@ int main(int argc, char** argv) {
 
     printf("Memory Measurements:\n\n");
 
-    measure_taurus_memory();
+    measure_leptris_memory();
     measure_pugixml_memory();
 
     printf("═══════════════════════════════════════════════════════════\n");
     printf("Expected Results:\n");
-    printf("  - TAURUS_COMPACT_MODE: 32 bytes/element (6x reduction)\n");
-    printf("  - Regular Taurus: ~192 bytes/element (pool allocation)\n");
+    printf("  - LEPTRIS_COMPACT_MODE: 32 bytes/element (6x reduction)\n");
+    printf("  - Regular Leptris: ~192 bytes/element (pool allocation)\n");
     printf("  - pugixml: Variable (malloc overhead, depends on allocator)\n");
     printf("\n");
     printf("Memory Efficiency Strategies:\n");
-    printf("  1. Pool allocation (Taurus): O(1) bump pointer, bulk free\n");
-    printf("  2. Compact mode (Taurus): 1-2 byte offsets vs 8-byte pointers\n");
-    printf("  3. StringView zero-copy (Taurus): No string duplication\n");
+    printf("  1. Pool allocation (Leptris): O(1) bump pointer, bulk free\n");
+    printf("  2. Compact mode (Leptris): 1-2 byte offsets vs 8-byte pointers\n");
+    printf("  3. StringView zero-copy (Leptris): No string duplication\n");
     printf("  4. Per-node malloc (pugixml): Flexible but more overhead\n");
     printf("═══════════════════════════════════════════════════════════\n");
     printf("\n");

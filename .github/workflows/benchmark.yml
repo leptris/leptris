@@ -51,9 +51,9 @@ jobs:
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=ON \
-            -DTAURUS_BUILD_BENCHMARKS=ON \
-            -DTAURUS_ENABLE_LTO=ON \
-            -DTAURUS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_BENCHMARKS=ON \
+            -DLEPTRIS_ENABLE_LTO=ON \
+            -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Build
         run: cmake --build build
@@ -99,18 +99,18 @@ jobs:
           }
 
           for bin in \
-              ../build/benchmarks/bench_dom_taurus \
+              ../build/benchmarks/bench_dom_leptris \
               ../build/benchmarks/bench_dom_libxml2 \
-              ../build/benchmarks/bench_xpath_taurus \
+              ../build/benchmarks/bench_xpath_leptris \
               ../build/benchmarks/bench_xpath_libxml2 \
-              ../build/benchmarks/bench_xpath_axes_taurus \
+              ../build/benchmarks/bench_xpath_axes_leptris \
               ../build/benchmarks/bench_xpath_axes_libxml2 \
-              ../build/benchmarks/bench_xpath_functions_taurus \
+              ../build/benchmarks/bench_xpath_functions_leptris \
               ../build/benchmarks/bench_xpath_functions_libxml2 \
-              ../build/benchmarks/bench_sax_taurus \
+              ../build/benchmarks/bench_sax_leptris \
               ../build/benchmarks/bench_sax_libxml2 \
               ../build/benchmarks/bench_serialize \
-              ../build/benchmarks/bench_modify_taurus \
+              ../build/benchmarks/bench_modify_leptris \
               ../build/benchmarks/benchmark_parse \
               ../build/benchmarks/benchmark_parse_ops \
               ../build/benchmarks/benchmark_first_access \

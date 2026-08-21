@@ -6,13 +6,13 @@
 
 ## Problem
 
-`src/taurus/sax/parser.c:751`:
+`src/leptris/sax/parser.c:751`:
 
 ```c
 /* TODO: Implement true incremental parsing in Session 2 */
 ```
 
-`taurus_sax_parser_feed` is the incremental API but today it just
+`leptris_sax_parser_feed` is the incremental API but today it just
 buffers all chunks until `is_final` is set, then parses in one shot.
 True incremental parsing would emit events as chunks arrive.
 
@@ -35,7 +35,7 @@ SAX. The current buffering defeats that.
 
 ## Acceptance
 
-- `taurus_sax_parser_feed` works correctly with chunks as small as
+- `leptris_sax_parser_feed` works correctly with chunks as small as
   1 byte.
 - Memory usage stays bounded regardless of document size (no full
   document buffered).

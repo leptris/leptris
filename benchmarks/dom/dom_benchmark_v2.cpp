@@ -14,9 +14,9 @@
 #include <fstream>
 #include <sstream>
 
-// Taurus API (C)
+// Leptris API (C)
 extern "C" {
-#include <taurus.h>
+#include <leptris.h>
 }
 
 // pugixml API (C++)
@@ -46,9 +46,9 @@ static std::string read_file(const char* filename) {
 // Benchmark 1: Parse (measured separately)
 // ============================================================================
 
-static void bench_taurus_parse(const char* xml, size_t len) {
-    TaurusDocument doc = taurus_parse_string(xml, len, NULL);
-    taurus_document_free(doc);
+static void bench_leptris_parse(const char* xml, size_t len) {
+    LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
+    leptris_document_free(doc);
 }
 
 static void bench_pugixml_parse(const char* xml, size_t len) {
@@ -60,16 +60,16 @@ static void bench_pugixml_parse(const char* xml, size_t len) {
 // Benchmark 2: Child Access - PARSE ONCE, ACCESS MANY TIMES
 // ============================================================================
 
-static void bench_taurus_child_access(const char* xml, size_t len) {
+static void bench_leptris_child_access(const char* xml, size_t len) {
     // Parse ONCE
-    TaurusDocument doc = taurus_parse_string(xml, len, NULL);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
+    LeptrisElement root = leptris_document_root(doc);
 
     // Warmup
     for (int i = 0; i < WARMUP_ITERS; i++) {
-        volatile size_t count = taurus_element_child_count(root);
+        volatile size_t count = leptris_element_child_count(root);
         for (size_t j = 0; j < count; j++) {
-            volatile TaurusElement child = taurus_element_child(root, j);
+            volatile LeptrisElement child = leptris_element_child(root, j);
             (void)child;
         }
     }
@@ -77,16 +77,16 @@ static void bench_taurus_child_access(const char* xml, size_t len) {
     // Measure ONLY child access
     long start = benchmark_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        size_t count = taurus_element_child_count(root);
+        size_t count = leptris_element_child_count(root);
         for (size_t j = 0; j < count; j++) {
-            TaurusElement child = taurus_element_child(root, j);
-            const char* name = taurus_element_name(child);
+            LeptrisElement child = leptris_element_child(root, j);
+            const char* name = leptris_element_name(child);
             (void)name;  // Use result
         }
     }
     long end = benchmark_time_us();
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     benchmark_print_result("Child Access (isolated)", (benchmark_stats){(double)(end - start), 0, 0, 0, 0}, (benchmark_stats){0, 0, 0, 0, 0}, "pugixml");
 }
 
@@ -120,17 +120,17 @@ static void bench_pugixml_child_access(const char* xml, size_t len) {
 // Benchmark 3: Attribute Access - PARSE ONCE
 // ============================================================================
 
-static void bench_taurus_attribute_access(const char* xml, size_t len) {
-    TaurusDocument doc = taurus_parse_string(xml, len, NULL);
-    TaurusElement root = taurus_document_root(doc);
-    size_t count = taurus_element_child_count(root);
+static void bench_leptris_attribute_access(const char* xml, size_t len) {
+    LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
+    LeptrisElement root = leptris_document_root(doc);
+    size_t count = leptris_element_child_count(root);
 
     // Warmup
     for (int i = 0; i < WARMUP_ITERS; i++) {
         for (size_t j = 0; j < count; j++) {
-            TaurusElement child = taurus_element_child(root, j);
-            const char* id = taurus_element_attribute(child, "id");
-            const char* category = taurus_element_attribute(child, "category");
+            LeptrisElement child = leptris_element_child(root, j);
+            const char* id = leptris_element_attribute(child, "id");
+            const char* category = leptris_element_attribute(child, "category");
             (void)id; (void)category;
         }
     }
@@ -139,15 +139,15 @@ static void bench_taurus_attribute_access(const char* xml, size_t len) {
     long start = benchmark_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
         for (size_t j = 0; j < count; j++) {
-            TaurusElement child = taurus_element_child(root, j);
-            const char* id = taurus_element_attribute(child, "id");
-            const char* category = taurus_element_attribute(child, "category");
+            LeptrisElement child = leptris_element_child(root, j);
+            const char* id = leptris_element_attribute(child, "id");
+            const char* category = leptris_element_attribute(child, "category");
             (void)id; (void)category;
         }
     }
     long end = benchmark_time_us();
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     benchmark_print_result("Attribute Access (isolated)", (benchmark_stats){(double)(end - start), 0, 0, 0, 0}, (benchmark_stats){0, 0, 0, 0, 0}, "pugixml");
 }
 
@@ -182,34 +182,34 @@ static void bench_pugixml_attribute_access(const char* xml, size_t len) {
 // Benchmark 4: Tree Walking (recursive) - PARSE ONCE
 // ============================================================================
 
-static int walk_taurus(TaurusElement elem) {
+static int walk_leptris(LeptrisElement elem) {
     int count = 1;
-    size_t children = taurus_element_child_count(elem);
+    size_t children = leptris_element_child_count(elem);
     for (size_t i = 0; i < children; i++) {
-        count += walk_taurus(taurus_element_child(elem, i));
+        count += walk_leptris(leptris_element_child(elem, i));
     }
     return count;
 }
 
-static void bench_taurus_tree_walk(const char* xml, size_t len) {
-    TaurusDocument doc = taurus_parse_string(xml, len, NULL);
-    TaurusElement root = taurus_document_root(doc);
+static void bench_leptris_tree_walk(const char* xml, size_t len) {
+    LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
+    LeptrisElement root = leptris_document_root(doc);
 
     // Warmup
     for (int i = 0; i < WARMUP_ITERS; i++) {
-        volatile int count = walk_taurus(root);
+        volatile int count = walk_leptris(root);
         (void)count;
     }
 
     // Measure ONLY tree walking
     long start = benchmark_time_us();
     for (int i = 0; i < ITERATIONS; i++) {
-        volatile int count = walk_taurus(root);
+        volatile int count = walk_leptris(root);
         (void)count;
     }
     long end = benchmark_time_us();
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
     benchmark_print_result("Tree Walk (isolated)", (benchmark_stats){(double)(end - start), 0, 0, 0, 0}, (benchmark_stats){0, 0, 0, 0, 0}, "pugixml");
 }
 
@@ -251,18 +251,18 @@ typedef void (*bench_func_t)(const char*, size_t);
 
 struct benchmark_test {
     const char* name;
-    bench_func_t taurus_fn;
+    bench_func_t leptris_fn;
     bench_func_t pugixml_fn;
 };
 
 static void run_benchmark(const char* xml, size_t len, const benchmark_test* test) {
     printf("\n=== %s ===\n", test->name);
 
-    // Taurus measurement
-    long taurus_start = benchmark_time_us();
-    test->taurus_fn(xml, len);
-    long taurus_end = benchmark_time_us();
-    double taurus_time = (double)(taurus_end - taurus_start);
+    // Leptris measurement
+    long leptris_start = benchmark_time_us();
+    test->leptris_fn(xml, len);
+    long leptris_end = benchmark_time_us();
+    double leptris_time = (double)(leptris_end - leptris_start);
 
     // pugixml measurement
     long pugixml_start = benchmark_time_us();
@@ -271,9 +271,9 @@ static void run_benchmark(const char* xml, size_t len, const benchmark_test* tes
     double pugixml_time = (double)(pugixml_end - pugixml_start);
 
     // Calculate speedup
-    double speedup = pugixml_time / taurus_time;
+    double speedup = pugixml_time / leptris_time;
 
-    printf("Taurus:  %.2f µs (%d iterations)\n", taurus_time, ITERATIONS);
+    printf("Leptris:  %.2f µs (%d iterations)\n", leptris_time, ITERATIONS);
     printf("pugixml:  %.2f µs (%d iterations)\n", pugixml_time, ITERATIONS);
     printf("Speedup: %.2fx (%s)\n", speedup,
            speedup >= 1.2 ? "✅ AHEAD" : speedup > 0.8 ? "~ PARITY" : "⚠️ BEHIND");
@@ -296,9 +296,9 @@ int main(int argc, char** argv) {
 
     // Define benchmarks
     benchmark_test tests[] = {
-        {"Child Access (isolated)", bench_taurus_child_access, bench_pugixml_child_access},
-        {"Attribute Access (isolated)", bench_taurus_attribute_access, bench_pugixml_attribute_access},
-        {"Tree Walking (isolated)", bench_taurus_tree_walk, bench_pugixml_tree_walk},
+        {"Child Access (isolated)", bench_leptris_child_access, bench_pugixml_child_access},
+        {"Attribute Access (isolated)", bench_leptris_attribute_access, bench_pugixml_attribute_access},
+        {"Tree Walking (isolated)", bench_leptris_tree_walk, bench_pugixml_tree_walk},
     };
 
     // Run all benchmarks

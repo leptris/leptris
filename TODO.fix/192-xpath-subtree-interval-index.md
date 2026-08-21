@@ -7,7 +7,7 @@ BC_AXIS_DESCENDANT_NAME); VM interval path with nested-subtree skip;
 remove_child/remove_all_children index invalidation (latent stale-index
 bug the new specs exposed). Gate: 546/546 + ASAN + zero leaks; `.//item`
 from 200 section contexts: 2.0 → 0.30 µs/query (6.6× vs main);
-pugixml with reused xpath_query = 0.42 µs — taurus 1.4× FASTER.
+pugixml with reused xpath_query = 0.42 µs — leptris 1.4× FASTER.
 
 **192b (same day): predicated relative queries.** The fusion now
 also accepts the absolute fold's predicate set (attr-exists,
@@ -15,7 +15,7 @@ attr-eq-string, child-num-cmp — all per-element/context-independent),
 emitting the pred opcodes after the fused axis opcode; position
 predicates stay expanded (per-parent semantics — pinned by spec).
 `.//item[@n='5']`: main 1.67 → 0.50 µs (3.3×); pugixml reused
-query 0.55 µs — taurus ahead.
+query 0.55 µs — leptris ahead.
 
 **192c (same day): attr-value bucket windows.** Value buckets now
 store preorder positions; a single attr-equals pred on a relative
@@ -36,7 +36,7 @@ document index — every `//name`, from any context, walks the tree
 every time (their step_fill axis loops; no caching, no precomputation
 beyond translate tables / @attr='const' folding).
 
-We already have `taurus_element_index` (TODO 132/133: preorder flat
+We already have `leptris_element_index` (TODO 132/133: preorder flat
 array + name buckets + attr-value buckets), but it only serves
 ROOT-context queries (vm.c:237, vm.c:603 — both `vm_apply_absolute`
 paths). Relative descendants (`.//x`, `a//b`, `$ctx//x`) still walk.
@@ -69,14 +69,14 @@ Subtree-restricted bucket query for context element C:
 ## Changes
 
 1. `dom/element_index.h`: add `size_t* subtree_end;` to
-   `struct taurus_element_index` + accessor:
-   `void taurus_element_index_lookup_subtree(const TaurusElementIndex* idx, TaurusElement ctx, const char* name, TaurusElement** out, size_t* out_count)`
+   `struct leptris_element_index` + accessor:
+   `void leptris_element_index_lookup_subtree(const LeptrisElementIndex* idx, LeptrisElement ctx, const char* name, LeptrisElement** out, size_t* out_count)`
    (returns bucket-filtered array view; caller must not free).
 2. `dom/element_index.c`:
    - allocate `subtree_end` alongside `all_elements` in build;
    - set `idx->subtree_end[me] = idx->all_count - 1;` at the end of
      each `index_walk` frame (after the child loop);
-   - free it in `taurus_element_index_free`;
+   - free it in `leptris_element_index_free`;
    - implement the lookup (binary search + bucket filter; fall back
      to empty/NULL when ctx is not in the array — foreign doc).
 3. `xpath/vm.c`: at the RELATIVE descendant step (the non-absolute

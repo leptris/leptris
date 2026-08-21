@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 /**
  * @file error.c
- * @brief Error handling implementation for Taurus CLI
+ * @brief Error handling implementation for Leptris CLI
  */
 
 #include "error.h"
@@ -306,7 +306,7 @@ void cli_error_usage(const char* command, const char* message) {
             get_reset_code(),
             message);
     fprintf(g_error_config.error_stream,
-            "Use 'taurus %s --help' for usage information\n",
+            "Use 'leptris %s --help' for usage information\n",
             command);
 
     g_error_stats.error_count++;

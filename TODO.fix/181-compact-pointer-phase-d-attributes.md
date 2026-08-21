@@ -5,13 +5,13 @@
 
 ## Goal
 
-Migrate `struct taurus_attribute`'s `next` pointer and the
+Migrate `struct leptris_attribute`'s `next` pointer and the
 element's `first_attribute` pointer to `compact_pointer_1byte`.
 Attribute struct shrinks 72 → ~24 bytes.
 
 ## Why
 
-K=100 many-attrs benchmark is the worst-case for taurus vs pugixml
+K=100 many-attrs benchmark is the worst-case for leptris vs pugixml
 (current gap 3.06×). Each attr struct is 72 B; pugixml's is ~16 B
 in compact mode. Five attrs per cache line vs one — exactly the
 shape of the gap.
@@ -22,13 +22,13 @@ closes the structural gap to pugixml.
 
 ## Migration steps (one PR)
 
-### Step 1 — Migrate `struct taurus_attribute.next` to `compact_pointer_1byte next_cp`
+### Step 1 — Migrate `struct leptris_attribute.next` to `compact_pointer_1byte next_cp`
 
 Rename field, update all reads/writes via accessors. Hot sites:
 
 - `dp_add_attr_inline` (parser writes during attr-list construction)
-- `taurus_element_get_attribute_by_name` (DOM query walks the list)
-- `taurus_attribute_foreach` (public iteration macro)
+- `leptris_element_get_attribute_by_name` (DOM query walks the list)
+- `leptris_attribute_foreach` (public iteration macro)
 - XPath VM `PRED_ATTR_EXISTS` / `PRED_ATTR_EQ_STRING` opcodes
 - Serializer attr-walk
 
@@ -43,7 +43,7 @@ Attributes are pool-allocated. Per-doc overflow table from Step 1
 of [[180-compact-pointer-phase-c-element]] handles this — same
 table, just attribute field-offset entries.
 
-### Step 4 — Tighten `_Static_assert(sizeof(taurus_attribute) == 24)`
+### Step 4 — Tighten `_Static_assert(sizeof(leptris_attribute) == 24)`
 
 (Depending on remaining fields: `name_view`, `value_view`,
 `name_hash`, `has_entities`, `ns_cache`. Some of these may also

@@ -203,7 +203,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
-          name: taurus v${{ steps.get_version.outputs.version }}
+          name: leptris v${{ steps.get_version.outputs.version }}
           body_path: ${{ steps.extract_notes.outputs.notes_file }}
           draft: false
           prerelease: false

@@ -1,4 +1,4 @@
-/* benchmark_sax — SAX-mode parse: taurus vs libxml2.
+/* benchmark_sax — SAX-mode parse: leptris vs libxml2.
  *
  * pugixml has no SAX interface, so libxml2 (the reference streaming
  * parser) is the comparison. Both sides install no-op handlers so the
@@ -14,8 +14,8 @@
 #include <string.h>
 #include <time.h>
 
-#include <taurus.h>
-#include <taurus/sax/sax.h>
+#include <leptris.h>
+#include <leptris/sax/sax.h>
 
 #include <libxml/parser.h>
 #include <libxml/SAX2.h>
@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
     char* buf = slurp(path, &len);
     if (!buf) { printf("cannot read %s\n", path); return 1; }
 
-    TaurusSAXHandler handler;
+    LeptrisSAXHandler handler;
     memset(&handler, 0, sizeof(handler));
     handler.start_element = t_start;
     handler.end_element = t_end;
@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     for (int r = 0; r < 30; r++) {
         g_events = 0;
         double t0 = now_us();
-        taurus_sax_parse(buf, len, &handler, NULL);
+        leptris_sax_parse(buf, len, &handler, NULL);
         double dt = now_us() - t0;
         if (dt < t_best) t_best = dt;
     }
@@ -97,8 +97,8 @@ int main(int argc, char** argv) {
         if (dt < x_best) x_best = dt;
     }
 
-    printf("SAX %-28s %6zuKB taurus=%7.1fus libxml2=%7.1fus ratio=%.2fx "
-           "(taurus %.2f GB/s)\n",
+    printf("SAX %-28s %6zuKB leptris=%7.1fus libxml2=%7.1fus ratio=%.2fx "
+           "(leptris %.2f GB/s)\n",
            path, len / 1024, t_best, x_best, t_best / x_best,
            len / t_best / 1000.0);
     free(buf);

@@ -16,8 +16,8 @@ parse time.
    uses the caller's buffer directly (no copy). Sets
    `doc->xml_buffer = writable_buf` with `xml_buffer_needs_free = 0`.
 
-2. Wire `taurus_parse_inplace` to call `direct_parse_inplace` instead
-   of delegating to `taurus_parse` (which copies).
+2. Wire `leptris_parse_inplace` to call `direct_parse_inplace` instead
+   of delegating to `leptris_parse` (which copies).
 
 3. The Ruby FFI binding can pass its Ruby String's internal buffer
    directly (FFI::MemoryPointer from `string.to_ptr`).
@@ -35,6 +35,6 @@ The C API contract is clear: caller owns the buffer, document borrows.
 ## Status
 
 Completed. `direct_parse_inplace(char* buf, size_t len)` added —
-parses a caller-owned writable buffer without copying. `taurus_parse_
-inplace` now calls it directly (was delegating to taurus_parse which
+parses a caller-owned writable buffer without copying. `leptris_parse_
+inplace` now calls it directly (was delegating to leptris_parse which
 copies).

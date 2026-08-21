@@ -1,4 +1,4 @@
-# Taurus CLI Architecture Review
+# Leptris CLI Architecture Review
 
 **Session**: 92
 **Date**: 2024-12-01
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document reviews the Taurus CLI architecture for adherence to:
+This document reviews the Leptris CLI architecture for adherence to:
 
 1. **MECE Principles** (Mutually Exclusive, Collectively Exhaustive)
 2. **Separation of Concerns**
@@ -38,9 +38,9 @@ This document reviews the Taurus CLI architecture for adherence to:
 - ✅ **Extensible**: Can add new commands without overlap
 
 **Examples**:
-- `taurus parse file.xml` - Only parses, doesn't format or query
-- `taurus xpath file.xml "//book"` - Only queries, doesn't format or validate
-- `taurus format file.xml` - Only formats, doesn't validate or query
+- `leptris parse file.xml` - Only parses, doesn't format or query
+- `leptris xpath file.xml "//book"` - Only queries, doesn't format or validate
+- `leptris format file.xml` - Only formats, doesn't validate or query
 
 **Verdict**: ✅ **MECE compliant**
 
@@ -53,7 +53,7 @@ This document reviews the Taurus CLI architecture for adherence to:
 ```
 Option Resolution Hierarchy (most specific wins):
 1. CLI Arguments    (--option value)
-2. Environment Vars (TAURUS_OPTION=value)
+2. Environment Vars (LEPTRIS_OPTION=value)
 3. API Defaults     (hardcoded)
 ```
 
@@ -66,12 +66,12 @@ Option Resolution Hierarchy (most specific wins):
 ```c
 // Scenario: User wants indent=4
 // CLI: --indent 4        → Use 4 (highest priority)
-// ENV: TAURUS_INDENT=2   → Ignored
+// ENV: LEPTRIS_INDENT=2   → Ignored
 // Default: 2             → Ignored
 
 // Scenario: User doesn't specify
 // CLI: (not specified)   → Skip
-// ENV: TAURUS_INDENT=2   → Use 2 (medium priority)
+// ENV: LEPTRIS_INDENT=2   → Use 2 (medium priority)
 // Default: 2             → Ignored
 
 // Scenario: Neither CLI nor ENV
@@ -203,9 +203,9 @@ cli_fatal("cannot allocate memory");  // Exit
                        ↓
 ┌─────────────────────────────────────────────────┐
 │  API Layer (high-level operations)              │
-│  - taurus_parse()                                │
-│  - taurus_xpath_eval()                           │
-│  - taurus_document_free()                        │
+│  - leptris_parse()                                │
+│  - leptris_xpath_eval()                           │
+│  - leptris_document_free()                        │
 │  Does NOT: Handle argv, format output           │
 └─────────────────────────────────────────────────┘
                        ↓
@@ -220,7 +220,7 @@ cli_fatal("cannot allocate memory");  // Exit
 
 **Verification**:
 - ✅ CLI never calls internal library functions
-- ✅ CLI only uses public API (taurus.h)
+- ✅ CLI only uses public API (leptris.h)
 - ✅ API doesn't know about CLI arguments
 - ✅ Library doesn't know about output formats
 
@@ -263,7 +263,7 @@ commands/*.c
   ↓ depends on
 output.c
   ↓ depends on
-libtaurus (API)
+libleptris (API)
 ```
 
 **No Circular Dependencies**:
@@ -495,7 +495,7 @@ Each component has **one reason to change**:
 
 **Architecture Status**: ✅ **APPROVED FOR IMPLEMENTATION**
 
-The Taurus CLI architecture successfully meets all design criteria:
+The Leptris CLI architecture successfully meets all design criteria:
 
 1. ✅ **MECE principles** rigorously applied throughout
 2. ✅ **Separation of concerns** cleanly maintained

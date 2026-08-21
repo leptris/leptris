@@ -7,7 +7,7 @@
 
 ### Phase A (PR #127)
 - `bytecode.h`: opcode enum (`XPATH_BC_*`), constant-pool types,
-  `TaurusXPathBytecode` struct.
+  `LeptrisXPathBytecode` struct.
 - `compiler.c`: AST → bytecode recursive-descent emitter. Handles
   literals (number, string), path expressions, steps, node tests.
 - `vm.c`: stack-based interpreter dispatch loop. Handles literals
@@ -40,10 +40,10 @@ Option (a) is simpler and still saves the AST dispatch overhead.
 Option (b) is the pugixml approach but requires duplicating
 evaluator_axes.c logic.
 
-### Phase D — wire into taurus_xpath_eval
+### Phase D — wire into leptris_xpath_eval
 Replace the default evaluation path:
 ```
-taurus_xpath_eval → parse → compile_ast → vm_eval
+leptris_xpath_eval → parse → compile_ast → vm_eval
                                ↓ (on fallback)
                                evaluate_expr(ast)
 ```
@@ -70,7 +70,7 @@ losing the AST reference.
 ## Estimated effort for Phases C-E
 
 - Phase C (VM inline): ~800 lines across vm.c + conversion helpers.
-- Phase D (wire-in): ~50 lines in taurus_xpath_eval.
+- Phase D (wire-in): ~50 lines in leptris_xpath_eval.
 - Phase E (testing): ~200 lines of new specs + benchmark validation.
 
 Total: ~1050 lines. 2-3 focused sessions.

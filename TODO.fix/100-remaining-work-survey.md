@@ -9,22 +9,22 @@
 
 | PR  | Subject |
 |-----|---------|
-| #51 | Specs for previously-uncovered public APIs + taurus_element_text ownership fix |
+| #51 | Specs for previously-uncovered public APIs + leptris_element_text ownership fix |
 | #52 | Warning-clean build under -Wall -Wextra (P0 enum leak + typedef redefs + dead code) |
-| #53 | taurus.h delegates all public types to taurus/types.h (DRY) |
+| #53 | leptris.h delegates all public types to leptris/types.h (DRY) |
 
-taurus.c stays at ~900 lines.  All 168 ctest pass.  All 15 CI workflows
+leptris.c stays at ~900 lines.  All 168 ctest pass.  All 15 CI workflows
 green.  Build is `-Wall -Wextra` clean on both macOS and Linux.
 
 ## What's actually remaining
 
 ### Real features with stubs
 
-- **TODO 88 (COW deep copy)** — `taurus_node_thaw` is a stub that just
+- **TODO 88 (COW deep copy)** — `leptris_node_thaw` is a stub that just
   flips the `frozen` bit without copying.  Public freeze API is shipped;
   COW on mutation is not.  Needs: pool deep-copy, attribute/string
   re-routing, child subtree clone.  Estimated 1 week.
-- **TODO 89 (incremental SAX)** — `taurus_sax_parser_feed` is one-shot
+- **TODO 89 (incremental SAX)** — `leptris_sax_parser_feed` is one-shot
   under the hood.  True incremental parsing needs a resumable parser
   state machine at every chunk boundary.  Estimated 1-2 weeks.
 - **TODO 91 Phase 8 (DTD validator)** — current engine does
@@ -59,9 +59,9 @@ green.  Build is `-Wall -Wextra` clean on both macOS and Linux.
 ### Closed-no-change
 
 - **TODO 41 (unified string ownership)** — investigated; current
-  design is intentional for the `taurus_parse_string_inplace`
+  design is intentional for the `leptris_parse_string_inplace`
   zero-copy API.
-- **TODO 42 (taurus.c split)** — all 4 phases done.
+- **TODO 42 (leptris.c split)** — all 4 phases done.
 - **TODO 70/93 (architecture review)** — shipped as
   `docs/ARCHITECTURE_REVIEW.md`.
 - **TODO 86 (XPath nodeset variables)** — implemented.

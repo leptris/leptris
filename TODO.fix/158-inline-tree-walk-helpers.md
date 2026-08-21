@@ -8,8 +8,8 @@ Replaces two 5-way type-dispatched switches with two array lookups.
 
 ## Why
 
-`taurus_node_first_child_internal`, `taurus_node_get_next_sibling`,
-`taurus_elem_first_child`, etc. live in node.c / element.c. Callers
+`leptris_node_first_child_internal`, `leptris_node_get_next_sibling`,
+`leptris_elem_first_child`, etc. live in node.c / element.c. Callers
 in direct_parse.c, evaluator.c, vm.c incur a real function call
 for every tree walk. Each call:
 
@@ -24,19 +24,19 @@ Per-element traversal cost: ~5 ns. On a 1000-element doc that's 5 µs.
 ### Phase A — Move hot accessors to header as `static inline`
 
 The hot helpers:
-- `taurus_elem_first_child`
-- `taurus_elem_next_sibling`
-- `taurus_elem_parent`
-- `taurus_node_first_child_internal`
-- `taurus_node_get_next_sibling`
-- `taurus_element_name` (already inlined via `name` field)
+- `leptris_elem_first_child`
+- `leptris_elem_next_sibling`
+- `leptris_elem_parent`
+- `leptris_node_first_child_internal`
+- `leptris_node_get_next_sibling`
+- `leptris_element_name` (already inlined via `name` field)
 
 These go in element.h / node.h as `static inline` so the compiler
 inlines them at -O2 and LTO can specialize across TUs.
 
 ### Phase B — Branchless type dispatch
 
-Today `taurus_node_get_next_sibling` switches on `node->type`:
+Today `leptris_node_get_next_sibling` switches on `node->type`:
 element → read element->next_sibling_off, text → read
 text->next_sibling_off, etc. The switch is branchy.
 
@@ -44,12 +44,12 @@ Replace with a lookup table of field offsets per type:
 
 ```c
 static const size_t NEXT_SIB_OFF[] = {
-    offsetof(struct taurus_element, next_sibling_off),
-    offsetof(struct taurus_text_node, next_sibling_off),
-    offsetof(struct taurus_comment_node, next_sibling_off),
+    offsetof(struct leptris_element, next_sibling_off),
+    offsetof(struct leptris_text_node, next_sibling_off),
+    offsetof(struct leptris_comment_node, next_sibling_off),
     /* ... */
 };
-return (TaurusNode*)((char*)node + *(int32_t*)((char*)node + NEXT_SIB_OFF[node->type]));
+return (LeptrisNode*)((char*)node + *(int32_t*)((char*)node + NEXT_SIB_OFF[node->type]));
 ```
 
 Or: ensure `next_sibling_off` lives at the SAME offset in every
@@ -60,7 +60,7 @@ node-type struct. Then there's no dispatch — just one load.
 Even with `static inline`, the compiler may refuse to inline when
 the function is large or has many call sites. Make sure the LTO
 pass sees the function bodies by enabling `-flto` consistently
-(already enabled in Release via `TAURUS_ENABLE_LTO`).
+(already enabled in Release via `LEPTRIS_ENABLE_LTO`).
 
 ## Risk
 

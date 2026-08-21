@@ -6,8 +6,8 @@
 
 ## Problem
 
-`taurus_c14n_canonicalize` exposes `TAURUS_C14N_1_0` and
-`TAURUS_C14N_1_1` enum values.  The specs in
+`leptris_c14n_canonicalize` exposes `LEPTRIS_C14N_1_0` and
+`LEPTRIS_C14N_1_1` enum values.  The specs in
 `test/serializer/test_c14n.cpp` verify basic C14N 1.0 behavior
 (empty element expansion, attribute sorting) but don't cover:
 

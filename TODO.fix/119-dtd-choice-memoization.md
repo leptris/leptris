@@ -5,7 +5,7 @@
 
 ## Why
 
-DTD content-model validation in `src/taurus/dtd/content_check.c` uses
+DTD content-model validation in `src/leptris/dtd/content_check.c` uses
 recursive descent. Each `xi:include parse="xml"` of an element with a
 complex content model re-parses the model string and re-walks the
 children. For DocBook-style schemas where the same content model
@@ -19,7 +19,7 @@ model length, and the model is re-tokenized on every call.
 
 ## Current state
 
-`taurus_content_model_match(model, elem_name, child_names, child_count)`
+`leptris_content_model_match(model, elem_name, child_names, child_count)`
 in `content_check.c`:
 - Tokenizes the model string in-place on every call (no caching).
 - Recursive-descent match against the children array.
@@ -46,7 +46,7 @@ Walk the NFA-equivalent of the model over the actual children. Memo
 key is `(decl, hash(children))`. Memo value is match result + error
 message index.
 
-Memo table is per-validation-run (allocated in `taurus_dtd_validate`,
+Memo table is per-validation-run (allocated in `leptris_dtd_validate`,
 freed before return). Bounded by #distinct (decl, children) pairs in
 the document — typically small.
 

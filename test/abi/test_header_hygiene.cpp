@@ -3,8 +3,8 @@
 // A binding generator (bindgen, cffi, ctypes) parses the public
 // headers without a C compiler.  These specs verify the headers
 // survive that parse by:
-//   1. The umbrella header taurus.h compiles cleanly.
-//   2. TAURUS_FOR_BINDGEN mode produces a clean parse (verified by
+//   1. The umbrella header leptris.h compiles cleanly.
+//   2. LEPTRIS_FOR_BINDGEN mode produces a clean parse (verified by
 //      the standalone compile in CI).
 //   3. Opaque-handle typedefs are pointer-sized (catches accidental
 //      struct-field exposure).
@@ -18,11 +18,11 @@
 
 /* The umbrella header pulls in everything.  Including sub-headers
  * directly in the same TU redefines enums (intentional — see TODO 12). */
-#include "taurus.h"
+#include "leptris.h"
 
 /* Internal headers — needed for the compact-pointer round-trip specs
  * (TODO 90 Phase 2). The structs are opaque to public callers.
- * The test CMake target adds src/taurus/dom to the include path. */
+ * The test CMake target adds src/leptris/dom to the include path. */
 #include "element.h"
 #include "text.h"
 #include "cdata.h"
@@ -40,23 +40,23 @@ TEST(HeaderHygiene, UmbrellaHeaderCompilesStandalone) {
 TEST(HeaderHygiene, OpaqueHandlesArePointerSized) {
     /* Catches accidental struct-field exposure that would change
      * opaque-handle sizes.  Binding generators assume sizeof(void*). */
-    EXPECT_EQ(sizeof(TaurusDocument),   sizeof(void*));
-    EXPECT_EQ(sizeof(TaurusElement),    sizeof(void*));
-    EXPECT_EQ(sizeof(TaurusAttribute),  sizeof(void*));
-    EXPECT_EQ(sizeof(TaurusXPathResult), sizeof(void*));
+    EXPECT_EQ(sizeof(LeptrisDocument),   sizeof(void*));
+    EXPECT_EQ(sizeof(LeptrisElement),    sizeof(void*));
+    EXPECT_EQ(sizeof(LeptrisAttribute),  sizeof(void*));
+    EXPECT_EQ(sizeof(LeptrisXPathResult), sizeof(void*));
 }
 
 TEST(HeaderHygiene, NodeRefIsPointerSized) {
-    EXPECT_EQ(sizeof(TaurusNodeRef), sizeof(void*));
+    EXPECT_EQ(sizeof(LeptrisNodeRef), sizeof(void*));
 }
 
 TEST(HeaderHygiene, NamespaceTypedefIsPointerSized) {
-    /* TaurusNamespace is `const char*` — pointer-sized. */
-    EXPECT_EQ(sizeof(TaurusNamespace), sizeof(void*));
+    /* LeptrisNamespace is `const char*` — pointer-sized. */
+    EXPECT_EQ(sizeof(LeptrisNamespace), sizeof(void*));
 }
 
 // Report the internal element struct size for tracking (TODO 90).
-// The public TaurusElement is an opaque pointer (8 bytes); the struct
+// The public LeptrisElement is an opaque pointer (8 bytes); the struct
 // it points to is 80 bytes after TODO 90 Phase 2d (first/last attribute
 // pointers compressed to int32_t offsets). pugixml compact node: 12 B.
 // Phase 2e (string/document-context pointers) is a stretch goal.
@@ -71,22 +71,22 @@ TEST(HeaderHygiene, ElementStructSizeTracked) {
 
 TEST(HeaderHygiene, StatusEnumValuesAreStable) {
     /* Binding generators hard-code enum values; pin them. */
-    EXPECT_EQ(TAURUS_OK,                0);
-    EXPECT_EQ(TAURUS_ERROR_MEMORY,     -1);
-    EXPECT_EQ(TAURUS_ERROR_PARSE,      -2);
-    EXPECT_EQ(TAURUS_ERROR_XPATH,      -3);
-    EXPECT_EQ(TAURUS_ERROR_NULL_ARG,   -4);
-    EXPECT_EQ(TAURUS_ERROR_INVALID_ARG, -5);
-    EXPECT_EQ(TAURUS_ERROR_NOT_FOUND,  -6);
-    EXPECT_EQ(TAURUS_ERROR_IO,         -7);
+    EXPECT_EQ(LEPTRIS_OK,                0);
+    EXPECT_EQ(LEPTRIS_ERROR_MEMORY,     -1);
+    EXPECT_EQ(LEPTRIS_ERROR_PARSE,      -2);
+    EXPECT_EQ(LEPTRIS_ERROR_XPATH,      -3);
+    EXPECT_EQ(LEPTRIS_ERROR_NULL_ARG,   -4);
+    EXPECT_EQ(LEPTRIS_ERROR_INVALID_ARG, -5);
+    EXPECT_EQ(LEPTRIS_ERROR_NOT_FOUND,  -6);
+    EXPECT_EQ(LEPTRIS_ERROR_IO,         -7);
 }
 
 TEST(HeaderHygiene, XPathResultTypeEnumValues) {
     /* The XPath result-type enum must be stable across versions. */
-    EXPECT_EQ(TAURUS_XPATH_NODESET, 0);
-    EXPECT_EQ(TAURUS_XPATH_BOOLEAN, 1);
-    EXPECT_EQ(TAURUS_XPATH_NUMBER,  2);
-    EXPECT_EQ(TAURUS_XPATH_STRING,  3);
+    EXPECT_EQ(LEPTRIS_XPATH_NODESET, 0);
+    EXPECT_EQ(LEPTRIS_XPATH_BOOLEAN, 1);
+    EXPECT_EQ(LEPTRIS_XPATH_NUMBER,  2);
+    EXPECT_EQ(LEPTRIS_XPATH_STRING,  3);
 }
 
 /* Compact-pointer encoding round-trip (TODO 90 Phase 2b/2c/2d).
@@ -99,26 +99,26 @@ TEST(HeaderHygiene, XPathResultTypeEnumValues) {
 TEST(HeaderHygiene, ElementTreeEdgeRoundTrip) {
     /* Allocate two fake elements in the same memory region so their
      * offset fits in int32_t. Use a small aligned buffer. */
-    static const size_t kAlign = alignof(struct taurus_element);
-    alignas(kAlign) char buf[2 * sizeof(struct taurus_element)];
-    struct taurus_element* a = (struct taurus_element*)buf;
-    struct taurus_element* b = (struct taurus_element*)(buf + sizeof(*a));
+    static const size_t kAlign = alignof(struct leptris_element);
+    alignas(kAlign) char buf[2 * sizeof(struct leptris_element)];
+    struct leptris_element* a = (struct leptris_element*)buf;
+    struct leptris_element* b = (struct leptris_element*)(buf + sizeof(*a));
 
     /* parent round-trip */
-    taurus_elem_set_parent(a, b);
-    EXPECT_EQ(taurus_elem_parent(a), b);
+    leptris_elem_set_parent(a, b);
+    EXPECT_EQ(leptris_elem_parent(a), b);
 
     /* NULL encoding */
-    taurus_elem_set_parent(a, NULL);
-    EXPECT_EQ(taurus_elem_parent(a), nullptr);
+    leptris_elem_set_parent(a, NULL);
+    EXPECT_EQ(leptris_elem_parent(a), nullptr);
 
     /* first_child, last_child, next_sibling round-trip */
-    taurus_elem_set_first_child(a, (TaurusNode*)b);
-    taurus_elem_set_last_child(a, (TaurusNode*)b);
-    taurus_elem_set_next_sibling(a, (TaurusNode*)b);
-    EXPECT_EQ(taurus_elem_first_child(a), (TaurusNode*)b);
-    EXPECT_EQ(taurus_elem_last_child(a), (TaurusNode*)b);
-    EXPECT_EQ(taurus_elem_next_sibling(a), (TaurusNode*)b);
+    leptris_elem_set_first_child(a, (LeptrisNode*)b);
+    leptris_elem_set_last_child(a, (LeptrisNode*)b);
+    leptris_elem_set_next_sibling(a, (LeptrisNode*)b);
+    EXPECT_EQ(leptris_elem_first_child(a), (LeptrisNode*)b);
+    EXPECT_EQ(leptris_elem_last_child(a), (LeptrisNode*)b);
+    EXPECT_EQ(leptris_elem_next_sibling(a), (LeptrisNode*)b);
 }
 
 TEST(HeaderHygiene, ElementAttributeEdgeRoundTrip) {
@@ -126,43 +126,43 @@ TEST(HeaderHygiene, ElementAttributeEdgeRoundTrip) {
      * TODO 155 Phase C: last_attribute was removed; the getter walks
      * via the cp16 attr edge (TODO 183 Phase 5). The test attr must
      * have next=NULL so the walk terminates after one step. */
-    static const size_t kAlign = alignof(struct taurus_element);
-    alignas(kAlign) char buf[sizeof(struct taurus_element) +
-                              sizeof(struct taurus_attribute) + 64];
-    struct taurus_element* e = (struct taurus_element*)buf;
-    struct taurus_attribute* attr =
-        (struct taurus_attribute*)(buf + sizeof(*e));
-    taurus_attr_set_next(attr, NULL);
+    static const size_t kAlign = alignof(struct leptris_element);
+    alignas(kAlign) char buf[sizeof(struct leptris_element) +
+                              sizeof(struct leptris_attribute) + 64];
+    struct leptris_element* e = (struct leptris_element*)buf;
+    struct leptris_attribute* attr =
+        (struct leptris_attribute*)(buf + sizeof(*e));
+    leptris_attr_set_next(attr, NULL);
 
-    taurus_elem_set_first_attribute(e, attr);
-    EXPECT_EQ(taurus_elem_first_attribute(e), attr);
-    EXPECT_EQ(taurus_elem_last_attribute(e), attr);
+    leptris_elem_set_first_attribute(e, attr);
+    EXPECT_EQ(leptris_elem_first_attribute(e), attr);
+    EXPECT_EQ(leptris_elem_last_attribute(e), attr);
 
-    taurus_elem_set_first_attribute(e, NULL);
-    EXPECT_EQ(taurus_elem_first_attribute(e), nullptr);
-    EXPECT_EQ(taurus_elem_last_attribute(e), nullptr);
+    leptris_elem_set_first_attribute(e, NULL);
+    EXPECT_EQ(leptris_elem_first_attribute(e), nullptr);
+    EXPECT_EQ(leptris_elem_last_attribute(e), nullptr);
 }
 
 TEST(HeaderHygiene, NonElementNodeSiblingRoundTrip) {
     /* Text/CDATA/Comment/PI nodes each carry their own sibling offset. */
     alignas(64) char buf[128];
-    TaurusTextNode* t = (TaurusTextNode*)buf;
-    TaurusNode* sibling = (TaurusNode*)(buf + 64);
+    LeptrisTextNode* t = (LeptrisTextNode*)buf;
+    LeptrisNode* sibling = (LeptrisNode*)(buf + 64);
 
-    taurus_textnode_set_next_sibling(t, sibling);
-    EXPECT_EQ(taurus_textnode_next_sibling(t), sibling);
+    leptris_textnode_set_next_sibling(t, sibling);
+    EXPECT_EQ(leptris_textnode_next_sibling(t), sibling);
 
-    TaurusCDATANode* c = (TaurusCDATANode*)buf;
-    taurus_cdata_set_next_sibling(c, sibling);
-    EXPECT_EQ(taurus_cdata_next_sibling(c), sibling);
+    LeptrisCDATANode* c = (LeptrisCDATANode*)buf;
+    leptris_cdata_set_next_sibling(c, sibling);
+    EXPECT_EQ(leptris_cdata_next_sibling(c), sibling);
 
-    TaurusCommentNode* cm = (TaurusCommentNode*)buf;
-    taurus_comment_set_next_sibling(cm, sibling);
-    EXPECT_EQ(taurus_comment_next_sibling(cm), sibling);
+    LeptrisCommentNode* cm = (LeptrisCommentNode*)buf;
+    leptris_comment_set_next_sibling(cm, sibling);
+    EXPECT_EQ(leptris_comment_next_sibling(cm), sibling);
 
-    TaurusPINode* pi = (TaurusPINode*)buf;
-    taurus_pi_set_next_sibling(pi, sibling);
-    EXPECT_EQ(taurus_pi_next_sibling(pi), sibling);
+    LeptrisPINode* pi = (LeptrisPINode*)buf;
+    leptris_pi_set_next_sibling(pi, sibling);
+    EXPECT_EQ(leptris_pi_next_sibling(pi), sibling);
 }
 
 // FFI Helper API (TODO 138): document_encoding, attribute index
@@ -170,62 +170,62 @@ TEST(HeaderHygiene, NonElementNodeSiblingRoundTrip) {
 
 TEST(HeaderHygiene, DocumentEncodingAccessor) {
     const char xml[] = "<?xml version='1.0' encoding='UTF-8'?><r/>";
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, sizeof(xml) - 1, &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, sizeof(xml) - 1, &st);
     ASSERT_NE(doc, nullptr);
 
-    const char* enc = taurus_document_encoding(doc);
+    const char* enc = leptris_document_encoding(doc);
     EXPECT_STREQ(enc, "UTF-8");
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(HeaderHygiene, AttributeIndexAccess) {
     const char xml[] = "<e a='1' b='2' c='3'/>";
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, sizeof(xml) - 1, &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, sizeof(xml) - 1, &st);
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
 
-    EXPECT_EQ(taurus_element_attribute_count(root), 3u);
-    EXPECT_STREQ(taurus_element_attribute_name_at(root, 0), "a");
-    EXPECT_STREQ(taurus_element_attribute_value_at(root, 0), "1");
-    EXPECT_STREQ(taurus_element_attribute_name_at(root, 1), "b");
-    EXPECT_STREQ(taurus_element_attribute_value_at(root, 1), "2");
-    EXPECT_STREQ(taurus_element_attribute_name_at(root, 2), "c");
-    EXPECT_STREQ(taurus_element_attribute_value_at(root, 2), "3");
+    EXPECT_EQ(leptris_element_attribute_count(root), 3u);
+    EXPECT_STREQ(leptris_element_attribute_name_at(root, 0), "a");
+    EXPECT_STREQ(leptris_element_attribute_value_at(root, 0), "1");
+    EXPECT_STREQ(leptris_element_attribute_name_at(root, 1), "b");
+    EXPECT_STREQ(leptris_element_attribute_value_at(root, 1), "2");
+    EXPECT_STREQ(leptris_element_attribute_name_at(root, 2), "c");
+    EXPECT_STREQ(leptris_element_attribute_value_at(root, 2), "3");
 
     /* Out of range. */
-    EXPECT_EQ(taurus_element_attribute_name_at(root, 99), nullptr);
-    EXPECT_EQ(taurus_element_attribute_value_at(root, 99), nullptr);
+    EXPECT_EQ(leptris_element_attribute_name_at(root, 99), nullptr);
+    EXPECT_EQ(leptris_element_attribute_value_at(root, 99), nullptr);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(HeaderHygiene, NamespaceCount) {
     /* The parser strips xmlns declarations from the regular attribute
-     * list and stores them on elem->namespaces. taurus_element_namespace_count
+     * list and stores them on elem->namespaces. leptris_element_namespace_count
      * walks both lists (issue #171 made it count namespaces correctly). */
     const char xml[] = "<e xmlns='http://default' a='1'/>";
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, sizeof(xml) - 1, &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, sizeof(xml) - 1, &st);
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
 
     /* Regular attributes are counted. */
-    EXPECT_EQ(taurus_element_attribute_count(root), 1u);
+    EXPECT_EQ(leptris_element_attribute_count(root), 1u);
 
     /* xmlns declarations are counted via elem->namespaces (was 0
      * pre-issue #171 because the old impl only walked the attribute
      * list, missing the parser-moved declarations). */
-    EXPECT_EQ(taurus_element_namespace_count(root), 1u);
-    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 0),
+    EXPECT_EQ(leptris_element_namespace_count(root), 1u);
+    EXPECT_STREQ(leptris_element_namespace_decl_uri(root, 0),
                  "http://default");
-    EXPECT_EQ(taurus_element_namespace_decl_prefix(root, 0), nullptr);
+    EXPECT_EQ(leptris_element_namespace_decl_prefix(root, 0), nullptr);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(HeaderHygiene, NamespaceDeclEnumeration) {
@@ -234,35 +234,35 @@ TEST(HeaderHygiene, NamespaceDeclEnumeration) {
         "<e xmlns='http://default' "
         "   xmlns:foo='http://foo' "
         "   xmlns:bar='http://bar' a='1'/>";
-    TaurusStatus st = TAURUS_OK;
-    TaurusDocument doc = taurus_parse_string(xml, strlen(xml), &st);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
 
-    EXPECT_EQ(taurus_element_namespace_count(root), 3u);
+    EXPECT_EQ(leptris_element_namespace_count(root), 3u);
     /* Order matches source order: default, foo, bar. */
-    EXPECT_EQ(taurus_element_namespace_decl_prefix(root, 0), nullptr);
-    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 0),
+    EXPECT_EQ(leptris_element_namespace_decl_prefix(root, 0), nullptr);
+    EXPECT_STREQ(leptris_element_namespace_decl_uri(root, 0),
                  "http://default");
-    EXPECT_STREQ(taurus_element_namespace_decl_prefix(root, 1), "foo");
-    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 1), "http://foo");
-    EXPECT_STREQ(taurus_element_namespace_decl_prefix(root, 2), "bar");
-    EXPECT_STREQ(taurus_element_namespace_decl_uri(root, 2), "http://bar");
+    EXPECT_STREQ(leptris_element_namespace_decl_prefix(root, 1), "foo");
+    EXPECT_STREQ(leptris_element_namespace_decl_uri(root, 1), "http://foo");
+    EXPECT_STREQ(leptris_element_namespace_decl_prefix(root, 2), "bar");
+    EXPECT_STREQ(leptris_element_namespace_decl_uri(root, 2), "http://bar");
 
     /* Out of range. */
-    EXPECT_EQ(taurus_element_namespace_decl_prefix(root, 99), nullptr);
-    EXPECT_EQ(taurus_element_namespace_decl_uri(root, 99), nullptr);
+    EXPECT_EQ(leptris_element_namespace_decl_prefix(root, 99), nullptr);
+    EXPECT_EQ(leptris_element_namespace_decl_uri(root, 99), nullptr);
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 TEST(HeaderHygiene, StatusString) {
-    EXPECT_STREQ(taurus_status_string(TAURUS_OK), "OK");
-    EXPECT_STREQ(taurus_status_string(TAURUS_ERROR_PARSE), "XML parse error");
-    EXPECT_STREQ(taurus_status_string(TAURUS_ERROR_MEMORY), "Memory allocation failed");
+    EXPECT_STREQ(leptris_status_string(LEPTRIS_OK), "OK");
+    EXPECT_STREQ(leptris_status_string(LEPTRIS_ERROR_PARSE), "XML parse error");
+    EXPECT_STREQ(leptris_status_string(LEPTRIS_ERROR_MEMORY), "Memory allocation failed");
     /* Unknown code returns something non-NULL. */
-    EXPECT_STRNE(taurus_status_string(static_cast<TaurusStatus>(-999)), "");
+    EXPECT_STRNE(leptris_status_string(static_cast<LeptrisStatus>(-999)), "");
 }
 
 }  // namespace

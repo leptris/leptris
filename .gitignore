@@ -78,8 +78,8 @@ Testing/
 compile_commands.json
 Makefile
 *.cmake.in
-# Exception: taurus-config.cmake.in IS source (TODO 01).
-!cmake/taurus-config.cmake.in
+# Exception: leptris-config.cmake.in IS source (TODO 01).
+!cmake/leptris-config.cmake.in
 
 # Local TODO/plan scratchpad.
 # TODO.fix/ is tracked — work plans for in-progress TODOs.

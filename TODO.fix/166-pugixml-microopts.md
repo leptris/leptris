@@ -7,12 +7,12 @@ out of scope (no applicable call sites).**
 
 ## Outcome by phase
 
-### Phase A — TAURUS_NOINLINE + cold-path extraction: LANDED
+### Phase A — LEPTRIS_NOINLINE + cold-path extraction: LANDED
 
-Added `TAURUS_NOINLINE` and `TAURUS_ALWAYS_INLINE` macros to
+Added `LEPTRIS_NOINLINE` and `LEPTRIS_ALWAYS_INLINE` macros to
 `common/port.h` (GCC/Clang/MSVC portable). Extracted the DOCTYPE
 handling body (140 lines) out of `direct_parse_internal` into a
-new `dp_parse_doctype` helper marked `TAURUS_NOINLINE`.
+new `dp_parse_doctype` helper marked `LEPTRIS_NOINLINE`.
 
 Result: the hot parse loop's instruction footprint shrinks. The
 DOCTYPE code (PUBLIC/SYSTEM re-scan, internal subset parsing, DTD
@@ -36,11 +36,11 @@ overhead dominates), but the typical XML name is 5-10 chars.
 
 The pugixml trick this came from (SCANWHILE_UNROLL) is for
 *long* character runs (PCDATA, CDATA, comment bodies), not for
-short token names. taurus already uses `memchr` for those long
+short token names. leptris already uses `memchr` for those long
 runs, which is the libc-vectorized equivalent and beats the
 manual unroll.
 
-Kept `dp_scan_name` as a `TAURUS_ALWAYS_INLINE` wrapper — DRY
+Kept `dp_scan_name` as a `LEPTRIS_ALWAYS_INLINE` wrapper — DRY
 for the 6 name-scan call sites in `direct_parse.c`, zero call
 overhead, single source of truth if we revisit.
 
@@ -75,7 +75,7 @@ scanning).
 - **Computed-goto dispatch (GCC labels-as-values).** GCC-only.
   PGO covers most of the same ground without portability cost.
 - **SIMD 16-byte ASCII classify (SSE2/NEON).** Investigated in
-  TODO 157; for taurus's short-token scan pattern (avg name
+  TODO 157; for leptris's short-token scan pattern (avg name
   length ~8 bytes) the SIMD setup overhead exceeded the gain.
   Parabix-style parallel bit streams would require a full
   parser rewrite — not realistic for the current parse
@@ -89,7 +89,7 @@ scanning).
   checks but couples parse code to the buffer-ownership model.
   High correctness risk.
 - **Compact 1-byte in-page pointers (pugixml's
-  compact_pointer).** Multi-week refactor; taurus's 4-byte
+  compact_pointer).** Multi-week refactor; leptris's 4-byte
   int32 compact pointers are already on parity for our
   cache-line-sized element struct.
 - **Header-only build.** Breaks our ABI stability promise.
@@ -112,9 +112,9 @@ measure. The min-time metric (more stable than median) is
 unchanged across runs. Best read: this is a **code-quality +
 architecture release**, not a measurable perf release.
 
-- `bench_dom_taurus`: parse CPU time 36.27µs → 36.81µs
+- `bench_dom_leptris`: parse CPU time 36.27µs → 36.81µs
   (within noise).
-- `bench_xpath_taurus`: complex-query CPU 6.86µs → 6.20µs
+- `bench_xpath_leptris`: complex-query CPU 6.86µs → 6.20µs
   (improvement, within noise).
 - `benchmark_many_attrs` K=5/20/50/100: no significant change.
 

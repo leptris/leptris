@@ -38,8 +38,8 @@
 
 ### ABI / visibility
 - PR #89: TODO 80 — symbol visibility (`-fvisibility=hidden`).
-  Shared lib drops from 445 entries (295 taurus_* + 150 leaked
-  internal helpers) to 118 taurus_* only.
+  Shared lib drops from 445 entries (295 leptris_* + 150 leaked
+  internal helpers) to 118 leptris_* only.
 
 ### Specs
 - PR #93: Compact-pointer round-trip specs (locks in Phase 2 encoding).
@@ -64,10 +64,10 @@ be exponential on adversarial inputs. Real implementation needs an
 NFA or compiled state machine with memoization. Estimated 1-2 weeks.
 
 ### TODO 89 — incremental SAX parsing
-`taurus_sax_parser_feed` currently buffers all chunks until `is_final`
+`leptris_sax_parser_feed` currently buffers all chunks until `is_final`
 is set, then parses in one shot. True incremental parsing requires
 the parser to be resumable at every `sax_advance`. Estimated multi-
-week refactor of `src/taurus/sax/parser.c`.
+week refactor of `src/leptris/sax/parser.c`.
 
 ### TODOs 79-85 — FFI bindings (Ruby, Python, Rust)
 Each language is a multi-week project (Ruby-ffi, Python-cffi, Rust-
@@ -101,8 +101,8 @@ cmake --build build
 ctest --test-dir build -j4   # 305/307 pass; 2 pre-existing flaky CLI
                               # tests that pass when run serially.
 leaks --atExit -- ./build/test/test_dom   # 0 leaks
-cc -I src/include -o /tmp/sz /tmp/sz.c build/src/libtaurus.a ...
-# sizeof(struct taurus_element) = 80
+cc -I src/include -o /tmp/sz /tmp/sz.c build/src/libleptris.a ...
+# sizeof(struct leptris_element) = 80
 ```
 
 ## Architecture status

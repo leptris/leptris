@@ -24,18 +24,18 @@ struct RunResult {
 
 std::string bin_path() {
     /* The test executable is at build/test/cli/test_cli; the binary is at
-     * build/cli/taurus.  Honor TEST_CLI_BIN env (set by CMake at build
+     * build/cli/leptris.  Honor TEST_CLI_BIN env (set by CMake at build
      * time) or fall back to the relative path. */
-    const char* env = std::getenv("TAURUS_CLI_BIN");
+    const char* env = std::getenv("LEPTRIS_CLI_BIN");
     if (env && env[0]) return env;
-    return "cli/taurus";  /* resolved against the build dir cwd */
+    return "cli/leptris";  /* resolved against the build dir cwd */
 }
 
 RunResult run_cli(const std::vector<std::string>& args,
                   const std::string& stdin_data = "") {
     /* Build the command.  Use a temp file for stdin to avoid heredoc
      * quoting pitfalls with embedded quotes/special chars. */
-    std::string stdin_path = "/tmp/taurus_cli_stdin";
+    std::string stdin_path = "/tmp/leptris_cli_stdin";
     if (!stdin_data.empty()) {
         FILE* fp = std::fopen(stdin_path.c_str(), "w");
         if (fp) {
@@ -56,13 +56,13 @@ RunResult run_cli(const std::vector<std::string>& args,
     if (!stdin_data.empty()) {
         cmd += " < " + stdin_path;
     }
-    cmd += " > /tmp/taurus_cli_stdout 2> /tmp/taurus_cli_stderr";
+    cmd += " > /tmp/leptris_cli_stdout 2> /tmp/leptris_cli_stderr";
 
     int rc = std::system(cmd.c_str());
 
     std::array<char, 4096> buf;
     std::string out;
-    FILE* fp = std::fopen("/tmp/taurus_cli_stdout", "r");
+    FILE* fp = std::fopen("/tmp/leptris_cli_stdout", "r");
     if (fp) {
         while (size_t n = std::fread(buf.data(), 1, buf.size(), fp)) {
             out.append(buf.data(), n);
@@ -70,7 +70,7 @@ RunResult run_cli(const std::vector<std::string>& args,
         std::fclose(fp);
     }
     std::string err;
-    fp = std::fopen("/tmp/taurus_cli_stderr", "r");
+    fp = std::fopen("/tmp/leptris_cli_stderr", "r");
     if (fp) {
         while (size_t n = std::fread(buf.data(), 1, buf.size(), fp)) {
             err.append(buf.data(), n);
@@ -86,7 +86,7 @@ RunResult run_cli(const std::vector<std::string>& args,
 TEST(CliVersion, PrintsVersionOnStdout) {
     auto r = run_cli({"version"});
     EXPECT_EQ(r.exit_code, 0);
-    EXPECT_NE(r.out.find("taurus"), std::string::npos);
+    EXPECT_NE(r.out.find("leptris"), std::string::npos);
 }
 
 // ---- parse ----------------------------------------------------------------
@@ -99,7 +99,7 @@ TEST(CliParse, ReadsFromStdin) {
 
 TEST(CliParse, ReadsFile) {
     /* Absolute path — the test cwd is the build dir, not the source tree. */
-    const char* src_dir = std::getenv("TAURUS_SOURCE_DIR");
+    const char* src_dir = std::getenv("LEPTRIS_SOURCE_DIR");
     std::string fixture = src_dir && src_dir[0]
         ? std::string(src_dir) + "/test/fixtures/basic.xml"
         : "../test/fixtures/basic.xml";

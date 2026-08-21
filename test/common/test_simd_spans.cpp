@@ -9,18 +9,18 @@
  * bytes — every implementation dispatches to identical events. */
 namespace {
 
-std::vector<TaurusScanEvent> Scan(const char* s, size_t len) {
-    std::vector<TaurusScanEvent> v(len + 1);
-    size_t n = taurus_text_scan_events(s, len, v.data(), v.size());
+std::vector<LeptrisScanEvent> Scan(const char* s, size_t len) {
+    std::vector<LeptrisScanEvent> v(len + 1);
+    size_t n = leptris_text_scan_events(s, len, v.data(), v.size());
     v.resize(n);
     return v;
 }
 
-std::vector<TaurusScanEvent> ScanScalar(const char* s, size_t len) {
+std::vector<LeptrisScanEvent> ScanScalar(const char* s, size_t len) {
     /* Reference: same table, plain loop. */
-    std::vector<TaurusScanEvent> v;
+    std::vector<LeptrisScanEvent> v;
     for (size_t i = 0; i < len; i++) {
-        unsigned char cls = taurus_dp_class_table[(unsigned char)s[i]];
+        unsigned char cls = leptris_dp_class_table[(unsigned char)s[i]];
         if (cls) v.push_back({(uint32_t)i, cls});
     }
     return v;
@@ -81,8 +81,8 @@ TEST(SimdSpans, RandomBuffers) {
 TEST(SimdSpans, OverflowSignalsTruncation) {
     const char* xml = "<a x='1' y='2'/>";
     size_t len = std::strlen(xml);
-    TaurusScanEvent one[1];
-    EXPECT_EQ(taurus_text_scan_events(xml, len, one, 1), 1u);
+    LeptrisScanEvent one[1];
+    EXPECT_EQ(leptris_text_scan_events(xml, len, one, 1), 1u);
     EXPECT_EQ(one[0].offset, 0u);
     EXPECT_EQ(one[0].cls, DPSCAN_LT);
 }

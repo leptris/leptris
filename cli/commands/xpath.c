@@ -7,14 +7,14 @@
 #include "../options.h"
 #include "../error.h"
 #include "../output.h"
-#include "../src/include/taurus.h"
+#include "../src/include/leptris.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 
 /* Need access to internal structures for result handling */
-#include "../../src/taurus/taurus_internal.h"
+#include "../../src/leptris/leptris_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* XPath Command Options                                                     */
@@ -238,8 +238,8 @@ static cli_result_t xpath_execute(int argc, char** argv) {
     cli_result_t result = CLI_SUCCESS;
     xpath_options_t* opts = NULL;
     char* xml_content = NULL;
-    struct taurus_document* doc = NULL;
-    struct taurus_xpath_result* xpath_result = NULL;
+    struct leptris_document* doc = NULL;
+    struct leptris_xpath_result* xpath_result = NULL;
     output_formatter_t* fmt = NULL;
 
     /* Parse options */
@@ -265,8 +265,8 @@ static cli_result_t xpath_execute(int argc, char** argv) {
         goto cleanup;
     }
 
-    TaurusStatus status;
-    doc = taurus_parse_string(xml_content, xml_len, &status);
+    LeptrisStatus status;
+    doc = leptris_parse_string(xml_content, xml_len, &status);
     if (!doc) {
         cli_error("failed to parse XML: %s", opts->input_file);
         result = CLI_ERROR_PARSE;
@@ -274,7 +274,7 @@ static cli_result_t xpath_execute(int argc, char** argv) {
     }
 
     /* Evaluate XPath expression */
-    xpath_result = taurus_xpath_eval(
+    xpath_result = leptris_xpath_eval(
         doc,
         NULL,  /* context = NULL means use document root */
         opts->expression
@@ -304,12 +304,12 @@ static cli_result_t xpath_execute(int argc, char** argv) {
                 result_type = "string";
                 break;
         }
-        fprintf(stderr, "[taurus] Parsed: %s\n", opts->input_file);
-        fprintf(stderr, "[taurus] XPath: %s\n", opts->expression);
-        fprintf(stderr, "[taurus] Result type: %s\n", result_type);
+        fprintf(stderr, "[leptris] Parsed: %s\n", opts->input_file);
+        fprintf(stderr, "[leptris] XPath: %s\n", opts->expression);
+        fprintf(stderr, "[leptris] Result type: %s\n", result_type);
         if (xpath_result->type == XPATH_RESULT_NODESET) {
             size_t count = xpath_result->value.nodeset_value->count;
-            fprintf(stderr, "[taurus] Nodes selected: %zu\n", count);
+            fprintf(stderr, "[leptris] Nodes selected: %zu\n", count);
         }
         fflush(stderr);
     }
@@ -382,8 +382,8 @@ static cli_result_t xpath_execute(int argc, char** argv) {
 
 cleanup:
     if (fmt) output_formatter_free(fmt);
-    if (xpath_result) taurus_xpath_result_free(xpath_result);
-    if (doc) taurus_document_free(doc);
+    if (xpath_result) leptris_xpath_result_free(xpath_result);
+    if (doc) leptris_document_free(doc);
     if (xml_content) free(xml_content);
     if (opts) xpath_options_free(opts);
 
@@ -391,7 +391,7 @@ cleanup:
 }
 
 static void xpath_print_help(void) {
-    printf("Usage: taurus xpath [OPTIONS] FILE EXPRESSION\n");
+    printf("Usage: leptris xpath [OPTIONS] FILE EXPRESSION\n");
     printf("\n");
     printf("Execute XPath query against XML document.\n");
     printf("\n");

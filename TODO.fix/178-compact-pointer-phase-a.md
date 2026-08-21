@@ -50,7 +50,7 @@ span > 1 KB between adjacent nodes), fall back to a per-document
 hash table:
 
 ```c
-struct taurus_pointer_overflow {
+struct leptris_pointer_overflow {
     void* host_addr;          /* key — pointer to the host struct */
     uint16_t field_offset;    /* which field of the host struct */
     void* target_addr;        /* value */
@@ -62,9 +62,9 @@ only when `raw == 0xFF` (reserved sentinel for "see overflow table").
 
 ## Files
 
-- `src/taurus/dom/compact_pointer.h` — type defs + inline accessors
-- `src/taurus/dom/compact_pointer.c` — overflow table impl
-- `src/taurus/dom/compact_pointer_test.c` — Google Test coverage
+- `src/leptris/dom/compact_pointer.h` — type defs + inline accessors
+- `src/leptris/dom/compact_pointer.c` — overflow table impl
+- `src/leptris/dom/compact_pointer_test.c` — Google Test coverage
 
 ## Phases — one PR (this TODO)
 
@@ -72,10 +72,10 @@ only when `raw == 0xFF` (reserved sentinel for "see overflow table").
 
 ```c
 static inline void* cp1_get(const void* host, compact_pointer_1byte cp,
-                             struct taurus_pointer_overflow* ovf);
+                             struct leptris_pointer_overflow* ovf);
 static inline compact_pointer_1byte cp1_set(void* host, void* target,
                                              uint16_t field_offset,
-                                             struct taurus_pointer_overflow** ovf_p);
+                                             struct leptris_pointer_overflow** ovf_p);
 ```
 
 `cp1_set` returns the encoded value and may allocate the overflow

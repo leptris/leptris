@@ -4,7 +4,7 @@
 
 Per `benchmark_parse` (Apple M1):
 
-| Doc size          | Taurus  | pugixml | Ratio   |
+| Doc size          | Leptris  | pugixml | Ratio   |
 |-------------------|---------|---------|---------|
 | Small (~1 KB)     | 18.1 µs | 0.6 µs  | 30× slower |
 | Medium (~10 KB)   | 233.7 µs| 40.4 µs | 5.8× slower |
@@ -23,7 +23,7 @@ pugixml's document representation IS a flat buffer with 32-byte node
 records. Traversal, XPath, and mutation all operate directly on the
 flat buffer — no "promote" step exists.
 
-Taurus has two representations:
+Leptris has two representations:
 - FlatDoc (28 B + 12 B) — fast to build, used for parse-only paths
 - Compact-pointer tree (96 B elements) — fast for XPath, requires promote
 
@@ -37,7 +37,7 @@ Three concrete optimizations, layered:
 
 ### Phase A — Bulk pool allocation (TODO 141)
 
-Replace per-element `taurus_pool_alloc` in flat_promote with a single
+Replace per-element `leptris_pool_alloc` in flat_promote with a single
 bulk allocation. Allocate a contiguous block of N elements, slice it
 into individual element pointers. Saves ~50% of promote time.
 

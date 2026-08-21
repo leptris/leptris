@@ -169,26 +169,26 @@ void bench_print_header(const char* title) {
     printf("--------------------------------------------------------------------------------\n");
 }
 
-void bench_print_comparison(const BenchResult* taurus,
+void bench_print_comparison(const BenchResult* leptris,
                             const BenchResult* competitor,
                             const char* competitor_name) {
-    double wall_speedup = competitor->mean_us / taurus->mean_us;
-    double cpu_speedup  = competitor->cpu_mean_us / taurus->cpu_mean_us;
+    double wall_speedup = competitor->mean_us / leptris->mean_us;
+    double cpu_speedup  = competitor->cpu_mean_us / leptris->cpu_mean_us;
     double rss_ratio    = (competitor->rss_peak_kb > 0.0)
-        ? (taurus->rss_peak_kb / competitor->rss_peak_kb)
+        ? (leptris->rss_peak_kb / competitor->rss_peak_kb)
         : 0.0;
 
     printf("\n  vs %s:\n", competitor_name);
-    printf("    wall:  taurus %8.2f us | %s %8.2f us | %s %.2fx\n",
-           taurus->mean_us, competitor_name, competitor->mean_us,
+    printf("    wall:  leptris %8.2f us | %s %8.2f us | %s %.2fx\n",
+           leptris->mean_us, competitor_name, competitor->mean_us,
            (wall_speedup >= 1.0) ? "faster" : "slower",
            (wall_speedup >= 1.0) ? wall_speedup : 1.0 / wall_speedup);
-    printf("    cpu:   taurus %8.2f us | %s %8.2f us | %s %.2fx\n",
-           taurus->cpu_mean_us, competitor_name, competitor->cpu_mean_us,
+    printf("    cpu:   leptris %8.2f us | %s %8.2f us | %s %.2fx\n",
+           leptris->cpu_mean_us, competitor_name, competitor->cpu_mean_us,
            (cpu_speedup >= 1.0) ? "faster" : "slower",
            (cpu_speedup >= 1.0) ? cpu_speedup : 1.0 / cpu_speedup);
-    printf("    rss:   taurus %7.0f KB | %s %7.0f KB | %s %.2fx\n",
-           taurus->rss_peak_kb, competitor_name, competitor->rss_peak_kb,
+    printf("    rss:   leptris %7.0f KB | %s %7.0f KB | %s %.2fx\n",
+           leptris->rss_peak_kb, competitor_name, competitor->rss_peak_kb,
            (rss_ratio <= 1.0) ? "smaller" : "larger",
            (rss_ratio <= 1.0) ? 1.0 / rss_ratio : rss_ratio);
 }

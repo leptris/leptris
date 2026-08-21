@@ -6,18 +6,18 @@
 ## What was accomplished this session (29 PRs)
 
 ### Memory safety (P0) — 4 bugs fixed
-- taurus_element_text ownership leak (6+ call sites)
-- Public API enum leak (TAURUS_ERROR_MEMORY_ALLOCATION → TAURUS_ERROR_MEMORY)
-- taurus_element_create_pooled name-copy (heap-use-after-free)
+- leptris_element_text ownership leak (6+ call sites)
+- Public API enum leak (LEPTRIS_ERROR_MEMORY_ALLOCATION → LEPTRIS_ERROR_MEMORY)
+- leptris_element_create_pooled name-copy (heap-use-after-free)
 - Benchmark LEN overread (855-2298 bytes past buffer)
 
 ### Architecture — 7 cleanups
-- Public type dedup (taurus.h → types.h delegation)
+- Public type dedup (leptris.h → types.h delegation)
 - strict_mode cached in Parser struct
 - Freeze contract clarified (advisory, not enforced)
-- Child-cache invalidation encapsulated (taurus_element_invalidate_child_cache)
+- Child-cache invalidation encapsulated (leptris_element_invalidate_child_cache)
 - Element field reads routed through accessors (TODO 90 Phase 1)
-- Duplicate taurus_element_create_pooled declaration removed
+- Duplicate leptris_element_create_pooled declaration removed
 - Serializer emits document-level PIs
 
 ### Performance — 10 PRs
@@ -46,9 +46,9 @@
 
 ## Competitive position (Release + LTO)
 
-### vs libxml2 — taurus dominates
+### vs libxml2 — leptris dominates
 
-| Benchmark | Taurus | libxml2 | Advantage |
+| Benchmark | Leptris | libxml2 | Advantage |
 |---|---|---|---|
 | SAX small | 2.83 µs | 7.07 µs | 2.5x faster |
 | SAX medium | 7.54 µs | 26.87 µs | 3.6x faster |
@@ -59,7 +59,7 @@
 
 ### vs pugixml — gap narrowed
 
-| Benchmark | Taurus | pugixml | Gap |
+| Benchmark | Leptris | pugixml | Gap |
 |---|---|---|---|
 | Append 1000 children | 14.96 µs | 11.94 µs | 1.25x |
 | Set text | 0.90 µs | 0.68 µs | 1.3x |
@@ -76,8 +76,8 @@ at `dom/compact.h` (340 lines, fully designed). 5-phase plan:
   - Cache invalidation encapsulated (PR #78)
   - Serializer/C14N/node_public reads migrated (PR #79)
   - Remaining: element_modify.c field writes (blocked on type
-    mismatch — setters take TaurusElement but children list is
-    mixed-type TaurusNode*)
+    mismatch — setters take LeptrisElement but children list is
+    mixed-type LeptrisNode*)
 
 - **Phase 2** (3-5 days): dual representation (compact + regular)
 - **Phase 3** (3-5 days): parser builds compact
@@ -90,7 +90,7 @@ Target: 104-byte elements → 23-byte (4.5x smaller).
 
 4.2x slower than pugixml on set_attribute. Root cause: O(N)
 existence check per call. Options:
-- Add `taurus_element_append_attribute` (no existence check)
+- Add `leptris_element_append_attribute` (no existence check)
 - Per-element attribute hash table
 - Both
 
@@ -107,7 +107,7 @@ work. xpointer requires XPath engine integration. Estimated 1 week.
 
 ### P2 — XPath conformance suite (TODO 69)
 
-W3C XPath test suite harness. taurus passes 438/438 against the
+W3C XPath test suite harness. leptris passes 438/438 against the
 existing suite; the W3C suite would provide broader coverage.
 Estimated 2-3 days.
 
@@ -118,7 +118,7 @@ docs/FFI.md documents the contract. Language-specific work.
 
 ### P3 — Incremental SAX (TODO 89)
 
-taurus_sax_parser_feed is one-shot. True incremental parsing
+leptris_sax_parser_feed is one-shot. True incremental parsing
 requires resumable state machine. Estimated 1 week.
 
 ### P3 — More spec coverage (TODO 104)
@@ -131,7 +131,7 @@ Priority: every public API has at least one spec.
 Not yet benchmarked. Most benches parse one file. A "parse N
 small files in sequence" bench would catch churn/workflow issues.
 
-## How taurus improves on pugixml (once compact lands)
+## How leptris improves on pugixml (once compact lands)
 
 1. **children_array cache** — O(1) indexed child access (pugixml is O(N))
 2. **last_attribute tail pointer** — O(1) attribute append

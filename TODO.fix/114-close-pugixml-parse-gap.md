@@ -5,7 +5,7 @@
 
 ## Current state (Release+LTO, ~1 KB doc, M-series Mac)
 
-| Op                          | taurus | pugixml | gap   |
+| Op                          | leptris | pugixml | gap   |
 | --------------------------- | ------ | ------- | ----- |
 | Parse + free (small)        | 15 µs  | ~2 µs   | 7.5×  |
 | Parse + free (attr-heavy)   | 71 µs  | ~10 µs  | 7×    |
@@ -22,29 +22,29 @@ Per text node today:
 
 Steps 1, 2, 5 are pure waste for the no-entity (≈95% of text) case. The
 intermediate buffer exists only because the legacy non-writable parser
-needed a NUL-terminated copy to pass to `taurus_text_create`. In
+needed a NUL-terminated copy to pass to `leptris_text_create`. In
 writable mode we can skip it.
 
 ## Plan
 
 ### Phase 1 — eliminate intermediate text buffer (this PR)
 - In `parser_parse_text`, when `p->writable` and `has_entities == 0`:
-  skip the `TAURUS_ALLOC_N` + memcpy; pass `start` directly to
-  `taurus_text_create` which already does its own pool copy.
+  skip the `LEPTRIS_ALLOC_N` + memcpy; pass `start` directly to
+  `leptris_text_create` which already does its own pool copy.
 - No API change. Saves 1 malloc + 1 memcpy + 1 free per text node.
 - Expected: 10-20% parse speedup on text-heavy docs.
 
 ### Phase 2 — length-aware text nodes (future)
-- Add `size_t content_len` to `TaurusTextNode`.
+- Add `size_t content_len` to `LeptrisTextNode`.
 - For writable + no-entity case, point `content` at the in-buffer text
   (zero-copy). NUL not required since length is known.
 - Skip both copies. Saves another memcpy per text node.
-- Needs serializer, text-content concatenation, and `taurus_element_text`
+- Needs serializer, text-content concatenation, and `leptris_element_text`
   updates to handle non-NUL-terminated content.
 
 ### Phase 3 — pool-resident parser state (future)
-- The Parser struct itself is heap-allocated via `TAURUS_ALLOC` per
-  `taurus_parse_string` call. Pool-route it to remove one malloc per
+- The Parser struct itself is heap-allocated via `LEPTRIS_ALLOC` per
+  `leptris_parse_string` call. Pool-route it to remove one malloc per
   parse.
 - Minor win (~1 µs) but every microsecond counts at the pugixml gap.
 

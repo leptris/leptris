@@ -8,7 +8,7 @@ switch dispatch in `evaluate_expr`.
 
 The current VM is complete but slower than direct AST evaluation for
 non-literal expressions because:
-1. `taurus_xpath_vm_eval` compiles the bytecode on EVERY eval call
+1. `leptris_xpath_vm_eval` compiles the bytecode on EVERY eval call
    (no caching). The compile cost dwarfs the dispatch savings on
    literals.
 2. For non-literal AST nodes the compiler emits `BC_FALLBACK_EVAL`,
@@ -16,20 +16,20 @@ non-literal expressions because:
    the same function the non-VM path uses, plus the VM stack
    overhead.
 
-So today: `taurus_xpath_eval` ≈ AST-eval + (compile + run + free).
+So today: `leptris_xpath_eval` ≈ AST-eval + (compile + run + free).
 The VM must become a net win, not a tax.
 
 ## Two-part design
 
 ### Part 1: Bytecode cache (the real win)
-Extend `xpath_ast_cache` to also lazily hold a `TaurusXPathBytecode*`
+Extend `xpath_ast_cache` to also lazily hold a `LeptrisXPathBytecode*`
 per cached expression. Rename internally to reflect that the cache
 holds both AST and compiled bytecode (public API names unchanged).
 
 Flow change:
-- Before: `taurus_xpath_eval` → AST cache lookup → `vm_eval(ast)`
+- Before: `leptris_xpath_eval` → AST cache lookup → `vm_eval(ast)`
   → compile + run + free.
-- After: `taurus_xpath_eval` → cache lookup → if bytecode missing,
+- After: `leptris_xpath_eval` → cache lookup → if bytecode missing,
   compile and store → run cached bytecode.
 
 Net effect on the second and later evals of the same expression:

@@ -5,8 +5,8 @@
  */
 
 #include "evaluator_internal.h"
-#include "../taurus_internal.h"
-#include "../dom/element.h"  /* For TaurusElementNode structure */
+#include "../leptris_internal.h"
+#include "../dom/element.h"  /* For LeptrisElementNode structure */
 #include <string.h>
 #include <stdio.h>
 
@@ -25,15 +25,15 @@
 
 /* Helper: Collect descendants recursively */
 static void collect_descendants(XPathContext* ctx,
-                               TaurusElementNode* node,
+                               LeptrisElementNode* node,
                                XPathNodeSet* result,
                                XPathASTNode* node_test) {
     if (!node) return;
 
     /* Iterate through children using linked list */
-    for (TaurusNode* child_node = node->first_child; child_node; child_node = child_node->next_sibling) {
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElementNode* child = (TaurusElementNode*)child_node;
+    for (LeptrisNode* child_node = node->first_child; child_node; child_node = child_node->next_sibling) {
+        if (child_node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            LeptrisElementNode* child = (LeptrisElementNode*)child_node;
             if (matches_node_test(ctx, child, node_test)) {
                 xpath_nodeset_add(result, child);
             }
@@ -44,7 +44,7 @@ static void collect_descendants(XPathContext* ctx,
 
 /* Helper: Collect descendants or self */
 static void collect_descendants_or_self(XPathContext* ctx,
-                                       TaurusElementNode* node,
+                                       LeptrisElementNode* node,
                                        XPathNodeSet* result,
                                        XPathASTNode* node_test) {
     if (!node) return;
@@ -54,43 +54,43 @@ static void collect_descendants_or_self(XPathContext* ctx,
     }
 
     /* Iterate through children using linked list */
-    for (TaurusNode* child_node = node->first_child; child_node; child_node = child_node->next_sibling) {
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            collect_descendants_or_self(ctx, (TaurusElementNode*)child_node, result, node_test);
+    for (LeptrisNode* child_node = node->first_child; child_node; child_node = child_node->next_sibling) {
+        if (child_node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            collect_descendants_or_self(ctx, (LeptrisElementNode*)child_node, result, node_test);
         }
     }
 }
 
-/* Helper: Create attribute node from taurus_attribute */
-static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
-                                                   TaurusElementNode* owner) {
+/* Helper: Create attribute node from leptris_attribute */
+static LeptrisAttributeNode* create_attribute_node(struct leptris_attribute* attr,
+                                                   LeptrisElementNode* owner) {
     if (!attr) return NULL;
 
-    TaurusAttributeNode* attr_node = TAURUS_ALLOC(TaurusAttributeNode);
+    LeptrisAttributeNode* attr_node = LEPTRIS_ALLOC(LeptrisAttributeNode);
     if (!attr_node) return NULL;
 
-    attr_node->node_type = TAURUS_NODE_ATTRIBUTE;
+    attr_node->node_type = LEPTRIS_NODE_ATTRIBUTE;
 
     /* Use cached C string if available, otherwise convert from StringView */
     if (attr->name) {
-        attr_node->name = taurus_strdup(attr->name);
+        attr_node->name = leptris_strdup(attr->name);
     } else {
         /* Convert StringView to C string */
-        attr_node->name = taurus_sv_to_cstr(&attr->name_view);
+        attr_node->name = leptris_sv_to_cstr(&attr->name_view);
     }
 
     if (attr->value) {
-        attr_node->value = taurus_strdup(attr->value);
+        attr_node->value = leptris_strdup(attr->value);
     } else {
         /* Convert StringView to C string */
-        attr_node->value = taurus_sv_to_cstr(&attr->value_view);
+        attr_node->value = leptris_sv_to_cstr(&attr->value_view);
     }
 
     /* For namespace_uri, use cached string if available, otherwise convert from StringView */
     if (attr->namespace_uri) {
-        attr_node->namespace_uri = taurus_strdup(attr->namespace_uri);
-    } else if (!taurus_sv_is_empty(&attr->namespace_uri_view)) {
-        attr_node->namespace_uri = taurus_sv_to_cstr(&attr->namespace_uri_view);
+        attr_node->namespace_uri = leptris_strdup(attr->namespace_uri);
+    } else if (!leptris_sv_is_empty(&attr->namespace_uri_view)) {
+        attr_node->namespace_uri = leptris_sv_to_cstr(&attr->namespace_uri_view);
     } else {
         attr_node->namespace_uri = NULL;
     }
@@ -101,15 +101,15 @@ static TaurusAttributeNode* create_attribute_node(struct taurus_attribute* attr,
 }
 
 /* child:: axis */
-static XPathNodeSet* axis_child(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_child(XPathContext* ctx, LeptrisElementNode* node,
                                XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
     /* Iterate through children using linked list */
-    for (TaurusNode* child_node = node->first_child; child_node; child_node = child_node->next_sibling) {
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElementNode* child = (TaurusElementNode*)child_node;
+    for (LeptrisNode* child_node = node->first_child; child_node; child_node = child_node->next_sibling) {
+        if (child_node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            LeptrisElementNode* child = (LeptrisElementNode*)child_node;
             if (matches_node_test(ctx, child, test)) {
                 xpath_nodeset_add(result, child);
             }
@@ -120,7 +120,7 @@ static XPathNodeSet* axis_child(XPathContext* ctx, TaurusElementNode* node,
 }
 
 /* descendant:: axis */
-static XPathNodeSet* axis_descendant(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_descendant(XPathContext* ctx, LeptrisElementNode* node,
                                     XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
@@ -130,7 +130,7 @@ static XPathNodeSet* axis_descendant(XPathContext* ctx, TaurusElementNode* node,
 
 /* descendant-or-self:: axis */
 static XPathNodeSet* axis_descendant_or_self(XPathContext* ctx,
-                                            TaurusElementNode* node,
+                                            LeptrisElementNode* node,
                                             XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
@@ -139,13 +139,13 @@ static XPathNodeSet* axis_descendant_or_self(XPathContext* ctx,
 }
 
 /* parent:: axis */
-static XPathNodeSet* axis_parent(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_parent(XPathContext* ctx, LeptrisElementNode* node,
                                 XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
     /* Get parent element using base node */
-    TaurusElementNode* parent = (TaurusElementNode*)node->base.parent;
+    LeptrisElementNode* parent = (LeptrisElementNode*)node->base.parent;
 
     if (!parent) return result;
 
@@ -160,12 +160,12 @@ static XPathNodeSet* axis_parent(XPathContext* ctx, TaurusElementNode* node,
 }
 
 /* ancestor:: axis */
-static XPathNodeSet* axis_ancestor(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_ancestor(XPathContext* ctx, LeptrisElementNode* node,
                                   XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    TaurusElementNode* current = (TaurusElementNode*)node->base.parent;
+    LeptrisElementNode* current = (LeptrisElementNode*)node->base.parent;
     while (current) {
         if (matches_node_test(ctx, current, test)) {
             XPathNode* wrapped = wrap_element_node(current);
@@ -173,7 +173,7 @@ static XPathNodeSet* axis_ancestor(XPathContext* ctx, TaurusElementNode* node,
                 xpath_nodeset_add(result, wrapped);
             }
         }
-        current = (TaurusElementNode*)current->base.parent;
+        current = (LeptrisElementNode*)current->base.parent;
     }
 
     return result;
@@ -181,7 +181,7 @@ static XPathNodeSet* axis_ancestor(XPathContext* ctx, TaurusElementNode* node,
 
 /* ancestor-or-self:: axis */
 static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
-                                          TaurusElementNode* node,
+                                          LeptrisElementNode* node,
                                           XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
@@ -193,7 +193,7 @@ static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
         }
     }
 
-    TaurusElementNode* current = (TaurusElementNode*)node->base.parent;
+    LeptrisElementNode* current = (LeptrisElementNode*)node->base.parent;
     while (current) {
         if (matches_node_test(ctx, current, test)) {
             XPathNode* wrapped = wrap_element_node(current);
@@ -201,14 +201,14 @@ static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
                 xpath_nodeset_add(result, wrapped);
             }
         }
-        current = (TaurusElementNode*)current->base.parent;
+        current = (LeptrisElementNode*)current->base.parent;
     }
 
     return result;
 }
 
 /* self:: axis */
-static XPathNodeSet* axis_self(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_self(XPathContext* ctx, LeptrisElementNode* node,
                               XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
@@ -225,18 +225,18 @@ static XPathNodeSet* axis_self(XPathContext* ctx, TaurusElementNode* node,
 
 /* following-sibling:: axis */
 static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
-                                           TaurusElementNode* node,
+                                           LeptrisElementNode* node,
                                            XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node || !node->base.parent) return result;
 
-    TaurusElementNode* parent = (TaurusElementNode*)node->base.parent;
+    LeptrisElementNode* parent = (LeptrisElementNode*)node->base.parent;
     int found = 0;
 
     /* Iterate through siblings using linked list */
-    for (TaurusNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElementNode* sibling = (TaurusElementNode*)child_node;
+    for (LeptrisNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
+        if (child_node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            LeptrisElementNode* sibling = (LeptrisElementNode*)child_node;
             if (sibling == node) {
                 found = 1;
                 continue;
@@ -255,17 +255,17 @@ static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
 
 /* preceding-sibling:: axis */
 static XPathNodeSet* axis_preceding_sibling(XPathContext* ctx,
-                                           TaurusElementNode* node,
+                                           LeptrisElementNode* node,
                                            XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node || !node->base.parent) return result;
 
-    TaurusElementNode* parent = (TaurusElementNode*)node->base.parent;
+    LeptrisElementNode* parent = (LeptrisElementNode*)node->base.parent;
 
     /* Collect all preceding siblings in forward order using linked list */
-    for (TaurusNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElementNode* sibling = (TaurusElementNode*)child_node;
+    for (LeptrisNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
+        if (child_node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            LeptrisElementNode* sibling = (LeptrisElementNode*)child_node;
             if (sibling == node) break;
             if (matches_node_test(ctx, sibling, test)) {
                 XPathNode* wrapped = wrap_element_node(sibling);
@@ -289,19 +289,19 @@ static XPathNodeSet* axis_preceding_sibling(XPathContext* ctx,
 }
 
 /* following:: axis - all nodes after context in document order */
-static XPathNodeSet* axis_following(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_following(XPathContext* ctx, LeptrisElementNode* node,
                                    XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node || !node->base.parent) return result;
 
     /* Get following siblings and their descendants */
-    TaurusElementNode* parent = (TaurusElementNode*)node->base.parent;
+    LeptrisElementNode* parent = (LeptrisElementNode*)node->base.parent;
     int found = 0;
 
     /* Iterate through siblings using linked list */
-    for (TaurusNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElementNode* sibling = (TaurusElementNode*)child_node;
+    for (LeptrisNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
+        if (child_node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            LeptrisElementNode* sibling = (LeptrisElementNode*)child_node;
             if (sibling == node) {
                 found = 1;
                 continue;
@@ -331,18 +331,18 @@ static XPathNodeSet* axis_following(XPathContext* ctx, TaurusElementNode* node,
 }
 
 /* preceding:: axis - all nodes before context in document order */
-static XPathNodeSet* axis_preceding(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_preceding(XPathContext* ctx, LeptrisElementNode* node,
                                    XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node || !node->base.parent) return result;
 
     /* Get preceding siblings and their descendants */
-    TaurusElementNode* parent = (TaurusElementNode*)node->base.parent;
+    LeptrisElementNode* parent = (LeptrisElementNode*)node->base.parent;
 
     /* Iterate through siblings using linked list */
-    for (TaurusNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
-        if (child_node->type == TAURUS_NODE_TYPE_ELEMENT) {
-            TaurusElementNode* sibling = (TaurusElementNode*)child_node;
+    for (LeptrisNode* child_node = parent->first_child; child_node; child_node = child_node->next_sibling) {
+        if (child_node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            LeptrisElementNode* sibling = (LeptrisElementNode*)child_node;
             if (sibling == node) break;
             if (matches_node_test(ctx, sibling, test)) {
                 XPathNode* wrapped = wrap_element_node(sibling);
@@ -368,14 +368,14 @@ static XPathNodeSet* axis_preceding(XPathContext* ctx, TaurusElementNode* node,
 
 /* attribute:: axis
  *
- * Returns attributes as proper TaurusAttributeNode structures.
- * These nodes have type TAURUS_NODE_ATTRIBUTE and work with all
+ * Returns attributes as proper LeptrisAttributeNode structures.
+ * These nodes have type LEPTRIS_NODE_ATTRIBUTE and work with all
  * type conversion functions properly.
  */
-static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_attribute(XPathContext* ctx, LeptrisElementNode* node,
                                    XPathASTNode* test) {
     DEBUG_LOG("        === axis_attribute START ===");
-    DEBUG_LOG("        node=%p, name=%s", (void*)node, node ? taurus_element_get_name(node) : "(null)");
+    DEBUG_LOG("        node=%p, name=%s", (void*)node, node ? leptris_element_get_name(node) : "(null)");
     DEBUG_LOG("        attributes_count=%zu", node ? (size_t)node->attributes_count : 0);
 
     XPathNodeSet* result = xpath_nodeset_new();
@@ -386,7 +386,7 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElementNode* node,
 
     /* Iterate through element's attributes */
     for (size_t i = 0; i < node->attributes_count; i++) {
-        struct taurus_attribute* attr = node->attributes[i];
+        struct leptris_attribute* attr = node->attributes[i];
         DEBUG_LOG("        [%zu] attr=%p", i, (void*)attr);
         if (!attr) {
             DEBUG_LOG("        [%zu] SKIPPED: attr is NULL", i);
@@ -416,7 +416,7 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElementNode* node,
         if (matches) {
             /* Create proper attribute node */
             DEBUG_LOG("        [%zu] Creating attribute node...", i);
-            TaurusAttributeNode* attr_node = create_attribute_node(attr, node);
+            LeptrisAttributeNode* attr_node = create_attribute_node(attr, node);
             DEBUG_LOG("        [%zu] attr_node=%p", i, (void*)attr_node);
             if (attr_node) {
                 DEBUG_LOG("        [%zu] attr_node->node_type=%d (should be 1)",
@@ -440,17 +440,17 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, TaurusElementNode* node,
     return result;
 }
 
-/* Helper: Create namespace node from taurus_namespace */
-static TaurusNamespaceNode* create_namespace_node(struct taurus_namespace* ns,
-                                                    TaurusElementNode* owner) {
+/* Helper: Create namespace node from leptris_namespace */
+static LeptrisNamespaceNode* create_namespace_node(struct leptris_namespace* ns,
+                                                    LeptrisElementNode* owner) {
     if (!ns) return NULL;
 
-    TaurusNamespaceNode* ns_node = TAURUS_ALLOC(TaurusNamespaceNode);
+    LeptrisNamespaceNode* ns_node = LEPTRIS_ALLOC(LeptrisNamespaceNode);
     if (!ns_node) return NULL;
 
-    ns_node->node_type = TAURUS_NODE_NAMESPACE;
-    ns_node->prefix = ns->prefix ? taurus_strdup(ns->prefix) : NULL;
-    ns_node->uri = taurus_strdup(ns->uri);
+    ns_node->node_type = LEPTRIS_NODE_NAMESPACE;
+    ns_node->prefix = ns->prefix ? leptris_strdup(ns->prefix) : NULL;
+    ns_node->uri = leptris_strdup(ns->uri);
     ns_node->owner = owner;
 
     return ns_node;
@@ -470,7 +470,7 @@ static int is_prefix_seen(char** seen_prefixes, size_t seen_count, const char* p
 }
 
 /* namespace:: axis */
-static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElementNode* node,
+static XPathNodeSet* axis_namespace(XPathContext* ctx, LeptrisElementNode* node,
                                    XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
@@ -481,10 +481,10 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElementNode* node,
     size_t seen_capacity = 0;
 
     /* Collect namespaces from element and ancestors */
-    TaurusElementNode* current = node;
+    LeptrisElementNode* current = node;
     while (current) {
         /* Iterate through element's namespace declarations */
-        struct taurus_namespace* ns = current->namespaces;
+        struct leptris_namespace* ns = current->namespaces;
         while (ns) {
             /* Skip if already seen (inheritance override) */
             if (is_prefix_seen(seen_prefixes, seen_count, ns->prefix)) {
@@ -502,7 +502,7 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElementNode* node,
             }
 
             if (matches) {
-                TaurusNamespaceNode* ns_node = create_namespace_node(ns, node);
+                LeptrisNamespaceNode* ns_node = create_namespace_node(ns, node);
                 if (ns_node) {
                     xpath_nodeset_add(result, (void*)ns_node);
                 }
@@ -513,12 +513,12 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElementNode* node,
                 seen_capacity = seen_capacity == 0 ? 4 : seen_capacity * 2;
                 seen_prefixes = (char**)realloc(seen_prefixes, seen_capacity * sizeof(char*));
             }
-            seen_prefixes[seen_count++] = ns->prefix ? taurus_strdup(ns->prefix) : NULL;
+            seen_prefixes[seen_count++] = ns->prefix ? leptris_strdup(ns->prefix) : NULL;
 
             ns = ns->next;
         }
 
-        current = (TaurusElementNode*)current->base.parent;
+        current = (LeptrisElementNode*)current->base.parent;
     }
 
     /* Always add implicit xml namespace if not already present */
@@ -528,11 +528,11 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElementNode* node,
                        test->value && strcmp(test->value, "xml") == 0));
 
         if (matches) {
-            TaurusNamespaceNode* xml_ns = TAURUS_ALLOC(TaurusNamespaceNode);
+            LeptrisNamespaceNode* xml_ns = LEPTRIS_ALLOC(LeptrisNamespaceNode);
             if (xml_ns) {
-                xml_ns->node_type = TAURUS_NODE_NAMESPACE;
-                xml_ns->prefix = taurus_strdup("xml");
-                xml_ns->uri = taurus_strdup("http://www.w3.org/XML/1998/namespace");
+                xml_ns->node_type = LEPTRIS_NODE_NAMESPACE;
+                xml_ns->prefix = leptris_strdup("xml");
+                xml_ns->uri = leptris_strdup("http://www.w3.org/XML/1998/namespace");
                 xml_ns->owner = node;
                 xpath_nodeset_add(result, (void*)xml_ns);
             }
@@ -552,7 +552,7 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, TaurusElementNode* node,
 }
 
 /* Apply axis dispatcher */
-XPathNodeSet* apply_axis(XPathContext* ctx, TaurusElementNode* node,
+XPathNodeSet* apply_axis(XPathContext* ctx, LeptrisElementNode* node,
                          const char* axis_name, XPathASTNode* test) {
     DEBUG_LOG("      === apply_axis: %s ===", axis_name ? axis_name : "(null/child)");
     if (!axis_name) {

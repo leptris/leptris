@@ -2,7 +2,7 @@
  * Copyright (c) 2024, Ribose Inc.
  * All rights reserved.
  *
- * Session 84: Modularized from taurus_parse.c
+ * Session 84: Modularized from leptris_parse.c
  * Functions for parsing element start tags, end tags, and complete elements
  */
 
@@ -17,9 +17,9 @@
 /* Parse element start tag <name attr="value" ...>
  * Returns newly created element or NULL on error
  * NOTE: Return value may have lowest bit set to indicate self-closing */
-struct taurus_element *parse_start_tag(TaurusParseContext *ctx,
-                                        struct taurus_element *parent) {
-    struct taurus_element *elem;
+struct leptris_element *parse_start_tag(LeptrisParseContext *ctx,
+                                        struct leptris_element *parent) {
+    struct leptris_element *elem;
     const char *name;
     size_t name_len, value_len;
     char *name_copy, *prefix, *local_name;
@@ -30,18 +30,18 @@ struct taurus_element *parse_start_tag(TaurusParseContext *ctx,
     if (!name) return NULL;
     
     /* Create a copy for processing */
-    name_copy = taurus_strndup(name, name_len);
+    name_copy = leptris_strndup(name, name_len);
     if (!name_copy) return NULL;
     
     /* Extract prefix and local name */
     extract_prefix_and_local(name_copy, &prefix, &local_name);
     
     /* Initialize attribute stack */
-    taurus_attr_stack_init(&ctx->attr_stack);
+    leptris_attr_stack_init(&ctx->attr_stack);
     
     /* Parse attributes */
     while (ctx->pos < ctx->end) {
-        taurus_skip_whitespace(&ctx->pos, ctx->end);
+        leptris_skip_whitespace(&ctx->pos, ctx->end);
         
         if (ctx->pos >= ctx->end) break;
         if (*ctx->pos == '>' || *ctx->pos == '/') break;
@@ -49,17 +49,17 @@ struct taurus_element *parse_start_tag(TaurusParseContext *ctx,
         /* Parse attribute name */
         const char *attr_name = parse_name(ctx, &name_len);
         if (!attr_name) {
-            taurus_attr_stack_cleanup(&ctx->attr_stack);
-            taurus_free(name_copy);
+            leptris_attr_stack_cleanup(&ctx->attr_stack);
+            leptris_free(name_copy);
             return NULL;
         }
         
         /* Expect '=' */
-        taurus_skip_whitespace(&ctx->pos, ctx->end);
+        leptris_skip_whitespace(&ctx->pos, ctx->end);
         if (ctx->pos >= ctx->end || *ctx->pos != '=') {
-            taurus_parse_context_set_error(ctx, "Expected '=' after attribute name at line %d, column %d", ctx->line, ctx->column);
-            taurus_attr_stack_cleanup(&ctx->attr_stack);
-            taurus_free(name_copy);
+            leptris_parse_context_set_error(ctx, "Expected '=' after attribute name at line %d, column %d", ctx->line, ctx->column);
+            leptris_attr_stack_cleanup(&ctx->attr_stack);
+            leptris_free(name_copy);
             return NULL;
         }
         ctx->pos++;
@@ -67,17 +67,17 @@ struct taurus_element *parse_start_tag(TaurusParseContext *ctx,
         /* Parse attribute value */
         const char *attr_value = parse_quoted_value(ctx, &value_len);
         if (!attr_value) {
-            taurus_attr_stack_cleanup(&ctx->attr_stack);
-            taurus_free(name_copy);
+            leptris_attr_stack_cleanup(&ctx->attr_stack);
+            leptris_free(name_copy);
             return NULL;
         }
         
         /* Push attribute onto stack */
-        taurus_attr_stack_push(&ctx->attr_stack, attr_name, attr_value);
+        leptris_attr_stack_push(&ctx->attr_stack, attr_name, attr_value);
     }
     
     /* Check for self-closing */
-    taurus_skip_whitespace(&ctx->pos, ctx->end);
+    leptris_skip_whitespace(&ctx->pos, ctx->end);
     if (ctx->pos < ctx->end && *ctx->pos == '/') {
         self_closing = 1;
         ctx->pos++;  /* Skip '/' */
@@ -85,18 +85,18 @@ struct taurus_element *parse_start_tag(TaurusParseContext *ctx,
     
     /* Expect '>' */
     if (ctx->pos >= ctx->end || *ctx->pos != '>') {
-        taurus_parse_context_set_error(ctx, "Expected '>' at line %d, column %d", ctx->line, ctx->column);
-        taurus_attr_stack_cleanup(&ctx->attr_stack);
-        taurus_free(name_copy);
+        leptris_parse_context_set_error(ctx, "Expected '>' at line %d, column %d", ctx->line, ctx->column);
+        leptris_attr_stack_cleanup(&ctx->attr_stack);
+        leptris_free(name_copy);
         return NULL;
     }
     ctx->pos++;  /* Skip '>' */
     
     /* Create element */
-    elem = taurus_element_new(local_name);
+    elem = leptris_element_new(local_name);
     if (!elem) {
-        taurus_attr_stack_cleanup(&ctx->attr_stack);
-        taurus_free(name_copy);
+        leptris_attr_stack_cleanup(&ctx->attr_stack);
+        leptris_free(name_copy);
         return NULL;
     }
     
@@ -116,15 +116,15 @@ struct taurus_element *parse_start_tag(TaurusParseContext *ctx,
     
     /* Link to parent */
     if (parent) {
-        taurus_element_add_child(parent, elem);
+        leptris_element_add_child(parent, elem);
     }
     
     /* Cleanup */
-    taurus_attr_stack_cleanup(&ctx->attr_stack);
-    taurus_free(name_copy);
+    leptris_attr_stack_cleanup(&ctx->attr_stack);
+    leptris_free(name_copy);
     
     /* Return element with self_closing status encoded */
-    return self_closing ? (struct taurus_element*)((uintptr_t)elem | 1) : elem;
+    return self_closing ? (struct leptris_element*)((uintptr_t)elem | 1) : elem;
 }
 
 /* ==================================================================
@@ -133,7 +133,7 @@ struct taurus_element *parse_start_tag(TaurusParseContext *ctx,
 
 /* Parse element end tag </name>
  * Returns 0 on success, -1 on error */
-int parse_end_tag(TaurusParseContext *ctx, const char *expected_name) {
+int parse_end_tag(LeptrisParseContext *ctx, const char *expected_name) {
     const char *name;
     size_t len;
     char *name_copy;
@@ -143,7 +143,7 @@ int parse_end_tag(TaurusParseContext *ctx, const char *expected_name) {
     /* Should be at '</' */
     if (ctx->pos + 1 >= ctx->end ||
         ctx->pos[0] != '<' || ctx->pos[1] != '/') {
-        taurus_parse_context_set_error(ctx, "Expected '</' at line %d, column %d", ctx->line, ctx->column);
+        leptris_parse_context_set_error(ctx, "Expected '</' at line %d, column %d", ctx->line, ctx->column);
         return -1;
     }
     ctx->pos += 2;
@@ -153,7 +153,7 @@ int parse_end_tag(TaurusParseContext *ctx, const char *expected_name) {
     if (!name) return -1;
     
     /* Extract local name (remove prefix) */
-    name_copy = taurus_strndup(name, len);
+    name_copy = leptris_strndup(name, len);
     if (!name_copy) return -1;
     
     local_name = extract_local_name_only(name_copy);
@@ -161,19 +161,19 @@ int parse_end_tag(TaurusParseContext *ctx, const char *expected_name) {
     /* Compare with expected */
     match = (strcmp(local_name, expected_name) == 0);
     
-    taurus_free(name_copy);
+    leptris_free(name_copy);
     
     if (!match) {
-        taurus_parse_context_set_error(ctx,
+        leptris_parse_context_set_error(ctx,
             "Mismatched end tag at line %d, column %d: expected %s",
             ctx->line, ctx->column, expected_name);
         return -1;
     }
     
     /* Expect '>' */
-    taurus_skip_whitespace(&ctx->pos, ctx->end);
+    leptris_skip_whitespace(&ctx->pos, ctx->end);
     if (ctx->pos >= ctx->end || *ctx->pos != '>') {
-        taurus_parse_context_set_error(ctx,
+        leptris_parse_context_set_error(ctx,
             "Expected '>' in end tag at line %d, column %d", ctx->line, ctx->column);
         return -1;
     }
@@ -188,9 +188,9 @@ int parse_end_tag(TaurusParseContext *ctx, const char *expected_name) {
 
 /* Parse complete element (start tag, content, end tag)
  * Returns newly created element or NULL on error */
-struct taurus_element *parse_element(TaurusParseContext *ctx,
-                                      struct taurus_element *parent) {
-    struct taurus_element *elem;
+struct leptris_element *parse_element(LeptrisParseContext *ctx,
+                                      struct leptris_element *parent) {
+    struct leptris_element *elem;
     uintptr_t elem_ptr;
     int self_closing;
     
@@ -201,7 +201,7 @@ struct taurus_element *parse_element(TaurusParseContext *ctx,
     /* Check if self-closing (encoded in lowest bit) */
     elem_ptr = (uintptr_t)elem;
     self_closing = elem_ptr & 1;
-    elem = (struct taurus_element*)(elem_ptr & ~1);
+    elem = (struct leptris_element*)(elem_ptr & ~1);
     
     /* If self-closing, we're done */
     if (self_closing) {
@@ -210,7 +210,7 @@ struct taurus_element *parse_element(TaurusParseContext *ctx,
     
     /* Parse content */
     while (ctx->pos < ctx->end) {
-        taurus_skip_whitespace(&ctx->pos, ctx->end);
+        leptris_skip_whitespace(&ctx->pos, ctx->end);
         
         if (ctx->pos >= ctx->end) break;
         
@@ -218,8 +218,8 @@ struct taurus_element *parse_element(TaurusParseContext *ctx,
             ctx->pos++;
             
             if (ctx->pos >= ctx->end) {
-                taurus_parse_context_set_error(ctx, "Unexpected end after '<' at line %d, column %d", ctx->line, ctx->column);
-                taurus_element_free_tree(elem);
+                leptris_parse_context_set_error(ctx, "Unexpected end after '<' at line %d, column %d", ctx->line, ctx->column);
+                leptris_element_free_tree(elem);
                 return NULL;
             }
             
@@ -232,7 +232,7 @@ struct taurus_element *parse_element(TaurusParseContext *ctx,
                 /* Comment */
                 ctx->pos += 3;  /* Skip '!--' */
                 if (skip_comment(ctx) < 0) {
-                    taurus_element_free_tree(elem);
+                    leptris_element_free_tree(elem);
                     return NULL;
                 }
             } else if (ctx->pos + 7 < ctx->end &&
@@ -243,16 +243,16 @@ struct taurus_element *parse_element(TaurusParseContext *ctx,
                 size_t len;
                 const char *cdata = parse_cdata(ctx, &len);
                 if (!cdata) {
-                    taurus_element_free_tree(elem);
+                    leptris_element_free_tree(elem);
                     return NULL;
                 }
                 /* Add CDATA as text content */
                 add_text_to_element(elem, cdata, len);
             } else {
                 /* Child element - already positioned at element name after '<' */
-                struct taurus_element *child = parse_element(ctx, elem);
+                struct leptris_element *child = parse_element(ctx, elem);
                 if (!child) {
-                    taurus_element_free_tree(elem);
+                    leptris_element_free_tree(elem);
                     return NULL;
                 }
                 /* child already added to elem by parse_start_tag */
@@ -269,7 +269,7 @@ struct taurus_element *parse_element(TaurusParseContext *ctx,
     
     /* Parse end tag */
     if (parse_end_tag(ctx, elem->name) < 0) {
-        taurus_element_free_tree(elem);
+        leptris_element_free_tree(elem);
         return NULL;
     }
     

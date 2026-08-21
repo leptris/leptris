@@ -6,7 +6,7 @@
 
 ## Original concern
 
-`src/taurus/parse/compact_parser.c:375`:
+`src/leptris/parse/compact_parser.c:375`:
 
 ```c
 /* TODO: Link text nodes as children */
@@ -15,11 +15,11 @@
 
 ## Investigation outcome
 
-`grep -rn "parse_compact_document\|compact_parse" src/taurus/taurus.c src/taurus/parse/parser_new.c`
+`grep -rn "parse_compact_document\|compact_parse" src/leptris/leptris.c src/leptris/parse/parser_new.c`
 returns **no matches**. The compact parser is compiled into the
 library (it's listed in `src/CMakeLists.txt`) but **no entry point
 calls into it**. The active parser is `parser_new.c`; documents flow
-through `taurus_parse` → `parser_create_writable` →
+through `leptris_parse` → `parser_create_writable` →
 `parser_parse_document` in `parser_new.c`. The compact parser is a
 parallel implementation that was never integrated.
 

@@ -13,7 +13,7 @@
  *
  * Runs in ~5 seconds on CI hardware (vs 30+ seconds for 15,000). */
 #include <gtest/gtest.h>
-#include <taurus.h>
+#include <leptris.h>
 #include <string>
 #include <vector>
 
@@ -36,29 +36,29 @@ TEST(HighDocCountStress, ParseVerifyFree5000Docs) {
 
     const int BATCH = 500;
     const int ROUNDS = 10;
-    std::vector<TaurusDocument> docs(BATCH);
+    std::vector<LeptrisDocument> docs(BATCH);
 
     for (int round = 0; round < ROUNDS; round++) {
         /* Parse a batch */
         for (int i = 0; i < BATCH; i++) {
-            TaurusStatus st = TAURUS_OK;
-            docs[i] = taurus_parse_string(xml.data(), xml.size(), &st);
+            LeptrisStatus st = LEPTRIS_OK;
+            docs[i] = leptris_parse_string(xml.data(), xml.size(), &st);
             ASSERT_NE(docs[i], nullptr)
                 << "parse failed at round " << round << " doc " << i
                 << " status=" << st;
         }
         /* Verify tree integrity on each doc */
         for (int i = 0; i < BATCH; i++) {
-            TaurusElement root = taurus_document_root(docs[i]);
+            LeptrisElement root = leptris_document_root(docs[i]);
             ASSERT_NE(root, nullptr);
-            size_t cc = taurus_element_child_count(root);
+            size_t cc = leptris_element_child_count(root);
             EXPECT_EQ(cc, 1000u)
                 << "child_count corruption at round " << round
                 << " doc " << i;
         }
         /* Free the batch */
         for (int i = 0; i < BATCH; i++) {
-            taurus_document_free(docs[i]);
+            leptris_document_free(docs[i]);
         }
     }
     SUCCEED() << ROUNDS * BATCH << " docs parsed, verified, freed";

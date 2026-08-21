@@ -1,9 +1,9 @@
-/* Taurus DOM Modification API Performance Benchmarks
+/* Leptris DOM Modification API Performance Benchmarks
  * Phase 19 Session 2 - Performance Validation
  * Tests all 10 new DOM APIs introduced in Phase 18 and Phase 19
  */
 
-#include "taurus.h"
+#include "leptris.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,15 +21,15 @@
 } while(0)
 
 // Helper: Create document with N children
-TaurusDocument create_test_doc_with_children(int count) {
-    TaurusDocument doc = taurus_parse_string("<root/>", 7, NULL);
-    TaurusElement root = taurus_document_root(doc);
+LeptrisDocument create_test_doc_with_children(int count) {
+    LeptrisDocument doc = leptris_parse_string("<root/>", 7, NULL);
+    LeptrisElement root = leptris_document_root(doc);
     for (int i = 0; i < count; i++) {
-        TaurusElement child = taurus_element_create(doc, "item");
+        LeptrisElement child = leptris_element_create(doc, "item");
         char id[16];
         snprintf(id, sizeof(id), "%d", i);
-        taurus_element_set_attribute(child, "id", id);
-        taurus_element_append_child(root, child);
+        leptris_element_set_attribute(child, "id", id);
+        leptris_element_append_child(root, child);
     }
     return doc;
 }
@@ -41,40 +41,40 @@ void bench_child_access(void) {
     printf("╚════════════════════════════════════════════════════════╝\n");
 
     // Setup: Create document with 100 children
-    TaurusDocument doc = create_test_doc_with_children(100);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisDocument doc = create_test_doc_with_children(100);
+    LeptrisElement root = leptris_document_root(doc);
 
     // Baseline: child by index (existing API)
     MEASURE_TIME("child(index=50)", {
-        TaurusElement elem = taurus_element_child(root, 50);
+        LeptrisElement elem = leptris_element_child(root, 50);
         (void)elem;
     });
 
     // New: first_child by name
     MEASURE_TIME("first_child(name)", {
-        TaurusElement elem = taurus_element_first_child(root, "item");
+        LeptrisElement elem = leptris_element_first_child(root, "item");
         (void)elem;
     });
 
     // New: last_child by name
     MEASURE_TIME("last_child(name)", {
-        TaurusElement elem = taurus_element_last_child(root, "item");
+        LeptrisElement elem = leptris_element_last_child(root, "item");
         (void)elem;
     });
 
     // New: first_child (any)
     MEASURE_TIME("first_child(NULL)", {
-        TaurusElement elem = taurus_element_first_child(root, NULL);
+        LeptrisElement elem = leptris_element_first_child(root, NULL);
         (void)elem;
     });
 
     // New: last_child (any)
     MEASURE_TIME("last_child(NULL)", {
-        TaurusElement elem = taurus_element_last_child(root, NULL);
+        LeptrisElement elem = leptris_element_last_child(root, NULL);
         (void)elem;
     });
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // Category B: Sibling Navigation Benchmarks
@@ -83,35 +83,35 @@ void bench_sibling_navigation(void) {
     printf("║         Sibling Navigation Benchmarks                 ║\n");
     printf("╚════════════════════════════════════════════════════════╝\n");
 
-    TaurusDocument doc = create_test_doc_with_children(100);
-    TaurusElement root = taurus_document_root(doc);
-    TaurusElement elem = taurus_element_child(root, 50);
+    LeptrisDocument doc = create_test_doc_with_children(100);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement elem = leptris_element_child(root, 50);
 
     // New: next_sibling by name
     MEASURE_TIME("next_sibling(name)", {
-        TaurusElement next = taurus_element_next_sibling(elem, "item");
+        LeptrisElement next = leptris_element_next_sibling(elem, "item");
         (void)next;
     });
 
     // New: previous_sibling by name
     MEASURE_TIME("previous_sibling(name)", {
-        TaurusElement prev = taurus_element_previous_sibling(elem, "item");
+        LeptrisElement prev = leptris_element_previous_sibling(elem, "item");
         (void)prev;
     });
 
     // New: next_sibling (any)
     MEASURE_TIME("next_sibling(NULL)", {
-        TaurusElement next = taurus_element_next_sibling(elem, NULL);
+        LeptrisElement next = leptris_element_next_sibling(elem, NULL);
         (void)next;
     });
 
     // New: previous_sibling (any)
     MEASURE_TIME("previous_sibling(NULL)", {
-        TaurusElement prev = taurus_element_previous_sibling(elem, NULL);
+        LeptrisElement prev = leptris_element_previous_sibling(elem, NULL);
         (void)prev;
     });
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // Category C: Element Insertion Benchmarks
@@ -122,43 +122,43 @@ void bench_element_insertion(void) {
 
     // Test append_child (baseline - Phase 15)
     printf("\nBaseline (Phase 15):\n");
-    TaurusDocument doc1 = taurus_parse_string("<root/>", 7, NULL);
-    TaurusElement root1 = taurus_document_root(doc1);
+    LeptrisDocument doc1 = leptris_parse_string("<root/>", 7, NULL);
+    LeptrisElement root1 = leptris_document_root(doc1);
     MEASURE_TIME("append_child", {
-        TaurusElement child = taurus_element_create(doc1, "item");
-        taurus_element_append_child(root1, child);
+        LeptrisElement child = leptris_element_create(doc1, "item");
+        leptris_element_append_child(root1, child);
     });
-    taurus_document_free(doc1);
+    leptris_document_free(doc1);
 
     // Test prepend_child (new - Phase 18)
     printf("\nNew APIs (Phase 18):\n");
-    TaurusDocument doc2 = taurus_parse_string("<root/>", 7, NULL);
-    TaurusElement root2 = taurus_document_root(doc2);
+    LeptrisDocument doc2 = leptris_parse_string("<root/>", 7, NULL);
+    LeptrisElement root2 = leptris_document_root(doc2);
     MEASURE_TIME("prepend_child", {
-        TaurusElement child = taurus_element_create(doc2, "item");
-        taurus_element_prepend_child(root2, child);
+        LeptrisElement child = leptris_element_create(doc2, "item");
+        leptris_element_prepend_child(root2, child);
     });
-    taurus_document_free(doc2);
+    leptris_document_free(doc2);
 
     // Test insert_before (new - Phase 18)
-    TaurusDocument doc3 = create_test_doc_with_children(10);
-    TaurusElement root3 = taurus_document_root(doc3);
-    TaurusElement sibling = taurus_element_child(root3, 5);
+    LeptrisDocument doc3 = create_test_doc_with_children(10);
+    LeptrisElement root3 = leptris_document_root(doc3);
+    LeptrisElement sibling = leptris_element_child(root3, 5);
     MEASURE_TIME("insert_before", {
-        TaurusElement child = taurus_element_create(doc3, "item");
-        taurus_element_insert_before(sibling, child);
+        LeptrisElement child = leptris_element_create(doc3, "item");
+        leptris_element_insert_before(sibling, child);
     });
-    taurus_document_free(doc3);
+    leptris_document_free(doc3);
 
     // Test insert_after (new - Phase 18)
-    TaurusDocument doc4 = create_test_doc_with_children(10);
-    TaurusElement root4 = taurus_document_root(doc4);
-    TaurusElement sibling2 = taurus_element_child(root4, 5);
+    LeptrisDocument doc4 = create_test_doc_with_children(10);
+    LeptrisElement root4 = leptris_document_root(doc4);
+    LeptrisElement sibling2 = leptris_element_child(root4, 5);
     MEASURE_TIME("insert_after", {
-        TaurusElement child = taurus_element_create(doc4, "item");
-        taurus_element_insert_after(sibling2, child);
+        LeptrisElement child = leptris_element_create(doc4, "item");
+        leptris_element_insert_after(sibling2, child);
     });
-    taurus_document_free(doc4);
+    leptris_document_free(doc4);
 }
 
 // Category D: Find Operation Benchmarks
@@ -167,22 +167,22 @@ void bench_find_operations(void) {
     printf("║           Find Operation Benchmarks                   ║\n");
     printf("╚════════════════════════════════════════════════════════╝\n");
 
-    TaurusDocument doc = create_test_doc_with_children(100);
-    TaurusElement root = taurus_document_root(doc);
+    LeptrisDocument doc = create_test_doc_with_children(100);
+    LeptrisElement root = leptris_document_root(doc);
 
     // New: find_child (Phase 18)
     MEASURE_TIME("find_child", {
-        TaurusElement found = taurus_element_find_child(root, "item");
+        LeptrisElement found = leptris_element_find_child(root, "item");
         (void)found;
     });
 
     // New: find_child_by_attr (Phase 18)
     MEASURE_TIME("find_child_by_attr", {
-        TaurusElement found = taurus_element_find_child_by_attr(root, "item", "id", "50");
+        LeptrisElement found = leptris_element_find_child_by_attr(root, "item", "id", "50");
         (void)found;
     });
 
-    taurus_document_free(doc);
+    leptris_document_free(doc);
 }
 
 // Category E: Attribute Operation Benchmarks
@@ -194,33 +194,33 @@ void bench_attribute_operations(void) {
     // Phase 15 baseline: set_attribute
     // Test with single attribute updates to avoid accumulation
     printf("\nBaseline (Phase 15):\n");
-    TaurusDocument doc1 = taurus_parse_string("<root/>", 7, NULL);
-    TaurusElement root1 = taurus_document_root(doc1);
+    LeptrisDocument doc1 = leptris_parse_string("<root/>", 7, NULL);
+    LeptrisElement root1 = leptris_document_root(doc1);
     MEASURE_TIME("set_attribute", {
-        taurus_element_set_attribute(root1, "id", "test");
+        leptris_element_set_attribute(root1, "id", "test");
     });
-    taurus_document_free(doc1);
+    leptris_document_free(doc1);
 
     // New: remove_attribute (Phase 18)
     printf("\nNew APIs (Phase 18):\n");
-    TaurusDocument doc2 = taurus_parse_string("<root/>", 7, NULL);
-    TaurusElement root2 = taurus_document_root(doc2);
+    LeptrisDocument doc2 = leptris_parse_string("<root/>", 7, NULL);
+    LeptrisElement root2 = leptris_document_root(doc2);
     MEASURE_TIME("remove_attribute", {
-        taurus_element_set_attribute(root2, "temp", "value");
-        taurus_element_remove_attribute(root2, "temp");
+        leptris_element_set_attribute(root2, "temp", "value");
+        leptris_element_remove_attribute(root2, "temp");
     });
-    taurus_document_free(doc2);
+    leptris_document_free(doc2);
 
     // New: remove_all_attributes (Phase 18)
-    TaurusDocument doc3 = taurus_parse_string("<root/>", 7, NULL);
-    TaurusElement root3 = taurus_document_root(doc3);
+    LeptrisDocument doc3 = leptris_parse_string("<root/>", 7, NULL);
+    LeptrisElement root3 = leptris_document_root(doc3);
     MEASURE_TIME("remove_all_attributes", {
-        taurus_element_set_attribute(root3, "a", "1");
-        taurus_element_set_attribute(root3, "b", "2");
-        taurus_element_set_attribute(root3, "c", "3");
-        taurus_element_remove_all_attributes(root3);
+        leptris_element_set_attribute(root3, "a", "1");
+        leptris_element_set_attribute(root3, "b", "2");
+        leptris_element_set_attribute(root3, "c", "3");
+        leptris_element_remove_all_attributes(root3);
     });
-    taurus_document_free(doc3);
+    leptris_document_free(doc3);
 }
 
 // Memory leak validation test (separate from performance benchmarks)
@@ -232,45 +232,45 @@ void validate_memory(void) {
 
     // Test all APIs 100 times to validate no memory leaks
     for (int i = 0; i < 100; i++) {
-        TaurusDocument doc = create_test_doc_with_children(10);
-        TaurusElement root = taurus_document_root(doc);
+        LeptrisDocument doc = create_test_doc_with_children(10);
+        LeptrisElement root = leptris_document_root(doc);
 
         // Test all navigation APIs
-        TaurusElement first = taurus_element_first_child(root, "item");
-        TaurusElement last = taurus_element_last_child(root, "item");
+        LeptrisElement first = leptris_element_first_child(root, "item");
+        LeptrisElement last = leptris_element_last_child(root, "item");
         if (first) {
-            TaurusElement next = taurus_element_next_sibling(first, "item");
+            LeptrisElement next = leptris_element_next_sibling(first, "item");
             (void)next;
         }
         if (last) {
-            TaurusElement prev = taurus_element_previous_sibling(last, "item");
+            LeptrisElement prev = leptris_element_previous_sibling(last, "item");
             (void)prev;
         }
 
         // Test find APIs
-        TaurusElement found = taurus_element_find_child(root, "item");
-        TaurusElement found_by_attr = taurus_element_find_child_by_attr(root, "item", "id", "5");
+        LeptrisElement found = leptris_element_find_child(root, "item");
+        LeptrisElement found_by_attr = leptris_element_find_child_by_attr(root, "item", "id", "5");
         (void)found;
         (void)found_by_attr;
 
         // Test modification APIs
-        TaurusElement new_elem = taurus_element_create(doc, "new");
-        taurus_element_prepend_child(root, new_elem);
+        LeptrisElement new_elem = leptris_element_create(doc, "new");
+        leptris_element_prepend_child(root, new_elem);
 
-        TaurusElement another = taurus_element_create(doc, "another");
-        TaurusElement sibling = taurus_element_child(root, 5);
+        LeptrisElement another = leptris_element_create(doc, "another");
+        LeptrisElement sibling = leptris_element_child(root, 5);
         if (sibling) {
-            taurus_element_insert_before(sibling, another);
+            leptris_element_insert_before(sibling, another);
         }
 
         // Test attribute APIs
-        taurus_element_set_attribute(new_elem, "test", "value");
-        taurus_element_remove_attribute(new_elem, "test");
-        taurus_element_set_attribute(new_elem, "a", "1");
-        taurus_element_set_attribute(new_elem, "b", "2");
-        taurus_element_remove_all_attributes(new_elem);
+        leptris_element_set_attribute(new_elem, "test", "value");
+        leptris_element_remove_attribute(new_elem, "test");
+        leptris_element_set_attribute(new_elem, "a", "1");
+        leptris_element_set_attribute(new_elem, "b", "2");
+        leptris_element_remove_all_attributes(new_elem);
 
-        taurus_document_free(doc);
+        leptris_document_free(doc);
     }
 
     printf("✓ Memory validation complete (run 'leaks' tool to verify)\n");

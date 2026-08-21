@@ -6,32 +6,32 @@
 
 ## Original concern
 
-Strings inside a `TaurusDocument` had three apparent lifetimes:
+Strings inside a `LeptrisDocument` had three apparent lifetimes:
 
 1. **Pool-owned** — node names, attribute values, text content.
 2. **Document-owned but heap-allocated** — `doc->xml_buffer` (the
    parse input copy).
 3. **Caller-owned** — `doc->xml_buffer` when the caller used
-   `taurus_parse_string_inplace`.
+   `leptris_parse_string_inplace`.
 
 ## Investigation outcome
 
 Lifetime #3 is the **intentional API contract** for
-`taurus_parse_string_inplace`. The caller opts into zero-copy by
+`leptris_parse_string_inplace`. The caller opts into zero-copy by
 passing their own buffer; they retain ownership. The
 `xml_buffer_needs_free` flag tracks this.
 
 Lifetime #2 is necessary because:
-- The pool is created BEFORE the xml_buffer copy (see `taurus_parse`).
-- Even if we pool-allocated xml_buffer, the pool's TaurusBigAlloc
+- The pool is created BEFORE the xml_buffer copy (see `leptris_parse`).
+- Even if we pool-allocated xml_buffer, the pool's LeptrisBigAlloc
   side-list would track it — net effect: same lifetime, more
   indirection.
 
-Conditional free in `taurus_document_free` is correct and well-documented:
+Conditional free in `leptris_document_free` is correct and well-documented:
 
 ```c
 if (doc->xml_buffer && doc->xml_buffer_needs_free) {
-    TAURUS_FREE(doc->xml_buffer);
+    LEPTRIS_FREE(doc->xml_buffer);
 }
 ```
 

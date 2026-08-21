@@ -2,21 +2,21 @@
 
 ## Status
 
-**DONE.** Thread-local free-list for `struct taurus_xpath_result`
+**DONE.** Thread-local free-list for `struct leptris_xpath_result`
 added in evaluator.c, capping at 32 entries. Pattern mirrors
 the nodeset free-list (TODO 159 Phase B). The value union is
 reused as the next-pointer slot while the struct is on the
 free-list — no struct size change.
 
 Benchmark delta vs Phase G baseline is within noise on
-`bench_xpath_taurus` (6.34 µs vs 6.48 µs total wall); the win
+`bench_xpath_leptris` (6.34 µs vs 6.48 µs total wall); the win
 shows up at high call rates where malloc churn dominates.
 
 ## Why
 
-`taurus_xpath_result_new` allocates a `struct taurus_xpath_result`
-per `taurus_xpath_eval` call. The result is freed at the end of
-the call by `taurus_xpath_result_free`. On `bench_xpath_taurus`
+`leptris_xpath_result_new` allocates a `struct leptris_xpath_result`
+per `leptris_xpath_eval` call. The result is freed at the end of
+the call by `leptris_xpath_result_free`. On `bench_xpath_leptris`
 this is one malloc/free pair per query — small, but visible in
 profiles.
 
@@ -60,7 +60,7 @@ helper `xpath_result_new_nodeset(nodeset)` and use it from the
 
 ## Expected impact
 
-~5% on `bench_xpath_taurus` total wall time. Less than Phase B
+~5% on `bench_xpath_leptris` total wall time. Less than Phase B
 because there's only one result per call (vs ~3 nodesets).
 
 ## Status

@@ -1,0 +1,961 @@
+= libleptris(5)
+:doctype: manpage
+:man manual: Leptris Library Manual
+:man source: Leptris 2.0.0
+:man version: 2.0.0
+
+== NAME
+libleptris - fast XML parser and XPath evaluator C library
+
+== SYNOPSIS
+[source,c]
+----
+#include <leptris/leptris.h>
+
+// Compile and link:
+// gcc -o app app.c -lleptris
+// Or with pkg-config:
+// gcc -o app app.c $(pkg-config --cflags --libs leptris)
+----
+
+== DESCRIPTION
+*libleptris* is a high-performance C library for parsing XML documents and 
+evaluating XPath expressions. It provides complete implementations of:
+
+* XML 1.0 (Fifth Edition)
+* XML Namespaces 1.0 (Third Edition)  
+* XPath 1.0
+
+The library is designed for speed and standards compliance with zero external 
+dependencies. It uses SIMD optimizations where available and maintains minimal 
+memory overhead.
+
+=== Key Features
+
+* Fast XML parsing comparable to Ox
+* Complete XPath 1.0 with all 27 functions and 13 axes
+* Full namespace support with automatic resolution
+* Thread-safe error handling (per-thread error state)
+* Zero memory leaks (verified with valgrind)
+* No external dependencies (no libxml2)
+
+== API OVERVIEW
+
+The API is organized into functional groups:
+
+* *Document API* - Parsing and document management
+* *Element API* - DOM tree navigation and access
+* *Attribute API* - Attribute access and iteration
+* *Namespace API* - Namespace declaration and resolution
+* *XPath API* - XPath expression evaluation
+* *Error API* - Error handling and reporting
+
+== DATA STRUCTURES
+
+=== leptris_document
+
+Opaque structure representing a parsed XML document.
+
+[source,c]
+----
+typedef struct leptris_document leptris_document;
+----
+
+Created by `leptris_parse()`, freed by `leptris_document_free()`.
+
+=== leptris_element
+
+Opaque structure representing an XML element node.
+
+[source,c]
+----
+typedef struct leptris_element leptris_element;
+----
+
+Obtained from document or element navigation functions. Do not free directly.
+
+=== leptris_attribute
+
+Opaque structure representing an XML attribute.
+
+[source,c]
+----
+typedef struct leptris_attribute leptris_attribute;
+----
+
+Obtained from element attribute functions. Do not free directly.
+
+=== leptris_namespace
+
+Opaque structure representing a namespace declaration.
+
+[source,c]
+----
+typedef struct leptris_namespace leptris_namespace;
+----
+
+Obtained from element namespace functions. Do not free directly.
+
+=== leptris_xpath_result
+
+Opaque structure representing an XPath evaluation result.
+
+[source,c]
+----
+typedef struct leptris_xpath_result leptris_xpath_result;
+----
+
+Created by `leptris_xpath_eval()`, freed by `leptris_xpath_result_free()`.
+
+=== leptris_xpath_result_type
+
+Enumeration of XPath result types.
+
+[source,c]
+----
+typedef enum {
+    XPATH_RESULT_NODESET,   // Node-set
+    XPATH_RESULT_BOOLEAN,   // Boolean value
+    XPATH_RESULT_NUMBER,    // Numeric value
+    XPATH_RESULT_STRING     // String value
+} leptris_xpath_result_type;
+----
+
+=== leptris_error_code
+
+Enumeration of error codes.
+
+[source,c]
+----
+typedef enum {
+    LEPTRIS_OK = 0,              // No error
+    LEPTRIS_ERROR_PARSE,         // Parse error
+    LEPTRIS_ERROR_MEMORY,        // Memory allocation failure
+    LEPTRIS_ERROR_INVALID_ARG,   // Invalid argument
+    LEPTRIS_ERROR_XPATH,         // XPath evaluation error
+    LEPTRIS_ERROR_IO             // I/O error
+} leptris_error_code;
+----
+
+=== leptris_parse_options
+
+Structure for parse options.
+
+[source,c]
+----
+typedef struct {
+    int strict;                  // Strict parsing mode (1=on, 0=off)
+    int preserve_whitespace;     // Preserve all whitespace (1=on, 0=off)
+    int track_positions;         // Track line/column positions (1=on, 0=off)
+} leptris_parse_options;
+----
+
+== DOCUMENT API
+
+=== leptris_parse
+
+Parse XML string into document.
+
+[source,c]
+----
+leptris_document* leptris_parse(const char* xml, size_t len);
+----
+
+*Parameters*:
+
+* `xml` - XML string to parse (need not be null-terminated)
+* `len` - Length of XML string in bytes
+
+*Returns*: Document structure on success, NULL on error
+
+*Example*:
+[source,c]
+----
+const char* xml = "<root><item>Hello</item></root>";
+leptris_document* doc = leptris_parse(xml, strlen(xml));
+if (!doc) {
+    fprintf(stderr, "Parse error: %s\n", leptris_last_error());
+    return 1;
+}
+// Use document...
+leptris_document_free(doc);
+----
+
+=== leptris_parse_with_options
+
+Parse XML with custom options.
+
+[source,c]
+----
+leptris_document* leptris_parse_with_options(
+    const char* xml,
+    size_t len,
+    const leptris_parse_options* opts
+);
+----
+
+*Parameters*:
+
+* `xml` - XML string to parse
+* `len` - Length of XML string
+* `opts` - Parse options (NULL for defaults)
+
+*Returns*: Document structure on success, NULL on error
+
+=== leptris_document_free
+
+Free document and all its contents.
+
+[source,c]
+----
+void leptris_document_free(leptris_document* doc);
+----
+
+*Parameters*:
+
+* `doc` - Document to free (can be NULL)
+
+*Notes*: After calling, all elements, attributes, and data from this document 
+are invalid.
+
+=== leptris_document_root
+
+Get root element of document.
+
+[source,c]
+----
+leptris_element* leptris_document_root(leptris_document* doc);
+----
+
+*Parameters*:
+
+* `doc` - Document to query (must not be NULL)
+
+*Returns*: Root element, or NULL if document has no root
+
+=== leptris_document_encoding
+
+Get document encoding.
+
+[source,c]
+----
+const char* leptris_document_encoding(leptris_document* doc);
+----
+
+*Parameters*:
+
+* `doc` - Document to query (must not be NULL)
+
+*Returns*: Encoding string (e.g., "UTF-8"), or NULL if not specified
+
+== ELEMENT API
+
+=== leptris_element_name
+
+Get element name.
+
+[source,c]
+----
+const char* leptris_element_name(leptris_element* elem);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+
+*Returns*: Element local name (never NULL, but may be empty)
+
+=== leptris_element_text
+
+Get element text content.
+
+[source,c]
+----
+const char* leptris_element_text(leptris_element* elem);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+
+*Returns*: Concatenated text content (never NULL, but may be empty)
+
+=== leptris_element_parent
+
+Get parent element.
+
+[source,c]
+----
+leptris_element* leptris_element_parent(leptris_element* elem);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+
+*Returns*: Parent element, or NULL if element is root
+
+=== leptris_element_child_count
+
+Get number of child elements.
+
+[source,c]
+----
+size_t leptris_element_child_count(leptris_element* elem);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+
+*Returns*: Number of child elements (not including text nodes)
+
+=== leptris_element_child
+
+Get child element by index.
+
+[source,c]
+----
+leptris_element* leptris_element_child(leptris_element* elem, size_t index);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+* `index` - Index of child (0-based)
+
+*Returns*: Child element, or NULL if index out of bounds
+
+*Example*:
+[source,c]
+----
+size_t count = leptris_element_child_count(root);
+for (size_t i = 0; i < count; i++) {
+    leptris_element* child = leptris_element_child(root, i);
+    printf("Child %zu: %s\n", i, leptris_element_name(child));
+}
+----
+
+== ATTRIBUTE API
+
+=== leptris_element_attribute_count
+
+Get number of attributes.
+
+[source,c]
+----
+size_t leptris_element_attribute_count(leptris_element* elem);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+
+*Returns*: Number of attributes
+
+=== leptris_element_attribute
+
+Get attribute by index.
+
+[source,c]
+----
+leptris_attribute* leptris_element_attribute(
+    leptris_element* elem,
+    size_t index
+);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+* `index` - Index of attribute (0-based)
+
+*Returns*: Attribute, or NULL if index out of bounds
+
+=== leptris_element_get_attribute
+
+Get attribute value by name.
+
+[source,c]
+----
+const char* leptris_element_get_attribute(
+    leptris_element* elem,
+    const char* name
+);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+* `name` - Attribute name (must not be NULL)
+
+*Returns*: Attribute value, or NULL if not found
+
+*Example*:
+[source,c]
+----
+const char* id = leptris_element_get_attribute(elem, "id");
+if (id) {
+    printf("ID: %s\n", id);
+}
+----
+
+=== leptris_element_has_attribute
+
+Check if element has attribute.
+
+[source,c]
+----
+int leptris_element_has_attribute(
+    leptris_element* elem,
+    const char* name
+);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+* `name` - Attribute name (must not be NULL)
+
+*Returns*: 1 if attribute exists, 0 otherwise
+
+=== leptris_attribute_name
+
+Get attribute name.
+
+[source,c]
+----
+const char* leptris_attribute_name(leptris_attribute* attr);
+----
+
+*Parameters*:
+
+* `attr` - Attribute to query (must not be NULL)
+
+*Returns*: Attribute name (never NULL)
+
+=== leptris_attribute_value
+
+Get attribute value.
+
+[source,c]
+----
+const char* leptris_attribute_value(leptris_attribute* attr);
+----
+
+*Parameters*:
+
+* `attr` - Attribute to query (must not be NULL)
+
+*Returns*: Attribute value (never NULL, but may be empty)
+
+== NAMESPACE API
+
+=== leptris_element_namespace
+
+Get element namespace URI.
+
+[source,c]
+----
+const char* leptris_element_namespace(leptris_element* elem);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+
+*Returns*: Namespace URI, or NULL if element has no namespace
+
+=== leptris_element_prefix
+
+Get element namespace prefix.
+
+[source,c]
+----
+const char* leptris_element_prefix(leptris_element* elem);
+----
+
+*Parameters*:
+
+* `elem` - Element to query (must not be NULL)
+
+*Returns*: Namespace prefix, or NULL if no prefix
+
+=== leptris_element_resolve_namespace
+
+Resolve namespace prefix to URI.
+
+[source,c]
+----
+const char* leptris_element_resolve_namespace(
+    leptris_element* elem,
+    const char* prefix
+);
+----
+
+*Parameters*:
+
+* `elem` - Element to start search from (must not be NULL)
+* `prefix` - Namespace prefix to resolve (NULL for default namespace)
+
+*Returns*: Namespace URI, or NULL if prefix not found
+
+*Notes*: Searches up the element tree to find matching declaration.
+
+== XPATH API
+
+=== leptris_xpath_eval
+
+Evaluate XPath expression against document.
+
+[source,c]
+----
+leptris_xpath_result* leptris_xpath_eval(
+    leptris_document* doc,
+    const char* xpath_expr,
+    size_t expr_len
+);
+----
+
+*Parameters*:
+
+* `doc` - Document to evaluate against (must not be NULL)
+* `xpath_expr` - XPath expression string (must not be NULL)
+* `expr_len` - Length of expression string
+
+*Returns*: XPath result, or NULL on error
+
+*Example*:
+[source,c]
+----
+leptris_xpath_result* result = leptris_xpath_eval(doc, "//book", 6);
+if (!result) {
+    fprintf(stderr, "XPath error: %s\n", leptris_last_error());
+    return 1;
+}
+// Use result...
+leptris_xpath_result_free(result);
+----
+
+=== leptris_xpath_result_free
+
+Free XPath result.
+
+[source,c]
+----
+void leptris_xpath_result_free(leptris_xpath_result* result);
+----
+
+*Parameters*:
+
+* `result` - Result to free (can be NULL)
+
+=== leptris_xpath_result_get_type
+
+Get result type.
+
+[source,c]
+----
+leptris_xpath_result_type leptris_xpath_result_get_type(
+    const leptris_xpath_result* result
+);
+----
+
+*Parameters*:
+
+* `result` - Result to query (must not be NULL)
+
+*Returns*: Result type (nodeset, boolean, number, or string)
+
+=== leptris_xpath_result_as_boolean
+
+Get boolean value from result.
+
+[source,c]
+----
+int leptris_xpath_result_as_boolean(const leptris_xpath_result* result);
+----
+
+*Parameters*:
+
+* `result` - Result to convert (must not be NULL)
+
+*Returns*: Boolean value (0=false, 1=true)
+
+=== leptris_xpath_result_as_number
+
+Get number value from result.
+
+[source,c]
+----
+double leptris_xpath_result_as_number(const leptris_xpath_result* result);
+----
+
+*Parameters*:
+
+* `result` - Result to convert (must not be NULL)
+
+*Returns*: Numeric value (may be NaN or infinity)
+
+=== leptris_xpath_result_as_string
+
+Get string value from result.
+
+[source,c]
+----
+char* leptris_xpath_result_as_string(const leptris_xpath_result* result);
+----
+
+*Parameters*:
+
+* `result` - Result to convert (must not be NULL)
+
+*Returns*: String value (caller must free with `free()`)
+
+=== leptris_xpath_result_nodeset_size
+
+Get node-set size.
+
+[source,c]
+----
+size_t leptris_xpath_result_nodeset_size(
+    const leptris_xpath_result* result
+);
+----
+
+*Parameters*:
+
+* `result` - Result to query (must not be NULL)
+
+*Returns*: Number of nodes (0 if not a node-set)
+
+=== leptris_xpath_result_nodeset_get
+
+Get node from node-set.
+
+[source,c]
+----
+leptris_element* leptris_xpath_result_nodeset_get(
+    const leptris_xpath_result* result,
+    size_t index
+);
+----
+
+*Parameters*:
+
+* `result` - Result to query (must not be NULL)
+* `index` - Index of node (0-based)
+
+*Returns*: Element at index, or NULL if out of bounds
+
+*Example*:
+[source,c]
+----
+leptris_xpath_result* result = leptris_xpath_eval(doc, "//book", 6);
+size_t count = leptris_xpath_result_nodeset_size(result);
+for (size_t i = 0; i < count; i++) {
+    leptris_element* book = leptris_xpath_result_nodeset_get(result, i);
+    printf("Book: %s\n", leptris_element_text(book));
+}
+leptris_xpath_result_free(result);
+----
+
+== ERROR API
+
+=== leptris_last_error
+
+Get last error message.
+
+[source,c]
+----
+const char* leptris_last_error(void);
+----
+
+*Returns*: Error message string, or NULL if no error
+
+*Notes*: Thread-safe - each thread has its own error state.
+
+=== leptris_clear_error
+
+Clear last error.
+
+[source,c]
+----
+void leptris_clear_error(void);
+----
+
+=== leptris_last_error_code
+
+Get error code.
+
+[source,c]
+----
+leptris_error_code leptris_last_error_code(void);
+----
+
+*Returns*: Error code from leptris_error_code enum
+
+=== leptris_parse_error_line
+
+Get parse error line number.
+
+[source,c]
+----
+int leptris_parse_error_line(void);
+----
+
+*Returns*: Line number (1-based), or 0 if not available
+
+== EXAMPLES
+
+=== Basic XML Parsing
+
+[source,c]
+----
+#include <leptris/leptris.h>
+#include <stdio.h>
+#include <string.h>
+
+int main(void) {
+    const char* xml = "<root><item id=\"1\">Hello</item></root>";
+    
+    // Parse XML
+    leptris_document* doc = leptris_parse(xml, strlen(xml));
+    if (!doc) {
+        fprintf(stderr, "Parse error: %s\n", leptris_last_error());
+        return 1;
+    }
+    
+    // Access root element
+    leptris_element* root = leptris_document_root(doc);
+    printf("Root: %s\n", leptris_element_name(root));
+    
+    // Navigate children
+    size_t count = leptris_element_child_count(root);
+    for (size_t i = 0; i < count; i++) {
+        leptris_element* child = leptris_element_child(root, i);
+        printf("Child: %s = %s\n",
+            leptris_element_name(child),
+            leptris_element_text(child));
+    }
+    
+    // Cleanup
+    leptris_document_free(doc);
+    return 0;
+}
+----
+
+=== DOM Traversal
+
+[source,c]
+----
+#include <leptris/leptris.h>
+
+void print_element(leptris_element* elem, int depth) {
+    // Print indentation
+    for (int i = 0; i < depth; i++) printf("  ");
+    
+    // Print element name
+    printf("<%s", leptris_element_name(elem));
+    
+    // Print attributes
+    size_t attr_count = leptris_element_attribute_count(elem);
+    for (size_t i = 0; i < attr_count; i++) {
+        leptris_attribute* attr = leptris_element_attribute(elem, i);
+        printf(" %s=\"%s\"",
+            leptris_attribute_name(attr),
+            leptris_attribute_value(attr));
+    }
+    printf(">\n");
+    
+    // Print children recursively
+    size_t child_count = leptris_element_child_count(elem);
+    for (size_t i = 0; i < child_count; i++) {
+        leptris_element* child = leptris_element_child(elem, i);
+        print_element(child, depth + 1);
+    }
+}
+
+int main(void) {
+    const char* xml = "<root><a><b/></a><c/></root>";
+    leptris_document* doc = leptris_parse(xml, strlen(xml));
+    
+    print_element(leptris_document_root(doc), 0);
+    
+    leptris_document_free(doc);
+    return 0;
+}
+----
+
+=== XPath Query
+
+[source,c]
+----
+#include <leptris/leptris.h>
+
+int main(void) {
+    const char* xml = 
+        "<library>"
+        "  <book><title>C Programming</title></book>"
+        "  <book><title>XPath Guide</title></book>"
+        "</library>";
+    
+    leptris_document* doc = leptris_parse(xml, strlen(xml));
+    
+    // Execute XPath query
+    leptris_xpath_result* result = 
+        leptris_xpath_eval(doc, "//title", 7);
+    
+    // Process results
+    int type = leptris_xpath_result_get_type(result);
+    if (type == XPATH_RESULT_NODESET) {
+        size_t count = leptris_xpath_result_nodeset_size(result);
+        printf("Found %zu titles:\n", count);
+        
+        for (size_t i = 0; i < count; i++) {
+            leptris_element* elem = 
+                leptris_xpath_result_nodeset_get(result, i);
+            printf("  - %s\n", leptris_element_text(elem));
+        }
+    }
+    
+    leptris_xpath_result_free(result);
+    leptris_document_free(doc);
+    return 0;
+}
+----
+
+=== Error Handling
+
+[source,c]
+----
+#include <leptris/leptris.h>
+
+int main(void) {
+    const char* malformed = "<root><unclosed>";
+    
+    leptris_document* doc = leptris_parse(malformed, strlen(malformed));
+    if (!doc) {
+        printf("Parse failed!\n");
+        printf("Error: %s\n", leptris_last_error());
+        printf("Code: %d\n", leptris_last_error_code());
+        printf("Line: %d\n", leptris_parse_error_line());
+        return 1;
+    }
+    
+    leptris_document_free(doc);
+    return 0;
+}
+----
+
+=== Namespace Handling
+
+[source,c]
+----
+#include <leptris/leptris.h>
+
+int main(void) {
+    const char* xml = 
+        "<root xmlns:book=\"http://example.com/book\">"
+        "  <book:title>Example</book:title>"
+        "</root>";
+    
+    leptris_document* doc = leptris_parse(xml, strlen(xml));
+    leptris_element* root = leptris_document_root(doc);
+    
+    // Navigate to title
+    leptris_element* title = leptris_element_child(root, 0);
+    
+    printf("Element: %s\n", leptris_element_name(title));
+    printf("Prefix: %s\n", leptris_element_prefix(title));
+    printf("Namespace: %s\n", leptris_element_namespace(title));
+    
+    // Resolve namespace
+    const char* uri = leptris_element_resolve_namespace(title, "book");
+    printf("Resolved: %s\n", uri);
+    
+    leptris_document_free(doc);
+    return 0;
+}
+----
+
+== RETURN VALUES
+
+Most functions return pointers or values directly. NULL return indicates:
+
+* Object not found (element, attribute functions)
+* Error occurred (parse, XPath functions - check `leptris_last_error()`)
+* End of collection (child/attribute iteration)
+
+Functions never return NULL unless documented otherwise.
+
+== MEMORY MANAGEMENT
+
+=== Ownership Rules
+
+1. *Documents*: Caller owns, must free with `leptris_document_free()`
+2. *Elements/Attributes*: Owned by document, freed automatically
+3. *XPath Results*: Caller owns, must free with `leptris_xpath_result_free()`
+4. *Strings from functions*: Owned by object, do not free
+5. *Strings from `leptris_xpath_result_as_string()`*: Caller owns, must free with `free()`
+
+=== Thread Safety
+
+* Parsing is thread-safe if different documents
+* Error state is per-thread (thread-safe)
+* XPath evaluation is thread-safe if different documents
+* Do not share document pointers between threads
+
+=== Best Practices
+
+* Always check return values for NULL
+* Free documents and XPath results when done
+* Never free elements or attributes directly
+* Use `leptris_last_error()` to diagnose failures
+
+== FILES
+
+*/usr/local/include/leptris/leptris.h*::
+    Main header file
+
+*/usr/local/include/leptris/xpath.h*::
+    XPath API declarations
+
+*/usr/local/include/leptris/error.h*::
+    Error handling API
+
+*/usr/local/lib/libleptris.so*::
+    Shared library (Linux)
+
+*/usr/local/lib/libleptris.dylib*::
+    Shared library (macOS)
+
+*/usr/local/lib/libleptris.a*::
+    Static library
+
+*/usr/local/lib/pkgconfig/leptris.pc*::
+    pkg-config file
+
+== SEE ALSO
+
+*leptris*(1), *leptris-xpath*(1), *pkg-config*(1)
+
+== STANDARDS
+
+*libleptris* implements the following W3C specifications:
+
+* XML 1.0 (Fifth Edition) - https://www.w3.org/TR/xml/
+* XML Namespaces 1.0 (Third Edition) - https://www.w3.org/TR/xml-names/
+* XPath 1.0 - https://www.w3.org/TR/xpath-10/
+
+== BUGS
+
+Report bugs at: https://github.com/leptris/leptris/issues
+
+== COPYRIGHT
+
+Copyright (c) 2024 Ribose Inc. Licensed under the MIT License.
+
+== AUTHORS
+
+Developed by Ribose Inc. and contributors.

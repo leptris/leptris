@@ -12,19 +12,19 @@ This session merged 13 PRs to main (#23–#35):
 |-----|---------|
 | #23 | ASAN crash fixes (parser field init, SAX ns_prefixes) |
 | #24 | docs refresh (building.md, CHANGELOG) |
-| #25 | taurus.c phase 2 split (Node + XPath public API) |
+| #25 | leptris.c phase 2 split (Node + XPath public API) |
 | #26 | man page version drift |
-| #27 | taurus.c phase 3 split (Element query API) |
-| #28 | relocate taurus_element_hash_value |
+| #27 | leptris.c phase 3 split (Element query API) |
+| #28 | relocate leptris_element_hash_value |
 | #29 | XPath nodeset variable support (TODO 86) |
-| #30 | taurus.c phase 4 split (C14N) |
+| #30 | leptris.c phase 4 split (C14N) |
 | #31 | architecture review (TODO 70/93) |
 | #32 | namespace list fix (TODO 87) |
 | #33 | XInclude classifier implementations + process stub |
 | #34 | DTD validation stub + error_free |
 | #35 | arch review update |
 
-taurus.c went from **2646 → 900 lines**. Every previously
+leptris.c went from **2646 → 900 lines**. Every previously
 declared-but-undefined public API function now has a defined symbol.
 Test count: **105 → 114**. All 15 CI workflows green on main.
 
@@ -46,7 +46,7 @@ Local macOS debugging has not reproduced either.
 ### Large features with stubs in place
 
 - **TODO 91 (DTD validator)** — stub returns
-  `TAURUS_ERROR_NOT_IMPLEMENTED`. Full engine needs content-model
+  `LEPTRIS_ERROR_NOT_IMPLEMENTED`. Full engine needs content-model
   grammar matcher, ATTLIST enforcement, attribute type checking.
   Estimated 1-2 weeks.
 - **TODO 92 (XInclude processor)** — classifier helpers ship;
@@ -56,7 +56,7 @@ Local macOS debugging has not reproduced either.
 
 ### Large features not started
 
-- **TODO 89 (incremental SAX)** — `taurus_sax_parser_feed` is
+- **TODO 89 (incremental SAX)** — `leptris_sax_parser_feed` is
   one-shot under the hood. True incremental parsing requires
   resumable parser state at every chunk boundary.
 - **TODO 69 (XPath conformance suite)** — W3C test suite not in
@@ -71,9 +71,9 @@ Local macOS debugging has not reproduced either.
 ### Deferred / closed-no-change
 
 - **TODO 41 (unified string ownership)** — investigated; current
-  design is intentional for the `taurus_parse_string_inplace`
+  design is intentional for the `leptris_parse_string_inplace`
   zero-copy API.
-- **TODO 42 (taurus.c split)** — all 4 phases done.
+- **TODO 42 (leptris.c split)** — all 4 phases done.
 - **TODO 70/93 (architecture review)** — `docs/ARCHITECTURE_REVIEW.md`
   shipped.
 - **TODO 86 (XPath nodeset variables)** — implemented.
@@ -100,11 +100,11 @@ Local macOS debugging has not reproduced either.
 
 - All previously declared-but-undefined public API functions now
   have implementations (real or stubs returning NOT_IMPLEMENTED).
-- taurus.c is navigable (900 lines, focused on document lifecycle).
+- leptris.c is navigable (900 lines, focused on document lifecycle).
 - 4 new focused translation units (`node_public.c`,
   `element_query.c`, `xpath_public.c`, `c14n.c`).
 - Public headers have `_Static_assert` ABI-stability guards.
-- vcpkg overlay port under `ports/taurus/`.
+- vcpkg overlay port under `ports/leptris/`.
 - Architecture review captures state and known debt.
 - TODO.fix/ contains 35+ files documenting all work, completed
   and pending.

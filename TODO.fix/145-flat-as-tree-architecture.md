@@ -24,11 +24,11 @@ flat_parse  ──────────────▶  FlatDoc
                                   ↓
                               Compact-pointer tree (96 B elem)
                                   ↓
-                              Public API (TaurusElement)
+                              Public API (LeptrisElement)
 ```
 
 - FlatNode: 28 B + 12 B attr (zero-copy into input buffer)
-- TaurusElement: 96 B (pool-allocated, compact-pointer edges)
+- LeptrisElement: 96 B (pool-allocated, compact-pointer edges)
 - Promote cost: ~1.5 µs per element
 
 ## Target architecture
@@ -47,7 +47,7 @@ flat_parse  ──────────────▶  FlatDoc  ◀───
 ```
 
 - FlatNode grows to ~40 B (adds document back-pointer + a few flags)
-  but still 2.4× smaller than TaurusElement.
+  but still 2.4× smaller than LeptrisElement.
 - Promote becomes opt-in for mutation, not required for reads.
 
 ## Phases
@@ -57,15 +57,15 @@ flat_parse  ──────────────▶  FlatDoc  ◀───
 Add internal flat-mode accessors that operate directly on FlatDoc:
 
 ```c
-const char* flat_elem_name(struct taurus_document* doc, FlatNode* n);
-FlatNode* flat_elem_parent(struct taurus_document* doc, FlatNode* n);
-FlatNode* flat_elem_first_child(struct taurus_document* doc, FlatNode* n);
-FlatNode* flat_elem_next_sibling(struct taurus_document* doc, FlatNode* n);
+const char* flat_elem_name(struct leptris_document* doc, FlatNode* n);
+FlatNode* flat_elem_parent(struct leptris_document* doc, FlatNode* n);
+FlatNode* flat_elem_first_child(struct leptris_document* doc, FlatNode* n);
+FlatNode* flat_elem_next_sibling(struct leptris_document* doc, FlatNode* n);
 const char* flat_elem_attr_value(FlatNode* n, const char* name);
 size_t flat_elem_attr_count(FlatNode* n);
 ```
 
-Public API entry points (taurus_element_name, etc.) gain a dispatch:
+Public API entry points (leptris_element_name, etc.) gain a dispatch:
 if the doc has flat_doc and hasn't been mutated, route to flat
 accessors. No promote needed.
 
@@ -96,7 +96,7 @@ the cost is paid once at first mutation, not at first read.
 
 After Phase 3 stabilizes, remove the always-promote behavior. New
 default: FlatDoc is the tree; promote runs only when explicitly
-requested via a new taurus_document_compact() API for users who
+requested via a new leptris_document_compact() API for users who
 need the compact-pointer layout (rare).
 
 ## Expected performance after completion
@@ -115,7 +115,7 @@ don't mutate.
 
 ## Risk assessment
 
-- **ABI**: TaurusDocument remains opaque. TaurusElement semantics
+- **ABI**: LeptrisDocument remains opaque. LeptrisElement semantics
   shift (may point into FlatDoc OR compact tree), but the type is
   opaque so callers can't tell.
 - **Correctness**: 460+ existing specs must still pass. The dual-

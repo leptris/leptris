@@ -66,7 +66,7 @@ wiring-bound (already 1.54x).
 ## VERDICT (2026-08-17): two-pass v3 DEAD by floor probe; scanner ships as a primitive
 
 Phase 1 delivered the SIMD structural span scanner
-(`taurus_text_scan_events`, NEON + scalar, parity-tested over
+(`leptris_text_scan_events`, NEON + scalar, parity-tested over
 all-256-bytes / boundary lengths / realistic docs / 50 random
 buffers): **3.17 GB/s vs 0.46 GB/s for the scalar table loop —
 6.85x classification rate.** The movemask uses widen +
@@ -85,7 +85,7 @@ XL build.
 Final parse position: every architectural class is now measured —
 11 micro/structural experiments, the out-of-line split, and the
 SIMD two-pass floor. The single-pass parser is at a genuine
-global optimum on this compiler/hardware; taurus parses 6-14x
+global optimum on this compiler/hardware; leptris parses 6-14x
 faster than libxml2 and 1.5-1.8x behind pugixml, and that gap
 has no remaining lever of any known class. The scanner remains
 shipped infrastructure for future consumers (XInclude href

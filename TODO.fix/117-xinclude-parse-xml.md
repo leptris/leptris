@@ -17,7 +17,7 @@ Still missing:
 ## Plan
 
 ### Phase A — parse="xml" without xpointer
-- Resolve href → read file → call `taurus_parse_string` to get a `TaurusDocument`.
+- Resolve href → read file → call `leptris_parse_string` to get a `LeptrisDocument`.
 - Detach the root element from the included document (set document pointer to NULL).
 - Replace the xi:include element with the root element in the parent tree.
 - Free the included document struct (but NOT the root element pool, which gets adopted).
