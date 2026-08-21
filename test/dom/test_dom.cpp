@@ -456,6 +456,55 @@ TEST(ElementSetName, ShorterNameAlsoTruncatesCorrectly) {
     taurus_document_free(doc);
 }
 
+/* Regression (#450): sibling links from text nodes to element
+ * siblings are cp16-encoded (±256 KB). On large documents the
+ * element block sits farther than that from the text block, and the
+ * parser's raw store silently truncated — serialize then decoded
+ * into stale arena memory and segfaulted (heap-layout dependent,
+ * reliably reproducible around 90 KB of pretty-printed mixed
+ * content). The wiring must go through the encoder's overflow path.
+ * This spec builds a document large enough to cross the boundary. */
+TEST(LargeMixedContent, TextToElementSiblingLinksSurviveSerialize) {
+    std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<users>\n";
+    xml.reserve(220 * 1024);
+    for (int i = 0; i < 1200; i++) {
+        char buf[160];
+        std::snprintf(buf, sizeof buf,
+            "<user id=\"%d\"><name>User %d</name>"
+            "<created>2023-01-%02dT10:00:00Z</created></user>\n",
+            i, i, (i % 28) + 1);
+        xml += buf;
+    }
+    xml += "</users>\n";
+
+    TaurusStatus st = TAURUS_OK;
+    TaurusDocument doc = taurus_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Every element must remain reachable through the sibling chain
+     * (the truncated cp16 links broke exactly this walk). */
+    TaurusElement root = taurus_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    size_t users = 0;
+    for (TaurusElement u = taurus_element_first_child(root, "user"); u;
+         u = taurus_element_next_sibling(u, "user")) {
+        users++;
+    }
+    EXPECT_EQ(users, 1200u);
+
+    char* out = taurus_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    /* Round trip modulo the serializer's declaration handling: the
+     * newline after the declaration is not part of the tree. */
+    std::string expected = xml;
+    expected.erase(strlen("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"), 1);
+    ASSERT_EQ(expected.back(), '\n');
+    expected.pop_back(); /* top-level trailing ws is not in the tree */
+    EXPECT_EQ(std::string(out), expected);
+    taurus_free_string(out);
+    taurus_document_free(doc);
+}
+
 TEST(ElementSetAttribute, CreatesAndUpdates) {
     TaurusStatus st = TAURUS_OK;
     const char xml[] = "<r a='1'/>";
