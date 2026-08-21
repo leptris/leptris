@@ -20,6 +20,7 @@ ffi.cdef(
     typedef struct leptris_document* LeptrisDocument;
     typedef struct leptris_element*  LeptrisElement;
     typedef struct leptris_node*     LeptrisNodeRef;
+    typedef struct leptris_attribute* LeptrisAttribute;
     typedef struct leptris_xpath_result* LeptrisXPathResult;
 
     LeptrisDocument leptris_parse_string(const char* xml, size_t len, int* status);
@@ -41,9 +42,13 @@ ffi.cdef(
     LeptrisElement leptris_element_first_child_any(LeptrisElement elem);
     LeptrisElement leptris_element_parent(LeptrisElement elem);
     const char* leptris_element_attribute(LeptrisElement elem,
-                                         const char* name,
-                                         const char* default_value);
+                                         const char* name);
     LeptrisElement leptris_element_next_sibling_any(LeptrisElement elem);
+    LeptrisAttribute leptris_element_first_attribute(LeptrisElement elem);
+    LeptrisAttribute leptris_attribute_next(LeptrisAttribute attr);
+    const char* leptris_attribute_get_name(LeptrisAttribute attr);
+    const char* leptris_attribute_get_value(LeptrisElement elem,
+                                            LeptrisAttribute attr);
     size_t leptris_element_attribute_count(LeptrisElement elem);
     size_t leptris_element_child_count(LeptrisElement elem);
 

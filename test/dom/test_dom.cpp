@@ -69,6 +69,89 @@ TEST(DomBasics, ManyAttributesPerElementAreAllReachable) {
     leptris_document_free(doc);
 }
 
+TEST(DomBasics, AttributeHandleIterationWalksAll) {
+    /* TODO.remaining/06: handle-based iteration — O(n) total where
+     * the _at(index) accessors re-walk from the head per call. */
+    const char xml[] = "<r a='1' b='2' c='3'/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    const char* names[4] = {0};
+    const char* values[4] = {0};
+    size_t n = 0;
+    for (LeptrisAttribute a = leptris_element_first_attribute(root);
+         a && n < 4; a = leptris_attribute_next(a), n++) {
+        names[n] = leptris_attribute_get_name(a);
+        values[n] = leptris_attribute_get_value(root, a);
+    }
+
+    EXPECT_EQ(n, 3);
+    EXPECT_STREQ(names[0], "a");
+    EXPECT_STREQ(values[0], "1");
+    EXPECT_STREQ(names[1], "b");
+    EXPECT_STREQ(values[1], "2");
+    EXPECT_STREQ(names[2], "c");
+    EXPECT_STREQ(values[2], "3");
+
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, AttributeHandleIterationEmptyAndNullContracts) {
+    const char xml[] = "<r/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    EXPECT_EQ(leptris_element_first_attribute(root), nullptr);
+    EXPECT_EQ(leptris_attribute_next(nullptr), nullptr);
+    EXPECT_STREQ(leptris_attribute_get_name(nullptr), "");
+    EXPECT_STREQ(leptris_attribute_get_value(root, nullptr), "");
+
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, AttributeHandleValueExpandsEntities) {
+    const char xml[] = "<r t='a &amp; b &lt; c'/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    LeptrisAttribute a = leptris_element_first_attribute(root);
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_attribute_get_name(a), "t");
+    EXPECT_STREQ(leptris_attribute_get_value(root, a), "a & b < c");
+    /* Matches the by-name accessor's expansion contract. */
+    EXPECT_STREQ(leptris_element_attribute(root, "t"), "a & b < c");
+
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, AttributeHandleIterationSeesMutationAppends) {
+    const char xml[] = "<r a='1'/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    EXPECT_EQ(leptris_element_set_attribute(root, "b", "2"), LEPTRIS_OK);
+
+    size_t n = 0;
+    const char* last_name = nullptr;
+    for (LeptrisAttribute a = leptris_element_first_attribute(root);
+         a; a = leptris_attribute_next(a)) {
+        last_name = leptris_attribute_get_name(a);
+        n++;
+    }
+    EXPECT_EQ(n, 2);
+    EXPECT_STREQ(last_name, "b");
+
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, MultipleNamespacesPerElementAreAllReachable) {
     /* Regression for TODO 159 Phase G: parser-local last-ns cache
      * must wire every xmlns into the list. We verify by parsing an

@@ -920,6 +920,38 @@ LEPTRIS_API const char* leptris_element_attribute_value_at(LeptrisElement elem, 
     return NULL;
 }
 
+/* Handle-based attribute iteration (TODO.remaining/06). The _at
+ * accessors above re-walk the list from the head per call — index
+ * iteration is O(n^2); the handle pair is O(n) total and gives
+ * bindings a stable object to carry between calls. */
+LEPTRIS_API LeptrisAttribute leptris_element_first_attribute(LeptrisElement elem) {
+    return leptris_element_get_first_attribute(elem);
+}
+
+LEPTRIS_API LeptrisAttribute leptris_attribute_next(LeptrisAttribute attr) {
+    return attr ? leptris_attr_next(attr) : NULL;
+}
+
+LEPTRIS_API const char* leptris_attribute_get_name(LeptrisAttribute attr) {
+    return attr ? attr_cname(attr) : "";
+}
+
+LEPTRIS_API const char* leptris_attribute_get_value(LeptrisElement elem, LeptrisAttribute attr) {
+    if (!attr) return "";
+    if (attr_has_entities(attr)) {
+        LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
+        if (pool) {
+            char* decoded = leptris_decode_entities_view(
+                &attr->value_view, pool);
+            if (decoded) {
+                attr->value_view = leptris_sv_from_cstr(decoded);
+                attr_set_entities(attr, 0);
+            }
+        }
+    }
+    return attr_cvalue(attr);
+}
+
 LEPTRIS_API size_t leptris_element_namespace_count(LeptrisElement elem) {
     if (!elem) return 0;
     size_t count = 0;

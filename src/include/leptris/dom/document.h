@@ -97,24 +97,6 @@ LEPTRIS_API LeptrisDocument leptris_parse_string_inplace(char* xml, size_t lengt
 LEPTRIS_API LeptrisDocument leptris_parse_string_with_encoding(const char* xml, size_t length, LeptrisStatus* status);
 
 /**
- * Parse XML string using high-performance compact mode
- *
- * This function uses an optimized internal parser that stores DOM nodes in
- * contiguous memory blocks for maximum parsing speed, then converts to regular
- * format for use.
- *
- * @param xml XML string (must be valid UTF-8)
- * @param length Length of XML string in bytes
- * @param error_out Output error flag (0=success, 1=error)
- * @return Document handle or NULL on error
- *
- * Performance: Significantly faster than leptris_parse_string() for large documents
- * Memory: Caller must call leptris_document_free() when done
- * Thread safety: Not thread-safe. One document per thread.
- */
-LEPTRIS_API LeptrisDocument leptris_parse_string_compact(const char* xml, size_t length, int* error_out);
-
-/**
  * Load file into memory buffer
  *
  * Reads entire file into a newly allocated buffer. Caller must free the buffer.

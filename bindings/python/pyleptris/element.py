@@ -29,13 +29,30 @@ class Element:
 
     def attribute(self, name: str, default=None):
         value = _ffi.lib.leptris_element_attribute(
-            self._ptr, name.encode("utf-8"), _ffi.ffi.NULL
+            self._ptr, name.encode("utf-8")
         )
         if value == _ffi.ffi.NULL:
             return default
         return _ffi.ffi.string(value).decode("utf-8")
 
     __getitem__ = attribute
+
+    def attributes(self):
+        """Yield (name, value) for every attribute in document order.
+
+        Handle-based iteration — O(n) total where index-based access
+        re-walks the list per call.
+        """
+        attr = _ffi.lib.leptris_element_first_attribute(self._ptr)
+        while attr != _ffi.ffi.NULL:
+            name = _ffi.ffi.string(
+                _ffi.lib.leptris_attribute_get_name(attr)
+            ).decode("utf-8")
+            value = _ffi.ffi.string(
+                _ffi.lib.leptris_attribute_get_value(self._ptr, attr)
+            ).decode("utf-8")
+            yield (name, value)
+            attr = _ffi.lib.leptris_attribute_next(attr)
 
     @property
     def attribute_count(self) -> int:
