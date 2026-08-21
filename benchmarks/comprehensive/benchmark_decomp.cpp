@@ -56,7 +56,7 @@ int main(void){
         n=snappend(b,n,cap,"<r>");
         for (int e=0; e<5000 && n<cap-4096; e++) {
             n=snappend(b,n,cap,"<e");
-            for (int a=0;a<10;a++) n+=snprintf(b+n,cap-n," k%d='v%d'",a,e);
+            for (int a=0;a<10;a++) n=snappend(b,n,cap," k%d='v%d'",a,e);
             n=snappend(b,n,cap,"/>");
         }
         n=snappend(b,n,cap,"</r>");
