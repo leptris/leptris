@@ -90,4 +90,24 @@ RSpec.describe Leptris::Element do
     expect(children.length).to eq(1)
     expect(children[0].name).to eq('a')
   end
+
+  describe '#each_attribute' do
+    it 'yields name/value pairs in document order' do
+      doc2 = Leptris::Document.parse('<e a="1" b="2" c="3"/>')
+      pairs = doc2.root.each_attribute.to_a
+      expect(pairs).to eq([%w[a 1], %w[b 2], %w[c 3]])
+      doc2.free
+    end
+
+    it 'expands entities in values and yields nothing for bare elements' do
+      doc2 = Leptris::Document.parse('<e t="a &amp; b"/>')
+      expect(doc2.root.each_attribute.to_a).to eq([['t', 'a & b']])
+      doc2.free
+
+      doc3 = Leptris::Document.parse('<e/>')
+      expect(doc3.root.each_attribute.to_a).to eq([])
+      expect(doc3.root.attribute_count).to eq(0)
+      doc3.free
+    end
+  end
 end

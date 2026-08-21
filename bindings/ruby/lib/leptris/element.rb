@@ -28,6 +28,19 @@ module Leptris
       Leptris.leptris_element_attribute_count(@ptr)
     end
 
+    # Yields [name, value] for every attribute in document order.
+    # Handle-based iteration — O(n) total where index-based access
+    # re-walks the list per call.
+    def each_attribute
+      return enum_for(:each_attribute) unless block_given?
+      attr = Leptris.leptris_element_first_attribute(@ptr)
+      until attr.nil? || attr.null?
+        yield [Leptris.leptris_attribute_get_name(attr),
+               Leptris.leptris_attribute_get_value(@ptr, attr)]
+        attr = Leptris.leptris_attribute_next(attr)
+      end
+    end
+
     def parent
       p = Leptris.leptris_element_parent(@ptr)
       return nil if p.nil? || p.null?

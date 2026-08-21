@@ -520,24 +520,6 @@ LEPTRIS_API LeptrisElement leptris_parse_fragment(const char* xml,
 LEPTRIS_API LeptrisDocument leptris_parse_string_with_encoding(const char* xml, size_t length, LeptrisStatus* status);
 
 /**
- * Parse XML string using high-performance compact mode
- *
- * This function uses an optimized internal parser that stores DOM nodes in
- * contiguous memory blocks for maximum parsing speed, then converts to regular
- * format for use.
- *
- * @param xml XML string (must be valid UTF-8)
- * @param length Length of XML string in bytes
- * @param error_out Output error flag (0=success, 1=error)
- * @return Document handle or NULL on error
- *
- * Performance: Significantly faster than leptris_parse_string() for large documents
- * Memory: Caller must call leptris_document_free() when done
- * Thread safety: Not thread-safe. One document per thread.
- */
-LEPTRIS_API LeptrisDocument leptris_parse_string_compact(const char* xml, size_t length, int* error_out);
-
-/**
  * Load file into memory buffer
  *
  * Reads entire file into a newly allocated buffer. Caller must free the buffer.
@@ -1028,6 +1010,61 @@ LEPTRIS_API const char* leptris_element_attribute_name_at(LeptrisElement elem, s
  * Memory: String is owned by element. Do not free.
  */
 LEPTRIS_API const char* leptris_element_attribute_value_at(LeptrisElement elem, size_t index);
+
+/**
+ * Attribute iteration — first attribute of an element
+ *
+ * Handle-based iteration for bindings and C callers that want to
+ * walk attributes as objects rather than by index (each _at call
+ * re-walks the list from the head, making index iteration O(n^2);
+ * handle iteration is O(n) total).
+ *
+ * for (LeptrisAttribute a = leptris_element_first_attribute(e); a;
+ *      a = leptris_attribute_next(a)) { ... }
+ *
+ * @param elem Element
+ * @return First attribute handle, or NULL if the element has none
+ *
+ * Memory: Handles are owned by the document; do not free. Valid
+ * until the attribute is removed or the document is freed.
+ */
+LEPTRIS_API LeptrisAttribute leptris_element_first_attribute(LeptrisElement elem);
+
+/**
+ * Attribute iteration — next attribute
+ *
+ * @param attr Current attribute handle
+ * @return Next attribute handle, or NULL at the end of the list
+ *
+ * Memory: Same ownership as the incoming handle.
+ */
+LEPTRIS_API LeptrisAttribute leptris_attribute_next(LeptrisAttribute attr);
+
+/**
+ * Get an attribute's name from its handle
+ *
+ * @param attr Attribute handle
+ * @return Attribute name (empty string for a NULL handle)
+ *
+ * Memory: String is owned by the document. Do not free.
+ */
+LEPTRIS_API const char* leptris_attribute_get_name(LeptrisAttribute attr);
+
+/**
+ * Get an attribute's value from its handle
+ *
+ * Expands entity references on first access (same contract as
+ * leptris_element_attribute). The element argument supplies the
+ * document pool for expansion — attr must belong to elem.
+ *
+ * @param elem Owning element
+ * @param attr Attribute handle (must belong to elem)
+ * @return Attribute value with entities expanded (empty string for
+ *         a NULL handle)
+ *
+ * Memory: String is owned by the document. Do not free.
+ */
+LEPTRIS_API const char* leptris_attribute_get_value(LeptrisElement elem, LeptrisAttribute attr);
 
 /**
  * Get number of child elements

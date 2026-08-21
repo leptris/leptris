@@ -57,6 +57,19 @@ class TestElement:
         assert book.attribute("nope") is None
         assert book.attribute("nope", "x") == "x"
 
+    def test_attributes_iteration(self, doc):
+        book = doc.root.first_child_element
+        pairs = list(book.attributes())
+        assert pairs == [("id", "1"), ("lang", "en")]
+        assert book.attribute_count == 2
+
+    def test_attributes_entity_expansion_and_empty(self):
+        with Document.parse('<e t="a &amp; b"/>') as doc:
+            assert list(doc.root.attributes()) == [("t", "a & b")]
+        with Document.parse("<e/>") as doc:
+            assert list(doc.root.attributes()) == []
+            assert doc.root.attribute_count == 0
+
     def test_text(self, doc):
         book = doc.root.first_child_element
         assert book.text == "Ulysses"

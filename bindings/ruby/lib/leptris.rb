@@ -73,6 +73,14 @@ module Leptris
   attach_function :leptris_element_attribute, [:element, :string, :string], :string
   attach_function :leptris_element_next_sibling_any, [:element], :element
 
+  # ---- Attribute iteration (TODO.remaining/06) ----
+  typedef :pointer, :attribute
+  attach_function :leptris_element_attribute_count, [:element], :size_t
+  attach_function :leptris_element_first_attribute, [:element], :attribute
+  attach_function :leptris_attribute_next, [:attribute], :attribute
+  attach_function :leptris_attribute_get_name, [:attribute], :string
+  attach_function :leptris_attribute_get_value, [:element, :attribute], :string
+
   # ---- Text / Comment / CDATA / PI ----
   attach_function :leptris_text_node_get_content, [:node_ref], :string
   attach_function :leptris_comment_node_get_content, [:node_ref], :string

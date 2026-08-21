@@ -112,15 +112,6 @@ typedef struct compact_text {
 #define COMPACT_NODE_COMMENT 3
 #define COMPACT_NODE_PI      4
 
-/* ============================================================================
- * API for Compact Parsing
- * ============================================================================ */
-
-/* Parse document in compact mode - returns regular LeptrisDocument
- * (converts from compact to regular format internally) */
-struct leptris_document;
-LEPTRIS_API struct leptris_document* leptris_parse_string_compact(const char* xml, size_t length, int* error_out);
-
 #ifdef __cplusplus
 }
 #endif
