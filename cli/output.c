@@ -302,7 +302,7 @@ static void xml_print_nodeset_impl(
         if (IS_ATTRIBUTE_NODE(node_ptr)) {
             /* Attribute node - print as name="value" format */
             LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
-            if (attr && attr->name && attr->name[0] != '\0') {
+            if (attr->name && attr->name[0] != '\0') {
                 fprintf(out, "%s", attr->name);
                 if (attr->value) {
                     fprintf(out, "=\"%s\"", attr->value);
@@ -312,7 +312,7 @@ static void xml_print_nodeset_impl(
         } else if (IS_TEXT_NODE(node_ptr)) {
             /* Text node - print just the text content */
             XPathTextNode* text = (XPathTextNode*)node_ptr;
-            if (text && text->content && text->content[0] != '\0') {
+            if (text->content && text->content[0] != '\0') {
                 fprintf(out, "%s\n", text->content);
             }
         } else if (IS_ELEMENT_NODE(node_ptr)) {
@@ -560,10 +560,6 @@ static void json_print_nodeset_impl(
         if (IS_ATTRIBUTE_NODE(node_ptr)) {
             /* Attribute node - print as {"name":"value"} format */
             LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
-            if (!attr) {
-                fprintf(out, "null");
-                continue;
-            }
 
             fprintf(out, "{\"");
             if (attr->name) {
@@ -581,7 +577,7 @@ static void json_print_nodeset_impl(
         } else if (IS_TEXT_NODE(node_ptr)) {
             /* Text node - print as JSON string */
             XPathTextNode* text = (XPathTextNode*)node_ptr;
-            if (text && text->content) {
+            if (text->content) {
                 fprintf(out, "\"");
                 json_escape_string(text->content, out);
                 fprintf(out, "\"");
@@ -721,7 +717,7 @@ static void text_print_nodeset_impl(
         if (IS_ATTRIBUTE_NODE(node_ptr)) {
             /* Attribute node - print as name="value" format */
             LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
-            if (attr && attr->name) {
+            if (attr->name) {
                 fprintf(out, "%s", attr->name);
                 if (attr->value) {
                     fprintf(out, "=\"%s\"", attr->value);
@@ -731,7 +727,7 @@ static void text_print_nodeset_impl(
         } else if (IS_TEXT_NODE(node_ptr)) {
             /* Text node - print just the text content */
             XPathTextNode* text = (XPathTextNode*)node_ptr;
-            if (text && text->content && text->content[0] != '\0') {
+            if (text->content && text->content[0] != '\0') {
                 fprintf(out, "%s\n", text->content);
             }
         } else if (IS_ELEMENT_NODE(node_ptr)) {
