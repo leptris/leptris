@@ -1,13 +1,21 @@
 ## [Unreleased]
 
-## [0.26.6] - Y-08-21
+## [0.26.6] - 2026-08-21
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **Critical (#450)**: serialize segfaulted (use-after-free) on documents of
+  roughly 90 KB+ containing an encoding declaration. Root cause: the parser
+  stored whitespace-text → element sibling links with a raw 2-byte compact
+  pointer whose ±256 KB range is exceeded once the parse-time element and text
+  blocks grow with the document; the value silently truncated and tree walks
+  decoded into stale memory. The regression window measured v0.26.1 clean →
+  v0.26.2 crashing (the 40-byte attribute struct shifted block distances);
+  the underlying bug is as old as the bulk-block parser. Text sibling edges
+  are now int32 (size-neutral: the text node stays 64 bytes) and
+  comment/cdata/pi links route through the overflow-table encoder.
+  Regression spec added (1200-user mixed-content document, byte-exact
+  round-trip).
 
 
 ## [0.26.5] - 2026-08-21
