@@ -1,13 +1,14 @@
 ## [Unreleased]
 
-## [0.26.7] - Y-08-21
-
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+## [0.26.7] - 2026-08-21
 
 ### Changed
 
-- (describe changes here)
+- `taurus_element_set_attribute` 13% faster (180 → 157 ns/call, flat scaling to
+  4000 attributes): mutation attributes now carve from a per-document
+  40-byte-stride block (adjacent attributes keep their compact sibling edges
+  in-range), with names and values from the shared mutation name block. Long
+  values and allocation failures fall back to the pool.
 
 
 ## [0.26.6] - 2026-08-21
