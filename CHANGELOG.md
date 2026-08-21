@@ -1,13 +1,28 @@
 ## [Unreleased]
 
-## [1.0.0] - Y-08-21
-
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+## [1.0.0] - 2026-08-21
 
 ### Changed
 
-- (describe changes here)
+- **The rebrand: taurus is now leptris** — every public symbol, path, and
+  artifact renamed (`TaurusDocument` → `LeptrisDocument`,
+  `taurus_parse_string` → `leptris_parse_string`, `libtaurus` → `libleptris`,
+  `pytaurus` → `pyleptris`; library at `leptris/leptris`; Ruby gem `leptris`).
+  Breaking ABI and API rename — hence 1.0.0, the natural freeze point.
+- The name: the three hares of Dunhuang — three hares in a circle, three
+  ears among them. Speed of parse and edit; containment — hard resource
+  bounds and self-sufficiency.
+- CLI `--version` now reports the library version (was a hardcoded 0.1.0).
+
+### Fixed
+
+- XPath result double-free corrupted the internal free-list (CodeQL
+  critical): free-list entries park behind an internal sentinel and a
+  repeat `leptris_xpath_result_free` is a no-op.
+- All allocation-failure, large-document, and crash-class suites from
+  v0.26.8 carry over renamed; workflow permissions tightened; every
+  remaining CodeQL annotation cleared.
+
 
 
 ## [0.26.8] - 2026-08-21
