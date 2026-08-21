@@ -4,6 +4,8 @@
 #include "leptris.h"
 #include "leptris/dtd.h"
 #include <cstring>
+#include <cstdio>
+#include <string>
 
 namespace {
 
@@ -785,5 +787,319 @@ TEST(DtdValidate, ParameterEntityChainedReferencesExpand) {
 
     leptris_dtd_error_free(&err);
     leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+// ---- Phase 8: falsifiable enforcement (TODO 91 / TODO.remaining/03) ----
+//
+// The earlier INCLUDE/PE specs all paired the declaration with a
+// conforming document, so "declaration registered" and "declaration
+// lost" both returned 1 via the lenient undeclared-element path.
+// These specs distinguish the two: the document VIOLATES the
+// declaration, so a lost declaration flips the result.
+
+TEST(DtdValidate, IncludeSectionDeclIsEnforcedForValidation) {
+    /* If the INCLUDE body's <!ELEMENT root EMPTY> registers, the
+     * child element is a violation (rc 0). If the body's
+     * declarations were lost, the lenient path returns 1. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<![INCLUDE["
+        "<!ELEMENT root EMPTY>"
+        "]]>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, IncludeSectionKeepsDeclsAfterTheSection) {
+    /* Declarations following the conditional section must still be
+     * parsed — the INCLUDE handling cannot abort the rest of the
+     * subset. The #REQUIRED attribute declared after the section is
+     * enforced. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<![INCLUDE[<!ELEMENT a EMPTY>]]>"
+        "<!ATTLIST root req CDATA #REQUIRED>"
+        "<!ELEMENT root EMPTY>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(err.message, nullptr);
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, ParameterEntityDeclIsEnforcedForValidation) {
+    /* The declaration delivered by %e; must be live: <root> with a
+     * child violates the substituted <!ELEMENT root EMPTY>. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY % e \"<!ELEMENT root EMPTY>\">"
+        "%e;";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, ParameterEntityLargeSubstitutionRegisters) {
+    /* A PE value larger than any stack buffer (the old splice path
+     * capped at 8 KB and silently skipped). The substituted
+     * declarations plus the tail after the reference must all land. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    std::string big = "<!ENTITY % big \"";
+    for (int i = 0; i < 600; i++) {
+        char decl[48];
+        std::snprintf(decl, sizeof(decl), "<!ELEMENT filler%06d EMPTY>", i);
+        big += decl;
+    }
+    big += "\">%big;<!ELEMENT root EMPTY>";
+
+    LeptrisDTD* dtd = leptris_dtd_parse(big.c_str(), big.size());
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, ParameterEntitySelfReferenceTerminates) {
+    /* A self-referential parameter entity must not recurse forever.
+     * Depth is capped; the reference is skipped at the cap and the
+     * rest of the subset still parses. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY % a \"%a;\">"
+        "%a;"
+        "<!ELEMENT root EMPTY>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0); /* tail decl enforced — cycle skipped, not fatal */
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, EntityAttrRejectsUndeclaredNotation) {
+    /* ENTITY-typed value points at an unparsed entity whose NDATA
+     * notation was never declared via <!NOTATION>. Invalid. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<img src='pic'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY pic SYSTEM 'pic.png' NDATA gif>"
+        "<!ELEMENT img EMPTY>"
+        "<!ATTLIST img src ENTITY #REQUIRED>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0);
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, DuplicateElementDeclarationIsIgnoredNotFreed) {
+    /* Re-declaring an element is legal input (first declaration
+     * wins); the rejected duplicate is pool-owned and must simply be
+     * ignored — the old path free()d pool memory on rejection and
+     * corrupted the heap. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ELEMENT root (a,b)>"
+        "<!ELEMENT root ANY>"
+        "<!ENTITY dup 'one'>"
+        "<!ENTITY dup 'two'>"
+        "<!NOTATION n SYSTEM 'x'>"
+        "<!NOTATION n SYSTEM 'y'>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1); /* first decl (EMPTY) binds; <root/> conforms */
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, AttributeFirstDeclarationWins) {
+    /* XML 1.0 §3.3: when the same attribute is declared more than
+     * once, the FIRST declaration is binding. The #FIXED value from
+     * the first ATTLIST is enforced even though a second declares a
+     * different fixed value. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root x='wrong'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ATTLIST root x CDATA #FIXED 'right'>"
+        "<!ATTLIST root x CDATA #FIXED 'wrong'>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0); /* 'wrong' violates the first (#FIXED 'right') */
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+// ---- External subset (TODO.remaining/03) ------------------------------
+
+TEST(DtdValidate, DocumentGetDtdExposesInternalSubset) {
+    /* The document's parsed internal subset is reachable via
+     * leptris_document_get_dtd — the handle the app passes to
+     * leptris_dtd_validate. Document-owned: no leptris_dtd_free. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<!DOCTYPE root [<!ELEMENT root EMPTY>]><root/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+    ASSERT_NE(dtd, nullptr);
+    EXPECT_EQ(dtd, leptris_document_get_dtd(doc)); /* stable handle */
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1);
+
+    leptris_dtd_error_free(&err);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, ExternalSubsetMergesForValidation) {
+    /* DOCTYPE with only a SYSTEM id: no internal subset exists yet,
+     * so get_dtd creates an empty DTD on the document; the app feeds
+     * the external subset content in; declarations become live. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<!DOCTYPE root SYSTEM 'ext.dtd'><root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+    ASSERT_NE(dtd, nullptr);
+
+    const char ext[] = "<!ELEMENT root EMPTY>";
+    EXPECT_EQ(leptris_dtd_parse_external_subset(dtd, ext, std::strlen(ext)), 1);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0); /* EMPTY violated via the external subset */
+
+    leptris_dtd_error_free(&err);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, ExternalSubsetDoesNotOverrideInternal) {
+    /* First declaration wins: the internal subset's EMPTY beats the
+     * external subset's ANY re-declaration. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<!DOCTYPE root [<!ELEMENT root EMPTY>]><root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+    ASSERT_NE(dtd, nullptr);
+
+    const char ext[] = "<!ELEMENT root ANY>";
+    EXPECT_EQ(leptris_dtd_parse_external_subset(dtd, ext, std::strlen(ext)), 1);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0); /* internal EMPTY still binds */
+
+    leptris_dtd_error_free(&err);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, ExternalSubsetConditionalSectionsAndPEs) {
+    /* External subsets are where conditional sections and parameter
+     * entities are legal per XML 1.0 — the hook must handle both. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<!DOCTYPE root SYSTEM 'ext.dtd'><root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+    ASSERT_NE(dtd, nullptr);
+
+    const char ext[] =
+        "<!ENTITY % e \"<!ELEMENT root EMPTY>\">"
+        "%e;"
+        "<![INCLUDE[<!ELEMENT extra EMPTY>]]>";
+    EXPECT_EQ(leptris_dtd_parse_external_subset(dtd, ext, std::strlen(ext)), 1);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0); /* root EMPTY delivered via the PE, enforced */
+
+    leptris_dtd_error_free(&err);
     leptris_document_free(doc);
 }

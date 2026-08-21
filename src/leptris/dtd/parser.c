@@ -314,6 +314,15 @@ static DTDNotationDecl* dtd_parse_notation(DTDParser* p) {
     return notation;
 }
 
+/* Maximum parameter-entity substitution depth (TODO.remaining/03).
+ * Self- or mutually-recursive PEs (<!ENTITY % a "%a;">) would splice
+ * their own reference forever; at the cap the reference is skipped
+ * and parsing continues with the rest of the subset. */
+#define DTD_PE_MAX_DEPTH 16
+
+static void dtd_parse_into(LeptrisDTD* dtd, const char* dtd_content,
+                           size_t len, int depth);
+
 /**
  * Parse DTD internal subset
  *
@@ -328,6 +337,42 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
     /* Create DTD container backed by the document's pool (TODO 16). */
     LeptrisDTD* dtd = leptris_dtd_create(pool);
     if (!dtd) return NULL;
+
+    dtd_parse_into(dtd, dtd_content, len, 0);
+    return dtd;
+}
+
+/**
+ * Parse an external subset's content into an EXISTING DTD.
+ *
+ * The application owns I/O: read the resource named by the DOCTYPE
+ * system id (leptris_doctype_get_system_id) and hand the bytes here.
+ * Declarations merge with the internal subset per XML 1.0 §4.2 —
+ * the first declaration of a name wins, so an internal-subset
+ * declaration is never overridden by the external subset.
+ *
+ * @param dtd DTD to extend (from leptris_dtd_parse or
+ *            leptris_document_get_dtd)
+ * @param content External subset text (UTF-8)
+ * @param len Length in bytes
+ * @return 1 on success, -1 on invalid arguments
+ */
+int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
+                                      size_t len) {
+    if (!dtd || !content || len == 0) return -1;
+    dtd_parse_into(dtd, content, len, 0);
+    return 1;
+}
+
+/* Parse declarations from [dtd_content, dtd_content+len) INTO an
+ * existing DTD. All recursion (parameter-entity substitution,
+ * INCLUDE conditional sections) goes through this function so
+ * declarations always land in the same tables — the earlier shape
+ * recursed through leptris_dtd_parse_internal_subset, which builds a
+ * FRESH DTD per call whose declarations were then discarded. */
+static void dtd_parse_into(LeptrisDTD* dtd, const char* dtd_content,
+                           size_t len, int depth) {
+    LeptrisMemoryPool* pool = (LeptrisMemoryPool*)dtd->pool;
 
     DTDParser parser = {dtd_content, dtd_content + len, pool};
 
@@ -346,9 +391,8 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
 
         /* Handle parameter entity references (%name;).
          * Phase 8b of TODO 91: substitute the entity value inline
-         * so the referenced declarations are parsed. Internal
-         * parameter entities (the only kind we store values for)
-         * have their text spliced in place of the reference. */
+         * so the referenced declarations are parsed. Only internal
+         * parameter entities (which carry values) are substituted. */
         if (dtd_peek(&parser) == '%') {
             const char* save = parser.pos;
             parser.pos++;  /* consume '%' */
@@ -366,38 +410,32 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
                 buf[name_len + 1] = '\0';
                 /* Look up the parameter entity (namespaced with "%"). */
                 DTDEntityDecl* pe = ttdtd_lookup_entity(dtd, buf);
-                if (pe && pe->type == DTD_ENTITY_INTERNAL && pe->value) {
-                    /* Splice the value into the input buffer by
-                     * building a new buffer. This is a simple but
-                     * not optimal approach — for large DTDs with
-                     * many references, this becomes O(N²).
-                     *
-                     * Build: head + value + tail
-                     * where head is everything up to '%', and tail
-                     * is everything after ';'. */
-                    size_t head_len = (size_t)(save - dtd_content);
+                if (pe && pe->type == DTD_ENTITY_INTERNAL && pe->value &&
+                    depth < DTD_PE_MAX_DEPTH) {
+                    /* Splice the value plus the REMAINING TAIL into a
+                     * pool buffer and re-parse into the SAME dtd.
+                     * Everything before the reference was already
+                     * parsed by this loop, so only value+tail is
+                     * re-fed — linear in the input for chains of
+                     * references. The recursive call handles nested
+                     * %ref; in the value (depth-capped). */
                     size_t value_len = strlen(pe->value);
                     parser.pos++;  /* consume ';' */
-                    size_t tail_len = (size_t)(dtd_content + len - parser.pos);
-                    size_t new_len = head_len + value_len + tail_len;
-                    /* For simplicity, only handle substitution when
-                     * the resulting buffer fits in a stack-allocated
-                     * 8KB buffer. Larger substitutions fall through
-                     * to the skip behavior. */
-                    if (new_len < 8192) {
-                        char newbuf[8192];
-                        memcpy(newbuf, dtd_content, head_len);
-                        memcpy(newbuf + head_len, pe->value, value_len);
-                        memcpy(newbuf + head_len + value_len, parser.pos, tail_len);
-                        /* Note: this recursion allocates a new DTD
-                         * parser context but adds to the SAME dtd
-                         * object, so declarations land correctly. */
-                        leptris_dtd_parse_internal_subset(newbuf, new_len, pool);
-                        /* Skip the rest of the original input since
-                         * the recursive call handled it. */
+                    size_t tail_len = (size_t)(parser.end - parser.pos);
+                    char* newbuf = (char*)leptris_pool_alloc(
+                        pool, value_len + tail_len);
+                    if (newbuf) {
+                        memcpy(newbuf, pe->value, value_len);
+                        memcpy(newbuf + value_len, parser.pos, tail_len);
+                        dtd_parse_into(dtd, newbuf,
+                                       value_len + tail_len, depth + 1);
+                        /* The recursion consumed value+tail. */
                         parser.pos = parser.end;
                         continue;
                     }
+                    /* Pool exhaustion: recover by skipping the
+                     * reference instead of losing the tail. */
+                    parser.pos = save;
                 }
             }
             /* Fallback: skip the reference. */
@@ -409,27 +447,25 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
             continue;
         }
 
-        /* Parse declarations */
+        /* Parse declarations. All decl structs are POOL-OWNED
+         * (ttdtd_*_create_pooled); duplicate adds are ignored —
+         * the first declaration wins per XML 1.0 — and nothing is
+         * freed on rejection. The old ttdtd_*_free() calls here
+         * free()d pool memory on every duplicate declaration. */
         if (dtd_match(&parser, "<!ENTITY")) {
             DTDEntityDecl* entity = dtd_parse_entity(&parser);
             if (entity) {
-                if (!ttdtd_add_entity(dtd, entity)) {
-                    ttdtd_entity_free(entity);
-                }
+                ttdtd_add_entity(dtd, entity);
             }
         } else if (dtd_match(&parser, "<!ELEMENT")) {
             DTDElementDecl* elem = dtd_parse_element(&parser);
             if (elem) {
-                if (!ttdtd_add_element(dtd, elem)) {
-                    ttdtd_element_free(elem);
-                }
+                ttdtd_add_element(dtd, elem);
             }
         } else if (dtd_match(&parser, "<!NOTATION")) {
             DTDNotationDecl* notation = dtd_parse_notation(&parser);
             if (notation) {
-                if (!ttdtd_add_notation(dtd, notation)) {
-                    ttdtd_notation_free(notation);
-                }
+                ttdtd_add_notation(dtd, notation);
             }
         } else if (dtd_match(&parser, "<!ATTLIST")) {
             /* Parse one or more <!ATTLIST element-name attr-decl+>
@@ -558,16 +594,16 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
             if (dtd_peek(&parser) == '[') dtd_advance(&parser);
 
             if (is_ignore) {
-                /* Skip until matching ]]>. Track nesting depth so a
-                 * nested <![INCLUDE[...]]> inside the IGNORE doesn't
+                /* Skip until matching ]]>. Track nesting so a nested
+                 * <![INCLUDE[...]]> inside the IGNORE doesn't
                  * terminate the skip early. */
-                int depth = 1;
-                while (!dtd_at_end(&parser) && depth > 0) {
+                int nest = 1;
+                while (!dtd_at_end(&parser) && nest > 0) {
                     if (dtd_match(&parser, "<![")) {
-                        depth++;
+                        nest++;
                         parser.pos += 3;
                     } else if (dtd_match(&parser, "]]>")) {
-                        depth--;
+                        nest--;
                         parser.pos += 3;
                     } else {
                         dtd_advance(&parser);
@@ -577,34 +613,37 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
                 /* Parse the inner content as a DTD subset. Find the
                  * matching ]]> (respecting nesting) and recurse. */
                 const char* body_start = parser.pos;
-                int depth = 1;
-                while (!dtd_at_end(&parser) && depth > 0) {
+                int nest = 1;
+                while (!dtd_at_end(&parser) && nest > 0) {
                     if (dtd_match(&parser, "<![")) {
-                        depth++;
+                        nest++;
                         parser.pos += 3;
                     } else if (dtd_match(&parser, "]]>")) {
-                        depth--;
-                        if (depth == 0) break;
+                        nest--;
+                        if (nest == 0) break;
                         parser.pos += 3;
                     } else {
                         dtd_advance(&parser);
                     }
                 }
                 size_t body_len = (size_t)(parser.pos - body_start);
-                /* Recurse — the inner content is itself a DTD subset. */
+                /* Recurse into the SAME dtd — the inner content is
+                 * itself a DTD subset (TODO.remaining/03: the old
+                 * call built a fresh DTD whose declarations were
+                 * discarded). */
                 if (body_len > 0) {
-                    leptris_dtd_parse_internal_subset(body_start, body_len, pool);
+                    dtd_parse_into(dtd, body_start, body_len, depth);
                 }
                 if (dtd_match(&parser, "]]>")) parser.pos += 3;
             } else {
                 /* Unknown keyword — skip to ]]> (best-effort recovery). */
-                int depth = 1;
-                while (!dtd_at_end(&parser) && depth > 0) {
+                int nest = 1;
+                while (!dtd_at_end(&parser) && nest > 0) {
                     if (dtd_match(&parser, "<![")) {
-                        depth++;
+                        nest++;
                         parser.pos += 3;
                     } else if (dtd_match(&parser, "]]>")) {
-                        depth--;
+                        nest--;
                         parser.pos += 3;
                     } else {
                         dtd_advance(&parser);
@@ -619,8 +658,6 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
             if (dtd_peek(&parser) == '>') dtd_advance(&parser);
         }
     }
-
-    return dtd;
 }
 
 /**

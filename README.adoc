@@ -34,7 +34,11 @@ memory handling matter.
   via ancestor-URI tracking (TODO 117).
 * **DTD validation** with content-model memoization — repeated element
   types with the same children signature skip the matcher on
-  subsequent calls (TODO 119).
+  subsequent calls (TODO 119). Parameter entities, INCLUDE/IGNORE
+  conditional sections, ENTITY/ENTITIES unparsed-entity attribute
+  checking, and external subsets via
+  `leptris_document_get_dtd` + `leptris_dtd_parse_external_subset`
+  (application-supplied I/O).
 * **Canonical XML (C14N)** for digital signatures and cryptographic
   hashing.
 * **Pool-based memory model** — every allocation reachable from a

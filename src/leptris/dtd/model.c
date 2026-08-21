@@ -368,11 +368,18 @@ static char* build_attr_key(const char* element_name, const char* attr_name) {
 int ttdtd_add_attribute(LeptrisDTD* dtd, DTDAttributeDecl* attr) {
     if (!dtd || !attr || !attr->element_name || !attr->attr_name) return 0;
 
+    /* XML 1.0 §3.3: "If the same attribute is declared more than
+     * once, the first declaration is binding." Duplicate adds are
+     * ignored — this also gives internal-subset declarations
+     * precedence over external-subset re-declarations. */
+    if (ttdtd_lookup_attribute(dtd, attr->element_name, attr->attr_name) != NULL) {
+        return 0;
+    }
+
     char* key = build_attr_key(attr->element_name, attr->attr_name);
     if (!key) return 0;
     size_t key_len = strlen(key);
 
-    /* Replace existing declaration if present. */
     int rc = leptris_hash_table_set(dtd->tables.attributes, key, key_len,
                                    attr, dtd->pool);
     free(key);

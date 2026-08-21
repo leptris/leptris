@@ -793,6 +793,18 @@ LEPTRIS_API LeptrisElement leptris_document_root(struct leptris_document* doc) {
     return (LeptrisElement)doc->root;
 }
 
+LEPTRIS_API LeptrisDTD* leptris_document_get_dtd(LeptrisDocument doc) {
+    if (!doc) return NULL;
+    if (!doc->dtd) {
+        /* No DOCTYPE internal subset: lazily create an empty DTD on
+         * the document's pool — the handle for attaching an external
+         * subset. Document-owned (owns_pool stays 0): released by
+         * leptris_document_free with the pool. */
+        doc->dtd = leptris_dtd_create(doc->pool);
+    }
+    return (LeptrisDTD*)doc->dtd;
+}
+
 /**
  * Serialize document to XML string
  */

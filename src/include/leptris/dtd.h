@@ -60,6 +60,51 @@ typedef struct {
 LeptrisDTD* leptris_dtd_parse(const char* dtd_content, size_t len);
 
 /**
+ * Get the document's DTD (the declarations parsed from the DOCTYPE
+ * internal subset)
+ *
+ * The returned DTD is owned by the document: it lives until
+ * leptris_document_free and must NOT be passed to leptris_dtd_free.
+ * When the document has no internal subset (or no DOCTYPE), an empty
+ * DTD is created on the document's pool on first call — the handle
+ * for attaching an external subset via
+ * leptris_dtd_parse_external_subset.
+ *
+ * @param doc Document (must not be NULL)
+ * @return The document's DTD (never NULL for a valid document)
+ *
+ * Memory: Owned by the document; freed by leptris_document_free
+ */
+LeptrisDTD* leptris_document_get_dtd(LeptrisDocument doc);
+
+/**
+ * Parse an external subset into an existing DTD
+ *
+ * The application owns I/O: read the resource named by the DOCTYPE
+ * system id (leptris_doctype_get_system_id) and pass the bytes here.
+ * Declarations merge with the internal subset per XML 1.0 — the
+ * first declaration of a name wins, so internal-subset declarations
+ * are never overridden. Parameter entities and conditional sections
+ * (<![INCLUDE[...]]> / <![IGNORE[...]]>) are processed as in the
+ * external subset grammar.
+ *
+ * @param dtd DTD to extend (e.g. from leptris_document_get_dtd)
+ * @param content External subset text (UTF-8)
+ * @param len Length of content in bytes
+ * @return 1 on success, -1 on invalid arguments
+ *
+ * Example:
+ *   LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+ *   const char* sys = leptris_doctype_get_system_id(
+ *       leptris_document_get_doctype(doc));
+ *   // read the resource named by sys, then:
+ *   leptris_dtd_parse_external_subset(dtd, buffer, len);
+ *   int valid = leptris_dtd_validate(doc, dtd, &error);
+ */
+int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
+                                      size_t len);
+
+/**
  * Validate document against DTD
  *
  * Checks if document conforms to DTD rules:
