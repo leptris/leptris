@@ -56,7 +56,12 @@ int main(void){
         n=snappend(b,n,cap,"<r>");
         for (int e=0; e<5000 && n<cap-4096; e++) {
             n=snappend(b,n,cap,"<e");
-            for (int a=0;a<10;a++) n=snappend(b,n,cap," k%d='v%d'",a,e);
+            for (int a=0;a<10;a++) {
+                char attr[32];
+                int alen = snprintf(attr, sizeof attr, " k%d='v%d'", a, e);
+                if (alen > 0 && (size_t)alen < sizeof attr)
+                    n = snappend(b, n, cap, "%s", attr);
+            }
             n=snappend(b,n,cap,"/>");
         }
         n=snappend(b,n,cap,"</r>");
