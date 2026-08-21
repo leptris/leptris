@@ -561,6 +561,20 @@ Leptris is benchmarked against libxml2 and pugixml on every push via CI
 |1.4× faster
 |===
 
+==== Parse modes: whitespace semantics
+
+By default leptris keeps whitespace-only text nodes — the
+faithful-DOM behavior of libxml2/Nokogiri, and the only mode that
+round-trips pretty-printed XML byte-for-byte. pugixml discards these
+nodes by default (its `parse_ws_pcdata` is opt-in). For an
+apples-to-apples parse comparison on pretty-printed documents, use
+`leptris_parse_string_flags(..., LEPTRIS_PARSE_DROP_WS_TEXT, ...)`
+— the equivalent of pugixml's default and libxml2's
+`XML_PARSE_NOBLANKS`. Without the flag, leptris creates and wires
+one text node per element that pugixml never materializes, which is
+the entire difference on whitespace-heavy shapes (~1.1-1.4x in
+default mode).
+
 === DOM read access (vs libxml2)
 
 [cols="2,>1,>1,>1",options="header"]
@@ -843,9 +857,19 @@ Planned:
 * Pre-evaluate function args via VM for the remaining string
   functions (`concat`, `contains`, `substring`).
 * Doxygen API reference polish.
-* TODO 182 endgame: 32 B attrs (2/cache line) — the one remaining
-  >5% parse lever; all source-level micro-optimization is measured
-  dead (TODO 185 round 3).
+
+Measured dead (recorded for honesty; see TODO.remaining/08 and the
+perf ledger in `TODO.fix/`):
+
+* 32 B split-stream attrs — the family's upper-bound probe (views-
+  only 32 B stride, no ctrl array) regressed mid-K and still lost at
+  K=100 (TODO 185 round 6).
+* Parser two-pass SIMD (v3) — the floor probe (memcpy + scan + stub
+  walk) already cost 88.5% of the current full parse (TODO 193).
+  The single-pass parser is at a compiler-global optimum; leptris
+  parses 6-14x faster than libxml2 and sits ~1.5-1.8x behind
+  pugixml on attr-heavy shapes, with no remaining lever of any
+  known class.
 
 == Contributing
 
