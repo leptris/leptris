@@ -23,9 +23,7 @@
 #include "../../include/leptris.h"
 #include "../../include/leptris/dtd.h"
 #include "model.h"
-#include "../dom/element.h"
-#include "../dom/node.h"
-#include "../memory/pool.h"
+#include "../memory/pool.h"  /* StringHashTable scratch tables (dtd-owned pool) */
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -152,7 +150,7 @@ static int validate_element_recursive(LeptrisElement elem, LeptrisDTD* dtd,
 /* Return 1 if this element has any element-type children, 0 otherwise.
  * Used to validate <!ELEMENT name EMPTY> — no element children allowed. */
 static int element_has_element_children(LeptrisElement elem) {
-    LeptrisNodeRef child = leptris_node_first_child((LeptrisNodeRef)elem);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(elem));
     while (child) {
         if (leptris_node_get_type(child) == LEPTRIS_NODE_TYPE_ELEMENT) {
             return 1;
@@ -195,9 +193,7 @@ static int attr_check_iter(const char* key, size_t key_len,
         if (attr_name_len < sizeof(attr_buf)) {
             memcpy(attr_buf, attr_name, attr_name_len);
             attr_buf[attr_name_len] = '\0';
-            struct leptris_attribute* present =
-                leptris_element_get_attribute_by_name(ctx->elem, attr_buf);
-            if (!present) {
+            if (!leptris_element_has_attribute(ctx->elem, attr_buf)) {
                 char msg_buf[200];
                 snprintf(msg_buf, sizeof(msg_buf),
                          "Element '%s' missing #REQUIRED attribute '%s'",
@@ -217,7 +213,7 @@ static int validate_element_recursive(LeptrisElement elem, LeptrisDTD* dtd,
                                        ContentModelMemo* memo) {
     if (!elem) return 1;
 
-    const char* name = leptris_element_get_name(elem);
+    const char* name = leptris_element_name(elem);
     if (!name) return 1;
 
     /* Look up the element declaration in the DTD. */
@@ -246,7 +242,7 @@ static int validate_element_recursive(LeptrisElement elem, LeptrisDTD* dtd,
              * case; the matcher handles the other content types
              * (CHILDREN, MIXED, ELEMENT) where a model is stored. */
             size_t child_count = 0;
-            for (LeptrisNodeRef c = leptris_node_first_child((LeptrisNodeRef)elem);
+            for (LeptrisNodeRef c = leptris_node_first_child(leptris_element_as_node(elem));
                  c; c = leptris_node_next_sibling(c)) {
                 if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
                     child_count++;
@@ -257,10 +253,10 @@ static int validate_element_recursive(LeptrisElement elem, LeptrisDTD* dtd,
                     child_count * sizeof(const char*));
                 if (child_names) {
                     size_t i = 0;
-                    for (LeptrisNodeRef c = leptris_node_first_child((LeptrisNodeRef)elem);
+                    for (LeptrisNodeRef c = leptris_node_first_child(leptris_element_as_node(elem));
                          c && i < child_count; c = leptris_node_next_sibling(c)) {
                         if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
-                            child_names[i++] = leptris_element_get_name((LeptrisElement)c);
+                            child_names[i++] = leptris_element_name((LeptrisElement)c);
                         }
                     }
                     /* TODO 119: memoize.  The cache key is (model
@@ -320,10 +316,12 @@ static int validate_element_recursive(LeptrisElement elem, LeptrisDTD* dtd,
      * is declared as type "ID", record its value in id_table. The
      * first occurrence of a duplicate triggers a violation.
      * Direct walk (TODO 185) — indexed access is O(K²). */
-    for (struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
-         attr; attr = leptris_attr_next(attr)) {
-        const char* attr_name = attr_cname(attr);
-        const char* attr_val = attr_cvalue(attr);
+    for (LeptrisAttribute attr = leptris_element_first_attribute(elem);
+         attr; attr = leptris_attribute_next(attr)) {
+        const char* attr_name = leptris_attribute_get_name(attr);
+        /* Entity-expanded: validation compares against expanded values
+         * (a #FIXED 'a & b' matches attribute text 'a &amp; b'). */
+        const char* attr_val = leptris_attribute_get_value(elem, attr);
         if (!*attr_name) continue;
         DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
         if (!ad || !ad->attr_type) continue;
@@ -519,12 +517,12 @@ static int validate_idref_pass(LeptrisElement elem, LeptrisDTD* dtd,
                                 StringHashTable* id_table,
                                 LeptrisDTDError* error) {
     if (!elem) return 1;
-    const char* name = leptris_element_get_name(elem);
+    const char* name = leptris_element_name(elem);
     if (name) {
-        for (struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
-             attr; attr = leptris_attr_next(attr)) {
-            const char* attr_name = attr_cname(attr);
-            const char* attr_val2 = attr_cvalue(attr);
+        for (LeptrisAttribute attr = leptris_element_first_attribute(elem);
+             attr; attr = leptris_attribute_next(attr)) {
+            const char* attr_name = leptris_attribute_get_name(attr);
+            const char* attr_val2 = leptris_attribute_get_value(elem, attr);
             if (!*attr_name) continue;
             DTDAttributeDecl* ad = ttdtd_lookup_attribute(dtd, name, attr_name);
             if (!ad || !ad->attr_type) continue;
