@@ -1608,6 +1608,9 @@ LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
  * in any public header — invisible to header-derived cdef/bindgen
  * mirrors and to export audits.
  *
+ * DEPRECATED: prefer leptris_document_serialize in new code; this
+ * alias will not gain options or fixes beyond ABI stability.
+ *
  * @param doc Document
  * @return XML string or NULL on error
  *
