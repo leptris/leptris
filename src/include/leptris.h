@@ -2028,13 +2028,14 @@ LEPTRIS_API LeptrisNodeRef leptris_xpath_result_get_node(
     LeptrisXPathResult result, size_t index);
 
 /**
- * Get the name of a non-element node in a nodeset result
+ * Get the name of a node in a nodeset result
  *
  * @param result XPath result (NODESET type)
  * @param index Node index (0-based)
- * @return Attribute name for attribute nodes; NULL otherwise
+ * @return Element name for element nodes; attribute name for
+ *         attribute nodes; NULL for text/comment/other nodes
  *
- * Memory: String is owned by the result. Do not free.
+ * Memory: String is owned by the result or the document. Do not free.
  */
 LEPTRIS_API const char* leptris_xpath_result_node_name(
     LeptrisXPathResult result, size_t index);

@@ -7,6 +7,10 @@
 #include "evaluator_internal.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
+#include "../dom/text.h"
+#include "../dom/comment.h"
+#include "../dom/cdata.h"
+#include "../dom/pi.h"
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -16,11 +20,14 @@
  * Type Conversions (XPath 1.0 Spec Section 4)
  * ============================================================================ */
 
-/* Get text content from typed node (handles elements and attributes) */
+/* Get the XPath string-value of a node (all node kinds). Returns a
+ * malloc'd string the caller owns. */
 char* get_node_text(void* node) {
     if (!node) return leptris_strdup("");
 
-    LeptrisNodeType node_type = XPATH_NODE_TYPE(node);
+    /* Unified tag space (issue #477): real DOM nodes carry public
+     * LeptrisNodeKind values, synthetic nodes carry 6/7/8. */
+    int node_type = (int)XPATH_NODE_TYPE(node);
 
     switch (node_type) {
         case LEPTRIS_NODE_ELEMENT: {
@@ -33,6 +40,34 @@ char* get_node_text(void* node) {
         case LEPTRIS_NODE_ATTRIBUTE: {
             LeptrisAttributeNode* attr_node = (LeptrisAttributeNode*)node;
             return leptris_strdup(attr_node->value ? attr_node->value : "");
+        }
+
+        case LEPTRIS_NODE_TYPE_TEXT: {
+            const char* s =
+                leptris_text_get_content((LeptrisTextNode*)node);
+            return leptris_strdup(s ? s : "");
+        }
+
+        case LEPTRIS_NODE_TYPE_CDATA: {
+            const char* s =
+                leptris_cdata_get_content((LeptrisCDATANode*)node);
+            return leptris_strdup(s ? s : "");
+        }
+
+        case LEPTRIS_NODE_TYPE_COMMENT: {
+            const char* s =
+                leptris_comment_get_content((LeptrisCommentNode*)node);
+            return leptris_strdup(s ? s : "");
+        }
+
+        case LEPTRIS_NODE_TYPE_PI: {
+            const char* s = leptris_pi_get_data((LeptrisPINode*)node);
+            return leptris_strdup(s ? s : "");
+        }
+
+        case LEPTRIS_NODE_TEXT: {
+            XPathTextNode* text = (XPathTextNode*)node;
+            return leptris_strdup(text->content ? text->content : "");
         }
 
         default:

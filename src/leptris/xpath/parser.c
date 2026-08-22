@@ -753,14 +753,27 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         return expr;
     }
 
-    /* Function call with node type tokens */
+    /* Node-type tokens are node tests, not functions: XPath 1.0
+     * defines no text()/node()/comment()/processing-instruction()
+     * function. `text()` in expression position (e.g. inside a
+     * predicate, a[text()]) is a relative location path — a single
+     * child-axis step with a type node test. */
     if (tok->type >= TOK_COMMENT && tok->type <= TOK_NODE) {
-        XPathToken name_token = *tok;
         XPathToken* next = peek_token(parser, 1);
 
         if (next && next->type == TOK_LPAREN) {
-            advance_token(parser);
-            return parse_function_call(parser, name_token.value, name_token.value_len);
+            XPathASTNode* node = ast_node_new(XPATH_AST_STEP);
+            if (!node) return NULL;
+            node->value = leptris_strdup("child");
+            node->axis_id = XPATH_AXIS_CHILD;
+
+            XPathASTNode* test = parse_node_test(parser);
+            if (!test) {
+                ast_node_free(node);
+                return NULL;
+            }
+            ast_node_add_child(node, test);
+            return node;
         }
     }
 

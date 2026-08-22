@@ -14,6 +14,9 @@
 #include "functions.h"  /* TODO 148 Phase 5 */
 #include "xpath_variables.h"
 #include "../dom/element.h"
+#include "../dom/text.h"
+#include "../dom/comment.h"
+#include "../dom/cdata.h"
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
@@ -147,11 +150,10 @@ LEPTRIS_API LeptrisElement leptris_xpath_result_get(LeptrisXPathResult result, s
         return NULL;  /* Clearly invalid pointer */
     }
 
-    /* Elements only. The synthetic attribute nodes carry the XPath
-     * tag space (LeptrisNodeType from leptris_internal.h), whose
-     * values overlap this enum's range — the old 0..DOCTYPE guard
-     * passed attribute-tagged nodes through miscast as elements.
-     * Mixed results are consumed via node_kind/get_node/node_value. */
+    /* Elements only (tag 0 — the public element kind). Synthetic
+     * attribute/namespace nodes and text/comment/cdata/pi tree nodes
+     * must not miscast as LeptrisElement. Mixed results are consumed
+     * via node_kind/get_node/node_name/node_value. */
     if (XPATH_NODE_TYPE(node) != LEPTRIS_NODE_ELEMENT) {
         return NULL;
     }
@@ -193,12 +195,17 @@ LEPTRIS_API LeptrisXPathNodeKind leptris_xpath_result_node_kind(
     LeptrisXPathResult result, size_t index) {
     void* node = xp_result_node(result, index);
     if (!node) return LEPTRIS_XPATH_NODE_OTHER;
-    /* Result nodes carry the LeptrisNodeType tag space
-     * (leptris_internal.h): element=0, attribute=1, text=2. */
+    /* Unified tag space (issue #477): real DOM nodes carry public
+     * LeptrisNodeKind values (element=0, text=1, comment=2, cdata=3,
+     * pi=4, doctype=5); synthetic attribute/namespace/text nodes
+     * carry LEPTRIS_NODE_ATTRIBUTE/NAMESPACE/TEXT (6/7/8). */
     int tag = (int)XPATH_NODE_TYPE(node);
     if (tag == LEPTRIS_NODE_ELEMENT) return LEPTRIS_XPATH_NODE_ELEMENT;
     if (tag == LEPTRIS_NODE_ATTRIBUTE) return LEPTRIS_XPATH_NODE_ATTRIBUTE;
-    if (tag == LEPTRIS_NODE_TEXT) return LEPTRIS_XPATH_NODE_TEXT;
+    if (tag == LEPTRIS_NODE_TYPE_TEXT || tag == LEPTRIS_NODE_TYPE_CDATA ||
+        tag == LEPTRIS_NODE_TEXT) {
+        return LEPTRIS_XPATH_NODE_TEXT;
+    }
     return LEPTRIS_XPATH_NODE_OTHER;
 }
 
@@ -210,9 +217,17 @@ LEPTRIS_API LeptrisNodeRef leptris_xpath_result_get_node(
 LEPTRIS_API const char* leptris_xpath_result_node_name(
     LeptrisXPathResult result, size_t index) {
     void* node = xp_result_node(result, index);
-    if (!node || XPATH_NODE_TYPE(node) != LEPTRIS_NODE_ATTRIBUTE) return NULL;
-    LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
-    return (attr->name && attr->name[0]) ? attr->name : NULL;
+    if (!node) return NULL;
+    int tag = (int)XPATH_NODE_TYPE(node);
+    if (tag == LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
+        return (attr->name && attr->name[0]) ? attr->name : NULL;
+    }
+    if (tag == LEPTRIS_NODE_ELEMENT) {
+        const char* name = leptris_element_get_name((LeptrisElement)node);
+        return (name && name[0]) ? name : NULL;
+    }
+    return NULL;
 }
 
 LEPTRIS_API const char* leptris_xpath_result_node_value(
@@ -223,6 +238,15 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
     if (tag == LEPTRIS_NODE_ATTRIBUTE) {
         LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
         return attr->value;
+    }
+    if (tag == LEPTRIS_NODE_TYPE_TEXT) {
+        return leptris_text_get_content((LeptrisTextNode*)node);
+    }
+    if (tag == LEPTRIS_NODE_TYPE_CDATA) {
+        return leptris_cdata_get_content((LeptrisCDATANode*)node);
+    }
+    if (tag == LEPTRIS_NODE_TYPE_COMMENT) {
+        return leptris_comment_get_content((LeptrisCommentNode*)node);
     }
     if (tag == LEPTRIS_NODE_TEXT) {
         XPathTextNode* text = (XPathTextNode*)node;

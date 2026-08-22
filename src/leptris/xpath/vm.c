@@ -139,16 +139,10 @@ static XPathNodeSet* vm_detach_input_nodeset(XPathVM* vm) {
  * skipped (matches the existing axis behavior for non-element context). */
 static int node_is_element(void* node) {
     if (!node) return 0;
-    /* Element vs attribute distinguishing: the attribute node struct
-     * begins with LeptrisNodeType node_type == LEPTRIS_NODE_ATTRIBUTE.
-     * Elements begin with the compact header (LeptrisCompactHeader)
-     * whose first int is the page offset, never matches the attribute
-     * tag reliably. Use a conservative check that mirrors
-     * evaluator_path.c's node_as_element. */
-    LeptrisNodeType first = *(LeptrisNodeType*)node;
-    return first != LEPTRIS_NODE_ATTRIBUTE &&
-           first != LEPTRIS_NODE_NAMESPACE &&
-           first != LEPTRIS_NODE_TEXT;
+    /* Unified tag space (issue #477): every node — real DOM node or
+     * synthetic attribute/namespace/text node — is classified by its
+     * first int; 0 is the public element tag, nothing else uses it. */
+    return *(LeptrisNodeType*)node == LEPTRIS_NODE_ELEMENT;
 }
 
 struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
@@ -2134,8 +2128,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                         } else {
                             str = an->namespace_uri;  /* may be NULL */
                         }
-                    } else if (nt != LEPTRIS_NODE_NAMESPACE &&
-                               nt != LEPTRIS_NODE_TEXT) {
+                    } else if (nt == LEPTRIS_NODE_ELEMENT) {
                         /* Element. */
                         LeptrisElement e = (LeptrisElement)first;
                         if (op == XPATH_BC_FUNC_NAME) {
