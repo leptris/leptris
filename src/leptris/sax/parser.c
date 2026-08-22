@@ -30,7 +30,7 @@ void leptris_sax_streaming_reset(LeptrisSAXParser* p);
  * One-shot parse — convenience wrapper around the streaming state machine.
  * ============================================================================ */
 
-int leptris_sax_parse(const char* xml, size_t len,
+LEPTRIS_API int leptris_sax_parse(const char* xml, size_t len,
                      LeptrisSAXHandler* handler,
                      void* user_data) {
     if (!xml || len == 0 || !handler) return -1;
@@ -49,7 +49,7 @@ int leptris_sax_parse(const char* xml, size_t len,
  * Parser lifecycle
  * ============================================================================ */
 
-LeptrisSAXParser* leptris_sax_parser_create(LeptrisSAXHandler* handler, void* user_data) {
+LEPTRIS_API LeptrisSAXParser* leptris_sax_parser_create(LeptrisSAXHandler* handler, void* user_data) {
     if (!handler) return NULL;
 
     LeptrisSAXParser* parser = (LeptrisSAXParser*)malloc(sizeof(LeptrisSAXParser));
@@ -83,7 +83,7 @@ LeptrisSAXParser* leptris_sax_parser_create(LeptrisSAXHandler* handler, void* us
     return parser;
 }
 
-int leptris_sax_parser_feed(LeptrisSAXParser* parser,
+LEPTRIS_API int leptris_sax_parser_feed(LeptrisSAXParser* parser,
                             const char* xml,
                             size_t len,
                             int is_final) {
@@ -91,7 +91,7 @@ int leptris_sax_parser_feed(LeptrisSAXParser* parser,
     return leptris_sax_streaming_feed(parser, xml, len, is_final);
 }
 
-void leptris_sax_parser_free(LeptrisSAXParser* parser) {
+LEPTRIS_API void leptris_sax_parser_free(LeptrisSAXParser* parser) {
     if (parser) {
         leptris_sax_streaming_reset(parser);
         free(parser->input_buf);

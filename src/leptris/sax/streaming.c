@@ -1392,7 +1392,7 @@ void leptris_sax_streaming_reset(LeptrisSAXParser* p) {
     /* scratch is freed by parser.c's free path. */
 }
 
-int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int streaming) {
+LEPTRIS_API int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int streaming) {
     if (!parser) return -1;
     parser->streaming = streaming ? 1 : 0;
     return 0;
