@@ -176,87 +176,89 @@ LEPTRIS_API int leptris_element_has_attribute(LeptrisElement elem, const char* n
 /**
  * Get attribute value as integer (Public API)
  */
+/* ---- typed-conversion cores (architecture review C) ----
+ *
+ * The four attribute numeric getters share one contract: isspace-
+ * trimmed whole-token numbers, base 10, partial parses rejected,
+ * NULL/empty falls through to the caller's default. The element_
+ * text_* getters are deliberately separate: their contracts differ
+ * (0x hex forms, no trailing-whitespace tolerance, empty-text bool
+ * is false) and unifying them would change behavior. */
+static int attr_num_long(const char* s, long* out) {
+    if (!s || !*s) return 0;
+    while (isspace((unsigned char)*s)) s++;
+    char* end;
+    long v = strtol(s, &end, 10);
+    while (*end && isspace((unsigned char)*end)) end++;
+    if (*end != '\0') return 0;
+    *out = v;
+    return 1;
+}
+
+static int attr_num_ulong(const char* s, unsigned long* out) {
+    if (!s || !*s) return 0;
+    while (isspace((unsigned char)*s)) s++;
+    char* end;
+    unsigned long v = strtoul(s, &end, 10);
+    while (*end && isspace((unsigned char)*end)) end++;
+    if (*end != '\0') return 0;
+    *out = v;
+    return 1;
+}
+
+static int attr_num_double(const char* s, double* out) {
+    if (!s || !*s) return 0;
+    while (isspace((unsigned char)*s)) s++;
+    char* end;
+    double v = strtod(s, &end);
+    while (*end && isspace((unsigned char)*end)) end++;
+    if (*end != '\0') return 0;
+    *out = v;
+    return 1;
+}
+
+static int attr_num_float(const char* s, float* out) {
+    if (!s || !*s) return 0;
+    while (isspace((unsigned char)*s)) s++;
+    char* end;
+    float v = strtof(s, &end);
+    while (*end && isspace((unsigned char)*end)) end++;
+    if (*end != '\0') return 0;
+    *out = v;
+    return 1;
+}
+
+/**
+ * Get attribute value as integer (Public API)
+ */
 LEPTRIS_API int leptris_element_attribute_int(LeptrisElement elem, const char* name, int default_value) {
-    const char* value = leptris_element_attribute(elem, name);
-    if (!value || !*value) return default_value;
-
-    /* Trim leading whitespace */
-    while (isspace((unsigned char)*value)) value++;
-
-    /* Check for valid integer (no partial parsing like "42abc") */
-    char* endptr;
-    long result = strtol(value, &endptr, 10);
-
-    /* If there's non-whitespace after the number, it's invalid */
-    while (*endptr && isspace((unsigned char)*endptr)) endptr++;
-    if (*endptr != '\0') return default_value;
-
-    return (int)result;
+    long v;
+    return attr_num_long(leptris_element_attribute(elem, name), &v) ? (int)v : default_value;
 }
 
 /**
  * Get attribute value as unsigned integer (Public API)
  */
 LEPTRIS_API unsigned int leptris_element_attribute_uint(LeptrisElement elem, const char* name, unsigned int default_value) {
-    const char* value = leptris_element_attribute(elem, name);
-    if (!value || !*value) return default_value;
-
-    /* Trim leading whitespace */
-    while (isspace((unsigned char)*value)) value++;
-
-    /* Check for valid unsigned integer (no partial parsing) */
-    char* endptr;
-    unsigned long result = strtoul(value, &endptr, 10);
-
-    /* If there's non-whitespace after the number, it's invalid */
-    while (*endptr && isspace((unsigned char)*endptr)) endptr++;
-    if (*endptr != '\0') return default_value;
-
-    return (unsigned int)result;
+    unsigned long v;
+    return attr_num_ulong(leptris_element_attribute(elem, name), &v) ? (unsigned int)v : default_value;
 }
 
 /**
  * Get attribute value as double (Public API)
  */
 LEPTRIS_API double leptris_element_attribute_double(LeptrisElement elem, const char* name, double default_value) {
-    const char* value = leptris_element_attribute(elem, name);
-    if (!value || !*value) return default_value;
-
-    /* Trim leading whitespace */
-    while (isspace((unsigned char)*value)) value++;
-
-    /* Check for valid double (no partial parsing) */
-    char* endptr;
-    double result = strtod(value, &endptr);
-
-    /* If there's non-whitespace after the number, it's invalid */
-    while (*endptr && isspace((unsigned char)*endptr)) endptr++;
-    if (*endptr != '\0') return default_value;
-
-    return result;
+    double v;
+    return attr_num_double(leptris_element_attribute(elem, name), &v) ? v : default_value;
 }
 
 /**
  * Get attribute value as float (Public API)
  */
 LEPTRIS_API float leptris_element_attribute_float(LeptrisElement elem, const char* name, float default_value) {
-    const char* value = leptris_element_attribute(elem, name);
-    if (!value || !*value) return default_value;
-
-    /* Trim leading whitespace */
-    while (isspace((unsigned char)*value)) value++;
-
-    /* Check for valid float (no partial parsing) */
-    char* endptr;
-    float result = strtof(value, &endptr);
-
-    /* If there's non-whitespace after the number, it's invalid */
-    while (*endptr && isspace((unsigned char)*endptr)) endptr++;
-    if (*endptr != '\0') return default_value;
-
-    return result;
+    float v;
+    return attr_num_float(leptris_element_attribute(elem, name), &v) ? v : default_value;
 }
-
 /**
  * Get attribute value as boolean (Public API)
  */
@@ -925,6 +927,11 @@ LEPTRIS_API const char* leptris_element_attribute_value_at(LeptrisElement elem, 
         attr = leptris_attr_next(attr);
     }
     return NULL;
+}
+
+LEPTRIS_API size_t leptris_element_attribute_count(LeptrisElement elem) {
+    if (!elem) return 0;
+    return elem->attr_count;
 }
 
 /* Handle-based attribute iteration (TODO.remaining/06). The _at

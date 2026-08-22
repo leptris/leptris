@@ -154,14 +154,6 @@ void leptris_element_set_first_attribute(LeptrisElement elem, struct leptris_att
     leptris_elem_set_first_attribute(elem, attr);
 }
 
-/* Get attribute count — returns size_t for public API (TODO 138).
- * Declared LEPTRIS_API so the symbol is exported from the shared library
- * for FFI bindings. */
-LEPTRIS_API size_t leptris_element_attribute_count(LeptrisElement elem) {
-    if (!elem) return 0;
-    return elem->attr_count;
-}
-
 /* Get attribute by index */
 struct leptris_attribute* leptris_element_get_attribute_by_index(LeptrisElement elem, uint8_t index) {
     if (!elem || index >= elem->attr_count) return NULL;
