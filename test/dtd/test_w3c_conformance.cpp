@@ -28,6 +28,9 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #include <sys/wait.h>
+#else
+#define popen _popen
+#define pclose _pclose
 #endif
 
 namespace {
@@ -93,9 +96,16 @@ static std::vector<Case> load_cases(const std::string& root) {
         scan_master(path, base, &out);
     }
     /* Sweep any remaining masters (sun/, eduni layouts vary by
-     * suite version): every *.xml under root, max depth 3. */
+     * suite version). POSIX gets a find pipe; Windows a dir pipe —
+     * both feed the same line loop. */
+#if defined(_WIN32)
+    std::string winroot = root;
+    for (auto& ch : winroot) if (ch == '/') ch = '\\';
+    std::string cmd = "cmd /c dir /s /b \"" + winroot + "\*.xml\" 2>nul";
+#else
     std::string cmd = "find '" + root +
         "' -maxdepth 3 -name '*.xml' -not -path '*/files/*'";
+#endif
     FILE* pipe = popen(cmd.c_str(), "r");
     if (pipe) {
         char line[2048];
@@ -103,6 +113,9 @@ static std::vector<Case> load_cases(const std::string& root) {
             std::string path(line);
             while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
                 path.pop_back();
+#if defined(_WIN32)
+            for (auto& ch : path) if (ch == '\\') ch = '/';
+#endif
             std::string base = path.substr(0, path.find_last_of('/'));
             bool known = false;
             for (auto g : groups) {
