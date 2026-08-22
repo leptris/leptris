@@ -1,13 +1,44 @@
 ## [Unreleased]
 
-## [1.1.1] - 2026-08-22
+## [1.1.1] - 2026-08-23
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
+- XPath mixed-nodeset results: the synthetic attribute/namespace/
+  text node tags collided with the public node-kind values real DOM
+  nodes carry, so `//node()` misclassified entries and
+  `leptris_xpath_result_node_name` could crash on text entries
+  (#477). One unified tag space now classifies every nodeset entry;
+  `node_kind` / `node_name` / `node_value` / `get_node`+`node_get_type`
+  agree, and `node_name` also reports element names.
+- `name()` / `local-name()` / `namespace-uri()` read their argument's
+  first node after freeing the result that owned the synthetic
+  attribute node — a use-after-free on GCC/ASAN toolchains (#477).
+- Bare `text()` / `node()` in expression position parsed as unknown
+  function calls, so predicates like `a[text()='x']` never matched;
+  `text()` also no longer double-counts elements that merely contain
+  text (#477).
+- String-values for text / CDATA / comment / PI nodes via `string()`
+  and comparisons (#477).
+- Nodeset results are now true document order: multi-context steps
+  and the union operator previously appended per context node (#485).
+  Reverse axes (ancestor / preceding families) return reverse
+  document order per the spec.
+- aarch64 GCC (glibc and Alpine musl) could not compile
+  `simd_text_neon.c`: the `vshlq_u16` shift vector now uses the
+  ACLE-mandated `int16x8_t`; `__builtin_ctz` routed through the
+  portable `LEPTRIS_CTZ` shim for MSVC ARM64 (#487).
+- `python-publish.yml` carried a duplicate top-level `name:` key that
+  produced a startup-failure run on every branch push.
 
-- (describe changes here)
+### Performance
+
+- `//text()` / `//node()` / `//comment()` /
+  `//processing-instruction()` compile to a single pre-order walk
+  emitting matches directly in document order — `//text()` is ~7x
+  faster than 1.1.0 on a 20k-element document (#485). The
+  document-order rank table used elsewhere is cached per document
+  and invalidated on mutation.
 
 
 ## [1.1.0] - 2026-08-22
