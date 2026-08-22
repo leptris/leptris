@@ -82,7 +82,7 @@ if [ -f "$VCPKG_JSON" ]; then
 fi
 
 # --- Update CHANGELOG.md ---
-CURRENT_DATE=$(date "+Y-%m-%d" 2>/dev/null || date "+%Y-%m-%d")
+CURRENT_DATE=$(date "+%Y-%m-%d")
 TEMP_CL=$(mktemp)
 
 cat > "$TEMP_CL" << EOF
