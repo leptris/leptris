@@ -25,8 +25,10 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#if !defined(_WIN32)
 #include <unistd.h>
 #include <sys/wait.h>
+#endif
 
 namespace {
 
