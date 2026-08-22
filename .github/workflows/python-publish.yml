@@ -1,5 +1,3 @@
-name: python-publish
-
 # PyPI release path for pyleptris. Trusted publishing (no stored
 # credentials): configure on pypi.org → project settings →
 # "Trusted Publisher" → workflow leptris/leptris,
