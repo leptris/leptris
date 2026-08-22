@@ -114,6 +114,12 @@ struct LeptrisDTD {
      * from the document parser). ttdtd_free destroys the pool only
      * when this flag is set. */
     int owns_pool;
+
+    /* External parameter-entity loader (application-owned I/O).
+     * NULL = external PEs are not resolvable and are skipped.
+     * The loader returns a malloc'd buffer the DTD parser frees. */
+    char* (*pe_loader)(void* user, const char* system_id, size_t* out_len);
+    void* pe_loader_user;
 };
 
 /* LeptrisDTD typedef comes from common/types_internal.h.

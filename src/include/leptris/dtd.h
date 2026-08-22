@@ -105,6 +105,34 @@ int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
                                       size_t len);
 
 /**
+ * External parameter-entity loader (application-owned I/O)
+ *
+ * External parameter entities (<!ENTITY % pe SYSTEM "uri">) carry no
+ * inline value; when such a PE is referenced, the DTD parser asks
+ * this loader for the resource named by the system id. Same pattern
+ * as leptris_dtd_parse_external_subset: the library never does I/O.
+ *
+ * The loader returns a malloc'd (or calloc'd) buffer in *out_len
+ * bytes, which the parser consumes and frees; return NULL for
+ * "unavailable" (the reference is then skipped, leniently).
+ *
+ * The loader is consulted when DTD CONTENT IS PARSED — register it
+ * before leptris_dtd_parse_external_subset (or before parsing a
+ * document whose internal subset you want resolved). Registering it
+ * on a DTD whose text was already consumed has nothing left to
+ * resolve.
+ *
+ * @param dtd DTD the loader attaches to
+ * @param loader Callback (NULL clears it)
+ * @param user_data Opaque pointer handed to the loader
+ */
+void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
+                               char* (*loader)(void* user_data,
+                                               const char* system_id,
+                                               size_t* out_len),
+                               void* user_data);
+
+/**
  * Validate document against DTD
  *
  * Checks if document conforms to DTD rules:

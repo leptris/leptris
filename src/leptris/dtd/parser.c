@@ -357,6 +357,16 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
  * @param len Length in bytes
  * @return 1 on success, -1 on invalid arguments
  */
+void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
+                               char* (*loader)(void* user_data,
+                                               const char* system_id,
+                                               size_t* out_len),
+                               void* user_data) {
+    if (!dtd) return;
+    dtd->pe_loader = loader;
+    dtd->pe_loader_user = user_data;
+}
+
 int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
                                       size_t len) {
     if (!dtd || !content || len == 0) return -1;
@@ -370,6 +380,103 @@ int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
  * declarations always land in the same tables — the earlier shape
  * recursed through leptris_dtd_parse_internal_subset, which builds a
  * FRESH DTD per call whose declarations were then discarded. */
+/* Substitute %pe; references inside a declaration body (element
+ * content models, ATTLIST definition lists — the common real-world
+ * pattern). Internal PEs splice their values; EXTERNAL (SYSTEM) PEs
+ * splice the loader's content when a loader is registered (the
+ * app-owned-I/O pattern of leptris_dtd_parse_external_subset);
+ * without one they are left as-is (lenient). Undefined references
+ * are left as-is. Results go to a pool buffer; depth-capped like
+ * the between-decl substitution. Returns NULL when the text needs
+ * no substitution. */
+static char* dtd_substitute_decl_pes(LeptrisDTD* dtd, const char* text,
+                             size_t len, int depth);
+
+static char* dtd_substitute_decl_pes(LeptrisDTD* dtd, const char* text,
+                             size_t len, int depth) {
+    /* Quick scan: no '%' -> nothing to do. */
+    const char* pct = (const char*)memchr(text, '%', len);
+    if (!pct) return NULL;
+
+    LeptrisMemoryPool* pool = (LeptrisMemoryPool*)dtd->pool;
+    char* out = (char*)leptris_pool_alloc(pool, len + 1);
+    if (!out) return NULL;
+    size_t w = 0;
+    int substituted = 0;
+
+    size_t i = 0;
+    while (i < len) {
+if (text[i] == '%' && i + 1 < len) {
+    /* %name; reference within the decl body. */
+    size_t j = i + 1;
+    while (j < len && text[j] != ';' && text[j] != '%' &&
+           !isspace((unsigned char)text[j])) {
+        j++;
+    }
+    if (j < len && text[j] == ';' && j > i + 1 && j - i - 1 < 128) {
+        char buf[130];
+        buf[0] = '%';
+        memcpy(buf + 1, text + i + 1, j - i - 1);
+        buf[j - i] = '\0';
+        DTDEntityDecl* pe = ttdtd_lookup_entity(dtd, buf);
+        if (pe && depth < DTD_PE_MAX_DEPTH) {
+            const char* val = NULL;
+            size_t val_len = 0;
+            if (pe->type == DTD_ENTITY_INTERNAL && pe->value) {
+                val = pe->value;
+                val_len = strlen(val);
+            } else if (pe->type == DTD_ENTITY_EXTERNAL &&
+                       pe->system_id && dtd->pe_loader) {
+                size_t loaded = 0;
+                char* got = dtd->pe_loader(dtd->pe_loader_user,
+                                            pe->system_id, &loaded);
+                if (got) {
+                    /* Splice then free: the loaded text is
+                     * copied into the pool buffer. Nested
+                     * %ref; in loaded content are expanded
+                     * by the recursive call below. */
+                    char* grown = (char*)leptris_pool_alloc(
+                        pool, w + loaded + (len - j) + 1);
+                    if (grown) {
+                        memcpy(grown, out, w);
+                        memcpy(grown + w, got, loaded);
+                        memcpy(grown + w + loaded, text + j + 1,
+                               len - j - 1);
+                        grown[w + loaded + (len - j - 1)] = '\0';
+                        free(got);
+                        /* Recurse once for nested refs in the
+                         * loaded content. */
+                        char* rec = dtd_substitute_decl_pes(
+                            dtd, grown,
+                            w + loaded + (len - j - 1), depth + 1);
+                        return rec ? rec : grown;
+                    }
+                    free(got);
+                }
+            }
+            if (val) {
+                char* grown = (char*)leptris_pool_alloc(
+                    pool, w + val_len + (len - j) + 1);
+                if (!grown) break;
+                memcpy(grown, out, w);
+                memcpy(grown + w, val, val_len);
+                memcpy(grown + w + val_len, text + j + 1, len - j - 1);
+                grown[w + val_len + (len - j - 1)] = '\0';
+                out = grown;
+                w = w + val_len + (len - j - 1);
+                substituted = 1;
+                i = j + 1;
+                continue;
+            }
+        }
+    }
+}
+out[w++] = text[i++];
+    }
+    out[w] = '\0';
+    return substituted ? out : NULL;
+}
+
 static void dtd_parse_into(LeptrisDTD* dtd, const char* dtd_content,
                            size_t len, int depth) {
     LeptrisMemoryPool* pool = (LeptrisMemoryPool*)dtd->pool;
@@ -445,6 +552,30 @@ static void dtd_parse_into(LeptrisDTD* dtd, const char* dtd_content,
             }
             if (dtd_peek(&parser) == ';') dtd_advance(&parser);
             continue;
+        }
+
+
+
+/* Parameter entities inside declaration bodies (element
+         * content models, ATTLIST lists — legal in external subsets,
+         * accepted leniently everywhere). ENTITY declarations are
+         * excluded: their VALUES may legitimately contain '%'. */
+        if (dtd_match(&parser, "<!ELEMENT") ||
+            dtd_match(&parser, "<!ATTLIST") ||
+            dtd_match(&parser, "<!NOTATION")) {
+            const char* decl_start = parser.pos;
+            const char* scan = parser.pos;
+            while (scan < parser.end && *scan != '>') scan++;
+            if (scan < parser.end) {
+                size_t decl_len = (size_t)(scan + 1 - decl_start);
+                char* sub = dtd_substitute_decl_pes(
+                    dtd, decl_start, decl_len, depth);
+                if (sub) {
+                    dtd_parse_into(dtd, sub, strlen(sub), depth + 1);
+                    parser.pos = scan + 1;
+                    continue;
+                }
+            }
         }
 
         /* Parse declarations. All decl structs are POOL-OWNED

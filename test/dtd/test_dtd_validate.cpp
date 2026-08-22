@@ -1103,3 +1103,125 @@ TEST(DtdValidate, ExternalSubsetConditionalSectionsAndPEs) {
     leptris_dtd_error_free(&err);
     leptris_document_free(doc);
 }
+
+// ---- DTD residuals (TODO post-close-out): %pe; in decls + loader ----
+
+TEST(DtdValidate, ParameterEntityInsideElementDecl) {
+    /* %pe; inside a markup declaration body (legal in external
+     * subsets; accepted leniently everywhere). */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><child/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY %content 'EMPTY'>"
+        "<!ELEMENT root %content;>"
+        "<!ELEMENT other %content;>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0); /* root EMPTY enforced through the PE */
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, ParameterEntityInsideAttlistDecl) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ELEMENT root EMPTY>"
+        "<!ENTITY %req 'id CDATA #REQUIRED'>"
+        "<!ATTLIST root %req;>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 0); /* #REQUIRED delivered through the PE */
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+static char* test_pe_loader(void* user, const char* system_id, size_t* out_len) {
+    (void)user;
+    if (std::strcmp(system_id, "model.dtd") != 0) return NULL;
+    const char body[] = "(a,b)";
+    char* buf = (char*)std::malloc(sizeof(body));
+    if (!buf) return NULL;
+    std::memcpy(buf, body, sizeof(body));
+    *out_len = sizeof(body) - 1;
+    return buf;
+}
+
+TEST(DtdValidate, ExternalParameterEntityLoaderFeedsContentModel) {
+    /* <!ENTITY % m SYSTEM "model.dtd"> + %m; inside an ELEMENT decl:
+     * the loader supplies the content model text. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><a/><b/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* The loader is consulted when content is PARSED into the DTD,
+     * so register before feeding the subset (the get_dtd +
+     * parse_external_subset flow; a loader on an already-parsed
+     * leptris_dtd_parse result has nothing left to resolve). */
+    const char dtd_text[] =
+        "<!ENTITY % m SYSTEM \"model.dtd\">"
+        "<!ELEMENT root %m;>";
+    LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+    ASSERT_NE(dtd, nullptr);
+    leptris_dtd_set_pe_loader(dtd, test_pe_loader, NULL);
+    EXPECT_EQ(leptris_dtd_parse_external_subset(
+                  dtd, dtd_text, std::strlen(dtd_text)), 1);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1); /* (a,b) matches <a/><b/> */
+
+    /* And the wrong order fails through the loaded model. */
+    const char xml2[] = "<root><b/><a/></root>";
+    LeptrisDocument doc2 = leptris_parse_string(xml2, std::strlen(xml2), &st);
+    ASSERT_NE(doc2, nullptr);
+    LeptrisDTDError err2 = {0};
+    int rc2 = leptris_dtd_validate(doc2, dtd, &err2);
+    EXPECT_EQ(rc2, 0);
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_error_free(&err2);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+    leptris_document_free(doc2);
+}
+
+TEST(DtdValidate, ExternalPEWithoutLoaderIsSkippedLeniently) {
+    /* No loader registered: the external PE inside the decl is left
+     * as-is and the declaration is skipped (no crash, no hang). */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY % m SYSTEM \"missing.dtd\">"
+        "<!ELEMENT root %m;>";
+    LeptrisDTD* dtd = leptris_dtd_parse(dtd_text, std::strlen(dtd_text));
+    ASSERT_NE(dtd, nullptr);
+
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, dtd, &err);
+    EXPECT_EQ(rc, 1); /* lenient: nothing enforced */
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
