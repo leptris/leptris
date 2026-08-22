@@ -53,3 +53,28 @@ document lifetime after a call returns. Elements keep a reference to
 their `Document`, so the pool cannot be freed while any wrapper is
 alive. Prefer explicit `close()` / the context manager; `__del__` is
 a refcounting safety net, not a contract.
+
+## Versioning
+
+The package version tracks libleptris (lockstep): library 1.1.0 ↔
+pyleptris 1.1.0.
+
+## Publishing
+
+Releases publish to PyPI via `.github/workflows/python-publish.yml`
+on `v*` tags, using PyPI **trusted publishing** (no stored
+credentials). One-time setup on pypi.org: project settings →
+Publishing → add trusted publisher for the `leptris/leptris` repo,
+that workflow file, environment `pypi`. Until then, the wheel built
+by CI is downloadable from the run's artifacts and installable
+directly.
+
+## Local development
+
+```bash
+python3 -m venv .venv
+./.venv/bin/pip install --upgrade build setuptools wheel pytest cffi
+./.venv/bin/python -m build
+LEPTRIS_LIB_PATH=../../build-shared/src/libleptris.dylib \
+  ./.venv/bin/python -m pytest tests/ -q
+```

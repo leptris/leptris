@@ -10,7 +10,7 @@ Usage:
 Requires libleptris on the library search path (or LEPTRIS_LIB_PATH).
 """
 
-__version__ = "0.1.0"
+__version__ = "1.1.0"
 
 from .document import Document
 from .element import Element
