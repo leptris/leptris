@@ -625,3 +625,183 @@ TEST(XIncludePhaseC, MutualIncludeCycleDoesNotLeak) {
     remove(path_a);
     remove(path_b);
 }
+
+// ---- TODO.remaining/04: XPointer scheme forms + href fragments ------
+
+namespace {
+constexpr char kXiNs[] = "http://www.w3.org/2001/XInclude";
+
+static void write_file(const char* path, const char* data, size_t len) {
+    FILE* f = fopen(path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(data, 1, len, f);
+    fclose(f);
+}
+
+static const char kXptrDoc[] =
+    "<doc><intro/><section id='target1'>first</section>"
+    "<section id='target2'>second</section><outro/></doc>";
+
+/* Include kXptrDoc with the given xi:include markup; return the
+ * spliced child's name (or attr value). */
+static std::string splice(const char* include_xml, const char* attr = nullptr) {
+    const char* doc_path = "/tmp/leptris_xptr_doc.xml";
+    write_file(doc_path, kXptrDoc, strlen(kXptrDoc));
+
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs + "'>" +
+                      include_xml + "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml.data(), xml.size(), &st);
+    if (!doc) return "(parse-failed)";
+    leptris_xinclude_process(doc, nullptr);
+
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement child = leptris_element_first_child_any(root);
+    std::string out;
+    if (!child) out = "(none)";
+    else if (attr) {
+        const char* v = leptris_element_attribute(child, attr);
+        out = v ? v : "(none)";
+    } else {
+        out = leptris_element_name(child);
+    }
+    leptris_document_free(doc);
+    remove(doc_path);
+    return out;
+}
+
+TEST(XIncludeXpointerForms, HrefFragmentIsShorthand) {
+    /* §4: the href fragment is a shorthand pointer -- the element
+     * with that ID. */
+    EXPECT_EQ(splice("<xi:include href='/tmp/leptris_xptr_doc.xml#target2'/>"),
+              "section");
+    EXPECT_EQ(splice("<xi:include href='/tmp/leptris_xptr_doc.xml#target2'/>", "id"),
+              "target2");
+}
+
+TEST(XIncludeXpointerForms, XpointerScheme) {
+    EXPECT_EQ(splice("<xi:include href='/tmp/leptris_xptr_doc.xml'"
+                     " xpointer='xpointer(//section[@id=\"target1\"])'/>"),
+              "section");
+    EXPECT_EQ(splice("<xi:include href='/tmp/leptris_xptr_doc.xml'"
+                     " xpointer='xpointer(//section[@id=\"target1\"])'/>", "id"),
+              "target1");
+}
+
+TEST(XIncludeXpointerForms, ElementSchemeChildSequence) {
+    /* element(/1/3): root's first element child is <intro>, its
+     * third element child is section#target2. */
+    EXPECT_EQ(splice("<xi:include href='/tmp/leptris_xptr_doc.xml'"
+                     " xpointer='element(/1/3)'/>", "id"),
+              "target2");
+}
+
+TEST(XIncludeXpointerForms, ElementSchemeNamedStart) {
+    EXPECT_EQ(splice("<xi:include href='/tmp/leptris_xptr_doc.xml'"
+                     " xpointer='element(target1)'/>", "id"),
+              "target1");
+}
+
+TEST(XIncludeXpointerForms, SchemesTriedLeftToRight) {
+    /* First scheme matches nothing; the second wins. */
+    EXPECT_EQ(splice("<xi:include href='/tmp/leptris_xptr_doc.xml'"
+                     " xpointer='element(nosuch)xpointer(//outro)'/>"),
+              "outro");
+}
+
+TEST(XIncludeXpointerForms, FragmentAndXpointerTogetherIsResourceError) {
+    /* §4: href fragment + xpointer attribute = resource error ->
+     * fallback text, not the document. */
+    const char* doc_path = "/tmp/leptris_xptr_doc.xml";
+    write_file(doc_path, kXptrDoc, strlen(kXptrDoc));
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs +
+        "'><xi:include href='/tmp/leptris_xptr_doc.xml#target1'"
+        " xpointer='xpointer(//outro)'><xi:fallback>fb</xi:fallback>"
+        "</xi:include></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    leptris_xinclude_process(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(leptris_node_get_type(child), LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_STREQ(leptris_text_node_get_content(child), "fb");
+    leptris_document_free(doc);
+    remove(doc_path);
+}
+
+TEST(XIncludeXpointerForms, FragmentOnTextIncludeIsResourceError) {
+    const char* txt = "/tmp/leptris_xptr_text.txt";
+    write_file(txt, "plain", 5);
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs +
+        "'><xi:include href='/tmp/leptris_xptr_text.txt#frag'"
+        " parse='text'><xi:fallback>nofrag</xi:fallback></xi:include></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    leptris_xinclude_process(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(leptris_node_get_type(child), LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_STREQ(leptris_text_node_get_content(child), "nofrag");
+    leptris_document_free(doc);
+    remove(txt);
+}
+
+TEST(XIncludeXpointerForms, TextEncodingAttributeConvertsToUtf8) {
+    /* ISO-8859-1 0xE9 = é (U+00E9, UTF-8 0xC3 0xA9). */
+    const char latin1[] = { 'c', 'a', 'f', (char)0xE9 };
+    const char* txt = "/tmp/leptris_xptr_latin1.txt";
+    write_file(txt, latin1, sizeof(latin1));
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs +
+        "'><xi:include href='/tmp/leptris_xptr_latin1.txt'"
+        " parse='text' encoding='ISO-8859-1'/></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    leptris_xinclude_process(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(leptris_node_get_type(child), LEPTRIS_NODE_TYPE_TEXT);
+    const char* text = leptris_text_node_get_content(child);
+    ASSERT_NE(text, nullptr);
+    /* Converted UTF-8, or (no-iconv builds) the raw byte -- never
+     * a fallback. */
+    bool converted = (unsigned char)text[3] == 0xC3 &&
+                     (unsigned char)text[4] == 0xA9 && text[5] == '\0';
+    bool passthrough = (unsigned char)text[3] == 0xE9 && text[4] == '\0';
+    EXPECT_TRUE(converted || passthrough);
+    leptris_document_free(doc);
+    remove(txt);
+}
+
+TEST(XIncludeXpointerForms, BadEncodingIsResourceError) {
+    const char* txt = "/tmp/leptris_xptr_badenc.txt";
+    write_file(txt, "data", 4);
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs +
+        "'><xi:include href='/tmp/leptris_xptr_badenc.txt'"
+        " parse='text' encoding='NOT-A-CHARSET'>"
+        "<xi:fallback>unconvertible</xi:fallback></xi:include></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    leptris_xinclude_process(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
+    ASSERT_NE(child, nullptr);
+    /* With iconv: conversion fails -> fallback. Without iconv: the
+     * attribute is ignored -> "data". Both acceptable. */
+    ASSERT_EQ(leptris_node_get_type(child), LEPTRIS_NODE_TYPE_TEXT);
+    const char* text = leptris_text_node_get_content(child);
+    ASSERT_NE(text, nullptr);
+    EXPECT_TRUE(strcmp(text, "unconvertible") == 0 ||
+                strcmp(text, "data") == 0);
+    leptris_document_free(doc);
+    remove(txt);
+}
+
+}  // namespace
