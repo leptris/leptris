@@ -1884,7 +1884,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                 /* Pre-compute the target hash so we can compare 2 bytes
                  * before strcmp on every child. */
                 uint16_t target_hash = leptris_name_hash_compute(child_name);
-                XPathOperatorType op = (XPathOperatorType)op_type;
+                XPathOperatorType step_op = (XPathOperatorType)op_type;
                 size_t child_name_len = strlen(child_name);
 
                 size_t write = 0;
@@ -1933,7 +1933,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                     }
 
                     int match_flag = 0;
-                    switch (op) {
+                    switch (step_op) {
                         case XPATH_OP_EQUAL:         match_flag = (lhs == rhs); break;
                         case XPATH_OP_NOT_EQUAL:     match_flag = (lhs != rhs); break;
                         case XPATH_OP_LESS:          match_flag = (lhs <  rhs); break;

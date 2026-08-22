@@ -29,7 +29,7 @@ static inline int rootmap_marked(LeptrisElement e) {
 
 static inline void rootmap_set(LeptrisElement e, int on) {
     if (on) e->header.flags |= ROOTMAP_FLAG;
-    else e->header.flags &= (uint8_t)~ROOTMAP_FLAG;
+    else e->header.flags &= (uint8_t)(~ROOTMAP_FLAG & 0xFFu);
 }
 
 typedef struct root_doc_entry {

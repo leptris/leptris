@@ -495,7 +495,7 @@ LeptrisStatus leptris_element_set_name(LeptrisElement elem, const char* name) {
      * A replacement name is pool storage with no backpointer: clear
      * the bit and register in the root map instead. */
     struct leptris_document* sn_doc = leptris_element_get_document(elem);
-    elem->header.flags &= (uint8_t)~LEPTRIS_NAMEBP_FLAG;
+    elem->header.flags &= (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
     if (sn_doc && sn_doc->pool) {
         /* Use pool allocation for consistency with parsing */
         elem->name = leptris_pool_strdup(sn_doc->pool, name);

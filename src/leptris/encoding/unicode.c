@@ -103,9 +103,9 @@ static size_t utf8_encode(uint32_t code_point, char* buf) {
         /* Check for surrogate range */
         if (code_point >= 0xD800 && code_point <= 0xDFFF) {
             /* Replace with replacement character */
-            buf[0] = (char)0xEF;
-            buf[1] = (char)0xBF;
-            buf[2] = (char)0xBD;
+            buf[0] = (char)(unsigned char)0xEF;
+            buf[1] = (char)(unsigned char)0xBF;
+            buf[2] = (char)(unsigned char)0xBD;
             return 3;
         }
         buf[0] = (char)(0xE0 | ((code_point >> 12) & 0x0F));
@@ -120,9 +120,9 @@ static size_t utf8_encode(uint32_t code_point, char* buf) {
         return 4;
     } else {
         /* Beyond Unicode range - use replacement character */
-        buf[0] = (char)0xEF;
-        buf[1] = (char)0xBF;
-        buf[2] = (char)0xBD;
+        buf[0] = (char)(unsigned char)0xEF;
+        buf[1] = (char)(unsigned char)0xBF;
+        buf[2] = (char)(unsigned char)0xBD;
         return 3;
     }
 }

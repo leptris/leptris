@@ -256,13 +256,13 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
         APPEND_STRING(temp, len);
 
         /* Add children - traverse ALL children including text nodes */
-        LeptrisNode* child = (LeptrisNode*)leptris_node_first_child_internal((LeptrisNode*)elem);
-        while (child) {
-            if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
-                c14n_serialize_element((LeptrisElement)child, buffer, size, capacity);
-                child = leptris_node_get_next_sibling(child);
-            } else if (child->type == LEPTRIS_NODE_TYPE_TEXT) {
-                const char* text = leptris_text_get_content((LeptrisTextNode*)child);
+        LeptrisNode* sub_child = (LeptrisNode*)leptris_node_first_child_internal((LeptrisNode*)elem);
+        while (sub_child) {
+            if (sub_child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+                c14n_serialize_element((LeptrisElement)sub_child, buffer, size, capacity);
+                sub_child = leptris_node_get_next_sibling(sub_child);
+            } else if (sub_child->type == LEPTRIS_NODE_TYPE_TEXT) {
+                const char* text = leptris_text_get_content((LeptrisTextNode*)sub_child);
                 if (text) {
                     /* Escape text content for C14N (only < and & need escaping) */
                     char* escaped_text = c14n_escape_text(text, 0);
@@ -271,10 +271,10 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
                         free(escaped_text);
                     }
                 }
-                child = leptris_node_get_next_sibling(child);
-            } else if (child->type == LEPTRIS_NODE_TYPE_CDATA) {
+                sub_child = leptris_node_get_next_sibling(sub_child);
+            } else if (sub_child->type == LEPTRIS_NODE_TYPE_CDATA) {
                 /* CDATA content is treated as character data in C14N */
-                const char* text = leptris_cdata_get_content((LeptrisCDATANode*)child);
+                const char* text = leptris_cdata_get_content((LeptrisCDATANode*)sub_child);
                 if (text) {
                     /* Escape CDATA content for C14N (same rules as text content) */
                     char* escaped_text = c14n_escape_text(text, 0);
@@ -283,10 +283,10 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
                         free(escaped_text);
                     }
                 }
-                child = leptris_node_get_next_sibling(child);
-            } else if (child->type == LEPTRIS_NODE_TYPE_PI) {
+                sub_child = leptris_node_get_next_sibling(sub_child);
+            } else if (sub_child->type == LEPTRIS_NODE_TYPE_PI) {
                 /* Processing Instruction: <?target data?> */
-                LeptrisPINode* pi = (LeptrisPINode*)child;
+                LeptrisPINode* pi = (LeptrisPINode*)sub_child;
                 const char* target = leptris_pi_get_target(pi);
                 const char* data = leptris_pi_get_data(pi);
                 if (target) {
@@ -298,22 +298,22 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
                     }
                     APPEND_STRING("?>", 2);
                 }
-                child = leptris_node_get_next_sibling(child);
-            } else if (child->type == LEPTRIS_NODE_TYPE_COMMENT) {
+                sub_child = leptris_node_get_next_sibling(sub_child);
+            } else if (sub_child->type == LEPTRIS_NODE_TYPE_COMMENT) {
                 /* Issue #183: emit comments when with_comments=1. */
                 if (c14n_include_comments) {
                     const char* text = leptris_comment_get_content(
-                        (LeptrisCommentNode*)child);
+                        (LeptrisCommentNode*)sub_child);
                     if (text) {
                         len = snprintf(temp, sizeof(temp),
                                        "<!--%s-->", text);
                         APPEND_STRING(temp, len);
                     }
                 }
-                child = leptris_node_get_next_sibling(child);
+                sub_child = leptris_node_get_next_sibling(sub_child);
             } else {
                 /* Unknown node type - stop */
-                child = NULL;
+                sub_child = NULL;
             }
         }
 

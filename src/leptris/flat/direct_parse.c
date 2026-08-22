@@ -573,9 +573,9 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
                 ? q + 48
                 : ((p->end - q > 48) ? q + 48 : p->end);
             while (q < probe_end) {
-                char c = *q;
-                if (c == quote) { val_end = (char*)q; goto value_done; }
-                if (c == '&') has_amp = 1;
+                char vch = *q;
+                if (vch == quote) { val_end = (char*)q; goto value_done; }
+                if (vch == '&') has_amp = 1;
                 q++;
             }
             if (q >= p->end) return -1; /* unterminated */
@@ -645,7 +645,9 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
                                 val_start, val_len, has_amp) != 0)
             return -1;
     }
-    return -1;
+    /* for (;;): every exit is a return inside the loop (0 = tag
+     * closed, 1 = self-closing, -1 = error) — there is no
+     * fallthrough path, so no trailing statement. */
 }
 
 /* Inline borrowed-text creation from the bulk block (round 8): the
