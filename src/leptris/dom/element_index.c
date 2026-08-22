@@ -264,7 +264,11 @@ void leptris_element_index_free(LeptrisElementIndex* idx) {
 }
 
 void leptris_element_index_invalidate(struct leptris_document* doc) {
-    if (!doc || !doc->element_index) return;
+    if (!doc) return;
+    /* Always bump: the document-order rank cache (issue #485) keys
+     * on this even when no element index was ever built. */
+    doc->mutation_version++;
+    if (!doc->element_index) return;
     leptris_element_index_free(doc->element_index);
     doc->element_index = NULL;
 }

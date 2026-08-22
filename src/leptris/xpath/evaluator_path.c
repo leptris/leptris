@@ -356,6 +356,7 @@ typedef struct {
     int64_t* ranks;
     size_t count;
     size_t mask;  /* capacity - 1, power of two */
+    unsigned built_version;  /* document mutation_version at build */
 } DocOrderRankTable;
 
 static int doc_rank_table_init(DocOrderRankTable* t, size_t expected) {
@@ -380,15 +381,45 @@ static void doc_rank_table_free(DocOrderRankTable* t) {
     free(t->ranks);
 }
 
-static void doc_rank_table_put(DocOrderRankTable* t, void* key, int64_t rank) {
+/* Grow at 70% load so probe chains stay short. */
+static int doc_rank_table_grow(DocOrderRankTable* t) {
+    size_t new_cap = (t->mask + 1) << 1;
+    void** new_keys = (void**)calloc(new_cap, sizeof(void*));
+    int64_t* new_ranks = (int64_t*)malloc(new_cap * sizeof(int64_t));
+    if (!new_keys || !new_ranks) {
+        free(new_keys);
+        free(new_ranks);
+        return 0;
+    }
+    size_t new_mask = new_cap - 1;
+    for (size_t i = 0; i <= t->mask; i++) {
+        if (!t->keys[i]) continue;
+        size_t j = (size_t)(((uintptr_t)t->keys[i] >> 4) & new_mask);
+        while (new_keys[j]) j = (j + 1) & new_mask;
+        new_keys[j] = t->keys[i];
+        new_ranks[j] = t->ranks[i];
+    }
+    free(t->keys);
+    free(t->ranks);
+    t->keys = new_keys;
+    t->ranks = new_ranks;
+    t->mask = new_mask;
+    return 1;
+}
+
+static int doc_rank_table_put(DocOrderRankTable* t, void* key, int64_t rank) {
+    if ((t->count + 1) * 10 >= (t->mask + 1) * 7) {
+        if (!doc_rank_table_grow(t)) return 0;
+    }
     size_t i = (size_t)(((uintptr_t)key >> 4) & t->mask);
     while (t->keys[i]) {
-        if (t->keys[i] == key) return;  /* first visit wins */
+        if (t->keys[i] == key) return 1;  /* first visit wins */
         i = (i + 1) & t->mask;
     }
     t->keys[i] = key;
     t->ranks[i] = rank;
     t->count++;
+    return 1;
 }
 
 static int64_t doc_rank_table_get(const DocOrderRankTable* t, void* key) {
@@ -416,43 +447,68 @@ static void doc_rank_walk(DocOrderRankTable* t, LeptrisElement elem,
     }
 }
 
+/* Free a cached rank table (called from document teardown). */
+void leptris_doc_order_index_free(void* table) {
+    if (!table) return;
+    doc_rank_table_free((DocOrderRankTable*)table);
+    free(table);
+}
+
 /* Sort ns in document order (descending if reverse). Returns 0 on
  * success, -1 on allocation failure (ns left unsorted — callers treat
- * order as best-effort for exotic nodes). */
+ * order as best-effort for exotic nodes).
+ *
+ * The rank table is cached on the document and keyed on
+ * mutation_version so repeated queries don't rewalk the tree
+ * (issue #485: a per-call walk made union-heavy benchmark loops
+ * quadratic). */
 int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
                                  int reverse) {
     if (!ns || ns->count < 2) return 0;
     if (!ctx || !ctx->document || !ctx->document->new_dom_root) return 0;
 
-    DocOrderRankTable t;
-    if (!doc_rank_table_init(&t, ns->count * 2 + 16)) return -1;
-
-    int64_t seq = 0;
-    doc_rank_walk(&t, (LeptrisElement)ctx->document->new_dom_root, &seq);
+    DocOrderRankTable* t = (DocOrderRankTable*)ctx->document->doc_order_index;
+    if (t && t->built_version != ctx->document->mutation_version) {
+        leptris_doc_order_index_free(t);
+        t = NULL;
+        ctx->document->doc_order_index = NULL;
+    }
+    if (!t) {
+        t = (DocOrderRankTable*)malloc(sizeof(DocOrderRankTable));
+        if (!t) return -1;
+        if (!doc_rank_table_init(t, 256)) {
+            free(t);
+            return -1;
+        }
+        int64_t seq = 0;
+        doc_rank_walk(t, (LeptrisElement)ctx->document->new_dom_root, &seq);
+        t->built_version = ctx->document->mutation_version;
+        ctx->document->doc_order_index = t;
+    }
+    const DocOrderRankTable ct = *t;
 
     /* Rank every entry: synthetic nodes via their owner's rank. */
     size_t n = ns->count;
     int64_t* rank = (int64_t*)malloc(n * sizeof(int64_t));
     if (!rank) {
-        doc_rank_table_free(&t);
         return -1;
     }
     for (size_t i = 0; i < n; i++) {
         void* node = ns->nodes[i];
-        int64_t r = doc_rank_table_get(&t, node);
+        int64_t r = doc_rank_table_get(&ct, node);
         if (r == INT64_MAX) {
             int tag = (int)XPATH_NODE_TYPE(node);
             if (tag == LEPTRIS_NODE_ATTRIBUTE) {
                 int64_t o = doc_rank_table_get(
-                    &t, ((LeptrisAttributeNode*)node)->owner);
+                    &ct, ((LeptrisAttributeNode*)node)->owner);
                 r = (o == INT64_MAX) ? INT64_MAX : o + 2;
             } else if (tag == LEPTRIS_NODE_NAMESPACE) {
                 int64_t o = doc_rank_table_get(
-                    &t, ((LeptrisNamespaceNode*)node)->owner);
+                    &ct, ((LeptrisNamespaceNode*)node)->owner);
                 r = (o == INT64_MAX) ? INT64_MAX : o + 1;
             } else if (tag == LEPTRIS_NODE_TEXT) {
                 int64_t o = doc_rank_table_get(
-                    &t, ((XPathTextNode*)node)->owner);
+                    &ct, ((XPathTextNode*)node)->owner);
                 r = (o == INT64_MAX) ? INT64_MAX : o + 3;
             } else if (r == INT64_MAX) {
                 /* Outside the tree (doctype, cross-document): last,
@@ -469,7 +525,6 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
     size_t* idx = (size_t*)malloc(n * sizeof(size_t));
     if (!idx) {
         free(rank);
-        doc_rank_table_free(&t);
         return -1;
     }
     for (size_t i = 0; i < n; i++) idx[i] = i;
@@ -479,7 +534,6 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
         if (!tmp) {
             free(idx);
             free(rank);
-            doc_rank_table_free(&t);
             return -1;
         }
         for (size_t width = 1; width < n; width <<= 1) {
@@ -501,7 +555,6 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
     if (!sorted) {
         free(idx);
         free(rank);
-        doc_rank_table_free(&t);
         return -1;
     }
     if (!reverse) {
@@ -514,7 +567,6 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
     free(sorted);
     free(idx);
     free(rank);
-    doc_rank_table_free(&t);
     return 0;
 }
 
