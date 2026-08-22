@@ -951,6 +951,38 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                 int c_has_name = (ctest && ctest->type == XPATH_AST_NODE_TEST_NAME &&
                                   ctest->value && !strchr(ctest->value, ':'));
                 int c_has_wild = (ctest && ctest->type == XPATH_AST_NODE_TEST_ALL);
+                int c_has_type = (ctest && ctest->type == XPATH_AST_NODE_TEST_TYPE &&
+                                  ctest->value &&
+                                  (strcmp(ctest->value, "node") == 0 ||
+                                   strcmp(ctest->value, "text") == 0 ||
+                                   strcmp(ctest->value, "comment") == 0 ||
+                                   strcmp(ctest->value,
+                                          "processing-instruction") == 0));
+
+                /* `//text()` & friends (issue #485): a type node test
+                 * folds to one pre-order walk that emits matches in
+                 * document order directly. Predicates stay on the
+                 * generic path — the fused form below filters after
+                 * the walk, which reorders position predicates. */
+                if (c_has_type && second_step->child_count == 1) {
+                    uint16_t t = add_const_string(st, ctest->value);
+                    uint16_t pi = ctest->local_name
+                        ? add_const_string(st, ctest->local_name) : 0xFFFF;
+                    emit_op_u16(st, XPATH_BC_ABSOLUTE_DESCENDANT_TYPE, t);
+                    if (reserve_code(st, 2) == 0) {
+                        st->bc->code[st->bc->code_len++] = (pi >> 8) & 0xFF;
+                        st->bc->code[st->bc->code_len++] = pi & 0xFF;
+                    }
+                    for (size_t i = 0; i < rest_count; i++) {
+                        XPathASTNode* s = rest[i];
+                        if (s && s->type == XPATH_AST_STEP) {
+                            if (!try_compile_specialized_axis(st, s)) {
+                                emit_op_u16(st, XPATH_BC_AXIS_STEP, add_const_ast(st, s));
+                            }
+                        }
+                    }
+                    return;
+                }
 
                 if (c_has_name || c_has_wild) {
                     /* Check predicates on the child step. Position

@@ -31,6 +31,10 @@ XPathAxisType xpath_axis_from_name(const char* name);
 /* From evaluator_operators.c */
 struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                               XPathASTNode* ast);
+/* Sort a nodeset into true document order (descending if reverse).
+ * Issue #485. Defined in evaluator_path.c. */
+int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
+                                 int reverse);
 
 /* From evaluator_path.c */
 struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,

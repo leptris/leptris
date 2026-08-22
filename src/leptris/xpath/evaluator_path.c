@@ -10,6 +10,7 @@
 #include "../dom/element.h"  /* For LeptrisElement structure */
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>  /* qsort (document-order merge, issue #485) */
 
 /* Debug logging - Set to 0 to disable */
 #define XPATH_DEBUG 0
@@ -334,6 +335,189 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
  * Path Expression Evaluation
  * ============================================================================ */
 
+/* ---- Document-order rank sort (issue #485) ------------------------------
+ *
+ * Comparing two nodes' document order directly costs O(depth +
+ * siblings) — the sibling-chain walk makes a qsort over a wide nodeset
+ * quadratic in practice (e.g. //text() on a 20k-child document).
+ * Instead we assign every node an integer rank with one preorder walk
+ * of the covering subtrees and sort by rank: O(tree) + O(n log n)
+ * integer comparisons.
+ *
+ * Walked nodes get rank 4*seq; a synthetic namespace/attribute/
+ * xpath-text node owned by a walked element ranks at 4*seq+1/+2/+3 —
+ * between the element and its first child, per XPath 1.0 document
+ * order. Nodes outside the walked region (doctype, cross-document)
+ * sort last, pointer-ordered, for determinism.
+ * ------------------------------------------------------------------------ */
+
+typedef struct {
+    void** keys;
+    int64_t* ranks;
+    size_t count;
+    size_t mask;  /* capacity - 1, power of two */
+} DocOrderRankTable;
+
+static int doc_rank_table_init(DocOrderRankTable* t, size_t expected) {
+    size_t cap = 16;
+    while (cap < expected * 2) cap <<= 1;
+    t->keys = (void**)calloc(cap, sizeof(void*));
+    t->ranks = (int64_t*)malloc(cap * sizeof(int64_t));
+    if (!t->keys || !t->ranks) {
+        free(t->keys);
+        free(t->ranks);
+        t->keys = NULL;
+        t->ranks = NULL;
+        return 0;
+    }
+    t->count = 0;
+    t->mask = cap - 1;
+    return 1;
+}
+
+static void doc_rank_table_free(DocOrderRankTable* t) {
+    free(t->keys);
+    free(t->ranks);
+}
+
+static void doc_rank_table_put(DocOrderRankTable* t, void* key, int64_t rank) {
+    size_t i = (size_t)(((uintptr_t)key >> 4) & t->mask);
+    while (t->keys[i]) {
+        if (t->keys[i] == key) return;  /* first visit wins */
+        i = (i + 1) & t->mask;
+    }
+    t->keys[i] = key;
+    t->ranks[i] = rank;
+    t->count++;
+}
+
+static int64_t doc_rank_table_get(const DocOrderRankTable* t, void* key) {
+    size_t i = (size_t)(((uintptr_t)key >> 4) & t->mask);
+    while (t->keys[i]) {
+        if (t->keys[i] == key) return t->ranks[i];
+        i = (i + 1) & t->mask;
+    }
+    return INT64_MAX;
+}
+
+/* Preorder walk of elem's subtree, ranking every node. */
+static void doc_rank_walk(DocOrderRankTable* t, LeptrisElement elem,
+                          int64_t* seq) {
+    if (!elem) return;
+    doc_rank_table_put(t, elem, (*seq)++ * 4);
+    LeptrisNode* child = leptris_elem_first_child(elem);
+    while (child) {
+        if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            doc_rank_walk(t, (LeptrisElement)child, seq);
+        } else {
+            doc_rank_table_put(t, child, (*seq)++ * 4);
+        }
+        child = leptris_node_get_next_sibling(child);
+    }
+}
+
+/* Sort ns in document order (descending if reverse). Returns 0 on
+ * success, -1 on allocation failure (ns left unsorted — callers treat
+ * order as best-effort for exotic nodes). */
+int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
+                                 int reverse) {
+    if (!ns || ns->count < 2) return 0;
+    if (!ctx || !ctx->document || !ctx->document->new_dom_root) return 0;
+
+    DocOrderRankTable t;
+    if (!doc_rank_table_init(&t, ns->count * 2 + 16)) return -1;
+
+    int64_t seq = 0;
+    doc_rank_walk(&t, (LeptrisElement)ctx->document->new_dom_root, &seq);
+
+    /* Rank every entry: synthetic nodes via their owner's rank. */
+    size_t n = ns->count;
+    int64_t* rank = (int64_t*)malloc(n * sizeof(int64_t));
+    if (!rank) {
+        doc_rank_table_free(&t);
+        return -1;
+    }
+    for (size_t i = 0; i < n; i++) {
+        void* node = ns->nodes[i];
+        int64_t r = doc_rank_table_get(&t, node);
+        if (r == INT64_MAX) {
+            int tag = (int)XPATH_NODE_TYPE(node);
+            if (tag == LEPTRIS_NODE_ATTRIBUTE) {
+                int64_t o = doc_rank_table_get(
+                    &t, ((LeptrisAttributeNode*)node)->owner);
+                r = (o == INT64_MAX) ? INT64_MAX : o + 2;
+            } else if (tag == LEPTRIS_NODE_NAMESPACE) {
+                int64_t o = doc_rank_table_get(
+                    &t, ((LeptrisNamespaceNode*)node)->owner);
+                r = (o == INT64_MAX) ? INT64_MAX : o + 1;
+            } else if (tag == LEPTRIS_NODE_TEXT) {
+                int64_t o = doc_rank_table_get(
+                    &t, ((XPathTextNode*)node)->owner);
+                r = (o == INT64_MAX) ? INT64_MAX : o + 3;
+            } else if (r == INT64_MAX) {
+                /* Outside the tree (doctype, cross-document): last,
+                 * pointer-ordered among themselves. */
+                r = INT64_MAX - (int64_t)(((uintptr_t)node >> 4) & 0x3FFFFFFF);
+            }
+        }
+        rank[i] = r;
+    }
+
+    /* Stable bottom-up merge sort on an index array keyed by rank
+     * (qsort_r is not portable C99; plain qsort cannot see the rank
+     * array). O(n log n) int64 compares. */
+    size_t* idx = (size_t*)malloc(n * sizeof(size_t));
+    if (!idx) {
+        free(rank);
+        doc_rank_table_free(&t);
+        return -1;
+    }
+    for (size_t i = 0; i < n; i++) idx[i] = i;
+    {
+        /* Bottom-up merge sort, stable, O(n log n) compares on int64. */
+        size_t* tmp = (size_t*)malloc(n * sizeof(size_t));
+        if (!tmp) {
+            free(idx);
+            free(rank);
+            doc_rank_table_free(&t);
+            return -1;
+        }
+        for (size_t width = 1; width < n; width <<= 1) {
+            for (size_t lo = 0; lo < n; lo += width << 1) {
+                size_t mid = lo + width < n ? lo + width : n;
+                size_t hi = lo + (width << 1) < n ? lo + (width << 1) : n;
+                size_t a = lo, b = mid, k = lo;
+                while (a < mid && b < hi)
+                    tmp[k++] = (rank[idx[a]] <= rank[idx[b]]) ? idx[a++] : idx[b++];
+                while (a < mid) tmp[k++] = idx[a++];
+                while (b < hi) tmp[k++] = idx[b++];
+            }
+            memcpy(idx, tmp, n * sizeof(size_t));
+        }
+        free(tmp);
+    }
+
+    void** sorted = (void**)malloc(n * sizeof(void*));
+    if (!sorted) {
+        free(idx);
+        free(rank);
+        doc_rank_table_free(&t);
+        return -1;
+    }
+    if (!reverse) {
+        for (size_t i = 0; i < n; i++) sorted[i] = ns->nodes[idx[i]];
+    } else {
+        for (size_t i = 0; i < n; i++) sorted[n - 1 - i] = ns->nodes[idx[i]];
+    }
+    memcpy(ns->nodes, sorted, n * sizeof(void*));
+
+    free(sorted);
+    free(idx);
+    free(rank);
+    doc_rank_table_free(&t);
+    return 0;
+}
+
 struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                                           XPathASTNode* step,
                                           XPathNodeSet* input) {
@@ -471,6 +655,21 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
     }
 
     DEBUG_LOG("    Final result count = %zu", xpath_nodeset_count(result));
+
+    /* Multi-context steps interleave: children of an early context
+     * node must precede a later context node even when they were
+     * appended after it (issue #485). Sort the merged result into
+     * document order — reverse axes descending, per XPath 1.0.
+     * Single-context steps come out of the axis walks already
+     * ordered. */
+    if (xpath_nodeset_count(input) > 1 && result->count > 1) {
+        int reverse = (strcmp(axis_name, "ancestor") == 0 ||
+                       strcmp(axis_name, "ancestor-or-self") == 0 ||
+                       strcmp(axis_name, "preceding") == 0 ||
+                       strcmp(axis_name, "preceding-sibling") == 0);
+        xpath_nodeset_sort_doc_order(ctx, result, reverse);
+    }
+
     DEBUG_LOG("  === evaluate_step END ===");
 
     struct leptris_xpath_result* res = xpath_result_new(XPATH_RESULT_NODESET);
