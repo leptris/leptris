@@ -20,6 +20,10 @@
 #  elif defined(_WIN32)
 #    ifdef LEPTRIS_BUILD_SHARED
 #      define LEPTRIS_API __declspec(dllexport)
+#    elif defined(LEPTRIS_BUILDING_DLL)
+       /* Mirrors leptris.h (issue #278): CMake defines
+        * LEPTRIS_BUILDING_DLL on the objects that build the DLL. */
+#      define LEPTRIS_API __declspec(dllexport)
 #    elif defined(LEPTRIS_USE_SHARED)
 #      define LEPTRIS_API __declspec(dllimport)
 #    else
