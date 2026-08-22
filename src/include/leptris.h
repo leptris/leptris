@@ -159,6 +159,8 @@ LEPTRIS_API LeptrisElement leptris_node_as_element(LeptrisNodeRef node);
  *
  * @param elem Element handle
  * @return Node handle, or NULL if elem is NULL
+  *
+ * Memory: Handle is owned by the document. Do not free.
  */
 LEPTRIS_API LeptrisNodeRef leptris_element_as_node(LeptrisElement elem);
 
@@ -191,6 +193,8 @@ LEPTRIS_API LeptrisNodeRef leptris_text_node_create(LeptrisDocument doc,
  * @param doc Owning document
  * @param content Comment body (NUL-terminated)
  * @return New node handle, or NULL on allocation failure
+  *
+ * Memory: Node is owned by doc; released by leptris_document_free.
  */
 LEPTRIS_API LeptrisNodeRef leptris_comment_node_create(LeptrisDocument doc,
                                                      const char* content);
@@ -201,6 +205,8 @@ LEPTRIS_API LeptrisNodeRef leptris_comment_node_create(LeptrisDocument doc,
  * @param doc Owning document
  * @param content CDATA section content (NUL-terminated)
  * @return New node handle, or NULL on allocation failure
+  *
+ * Memory: Node is owned by doc; released by leptris_document_free.
  */
 LEPTRIS_API LeptrisNodeRef leptris_cdata_node_create(LeptrisDocument doc,
                                                    const char* content);
@@ -212,6 +218,8 @@ LEPTRIS_API LeptrisNodeRef leptris_cdata_node_create(LeptrisDocument doc,
  * @param target PI target (e.g. "xml-stylesheet")
  * @param data PI data (may be NULL or empty)
  * @return New node handle, or NULL on allocation failure
+  *
+ * Memory: Node is owned by doc; released by leptris_document_free.
  */
 LEPTRIS_API LeptrisNodeRef leptris_pi_node_create(LeptrisDocument doc,
                                                 const char* target,
@@ -259,6 +267,8 @@ LEPTRIS_API LeptrisStatus leptris_pi_node_set_data(LeptrisNodeRef node,
  *
  * @param node Node handle
  * @return Parent element, or NULL if no parent
+  *
+ * Memory: Handle is owned by the document. Do not free.
  */
 LEPTRIS_API LeptrisElement leptris_node_parent(LeptrisNodeRef node);
 
@@ -624,6 +634,8 @@ LEPTRIS_API const char* leptris_doctype_get_name(LeptrisDoctype dt);
  *
  * @param dt DOCTYPE handle
  * @return Same value as `leptris_doctype_get_name`
+  *
+ * Memory: String is owned by the document. Do not free.
  */
 LEPTRIS_API const char* leptris_doctype_get_root_name(LeptrisDoctype dt);
 
@@ -636,6 +648,8 @@ LEPTRIS_API const char* leptris_doctype_get_root_name(LeptrisDoctype dt);
  *
  * @param dt DOCTYPE handle
  * @return Public identifier, or NULL if not declared
+  *
+ * Memory: String is owned by the document. Do not free.
  */
 LEPTRIS_API const char* leptris_doctype_get_public_id(LeptrisDoctype dt);
 
@@ -647,6 +661,8 @@ LEPTRIS_API const char* leptris_doctype_get_public_id(LeptrisDoctype dt);
  *
  * @param dt DOCTYPE handle
  * @return System identifier, or NULL if not declared
+  *
+ * Memory: String is owned by the document. Do not free.
  */
 LEPTRIS_API const char* leptris_doctype_get_system_id(LeptrisDoctype dt);
 
@@ -659,6 +675,8 @@ LEPTRIS_API const char* leptris_doctype_get_system_id(LeptrisDoctype dt);
  *
  * @param dt DOCTYPE handle
  * @return Internal subset source, or NULL if empty
+  *
+ * Memory: String is owned by the document. Do not free.
  */
 LEPTRIS_API const char* leptris_doctype_get_internal_subset(LeptrisDoctype dt);
 
@@ -1672,6 +1690,8 @@ LEPTRIS_API char* leptris_c14n_canonicalize(struct leptris_document* doc,
  * @param flags Reserved for future use (pass 0)
  * @return Canonicalized XML string (caller must free with
  *         leptris_free_string), or NULL on error
+  *
+ * Memory: Caller must free the returned string (free() or leptris_free_string).
  */
 LEPTRIS_API char* leptris_c14n_canonicalize_subtree(LeptrisElement elem,
                                                    int version,
@@ -1690,6 +1710,8 @@ LEPTRIS_API char* leptris_c14n_canonicalize_subtree(LeptrisElement elem,
  * @param with_comments 0 to strip comments, 1 to preserve
  * @return Canonicalized XML string (caller frees with
  *         leptris_free_string), or NULL on error
+  *
+ * Memory: Caller must free the returned string (free() or leptris_free_string).
  */
 LEPTRIS_API char* leptris_c14n_canonicalize_ex(
     struct leptris_document* doc,
@@ -1701,6 +1723,8 @@ LEPTRIS_API char* leptris_c14n_canonicalize_ex(
 /**
  * Extended subtree canonicalization (issue #183). Same parameters
  * as leptris_c14n_canonicalize_ex but limited to elem + descendants.
+  *
+ * Memory: Caller must free the returned string (free() or leptris_free_string).
  */
 LEPTRIS_API char* leptris_c14n_canonicalize_subtree_ex(
     LeptrisElement elem,
@@ -1843,6 +1867,8 @@ LEPTRIS_API LeptrisStatus leptris_element_remove_namespace_definition(
  *
  * @param status Status code from leptris_parse_string or other API
  * @return Static string (never NULL, never freed)
+  *
+ * Memory: Static string. Do not free.
  */
 LEPTRIS_API const char* leptris_status_string(LeptrisStatus status);
 
@@ -2167,6 +2193,8 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_with_vars(
  * @param expression XPath expression
  * @param variables Variable set (may be NULL)
  * @return XPath result (caller frees with leptris_xpath_result_free)
+  *
+ * Memory: Result is owned by the caller; free with leptris_xpath_result_free.
  */
 LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_with_vars_context(
     LeptrisDocument doc,
@@ -2312,6 +2340,8 @@ LEPTRIS_API int leptris_xinclude_is_fallback_element(LeptrisElement elem);
  *
  * @param include_elem Include element
  * @return href value or NULL if not found
+  *
+ * Memory: String is owned by the element. Do not free.
  */
 LEPTRIS_API const char* leptris_xinclude_get_href(LeptrisElement include_elem);
 
@@ -2320,6 +2350,8 @@ LEPTRIS_API const char* leptris_xinclude_get_href(LeptrisElement include_elem);
  *
  * @param include_elem Include element
  * @return "xml" or "text" (defaults to "xml" if not specified)
+  *
+ * Memory: String is owned by the element. Do not free.
  */
 LEPTRIS_API const char* leptris_xinclude_get_parse(LeptrisElement include_elem);
 
@@ -2328,6 +2360,8 @@ LEPTRIS_API const char* leptris_xinclude_get_parse(LeptrisElement include_elem);
  *
  * @param include_elem Include element
  * @return xpointer value or NULL if not specified
+  *
+ * Memory: String is owned by the element. Do not free.
  */
 LEPTRIS_API const char* leptris_xinclude_get_xpointer(LeptrisElement include_elem);
 
@@ -2336,6 +2370,8 @@ LEPTRIS_API const char* leptris_xinclude_get_xpointer(LeptrisElement include_ele
  *
  * @param include_elem Include element
  * @return encoding value or NULL if not specified
+  *
+ * Memory: String is owned by the element. Do not free.
  */
 LEPTRIS_API const char* leptris_xinclude_get_encoding(LeptrisElement include_elem);
 
@@ -2365,6 +2401,8 @@ LEPTRIS_API const char* leptris_xinclude_get_encoding(LeptrisElement include_ele
  * Get libleptris version string
  *
  * @return Version string (e.g., "0.2.0")
+  *
+ * Memory: Static string. Do not free.
  */
 LEPTRIS_API const char* leptris_version(void);
 
