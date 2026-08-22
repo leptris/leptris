@@ -1,13 +1,78 @@
 ## [Unreleased]
 
-## [1.1.0] - Y-08-22
+## [1.1.0] - 2026-08-22
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
+
+- Attribute handle iteration: `leptris_element_first_attribute`,
+  `leptris_attribute_next`, `leptris_attribute_get_name`,
+  `leptris_attribute_get_value` — O(n) enumeration where the index
+  accessors re-walk per call (O(n^2)).
+- Mixed XPath nodesets, consumable publicly:
+  `leptris_xpath_result_node_kind` / `get_node` / `node_name` /
+  `node_value`. `//a/@x` results no longer require internals.
+- `leptris_element_prefix` — the element's own namespace prefix.
+- `leptris_document_get_dtd` + `leptris_dtd_parse_external_subset` —
+  external DTD subsets with application-owned I/O; parameter
+  entities and INCLUDE/IGNORE conditional sections work in them.
+- Public node-kind enum (`LeptrisNodeKind`) — bindings no longer
+  hardcode numeric node types.
+- CI: a Windows DLL export check that diffs leptris.dll's export
+  table against the declared public surface, and an FFI mirror
+  drift gate (ctest) that fails on phantom symbols, arity drift, or
+  a missing core surface in the Ruby/Python bindings.
+- `scripts/gen-api-docs.sh` — regenerates the Doxygen reference
+  with the version read from CMakeLists.txt.
+
+### Fixed
+
+- Windows DLL exports (issue #430, two layers): the five public SAX
+  functions were defined without LEPTRIS_API, and — beneath that —
+  five headers carry standalone LEPTRIS_API mirror blocks that
+  lacked the LEPTRIS_BUILDING_DLL branch from issue #278, so any
+  translation unit including one before leptris.h compiled public
+  definitions with a toothless macro. All mirrors now carry the
+  canonical block; every leptris-ruby Windows failure at
+  `attach_function :leptris_sax_parse` traces to this.
+- DTD: declarations delivered by parameter-entity substitution or
+  INCLUDE conditional sections were silently discarded (the
+  recursion built a fresh DTD and dropped it); duplicate
+  declarations freed pool-owned memory (heap corruption);
+  self-referential parameter entities overflowed the stack (now
+  depth-capped); the 8 KB substitution cap is gone.
+- XPath: `leptris_xpath_result_get` passed attribute-tagged nodes
+  through miscast as elements; it now returns elements only, with
+  the mixed-nodeset quartet for the rest.
+- ATTLIST re-declaration honors XML 1.0 §3.3 (first declaration
+  binding); internal-subset declarations take precedence over
+  external subsets.
+- Bindings: Ruby/Python call the declared
+  `leptris_document_serialize` (both had attached the undeclared
+  legacy alias with a phantom second argument); the legacy
+  `leptris_serialize_document` alias is now declared in leptris.h;
+  Ruby's `leptris_element_attribute` attach corrected to the real
+  2-arg signature.
 
 ### Changed
 
-- (describe changes here)
+- The CLI is built on the public API only — the layer contract in
+  CLAUDE.md is enforced by construction; the XML formatter's
+  attribute walk dropped an O(n^2) index pattern for handle
+  iteration.
+- The DTD validator walks the tree through the public interface;
+  attribute values are validated entity-expanded.
+- Attribute access has one implementation face (element_query.c);
+  the four attribute numeric getters share documented conversion
+  cores.
+- Removed the phantom declaration `leptris_parse_string_compact`
+  (never defined, never exported), 756 lines of dead alternate
+  element representations (element_compact.c, element_fast.c), and
+  duplicate declarations of `leptris_element_child_value` /
+  `leptris_element_remove_children`; headers render
+  Doxygen-warning-free.
+- Warning-clean build restored; perf-regression specs use
+  min-of-per-rep ratios (no more CI flakes on shared runners);
+  shared-library export surface audited at 176/176.
 
 
 ## [1.0.0] - 2026-08-21
