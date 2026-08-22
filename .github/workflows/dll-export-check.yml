@@ -1,0 +1,39 @@
+name: DLL export check
+
+# Issue #430: the five SAX functions were declared LEPTRIS_API in the
+# headers but defined bare — absent from leptris.dll on Windows while
+# every other CI surface (which never builds a DLL on Windows) stayed
+# green. This job builds the shared library on Windows and diffs its
+# export table against the declared public surface, so a missing
+# __declspec(dllexport) is a red X, not a Ruby-side mystery.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows-dll-exports:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install pefile
+        run: pip install pefile
+
+      - name: Configure (shared)
+        run: cmake -B build -S . -DLEPTRIS_BUILD_SHARED=ON -DLEPTRIS_BUILD_STATIC=OFF -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Diff export table against declared public surface
+        shell: pwsh
+        run: |
+          python scripts/check_dll_exports.py `
+            (Get-ChildItem build -Recurse -Filter leptris.dll |
+             Select-Object -First 1).FullName .

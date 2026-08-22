@@ -133,6 +133,18 @@ leptris_add_test(test_dtd        dtd/test_dtd_validate.cpp)
 leptris_add_test(test_xinclude   xinclude/test_xinclude.cpp)
 leptris_add_cli_test(test_cli    cli/test_cli.cpp)
 
+# FFI mirror drift gate (architecture review D): the Ruby/Python
+# binding mirrors must match the public headers (no phantom symbols,
+# no arity drift, core surface present). Python-based; skipped when
+# no interpreter is found.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    add_test(NAME ffi_mirror_drift
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/scripts/check_ffi_mirrors.py
+                ${PROJECT_SOURCE_DIR})
+endif()
+
 # libFuzzer harness (TODO 40) — built only when LEPTRIS_ENABLE_FUZZING=ON.
 # Not a ctest target; invoked manually with corpus.
 if(LEPTRIS_ENABLE_FUZZING)

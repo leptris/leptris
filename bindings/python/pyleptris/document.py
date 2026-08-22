@@ -37,7 +37,7 @@ class Document:
         return Element(ptr, self)
 
     def serialize(self) -> str:
-        result = _ffi.lib.leptris_serialize_document(self._ptr, _ffi.ffi.NULL)
+        result = _ffi.lib.leptris_document_serialize(self._ptr, _ffi.ffi.NULL)
         if result == _ffi.ffi.NULL:
             return ""
         value = _ffi.ffi.string(result).decode("utf-8")

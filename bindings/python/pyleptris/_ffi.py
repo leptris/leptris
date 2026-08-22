@@ -26,7 +26,7 @@ ffi.cdef(
     LeptrisDocument leptris_parse_string(const char* xml, size_t len, int* status);
     void           leptris_document_free(LeptrisDocument doc);
     LeptrisElement  leptris_document_root(LeptrisDocument doc);
-    char*          leptris_serialize_document(LeptrisDocument doc, void* options);
+    char*          leptris_document_serialize(LeptrisDocument doc, void* options);
     int            leptris_xinclude_process(LeptrisDocument doc, const char* base_path);
 
     int    leptris_node_get_type(LeptrisNodeRef node);

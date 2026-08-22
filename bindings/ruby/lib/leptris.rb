@@ -43,7 +43,7 @@ module Leptris
     [:string, :size_t, :pointer], :document
   attach_function :leptris_document_free, [:document], :void
   attach_function :leptris_document_root, [:document], :element
-  attach_function :leptris_serialize_document,
+  attach_function :leptris_document_serialize,
     [:document, :pointer], :pointer
   attach_function :leptris_xinclude_process,
     [:document, :string], :int
@@ -70,7 +70,7 @@ module Leptris
   attach_function :leptris_element_text, [:element], :string
   attach_function :leptris_element_first_child_any, [:element], :element
   attach_function :leptris_element_parent, [:element], :element
-  attach_function :leptris_element_attribute, [:element, :string, :string], :string
+  attach_function :leptris_element_attribute, [:element, :string], :string
   attach_function :leptris_element_next_sibling_any, [:element], :element
 
   # ---- Attribute iteration (TODO.remaining/06) ----

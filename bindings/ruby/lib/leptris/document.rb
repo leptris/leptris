@@ -29,7 +29,7 @@ module Leptris
     end
 
     def serialize(options = nil)
-      result = Leptris.leptris_serialize_document(@ptr, nil)
+      result = Leptris.leptris_document_serialize(@ptr, nil)
       return nil if result.nil? || result.null?
       str = result.read_string
       Leptris.leptris_free_string(result)

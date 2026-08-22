@@ -21,7 +21,7 @@ module Leptris
     end
 
     def [](attr_name)
-      Leptris.leptris_element_attribute(@ptr, attr_name, nil)
+      Leptris.leptris_element_attribute(@ptr, attr_name)
     end
 
     def attribute_count
