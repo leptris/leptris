@@ -1,11 +1,12 @@
-# Remaining work — leptris (formerly leptris, pre-1.0)
+# Remaining work — leptris
 
 Snapshot taken at the v0.26.8 → leptris rebrand (2026-08-21).
 Each file is one task; numbering is sequential, not priority.
-Priority order: 01, 02, 03, 06, 08 (all done/closed — CodeQL clear,
-DTD Phase 8 closed, attribute iteration + FFI export audit shipped,
-attr split-stream measured dead), then 05 (unblocked now that 06
-landed), and the rest.
+Status: 01, 02, 03, 04, 06, 07, 08, 10 DONE/closed (see each file
+for what actually shipped vs. what the TODO falsely recorded).
+Remaining: 05 — Rust bindings, unblocked (bindgen over the settled
+1.x public surface; the FFI drift gate and the DLL export check now
+guard the surface it binds against).
 
 Detailed history lives in docs/{n}-*.md and the perf ledger
 (docs/114-close-pugixml-parse-gap.md and successors).

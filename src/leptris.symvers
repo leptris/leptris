@@ -1,0 +1,16 @@
+# Symbol version script for libleptris (ELF/Linux).
+#
+# Public surface under the LEPTRIS_1 node; everything else local.
+# With the hidden-visibility build this mostly formalizes what the
+# export table already says, but gives future ABI-breaking releases a
+# node to version against (LEPTRIS_2 alongside LEPTRIS_1) instead of
+# a hard soname bump.
+#
+# Applied only on ELF toolchains that accept --version-script
+# (GNU ld, gold, lld); macOS and Windows builds skip it.
+LEPTRIS_1 {
+  global:
+    leptris_*;
+  local:
+    *;
+};

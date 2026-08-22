@@ -394,6 +394,15 @@ if(LEPTRIS_BUILD_SHARED)
         target_compile_definitions(leptris_shared PUBLIC LEPTRIS_DLL)
     endif()
 
+    # Versioned symbol visibility (TODO.remaining/10): ELF toolchains
+    # get a version script binding the public surface to the LEPTRIS_1
+    # version node, everything else local. macOS (no --version-script)
+    # and Windows (dllexport-based) skip it.
+    if(NOT APPLE AND NOT WIN32 AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_link_options(leptris_shared PRIVATE
+            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/leptris.symvers")
+    endif()
+
     # Include directories (same as object library)
     target_include_directories(leptris_shared
         PUBLIC
