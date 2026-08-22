@@ -152,6 +152,27 @@ TEST(DomBasics, AttributeHandleIterationSeesMutationAppends) {
     leptris_document_free(doc);
 }
 
+TEST(DomBasics, ElementPrefixAndNamespaceAccess) {
+    /* Architecture review candidate A: the element's own prefix and
+     * namespace URI are public (leptris_namespace_prefix cannot answer
+     * the prefix — in the compact architecture it lives on the
+     * element, not the URI-string handle). */
+    const char xml[] = "<r xmlns:dc='urn:dc'><dc:book/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement book = leptris_element_first_child_any(root);
+
+    EXPECT_EQ(leptris_element_prefix(root), nullptr);
+    EXPECT_STREQ(leptris_element_prefix(book), "dc");
+    EXPECT_EQ(leptris_element_namespace(root), nullptr);
+    ASSERT_NE(leptris_element_namespace(book), nullptr);
+    EXPECT_STREQ(leptris_namespace_uri(leptris_element_namespace(book)), "urn:dc");
+
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, MultipleNamespacesPerElementAreAllReachable) {
     /* Regression for TODO 159 Phase G: parser-local last-ns cache
      * must wire every xmlns into the list. We verify by parsing an

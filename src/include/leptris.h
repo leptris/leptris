@@ -1727,6 +1727,19 @@ LEPTRIS_API char* leptris_c14n_canonicalize_subtree_ex(
 LEPTRIS_API LeptrisNamespace leptris_element_namespace(LeptrisElement elem);
 
 /**
+ * Get an element's own namespace prefix
+ *
+ * The prefix of the element's qualified name (e.g. "foo" in
+ * &lt;foo:child/&gt;), or NULL when the element has none.
+ *
+ * @param elem Element
+ * @return Prefix string or NULL
+ *
+ * Memory: String is owned by element. Do not free or modify.
+ */
+LEPTRIS_API const char* leptris_element_prefix(LeptrisElement elem);
+
+/**
  * Get namespace URI
  *
  * @param ns Namespace
@@ -1956,6 +1969,63 @@ LEPTRIS_API LeptrisElement leptris_xpath_result_get(LeptrisXPathResult result, s
  */
 LEPTRIS_API size_t leptris_xpath_result_get_nodes(
     LeptrisXPathResult result, LeptrisElement* out_nodes, size_t max_count);
+
+/**
+ * Get the kind of a node in a mixed nodeset result
+ *
+ * Nodesets contain element nodes AND synthetic attribute nodes (from
+ * @attr / attribute:: axes). This reports which. String results of
+ * any kind are read via leptris_xpath_result_string.
+ *
+ * @param result XPath result (NODESET type)
+ * @param index Node index (0-based, < leptris_xpath_result_count)
+ * @return Node kind, or LEPTRIS_XPATH_NODE_OTHER on error/out of range
+ */
+LEPTRIS_API LeptrisXPathNodeKind leptris_xpath_result_node_kind(
+    LeptrisXPathResult result, size_t index);
+
+/**
+ * Get any node from a mixed nodeset result
+ *
+ * Unlike leptris_xpath_result_get (elements only), this returns the
+ * node whatever its kind. For LEPTRIS_XPATH_NODE_ELEMENT results the
+ * handle casts to LeptrisElement (leptris_node_as_element); attribute
+ * and text nodes are opaque handles read via node_name/node_value.
+ *
+ * @param result XPath result (NODESET type)
+ * @param index Node index (0-based)
+ * @return Node handle, or NULL on error/out of range
+ *
+ * Memory: Node is owned by the result/document. Do not free.
+ */
+LEPTRIS_API LeptrisNodeRef leptris_xpath_result_get_node(
+    LeptrisXPathResult result, size_t index);
+
+/**
+ * Get the name of a non-element node in a nodeset result
+ *
+ * @param result XPath result (NODESET type)
+ * @param index Node index (0-based)
+ * @return Attribute name for attribute nodes; NULL otherwise
+ *
+ * Memory: String is owned by the result. Do not free.
+ */
+LEPTRIS_API const char* leptris_xpath_result_node_name(
+    LeptrisXPathResult result, size_t index);
+
+/**
+ * Get the string value of a non-element node in a nodeset result
+ *
+ * Attribute nodes: the attribute value. Text nodes: the content.
+ *
+ * @param result XPath result (NODESET type)
+ * @param index Node index (0-based)
+ * @return Value string, or NULL for element/other nodes
+ *
+ * Memory: String is owned by the result. Do not free.
+ */
+LEPTRIS_API const char* leptris_xpath_result_node_value(
+    LeptrisXPathResult result, size_t index);
 
 /**
  * Get boolean value (for BOOLEAN results or type conversion)

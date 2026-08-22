@@ -62,6 +62,34 @@ typedef enum {
 } LeptrisXPathResultType;
 
 /* ============================================================================
+ * Node Kinds
+ * ============================================================================ */
+
+/* Kind of a tree node, as returned by leptris_node_get_type.
+ * XPath RESULT nodes carry a separate internal tag space — use
+ * LeptrisXPathNodeKind (below) for those. */
+typedef enum {
+    LEPTRIS_NODE_TYPE_ELEMENT = 0,
+    LEPTRIS_NODE_TYPE_TEXT = 1,
+    LEPTRIS_NODE_TYPE_COMMENT = 2,
+    LEPTRIS_NODE_TYPE_CDATA = 3,
+    LEPTRIS_NODE_TYPE_PI = 4,
+    LEPTRIS_NODE_TYPE_DOCTYPE = 5,
+    LEPTRIS_NODE_TYPE_ATTRIBUTE = 6  /* reserved; not produced by the parser */
+} LeptrisNodeKind;
+
+/* Kind of a node inside an XPath nodeset result. Nodesets are mixed:
+ * element nodes alongside synthetic attribute nodes (from @attr /
+ * attribute:: axes). Consume with leptris_xpath_result_node_kind —
+ * leptris_xpath_result_get returns elements only. */
+typedef enum {
+    LEPTRIS_XPATH_NODE_ELEMENT = 0,
+    LEPTRIS_XPATH_NODE_ATTRIBUTE,
+    LEPTRIS_XPATH_NODE_TEXT,
+    LEPTRIS_XPATH_NODE_OTHER   /* comment, namespace, ... */
+} LeptrisXPathNodeKind;
+
+/* ============================================================================
  * Serialization Options
  * ============================================================================ */
 

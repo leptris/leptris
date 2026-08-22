@@ -147,11 +147,13 @@ LEPTRIS_API LeptrisElement leptris_xpath_result_get(LeptrisXPathResult result, s
         return NULL;  /* Clearly invalid pointer */
     }
 
-    /* Additional safety: check if node type field is valid */
-    LeptrisNode* typed_node = (LeptrisNode*)node;
-    if (typed_node->type < LEPTRIS_NODE_TYPE_ELEMENT ||
-        typed_node->type > LEPTRIS_NODE_TYPE_DOCTYPE) {
-        return NULL;  /* Invalid type field - likely stale pointer */
+    /* Elements only. The synthetic attribute nodes carry the XPath
+     * tag space (LeptrisNodeType from leptris_internal.h), whose
+     * values overlap this enum's range — the old 0..DOCTYPE guard
+     * passed attribute-tagged nodes through miscast as elements.
+     * Mixed results are consumed via node_kind/get_node/node_value. */
+    if (XPATH_NODE_TYPE(node) != LEPTRIS_NODE_ELEMENT) {
+        return NULL;
     }
 
     return (LeptrisElement)node;
@@ -163,13 +165,70 @@ LEPTRIS_API size_t leptris_xpath_result_get_nodes(
     if (result->type != XPATH_RESULT_NODESET) return 0;
     if (!result->value.nodeset_value) return 0;
 
+    size_t copied = 0;
     size_t count = result->value.nodeset_value->count;
-    if (count > max_count) count = max_count;
-
-    for (size_t i = 0; i < count; i++) {
-        out_nodes[i] = (LeptrisElement)result->value.nodeset_value->nodes[i];
+    for (size_t i = 0; i < count && copied < max_count; i++) {
+        void* node = result->value.nodeset_value->nodes[i];
+        /* Elements only — same guard as leptris_xpath_result_get;
+         * attribute/text result nodes would miscast. */
+        if ((uintptr_t)node >= 0x1000 &&
+            XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ELEMENT) {
+            out_nodes[copied++] = (LeptrisElement)node;
+        }
     }
-    return count;
+    return copied;
+}
+
+/* Shared guard for the mixed-nodeset accessors: fetch node i of the
+ * result with basic pointer validation, or NULL. */
+static void* xp_result_node(LeptrisXPathResult result, size_t index) {
+    if (!result || result->type != XPATH_RESULT_NODESET) return NULL;
+    if (!result->value.nodeset_value || index >= result->value.nodeset_value->count) return NULL;
+    void* node = result->value.nodeset_value->nodes[index];
+    if ((uintptr_t)node < 0x1000) return NULL;
+    return node;
+}
+
+LEPTRIS_API LeptrisXPathNodeKind leptris_xpath_result_node_kind(
+    LeptrisXPathResult result, size_t index) {
+    void* node = xp_result_node(result, index);
+    if (!node) return LEPTRIS_XPATH_NODE_OTHER;
+    /* Result nodes carry the LeptrisNodeType tag space
+     * (leptris_internal.h): element=0, attribute=1, text=2. */
+    int tag = (int)XPATH_NODE_TYPE(node);
+    if (tag == LEPTRIS_NODE_ELEMENT) return LEPTRIS_XPATH_NODE_ELEMENT;
+    if (tag == LEPTRIS_NODE_ATTRIBUTE) return LEPTRIS_XPATH_NODE_ATTRIBUTE;
+    if (tag == LEPTRIS_NODE_TEXT) return LEPTRIS_XPATH_NODE_TEXT;
+    return LEPTRIS_XPATH_NODE_OTHER;
+}
+
+LEPTRIS_API LeptrisNodeRef leptris_xpath_result_get_node(
+    LeptrisXPathResult result, size_t index) {
+    return (LeptrisNodeRef)xp_result_node(result, index);
+}
+
+LEPTRIS_API const char* leptris_xpath_result_node_name(
+    LeptrisXPathResult result, size_t index) {
+    void* node = xp_result_node(result, index);
+    if (!node || XPATH_NODE_TYPE(node) != LEPTRIS_NODE_ATTRIBUTE) return NULL;
+    LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
+    return (attr->name && attr->name[0]) ? attr->name : NULL;
+}
+
+LEPTRIS_API const char* leptris_xpath_result_node_value(
+    LeptrisXPathResult result, size_t index) {
+    void* node = xp_result_node(result, index);
+    if (!node) return NULL;
+    int tag = (int)XPATH_NODE_TYPE(node);
+    if (tag == LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
+        return attr->value;
+    }
+    if (tag == LEPTRIS_NODE_TEXT) {
+        XPathTextNode* text = (XPathTextNode*)node;
+        return text->content;
+    }
+    return NULL;
 }
 
 LEPTRIS_API int leptris_xpath_result_boolean(LeptrisXPathResult result) {
