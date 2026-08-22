@@ -4,6 +4,7 @@
 #include "arena.h"
 
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <string.h>
 
 /* Allocation hooks (core.c): honoring the public
@@ -131,6 +132,28 @@ void leptris_arena_buffer_release(void* p, size_t size) {
     retain_give((char*)p, size);
 }
 
+#if defined(__linux__) && defined(MADV_HUGEPAGE)
+/* TODO.remaining/07: hint transparent huge pages for the parse
+ * arena. The contiguous arena is the parser's dominant memory
+ * region; on Linux servers with THP set to madvise, one madvise
+ * call converts its TLB footprint to 2 MB pages. A hint only —
+ * failure is ignored (unprivileged systems without THP just keep
+ * 4 KB pages). Measured unmeasurable on macOS (no equivalent), so
+ * this is Linux-only. */
+static void arena_advise_hugepages(const void* base, size_t len) {
+    if (len < (2u << 20)) return;           /* below a huge page */
+    const uintptr_t page = 4096;
+    uintptr_t start = ((uintptr_t)base + page - 1) & ~(page - 1);
+    uintptr_t end = ((uintptr_t)base + len) & ~(page - 1);
+    if (end <= start) return;
+    (void)madvise((void*)start, end - start, MADV_HUGEPAGE);
+}
+#else
+static void arena_advise_hugepages(const void* base, size_t len) {
+    (void)base; (void)len;
+}
+#endif
+
 LeptrisArena* leptris_arena_create(size_t size) {
     if (size == 0 || size > (size_t)-1 - ARENA_ALIGNMENT) return NULL;
     LeptrisArena* arena = (LeptrisArena*)leptris_alloc_hook(sizeof(LeptrisArena));
@@ -144,6 +167,7 @@ LeptrisArena* leptris_arena_create(size_t size) {
             leptris_free_hook(arena);
             return NULL;
         }
+        arena_advise_hugepages(base, capacity);
     }
     arena->base = base;
     /* For a reused block this is the BLOCK capacity, so the

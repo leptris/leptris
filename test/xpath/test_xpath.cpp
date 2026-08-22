@@ -799,3 +799,102 @@ TEST(XPathResults, GetNodesBatchCopiesElementsOnly) {
 
     leptris_document_free(doc);
 }
+
+// ---- TODO.remaining/07: compile-time folding of literal string fns --
+
+TEST(XPathConstantFolding, ConcatOfLiterals) {
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(
+        doc, nullptr, "concat('leptris', '-', 'is', ' ', 'fast')");
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "leptris-is fast");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPathConstantFolding, ConcatWithRuntimeArgStaysRuntime) {
+    /* position() is not a literal: the fold must NOT fire; the
+     * result still comes out right via the normal path. */
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(
+        doc, nullptr, "concat('n', position())");
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "n1");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPathConstantFolding, ContainsLiteralsFoldToBoolean) {
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r1 = leptris_xpath_eval(
+        doc, nullptr, "contains('leptris', 'ptri')");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r1), 1);
+    leptris_xpath_result_free(r1);
+
+    LeptrisXPathResult r2 = leptris_xpath_eval(
+        doc, nullptr, "contains('leptris', 'x')");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r2), 0);
+    leptris_xpath_result_free(r2);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathConstantFolding, ContainsFoldWorksInBooleanContext) {
+    /* Folded boolean feeding the `and` operator. */
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(
+        doc, nullptr, "contains('abc','b') and contains('abc','z')");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r), 0);
+    leptris_xpath_result_free(r);
+
+    LeptrisXPathResult r2 = leptris_xpath_eval(
+        doc, nullptr, "contains('abc','a') and contains('abc','c')");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r2), 1);
+    leptris_xpath_result_free(r2);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathConstantFolding, SubstringLiteralsFoldWithRounding) {
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; const char* want; } cases[] = {
+        { "substring('12345', 2, 3)",           "234"   },
+        { "substring('12345', 2)",              "2345"  },
+        { "substring('12345', 1.5, 2.6)",       "234"   }, /* round: 2,3 */
+        { "substring('12345', 0, 3)",           "12"    }, /* pos<1 clamps */
+        { "substring('12345', -1, 3)",          "1"     },
+        /* UTF-8: characters, not bytes. */
+        { "substring('café-au-lait', 4, 2)",    "\xc3\xa9-" },
+        { "substring('caf\xc3\xa9', 4)",       "\xc3\xa9" },
+    };
+    for (auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
+        ASSERT_NE(r, nullptr) << c.expr;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.expr;
+        EXPECT_STREQ(s, c.want) << c.expr;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}

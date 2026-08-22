@@ -23,6 +23,7 @@
 #include "../leptris_internal.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <stdio.h>
 
 typedef struct {
@@ -119,6 +120,96 @@ static void compile_node(CompilerState* st, XPathASTNode* node);
  * context node as default when no arg is supplied. We approximate
  * this by emitting BC_PATH_RELATIVE (which pushes [context_node])
  * as the implicit arg. */
+/* TODO.remaining/07: compile-time folding of pure string functions
+ * whose arguments are all literals. concat() and substring() become
+ * a single string literal; contains() becomes true()/false(). Any
+ * non-literal argument (position(), variables, node tests) keeps
+ * the normal runtime path. Evaluated once at compile time instead
+ * of on every execution of the cached bytecode. */
+static int try_fold_constant_function(CompilerState* st, XPathASTNode* node) {
+    if (!node || node->type != XPATH_AST_FUNCTION_CALL || !node->value) return 0;
+    const char* name = node->value;
+    size_t nargs = node->child_count;
+    if (nargs < 2) return 0;
+
+    for (size_t i = 0; i < nargs; i++) {
+        XPathASTNode* a = node->children[i];
+        if (!a || (a->type != XPATH_AST_STRING && a->type != XPATH_AST_NUMBER)) {
+            return 0;
+        }
+        if (a->type == XPATH_AST_STRING && !a->value) return 0;
+    }
+
+    if (strcmp(name, "concat") == 0) {
+        size_t total = 1;
+        for (size_t i = 0; i < nargs; i++) {
+            total += strlen(node->children[i]->value);
+        }
+        char* out = (char*)malloc(total);
+        if (!out) return 0;
+        out[0] = '\0';
+        char* w = out;
+        for (size_t i = 0; i < nargs; i++) {
+            size_t l = strlen(node->children[i]->value);
+            memcpy(w, node->children[i]->value, l);
+            w += l;
+        }
+        *w = '\0';
+        emit_op_u16(st, XPATH_BC_LITERAL_STRING, add_const_string(st, out));
+        free(out);
+        return 1;
+    }
+
+    if (strcmp(name, "contains") == 0 && nargs == 2) {
+        const char* hay = node->children[0]->value;
+        const char* needle = node->children[1]->value;
+        /* UTF-8 is self-synchronizing: a byte-level strstr cannot
+         * match across character boundaries. */
+        int found = strstr(hay, needle) != NULL;
+        emit_op(st, found ? XPATH_BC_FUNC_TRUE : XPATH_BC_FUNC_FALSE);
+        return 1;
+    }
+
+    if (strcmp(name, "substring") == 0 && (nargs == 2 || nargs == 3)) {
+        const char* src = node->children[0]->value;
+        /* XPath 1.0: positions are rounded (IEEE), 1-based, in
+         * CHARACTERS not bytes; the result is every char at position
+         * p with round(start) <= p < round(start) + round(len). */
+        double start_d = node->children[1]->number_value;
+        double len_d = (nargs == 3) ? node->children[2]->number_value : 1e18;
+        if (isnan(start_d) || isnan(len_d)) {
+            emit_op_u16(st, XPATH_BC_LITERAL_STRING, add_const_string(st, ""));
+            return 1;
+        }
+        double lo = llround(start_d);
+        double hi = lo + llround(len_d);
+        size_t cap = strlen(src) + 1;
+        char* out = (char*)malloc(cap);
+        if (!out) return 0;
+        char* w = out;
+        double pos = 1.0;
+        const unsigned char* r = (const unsigned char*)src;
+        while (*r) {
+            size_t char_len = 1;
+            if (*r >= 0xF0) char_len = 4;
+            else if (*r >= 0xE0) char_len = 3;
+            else if (*r >= 0xC0) char_len = 2;
+            if (pos >= lo && pos < hi) {
+                memcpy(w, r, char_len);
+                w += char_len;
+            }
+            r += char_len;
+            pos += 1.0;
+        }
+        *w = '\0';
+        emit_op_u16(st, XPATH_BC_LITERAL_STRING, add_const_string(st, out));
+        free(out);
+        return 1;
+    }
+
+    return 0;
+}
+
 static int try_compile_inline_function(CompilerState* st, XPathASTNode* node) {
     if (!node || node->type != XPATH_AST_FUNCTION_CALL) return 0;
     const char* name = node->value;
@@ -1085,6 +1176,11 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
         }
 
         case XPATH_AST_FUNCTION_CALL:
+            /* TODO.remaining/07: all-literal string functions fold
+             * to constants before anything else. */
+            if (try_fold_constant_function(st, node)) {
+                break;
+            }
             /* Try to emit an inline function opcode (TODO 130).
              * Falls back to BC_FUNC_CALL if the function isn't in
              * the inline set or has unexpected arg count. */
