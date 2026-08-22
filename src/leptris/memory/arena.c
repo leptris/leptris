@@ -4,8 +4,10 @@
 #include "arena.h"
 
 #include <stdlib.h>
-#include <sys/mman.h>
 #include <string.h>
+#if defined(__linux__)
+#include <sys/mman.h>   /* madvise(MADV_HUGEPAGE) — Linux only */
+#endif
 
 /* Allocation hooks (core.c): honoring the public
  * leptris_set_memory_management_functions contract for arena
