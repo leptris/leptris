@@ -213,10 +213,12 @@ static const size_t dp_par_off[5] = {
  * tables for branchless type dispatch — no switch, no branch predict. */
 static inline void dp_wire_child(DParser* p, LeptrisElement parent,
                                   LeptrisNode* child) {
-    int32_t parent_to_child = (int32_t)((char*)parent - (char*)child);
     unsigned t = (unsigned)child->type;
     if (t < 5) {
-        *(int32_t*)((char*)child + dp_par_off[t]) = parent_to_child;
+        int32_t* par_field =
+            (int32_t*)((char*)child + dp_par_off[t]);
+        *par_field = leptris_compact_int32_encode(
+            child, parent, (const int32_t*)par_field);
     }
 
     LeptrisNode* prev_last = p->last_child_stack[p->depth - 1];
@@ -225,13 +227,18 @@ static inline void dp_wire_child(DParser* p, LeptrisElement parent,
         if (pt <= LEPTRIS_NODE_TYPE_PI) {
             /* All sibling edges: unscaled int32 byte offsets (#450 —
              * cp16 ranges cannot hold cross-block sibling links on
-             * large documents). */
-            int32_t sib_off = (int32_t)((char*)child - (char*)prev_last);
-            *(int32_t*)((char*)prev_last + dp_ns_off_int32[pt]) = sib_off;
+             * large documents). Routed through the encoder so a
+             * delta that overflows int32 (or collides with the
+             * sentinel) lands in the overflow table instead of
+             * truncating (issue #478). */
+            int32_t* sib_field =
+                (int32_t*)((char*)prev_last + dp_ns_off_int32[pt]);
+            *sib_field = leptris_compact_int32_encode(
+                prev_last, child, (const int32_t*)sib_field);
         }
     } else {
-        int32_t child_off = (int32_t)((char*)child - (char*)parent);
-        parent->first_child_off = child_off;
+        parent->first_child_off = leptris_compact_int32_encode(
+            parent, child, &parent->first_child_off);
     }
     p->last_child_stack[p->depth - 1] = child;
 
@@ -1135,6 +1142,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 goto fail;
             }
             p.depth--;
+            /* Clear the closed level's tail cache (AFTER the
+             * decrement: at max depth the pre-decrement index would
+             * write past the array): a stale prev_last here wires
+             * cross-level siblings (issue #478). */
+            p.last_child_stack[p.depth] = NULL;
         }
         else if (next == '!') {
             /* Comment, CDATA, or DOCTYPE. */
