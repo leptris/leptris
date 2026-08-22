@@ -12,27 +12,6 @@
 #include <stdio.h>
 
 /* ============================================================================
- * Helper Functions
- * ============================================================================ */
-
-/* Compare two nodes for document order
- * Returns: -1 if a < b, 0 if a == b, 1 if a > b
- * Uses pointer comparison for consistent ordering
- * TODO: Implement proper document order traversal if needed for correctness
- */
-static int compare_document_order(const void* a, const void* b) {
-    void* node_a = *(void**)a;
-    void* node_b = *(void**)b;
-
-    if (node_a == node_b) return 0;
-
-    /* New DOM doesn't track document order.  Pointer comparison gives a
-     * stable, total ordering sufficient for XPath's de-duplication needs;
-     * true document order would require an ancestor/descendant walk that
-     * is not worth the cost for the queries that reach this path. */
-    return (node_a < node_b) ? -1 : 1;
-}
-/* ============================================================================
  * Operator Evaluation
  * ============================================================================ */
 
@@ -216,10 +195,9 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 if (!duplicate) xpath_nodeset_add(ns, node);
             }
 
-            /* CRITICAL: Sort in document order per XPath 1.0 spec */
-            if (ns->count > 1) {
-                qsort(ns->nodes, ns->count, sizeof(void*), compare_document_order);
-            }
+            /* CRITICAL: Sort in document order per XPath 1.0 spec
+             * (issue #485: pointer order is not document order). */
+            xpath_nodeset_sort_doc_order(ctx, ns, 0);
 
             result->value.nodeset_value = ns;
         }

@@ -41,6 +41,7 @@
 #include "../dom/element_index.h"
 #include "../dom/text.h"
 #include "../dom/node.h"
+#include "../dom/pi.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -180,6 +181,73 @@ static void descendant_walk(XPathNodeSet* out, LeptrisElement elem,
  *       Used for BC_ABSOLUTE_DESCENDANT (descendant axis).
  *   2 = descendant-or-self: push root if matches + descendants
  *       matching. Used for BC_ABSOLUTE_DESCENDANT_OR_SELF. */
+/* Absolute `//type-test` (issue #485): one pre-order walk of the
+ * root subtree emitting matching nodes directly in document order.
+ * This replaces the generic two-step form (descendant-or-self::node()
+ * + child::type()) whose per-context merge needs a doc-order sort.
+ * `want`: 0=node(), 1=text(), 2=comment(), 3=processing-instruction().
+ * pi_target is only consulted for want==3 (NULL = any target). */
+static void vm_absolute_type_walk(XPathNodeSet* out, LeptrisElement elem,
+                                  int want, const char* pi_target) {
+    LeptrisNode* child = leptris_elem_first_child(elem);
+    while (child) {
+        int match = 0;
+        switch (want) {
+            case 0:  /* node() */
+                match = 1;
+                break;
+            case 1:  /* text() — CDATA sections count as text */
+                match = (child->type == LEPTRIS_NODE_TYPE_TEXT ||
+                         child->type == LEPTRIS_NODE_TYPE_CDATA);
+                break;
+            case 2:  /* comment() */
+                match = (child->type == LEPTRIS_NODE_TYPE_COMMENT);
+                break;
+            case 3:  /* processing-instruction([target]) */
+                if (child->type == LEPTRIS_NODE_TYPE_PI) {
+                    if (pi_target) {
+                        LeptrisPINode* pi = (LeptrisPINode*)child;
+                        match = pi->target &&
+                                strcmp(pi->target, pi_target) == 0;
+                    } else {
+                        match = 1;
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+        if (match) xpath_nodeset_add_fast(out, child);
+        if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            vm_absolute_type_walk(out, (LeptrisElement)child, want, pi_target);
+        }
+        child = leptris_node_get_next_sibling(child);
+    }
+}
+
+static struct leptris_xpath_result* vm_apply_absolute_type(
+        XPathContext* ctx, const char* type_name, const char* pi_target) {
+    if (!ctx || !ctx->document) return NULL;
+    LeptrisElement root = (LeptrisElement)ctx->document->new_dom_root;
+    if (!root) return NULL;
+
+    int want = -1;
+    if (strcmp(type_name, "node") == 0) want = 0;
+    else if (strcmp(type_name, "text") == 0) want = 1;
+    else if (strcmp(type_name, "comment") == 0) want = 2;
+    else if (strcmp(type_name, "processing-instruction") == 0) want = 3;
+    if (want < 0) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) return NULL;
+    vm_absolute_type_walk(out, root, want, pi_target);
+
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
 static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
                                                       const char* name,
                                                       int wild,
@@ -1027,6 +1095,11 @@ static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
                     }
                     if (!dup) xpath_nodeset_add_fast(out, candidate);
                 }
+                /* Document order per XPath 1.0 — the merged order is
+                 * left-then-right append, not document order (issue
+                 * #485). */
+                xpath_nodeset_sort_doc_order(
+                    ctx, result->value.nodeset_value, 0);
             }
         }
     }
@@ -1573,6 +1646,22 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                 /* `/descendant::foo` = all descendants of root named foo. */
                 struct leptris_xpath_result* r =
                     vm_apply_absolute(ctx, name, 0, 1);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DESCENDANT_TYPE: {
+                uint16_t idx = read_u16(&pc);
+                uint16_t tgt = read_u16(&pc);
+                const char* type_name = (idx < bc->const_count &&
+                                         bc->constants[idx].type == XPATH_CONST_STRING)
+                                        ? bc->constants[idx].v.string : NULL;
+                const char* pi_target = (tgt != 0xFFFF && tgt < bc->const_count &&
+                                         bc->constants[tgt].type == XPATH_CONST_STRING)
+                                        ? bc->constants[tgt].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute_type(ctx, type_name, pi_target);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;

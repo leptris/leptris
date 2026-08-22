@@ -974,6 +974,131 @@ TEST(XPathResults, StringValueOfNonElementNodes) {
     leptris_document_free(doc);
 }
 
+// ---- issue #485: document order in merged nodesets --
+
+namespace {
+
+/* Collect element names / kinds for a nodeset result, in result
+ * order, as a comparable string ("a txt cmt b" style). */
+std::string NodesetSequence(LeptrisXPathResult r) {
+    std::string out;
+    size_t n = leptris_xpath_result_count(r);
+    for (size_t i = 0; i < n; i++) {
+        if (!out.empty()) out += ' ';
+        LeptrisXPathNodeKind k = leptris_xpath_result_node_kind(r, i);
+        switch (k) {
+            case LEPTRIS_XPATH_NODE_ELEMENT: {
+                const char* nm = leptris_xpath_result_node_name(r, i);
+                out += nm ? nm : "?";
+                break;
+            }
+            case LEPTRIS_XPATH_NODE_TEXT: {
+                const char* v = leptris_xpath_result_node_value(r, i);
+                out += "t:";
+                out += v ? v : "";
+                break;
+            }
+            default:
+                out += "other";
+                break;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(XPathResults, DocumentOrderMergedNodeset) {
+    /* Children of an early element interleave with the element's
+     * own later siblings: text inside <a> precedes the comment that
+     * follows <a>. Regression: per-context append produced
+     * [a, cmt, text, b, bb]. */
+    const char xml[] =
+        "<r><a>text</a><!-- c --><b>bb</b><c><d>dd</d></c></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//node()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(NodesetSequence(r),
+              "a t:text other b t:bb c d t:dd");
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "//text()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(NodesetSequence(r), "t:text t:bb t:dd");
+    leptris_xpath_result_free(r);
+
+    /* Union of overlapping sets stays in document order, deduped. */
+    r = leptris_xpath_eval(doc, nullptr, "//b | //node()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(NodesetSequence(r),
+              "a t:text other b t:bb c d t:dd");
+    leptris_xpath_result_free(r);
+
+    /* Deeply nested text orders across subtrees. */
+    const char xml2[] = "<r><x><y>1</y></x><z>2</z></r>";
+    LeptrisDocument doc2 = leptris_parse_string(xml2, std::strlen(xml2), &st);
+    ASSERT_NE(doc2, nullptr);
+    r = leptris_xpath_eval(doc2, nullptr, "//node()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(NodesetSequence(r), "x y t:1 z t:2");
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc2);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, DocumentOrderReverseAxis) {
+    /* Reverse axes report reverse document order: the ancestors of
+     * later matches come first. */
+    const char xml[] = "<r><a><x>1</x></a><b><x>2</x></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//x/ancestor::*");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(NodesetSequence(r), "b a r");
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, AbsoluteTypeTestWalkOrder) {
+    /* //text(), //node(), //comment(), //processing-instruction()
+     * fold to a single pre-order walk (issue #485) — verify counts
+     * and order through the folded path. */
+    const char xml[] =
+        "<r><?one data?><a>t1</a><?two data?><!--c--><b><![CDATA[cd]]></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//node()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(NodesetSequence(r), "other a t:t1 other other b t:cd");
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "//processing-instruction()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 2u);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "//processing-instruction('two')");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "//processing-instruction('nope')");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
 // ---- TODO.remaining/07: compile-time folding of literal string fns --
 
 TEST(XPathConstantFolding, ConcatOfLiterals) {

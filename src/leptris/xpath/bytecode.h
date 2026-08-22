@@ -104,6 +104,9 @@ typedef enum {
     XPATH_BC_ABSOLUTE_DESCENDANT_WILD,         /* no operand */
     XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_NAME, /* u16: name */
     XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD, /* no operand */
+    XPATH_BC_ABSOLUTE_DESCENDANT_TYPE, /* u16 u16: type name (node/text/
+                                          comment/processing-instruction),
+                                          PI target (0xFFFF = any) */
 
     /* Inline function opcodes (TODO 130). The compiler emits
      * <arg bytecode> + BC_FUNC_<NAME> for the common XPath functions
