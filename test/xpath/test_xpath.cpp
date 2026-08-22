@@ -760,8 +760,9 @@ TEST(XPathResults, MixedNodesetElementKind) {
         LeptrisElement e = leptris_node_as_element(n);
         ASSERT_NE(e, nullptr);
         EXPECT_STREQ(leptris_element_name(e), "a");
-        /* Element nodes have no name/value via the node accessors. */
-        EXPECT_EQ(leptris_xpath_result_node_name(r, i), nullptr);
+        /* Element nodes report their name; no string-value via the
+         * node accessors (issue #477 mixed-nodeset contract). */
+        EXPECT_STREQ(leptris_xpath_result_node_name(r, i), "a");
         EXPECT_EQ(leptris_xpath_result_node_value(r, i), nullptr);
         /* And the elements-only accessor agrees with get_node. */
         EXPECT_EQ(leptris_xpath_result_get(r, i), e);
@@ -796,6 +797,167 @@ TEST(XPathResults, GetNodesBatchCopiesElementsOnly) {
     EXPECT_EQ(leptris_xpath_result_get_nodes(r2, out, 4), 2u);
     EXPECT_STREQ(leptris_element_name(out[0]), "a");
     leptris_xpath_result_free(r2);
+
+    leptris_document_free(doc);
+}
+
+// ---- issue #477: mixed-nodeset tag-space collision + accessors --
+
+TEST(XPathResults, MixedNodesetKindsNamesValues) {
+    /* Element, text, comment, CDATA all in one //node() result.
+     * Regression: synthetic attribute nodes used tag 1, colliding
+     * with real text nodes (public tag 1) — node_name/miscast crashed
+     * on text entries. */
+    const char xml[] = "<r><a id='1'>hello</a><!-- c --><b><![CDATA[cd]]></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//node()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    size_t n = leptris_xpath_result_count(r);
+    ASSERT_EQ(n, 5u);
+
+    /* Every entry must be classified by its real kind (no crash,
+     * no miscast), and name/value must match the node's content. */
+    int elements = 0, texts = 0, others = 0;
+    for (size_t i = 0; i < n; i++) {
+        LeptrisXPathNodeKind k = leptris_xpath_result_node_kind(r, i);
+        const char* name = leptris_xpath_result_node_name(r, i);
+        const char* value = leptris_xpath_result_node_value(r, i);
+        switch (k) {
+            case LEPTRIS_XPATH_NODE_ELEMENT:
+                elements++;
+                /* a and b are the two elements in the result. */
+                EXPECT_TRUE(name != nullptr &&
+                            (std::strcmp(name, "a") == 0 ||
+                             std::strcmp(name, "b") == 0));
+                break;
+            case LEPTRIS_XPATH_NODE_TEXT:
+                texts++;
+                EXPECT_EQ(name, nullptr);
+                ASSERT_NE(value, nullptr);
+                EXPECT_TRUE(std::strcmp(value, "hello") == 0 ||
+                            std::strcmp(value, "cd") == 0);
+                break;
+            default:
+                others++;
+                EXPECT_EQ(name, nullptr);
+                ASSERT_NE(value, nullptr);
+                EXPECT_STREQ(value, " c ");
+                break;
+        }
+    }
+    EXPECT_EQ(elements, 2);
+    EXPECT_EQ(texts, 2);
+    EXPECT_EQ(others, 1);
+
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, MixedNodesetAttributeNameValue) {
+    const char xml[] = "<r><a id='x1'>t</a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//a/@id");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    ASSERT_EQ(leptris_xpath_result_count(r), 1u);
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 0), LEPTRIS_XPATH_NODE_ATTRIBUTE);
+    EXPECT_STREQ(leptris_xpath_result_node_name(r, 0), "id");
+    EXPECT_STREQ(leptris_xpath_result_node_value(r, 0), "x1");
+
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, NameFunctionsOnAttributeNodeset) {
+    /* Regression: name()/local-name()/namespace-uri() read their arg
+     * nodeset's first node AFTER freeing the result that owned the
+     * synthetic attribute node — dangling read. */
+    const char xml[] = "<r><a id='x1'>t</a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "name(//a/@id)");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_STREQ(leptris_xpath_result_string(r), "id");
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "local-name(//a/@id)");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_STREQ(leptris_xpath_result_string(r), "id");
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "namespace-uri(//a/@id)");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_STREQ(leptris_xpath_result_string(r), "");
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, TextNodeTestAsExpression) {
+    /* Regression: bare text()/node() in expression position was
+     * parsed as an unknown FUNCTION call, so a[text()] and
+     * a[text()='...'] predicates matched nothing. */
+    const char xml[] = "<r><a>hello</a><b/><c>zz</c></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//a[text()]");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "//b[text()]");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "//c[text()='zz']");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "//c[text()='nope']");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+
+    /* text() no longer double-counts elements with text content. */
+    r = leptris_xpath_eval(doc, nullptr, "//text()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    ASSERT_EQ(leptris_xpath_result_count(r), 2u);
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 0), LEPTRIS_XPATH_NODE_TEXT);
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 1), LEPTRIS_XPATH_NODE_TEXT);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, StringValueOfNonElementNodes) {
+    const char xml[] = "<r><a id='x9'>hello</a><!-- c --><b><![CDATA[7]]></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; const char* want; } cases[] = {
+        {"string(//text())", "hello"},
+        {"string(//comment())", " c "},
+        {"string(//b)", "7"},
+        {"string(//a/@id)", "x9"},
+    };
+    for (auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
+        ASSERT_NE(r, (LeptrisXPathResult)0) << c.expr;
+        EXPECT_STREQ(leptris_xpath_result_string(r), c.want) << c.expr;
+        leptris_xpath_result_free(r);
+    }
 
     leptris_document_free(doc);
 }

@@ -54,14 +54,18 @@ typedef enum {
  * Internal Structures - Match ext/leptris/leptris.h but without Ruby
  * ============================================================================ */
 
-/* Node type enumeration - supports all XPath node types */
+/* Tag values for the XPath-SYNTHETIC node structs (LeptrisAttributeNode,
+ * LeptrisNamespaceNode, XPathTextNode below). They share the value space
+ * of the public LeptrisNodeKind carried by every real DOM node
+ * (element=0, text=1, comment=2, cdata=3, pi=4, doctype=5): synthetic
+ * kinds use values the public enum never produces, so reading the first
+ * int of any entry in a mixed nodeset classifies it unambiguously
+ * (issue #477). Do not renumber into 0..5. */
 typedef enum {
-    LEPTRIS_NODE_ELEMENT = 0,
-    LEPTRIS_NODE_ATTRIBUTE = 1,
-    LEPTRIS_NODE_TEXT = 2,      /* Future */
-    LEPTRIS_NODE_COMMENT = 3,    /* Future */
-    LEPTRIS_NODE_PI = 4,          /* Future */
-    LEPTRIS_NODE_NAMESPACE = 5   /* For namespace axis */
+    LEPTRIS_NODE_ELEMENT = 0,     /* == public LEPTRIS_NODE_TYPE_ELEMENT */
+    LEPTRIS_NODE_ATTRIBUTE = 6,   /* == public reserved LEPTRIS_NODE_TYPE_ATTRIBUTE */
+    LEPTRIS_NODE_NAMESPACE = 7,
+    LEPTRIS_NODE_TEXT = 8         /* synthetic text() result node */
 } LeptrisNodeType;
 
 /* Processing instruction structure */

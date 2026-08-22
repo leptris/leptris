@@ -1291,6 +1291,8 @@ static struct leptris_xpath_result* xpath_func_local_name(
 ) {
     (void)context;
     void* node = NULL;
+    char* synth_name = NULL;  /* owned copy from a synthetic node */
+    int node_tag = -1;        /* captured before the arg result is freed */
 
     /* Get context node if no argument */
     if (arg_count == 0) {
@@ -1304,6 +1306,20 @@ static struct leptris_xpath_result* xpath_func_local_name(
             XPathNodeSet* nodeset = arg_result->value.nodeset_value;
             if (nodeset && xpath_nodeset_count(nodeset) > 0) {
                 node = xpath_nodeset_get(nodeset, 0);
+                /* Synthetic attribute/namespace nodes are owned by
+                 * arg_result and die at the free below — copy the
+                 * string out while the node is still alive. */
+                if (node) {
+                    int tag = (int)XPATH_NODE_TYPE(node);
+                    node_tag = tag;
+                    if (tag == LEPTRIS_NODE_ATTRIBUTE) {
+                        const char* n = ((LeptrisAttributeNode*)node)->name;
+                        synth_name = n ? leptris_strdup(n) : NULL;
+                    } else if (tag == LEPTRIS_NODE_NAMESPACE) {
+                        const char* n = ((LeptrisNamespaceNode*)node)->prefix;
+                        synth_name = n ? leptris_strdup(n) : NULL;
+                    }
+                }
             }
         }
         xpath_result_free(arg_result);
@@ -1323,15 +1339,14 @@ static struct leptris_xpath_result* xpath_func_local_name(
 
     /* Get local name (everything after last colon, or full name if no colon) */
     const char* full_name = NULL;
-    if (IS_ELEMENT_NODE(node)) {
+    if (node_tag == LEPTRIS_NODE_ELEMENT) {
         full_name = leptris_element_get_name((LeptrisElement)node);
-    } else if (IS_ATTRIBUTE_NODE(node)) {
-        /* For attribute nodes, get the attribute name (stored as C string) */
-        LeptrisAttributeNode* attr_node = (LeptrisAttributeNode*)node;
-        full_name = attr_node->name;
+    } else if (synth_name) {
+        full_name = synth_name;
     }
 
     if (!full_name) {
+        LEPTRIS_FREE(synth_name);
         struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
         if (!result) return NULL;
         result->value.string_value = leptris_strdup("");
@@ -1343,8 +1358,12 @@ static struct leptris_xpath_result* xpath_func_local_name(
     const char* local_name = last_colon ? last_colon + 1 : full_name;
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
-    if (!result) return NULL;
+    if (!result) {
+        LEPTRIS_FREE(synth_name);
+        return NULL;
+    }
     result->value.string_value = leptris_strdup(local_name);
+    LEPTRIS_FREE(synth_name);
     return result;
 }
 
@@ -1359,6 +1378,8 @@ static struct leptris_xpath_result* xpath_func_namespace_uri(
 ) {
     (void)context;
     void* node = NULL;
+    char* synth_uri = NULL;  /* owned copy from a synthetic node */
+    int node_tag = -1;       /* captured before the arg result is freed */
 
     /* Get context node if no argument */
     if (arg_count == 0) {
@@ -1372,6 +1393,20 @@ static struct leptris_xpath_result* xpath_func_namespace_uri(
             XPathNodeSet* nodeset = arg_result->value.nodeset_value;
             if (nodeset && xpath_nodeset_count(nodeset) > 0) {
                 node = xpath_nodeset_get(nodeset, 0);
+                /* Synthetic attribute/namespace nodes are owned by
+                 * arg_result and die at the free below — copy the
+                 * string out while the node is still alive. */
+                if (node) {
+                    int tag = (int)XPATH_NODE_TYPE(node);
+                    node_tag = tag;
+                    if (tag == LEPTRIS_NODE_ATTRIBUTE) {
+                        const char* u = ((LeptrisAttributeNode*)node)->namespace_uri;
+                        synth_uri = u ? leptris_strdup(u) : NULL;
+                    } else if (tag == LEPTRIS_NODE_NAMESPACE) {
+                        const char* u = ((LeptrisNamespaceNode*)node)->uri;
+                        synth_uri = u ? leptris_strdup(u) : NULL;
+                    }
+                }
             }
         }
         xpath_result_free(arg_result);
@@ -1391,17 +1426,19 @@ static struct leptris_xpath_result* xpath_func_namespace_uri(
 
     /* Get namespace URI */
     const char* uri = NULL;
-    if (IS_ELEMENT_NODE(node)) {
+    if (node_tag == LEPTRIS_NODE_ELEMENT) {
         uri = leptris_element_get_namespace_uri((LeptrisElement)node);
-    } else if (IS_ATTRIBUTE_NODE(node)) {
-        /* For attribute nodes, return the namespace URI if present */
-        LeptrisAttributeNode* attr_node = (LeptrisAttributeNode*)node;
-        uri = attr_node->namespace_uri;
+    } else if (synth_uri) {
+        uri = synth_uri;
     }
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
-    if (!result) return NULL;
+    if (!result) {
+        LEPTRIS_FREE(synth_uri);
+        return NULL;
+    }
     result->value.string_value = uri ? leptris_strdup(uri) : leptris_strdup("");
+    LEPTRIS_FREE(synth_uri);
     return result;
 }
 
@@ -1416,6 +1453,8 @@ static struct leptris_xpath_result* xpath_func_name(
 ) {
     (void)context;
     void* node = NULL;
+    char* synth_name = NULL;  /* owned copy from a synthetic node */
+    int node_tag = -1;        /* captured before the arg result is freed */
 
     /* Get context node if no argument */
     if (arg_count == 0) {
@@ -1429,6 +1468,20 @@ static struct leptris_xpath_result* xpath_func_name(
             XPathNodeSet* nodeset = arg_result->value.nodeset_value;
             if (nodeset && xpath_nodeset_count(nodeset) > 0) {
                 node = xpath_nodeset_get(nodeset, 0);
+                /* Synthetic attribute/namespace nodes are owned by
+                 * arg_result and die at the free below — copy the
+                 * strings out while the node is still alive. */
+                if (node) {
+                    int tag = (int)XPATH_NODE_TYPE(node);
+                    node_tag = tag;
+                    if (tag == LEPTRIS_NODE_ATTRIBUTE) {
+                        const char* n = ((LeptrisAttributeNode*)node)->name;
+                        synth_name = n ? leptris_strdup(n) : NULL;
+                    } else if (tag == LEPTRIS_NODE_NAMESPACE) {
+                        const char* n = ((LeptrisNamespaceNode*)node)->prefix;
+                        synth_name = n ? leptris_strdup(n) : NULL;
+                    }
+                }
             }
         }
         xpath_result_free(arg_result);
@@ -1449,8 +1502,7 @@ static struct leptris_xpath_result* xpath_func_name(
     /* Get qualified name */
     const char* name = NULL;
     char* temp_name = NULL;  /* For temporary allocations */
-
-    if (IS_ELEMENT_NODE(node)) {
+    if (node_tag == LEPTRIS_NODE_ELEMENT) {
         /* For elements, get qualified name (prefix:local if prefix exists) */
         LeptrisElement elem = (LeptrisElement)node;
         const char* local_name = leptris_element_get_name(elem);
@@ -1472,21 +1524,24 @@ static struct leptris_xpath_result* xpath_func_name(
             /* No prefix, just use local name */
             name = local_name;
         }
-    } else if (IS_ATTRIBUTE_NODE(node)) {
-        /* For attribute nodes, get the attribute name (stored as C string in LeptrisAttributeNode) */
-        LeptrisAttributeNode* attr_node = (LeptrisAttributeNode*)node;
-        name = attr_node->name;  /* Already a C string from create_attribute_node() */
+    } else if (synth_name) {
+        /* Synthetic attribute node: qualified attribute name.
+         * Synthetic namespace node: its prefix (the name of a
+         * namespace node per XPath 1.0). */
+        name = synth_name;
     }
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
     if (!result) {
         if (temp_name) LEPTRIS_FREE(temp_name);
+        LEPTRIS_FREE(synth_name);
         return NULL;
     }
     result->value.string_value = name ? leptris_strdup(name) : leptris_strdup("");
 
     /* Free temporary allocation */
     if (temp_name) LEPTRIS_FREE(temp_name);
+    LEPTRIS_FREE(synth_name);
 
     return result;
 }

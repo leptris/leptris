@@ -26,24 +26,15 @@
 
 /* Helper: Get element from typed node (returns NULL if not element)
  *
- * IMPORTANT: Elements are stored as LeptrisElement with LEPTRIS_NODE_TYPE_ELEMENT.
- * Attribute nodes have node_type field as their first member.
- *
- * Strategy: Check if first field is LEPTRIS_NODE_ATTRIBUTE. If so, it's an attribute.
- * Otherwise, treat it as an element.
+ * Every node begins with its type tag: real DOM nodes carry the public
+ * LeptrisNodeKind (LeptrisNode.base.type), synthetic XPath nodes carry
+ * LeptrisNodeType. In the unified tag space only 0 means element.
  */
 static LeptrisElement node_as_element(void* node) {
     if (!node) return NULL;
 
-    /* Check if it's an attribute node by reading first field */
-    LeptrisNodeType first_field = *(LeptrisNodeType*)node;
-    if (first_field == LEPTRIS_NODE_ATTRIBUTE) {
-        /* It's an attribute node, not an element */
-        return NULL;
-    }
-
-    /* Otherwise, it's an element */
-    return (LeptrisElement)node;
+    return (XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ELEMENT)
+        ? (LeptrisElement)node : NULL;
 }
 
 /* Helper: Get attribute node from typed node (returns NULL if not attribute) */
@@ -180,11 +171,12 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
             /* Node type tests (node(), text(), comment(), etc.) */
             if (test->value) {
                 if (strcmp(test->value, "node") == 0) return 1;
-                if (strcmp(test->value, "text") == 0) {
-                    /* text() matches elements with non-empty text content */
-                    const char* text = leptris_element_get_text_content(elem);
-                    return (text && text[0] != '\0');
-                }
+                /* text()/comment()/processing-instruction() never
+                 * match elements — the non-element branch above tests
+                 * real text/cdata/comment/pi nodes. The legacy
+                 * "text() matches elements with text content" rule
+                 * double-counted //text() (element + its text node). */
+                if (strcmp(test->value, "text") == 0) return 0;
                 if (strcmp(test->value, "comment") == 0) return 0;
                 if (strcmp(test->value, "processing-instruction") == 0) return 0;
             }
@@ -431,10 +423,10 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
             /* Transfer nodes to result (result will own the attribute/namespace nodes)
              *
              * IMPORTANT: Determine ownership by axis type, not by node type checking!
-             * LeptrisElement doesn't start with LeptrisNodeType (it starts with LeptrisCompactHeader),
-             * so XPATH_NODE_TYPE() reads garbage data from the compact header. If page_offset happens
-             * to equal LEPTRIS_NODE_ATTRIBUTE (1), IS_ATTRIBUTE_NODE() would incorrectly return TRUE,
-             * causing element nodes to be freed as attributes later! */
+             * A nodeset from the attribute axis may also carry non-attribute
+             * nodes after predicates/unions; owns_attributes frees only
+             * entries whose tag is LEPTRIS_NODE_ATTRIBUTE, so real DOM
+             * nodes in the same set are never freed here. */
             if (strcmp(axis_name, "attribute") == 0) {
                 /* Attribute axis creates LeptrisAttributeNode structures that must be freed */
                 result->owns_attributes = 1;
