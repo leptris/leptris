@@ -690,7 +690,11 @@ static int process_element_xinclude(LeptrisElement elem,
         free(content);
     }
 
+#if defined(LEPTRIS_HAS_ICONV)
+    /* Only referenced by the conversion-failure goto above; without
+     * iconv the goto is compiled out and the label would dangle. */
 fallback:
+#endif
     if (!substitute) {
         /* Resource error: try xi:fallback before giving up. */
         LeptrisElement fb = find_fallback(elem);

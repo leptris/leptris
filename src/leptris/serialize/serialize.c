@@ -589,15 +589,15 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
             buf->indent++;
 
             /* Serialize children */
-            LeptrisNode* child = leptris_node_first_child_internal((LeptrisNode*)elem);
-            while (child) {
+            LeptrisNode* ser_child = leptris_node_first_child_internal((LeptrisNode*)elem);
+            while (ser_child) {
                 /* Pass is_root=0 for all children */
-                if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
-                    serialize_element_recursive((LeptrisElement)child, buf, 0);
+                if (ser_child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+                    serialize_element_recursive((LeptrisElement)ser_child, buf, 0);
                 } else {
                     serialize_node_internal(child, buf);
                 }
-                child = leptris_node_get_next_sibling(child);
+                ser_child = leptris_node_get_next_sibling(ser_child);
             }
 
             /* Decrease indent level after children */
@@ -969,9 +969,9 @@ char* leptris_serialize_document_with_declaration(LeptrisElement root,
 
     /* Output UTF-8 BOM if present in original */
     if (has_bom) {
-        buffer_append_char(buf, (char)0xEF);
-        buffer_append_char(buf, (char)0xBB);
-        buffer_append_char(buf, (char)0xBF);
+        buffer_append_char(buf, (char)(unsigned char)0xEF);
+        buffer_append_char(buf, (char)(unsigned char)0xBB);
+        buffer_append_char(buf, (char)(unsigned char)0xBF);
     }
 
     /* Add XML declaration only if version is provided */
@@ -1053,9 +1053,9 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
 
     /* Output UTF-8 BOM if present in original */
     if (doc->has_bom) {
-        buffer_append_char(buf, (char)0xEF);
-        buffer_append_char(buf, (char)0xBB);
-        buffer_append_char(buf, (char)0xBF);
+        buffer_append_char(buf, (char)(unsigned char)0xEF);
+        buffer_append_char(buf, (char)(unsigned char)0xBB);
+        buffer_append_char(buf, (char)(unsigned char)0xBF);
     }
 
     /* Add XML declaration if requested or if doc had one */
