@@ -67,7 +67,7 @@ struct LeptrisSAXHandler {
      *              Empty array if no attributes
      *
      * Example:
-     *   <book id="123" title="XML Guide">
+     *   &lt;book id="123" title="XML Guide"&gt;
      *   -> start_element(data, "book", ["id", "123", "title", "XML Guide", NULL])
      */
     void (*start_element)(void* user_data, const char* name, const char** attrs);
@@ -79,7 +79,7 @@ struct LeptrisSAXHandler {
      * @param name Element name (UTF-8, null-terminated)
      *
      * Example:
-     *   </book>
+     *   &lt;/book&gt;
      *   -> end_element(data, "book")
      */
     void (*end_element)(void* user_data, const char* name);
@@ -104,7 +104,7 @@ struct LeptrisSAXHandler {
      * Note: text is NOT null-terminated. Use len to determine bounds.
      *
      * Example:
-     *   <book>XML Programming</book>
+     *   &lt;book&gt;XML Programming&lt;/book&gt;
      *   -> characters(data, "XML Programming", 15)
      */
     void (*characters)(void* user_data, const char* text, size_t len);
@@ -157,10 +157,10 @@ struct LeptrisSAXHandler {
      * @param uri Namespace URI (UTF-8, null-terminated)
      *
      * Example:
-     *   <root xmlns:foo="http://example.com">
+     *   &lt;root xmlns:foo="http://example.com"&gt;
      *   -> start_prefix_mapping(data, "foo", "http://example.com")
      *
-     *   <root xmlns="http://example.com">
+     *   &lt;root xmlns="http://example.com"&gt;
      *   -> start_prefix_mapping(data, "", "http://example.com")
      */
     void (*start_prefix_mapping)(void* user_data, const char* prefix, const char* uri);
@@ -175,7 +175,7 @@ struct LeptrisSAXHandler {
      * @param prefix Namespace prefix (UTF-8, null-terminated, "" for default namespace)
      *
      * Example:
-     *   </root>  (where root declared xmlns:foo)
+     *   &lt;/root&gt;  (where root declared xmlns:foo)
      *   -> end_prefix_mapping(data, "foo")
      */
     void (*end_prefix_mapping)(void* user_data, const char* prefix);

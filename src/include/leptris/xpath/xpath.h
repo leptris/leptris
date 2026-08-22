@@ -48,7 +48,7 @@ extern "C" {
  * - All 13 axes: child, descendant, parent, ancestor, sibling, etc.
  * - All 27 functions: string(), count(), position(), etc.
  * - All operators: =, !=, <, <=, >, >=, +, -, *, div, mod, |, and, or
- * - Predicates: [1], [@attr], [position() > 2], etc.
+ * - Predicates: [1], [\@attr], [position() > 2], etc.
  */
 LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
     LeptrisDocument doc,
