@@ -1113,29 +1113,6 @@ LEPTRIS_API LeptrisElement leptris_element_parent(LeptrisElement elem);
 LEPTRIS_API LeptrisElement leptris_element_root(LeptrisElement elem);
 
 /**
- * Get text value of first child text node
- *
- * @param elem Element
- * @return Text content of first child text node, or NULL if no text child
- *
- * Returns the text content of the first child text node.
- * If the element has no children or the first child is not a text node, returns NULL.
- *
- * Memory: String is owned by element. Do not free or modify.
- */
-LEPTRIS_API const char* leptris_element_child_value(LeptrisElement elem);
-
-/**
- * Remove all children from element
- *
- * @param elem Element to remove children from
- * @return LEPTRIS_OK on success, error code otherwise
- *
- * Removes all child elements and nodes from the element.
- */
-LEPTRIS_API LeptrisStatus leptris_element_remove_children(LeptrisElement elem);
-
-/**
  * Get hash value of element for comparison
  *
  * @param elem Element
@@ -1170,7 +1147,7 @@ LEPTRIS_API LeptrisElement leptris_element_create(LeptrisDocument doc, const cha
  * @return LEPTRIS_OK on success, error code otherwise
  *
  * Example:
- *   // Change <old> to <new>
+ *   // Change &lt;old&gt; to &lt;new&gt;
  *   leptris_element_set_name(elem, "new");
  *
  * Memory: Name is copied (pooled for pool documents)
@@ -1669,7 +1646,7 @@ LEPTRIS_API LeptrisStatus leptris_document_save_file(LeptrisDocument doc,
  * 2. Normalized line endings (\n)
  * 3. Lexicographic attribute ordering
  * 4. Namespace declaration ordering
- * 5. Empty element normalization (<tag></tag> not <tag/>)
+ * 5. Empty element normalization (&lt;tag&gt;&lt;/tag&gt; not &lt;tag/&gt;)
  * 6. Entity/character reference expansion
  * 7. Attribute value quoting with double quotes
  *
@@ -1888,7 +1865,7 @@ LEPTRIS_API const char* leptris_status_string(LeptrisStatus status);
  * - All 13 axes: child, descendant, parent, ancestor, sibling, etc.
  * - All 27 functions: string(), count(), position(), etc.
  * - All operators: =, !=, <, <=, >, >=, +, -, *, div, mod, |, and, or
- * - Predicates: [1], [@attr], [position() > 2], etc.
+ * - Predicates: [1], [\@attr], [position() > 2], etc.
  */
 LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
     LeptrisDocument doc,
@@ -1994,7 +1971,7 @@ LEPTRIS_API size_t leptris_xpath_result_get_nodes(
  * Get the kind of a node in a mixed nodeset result
  *
  * Nodesets contain element nodes AND synthetic attribute nodes (from
- * @attr / attribute:: axes). This reports which. String results of
+ * \@attr / attribute:: axes). This reports which. String results of
  * any kind are read via leptris_xpath_result_string.
  *
  * @param result XPath result (NODESET type)
@@ -2308,9 +2285,9 @@ LEPTRIS_API LeptrisStatus leptris_document_set_allocators(
  * XInclude namespace: http://www.w3.org/2001/XInclude
  *
  * Example:
- *   <root xmlns:xi="http://www.w3.org/2001/XInclude">
+ *   &lt;root xmlns:xi="http://www.w3.org/2001/XInclude"&gt;
  *     <xi:include href="chapter1.xml"/>
- *   </root>
+ *   &lt;/root&gt;
  */
 LEPTRIS_API LeptrisStatus leptris_xinclude_process(LeptrisDocument doc, const char* base_url);
 

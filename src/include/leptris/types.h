@@ -79,7 +79,7 @@ typedef enum {
 } LeptrisNodeKind;
 
 /* Kind of a node inside an XPath nodeset result. Nodesets are mixed:
- * element nodes alongside synthetic attribute nodes (from @attr /
+ * element nodes alongside synthetic attribute nodes (from \@attr /
  * attribute:: axes). Consume with leptris_xpath_result_node_kind —
  * leptris_xpath_result_get returns elements only. */
 typedef enum {

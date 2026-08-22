@@ -105,7 +105,7 @@ LEPTRIS_API LeptrisStatus leptris_document_save_file(LeptrisDocument doc,
  * 2. Normalized line endings (\n)
  * 3. Lexicographic attribute ordering
  * 4. Namespace declaration ordering
- * 5. Empty element normalization (<tag></tag> not <tag/>)
+ * 5. Empty element normalization (&lt;tag&gt;&lt;/tag&gt; not &lt;tag/&gt;)
  * 6. Entity/character reference expansion
  * 7. Attribute value quoting with double quotes
  *
