@@ -641,6 +641,10 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         doc->element_index = NULL;
     }
 
+    /* Free document-order rank cache (issue #485) */
+    leptris_doc_order_index_free(doc->doc_order_index);
+    doc->doc_order_index = NULL;
+
     /* FlatDoc is no longer used — direct_parse builds the
      * LeptrisElement tree eagerly. doc->flat_doc is always NULL. */
 

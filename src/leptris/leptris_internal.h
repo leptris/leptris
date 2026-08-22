@@ -212,6 +212,15 @@ struct leptris_document {
     struct leptris_element_index* element_index;
     unsigned axis_query_count;  /* axis queries seen without an index */
 
+    /* Document-order rank table (issue #485) — one preorder walk
+     * assigns every node an integer rank used to sort merged
+     * nodesets into document order. Cached here so repeated queries
+     * don't rewalk the tree; rebuilt when mutation_version moves.
+     * Bumped by leptris_element_index_invalidate, which every DOM
+     * mutation path already calls. */
+    void* doc_order_index;
+    unsigned mutation_version;
+
     /* Mutation tail caches (TODO 195): the public API's append /
      * set-attribute walk to the tail because elements carry no
      * last-child edge (64 B layout law, TODO 155). Sequential
@@ -295,6 +304,10 @@ struct leptris_namespace {
     char* uri;                   /* Namespace URI (required) */
     struct leptris_namespace* next; /* Linked list for multiple declarations */
 };
+
+/* Document-order rank cache teardown (issue #485). Defined in
+ * xpath/evaluator_path.c. */
+void leptris_doc_order_index_free(void* table);
 
 /* ============================================================================
  * XPath Node Type System
