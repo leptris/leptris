@@ -884,17 +884,26 @@ TEST(XPathResults, NameFunctionsOnAttributeNodeset) {
 
     LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "name(//a/@id)");
     ASSERT_NE(r, (LeptrisXPathResult)0);
-    EXPECT_STREQ(leptris_xpath_result_string(r), "id");
+    char* s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "id");
+    leptris_free_string(s);
     leptris_xpath_result_free(r);
 
     r = leptris_xpath_eval(doc, nullptr, "local-name(//a/@id)");
     ASSERT_NE(r, (LeptrisXPathResult)0);
-    EXPECT_STREQ(leptris_xpath_result_string(r), "id");
+    s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "id");
+    leptris_free_string(s);
     leptris_xpath_result_free(r);
 
     r = leptris_xpath_eval(doc, nullptr, "namespace-uri(//a/@id)");
     ASSERT_NE(r, (LeptrisXPathResult)0);
-    EXPECT_STREQ(leptris_xpath_result_string(r), "");
+    s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "");
+    leptris_free_string(s);
     leptris_xpath_result_free(r);
 
     leptris_document_free(doc);
@@ -955,7 +964,10 @@ TEST(XPathResults, StringValueOfNonElementNodes) {
     for (auto& c : cases) {
         LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
         ASSERT_NE(r, (LeptrisXPathResult)0) << c.expr;
-        EXPECT_STREQ(leptris_xpath_result_string(r), c.want) << c.expr;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.expr;
+        EXPECT_STREQ(s, c.want) << c.expr;
+        leptris_free_string(s);
         leptris_xpath_result_free(r);
     }
 
