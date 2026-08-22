@@ -713,3 +713,89 @@ TEST(XPathResults, DoubleFreeIsANoOp) {
 
     leptris_document_free(doc);
 }
+
+// Mixed nodesets (architecture review, candidate A): nodesets contain
+// element nodes AND synthetic attribute nodes. The kind/get_node/
+// node_name/node_value quartet is the public way to consume them;
+// leptris_xpath_result_get stays elements-only.
+TEST(XPathResults, MixedNodesetAttributeKind) {
+    const char xml[] = "<r><a x='1'/><a x='2'/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//a/@x");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    ASSERT_EQ(leptris_xpath_result_count(r), 2u);
+
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 0), LEPTRIS_XPATH_NODE_ATTRIBUTE);
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 1), LEPTRIS_XPATH_NODE_ATTRIBUTE);
+    EXPECT_STREQ(leptris_xpath_result_node_name(r, 0), "x");
+    EXPECT_STREQ(leptris_xpath_result_node_value(r, 0), "1");
+    EXPECT_STREQ(leptris_xpath_result_node_value(r, 1), "2");
+
+    /* Elements-only accessor must not miscast an attribute node. */
+    EXPECT_EQ(leptris_xpath_result_get(r, 0), nullptr);
+    /* The node handle itself is retrievable whatever the kind. */
+    ASSERT_NE(leptris_xpath_result_get_node(r, 0), nullptr);
+
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, MixedNodesetElementKind) {
+    const char xml[] = "<r><a x='1'/><a x='2'/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//a");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    ASSERT_EQ(leptris_xpath_result_count(r), 2u);
+
+    for (size_t i = 0; i < 2; i++) {
+        EXPECT_EQ(leptris_xpath_result_node_kind(r, i), LEPTRIS_XPATH_NODE_ELEMENT);
+        LeptrisNodeRef n = leptris_xpath_result_get_node(r, i);
+        ASSERT_NE(n, nullptr);
+        LeptrisElement e = leptris_node_as_element(n);
+        ASSERT_NE(e, nullptr);
+        EXPECT_STREQ(leptris_element_name(e), "a");
+        /* Element nodes have no name/value via the node accessors. */
+        EXPECT_EQ(leptris_xpath_result_node_name(r, i), nullptr);
+        EXPECT_EQ(leptris_xpath_result_node_value(r, i), nullptr);
+        /* And the elements-only accessor agrees with get_node. */
+        EXPECT_EQ(leptris_xpath_result_get(r, i), e);
+    }
+
+    /* Out of range / wrong type -> safe defaults. */
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 99), LEPTRIS_XPATH_NODE_OTHER);
+    EXPECT_EQ(leptris_xpath_result_get_node(r, 99), nullptr);
+    EXPECT_EQ(leptris_xpath_result_node_name(r, 99), nullptr);
+    EXPECT_EQ(leptris_xpath_result_node_value(r, 99), nullptr);
+
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, GetNodesBatchCopiesElementsOnly) {
+    const char xml[] = "<r><a x='1'/><a x='2'/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Mixed result: 2 attribute nodes, 0 elements. */
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//a/@x");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    LeptrisElement out[4] = {0};
+    EXPECT_EQ(leptris_xpath_result_get_nodes(r, out, 4), 0u);
+    leptris_xpath_result_free(r);
+
+    /* Element result: both copied. */
+    LeptrisXPathResult r2 = leptris_xpath_eval(doc, nullptr, "//a");
+    ASSERT_NE(r2, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_get_nodes(r2, out, 4), 2u);
+    EXPECT_STREQ(leptris_element_name(out[0]), "a");
+    leptris_xpath_result_free(r2);
+
+    leptris_document_free(doc);
+}

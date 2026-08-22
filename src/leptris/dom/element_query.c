@@ -821,6 +821,13 @@ LEPTRIS_API LeptrisNamespace leptris_element_namespace(LeptrisElement elem) {
     return leptris_element_get_namespace_uri(elem);
 }
 
+LEPTRIS_API const char* leptris_element_prefix(LeptrisElement elem) {
+    /* leptris_namespace_prefix(LeptrisNamespace) cannot answer this:
+     * in the compact architecture the prefix lives on the ELEMENT,
+     * not on the URI-string namespace handle. */
+    return leptris_element_get_prefix(elem);
+}
+
 /**
  * Get namespace URI from namespace handle
  * In compact mode, LeptrisNamespace is the URI string itself.

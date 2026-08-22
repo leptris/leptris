@@ -15,13 +15,7 @@
 #  include <unistd.h>
 #endif
 
-/* Need access to internal structures for formatters */
-#include "../src/leptris/leptris_internal.h"
-#include "../src/leptris/dom/element.h"  /* For LeptrisElement and API */
-#include "../src/leptris/dom/text.h"    /* For LeptrisTextNode */
-#include "../src/leptris/dom/cdata.h"   /* For LeptrisCDATANode */
-#include "../src/leptris/dom/comment.h" /* For LeptrisCommentNode */
-#include "../src/leptris/dom/pi.h"      /* For LeptrisPINode */
+#include "leptris.h"  /* Public API only — the CLI layer contract */
 
 /* ------------------------------------------------------------------------- */
 /* Format Conversion                                                         */
@@ -74,30 +68,16 @@ static void xml_print_element_recursive(
     }
 
     /* Opening tag - use API to get name */
-    const char* name = leptris_element_get_name(elem);
+    const char* name = leptris_element_name(elem);
     fprintf(out, "<%s", name ? name : "");
 
-    /* Attributes - iterate using compact accessor functions */
-    size_t attr_count = leptris_element_attribute_count(elem);
-    for (size_t i = 0; i < attr_count; i++) {
-        /* Get attribute by index using accessor function */
-        const char* attr_name = NULL;
-        const char* attr_value = NULL;
+    /* Attributes - public handle iteration (O(n), not O(n^2) index walks) */
+    for (LeptrisAttribute attr = leptris_element_first_attribute(elem);
+         attr; attr = leptris_attribute_next(attr)) {
+        const char* attr_name = leptris_attribute_get_name(attr);
+        const char* attr_value = leptris_attribute_get_value(elem, attr);
 
-        /* Use API to get attribute name and value by index */
-        /* Walk the attribute linked list manually to get the i-th attribute */
-        struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
-        for (size_t j = 0; j < i && attr; j++) {
-            attr = leptris_attr_next(attr);
-        }
-        if (!attr) continue;
-
-        /* Single representation (TODO 184 round 4): views ARE the
-         * NUL-terminated strings — no conversion, no temp frees. */
-        attr_name = attr_cname(attr);
-        attr_value = attr_cvalue(attr);
-
-        if (attr_name) {
+        if (attr_name && attr_name[0]) {
             fprintf(out, " %s=\"", attr_name);
             if (attr_value) {
                 /* Escape XML entities */
@@ -117,8 +97,8 @@ static void xml_print_element_recursive(
     }
 
     /* Namespace declarations - output xmlns attributes if element has namespace */
-    const char* ns_uri = leptris_element_get_namespace_uri(elem);
-    const char* ns_prefix = leptris_element_get_prefix(elem);
+    const char* ns_uri = leptris_element_namespace(elem);
+    const char* ns_prefix = leptris_element_prefix(elem);
     if (ns_uri) {
         fprintf(out, " xmlns");
         if (ns_prefix) {
@@ -128,20 +108,22 @@ static void xml_print_element_recursive(
     }
 
     /* Namespace declarations stored on this element (xmlns:prefix="uri") */
-    struct leptris_namespace* ns = leptris_elem_namespaces(elem);
-    while (ns) {
+    size_t ns_count = leptris_element_namespace_count(elem);
+    for (size_t i = 0; i < ns_count; i++) {
+        const char* decl_prefix = leptris_element_namespace_decl_prefix(elem, i);
+        const char* decl_uri = leptris_element_namespace_decl_uri(elem, i);
         fprintf(out, " xmlns");
-        if (ns->prefix) {
-            fprintf(out, ":%s", ns->prefix);
+        if (decl_prefix) {
+            fprintf(out, ":%s", decl_prefix);
         }
-        fprintf(out, "=\"%s\"", ns->uri);
-        ns = ns->next;
+        fprintf(out, "=\"%s\"", decl_uri ? decl_uri : "");
     }
 
     /* Check if element has children (including text nodes) */
-    LeptrisNode* first_child = leptris_elem_first_child(elem);
+    LeptrisNodeRef first_child = leptris_node_first_child(leptris_element_as_node(elem));
     int has_children = (first_child != NULL);
-    int first_is_element = first_child && LEPTRIS_NODE_IS_ELEMENT(first_child);
+    int first_is_element = first_child &&
+        leptris_node_get_type(first_child) == LEPTRIS_NODE_TYPE_ELEMENT;
 
     if (!has_children) {
         /* Self-closing tag */
@@ -161,19 +143,18 @@ static void xml_print_element_recursive(
     }
 
     /* Children - iterate through ALL children (including text nodes) */
-    LeptrisNode* child = leptris_elem_first_child(elem);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(elem));
     while (child) {
-        if (LEPTRIS_NODE_IS_ELEMENT(child)) {
+        int child_type = leptris_node_get_type(child);
+        if (child_type == LEPTRIS_NODE_TYPE_ELEMENT) {
             /* Element child - recurse with indentation */
             xml_print_element_recursive((LeptrisElement)child, out, level + 1, ctx);
         }
-        else if (LEPTRIS_NODE_IS_TEXT(child)) {
-            /* Text node - escape and print */
-            LeptrisTextNode* text_node = LEPTRIS_NODE_AS_TEXT(child);
-            /* text may be borrowed (non-NUL-terminated); materialize so the
-             * whitespace check and output loop below can rely on NUL. */
-            const char* content = leptris_text_get_content(text_node);
-            if (text_node && content) {
+        else if (child_type == LEPTRIS_NODE_TYPE_TEXT) {
+            /* Text node - escape and print. The public getter
+             * materializes borrowed (non-NUL-terminated) content. */
+            const char* content = leptris_text_node_get_content(child);
+            if (content) {
                 /* In compact mode, skip whitespace-only text nodes */
                 if (!ctx->options.pretty_print) {
                     /* Check if content is whitespace-only */
@@ -183,7 +164,7 @@ static void xml_print_element_recursive(
                     }
                     if (*p == '\0') {
                         /* Whitespace-only, skip in compact mode */
-                        child = leptris_node_get_next_sibling(child);
+                        child = leptris_node_next_sibling(child);
                         continue;
                     }
                 }
@@ -197,44 +178,45 @@ static void xml_print_element_recursive(
                 }
             }
             /* Get next sibling via the type-dispatching accessor */
-            child = leptris_node_get_next_sibling(child);
+            child = leptris_node_next_sibling(child);
             continue;
         }
-        else if (LEPTRIS_NODE_IS_CDATA(child)) {
+        else if (child_type == LEPTRIS_NODE_TYPE_CDATA) {
             /* CDATA node - print as <![CDATA[...]]> */
-            LeptrisCDATANode* cdata = LEPTRIS_NODE_AS_CDATA(child);
-            if (cdata && cdata->content) {
-                fprintf(out, "<![CDATA[%s]]>", cdata->content);
+            const char* content = leptris_text_node_get_content(child);
+            if (content) {
+                fprintf(out, "<![CDATA[%s]]>", content);
             }
-            child = leptris_node_get_next_sibling(child);
+            child = leptris_node_next_sibling(child);
             continue;
         }
-        else if (LEPTRIS_NODE_IS_COMMENT(child)) {
+        else if (child_type == LEPTRIS_NODE_TYPE_COMMENT) {
             /* Comment node - print as <!--...--> */
-            LeptrisCommentNode* comment = LEPTRIS_NODE_AS_COMMENT(child);
-            if (comment && comment->content) {
-                fprintf(out, "<!--%s-->", comment->content);
+            const char* content = leptris_comment_node_get_content(child);
+            if (content) {
+                fprintf(out, "<!--%s-->", content);
             }
-            child = leptris_node_get_next_sibling(child);
+            child = leptris_node_next_sibling(child);
             continue;
         }
-        else if (LEPTRIS_NODE_IS_PI(child)) {
+        else if (child_type == LEPTRIS_NODE_TYPE_PI) {
             /* Processing Instruction - print as <?target data?> */
-            LeptrisPINode* pi = LEPTRIS_NODE_AS_PI(child);
-            if (pi && pi->target) {
-                fprintf(out, "<?%s", pi->target);
-                if (pi->data) {
-                    fprintf(out, " %s", pi->data);
+            const char* target = leptris_pi_node_get_target(child);
+            if (target) {
+                fprintf(out, "<?%s", target);
+                const char* data = leptris_pi_node_get_data(child);
+                if (data) {
+                    fprintf(out, " %s", data);
                 }
                 fprintf(out, "?>");
             }
-            child = leptris_node_get_next_sibling(child);
+            child = leptris_node_next_sibling(child);
             continue;
         }
         /* DOCTYPE nodes are not printed as children of elements */
 
         /* For element nodes, get next sibling using node API */
-        child = leptris_node_get_next_sibling(child);
+        child = leptris_node_next_sibling(child);
     }
 
     /* Closing tag */
@@ -248,7 +230,7 @@ static void xml_print_element_recursive(
 }
 
 static void xml_print_document_impl(
-    struct leptris_document* doc,
+    LeptrisDocument doc,
     FILE* out,
     void* ctx
 ) {
@@ -263,9 +245,8 @@ static void xml_print_document_impl(
     }
 
     /* Root element - use compact accessor */
-    leptris_document_ensure_promoted(doc);
-    if (doc->new_dom_root) {
-        LeptrisElement root = (LeptrisElement)doc->new_dom_root;
+    LeptrisElement root = leptris_document_root(doc);
+    if (root) {
         xml_print_element_recursive(root, out, 0, xml_ctx);
     }
 }
@@ -282,43 +263,40 @@ static void xml_print_element_impl(
 }
 
 static void xml_print_nodeset_impl(
-    struct leptris_xpath_result* result,
+    LeptrisXPathResult result,
     FILE* out,
     void* ctx
 ) {
     if (!result || !out) return;
-    if (result->type != XPATH_RESULT_NODESET) return;
+    if (leptris_xpath_result_type(result) != LEPTRIS_XPATH_NODESET) return;
 
     xml_formatter_context_t* xml_ctx = (xml_formatter_context_t*)ctx;
-    XPathNodeSet* nodeset = result->value.nodeset_value;
-
-    if (!nodeset) return;
 
     /* Print each node in the nodeset based on type */
-    for (size_t i = 0; i < nodeset->count; i++) {
-        void* node_ptr = nodeset->nodes[i];
+    size_t count = leptris_xpath_result_count(result);
+    for (size_t i = 0; i < count; i++) {
 
-        /* Check node type - attribute nodes have different structure than elements */
-        if (IS_ATTRIBUTE_NODE(node_ptr)) {
-            /* Attribute node - print as name="value" format */
-            LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
-            if (attr->name && attr->name[0] != '\0') {
-                fprintf(out, "%s", attr->name);
-                if (attr->value) {
-                    fprintf(out, "=\"%s\"", attr->value);
+        /* Mixed nodeset - dispatch on the public kind */
+        LeptrisXPathNodeKind kind = leptris_xpath_result_node_kind(result, i);
+        if (kind == LEPTRIS_XPATH_NODE_ATTRIBUTE) {
+            const char* name = leptris_xpath_result_node_name(result, i);
+            const char* value = leptris_xpath_result_node_value(result, i);
+            if (name && name[0] != '\0') {
+                fprintf(out, "%s", name);
+                if (value) {
+                    fprintf(out, "=\"%s\"", value);
                 }
                 fprintf(out, "\n");
             }
-        } else if (IS_TEXT_NODE(node_ptr)) {
-            /* Text node - print just the text content */
-            XPathTextNode* text = (XPathTextNode*)node_ptr;
-            if (text->content && text->content[0] != '\0') {
-                fprintf(out, "%s\n", text->content);
+        } else if (kind == LEPTRIS_XPATH_NODE_TEXT) {
+            const char* content = leptris_xpath_result_node_value(result, i);
+            if (content && content[0] != '\0') {
+                fprintf(out, "%s\n", content);
             }
-        } else if (IS_ELEMENT_NODE(node_ptr)) {
-            /* Element node - use existing recursive print function */
-            LeptrisElement elem = (LeptrisElement)node_ptr;
-            xml_print_element_recursive(elem, out, 0, xml_ctx);
+        } else if (kind == LEPTRIS_XPATH_NODE_ELEMENT) {
+            xml_print_element_recursive(
+                leptris_node_as_element(leptris_xpath_result_get_node(result, i)),
+                out, 0, xml_ctx);
         } else {
             /* Unknown node type - skip */
             continue;
@@ -441,24 +419,21 @@ static void json_print_element_recursive(
     fprintf(out, "{");
 
     /* Element name - use API */
-    const char* name = leptris_element_get_name(elem);
+    const char* name = leptris_element_name(elem);
     fprintf(out, "\"name\":\"");
     json_escape_string(name ? name : "", out);
     fprintf(out, "\"");
 
-    /* Attributes - handle both StringView and C string attributes */
-    size_t attr_count = leptris_element_attribute_count(elem);
-    if (attr_count > 0) {
+    /* Attributes - public handle iteration */
+    if (leptris_element_attribute_count(elem) > 0) {
         fprintf(out, ",\"attributes\":{");
         int first_attr = 1;
-        /* Walk the attribute linked list */
-        struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
-        while (attr) {
-            /* Single representation: views ARE the C strings. */
-            const char* attr_name = attr_cname(attr);
-            const char* attr_value = attr_cvalue(attr);
+        for (LeptrisAttribute attr = leptris_element_first_attribute(elem);
+             attr; attr = leptris_attribute_next(attr)) {
+            const char* attr_name = leptris_attribute_get_name(attr);
+            const char* attr_value = leptris_attribute_get_value(elem, attr);
 
-            if (attr_name) {
+            if (attr_name && attr_name[0]) {
                 if (!first_attr) fprintf(out, ",");
                 first_attr = 0;
 
@@ -471,34 +446,29 @@ static void json_print_element_recursive(
                 fprintf(out, "\"");
             }
 
-            /* Move to next attribute */
-            attr = leptris_attr_next(attr);
         }
         fprintf(out, "}");
     }
 
-    /* Text content - use API and free result */
-    char* text_content = leptris_element_get_text_content(elem);
+    /* Text content - document-owned string, no free */
+    const char* text_content = leptris_element_text(elem);
     if (text_content && text_content[0] != '\0') {
         fprintf(out, ",\"text\":\"");
         json_escape_string(text_content, out);
         fprintf(out, "\"");
     }
-    LEPTRIS_FREE(text_content);
 
-    /* Children - iterate using compact accessor functions */
-    LeptrisNode* first_child = leptris_elem_first_child(elem);
-    if (first_child != NULL) {
+    /* Children - element children via the public node API */
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(elem));
+    if (child != NULL) {
         fprintf(out, ",\"children\":[");
         int first = 1;
-        LeptrisNode* child = first_child;
-        while (child) {
-            if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+        for (; child; child = leptris_node_next_sibling(child)) {
+            if (leptris_node_get_type(child) == LEPTRIS_NODE_TYPE_ELEMENT) {
                 if (!first) fprintf(out, ",");
                 first = 0;
                 json_print_element_recursive((LeptrisElement)child, out, level + 1);
             }
-            child = leptris_node_get_next_sibling(child);
         }
         fprintf(out, "]");
     }
@@ -507,16 +477,15 @@ static void json_print_element_recursive(
 }
 
 static void json_print_document_impl(
-    struct leptris_document* doc,
+    LeptrisDocument doc,
     FILE* out,
     void* ctx
 ) {
     (void)ctx;
     if (!doc || !out) return;
 
-    leptris_document_ensure_promoted(doc);
-    if (doc->new_dom_root) {
-        LeptrisElement root = (LeptrisElement)doc->new_dom_root;
+    LeptrisElement root = leptris_document_root(doc);
+    if (root) {
         json_print_element_recursive(root, out, 0);
         fprintf(out, "\n");
     } else {
@@ -537,57 +506,48 @@ static void json_print_element_impl(
 }
 
 static void json_print_nodeset_impl(
-    struct leptris_xpath_result* result,
+    LeptrisXPathResult result,
     FILE* out,
     void* ctx
 ) {
     (void)ctx;
     if (!result || !out) return;
-    if (result->type != XPATH_RESULT_NODESET) return;
+    if (leptris_xpath_result_type(result) != LEPTRIS_XPATH_NODESET) return;
 
-    XPathNodeSet* nodeset = result->value.nodeset_value;
-    if (!nodeset) {
-        fprintf(out, "[]\n");
-        return;
-    }
-
+    size_t count = leptris_xpath_result_count(result);
     fprintf(out, "[");
-    for (size_t i = 0; i < nodeset->count; i++) {
+    for (size_t i = 0; i < count; i++) {
         if (i > 0) fprintf(out, ",");
-        void* node_ptr = nodeset->nodes[i];
-
-        /* Check node type - attribute nodes have different structure than elements */
-        if (IS_ATTRIBUTE_NODE(node_ptr)) {
-            /* Attribute node - print as {"name":"value"} format */
-            LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
-
+        LeptrisXPathNodeKind kind = leptris_xpath_result_node_kind(result, i);
+        if (kind == LEPTRIS_XPATH_NODE_ATTRIBUTE) {
             fprintf(out, "{\"");
-            if (attr->name) {
-                json_escape_string(attr->name, out);
+            const char* name = leptris_xpath_result_node_name(result, i);
+            if (name) {
+                json_escape_string(name, out);
             }
             fprintf(out, "\":");
-            if (attr->value) {
+            const char* value = leptris_xpath_result_node_value(result, i);
+            if (value) {
                 fprintf(out, "\"");
-                json_escape_string(attr->value, out);
+                json_escape_string(value, out);
                 fprintf(out, "\"");
             } else {
                 fprintf(out, "null");
             }
             fprintf(out, "}");
-        } else if (IS_TEXT_NODE(node_ptr)) {
-            /* Text node - print as JSON string */
-            XPathTextNode* text = (XPathTextNode*)node_ptr;
-            if (text->content) {
+        } else if (kind == LEPTRIS_XPATH_NODE_TEXT) {
+            const char* content = leptris_xpath_result_node_value(result, i);
+            if (content) {
                 fprintf(out, "\"");
-                json_escape_string(text->content, out);
+                json_escape_string(content, out);
                 fprintf(out, "\"");
             } else {
                 fprintf(out, "null");
             }
-        } else if (IS_ELEMENT_NODE(node_ptr)) {
-            /* Element node - use existing recursive print function */
-            LeptrisElement elem = (LeptrisElement)node_ptr;
-            json_print_element_recursive(elem, out, 0);
+        } else if (kind == LEPTRIS_XPATH_NODE_ELEMENT) {
+            json_print_element_recursive(
+                leptris_node_as_element(leptris_xpath_result_get_node(result, i)),
+                out, 0);
         } else {
             /* Unknown node type - print as null */
             fprintf(out, "null");
@@ -631,58 +591,51 @@ static void text_print_element_recursive(
     }
 
     /* Element name - use API */
-    const char* name = leptris_element_get_name(elem);
+    const char* name = leptris_element_name(elem);
     fprintf(out, "%s", name ? name : "");
 
-    /* Attributes - use compact accessor functions */
-    size_t attr_count = leptris_element_attribute_count(elem);
-    if (attr_count > 0) {
+    /* Attributes - public handle iteration */
+    if (leptris_element_attribute_count(elem) > 0) {
         fprintf(out, " {");
         int first_attr = 1;
-        /* Walk the attribute linked list */
-        struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
-        while (attr) {
+        for (LeptrisAttribute attr = leptris_element_first_attribute(elem);
+             attr; attr = leptris_attribute_next(attr)) {
             if (!first_attr) fprintf(out, ", ");
             first_attr = 0;
-            fprintf(out, "%s=", attr_cname(attr));
-            const char* av = attr_cvalue(attr);
+            fprintf(out, "%s=", leptris_attribute_get_name(attr));
+            const char* av = leptris_attribute_get_value(elem, attr);
             fprintf(out, "\"%s\"", av ? av : "");
-            /* Move to next attribute */
-            attr = leptris_attr_next(attr);
         }
         fprintf(out, "}");
     }
 
-    /* Text content - use API and free result */
-    char* text_content = leptris_element_get_text_content(elem);
+    /* Text content - document-owned string, no free */
+    const char* text_content = leptris_element_text(elem);
     if (text_content && text_content[0] != '\0') {
         fprintf(out, ": %s", text_content);
     }
-    LEPTRIS_FREE(text_content);
 
     fprintf(out, "\n");
 
-    /* Children - iterate through ALL children (including text nodes) */
-    LeptrisNode* child = leptris_elem_first_child(elem);
-    while (child) {
-        if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+    /* Children - element children via the public node API */
+    for (LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(elem));
+         child; child = leptris_node_next_sibling(child)) {
+        if (leptris_node_get_type(child) == LEPTRIS_NODE_TYPE_ELEMENT) {
             text_print_element_recursive((LeptrisElement)child, out, level + 1);
         }
-        child = leptris_node_get_next_sibling(child);
     }
 }
 
 static void text_print_document_impl(
-    struct leptris_document* doc,
+    LeptrisDocument doc,
     FILE* out,
     void* ctx
 ) {
     (void)ctx;
     if (!doc || !out) return;
 
-    leptris_document_ensure_promoted(doc);
-    if (doc->new_dom_root) {
-        LeptrisElement root = (LeptrisElement)doc->new_dom_root;
+    LeptrisElement root = leptris_document_root(doc);
+    if (root) {
         text_print_element_recursive(root, out, 0);
     }
 }
@@ -699,41 +652,36 @@ static void text_print_element_impl(
 }
 
 static void text_print_nodeset_impl(
-    struct leptris_xpath_result* result,
+    LeptrisXPathResult result,
     FILE* out,
     void* ctx
 ) {
     (void)ctx;
     if (!result || !out) return;
-    if (result->type != XPATH_RESULT_NODESET) return;
+    if (leptris_xpath_result_type(result) != LEPTRIS_XPATH_NODESET) return;
 
-    XPathNodeSet* nodeset = result->value.nodeset_value;
-    if (!nodeset) return;
-
-    for (size_t i = 0; i < nodeset->count; i++) {
-        void* node_ptr = nodeset->nodes[i];
-
-        /* Check node type - attribute nodes have different structure than elements */
-        if (IS_ATTRIBUTE_NODE(node_ptr)) {
-            /* Attribute node - print as name="value" format */
-            LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node_ptr;
-            if (attr->name) {
-                fprintf(out, "%s", attr->name);
-                if (attr->value) {
-                    fprintf(out, "=\"%s\"", attr->value);
+    size_t count = leptris_xpath_result_count(result);
+    for (size_t i = 0; i < count; i++) {
+        LeptrisXPathNodeKind kind = leptris_xpath_result_node_kind(result, i);
+        if (kind == LEPTRIS_XPATH_NODE_ATTRIBUTE) {
+            const char* name = leptris_xpath_result_node_name(result, i);
+            if (name) {
+                fprintf(out, "%s", name);
+                const char* value = leptris_xpath_result_node_value(result, i);
+                if (value) {
+                    fprintf(out, "=\"%s\"", value);
                 }
                 fprintf(out, "\n");
             }
-        } else if (IS_TEXT_NODE(node_ptr)) {
-            /* Text node - print just the text content */
-            XPathTextNode* text = (XPathTextNode*)node_ptr;
-            if (text->content && text->content[0] != '\0') {
-                fprintf(out, "%s\n", text->content);
+        } else if (kind == LEPTRIS_XPATH_NODE_TEXT) {
+            const char* content = leptris_xpath_result_node_value(result, i);
+            if (content && content[0] != '\0') {
+                fprintf(out, "%s\n", content);
             }
-        } else if (IS_ELEMENT_NODE(node_ptr)) {
-            /* Element node - use existing recursive print function */
-            LeptrisElement elem = (LeptrisElement)node_ptr;
-            text_print_element_recursive(elem, out, 0);
+        } else if (kind == LEPTRIS_XPATH_NODE_ELEMENT) {
+            text_print_element_recursive(
+                leptris_node_as_element(leptris_xpath_result_get_node(result, i)),
+                out, 0);
         }
     }
 }

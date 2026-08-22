@@ -20,16 +20,13 @@
 extern "C" {
 #endif
 
-/* Node type enumeration - extended from leptris_internal.h */
-typedef enum {
-    LEPTRIS_NODE_TYPE_ELEMENT = 0,
-    LEPTRIS_NODE_TYPE_TEXT = 1,
-    LEPTRIS_NODE_TYPE_COMMENT = 2,
-    LEPTRIS_NODE_TYPE_CDATA = 3,
-    LEPTRIS_NODE_TYPE_PI = 4,           /* Processing Instruction */
-    LEPTRIS_NODE_TYPE_DOCTYPE = 5,
-    LEPTRIS_NODE_TYPE_ATTRIBUTE = 6     /* For XPath attribute nodes */
-} LeptrisNodeTypeEnum;
+/* Node type enumeration — the canonical definition is the public
+ * LeptrisNodeKind in src/include/leptris/types.h (single source, no
+ * value drift between the public and internal views). LeptrisNodeTypeEnum
+ * is the internal alias. NOTE: the XPath-synthetic node structs use the
+ * SEPARATE LeptrisNodeType tag space from leptris_internal.h — the two
+ * must not be confused (see types.h). */
+typedef LeptrisNodeKind LeptrisNodeTypeEnum;
 
 /* ============================================================================
  * Node vtable (TODO 23/29, phases 2-3) — see full design below.

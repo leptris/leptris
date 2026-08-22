@@ -14,7 +14,7 @@
 #include <errno.h>
 
 /* Need access to internal structures for result handling */
-#include "../../src/leptris/leptris_internal.h"
+#include "leptris.h"  /* Public API only — the CLI layer contract */
 
 /* ------------------------------------------------------------------------- */
 /* XPath Command Options                                                     */
@@ -290,27 +290,25 @@ static cli_result_t xpath_execute(int argc, char** argv) {
     /* Verbose output - print result info to stderr */
     if (opts->verbose) {
         const char* result_type = "unknown";
-        switch (xpath_result->type) {
-            case XPATH_RESULT_NODESET:
+        switch (leptris_xpath_result_type(xpath_result)) {
+            case LEPTRIS_XPATH_NODESET:
                 result_type = "nodeset";
                 break;
-            case XPATH_RESULT_BOOLEAN:
+            case LEPTRIS_XPATH_BOOLEAN:
                 result_type = "boolean";
                 break;
-            case XPATH_RESULT_NUMBER:
+            case LEPTRIS_XPATH_NUMBER:
                 result_type = "number";
                 break;
-            case XPATH_RESULT_STRING:
+            case LEPTRIS_XPATH_STRING:
                 result_type = "string";
-                break;
-            case XPATH_RESULT_CACHED:
                 break;
         }
         fprintf(stderr, "[leptris] Parsed: %s\n", opts->input_file);
         fprintf(stderr, "[leptris] XPath: %s\n", opts->expression);
         fprintf(stderr, "[leptris] Result type: %s\n", result_type);
-        if (xpath_result->type == XPATH_RESULT_NODESET) {
-            size_t count = xpath_result->value.nodeset_value->count;
+        if (leptris_xpath_result_type(xpath_result) == LEPTRIS_XPATH_NODESET) {
+            size_t count = leptris_xpath_result_count(xpath_result);
             fprintf(stderr, "[leptris] Nodes selected: %zu\n", count);
         }
         fflush(stderr);
@@ -327,8 +325,8 @@ static cli_result_t xpath_execute(int argc, char** argv) {
     /* Output based on options and result type */
     if (opts->count_only) {
         /* Count mode - output count only */
-        if (xpath_result->type == XPATH_RESULT_NODESET) {
-            size_t count = xpath_result->value.nodeset_value->count;
+        if (leptris_xpath_result_type(xpath_result) == LEPTRIS_XPATH_NODESET) {
+            size_t count = leptris_xpath_result_count(xpath_result);
             output_print_count(count, stdout, fmt);
         } else {
             output_print_count(1, stdout, fmt);
@@ -337,50 +335,40 @@ static cli_result_t xpath_execute(int argc, char** argv) {
     else if (opts->boolean_only) {
         /* Boolean mode - output true/false */
         int bool_val;
-        if (xpath_result->type == XPATH_RESULT_BOOLEAN) {
-            bool_val = xpath_result->value.boolean_value;
-        } else if (xpath_result->type == XPATH_RESULT_NODESET) {
-            bool_val = xpath_result->value.nodeset_value->count > 0;
-        } else if (xpath_result->type == XPATH_RESULT_NUMBER) {
-            bool_val = xpath_result->value.number_value != 0;
-        } else {
-            bool_val = xpath_result->value.string_value &&
-                       xpath_result->value.string_value[0] != '\0';
-        }
+        bool_val = leptris_xpath_result_boolean(xpath_result);
         fmt->print_boolean(bool_val, stdout, fmt->context);
     }
     else {
-        /* Normal mode - format based on result type */
-        switch (xpath_result->type) {
-            case XPATH_RESULT_NODESET:
+        /* Normal mode - format based on result type. String and
+         * number values come back as caller-freed strings via
+         * leptris_xpath_result_string (the direct field reads are
+         * gone with the internals include). */
+        switch (leptris_xpath_result_type(xpath_result)) {
+            case LEPTRIS_XPATH_NODESET:
                 fmt->print_nodeset(xpath_result, stdout, fmt->context);
                 break;
 
-            case XPATH_RESULT_STRING:
-                fmt->print_string(
-                    xpath_result->value.string_value,
-                    stdout,
-                    fmt->context
-                );
+            case LEPTRIS_XPATH_STRING: {
+                char* s = leptris_xpath_result_string(xpath_result);
+                fmt->print_string(s ? s : "", stdout, fmt->context);
+                leptris_free_string(s);
                 break;
+            }
 
-            case XPATH_RESULT_NUMBER:
+            case LEPTRIS_XPATH_NUMBER:
                 fmt->print_number(
-                    xpath_result->value.number_value,
+                    leptris_xpath_result_number(xpath_result),
                     stdout,
                     fmt->context
                 );
                 break;
 
-            case XPATH_RESULT_BOOLEAN:
+            case LEPTRIS_XPATH_BOOLEAN:
                 fmt->print_boolean(
-                    xpath_result->value.boolean_value,
+                    leptris_xpath_result_boolean(xpath_result),
                     stdout,
                     fmt->context
                 );
-                break;
-
-            case XPATH_RESULT_CACHED:
                 break;
         }
     }
