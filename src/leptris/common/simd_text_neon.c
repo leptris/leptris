@@ -9,6 +9,7 @@
  */
 #include "simd_text.h"
 #include "cpu.h"
+#include "port.h"  /* LEPTRIS_CTZ (MSVC has no __builtin_ctz, issue #487) */
 
 #if defined(LEPTRIS_ARCH_ARM) && defined(__aarch64__)
 
@@ -196,8 +197,11 @@ size_t leptris_text_scan_events_neon(const char* buf, size_t len,
     const uint8x16_t k_qd   = vdupq_n_u8('"');
     const uint8x16_t k_amp  = vdupq_n_u8('&');
     const uint8x16_t k_sp   = vdupq_n_u8(' ');
-    static const uint16_t sh8[8] = {0,1,2,3,4,5,6,7};
-    const uint16x8_t sh8v = vld1q_u16(sh8);
+    /* vshlq_u16 takes an int16x8_t shift vector per the ARM ACLE;
+     * lanes 0..7 are fine as signed. Apple clang accepts the
+     * unsigned form silently, GCC rejects it (issue #487). */
+    static const int16_t sh8[8] = {0,1,2,3,4,5,6,7};
+    const int16x8_t sh8v = vld1q_s16(sh8);
 
     size_t n = 0;
     const unsigned char* p = (const unsigned char*)buf;
@@ -225,7 +229,7 @@ size_t leptris_text_scan_events_neon(const char* buf, size_t len,
             while (mask) {
                 if (n >= max) return max;
                 unsigned bit = mask & (unsigned)(-(int)mask);
-                unsigned idx = __builtin_ctz(mask);
+                unsigned idx = (unsigned)LEPTRIS_CTZ(mask);
                 out[n].offset = (uint32_t)(base + idx);
                 out[n].cls = leptris_dp_class_table[p[idx]];
                 n++;
