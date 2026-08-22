@@ -17,8 +17,14 @@ extern "C" {
 
 /* Export macro for Windows DLL support */
 #ifndef LEPTRIS_API
-#  ifdef _WIN32
+#  ifdef LEPTRIS_FOR_BINDGEN
+#    define LEPTRIS_API
+#  elif defined(_WIN32)
 #    ifdef LEPTRIS_BUILD_SHARED
+#      define LEPTRIS_API __declspec(dllexport)
+#    elif defined(LEPTRIS_BUILDING_DLL)
+       /* Mirrors leptris.h (issue #278): CMake defines
+        * LEPTRIS_BUILDING_DLL on the objects that build the DLL. */
 #      define LEPTRIS_API __declspec(dllexport)
 #    elif defined(LEPTRIS_USE_SHARED)
 #      define LEPTRIS_API __declspec(dllimport)
@@ -26,7 +32,7 @@ extern "C" {
 #      define LEPTRIS_API
 #    endif
 #  else
-#    define LEPTRIS_API
+#    define LEPTRIS_API __attribute__((visibility("default")))
 #  endif
 #endif
 
