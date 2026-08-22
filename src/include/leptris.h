@@ -1601,6 +1601,26 @@ LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
                                              LeptrisSerializeOptions* options);
 
 /**
+ * Serialize document with automatic options (legacy alias)
+ *
+ * Equivalent to leptris_document_serialize with options chosen from
+ * the document's own properties (XML declaration included when the
+ * source had one). Kept because it was exported before options
+ * existed; prefer leptris_document_serialize for new code.
+ *
+ * Declared here retroactively (2026-08-22): the symbol was
+ * implemented, exported, and used by bindings, but never declared
+ * in any public header — invisible to header-derived cdef/bindgen
+ * mirrors and to export audits.
+ *
+ * @param doc Document
+ * @return XML string or NULL on error
+ *
+ * Memory: Caller must free returned string with leptris_free_string()
+ */
+LEPTRIS_API char* leptris_serialize_document(LeptrisDocument doc);
+
+/**
  * Serialize element subtree to XML string
  *
  * @param elem Element to serialize
