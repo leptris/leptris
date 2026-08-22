@@ -26,7 +26,7 @@ jobs:
         run: pip install pefile
 
       - name: Configure (shared)
-        run: cmake -B build -S . -DLEPTRIS_BUILD_SHARED=ON -DLEPTRIS_BUILD_STATIC=OFF -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF
+        run: cmake -B build -S . -DLEPTRIS_BUILD_SHARED=ON -DLEPTRIS_BUILD_STATIC=OFF -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF -DLEPTRIS_ENABLE_UTF8PROC=OFF -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Build
         run: cmake --build build --config Release
