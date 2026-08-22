@@ -11,6 +11,16 @@
  *                  pool, splice the copy in place of the xi:include.
  *                  xpointer fragment selection is TODO 92 Phase 3.
  *
+ * XPointer forms (TODO.remaining/04): the xpointer attribute and
+ * href fragment identifiers support bare shorthand (an NCName,
+ * selecting the element with that ID), the element() scheme
+ * (element(name/1/2) child sequences), and the xpointer() scheme
+ * (a full XPath 1.0 expression).  Multiple space-separated schemes
+ * are tried left to right; the first that selects an element wins.
+ * xmlns(...) components are skipped (namespace bindings are not
+ * wired into this subset).  Non-element selections are treated as
+ * no match (the move path needs an element).
+ *
  * xi:fallback is honored in both modes.  Element-classification
  * helpers (is_include_element, etc.) are fully implemented and
  * documented in leptris.h.
@@ -25,6 +35,7 @@
 #include "../dom/comment.h"
 #include "../dom/pi.h"
 #include "../memory/pool.h"
+#include "../encoding/encoding.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -253,6 +264,208 @@ static LeptrisElement find_fallback(LeptrisElement include_elem) {
  * inclusion chains are < 5 deep. */
 #define XINCLUDE_MAX_DEPTH 32
 
+/* ---- XPointer evaluation (TODO.remaining/04) ------------------------ */
+
+typedef struct {
+    const char* name;   size_t name_len;  /* scheme name or shorthand token */
+    const char* body;   size_t body_len;  /* inside the parens; empty when none */
+    int  has_parens;
+} XptrComponent;
+
+/* Split an xpointer value into scheme components. Whitespace
+ * separates shorthand tokens; scheme(...) bodies are scanned with
+ * paren-depth so nested parentheses inside xpointer() survive.
+ * Components point into `value` (no allocation). Returns the count
+ * (0 for NULL/empty), or -1 on malformed nesting. */
+static int xptr_parse_components(const char* value, XptrComponent* out,
+                                 int max) {
+    if (!value) return 0;
+    int count = 0;
+    const char* p = value;
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        const char* start = p;
+        while (*p && *p != '(' && *p != ' ' && *p != '\t') p++;
+        size_t name_len = (size_t)(p - start);
+        if (name_len == 0) return -1;
+        if (*p == '(') {
+            int depth = 1;
+            p++;
+            const char* body = p;
+            while (*p && depth > 0) {
+                if (*p == '(') depth++;
+                else if (*p == ')') depth--;
+                p++;
+            }
+            if (depth != 0) return -1;   /* unbalanced */
+            size_t body_len = (size_t)(p - 1 - body);
+            if (count < max) {
+                out[count].name = start; out[count].name_len = name_len;
+                out[count].body = body;  out[count].body_len = body_len;
+                out[count].has_parens = 1;
+            }
+            count++;
+        } else {
+            /* Bare token: shorthand pointer (an NCName). */
+            if (count < max) {
+                out[count].name = start; out[count].name_len = name_len;
+                out[count].body = NULL;  out[count].body_len = 0;
+                out[count].has_parens = 0;
+            }
+            count++;
+        }
+    }
+    return count;
+}
+
+/* element() scheme body: [NCName]? ('/' integer)+ — walk child
+ * ELEMENTS by 1-based position, starting from the element named by
+ * the shorthand (via id()) or the document element when no name. */
+static LeptrisElement xptr_element_scheme(LeptrisDocument doc,
+                                          const char* body, size_t len) {
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, body, len);
+    buf[len] = '\0';
+
+    LeptrisElement cur = NULL;
+    const char* p = buf;
+    const char* slash = strchr(p, '/');
+    int first_step_is_document = 0;
+
+    if (slash && slash != p) {
+        /* NCName prefix: shorthand select, then child sequence. */
+        size_t nlen = (size_t)(slash - p);
+        char* name = (char*)malloc(nlen + 32);
+        if (name) {
+            snprintf(name, nlen + 32, "id('%.*s')", (int)nlen, p);
+            LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, name);
+            cur = r ? leptris_xpath_result_get(r, 0) : NULL;
+            if (r) leptris_xpath_result_free(r);
+            free(name);
+        }
+        p = slash;
+    } else if (!slash) {
+        /* element(name): shorthand select, no child sequence. */
+        size_t nlen = len;
+        char* name = (char*)malloc(nlen + 32);
+        if (name) {
+            snprintf(name, nlen + 32, "id('%.*s')", (int)nlen, p);
+            LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, name);
+            cur = r ? leptris_xpath_result_get(r, 0) : NULL;
+            if (r) leptris_xpath_result_free(r);
+            free(name);
+        }
+        free(buf);
+        return cur;
+    } else {
+        /* element(/1/...): the first number selects among the
+         * DOCUMENT's element children -- /1 is the document element
+         * itself; further numbers step into element children. */
+        first_step_is_document = 1;
+    }
+
+    /* Child sequence: /n1/n2/... selecting nth ELEMENT children. */
+    while (p < buf + len) {
+        if (*p != '/') { cur = NULL; break; }
+        p++;
+        if (p >= buf + len || *p < '0' || *p > '9') { cur = NULL; break; }
+        long n = strtol(p, (char**)&p, 10);
+        if (n < 1) { cur = NULL; break; }
+        if (first_step_is_document) {
+            /* The document has exactly one element child; the XPointer
+             * framework only defines /1 at this level. */
+            if (n != 1) { cur = NULL; break; }
+            cur = leptris_document_root(doc);
+            first_step_is_document = 0;
+            continue;
+        }
+        if (!cur) break;
+        LeptrisElement child = leptris_element_first_child_any(cur);
+        long seen = 0;
+        while (child) {
+            seen++;
+            if (seen == n) break;
+            child = leptris_element_next_sibling_any(child);
+        }
+        cur = child;
+    }
+    free(buf);
+    return cur;
+}
+
+/* Evaluate an xpointer value against the included document.
+ * Returns the first selected ELEMENT, or NULL when nothing (or only
+ * non-elements) matched. Tries schemes left to right per XPointer. */
+static LeptrisElement xptr_select(LeptrisDocument doc, const char* value) {
+    XptrComponent comps[8];
+    int n = xptr_parse_components(value, comps, 8);
+    for (int i = 0; i < n && i < 8; i++) {
+        const XptrComponent* c = &comps[i];
+        if (c->has_parens && c->name_len == 8 &&
+            strncmp(c->name, "xpointer", 8) == 0) {
+            char* expr = (char*)malloc(c->body_len + 1);
+            if (!expr) continue;
+            memcpy(expr, c->body, c->body_len);
+            expr[c->body_len] = '\0';
+            LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, expr);
+            free(expr);
+            if (!r) continue;
+            LeptrisElement e = leptris_xpath_result_get(r, 0);
+            /* Elements only: the ownership-transfer path needs one. */
+            if (e) {
+                /* Keep the result alive with the element? The element
+                 * belongs to `doc` (freed by the caller after the
+                 * splice), so freeing the result here is safe. */
+                leptris_xpath_result_free(r);
+                return e;
+            }
+            leptris_xpath_result_free(r);
+        } else if (c->has_parens && c->name_len == 7 &&
+                   strncmp(c->name, "element", 7) == 0) {
+            LeptrisElement e = xptr_element_scheme(doc, c->body, c->body_len);
+            if (e) return e;
+        } else if (!c->has_parens) {
+            /* Bare token. When it is an NCName it is a shorthand
+             * pointer (the element with that ID). Tokens that are
+             * not NCNames are legacy raw XPath -- the pre-scheme
+             * best-effort behavior, kept for compatibility. */
+            int is_ncname = 1;
+            for (size_t k = 0; k < c->name_len; k++) {
+                char ch = c->name[k];
+                if (ch == '/' || ch == '[' || ch == ']' || ch == '@' ||
+                    ch == '(' || ch == ')' || ch == '=' || ch == '\'' ||
+                    ch == '"' || ch == '*' || ch == '.' || ch == ' ' ||
+                    ch == ':') {
+                    is_ncname = 0;
+                    break;
+                }
+            }
+            char* expr;
+            if (is_ncname) {
+                expr = (char*)malloc(c->name_len + 32);
+                if (!expr) continue;
+                snprintf(expr, c->name_len + 32, "id('%.*s')",
+                         (int)c->name_len, c->name);
+            } else {
+                expr = (char*)malloc(c->name_len + 1);
+                if (!expr) continue;
+                memcpy(expr, c->name, c->name_len);
+                expr[c->name_len] = '\0';
+            }
+            LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, expr);
+            free(expr);
+            if (!r) continue;
+            LeptrisElement e = leptris_xpath_result_get(r, 0);
+            leptris_xpath_result_free(r);
+            if (e) return e;
+        }
+        /* xmlns(...) and unknown schemes: skipped (lenient subset). */
+    }
+    return NULL;
+}
+
 /* Forward decl for internal recursion-aware variant. */
 static LeptrisStatus xinclude_process_internal(struct leptris_document* doc,
                                               const char* base_url,
@@ -324,9 +537,31 @@ static int process_element_xinclude(LeptrisElement elem,
     const char* parse = leptris_xinclude_get_parse(elem);
     const char* href = leptris_xinclude_get_href(elem);
     if (!href || !href[0]) return 1;
+    const char* xptr_attr = leptris_xinclude_get_xpointer(elem);
+
+    /* XInclude §4: split a fragment identifier off the href. The
+     * fragment (when present) is a shorthand pointer for parse="xml".
+     * Resource errors per spec: fragment + explicit xpointer attr
+     * together, any fragment on parse="text", or an xpointer attr on
+     * parse="text". Resource error -> fallback, like a load failure. */
+    const char* frag = strchr(href, '#');
+    if (frag && !frag[1]) frag = NULL;   /* bare trailing '#' = none */
+    char href_base[4096];
+    size_t base_len = frag ? (size_t)(frag - href) : strlen(href);
+    if (base_len >= sizeof(href_base)) return 1;
+    memcpy(href_base, href, base_len);
+    href_base[base_len] = '\0';
+
+    int is_xml = (!parse || strcmp(parse, "xml") == 0);
+    /* Resource errors per §4 fall through to the fallback handling
+     * below -- an early return here would skip xi:fallback entirely. */
+    int resource_error = 0;
+    if (frag && xptr_attr && xptr_attr[0]) resource_error = 1;
+    if (!is_xml && (frag || (xptr_attr && xptr_attr[0]))) resource_error = 1;
 
     char full_path[4096];
-    if (!join_path(full_path, sizeof(full_path), base_url, href)) return 1;
+    if (!resource_error &&
+        !join_path(full_path, sizeof(full_path), base_url, href_base)) return 1;
 
     /* TODO 117 Phase C: cycle detection.  If `full_path` is already in
      * the ancestor chain, we'd be re-including something we're
@@ -336,15 +571,15 @@ static int process_element_xinclude(LeptrisElement elem,
     }
 
     size_t content_len = 0;
-    char* content = load_file_content(full_path, &content_len);
+    char* content = resource_error
+                        ? NULL
+                        : load_file_content(full_path, &content_len);
 
     /* The substitute node — element for parse="xml", text for parse="text",
      * NULL on failure (fallback path below). */
     LeptrisNode* substitute = NULL;
 
     if (content) {
-        int is_xml = (!parse || strcmp(parse, "xml") == 0);
-
         if (is_xml) {
             /* TODO 117 Phase C: push current URI onto ancestor stack so
              * nested xi:include can detect cycles.  Pop after we're
@@ -374,43 +609,26 @@ static int process_element_xinclude(LeptrisElement elem,
                      * xmlns(...)) which we don't support here — the
                      * raw attribute value is passed straight to the
                      * XPath engine as a best-effort implementation. */
-                    const char* xp = leptris_xinclude_get_xpointer(elem);
+                    /* TODO.remaining/04: the pointer is the xpointer
+                     * attribute (scheme forms) or the href fragment
+                     * (a bare shorthand). The scheme evaluator tries
+                     * xpointer()/element()/shorthand left to right and
+                     * returns an ELEMENT for the move path; a match of
+                     * only non-elements counts as no match. */
+                    const char* xp = (xptr_attr && xptr_attr[0])
+                                         ? xptr_attr
+                                         : (frag ? frag + 1 : NULL);
                     if (xp && xp[0]) {
-                        LeptrisXPathResult xr = leptris_xpath_eval(
-                            included_doc, NULL, xp);
-                        if (xr) {
-                            size_t n = leptris_xpath_result_count(xr);
-                            if (n > 0) {
-                                /* TODO 117 Phase B: when the xpointer
-                                 * selects an ELEMENT, move it via the
-                                 * same ownership-transfer machinery as
-                                 * Phase A.  For non-element results
-                                 * (text, attribute, comment), keep the
-                                 * deep-copy path -- those node types
-                                 * don't have a "detach from tree" API
-                                 * that's pool-safe across docs. */
-                                LeptrisElement first = leptris_xpath_result_get(xr, 0);
-                                if (first && leptris_node_get_type(
-                                        (LeptrisNodeRef)first) ==
-                                    LEPTRIS_NODE_TYPE_ELEMENT) {
-                                    /* Move: the fragment still lives
-                                     * in included_doc's pool, so we
-                                     * adopt included_doc into our
-                                     * lifecycle to keep the pool
-                                     * alive. */
-                                    leptris_element_set_document_tree(
-                                        first, doc);
-                                    leptris_document_adopt_child(
-                                        doc, included_doc);
-                                    substitute = (LeptrisNode*)first;
-                                    included_doc = NULL;
-                                } else if (first) {
-                                    substitute = deep_copy_node(
-                                        (const LeptrisNode*)first,
-                                        doc->pool);
-                                }
-                            }
-                            leptris_xpath_result_free(xr);
+                        LeptrisElement first = xptr_select(included_doc, xp);
+                        if (first) {
+                            /* Move: the fragment still lives in
+                             * included_doc's pool, so we adopt
+                             * included_doc into our lifecycle to keep
+                             * the pool alive. */
+                            leptris_element_set_document_tree(first, doc);
+                            leptris_document_adopt_child(doc, included_doc);
+                            substitute = (LeptrisNode*)first;
+                            included_doc = NULL;
                         }
                     }
                     if (!substitute) {
@@ -441,6 +659,29 @@ static int process_element_xinclude(LeptrisElement elem,
              * value. */
             ancestors = cycle_pop(ancestors);
         } else if (strcmp(parse, "text") == 0) {
+            /* TODO.remaining/04: the encoding attribute names the
+             * source character set; convert to UTF-8 before splicing.
+             * Only available with iconv; without it the attribute is
+             * ignored (bytes passed through). Failed conversion is a
+             * resource error -> fallback. */
+            const char* enc = get_attr_value(elem, "encoding");
+            if (enc && enc[0] &&
+                strcmp(enc, "UTF-8") != 0 && strcmp(enc, "utf-8") != 0) {
+#if defined(LEPTRIS_HAS_ICONV)
+                size_t conv_len = 0;
+                char* conv = leptris_encoding_convert(
+                    enc, "UTF-8", content, content_len, &conv_len);
+                if (!conv) {
+                    free(content);
+                    content = NULL;   /* resource error -> fallback */
+                    substitute = NULL;
+                    goto fallback;
+                }
+                free(content);
+                content = conv;
+                content_len = conv_len;
+#endif
+            }
             substitute = (LeptrisNode*)leptris_text_create(content, content_len, doc->pool);
             /* parse="text" doesn't recurse into another file's body
              * (no risk of A -> B -> A via text), so no push/pop here. */
@@ -449,6 +690,7 @@ static int process_element_xinclude(LeptrisElement elem,
         free(content);
     }
 
+fallback:
     if (!substitute) {
         /* Resource error: try xi:fallback before giving up. */
         LeptrisElement fb = find_fallback(elem);
