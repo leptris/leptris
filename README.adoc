@@ -60,8 +60,8 @@ memory handling matter.
   link:bindings/ruby/[Ruby binding].
 * **Python binding** — `pyleptris` via `cffi` (ABI mode, single
   `cdef` mirroring the public headers): `Document.parse`, element
-  navigation, typed XPath results, serialize. See
-  link:bindings/python/[Python binding].
+  navigation, typed XPath results, serialize. Shipped from its own
+  repository, https://github.com/leptris/pyleptris[leptris/pyleptris].
 * **Zero required runtime dependencies** — utf8proc and iconv are
   optional features, not prerequisites.
 * **Stable C ABI** with a documented FFI contract; bindings shipped
@@ -410,9 +410,10 @@ ctest --test-dir build -R HeaderHygiene
 libleptris exposes a stable C ABI.  Bindings:
 
 * *Ruby* — shipped. Uses `ffi` gem. See link:bindings/ruby/[Ruby binding].
-* *Python* — shipped as `pyleptris` via `cffi` (ABI mode). See
-  link:bindings/python/[Python binding].
-* *Rust* — planned via `bindgen` + idiomatic wrapper
+* *Python* — shipped as `pyleptris` via `cffi` (ABI mode), from
+  https://github.com/leptris/pyleptris[leptris/pyleptris].
+* *Rust* — shipped: crate `leptris` with safe wrappers, XPath, and
+  SAX closures. See link:bindings/rust/[Rust binding].
 
 === Ruby quick start
 
