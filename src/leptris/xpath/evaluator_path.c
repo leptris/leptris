@@ -564,6 +564,17 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
     }
     memcpy(ns->nodes, sorted, n * sizeof(void*));
 
+    /* Sort groups duplicate pointers adjacently — compact them in one
+     * pass. O(n) after the O(n log n) sort, versus the O(n^2) linear
+     * duplicate scan the union operator used to run per merge. */
+    size_t w = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (i == 0 || ns->nodes[i] != ns->nodes[i - 1]) {
+            ns->nodes[w++] = ns->nodes[i];
+        }
+    }
+    ns->count = w;
+
     free(sorted);
     free(idx);
     free(rank);
@@ -672,31 +683,13 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
             }
 
             for (size_t j = 0; j < xpath_nodeset_count(axis_result); j++) {
-                void* candidate = xpath_nodeset_get(axis_result, j);
-
-                /* Quick duplicate check using pointer equality only
-                 * For simple axes (most common), nodes are unlikely to appear twice
-                 * For complex queries, the O(n) check is acceptable
-                 * TODO: Use hash set for large result sets if this becomes bottleneck */
-                int already_present = 0;
-                size_t result_count = xpath_nodeset_count(result);
-                if (result_count < 32) {  /* Small result set - linear search is fine */
-                    for (size_t k = 0; k < result_count; k++) {
-                        if (xpath_nodeset_get(result, k) == candidate) {
-                            already_present = 1;
-                            break;
-                        }
-                    }
-                } else {
-                    /* Large result set - skip dedup check for now (rare case)
-                     * Most XPath queries return small nodesets anyway */
-                    already_present = 0;
-                }
-
-                /* Only add if not already present */
-                if (!already_present) {
-                    xpath_nodeset_add(result, candidate);
-                }
+                /* No inline duplicate scan: duplicates only arise
+                 * with multiple context nodes, and the document-order
+                 * sort below compacts them. (The old linear scan was
+                 * O(n^2) when the result grew past 32 entries, and
+                 * large sets skipped it entirely — silently keeping
+                 * duplicates from nested descendant contexts.) */
+                xpath_nodeset_add(result, xpath_nodeset_get(axis_result, j));
             }
 
             /* Don't free attribute/namespace nodes from intermediate node sets - result now owns them */

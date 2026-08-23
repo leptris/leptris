@@ -178,21 +178,14 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         result = xpath_result_new(XPATH_RESULT_NODESET);
         if (result) {
             XPathNodeSet* ns = xpath_nodeset_new();
-            /* Add left nodes */
+            /* Concatenate both sides; the sort dedups adjacent
+             * duplicates (the old per-candidate linear duplicate
+             * scan was O(n^2)). */
             for (size_t i = 0; i < xpath_nodeset_count(left->value.nodeset_value); i++) {
                 xpath_nodeset_add(ns, xpath_nodeset_get(left->value.nodeset_value, i));
             }
-            /* Add right nodes (skip duplicates) */
             for (size_t i = 0; i < xpath_nodeset_count(right->value.nodeset_value); i++) {
-                void* node = xpath_nodeset_get(right->value.nodeset_value, i);
-                int duplicate = 0;
-                for (size_t j = 0; j < xpath_nodeset_count(ns); j++) {
-                    if (xpath_nodeset_get(ns, j) == node) {
-                        duplicate = 1;
-                        break;
-                    }
-                }
-                if (!duplicate) xpath_nodeset_add(ns, node);
+                xpath_nodeset_add(ns, xpath_nodeset_get(right->value.nodeset_value, i));
             }
 
             /* CRITICAL: Sort in document order per XPath 1.0 spec
