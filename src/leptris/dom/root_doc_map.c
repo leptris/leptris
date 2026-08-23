@@ -87,6 +87,17 @@ void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc
     g_root_doc_buckets[idx] = e;
 }
 
+/* TODO.concurrency/08: TLS free-list entries outlive their thread
+ * (no portable C99 TLS destructor). leptris_thread_cleanup() drains
+ * them from each worker thread before exit. */
+void leptris_root_doc_drain_thread_caches(void) {
+    while (g_free_list) {
+        RootDocEntry* next = g_free_list->next;
+        free(g_free_list);
+        g_free_list = next;
+    }
+}
+
 void leptris_root_doc_unregister(LeptrisElement root) {
     if (!root) return;
     if (!rootmap_marked(root)) return;  /* never registered: O(1) out */

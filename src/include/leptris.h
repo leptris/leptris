@@ -2607,6 +2607,21 @@ LEPTRIS_API const char* leptris_version(void);
  */
 LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch);
 
+/**
+ * Release this thread's libleptris caches
+ *
+ * libleptris keeps small per-thread caches (XPath result/nodeset
+ * free lists, the root-element map free list) for performance.
+ * C99 has no portable thread-exit hook, so a thread that used
+ * libleptris and then exits keeps those entries allocated. Call
+ * this from each worker thread just before it exits — after the
+ * last leptris_document_free — to release them (TODO.concurrency/08).
+ *
+ * Optional: long-lived threads and pooled bindings never need it.
+ * Do not call while another operation is in flight on this thread.
+ */
+LEPTRIS_API void leptris_thread_cleanup(void);
+
 #ifdef __cplusplus
 }
 #endif

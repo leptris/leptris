@@ -281,6 +281,7 @@ static struct leptris_xpath_result* exslt_str_split(
                 }
             }
         }
+        free(subject);
     } else {
         r = exslt_split_pattern(subject, pattern);
     }

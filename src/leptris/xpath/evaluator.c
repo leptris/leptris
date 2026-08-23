@@ -402,6 +402,26 @@ XPathNodeSet* xpath_nodeset_new(void) {
     return xpath_nodeset_new_with_capacity(XPATH_NODESET_INLINE_CAPACITY);
 }
 
+/* TODO.concurrency/08: per-thread free lists have no portable TLS
+ * destructor in C99 — threads that touched XPath and then exited
+ * keep their parked structs forever. leptris_thread_cleanup() calls
+ * this from each worker thread before it exits. */
+void leptris_xpath_drain_thread_caches(void) {
+    while (xpath_nodeset_free_list) {
+        XPathNodeSet* next = (XPathNodeSet*)xpath_nodeset_free_list->inline_data[0];
+        LEPTRIS_FREE(xpath_nodeset_free_list);
+        xpath_nodeset_free_list = next;
+    }
+    xpath_nodeset_free_list_count = 0;
+    while (xpath_result_free_list) {
+        struct leptris_xpath_result* next = (struct leptris_xpath_result*)
+            xpath_result_free_list->value.nodeset_value;
+        LEPTRIS_FREE(xpath_result_free_list);
+        xpath_result_free_list = next;
+    }
+    xpath_result_free_list_count = 0;
+}
+
 XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
     XPathNodeSet* nodeset = NULL;
 

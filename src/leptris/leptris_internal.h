@@ -322,6 +322,11 @@ void leptris_doc_order_index_free(void* table);
  * failure (TODO.concurrency/01). */
 void leptris_doc_snapshot_error(struct leptris_document* doc);
 
+/* TODO.concurrency/08: per-thread cache drains, called by the public
+ * leptris_thread_cleanup from each worker thread before it exits. */
+void leptris_xpath_drain_thread_caches(void);
+void leptris_root_doc_drain_thread_caches(void);
+
 /* ============================================================================
  * XPath Node Type System
  * ============================================================================ */
