@@ -164,6 +164,13 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                 elem->name = name_copy;
                 elem->name_hash = leptris_name_hash_compute(name_copy);
                 elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
+                /* Round 20 contract: create registers every new element
+                 * so pre-attach ops (set_root validation, get_document
+                 * on detached elements) can resolve the doc. The bump-
+                 * block fast path omitted it, leaving detached elements
+                 * unresolvable until attached. Register is O(1) with
+                 * the ROOTMAP_FLAG fast-out, so no measurable cost. */
+                leptris_root_doc_register(elem, doc);
             } else {
                 /* Long name or block alloc failure: fall through to
                  * the pool path (registration follows below — pool

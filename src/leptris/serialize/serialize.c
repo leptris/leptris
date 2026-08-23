@@ -334,8 +334,23 @@ void serialize_cdata_internal(LeptrisCDATANode* cdata, SerializeBuffer* buf) {
     if (!cdata || !cdata->content) return;
 
     buffer_append(buf, "<![CDATA[");
-    /* CRITICAL: NO escaping in CDATA - content is literal */
-    buffer_append(buf, cdata->content);
+    /* XML 1.0 §2.7: "]]>" cannot appear inside a CDATA section.
+     * Content containing the terminator is split across two CDATA
+     * sections by rewriting it as "]]]]><![CDATA[>" — the same
+     * technique libxml2 uses. Everything else in CDATA is literal. */
+    const char* p = cdata->content;
+    const char* run_start = p;
+    while (*p) {
+        if (p[0] == ']' && p[1] == ']' && p[2] == '>') {
+            buffer_append_len(buf, run_start, (size_t)(p - run_start));
+            buffer_append(buf, "]]]]><![CDATA[>");
+            p += 3;
+            run_start = p;
+        } else {
+            p++;
+        }
+    }
+    buffer_append(buf, run_start);
     buffer_append(buf, "]]>");
 }
 
@@ -387,6 +402,19 @@ void serialize_doctype_internal(LeptrisDoctypeNode* doctype, SerializeBuffer* bu
 
 /* Recursive serializer (kept as the deep-tree fallback for the
  * iterative walker below). */
+/* Emit a qualified element/attribute name: XML requires names in a
+ * namespace to serialize with their prefix (prefix:name). libleptris
+ * stores the prefix beside the local name, so every name-emission
+ * site routes through this helper. */
+static void append_qualified_name(SerializeBuffer* buf, const char* prefix,
+                                  const char* name, size_t name_len) {
+    if (prefix && prefix[0]) {
+        buffer_append(buf, prefix);
+        buffer_append_char(buf, ':');
+    }
+    buffer_append_len(buf, name, name_len);
+}
+
 static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* buf, int is_root) {
     if (!elem) return;
 
@@ -404,6 +432,10 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
         return;
     }
 
+    const char* elem_prefix = leptris_element_get_prefix(elem);
+    size_t elem_prefix_len =
+        (elem_prefix && elem_prefix[0]) ? strlen(elem_prefix) + 1 : 0;
+
     /* Add indentation before opening tag (not for root element) */
     if (!is_root && buf->indent_spaces > 0) {
         buffer_append_indent(buf);
@@ -412,9 +444,14 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
     /* Opening tag — one reservation + inline emission (TODO 194c):
      * replaces separate '<' and name appends (two capacity checks
      * and two NUL stores per element). */
-    buffer_ensure_capacity(buf, 1 + elem_name_len + 1);
+    buffer_ensure_capacity(buf, 1 + elem_prefix_len + elem_name_len + 1);
     char* ot = buf->data + buf->size;
     *ot++ = '<';
+    if (elem_prefix_len) {
+        memcpy(ot, elem_prefix, elem_prefix_len - 1);
+        ot += elem_prefix_len - 1;
+        *ot++ = ':';
+    }
     memcpy(ot, elem_name, elem_name_len);
     ot += elem_name_len;
     buf->size = (size_t)(ot - buf->data);
@@ -450,14 +487,22 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
          * check and NUL store) per attribute. */
         const char* name_c = attr_cname(attr);
         size_t name_len = attr->name_view.length;
+        const char* attr_prefix = attr_get_prefix(attr);
+        size_t attr_prefix_len =
+            (attr_prefix && attr_prefix[0]) ? strlen(attr_prefix) + 1 : 0;
         /* The view is authoritative: entity resolution REPLACES the
          * view (from_cstr), so length always matches the data. */
         size_t val_len = attr->value_view.length;
-        size_t needed = 1 + name_len + 2 + 6 * val_len + 2;
+        size_t needed = 1 + attr_prefix_len + name_len + 2 + 6 * val_len + 2;
         buffer_ensure_capacity(buf, needed + 1);
 
         char* out = buf->data + buf->size;
         *out++ = ' ';
+        if (attr_prefix_len) {
+            memcpy(out, attr_prefix, attr_prefix_len - 1);
+            out += attr_prefix_len - 1;
+            *out++ = ':';
+        }
         memcpy(out, name_c, name_len);
         out += name_len;
         *out++ = '=';
@@ -547,7 +592,7 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
                 tc = leptris_text_get_content(tn);
                 tlen = tc ? tn->content_len : 0;
             }
-            buffer_ensure_capacity(buf, 2 + elem_name_len + 6 * tlen + 2 + 1);
+            buffer_ensure_capacity(buf, 2 + elem_prefix_len + elem_name_len + 6 * tlen + 2 + 1);
             char* te = buf->data + buf->size;
             *te++ = '>';
             if (tc && tlen) {
@@ -555,6 +600,11 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
             }
             *te++ = '<';
             *te++ = '/';
+            if (elem_prefix_len) {
+                memcpy(te, elem_prefix, elem_prefix_len - 1);
+                te += elem_prefix_len - 1;
+                *te++ = ':';
+            }
             memcpy(te, elem_name, elem_name_len);
             te += elem_name_len;
             *te++ = '>';
@@ -570,7 +620,7 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
 
             /* Closing tag */
             buffer_append(buf, "</");
-            buffer_append_len(buf, elem_name, elem_name_len);
+            append_qualified_name(buf, elem_prefix, elem_name, elem_name_len);
             buffer_append_char(buf, '>');
 
             /* Add newline after closing tag when indenting */
@@ -610,7 +660,7 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
 
             /* Closing tag */
             buffer_append(buf, "</");
-            buffer_append_len(buf, elem_name, elem_name_len);
+            append_qualified_name(buf, elem_prefix, elem_name, elem_name_len);
             buffer_append_char(buf, '>');
 
             /* Add newline after closing tag if not root */
@@ -660,6 +710,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         const char* name = e->name;
         size_t nl = (e->name_len != 0xFF) ? (size_t)e->name_len
                                           : strlen(name);
+        const char* epfx = leptris_element_get_prefix(e);
+        size_t epl = (epfx && epfx[0]) ? strlen(epfx) + 1 : 0;
 
         /* --- total-fusion fast path (TODO 194f): a compact-mode leaf
          * element with no attributes and no namespaces emits its ENTIRE
@@ -701,17 +753,25 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     ? buf->indent * buf->indent_spaces : 0;
                 int trail = (pretty0 && !is_root_cur) ? 1 : 0;
                 buffer_ensure_capacity(
-                    buf, (size_t)(lead + trail) + 2 * nl + 6 * tl0 + 6);
+                    buf, (size_t)(lead + trail) + 2 * (epl + nl) + 6 * tl0 + 6);
                 char* q = buf->data + buf->size;
                 if (lead) {
                     memset(q, ' ', (size_t)lead);
                     q += lead;
                 }
                 *q++ = '<';
+                if (epl) {
+                    memcpy(q, epfx, epl - 1); q += epl - 1;
+                    *q++ = ':';
+                }
                 memcpy(q, name, nl); q += nl;
                 *q++ = '>';
                 if (tc0 && tl0) q = emit_escaped_inline(q, tc0, tl0, 0);
                 *q++ = '<'; *q++ = '/';
+                if (epl) {
+                    memcpy(q, epfx, epl - 1); q += epl - 1;
+                    *q++ = ':';
+                }
                 memcpy(q, name, nl); q += nl;
                 *q++ = '>';
                 if (trail) *q++ = '\n';
@@ -723,9 +783,14 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
 
         /* --- open tag (batched, as before) --- */
         if (!is_root_cur && buf->indent_spaces > 0) buffer_append_indent(buf);
-        buffer_ensure_capacity(buf, 1 + nl + 1);
+        buffer_ensure_capacity(buf, 1 + epl + nl + 1);
         char* ot = buf->data + buf->size;
         *ot++ = '<';
+        if (epl) {
+            memcpy(ot, epfx, epl - 1);
+            ot += epl - 1;
+            *ot++ = ':';
+        }
         memcpy(ot, name, nl);
         ot += nl;
         buf->size = (size_t)(ot - buf->data);
@@ -748,12 +813,19 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             }
             const char* name_c = attr_cname(attr);
             size_t anl = attr->name_view.length;
+            const char* apfx = attr_get_prefix(attr);
+            size_t apl = (apfx && apfx[0]) ? strlen(apfx) + 1 : 0;
             /* View length is authoritative (entity resolution
              * replaces the view) — same as the recursive path. */
             size_t vlen = attr->value_view.length;
-            buffer_ensure_capacity(buf, 1 + anl + 2 + 6 * vlen + 2 + 1);
+            buffer_ensure_capacity(buf, 1 + apl + anl + 2 + 6 * vlen + 2 + 1);
             char* out = buf->data + buf->size;
             *out++ = ' ';
+            if (apl) {
+                memcpy(out, apfx, apl - 1);
+                out += apl - 1;
+                *out++ = ':';
+            }
             memcpy(out, name_c, anl);
             out += anl;
             *out++ = '=';
@@ -824,11 +896,15 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     tc = leptris_text_get_content(tn);
                     tlen = tc ? tn->content_len : 0;
                 }
-                buffer_ensure_capacity(buf, 2 + nl + 6 * tlen + 2 + 1);
+                buffer_ensure_capacity(buf, 2 + epl + nl + 6 * tlen + 2 + 1);
                 char* te = buf->data + buf->size;
                 *te++ = '>';
                 if (tc && tlen) te = emit_escaped_inline(te, tc, tlen, 0);
                 *te++ = '<'; *te++ = '/';
+                if (epl) {
+                    memcpy(te, epfx, epl - 1); te += epl - 1;
+                    *te++ = ':';
+                }
                 memcpy(te, name, nl); te += nl;
                 *te++ = '>';
                 buf->size = (size_t)(te - buf->data);
@@ -837,7 +913,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append_char(buf, '>');
                 serialize_node_internal(fc, buf);
                 buffer_append(buf, "</");
-                buffer_append_len(buf, name, nl);
+                append_qualified_name(buf, epfx, name, nl);
                 buffer_append_char(buf, '>');
                 buffer_append_newline(buf);
             }
@@ -861,7 +937,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             buf->indent--;
             if (buf->indent_spaces > 0) buffer_append_indent(buf);
             buffer_append(buf, "</");
-            buffer_append_len(buf, name, nl);
+            append_qualified_name(buf, epfx, name, nl);
             buffer_append_char(buf, '>');
             if (!is_root_cur && buf->indent_spaces > 0) buffer_append_newline(buf);
             goto advance;
@@ -891,9 +967,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             LeptrisElement pe = st[sp].e;
             const char* pn = pe->name;
             size_t pnl2 = st[sp].nl;
+            const char* pfx2 = leptris_element_get_prefix(pe);
             if (buf->indent_spaces > 0) buffer_append_indent(buf);
             buffer_append(buf, "</");
-            buffer_append_len(buf, pn, pnl2);
+            append_qualified_name(buf, pfx2, pn, pnl2);
             buffer_append_char(buf, '>');
             if (buf->indent_spaces > 0 && !(sp == 0 && (LeptrisNode*)pe == (LeptrisNode*)root_elem && is_root)) {
                 buffer_append_newline(buf);
