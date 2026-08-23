@@ -70,9 +70,15 @@ jobs:
         run: |
           echo "using lib at: $LEPTRIS_LIB_PATH"
           # Windows: the loader searches the executable's directory
-          # first — put the DLL next to the test binaries.
+          # first — put the DLL next to the test binaries. Cover both
+          # naming schemes (MSVC drops the lib prefix; the import
+          # name must match the file name).
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp "$LEPTRIS_LIB_PATH"/leptris.dll target/debug/ 2>/dev/null || true
-            cp "$LEPTRIS_LIB_PATH"/leptris.dll target/debug/deps/ 2>/dev/null || true
+            ls -la "$LEPTRIS_LIB_PATH" | grep -i leptris || true
+            for n in leptris.dll libleptris.dll; do
+              for d in target/debug target/debug/deps; do
+                cp "$LEPTRIS_LIB_PATH/$n" "$d/" 2>/dev/null || true
+              done
+            done
           fi
           cargo test --verbose
