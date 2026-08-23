@@ -528,6 +528,11 @@ typedef struct xpath_context {
     /* Variable support (v1.0.1) */
     void* variable_set;          /* LeptrisXPathVariableSet - for $var references */
 
+    /* External namespace bindings (v1.2.0): expression prefix -> URI,
+     * overriding literal prefix comparison in name tests when the
+     * test prefix is bound here (XPointer xmlns() is the driver). */
+    struct leptris_xpath_ns_map* ns_set;
+
     /* Error context support (v1.0.0) */
     const char* input;           /* Original XPath expression for error context */
     size_t input_len;            /* Length of input expression */

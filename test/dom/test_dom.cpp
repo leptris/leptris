@@ -29,6 +29,67 @@ TEST(DomBasics, EmptyDocumentRoundTrips) {
     leptris_document_free(doc);
 }
 
+TEST(DomBasics, DocumentCreateHasNoRoot) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_document_root(doc), nullptr);
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, DocumentSetRootBuildsProgrammaticTree) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisElement root = leptris_element_create(doc, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
+    EXPECT_EQ(leptris_document_root(doc), root);
+
+    LeptrisElement child = leptris_element_create(doc, "child");
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, child), LEPTRIS_OK);
+
+    char* xml = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_STREQ(xml, "<root><child/></root>");
+    leptris_free_string(xml);
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, DocumentSetRootRejectsNullInputs) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_document_set_root(doc, nullptr), LEPTRIS_ERROR_NULL_ARG);
+    LeptrisElement root = leptris_element_create(doc, "r");
+    EXPECT_EQ(leptris_document_set_root(nullptr, root), LEPTRIS_ERROR_NULL_ARG);
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, DocumentSetRootRejectsForeignElement) {
+    LeptrisDocument doc_a = leptris_document_create();
+    LeptrisDocument doc_b = leptris_document_create();
+    ASSERT_NE(doc_a, nullptr);
+    ASSERT_NE(doc_b, nullptr);
+    LeptrisElement foreign = leptris_element_create(doc_b, "b");
+    ASSERT_NE(foreign, nullptr);
+    EXPECT_EQ(leptris_document_set_root(doc_a, foreign),
+              LEPTRIS_ERROR_INVALID_ARG);
+    leptris_document_free(doc_a);
+    leptris_document_free(doc_b);
+}
+
+TEST(DomBasics, DocumentSetRootRejectsParentedElement) {
+    const char xml[] = "<a><b/></a>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement b = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(leptris_document_root(doc)));
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_document_set_root(doc, b), LEPTRIS_ERROR_INVALID_ARG);
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, AttributeLookupByName) {
     const char xml[] = "<r a='1' b='2' c='3'/>";
     LeptrisStatus st = LEPTRIS_OK;

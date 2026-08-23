@@ -392,6 +392,139 @@ LEPTRIS_API LeptrisStatus leptris_xpath_variable_set_string(LeptrisXPathVariable
     return LEPTRIS_OK;
 }
 
+/* ---- External namespace bindings (v1.2.0) ---------------------------
+ * Expression prefix -> URI pairs for namespace-aware name tests;
+ * XPointer xmlns() is the canonical producer. */
+
+struct leptris_xpath_ns_map {
+    char** prefixes;
+    char** uris;
+    size_t count;
+    size_t capacity;
+};
+
+LEPTRIS_API LeptrisXPathNsSet leptris_xpath_ns_set_new(void) {
+    struct leptris_xpath_ns_map* m =
+        (struct leptris_xpath_ns_map*)calloc(1, sizeof(*m));
+    return (LeptrisXPathNsSet)m;
+}
+
+LEPTRIS_API void leptris_xpath_ns_set_free(LeptrisXPathNsSet set) {
+    struct leptris_xpath_ns_map* m = (struct leptris_xpath_ns_map*)set;
+    if (!m) return;
+    for (size_t i = 0; i < m->count; i++) {
+        free(m->prefixes[i]);
+        free(m->uris[i]);
+    }
+    free(m->prefixes);
+    free(m->uris);
+    free(m);
+}
+
+LEPTRIS_API LeptrisStatus leptris_xpath_ns_set_add(
+    LeptrisXPathNsSet set, const char* prefix, const char* uri) {
+    struct leptris_xpath_ns_map* m = (struct leptris_xpath_ns_map*)set;
+    if (!m || !prefix || !uri || !prefix[0] || !uri[0]) {
+        return LEPTRIS_ERROR_NULL_ARG;
+    }
+    for (size_t i = 0; i < m->count; i++) {
+        if (strcmp(m->prefixes[i], prefix) == 0) {
+            char* copy = leptris_strdup(uri);
+            if (!copy) return LEPTRIS_ERROR_MEMORY;
+            free(m->uris[i]);
+            m->uris[i] = copy;
+            return LEPTRIS_OK;
+        }
+    }
+    if (m->count >= m->capacity) {
+        size_t cap = m->capacity ? m->capacity * 2 : 8;
+        char** gp = (char**)realloc(m->prefixes, cap * sizeof(char*));
+        char** gu = gp ? (char**)realloc(m->uris, cap * sizeof(char*)) : NULL;
+        if (!gp || !gu) {
+            /* realloc for uris failed but prefixes moved — keep the
+             * old (still-valid) arrays by shrinking back is not
+             * possible; the map stays consistent with old capacity
+             * only if neither shrank. On partial failure free the
+             * moved one and report memory. */
+            free(gu ? NULL : gp);
+            return LEPTRIS_ERROR_MEMORY;
+        }
+        m->prefixes = gp;
+        m->uris = gu;
+        m->capacity = cap;
+    }
+    char* pc = leptris_strdup(prefix);
+    char* uc = leptris_strdup(uri);
+    if (!pc || !uc) {
+        free(pc);
+        free(uc);
+        return LEPTRIS_ERROR_MEMORY;
+    }
+    m->prefixes[m->count] = pc;
+    m->uris[m->count] = uc;
+    m->count++;
+    return LEPTRIS_OK;
+}
+
+const char* leptris_xpath_ns_lookup(const struct leptris_xpath_ns_map* m,
+                                    const char* prefix, size_t prefix_len) {
+    if (!m || !prefix || prefix_len == 0) return NULL;
+    for (size_t i = 0; i < m->count; i++) {
+        if (strlen(m->prefixes[i]) == prefix_len &&
+            memcmp(m->prefixes[i], prefix, prefix_len) == 0) {
+            return m->uris[i];
+        }
+    }
+    return NULL;
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_ns(
+    LeptrisDocument doc,
+    LeptrisElement context,
+    const char* expression,
+    LeptrisXPathNsSet ns)
+{
+    if (!doc || !expression) {
+        return NULL;
+    }
+
+    LeptrisElement context_elem = context ? context : leptris_document_root(doc);
+    if (!context_elem) return NULL;
+
+    /* Mirror the variable-bound path: parse + AST eval directly. The
+     * VM fast paths skip prefixed name tests at compile time, so the
+     * generic matcher is the only consumer of ns_set. */
+    XPathParser* parser = xpath_parser_new(expression, strlen(expression));
+    if (!parser) return NULL;
+
+    XPathASTNode* ast = xpath_parse(parser);
+    const char* parse_error = xpath_parser_error(parser);
+
+    if (!ast || parse_error) {
+        xpath_parser_free(parser);
+        return NULL;
+    }
+
+    xpath_parser_free(parser);
+
+    XPathContext ctx_storage;
+    XPathContext* xpath_ctx = &ctx_storage;
+    xpath_context_init(xpath_ctx, doc, context_elem);
+    if (!xpath_ctx->document) {
+        ast_node_free(ast);
+        return NULL;
+    }
+
+    xpath_ctx->ns_set = (struct leptris_xpath_ns_map*)ns;
+
+    struct leptris_xpath_result* result = xpath_evaluate(xpath_ctx, ast);
+
+    xpath_context_cleanup(xpath_ctx);
+    ast_node_free(ast);
+
+    return result;
+}
+
 LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_with_vars(
     LeptrisDocument doc,
     const char* expression,

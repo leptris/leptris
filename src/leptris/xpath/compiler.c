@@ -503,7 +503,9 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
      * For namespace-aware fast path we'd need to split + resolve.
      * For now, only fast-path the no-colon case. */
     int has_name = (test->type == XPATH_AST_NODE_TEST_NAME);
-    int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL);
+    /* prefix:* is namespace-scoped, not a plain wildcard — the
+     * matcher (literal or URI-bound) must see it, so no fusion. */
+    int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL && !test->prefix);
     if (!has_name && !has_wild) return 0;
     if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
 
@@ -843,7 +845,9 @@ static int try_compile_absolute_root_step(CompilerState* st, XPathASTNode* step)
     if (!test) return 0;
 
     int has_name = (test->type == XPATH_AST_NODE_TEST_NAME);
-    int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL);
+    /* prefix:* is namespace-scoped, not a plain wildcard — the
+     * matcher (literal or URI-bound) must see it, so no fusion. */
+    int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL && !test->prefix);
     if (!has_name && !has_wild) return 0;
     if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
 
@@ -940,7 +944,8 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
         first_step->child_count == 1) {
         XPathASTNode* dstest = first_step->children[0];
         /* descendant-or-self::node()  OR  descendant-or-self::* */
-        int ds_is_wild = (dstest && dstest->type == XPATH_AST_NODE_TEST_ALL);
+        int ds_is_wild = (dstest && dstest->type == XPATH_AST_NODE_TEST_ALL &&
+                          !dstest->prefix);
         int ds_is_node = (dstest && dstest->type == XPATH_AST_NODE_TEST_TYPE &&
                           dstest->value && strcmp(dstest->value, "node") == 0);
         if (ds_is_wild || ds_is_node) {
@@ -950,7 +955,8 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                 XPathASTNode* ctest = second_step->children[0];
                 int c_has_name = (ctest && ctest->type == XPATH_AST_NODE_TEST_NAME &&
                                   ctest->value && !strchr(ctest->value, ':'));
-                int c_has_wild = (ctest && ctest->type == XPATH_AST_NODE_TEST_ALL);
+                int c_has_wild = (ctest && ctest->type == XPATH_AST_NODE_TEST_ALL &&
+                                 !ctest->prefix);
                 int c_has_type = (ctest && ctest->type == XPATH_AST_NODE_TEST_TYPE &&
                                   ctest->value &&
                                   (strcmp(ctest->value, "node") == 0 ||

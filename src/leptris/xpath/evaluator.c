@@ -90,6 +90,7 @@ void xpath_context_init(XPathContext* context,
     context->namespaces_collected = 0;
 
     context->variable_set = NULL;
+    context->ns_set = NULL;
 
     context->input = NULL;
     context->input_len = 0;

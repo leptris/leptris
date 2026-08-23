@@ -449,6 +449,76 @@ TEST(XIncludeXpointer, SelectsFragmentByXPath) {
     remove(path);
 }
 
+TEST(XIncludeXpointer, XmlnsBindsExpressionPrefixToNamespace) {
+    /* The included document declares the namespace with prefix t:;
+     * the xpointer binds p: to the same URI via xmlns() and selects
+     * by NAMESPACE — the literal prefixes differ. */
+    const char included_xml[] =
+        "<doc xmlns:t='http://example.com/ns'>"
+        "  <t:section id='one'>first</t:section>"
+        "  <section id='two'>plain</section>"
+        "</doc>";
+    const char* path = "/tmp/leptris_xinclude_xpointer_ns.xml";
+    FILE* f = fopen(path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(included_xml, 1, std::strlen(included_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/leptris_xinclude_xpointer_ns.xml'"
+        "              xpointer=\"xmlns(p=http://example.com/ns)xpointer(//p:section)\"/>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement child = leptris_element_first_child_any(root);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(leptris_element_name(child), "section");
+    EXPECT_STREQ(leptris_element_attribute(child, "id"), "one");
+    EXPECT_STREQ(leptris_element_text(child), "first");
+
+    leptris_document_free(doc);
+    remove(path);
+}
+
+TEST(XIncludeXpointer, XmlnsWrongUriSelectsNothing) {
+    /* A binding to a DIFFERENT namespace must not match: the
+     * fallback-to-root behavior then splices <doc>. */
+    const char included_xml[] =
+        "<doc xmlns:t='http://example.com/ns'><t:section/></doc>";
+    const char* path = "/tmp/leptris_xinclude_xpointer_ns2.xml";
+    FILE* f = fopen(path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(included_xml, 1, std::strlen(included_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/leptris_xinclude_xpointer_ns2.xml'"
+        "              xpointer=\"xmlns(p=http://other)xpointer(//p:section)\"/>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement child = leptris_element_first_child_any(root);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(leptris_element_name(child), "doc");
+
+    leptris_document_free(doc);
+    remove(path);
+}
+
 TEST(XIncludeXpointer, EmptyResultFallsBackToRoot) {
     /* If the xpointer matches nothing, the spec is unclear; we fall
      * back to the included doc's root element. */

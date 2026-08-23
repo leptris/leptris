@@ -166,6 +166,69 @@ LEPTRIS_API void leptris_parse_options_init(leptris_parse_options* opts) {
  * ============================================================================ */
 
 /**
+ * Create an empty document (Public API)
+ *
+ * Mirrors the document initialization direct_parse performs for
+ * parsed documents, minus the buffer and tree: a fresh pool, one
+ * pool-allocated (TODO 154) zeroed struct, strict mode inherited
+ * from the thread-local setting, standalone unset (-1).
+ */
+LEPTRIS_API LeptrisDocument leptris_document_create(void) {
+    extern LeptrisMemoryPool* leptris_pool_create(void);
+    extern void* leptris_pool_alloc(LeptrisMemoryPool* pool, size_t size);
+    extern void* leptris_pool_get_base(LeptrisMemoryPool* pool);
+
+    LeptrisMemoryPool* pool = leptris_pool_create();
+    if (!pool) return NULL;
+
+    struct leptris_document* doc =
+        (struct leptris_document*)leptris_pool_alloc(pool, sizeof(struct leptris_document));
+    if (!doc) {
+        extern void leptris_pool_destroy(LeptrisMemoryPool* pool);
+        leptris_pool_destroy(pool);
+        return NULL;
+    }
+    memset(doc, 0, sizeof(*doc));
+    doc->doc_pool_allocated = 1;
+    doc->strict_mode = g_leptris_strict_mode;
+    doc->pool = pool;
+    doc->page_base = leptris_pool_get_base(pool);
+    doc->ref_count = 1;
+    doc->standalone = -1;
+    return doc;
+}
+
+/**
+ * Attach an element as the document root (Public API)
+ *
+ * Validation mirrors what the parser guarantees for parsed roots:
+ * no parent, owned by this document's pool, registered in the
+ * thread-local root→doc map. The previous root (if any) is left
+ * detached but alive — the pool owns it until document free.
+ */
+LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
+                                                    LeptrisElement root) {
+    if (!doc || !root) return LEPTRIS_ERROR_NULL_ARG;
+
+    /* Already attached under a parent? (parent_off == 0 encodes NULL;
+     * leptris_elem_parent is the static inline accessor from dom/element.h) */
+    if (leptris_elem_parent(root))
+        return LEPTRIS_ERROR_INVALID_ARG;
+
+    /* Cross-document attach would dangle the source pool on free. */
+    extern struct leptris_document* leptris_root_doc_lookup(LeptrisElement root);
+    if (leptris_root_doc_lookup(root) != doc)
+        return LEPTRIS_ERROR_INVALID_ARG;
+
+    doc->root = root;
+    doc->new_dom_root = root;
+    extern void leptris_root_doc_register(LeptrisElement root,
+                                          struct leptris_document* doc);
+    leptris_root_doc_register(root, doc);
+    return LEPTRIS_OK;
+}
+
+/**
  * Parse XML string into document (Public API wrapper)
  *
  * This function automatically detects and converts various encodings to UTF-8,
@@ -683,6 +746,22 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         doc->child_docs_tail = NULL;
     }
 
+    /* CRITICAL: drop index/root-map registrations BEFORE any
+     * element storage is freed — programmatic roots live in the
+     * mutation blocks and pool, and both cleanups read element
+     * headers. (Round 18 added the mutation-block frees further
+     * down; a programmatic root set via leptris_document_set_root
+     * was read after its block was freed — ASAN use-after-free.) */
+    if (doc->ref_count == 0) {
+        extern void leptris_compact_cleanup_document(struct leptris_document* doc);
+        leptris_compact_cleanup_document(doc);
+    }
+
+    if (doc->new_dom_root) {
+        extern void leptris_root_doc_unregister(LeptrisElement);
+        leptris_root_doc_unregister((LeptrisElement)doc->new_dom_root);
+    }
+
     /* Free owned XML buffer if present
      * For regular parsing, the document owns the buffer (copied during parsing)
      * For in-place parsing, the document also owns the buffer for consistency
@@ -732,23 +811,6 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         free(doc->attr_index->slots);
         free(doc->attr_index);
         doc->attr_index = NULL;
-    }
-
-    /* CRITICAL: Cleanup overflow table BEFORE destroying the pool
-     * The new per-document cleanup only removes entries for this document,
-     * preserving entries for other active documents.
-     * This ensures that the overflow table doesn't have stale entries
-     * pointing to memory that will be freed when the pool is destroyed. */
-    if (doc->ref_count == 0) {
-        extern void leptris_compact_cleanup_document(struct leptris_document* doc);
-        leptris_compact_cleanup_document(doc);
-    }
-
-    /* TODO 155 Phase A: unregister root→doc mapping before the pool
-     * is destroyed (so the root pointer is still valid for lookup). */
-    if (doc->new_dom_root) {
-        extern void leptris_root_doc_unregister(LeptrisElement);
-        leptris_root_doc_unregister((LeptrisElement)doc->new_dom_root);
     }
 
     /* Cache the pool-allocated flag BEFORE destroying the pool —

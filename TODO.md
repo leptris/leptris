@@ -8,16 +8,6 @@ is genuinely still open, with pointers.
 
 ## Library
 
-- **Subtree-interval index for relative descendants** — `.//x` from a
-  non-root context still walks instead of hitting the element index;
-  only absolute paths and root-context descendants use it
-  (src/leptris/xpath/vm.c, "TODO 192" comment near the
-  subtree-interval call sites; plan: docs/192-xpath-subtree-interval-
-  index.md in git history).
-- **XPointer `xmlns()` scheme** — shorthand, `element()`, and
-  `xpointer()` schemes work; xmlns(...) components are skipped
-  because namespace bindings need a public namespace-context API
-  first (src/leptris/xinclude/xinclude.c header comment).
 - **Document node** — the engine has no document node. `//node()`
   selects the root element via the folded absolute walk, but the
   generic expansion (`/descendant-or-self::node()/child::node()`
