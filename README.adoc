@@ -415,6 +415,12 @@ Error reporting is channel-split:
   `leptris_xpath_eval`); immune to concurrent activity on other
   documents.
 
+Worker threads keep small per-thread caches (XPath free lists, the
+root-map free list). C99 has no portable thread-exit hook, so a
+thread that used libleptris and then exits retains those entries —
+call `leptris_thread_cleanup()` from each worker just before it
+exits to release them. Pooled, long-lived threads never need it.
+
 The full pack is exercised by `test/concurrency/test_concurrency.cpp`
 (parse/eval/serialize/free on four threads, thread-local error
 isolation, per-document error slots), which is ThreadSanitizer-clean.

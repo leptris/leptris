@@ -10,7 +10,14 @@ use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 fn main() {
-    let name = "leptris";
+    // Windows: the DLL is libleptris.dll, so the import library is
+    // libleptris.lib — link.exe resolves `-l <name>` as <name>.lib.
+    // (TODO.concurrency/05 renamed the DLL from leptris.dll.)
+    let name = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        "libleptris"
+    } else {
+        "leptris"
+    };
     if let Ok(path) = env::var("LEPTRIS_LIB_PATH") {
         // Tolerate repo-relative paths: cargo runs build.rs from the
         // crate directory, so a path like `build-shared/src` (natural

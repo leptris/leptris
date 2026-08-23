@@ -16,8 +16,11 @@ thread-local. Remaining process-global hazards:
   on last release; (c) compile reads the shared AST, verified
   read-only.
 - g_standard_registry lazy init — double-init race on first
-  concurrent eval; moves to a load-time constructor (both MSVC and
-  ELF/Mach-O support them).
+  concurrent eval; now built under a dedicated mutex with every read
+  through the same lock (a load-time constructor was tried first but
+  reverted: it allocated the registry in every linked process, even
+  XPath-free ones, and valgrind flagged it in LTO binaries where the
+  global became unreachable).
 - SIMD dispatch pointers (simd_text.c) and the parser's cached
   getenv debug flags — lazy first-call writes raced; dispatch now
   constructor-initialized, the getenv flags are thread-local.
@@ -36,3 +39,7 @@ returned "Unsupported AST node type: <garbage>") and two TSAN races
 (SIMD dispatch init, getenv flag caching). ThreadSanitizer-clean on
 the full suite; the lone TSAN failure (CliFormat.CompactByDefault)
 is the macOS TSAN-runtime-after-fork artifact, not a library race.
+Follow-ups caught by Linux CI: per-thread free lists (XPath results/
+nodesets, root-map entries) retained memory after thread exit — new
+public leptris_thread_cleanup() drains them from each worker; the
+registry went mutex-lazy (see above).

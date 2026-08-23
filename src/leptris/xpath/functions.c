@@ -63,32 +63,27 @@ const XPathFunctionRegistry* xpath_function_registry_get_standard_impl(void) {
 }
 
 /* Lazily initialize the global registry on first call. After init,
- * the registry is read-only. */
-/* TODO.concurrency/08: built at library load (both MSVC and
- * ELF/Mach-O support constructors) so the lazy-init double-build
- * race on first concurrent eval cannot happen. */
-#if defined(_MSC_VER)
-#  pragma section(".CRT$XCU", read)
-static void leptris_registry_ctor(void);
-__declspec(allocate(".CRT$XCU")) void (*leptris_registry_ctor_ptr)(void) = leptris_registry_ctor;
-static void leptris_registry_ctor(void)
-#else
-__attribute__((constructor))
-static void leptris_registry_ctor(void)
-#endif
-{
-    XPathFunctionRegistry* r = xpath_function_registry_new();
-    if (r) xpath_function_registry_init_standard(r);
-    g_standard_registry = r;
-}
+ * the registry is read-only.
+ *
+ * TODO.concurrency/08: built under a mutex — the old unlocked
+ * lazy-init had a double-build race on the first concurrent eval.
+ * (A constructor-time build was tried and reverted: it allocated
+ * the registry in every process that links libleptris, even ones
+ * that never evaluate XPath, and valgrind flagged it in binaries
+ * where LTO made the global unreachable.) All reads go through the
+ * same mutex — no unlocked fast path, so it is also race-clean
+ * under ThreadSanitizer. */
+static leptris_mutex_t g_standard_registry_mutex = LEPTRIS_MUTEX_INIT;
 
 XPathFunctionRegistry* xpath_function_registry_get_standard(void) {
-    if (g_standard_registry) return g_standard_registry;
-    XPathFunctionRegistry* r = xpath_function_registry_new();
-    if (!r) return NULL;
-    xpath_function_registry_init_standard(r);
-    g_standard_registry = r;
-    return r;
+    LEPTRIS_MUTEX_LOCK(&g_standard_registry_mutex);
+    if (!g_standard_registry) {
+        XPathFunctionRegistry* r = xpath_function_registry_new();
+        if (r) xpath_function_registry_init_standard(r);
+        g_standard_registry = r;
+    }
+    LEPTRIS_MUTEX_UNLOCK(&g_standard_registry_mutex);
+    return g_standard_registry;
 }
 
 /* ============================================================================

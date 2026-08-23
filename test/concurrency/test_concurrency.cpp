@@ -35,6 +35,9 @@ TEST(Threading, ConcurrentParseEvalSerializeFree) {
                 leptris_free_string(xml);
                 leptris_document_free(doc);
             }
+            /* TODO.concurrency/08: drain this thread's caches so the
+             * worker exits without retaining free-list entries. */
+            leptris_thread_cleanup();
         });
     }
     for (auto& th : threads) th.join();
@@ -63,6 +66,7 @@ TEST(Threading, LastErrorIsThreadLocal) {
             const char* msg = leptris_last_error();
             if (!msg || !*msg) unexpected[t]++;
             else seen[t] = msg;
+            leptris_thread_cleanup();
         });
     }
     for (auto& th : threads) th.join();

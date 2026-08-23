@@ -63,6 +63,13 @@ LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch) 
     if (patch) *patch = LEPTRIS_VERSION_PATCH;
 }
 
+LEPTRIS_API void leptris_thread_cleanup(void) {
+    extern void leptris_xpath_drain_thread_caches(void);
+    extern void leptris_root_doc_drain_thread_caches(void);
+    leptris_xpath_drain_thread_caches();
+    leptris_root_doc_drain_thread_caches();
+}
+
 /* ---- Memory management API ---- */
 
 LEPTRIS_API void leptris_set_memory_management_functions(
