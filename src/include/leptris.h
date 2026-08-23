@@ -92,6 +92,22 @@ LEPTRIS_STATIC_ASSERT(sizeof(LeptrisXPathResult) == sizeof(void*), "ABI");
 LEPTRIS_API int leptris_node_get_type(LeptrisNodeRef node);
 
 /**
+ * Get the 1-based source line of a node (issue #510)
+ *
+ * Derived on demand from the node's text anchor (element name,
+ * text/comment/CDATA content, PI target) inside the document's
+ * input buffer — nodes carry no line field (96-byte budget). Cost
+ * is proportional to the bytes before the node; fine for tooling,
+ * avoid in hot loops.
+ *
+ * @param node Any node handle (cast elements with
+ *             leptris_element_as_node)
+ * @return 1-based line, or 0 when unknown: mutated/created nodes
+ *         (pool-owned strings), detached nodes, or NULL
+ */
+LEPTRIS_API int leptris_node_line(LeptrisNodeRef node);
+
+/**
  * Get first child node (any type)
  *
  * @param node Parent node
@@ -1481,6 +1497,16 @@ LEPTRIS_API LeptrisElement leptris_element_last_child_any(LeptrisElement elem);
  * Memory: Element is owned by document. Do not free separately.
  */
 LEPTRIS_API LeptrisElement leptris_element_next_sibling_any(LeptrisElement elem);
+
+/**
+ * Get child elements in bulk
+ *
+ * Fills out_children with up to max_count element children in
+ * document order, skipping interleaved text/comment/CDATA nodes.
+ * Size the array from leptris_element_child_count.
+ */
+LEPTRIS_API size_t leptris_element_children(
+    LeptrisElement elem, LeptrisElement* out_children, size_t max_count);
 
 /**
  * Get previous sibling element regardless of name
