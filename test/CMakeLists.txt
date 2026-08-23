@@ -83,6 +83,8 @@ leptris_add_test(test_parser     parser/test_parser.cpp)
 leptris_add_test(test_large_docs parser/test_large_documents.cpp)
 leptris_add_test(test_encoding   parser/test_encoding.cpp)
 leptris_add_test(test_dom        dom/test_dom.cpp)
+# TEMP DIAGNOSTIC (remove before merge): CI-only set_root failure.
+set_property(TEST "^test_dom_" PROPERTY ENVIRONMENT "LEPTRIS_DIAG47=1")
 leptris_add_test(test_vtable     dom/test_vtable.cpp)
 leptris_add_test(test_text_borrowed dom/test_text_borrowed.cpp)
 leptris_add_test(test_compact    dom/test_compact.cpp)
