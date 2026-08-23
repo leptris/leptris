@@ -12,12 +12,28 @@ use std::{env, fs};
 fn main() {
     let name = "leptris";
     if let Ok(path) = env::var("LEPTRIS_LIB_PATH") {
-        let p = PathBuf::from(&path);
+        // Tolerate repo-relative paths: cargo runs build.rs from the
+        // crate directory, so a path like `build-shared/src` (natural
+        // when set from the repository root) would not resolve.
+        let mut p = PathBuf::from(&path);
+        if !p.exists() {
+            if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
+                let repo_relative = Path::new(&manifest).parent().map(|root| root.join(&p));
+                if let Some(cand) = repo_relative {
+                    if cand.exists() {
+                        p = cand;
+                    }
+                }
+            }
+        }
         let dir: PathBuf = if p.is_file() {
             p.parent().unwrap().to_path_buf()
         } else {
             p.clone()
         };
+        // Absolute for -rpath: a relative rpath resolves against the
+        // test binary's directory, not the crate.
+        let dir = dir.canonicalize().unwrap_or(dir);
         let found = if p.is_file() { Some(p) } else { find_lib(&p) };
         assert!(
             found.is_some(),

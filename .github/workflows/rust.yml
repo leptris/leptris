@@ -51,7 +51,7 @@ jobs:
             echo "ERROR: libleptris shared library not found"
             exit 1
           fi
-          echo "LEPTRIS_LIB_PATH=$(dirname "$LIB")" >> "$GITHUB_ENV"
+          echo "LEPTRIS_LIB_PATH=$(cd "$(dirname "$LIB")" && pwd)" >> "$GITHUB_ENV"
           echo "Built: $LIB"
 
       - name: cargo fmt
