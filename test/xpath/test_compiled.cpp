@@ -89,3 +89,47 @@ TEST(CompiledXPath, ConcurrentEvalOneHandle) {
     for (int t = 0; t < 4; t++) EXPECT_EQ(failures[t], 0) << "thread " << t;
     leptris_xpath_compiled_free(c);
 }
+
+/* TODO.engine/02 — compiled handles on the context-carrying paths. */
+TEST(CompiledXPath, EvalWithNamespaceBindings) {
+    const char* xml =
+        "<root xmlns:p='http://x'><p:title>T1</p:title>"
+        "<child xmlns:p='http://x'><p:title>T2</p:title></child></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+
+    const char* flat[] = {"p", "http://x"};
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new_from_pairs(flat, 1);
+    ASSERT_NE(ns, nullptr);
+
+    LeptrisXPathCompiled c = leptris_xpath_compile("count(//p:title)");
+    ASSERT_NE(c, nullptr);
+    LeptrisXPathResult r = leptris_xpath_compiled_eval_ns(c, doc, nullptr, ns);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 2.0);
+    leptris_xpath_result_free(r);
+    leptris_xpath_compiled_free(c);
+    leptris_xpath_ns_set_free(ns);
+    leptris_document_free(doc);
+}
+
+TEST(CompiledXPath, EvalWithVariables) {
+    LeptrisDocument doc =
+        leptris_parse_string(kDoc, strlen(kDoc), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXPathVariableSet vars = leptris_xpath_variable_set_new();
+    ASSERT_NE(vars, nullptr);
+    ASSERT_EQ(leptris_xpath_variable_set_number(vars, "min", 3.0),
+              LEPTRIS_OK);
+
+    LeptrisXPathCompiled c = leptris_xpath_compile("count(//book[@n > $min])");
+    ASSERT_NE(c, nullptr);
+    LeptrisXPathResult r =
+        leptris_xpath_compiled_eval_vars(c, doc, nullptr, vars);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 2.0);
+    leptris_xpath_result_free(r);
+    leptris_xpath_compiled_free(c);
+    leptris_xpath_variable_set_free(vars);
+    leptris_document_free(doc);
+}

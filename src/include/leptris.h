@@ -2019,6 +2019,28 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
 LEPTRIS_API void leptris_xpath_compiled_free(LeptrisXPathCompiled compiled);
 
 /**
+ * Evaluate a compiled expression with external namespace bindings
+ *
+ * Compiled-handle counterpart of leptris_xpath_eval_ns
+ * (TODO.engine/02): prefixed name tests resolve through the binding
+ * set, same semantics, minus the per-call parse.
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_ns(
+    LeptrisXPathCompiled compiled, LeptrisDocument doc,
+    LeptrisElement context, LeptrisXPathNsSet ns);
+
+/**
+ * Evaluate a compiled expression with external variables
+ *
+ * Compiled-handle counterpart of leptris_xpath_eval_with_vars_context
+ * (TODO.engine/02): $var references resolve through the variable
+ * set, same semantics, minus the per-call parse.
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
+    LeptrisXPathCompiled compiled, LeptrisDocument doc,
+    LeptrisElement context, LeptrisXPathVariableSet variables);
+
+/**
  * Custom XPath function handler (string-valued).
  *
  * The handler receives the string representations of each XPath

@@ -67,6 +67,18 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new(const char* xml,
     return it;
 }
 
+/* TODO.engine/01: file source — bounded-memory iteration over a
+ * document on disk (no whole-document buffer). */
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file(const char* path) {
+    if (!path || !*path) return NULL;
+    struct leptris_iterparse* it =
+        (struct leptris_iterparse*)calloc(1, sizeof(*it));
+    if (!it) return NULL;
+    it->pull = leptris_pull_new_file(path);
+    if (!it->pull) { free(it); return NULL; }
+    return it;
+}
+
 LEPTRIS_API LeptrisElement leptris_iterparse_next(LeptrisIterparse it) {
     if (!it || it->exhausted) return NULL;
 

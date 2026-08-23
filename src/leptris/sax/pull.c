@@ -8,6 +8,7 @@
  * by the slice, not the document. All event strings are owned by the
  * puller and remain valid until the NEXT leptris_pull_next call. */
 #include "../../include/leptris/sax/sax.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,6 +30,10 @@ struct leptris_pull_parser {
     const char* input;
     size_t len;
     size_t pos;
+    /* File source (TODO.engine/01): when set, input chunks are read
+     * from disk into file_buf — no whole-document buffer. */
+    FILE* file;
+    char file_buf[PULL_SLICE];
     int finished;    /* input fully fed */
     int failed;
     pull_event* queue;
@@ -164,13 +169,10 @@ static void cb_error(void* ud, const char* message, int line, int column) {
 
 /* ---- Public API ---- */
 
-LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len) {
-    if (!xml || len == 0) return NULL;
+static struct leptris_pull_parser* pull_alloc(void) {
     struct leptris_pull_parser* p =
         (struct leptris_pull_parser*)calloc(1, sizeof(*p));
     if (!p) return NULL;
-    p->input = xml;
-    p->len = len;
     p->cap = 32;
     p->queue = (pull_event*)calloc(p->cap, sizeof(pull_event));
     if (!p->queue) { free(p); return NULL; }
@@ -191,17 +193,52 @@ LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len) {
     return p;
 }
 
+/* TODO.engine/01: shared construction — memory source. */
+
+/* TODO.engine/01: shared construction — memory source. */
+LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len) {
+    if (!xml || len == 0) return NULL;
+    struct leptris_pull_parser* p = pull_alloc();
+    if (!p) return NULL;
+    p->input = xml;
+    p->len = len;
+    return p;
+}
+
+/* TODO.engine/01: file source — chunks stream off disk. */
+LEPTRIS_API LeptrisPullParser leptris_pull_new_file(const char* path) {
+    if (!path || !*path) return NULL;
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    struct leptris_pull_parser* p = pull_alloc();
+    if (!p) { fclose(f); return NULL; }
+    p->file = f;
+    /* The memory path is unused; keep the invariant pos==len==0. */
+    return p;
+}
+
 LEPTRIS_API const LeptrisPullEvent* leptris_pull_next(LeptrisPullParser pull) {
     if (!pull) return NULL;
 
     /* Feed more input while the queue is empty and input remains. */
     while (queue_empty(pull) && !pull->finished && !pull->failed) {
-        size_t chunk = pull->len - pull->pos;
-        if (chunk > PULL_SLICE) chunk = PULL_SLICE;
-        pull->pos += chunk;
-        int is_final = pull->pos == pull->len;
-        int rc = leptris_sax_parser_feed(pull->sax,
-                                         pull->input + pull->pos - chunk,
+        const char* chunk_ptr;
+        size_t chunk;
+        int is_final;
+
+        if (pull->file) {
+            /* File source (TODO.engine/01): stream the next slice. */
+            chunk = fread(pull->file_buf, 1, PULL_SLICE, pull->file);
+            chunk_ptr = pull->file_buf;
+            is_final = (chunk < PULL_SLICE);
+        } else {
+            chunk = pull->len - pull->pos;
+            if (chunk > PULL_SLICE) chunk = PULL_SLICE;
+            chunk_ptr = pull->input + pull->pos;
+            pull->pos += chunk;
+            is_final = pull->pos == pull->len;
+        }
+        int rc = leptris_sax_parser_feed(pull->sax, chunk_ptr,
                                          chunk, is_final);
         if (is_final) pull->finished = 1;
         if (rc != 0) break;
@@ -241,6 +278,7 @@ LEPTRIS_API const char* leptris_pull_attr_value(LeptrisPullParser pull,
 
 LEPTRIS_API void leptris_pull_free(LeptrisPullParser pull) {
     if (!pull) return;
+    if (pull->file) fclose(pull->file);
     if (pull->sax) leptris_sax_parser_free(pull->sax);
     queue_reset_event(&pull->current);
     for (size_t i = pull->head; i != pull->tail; i = (i + 1) % pull->cap)
