@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-23
+
+### Added
+
+- TODO.engine board — file streaming, compiled contexts, Rust publish, docs refresh (engine)
+
+
+
 ## [1.4.0] - 2026-08-23
 
 The full TODO.bindings board (issue #510 Tier 2/3) — the APIs that
