@@ -814,7 +814,7 @@ leptris/
   test/                 # 345 specs across 14 modules
   benchmark/            # libxml2 / pugixml comparisons
   bindings/ruby/        # Ruby FFI binding (TODO 118)
-  TODO.fix/             # local scratchpad (gitignored)
+  TODO.md               # open-work tracker (TODO.fix/ planning docs live in git history)
   archive/              # historical / disabled code
   .github/workflows/    # CI
   docs/                 # README, building guide, FFI design
@@ -860,18 +860,19 @@ Shipped post-v0.3.0 (XPath perf track):
 * ✓ O(K^2) attribute walks eliminated across finalize/DTD/c14n (TODO 185)
 * ✓ Ruby SAX binding — full callback surface + streaming (TODO 118 Phase B)
 
-Planned:
+Planned (see TODO.md for the full open list):
 
-* Python bindings via `cffi`.
-* Rust bindings via `bindgen`.
 * Extend element index to relative-descendant queries (currently
   only absolute paths and root-context descendant use it).
-* Pre-evaluate function args via VM for the remaining string
-  functions (`concat`, `contains`, `substring`).
+* XPointer `xmlns()` scheme (needs a public namespace-context API).
 * Doxygen API reference polish.
 
-Measured dead (recorded for honesty; see TODO.remaining/08 and the
-perf ledger in `TODO.fix/`):
+Shipped since this list was last curated: Python bindings (cffi,
+pyleptris) and Rust bindings (crate `leptris` in bindings/rust); VM
+constant folding for `concat` / `contains` / `substring`.
+
+Measured dead (recorded for honesty; see the TODO.remaining/08 and
+TODO.fix perf-ledger planning docs in git history, v1.1.2-era main):
 
 * 32 B split-stream attrs — the family's upper-bound probe (views-
   only 32 B stride, no ctrl array) regressed mid-K and still lost at
