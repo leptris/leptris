@@ -76,7 +76,7 @@ fi
 # --- Update bindings/python/pyproject.toml (pyleptris lockstep) ---
 PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
 if [ -f "$PYPROJECT" ]; then
-    sed -i.bak "s/^version = \"[^"]*\"/version = \"$NEXT\"/" "$PYPROJECT"
+    sed -i.bak 's/^version = "[^"]*"/version = "'"$NEXT"'"/' "$PYPROJECT"
     rm -f "$PYPROJECT.bak"
     print_info "Updated bindings/python/pyproject.toml"
 fi
