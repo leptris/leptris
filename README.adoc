@@ -337,6 +337,8 @@ leptris_pull_free(p);
 
 Event strings live until the next `leptris_pull_next` call. Memory is
 bounded by the internal input slice, not the document.
+`leptris_pull_new_file(path)` streams the same events from disk —
+huge documents parse with no whole-document buffer.
 
 === Incremental parsing (iterparse)
 
@@ -357,6 +359,8 @@ leptris_iterparse_free(it);
 
 v1: element names are QNames as written (prefixes are not
 re-resolved); use the DOM path when namespace URIs matter.
+`leptris_iterparse_new_file(path)` iterates a document on disk with
+memory bounded by the largest subtree.
 
 === SAX (event-driven) parsing
 
@@ -410,7 +414,10 @@ leptris_xpath_compiled_free(c);
 
 Thread contract: the handle is immutable — any number of threads may
 evaluate it concurrently (each against its own document); free it
-only after the last evaluation returns.
+only after the last evaluation returns. Context variants:
+`leptris_xpath_compiled_eval_ns` (external namespace bindings) and
+`leptris_xpath_compiled_eval_vars` ($var references) — compiled
+counterparts of `leptris_xpath_eval_ns` / `eval_with_vars_context`.
 
 === Per-parse options
 

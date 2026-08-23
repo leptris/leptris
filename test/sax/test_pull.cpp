@@ -139,3 +139,77 @@ TEST(Iterparse, InvalidInputRejected) {
     EXPECT_EQ(leptris_iterparse_new(nullptr, 3), nullptr);
     EXPECT_EQ(leptris_iterparse_new("<a/>", 0), nullptr);
 }
+
+/* TODO.engine/01 — file-backed sources. */
+#include <cstdio>
+
+namespace {
+char* write_temp(const char* content) {
+    char* path = (char*)malloc(64);
+    snprintf(path, 64, "/tmp/leptris_pull_test_%d.xml", getpid());
+    FILE* f = fopen(path, "wb");
+    if (!f) { free(path); return nullptr; }
+    fwrite(content, 1, strlen(content), f);
+    fclose(f);
+    return path;
+}
+}  // namespace
+
+TEST(Pull, FileSourceMatchesMemorySource) {
+    char* path = write_temp(
+        "<r><a x='1'/>text<a x='2'/><!--c--><?pi d?><![CDATA[cd]]></r>");
+    ASSERT_NE(path, nullptr);
+    LeptrisPullParser p = leptris_pull_new_file(path);
+    ASSERT_NE(p, nullptr);
+
+    int starts = 0, ends = 0, text = 0, comment = 0, cdata = 0, pi = 0;
+    int end_doc = 0;
+    const LeptrisPullEvent* ev;
+    while ((ev = leptris_pull_next(p)) != nullptr) {
+        switch (ev->type) {
+            case LEPTRIS_PULL_START_ELEMENT: starts++; break;
+            case LEPTRIS_PULL_END_ELEMENT: ends++; break;
+            case LEPTRIS_PULL_TEXT: text++; break;
+            case LEPTRIS_PULL_COMMENT: comment++; break;
+            case LEPTRIS_PULL_CDATA: cdata++; break;
+            case LEPTRIS_PULL_PI: pi++; break;
+            case LEPTRIS_PULL_END_DOCUMENT: end_doc++; break;
+            default: break;
+        }
+    }
+    leptris_pull_free(p);
+    EXPECT_EQ(starts, 3);
+    EXPECT_EQ(ends, 3);
+    EXPECT_EQ(text, 1);
+    EXPECT_EQ(comment, 1);
+    EXPECT_EQ(cdata, 1);
+    EXPECT_EQ(pi, 1);
+    EXPECT_EQ(end_doc, 1);
+
+    /* Missing file is a clean NULL. */
+    EXPECT_EQ(leptris_pull_new_file("/nonexistent/leptris-test.xml"),
+              nullptr);
+    remove(path);
+    free(path);
+}
+
+TEST(Iterparse, FileSourceYieldsSubtrees) {
+    char* path = write_temp(
+        "<library><book n='1'><title>A</title></book>"
+        "<book n='4'><title>B</title></book></library>");
+    ASSERT_NE(path, nullptr);
+    LeptrisIterparse it = leptris_iterparse_new_file(path);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement e;
+    int n = 0;
+    while ((e = leptris_iterparse_next(it)) != nullptr) {
+        EXPECT_STREQ(leptris_element_name(e), "book");
+        EXPECT_EQ(leptris_element_child_count(e), 1u);
+        n++;
+    }
+    leptris_iterparse_free(it);
+    EXPECT_EQ(n, 2);
+    EXPECT_EQ(leptris_iterparse_new_file("/nonexistent/x.xml"), nullptr);
+    remove(path);
+    free(path);
+}

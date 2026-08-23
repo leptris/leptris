@@ -1,0 +1,52 @@
+# Rust crate publishing (TODO.engine/03). crates.io has no OIDC
+# trusted publishing — CARGO_REGISTRY_TOKEN (one-time secret setup:
+# crates.io/settings/tokens, "publish-new" scope) is the mechanism.
+# Mirrors the leptris-py release pattern: manual dispatch, or call it
+# from the C-repo release flow when wanted.
+name: Rust release
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: cargo publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify the crate builds and links against the C core
+        run: |
+          cmake -B build-shared -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLEPTRIS_BUILD_SHARED=ON -DLEPTRIS_BUILD_STATIC=OFF \
+            -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF \
+            -DLEPTRIS_BUILD_BENCHMARKS=OFF \
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF -DLEPTRIS_ENABLE_ICONV=OFF
+          cmake --build build-shared --config Release
+          LIB=$(find build-shared -type f -o -type l 2>/dev/null | grep -iE '(lib)?leptris\.(dylib|so|dll)$' | head -1)
+          if [ -z "$LIB" ]; then
+            echo "ERROR: libleptris shared library not found"
+            exit 1
+          fi
+          echo "LEPTRIS_LIB_PATH=$PWD/$LIB" >> "$GITHUB_ENV"
+          cd bindings/rust
+          cargo test
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::warning::CARGO_REGISTRY_TOKEN is not set — packing only."
+            echo "::warning::One-time setup: crates.io/settings/tokens (publish-new scope) -> repo secret."
+            cd bindings/rust && cargo package --no-verify
+            exit 0
+          fi
+          cd bindings/rust && cargo publish

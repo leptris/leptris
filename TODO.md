@@ -19,17 +19,15 @@ is genuinely still open, with pointers.
 
 - **Rust: serde interop** — deferred until a consumer asks for it
   (TODO.remaining/05 closure note, git history).
-- **Rust: crates.io publishing** — the crate builds and tests in CI
-  but has no publish workflow yet; mirror the leptris (py)
-  workflow_call pattern when wanted.
-- **leptris (py)** — split into its own repo (leptris/leptris-py) with
-  its own pin (libleptris-version.txt) and CI; the release flow calls
-  its publish workflow. Pending: one-time trusted-publisher setup on
-  pypi.org against leptris/leptris-py (workflow publish.yml,
-  environment pypi), then a workflow_dispatch there ships the wheel.
+- **Rust: crates.io publishing** — publish workflow shipped
+  (.github/workflows/rust-release.yml, TODO.engine/03); the crate
+  version rides engine lockstep. One-time secret remains: set
+  CARGO_REGISTRY_TOKEN (crates.io token, publish-new scope) and
+  dispatch — without it the workflow packs and warns.
+- **leptris (py)** — own repo, own pin, wheels shipping since 1.3.x
+  (trusted publishing is set up; releases dispatch from leptris-py).
 
 ## Adjacent repos
 
-- **leptris-ruby** — release bump job accepts explicit x.y.z only
-  (the input description's major/minor/patch values are not
-  computed); fix in their release.yml when convenient.
+- **leptris-ruby** — release bump now computes major/minor/patch
+  from the current version (fixed in their release.yml).

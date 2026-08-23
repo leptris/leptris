@@ -14,6 +14,7 @@
 #include "parser.h"
 #include "bytecode.h"
 #include "evaluator_internal.h"
+#include "xpath_variables.h"
 #include "../leptris_internal.h"
 #include "../../include/leptris.h"
 #include <stdlib.h>
@@ -97,6 +98,56 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
 
     xpath_context_cleanup(xpath_ctx);
     return result;
+}
+
+/* TODO.engine/02: the context-carrying variants. The ns/vars routes
+ * run the direct evaluator (VM fast paths skip prefixed name tests),
+ * so these evaluate the pinned AST with ns_set / variable_set
+ * installed — the same semantics as leptris_xpath_eval_ns /
+ * leptris_xpath_eval_with_vars_context, minus the re-parse. */
+static struct leptris_xpath_result* compiled_eval_context(
+        LeptrisXPathCompiled compiled, LeptrisDocument doc,
+        LeptrisElement context, struct leptris_xpath_ns_map* ns,
+        XPathVariableSet* vars) {
+    if (!compiled || !doc) return NULL;
+
+    LeptrisElement context_elem =
+        context ? context : leptris_document_root(doc);
+    if (!context_elem) return NULL;
+
+    XPathContext ctx_storage;
+    XPathContext* xpath_ctx = &ctx_storage;
+    xpath_context_init(xpath_ctx, doc, context_elem);
+    if (!xpath_ctx->document) return NULL;
+
+    xpath_ctx->ns_set = ns;
+    xpath_ctx->variable_set = vars;
+
+    struct leptris_xpath_result* result =
+        xpath_evaluate(xpath_ctx, compiled->ast);
+
+    if (!result && xpath_ctx->error_msg[0]) {
+        strncpy(doc->last_error_message, xpath_ctx->error_msg,
+                sizeof(doc->last_error_message) - 1);
+        doc->last_error_message[sizeof(doc->last_error_message) - 1] = '\0';
+    }
+
+    xpath_context_cleanup(xpath_ctx);
+    return result;
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_ns(
+        LeptrisXPathCompiled compiled, LeptrisDocument doc,
+        LeptrisElement context, LeptrisXPathNsSet ns) {
+    return compiled_eval_context(compiled, doc, context,
+                                 (struct leptris_xpath_ns_map*)ns, NULL);
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
+        LeptrisXPathCompiled compiled, LeptrisDocument doc,
+        LeptrisElement context, LeptrisXPathVariableSet variables) {
+    return compiled_eval_context(compiled, doc, context, NULL,
+                                 (XPathVariableSet*)variables);
 }
 
 LEPTRIS_API void leptris_xpath_compiled_free(LeptrisXPathCompiled compiled) {

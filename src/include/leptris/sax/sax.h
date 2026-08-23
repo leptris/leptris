@@ -314,6 +314,18 @@ LEPTRIS_API int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int s
 LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len);
 
 /**
+ * Create a pull parser streaming from a file (TODO.engine/01)
+ *
+ * Same event semantics as leptris_pull_new; input is read from disk
+ * in bounded slices — no whole-document buffer. Huge documents
+ * stream with memory bounded by the internal slice.
+ *
+ * @param path File path
+ * @return New puller, or NULL when the file cannot be opened
+ */
+LEPTRIS_API LeptrisPullParser leptris_pull_new_file(const char* path);
+
+/**
  * Return the next event, feeding input as needed
  *
  * @param pull Pull parser
@@ -365,6 +377,17 @@ LEPTRIS_API void leptris_pull_free(LeptrisPullParser pull);
  */
 LEPTRIS_API LeptrisIterparse leptris_iterparse_new(const char* xml,
                                                    size_t len);
+
+/**
+ * Create an incremental tree-iterator over a file (TODO.engine/01)
+ *
+ * Same yield semantics as leptris_iterparse_new, streaming from disk
+ * — bounded by the largest subtree, not the file size.
+ *
+ * @param path File path
+ * @return New iterator, or NULL when the file cannot be opened
+ */
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file(const char* path);
 
 /**
  * Return the next completed top-level element
