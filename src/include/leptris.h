@@ -1457,6 +1457,27 @@ LEPTRIS_API LeptrisElement leptris_element_last_child(LeptrisElement elem, const
 LEPTRIS_API LeptrisElement leptris_element_first_child_any(LeptrisElement elem);
 
 /**
+ * Copy all child ELEMENT handles into a caller-provided array
+ *
+ * One call instead of N first_child_any/next_sibling_any round-trips
+ * for bindings iterating children (issue #509: per-item FFI dispatch
+ * dominated traversal; bulk fetch matches C-extension bindings).
+ *
+ * @param elem Parent element (NULL returns 0)
+ * @param out_elements Output array of child element handles, or NULL
+ *                     to just count
+ * @param max_count Capacity of out_elements
+ * @return The TOTAL number of child elements (always, regardless of
+ *         capacity). When out_elements is non-NULL, min(total,
+ *         max_count) handles are copied.
+ *
+ * Memory: Elements are owned by the document. Do not free separately.
+ */
+LEPTRIS_API size_t leptris_element_children(LeptrisElement elem,
+                                            LeptrisElement* out_elements,
+                                            size_t max_count);
+
+/**
  * Get last child element regardless of name
  *
  * @param elem Parent element

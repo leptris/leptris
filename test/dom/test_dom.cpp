@@ -1199,3 +1199,35 @@ TEST(NodeTraverse, NullArgsReturnNegativeOne) {
                                    nullptr, nullptr), -1);
     leptris_document_free(doc);
 }
+
+TEST(ElementChildrenBatch, CopiesAllElementsSkipsOtherNodes) {
+    const char xml[] = "<r><a/><b/><!--c--><d/>text<e/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    /* Count-only mode returns the total regardless of capacity. */
+    EXPECT_EQ(leptris_element_children(root, nullptr, 0), 4u);
+
+    LeptrisElement kids[4];
+    EXPECT_EQ(leptris_element_children(root, kids, 4), 4u);
+    EXPECT_STREQ(leptris_element_name(kids[0]), "a");
+    EXPECT_STREQ(leptris_element_name(kids[1]), "b");
+    EXPECT_STREQ(leptris_element_name(kids[2]), "d");
+    EXPECT_STREQ(leptris_element_name(kids[3]), "e");
+
+    /* Truncation: total still reported, only cap copied. */
+    LeptrisElement two[2];
+    EXPECT_EQ(leptris_element_children(root, two, 2), 4u);
+    EXPECT_STREQ(leptris_element_name(two[0]), "a");
+    EXPECT_STREQ(leptris_element_name(two[1]), "b");
+
+    /* Leaf element: zero children, zero copied. */
+    EXPECT_EQ(leptris_element_children(kids[0], two, 2), 0u);
+
+    /* NULL parent is not an error. */
+    EXPECT_EQ(leptris_element_children(nullptr, two, 2), 0u);
+
+    leptris_document_free(doc);
+}

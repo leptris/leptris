@@ -422,6 +422,28 @@ LEPTRIS_API LeptrisElement leptris_element_first_child_any(LeptrisElement elem) 
 /**
  * Get last child element regardless of name (Public API)
  */
+LEPTRIS_API size_t leptris_element_children(LeptrisElement elem,
+                                            LeptrisElement* out_elements,
+                                            size_t max_count) {
+    if (!elem) return 0;
+
+    size_t total = 0;
+    LeptrisNode* child = (LeptrisNode*)leptris_element_get_first_child(elem);
+    while (child) {
+        if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            if (out_elements && total < max_count) {
+                out_elements[total] = (LeptrisElement)child;
+            }
+            total++;
+        }
+        child = leptris_node_get_next_sibling(child);
+    }
+    return total;
+}
+
+/**
+ * Get last child element regardless of name (Public API)
+ */
 LEPTRIS_API LeptrisElement leptris_element_last_child_any(LeptrisElement elem) {
     if (!elem) return NULL;
 
