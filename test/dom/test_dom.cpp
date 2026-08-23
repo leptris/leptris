@@ -5,7 +5,11 @@
 #include "leptris.h"
 
 #include <cstring>
+#include <cstdio>
 #include <string>
+
+/* TEMP DIAGNOSTIC (remove before merge) */
+extern "C" struct leptris_document* leptris_root_doc_lookup(LeptrisElement root);
 
 namespace {
 
@@ -42,6 +46,15 @@ TEST(DomBasics, DocumentSetRootBuildsProgrammaticTree) {
 
     LeptrisElement root = leptris_element_create(doc, "root");
     ASSERT_NE(root, nullptr);
+    /* TEMP DIAGNOSTIC (remove before merge) */
+    {
+        LeptrisNodeRef n = leptris_element_as_node(root);
+        fprintf(stderr, "[diag47] doc=%p root=%p lookup=%p type=%d parent_first_child=%p\n",
+                (void*)doc, (void*)root,
+                (void*)leptris_root_doc_lookup(root),
+                (int)leptris_node_get_type(n),
+                (void*)leptris_node_first_child(n));
+    }
     ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
     EXPECT_EQ(leptris_document_root(doc), root);
 
