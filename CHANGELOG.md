@@ -1,12 +1,32 @@
 ## [Unreleased]
 
-## [1.5.0] - 2026-08-23
+## [1.5.0] - 2026-08-24
+
+The TODO.engine board — post-v1.4.0 gaps from shipping the last two
+boards.
 
 ### Added
 
-- TODO.engine board — file streaming, compiled contexts, Rust publish, docs refresh (engine)
+- **File-backed streaming sources**:
+  `leptris_pull_new_file(path)` / `leptris_iterparse_new_file(path)`
+  — both APIs stream off disk in bounded 256-byte slices, no
+  whole-document buffer; iterparse stays bounded by the largest
+  subtree. Huge documents now parse from file end to end
+- **Compiled XPath with contexts**:
+  `leptris_xpath_compiled_eval_ns` / `_eval_vars` — the compiled
+  handle on the namespace- and variable-carrying paths (same
+  semantics as `leptris_xpath_eval_ns` / `eval_with_vars_context`,
+  minus the per-call parse)
+- **Rust crate publishing**: rust-release workflow (manual or
+  workflow_call) — builds the C core, cargo test, cargo publish;
+  packs with a setup warning until CARGO_REGISTRY_TOKEN is set.
+  Crate bumped to engine lockstep 1.4.0 (was 1.1.1)
 
+### Housekeeping
 
+- TODO.md refreshed: leptris-py trusted-publisher note closed (wheels
+  shipping since 1.3.x); ruby release bump note closed (verified
+  fixed upstream)
 
 ## [1.4.0] - 2026-08-23
 
