@@ -816,7 +816,7 @@ TEST(XPathResults, MixedNodesetKindsNamesValues) {
     LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//node()");
     ASSERT_NE(r, (LeptrisXPathResult)0);
     size_t n = leptris_xpath_result_count(r);
-    ASSERT_EQ(n, 5u);
+    ASSERT_EQ(n, 6u);  /* r + a, hello, comment, b, cd (root included) */
 
     /* Every entry must be classified by its real kind (no crash,
      * no miscast), and name/value must match the node's content. */
@@ -828,10 +828,11 @@ TEST(XPathResults, MixedNodesetKindsNamesValues) {
         switch (k) {
             case LEPTRIS_XPATH_NODE_ELEMENT:
                 elements++;
-                /* a and b are the two elements in the result. */
+                /* r, a and b are the three elements in the result. */
                 EXPECT_TRUE(name != nullptr &&
                             (std::strcmp(name, "a") == 0 ||
-                             std::strcmp(name, "b") == 0));
+                             std::strcmp(name, "b") == 0 ||
+                             std::strcmp(name, "r") == 0));
                 break;
             case LEPTRIS_XPATH_NODE_TEXT:
                 texts++;
@@ -848,7 +849,7 @@ TEST(XPathResults, MixedNodesetKindsNamesValues) {
                 break;
         }
     }
-    EXPECT_EQ(elements, 2);
+    EXPECT_EQ(elements, 3);
     EXPECT_EQ(texts, 2);
     EXPECT_EQ(others, 1);
 
@@ -1022,7 +1023,7 @@ TEST(XPathResults, DocumentOrderMergedNodeset) {
     LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//node()");
     ASSERT_NE(r, (LeptrisXPathResult)0);
     EXPECT_EQ(NodesetSequence(r),
-              "a t:text other b t:bb c d t:dd");
+              "r a t:text other b t:bb c d t:dd");
     leptris_xpath_result_free(r);
 
     r = leptris_xpath_eval(doc, nullptr, "//text()");
@@ -1034,7 +1035,7 @@ TEST(XPathResults, DocumentOrderMergedNodeset) {
     r = leptris_xpath_eval(doc, nullptr, "//b | //node()");
     ASSERT_NE(r, (LeptrisXPathResult)0);
     EXPECT_EQ(NodesetSequence(r),
-              "a t:text other b t:bb c d t:dd");
+              "r a t:text other b t:bb c d t:dd");
     leptris_xpath_result_free(r);
 
     /* Deeply nested text orders across subtrees. */
@@ -1043,7 +1044,7 @@ TEST(XPathResults, DocumentOrderMergedNodeset) {
     ASSERT_NE(doc2, nullptr);
     r = leptris_xpath_eval(doc2, nullptr, "//node()");
     ASSERT_NE(r, (LeptrisXPathResult)0);
-    EXPECT_EQ(NodesetSequence(r), "x y t:1 z t:2");
+    EXPECT_EQ(NodesetSequence(r), "r x y t:1 z t:2");
     leptris_xpath_result_free(r);
     leptris_document_free(doc2);
 
@@ -1078,7 +1079,7 @@ TEST(XPathResults, AbsoluteTypeTestWalkOrder) {
 
     LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//node()");
     ASSERT_NE(r, (LeptrisXPathResult)0);
-    EXPECT_EQ(NodesetSequence(r), "other a t:t1 other other b t:cd");
+    EXPECT_EQ(NodesetSequence(r), "r other a t:t1 other other b t:cd");
     leptris_xpath_result_free(r);
 
     r = leptris_xpath_eval(doc, nullptr, "//processing-instruction()");

@@ -240,6 +240,13 @@ static struct leptris_xpath_result* vm_apply_absolute_type(
 
     XPathNodeSet* out = xpath_nodeset_new();
     if (!out) return NULL;
+    /* `//node()` per XPath 1.0 selects every node in the document
+     * except the document node itself — the root element included
+     * (it is a child of the document node). The walk covers the
+     * root's descendants, so node() needs the root itself added
+     * first. The other type tests never match an element, so the
+     * descendant walk already is their complete result. */
+    if (want == 0) xpath_nodeset_add_fast(out, root);
     vm_absolute_type_walk(out, root, want, pi_target);
 
     struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
