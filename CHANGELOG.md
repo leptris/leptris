@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-23
+
+### Added
+
+- namespace bindings — XPointer xmlns() + URI-aware tests (xpath,xinclude)
+- fully automated release PR (release)
+
+### Fixed
+
+- fast-path element registration, CDATA end markers, qualified-name round-trip (dom,serialize)
+- build/publish gates survive the workflow_call event (python)
+
+
+
 ## [1.1.2] - 2026-08-23
 
 ### Fixed
