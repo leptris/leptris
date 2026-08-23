@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-23
+
+### Added
+
+- TODO.bindings board — pull API, iterparse, compiled XPath, per-parse options, encoding guarantees (bindings)
+
+### Fixed
+
+- encoding declaration is truthful per build, not unconditional (serialize)
+
+
+
 ## [1.3.0] - 2026-08-23
 
 ### Concurrency & FFI (TODO.concurrency, issues #508–#510)
