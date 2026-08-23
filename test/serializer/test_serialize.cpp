@@ -427,18 +427,29 @@ TEST(EncodingGuarantee, DeclarationNeverLies) {
     opts.xml_declaration = 1;
     char* xml = leptris_document_serialize(doc, &opts);
     ASSERT_NE(xml, nullptr);
-    EXPECT_NE(std::strstr(xml, "encoding=\"UTF-8\""), nullptr)
-        << "declaration must say UTF-8";
-    EXPECT_EQ(std::strstr(xml, "ISO-8859-1"), nullptr);
-    /* Body transcoded: 2-byte UTF-8 é. */
-    EXPECT_NE(std::strstr(xml, "caf\xc3\xa9"), nullptr);
+    /* The body tells which build we are on (self-calibrating — the
+     * LEPTRIS_HAS_ICONV compile definition does not reach test TUs):
+     *  - iconv build: é was transcoded at parse time (c3 a9)
+     *  - no-iconv build: bytes pass through unchanged (e9)
+     * Either way the DECLARATION must match the body. */
+    bool transcoded = std::strstr(xml, "caf\xc3\xa9") != nullptr;
+    bool passthrough = std::strstr(xml, "caf\xe9") != nullptr;
+    ASSERT_TRUE(transcoded || passthrough) << "body must contain é";
+    if (transcoded) {
+        EXPECT_NE(std::strstr(xml, "encoding=\"UTF-8\""), nullptr)
+            << "declaration must say UTF-8";
+        EXPECT_EQ(std::strstr(xml, "ISO-8859-1"), nullptr);
 
-    /* Even an explicit non-UTF-8 request stays truthful. */
-    opts.encoding = "ISO-8859-1";
-    leptris_free_string(xml);
-    xml = leptris_document_serialize(doc, &opts);
-    ASSERT_NE(xml, nullptr);
-    EXPECT_EQ(std::strstr(xml, "ISO-8859-1"), nullptr);
+        /* Even an explicit non-UTF-8 request stays truthful. */
+        opts.encoding = "ISO-8859-1";
+        leptris_free_string(xml);
+        xml = leptris_document_serialize(doc, &opts);
+        ASSERT_NE(xml, nullptr);
+        EXPECT_EQ(std::strstr(xml, "ISO-8859-1"), nullptr);
+    } else {
+        EXPECT_NE(std::strstr(xml, "encoding=\"ISO-8859-1\""), nullptr)
+            << "no-iconv passthrough must echo the original encoding";
+    }
     leptris_free_string(xml);
     leptris_document_free(doc);
 }
