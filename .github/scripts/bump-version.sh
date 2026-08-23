@@ -94,19 +94,56 @@ fi
 CURRENT_DATE=$(date "+%Y-%m-%d")
 TEMP_CL=$(mktemp)
 
-cat > "$TEMP_CL" << EOF
-## [Unreleased]
+# Draft the section from conventional commits since the last tag
+# (feat -> Added, fix -> Fixed, perf -> Performance). The release PR
+# is still the review gate — refine there if a one-line subject
+# loses nuance.
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+LOG_RANGE="${LAST_TAG:+$LAST_TAG..}HEAD"
 
-## [$NEXT] - $CURRENT_DATE
+type_bullets() {
+    git log --format='%s' $LOG_RANGE 2>/dev/null \
+        | awk -v t="$1" '
+            match($0, "^" t "(\\([^)]*\\))?!?: ") {
+                pre = substr($0, 1, RLENGTH)
+                sub("^" t, "", pre)
+                gsub(/[()!: ]/, "", pre)
+                rest = substr($0, RLENGTH + 1)
+                if (pre != "") print "- " rest " (" pre ")"
+                else print "- " rest
+            }'
+}
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+FEAT=$(type_bullets feat)
+FIX=$(type_bullets fix)
+PERF=$(type_bullets perf)
 
-### Changed
+NOTES=$(mktemp)
+{
+    if [ -n "$FEAT" ]; then echo "### Added";   echo; printf '%s\n' "$FEAT"; echo; fi
+    if [ -n "$FIX" ];  then echo "### Fixed";  echo; printf '%s\n' "$FIX";  echo; fi
+    if [ -n "$PERF" ]; then echo "### Performance"; echo; printf '%s\n' "$PERF"; echo; fi
+} > "$NOTES"
 
-- (describe changes here)
+if [ ! -s "$NOTES" ]; then
+    printf '%s\n' \
+        '<!-- Edit this section with the actual release notes. -->' \
+        '<!-- See https://keepachangelog.com for format guidance. -->' \
+        '' \
+        '### Changed' \
+        '' \
+        '- (describe changes here)' > "$NOTES"
+fi
 
-EOF
+{
+    echo "## [Unreleased]"
+    echo
+    echo "## [$NEXT] - $CURRENT_DATE"
+    echo
+    cat "$NOTES"
+    echo
+} > "$TEMP_CL"
+rm -f "$NOTES"
 
 # Prepend to existing changelog (skip the top "## [Unreleased]" header)
 if [ -f "$CHANGELOG" ]; then
