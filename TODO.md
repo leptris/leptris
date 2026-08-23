@@ -22,10 +22,11 @@ is genuinely still open, with pointers.
 - **Rust: crates.io publishing** — the crate builds and tests in CI
   but has no publish workflow yet; mirror the pyleptris
   workflow_call pattern when wanted.
-- **pyleptris PyPI publish** — code path verified end-to-end; blocked
-  on the one-time trusted-publisher setup on pypi.org (project
-  pyleptris, workflow .github/workflows/python-publish.yml), then a
-  workflow_dispatch run ships the wheel.
+- **pyleptris** — split into its own repo (leptris/pyleptris) with
+  its own pin (libleptris-version.txt) and CI; the release flow calls
+  its publish workflow. Pending: one-time trusted-publisher setup on
+  pypi.org against leptris/pyleptris (workflow publish.yml,
+  environment pypi), then a workflow_dispatch there ships the wheel.
 
 ## Adjacent repos
 

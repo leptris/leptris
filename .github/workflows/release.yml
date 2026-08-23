@@ -246,7 +246,10 @@ jobs:
     name: Build and publish pyleptris wheel
     needs: [tag-and-release]
     if: needs.tag-and-release.result == 'success'
-    uses: ./.github/workflows/python-publish.yml
+    # Reusable workflow in the split-out binding repo
+    # (leptris/pyleptris); the pin lives there in
+    # libleptris-version.txt.
+    uses: leptris/pyleptris/.github/workflows/publish.yml@main
     with:
       publish: true
     permissions:

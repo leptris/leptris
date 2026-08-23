@@ -101,10 +101,17 @@ def parse_ruby(root):
     return out
 
 
-def parse_python(root):
-    """cdef declarations -> name -> arity (handles multiline params)."""
-    text = (root / "bindings" / "python" / "pyleptris" / "_ffi.py").read_text()
-    text = strip_comments(text)
+def parse_python_from_repo(brepo):
+    """cdef declarations -> name -> arity (handles multiline params).
+
+    The Python binding lives in its own repository (leptris/pyleptris)
+    since the v1.2.0-era split; its mirror gate runs THERE against a
+    leptris tarball. This repo's gate covers the Ruby mirror only.
+    """
+    ffi = brepo / "pyleptris" / "_ffi.py"
+    if not ffi.exists():
+        return {}
+    text = strip_comments(ffi.read_text())
     out = {}
     for m in re.finditer(r"\b(leptris_[a-z_0-9]+)\s*\(([^;]*?)\)\s*;", text, re.S):
         out[m.group(1)] = count_params(m.group(2))
@@ -121,7 +128,7 @@ def main():
 
     mirrors = {
         "ruby": parse_ruby(root),
-        "python": parse_python(root),
+        # Python mirror moved to leptris/pyleptris (checked there).
     }
 
     failures = []
@@ -146,7 +153,8 @@ def main():
         return 1
     print(
         f"FFI mirrors clean: {len(declared)} public symbols, "
-        f"{len(mirrors['ruby'])} ruby + {len(mirrors['python'])} python declarations"
+        f"{len(mirrors['ruby'])} ruby declarations "
+        f"(python mirror: leptris/pyleptris)"
     )
     return 0
 
