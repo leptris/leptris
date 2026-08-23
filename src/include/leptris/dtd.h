@@ -75,7 +75,7 @@ LeptrisDTD* leptris_dtd_parse(const char* dtd_content, size_t len);
  *
  * Memory: Owned by the document; freed by leptris_document_free
  */
-LeptrisDTD* leptris_document_get_dtd(LeptrisDocument doc);
+LEPTRIS_API LeptrisDTD* leptris_document_get_dtd(LeptrisDocument doc);
 
 /**
  * Parse an external subset into an existing DTD

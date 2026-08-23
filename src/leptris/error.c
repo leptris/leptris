@@ -4,12 +4,31 @@
 
 #include "leptris_internal.h"
 #include "../include/leptris.h"
+#include "common/port.h"  /* LEPTRIS_THREAD_LOCAL (TODO.concurrency/01) */
 #include <stdio.h>
 #include <string.h>
 
-/* Global error state (thread-local would be better but keeping simple) */
-static char error_message[512] = "";
-static leptris_error_code last_error = LEPTRIS_ERROR_NONE;
+/* Error state — THREAD-LOCAL since TODO.concurrency/01: concurrent
+ * parses (one document per thread) no longer race the channel. The
+ * bare leptris_last_error reads this; per-document snapshots go
+ * through leptris_document_last_error. */
+static LEPTRIS_THREAD_LOCAL char error_message[512] = "";
+static LEPTRIS_THREAD_LOCAL leptris_error_code last_error = LEPTRIS_ERROR_NONE;
+
+/* Per-document snapshot: failing operations against a LIVE document
+ * (currently XPath evaluation) copy the thread-local message here. */
+LEPTRIS_API const char* leptris_document_last_error(LeptrisDocument doc) {
+    if (!doc) return NULL;
+    struct leptris_document* d = (struct leptris_document*)doc;
+    return d->last_error_message[0] ? d->last_error_message : NULL;
+}
+
+void leptris_doc_snapshot_error(struct leptris_document* doc) {
+    if (!doc) return;
+    strncpy(doc->last_error_message, error_message,
+            sizeof(doc->last_error_message) - 1);
+    doc->last_error_message[sizeof(doc->last_error_message) - 1] = '\0';
+}
 
 /**
  * Set error with message
@@ -82,6 +101,8 @@ LEPTRIS_API const char* leptris_error_message(LeptrisStatus status) {
 LEPTRIS_API const char* leptris_last_error(void) {
     return error_message[0] ? error_message : NULL;
 }
+
+/* (Doc contract in error.h: NULL when the thread has no error.) */
 
 LEPTRIS_API const char* leptris_status_string(LeptrisStatus status) {
     switch (status) {

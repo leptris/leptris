@@ -1340,7 +1340,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * public leptris_document_freeze API still walks on demand. */
 
     {
-        static int dbg_ok = -1;
+        static LEPTRIS_THREAD_LOCAL int dbg_ok = -1;
         if (dbg_ok < 0) dbg_ok = getenv("LEPTRIS_DEBUG_PARSE") != NULL;
         if (dbg_ok) {
             size_t dbg_attr_idx =
@@ -1353,10 +1353,19 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     return doc;
 
 fail:
+    /* TODO.concurrency/01: record the failure position in the
+     * thread-local slot so bindings can read leptris_last_error()
+     * when leptris_parse_string returns NULL. */
+    {
+        char msg[80];
+        long off = (long)(p.pos ? p.pos - p.buf : 0);
+        snprintf(msg, sizeof(msg), "XML parse error at byte %ld: malformed input", off);
+        leptris_set_error(LEPTRIS_ERROR_PARSE_FAILED, msg);
+    }
     {
         /* Cached env lookup — getenv is a linear environ scan, too
          * costly to repeat on every parse. Benign init race. */
-        static int dbg = -1;
+        static LEPTRIS_THREAD_LOCAL int dbg = -1;
         if (dbg < 0) dbg = getenv("LEPTRIS_DEBUG_PARSE") != NULL;
         if (dbg) {
             fprintf(stderr, "dp fail: pos=%ld off=%ld depth=%d arena_used=%zu arena_cap=%zu elem_idx=%zu attr_idx=%zu lt=%zu q=%zu est=%zu attrcap=%zu\n",

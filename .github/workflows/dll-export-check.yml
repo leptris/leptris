@@ -35,5 +35,5 @@ jobs:
         shell: pwsh
         run: |
           python scripts/check_dll_exports.py `
-            (Get-ChildItem build -Recurse -Filter leptris.dll |
+            (Get-ChildItem build -Recurse -Filter libleptris.dll |
              Select-Object -First 1).FullName .

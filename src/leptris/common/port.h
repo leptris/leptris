@@ -117,6 +117,23 @@ static __inline int leptris_port_ctz(uint32_t mask) {
 #  define LEPTRIS_THREAD_LOCAL __thread
 #endif
 
+/* ---- Mutex (TODO.concurrency/08) -------------------------------------- */
+/* SRWLock (MSVC) and pthread_mutex both have static initializers, so
+ * a process-global guarded by these needs no runtime init. */
+#if defined(_MSC_VER)
+#  include <windows.h>
+typedef SRWLOCK leptris_mutex_t;
+#  define LEPTRIS_MUTEX_INIT SRWLOCK_INIT
+#  define LEPTRIS_MUTEX_LOCK(m) AcquireSRWLockExclusive(m)
+#  define LEPTRIS_MUTEX_UNLOCK(m) ReleaseSRWLockExclusive(m)
+#else
+#  include <pthread.h>
+typedef pthread_mutex_t leptris_mutex_t;
+#  define LEPTRIS_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+#  define LEPTRIS_MUTEX_LOCK(m) pthread_mutex_lock(m)
+#  define LEPTRIS_MUTEX_UNLOCK(m) pthread_mutex_unlock(m)
+#endif
+
 /* ---- POSIX string functions ------------------------------------------- */
 
 #if defined(_MSC_VER)
