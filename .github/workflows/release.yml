@@ -215,3 +215,21 @@ jobs:
           VERSION="${{ steps.get_version.outputs.version }}"
           echo "::notice::Tag v${VERSION} created"
           echo "::notice::Release: https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # pyleptris wheel (PyPI, trusted publisher).
+  #
+  # The tag push above does NOT fire python-publish.yml's own
+  # `push: tags` trigger — tags created with GITHUB_TOKEN never
+  # trigger other workflows. Call it here instead.
+  # ─────────────────────────────────────────────────────────────────────────
+  pyleptris:
+    name: Build and publish pyleptris wheel
+    needs: [tag-and-release]
+    if: needs.tag-and-release.result == 'success'
+    uses: ./.github/workflows/python-publish.yml
+    with:
+      publish: true
+    permissions:
+      id-token: write
+      contents: read
