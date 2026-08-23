@@ -142,6 +142,10 @@ typedef enum {
 /* Opaque variable set type */
 typedef struct leptris_xpath_variable_set* LeptrisXPathVariableSet;
 
+/* External namespace bindings for XPath/XPointer evaluation
+ * (leptris_xpath_ns_set_* below). */
+typedef struct leptris_xpath_ns_map* LeptrisXPathNsSet;
+
 /* ============================================================================
  * Memory Allocation Function Types
  * ============================================================================ */

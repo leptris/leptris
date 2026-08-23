@@ -17,8 +17,10 @@
  * (element(name/1/2) child sequences), and the xpointer() scheme
  * (a full XPath 1.0 expression).  Multiple space-separated schemes
  * are tried left to right; the first that selects an element wins.
- * xmlns(...) components are skipped (namespace bindings are not
- * wired into this subset).  Non-element selections are treated as
+ * xmlns(prefix=uri) components bind expression prefixes to
+ * namespace URIs for subsequent xpointer() bodies (prefix tests
+ * match by NAMESPACE, whatever prefix the included document
+ * declared).  Non-element selections are treated as
  * no match (the move path needs an element).
  *
  * xi:fallback is honored in both modes.  Element-classification
@@ -395,37 +397,77 @@ static LeptrisElement xptr_element_scheme(LeptrisDocument doc,
     return cur;
 }
 
+/* Parse an xmlns() scheme body: prefix=URI (EscapedURI per the
+ * framework; this subset takes it verbatim). Returns 1 and fills
+ * prefix/uri (malloc'd) on success. */
+static int xptr_xmlns_binding(const char* body, size_t len,
+                              char** prefix, char** uri) {
+    /* Skip leading/trailing whitespace. */
+    while (len > 0 && (body[0] == ' ' || body[0] == '\t')) { body++; len--; }
+    while (len > 0 && (body[len - 1] == ' ' || body[len - 1] == '\t')) len--;
+    const char* eq = memchr(body, '=', len);
+    if (!eq || eq == body) return 0;
+    size_t plen = (size_t)(eq - body);
+    char* p = (char*)malloc(plen + 1);
+    if (!p) return 0;
+    memcpy(p, body, plen);
+    p[plen] = '\0';
+    char* u = (char*)malloc(len - plen);
+    if (!u) { free(p); return 0; }
+    memcpy(u, eq + 1, len - plen - 1);
+    u[len - plen - 1] = '\0';
+    *prefix = p;
+    *uri = u;
+    return 1;
+}
+
 /* Evaluate an xpointer value against the included document.
  * Returns the first selected ELEMENT, or NULL when nothing (or only
- * non-elements) matched. Tries schemes left to right per XPointer. */
+ * non-elements) matched. Tries schemes left to right per XPointer.
+ * xmlns(prefix=uri) components accumulate bindings (left to right,
+ * per the XPointer framework) that resolve prefixed name tests in
+ * subsequent xpointer() bodies by NAMESPACE, not literal prefix. */
 static LeptrisElement xptr_select(LeptrisDocument doc, const char* value) {
     XptrComponent comps[8];
     int n = xptr_parse_components(value, comps, 8);
-    for (int i = 0; i < n && i < 8; i++) {
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    LeptrisElement found = NULL;
+    for (int i = 0; i < n && i < 8 && !found; i++) {
         const XptrComponent* c = &comps[i];
+        if (c->has_parens && c->name_len == 5 &&
+            strncmp(c->name, "xmlns", 5) == 0) {
+            char *pfx, *u;
+            if (xptr_xmlns_binding(c->body, c->body_len, &pfx, &u)) {
+                leptris_xpath_ns_set_add(ns, pfx, u);
+                free(pfx);
+                free(u);
+            }
+            continue;
+        }
         if (c->has_parens && c->name_len == 8 &&
             strncmp(c->name, "xpointer", 8) == 0) {
             char* expr = (char*)malloc(c->body_len + 1);
             if (!expr) continue;
             memcpy(expr, c->body, c->body_len);
             expr[c->body_len] = '\0';
-            LeptrisXPathResult r = leptris_xpath_eval(doc, NULL, expr);
+            LeptrisXPathResult r = leptris_xpath_eval_ns(doc, NULL, expr, ns);
             free(expr);
             if (!r) continue;
             LeptrisElement e = leptris_xpath_result_get(r, 0);
             /* Elements only: the ownership-transfer path needs one. */
             if (e) {
-                /* Keep the result alive with the element? The element
-                 * belongs to `doc` (freed by the caller after the
-                 * splice), so freeing the result here is safe. */
+                /* The element belongs to `doc` (freed by the caller
+                 * after the splice), so freeing the result here is
+                 * safe. */
                 leptris_xpath_result_free(r);
-                return e;
+                found = e;
+                break;
             }
             leptris_xpath_result_free(r);
         } else if (c->has_parens && c->name_len == 7 &&
                    strncmp(c->name, "element", 7) == 0) {
             LeptrisElement e = xptr_element_scheme(doc, c->body, c->body_len);
-            if (e) return e;
+            if (e) { found = e; break; }
         } else if (!c->has_parens) {
             /* Bare token. When it is an NCName it is a shorthand
              * pointer (the element with that ID). Tokens that are
@@ -459,11 +501,12 @@ static LeptrisElement xptr_select(LeptrisDocument doc, const char* value) {
             if (!r) continue;
             LeptrisElement e = leptris_xpath_result_get(r, 0);
             leptris_xpath_result_free(r);
-            if (e) return e;
+            if (e) { found = e; break; }
         }
-        /* xmlns(...) and unknown schemes: skipped (lenient subset). */
+        /* Unknown schemes: skipped (lenient subset). */
     }
-    return NULL;
+    leptris_xpath_ns_set_free(ns);
+    return found;
 }
 
 /* Forward decl for internal recursion-aware variant. */

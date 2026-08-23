@@ -417,6 +417,42 @@ LEPTRIS_API const char* leptris_pi_node_get_data(LeptrisNodeRef node);
  * ============================================================================ */
 
 /**
+ * Create an empty document with its own memory pool
+ *
+ * Complements the parse entry points: until now documents could only
+ * be obtained by parsing. Programmatic construction (bindings that
+ * build trees bottom-up) needs a document handle first so elements
+ * can be created against its pool via leptris_element_create().
+ *
+ * The document has no root element; attach one with
+ * leptris_document_set_root(). Serializing a rootless document
+ * returns NULL (there is nothing to write).
+ *
+ * @return Document handle or NULL on allocation failure
+ *
+ * Memory: Caller must call leptris_document_free() when done
+ * Thread safety: Not thread-safe. One document per thread.
+ */
+LEPTRIS_API LeptrisDocument leptris_document_create(void);
+
+/**
+ * Attach an element as the document's root element
+ *
+ * The element must have been created against @p doc (via
+ * leptris_element_create) and must not be attached to a parent.
+ * Replaces any existing root; the previous root is not freed — it
+ * remains a pool-owned, detached element.
+ *
+ * @param doc Document handle
+ * @param root Element to attach as root
+ * @return LEPTRIS_OK on success, LEPTRIS_ERROR_NULL_ARG on NULL
+ *         inputs, or LEPTRIS_ERROR_INVALID_ARG when the element
+ *         belongs to another document or already has a parent
+ */
+LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
+                                                    LeptrisElement root);
+
+/**
  * Parse XML string into document
  *
  * @param xml XML string (must be valid UTF-8)
@@ -2205,6 +2241,69 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_with_vars_context(
     LeptrisElement context,
     const char* expression,
     LeptrisXPathVariableSet variables
+);
+
+/* ============================================================================
+ * External Namespace Bindings
+ * ============================================================================ */
+
+/**
+ * Create an empty namespace-binding set for XPath evaluation
+ *
+ * Bindings map expression prefixes to namespace URIs, so a prefixed
+ * name test (p:title) matches elements in that namespace regardless
+ * of the literal prefix the document uses (XPointer xmlns() is the
+ * canonical use). Without bindings, prefixed name tests compare
+ * prefixes literally (historic behavior, unchanged).
+ *
+ * @return New empty set (caller frees with leptris_xpath_ns_set_free)
+ *
+ * Memory: Set and its copies of prefix/URI strings are owned by the
+ * caller; free with leptris_xpath_ns_set_free.
+ */
+LEPTRIS_API LeptrisXPathNsSet leptris_xpath_ns_set_new(void);
+
+/**
+ * Free a namespace-binding set (NULL-safe)
+ */
+LEPTRIS_API void leptris_xpath_ns_set_free(LeptrisXPathNsSet set);
+
+/**
+ * Bind an expression prefix to a namespace URI
+ *
+ * Re-binding an existing prefix replaces the URI. A NULL/empty
+ * prefix is invalid (use unprefixed tests for no-namespace).
+ *
+ * @param set Binding set
+ * @param prefix Prefix used in the expression (copied)
+ * @param uri Namespace URI (copied)
+ * @return LEPTRIS_OK, or NULL_ARG / MEMORY
+ */
+LEPTRIS_API LeptrisStatus leptris_xpath_ns_set_add(
+    LeptrisXPathNsSet set, const char* prefix, const char* uri);
+
+/**
+ * Evaluate an XPath expression with external namespace bindings
+ *
+ * Same as leptris_xpath_eval_with_vars_context, plus prefix->URI
+ * resolution for prefixed name tests (p:title matches any element
+ * named title in the bound namespace, whatever prefix the document
+ * declared it with).
+ *
+ * @param doc Document
+ * @param context Context element (NULL = document root)
+ * @param expression XPath expression
+ * @param ns Namespace bindings (may be NULL; then behavior equals
+ *        leptris_xpath_eval_with_vars_context)
+ * @return XPath result (caller frees with leptris_xpath_result_free)
+ *
+ * Memory: Result is owned by the caller; free with leptris_xpath_result_free.
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_ns(
+    LeptrisDocument doc,
+    LeptrisElement context,
+    const char* expression,
+    LeptrisXPathNsSet ns
 );
 
 /* ============================================================================

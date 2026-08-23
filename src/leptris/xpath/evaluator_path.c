@@ -133,6 +133,23 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
             size_t prefix_len = colon - test->value;
             const char* test_local = colon + 1;
 
+            /* URI-aware matching when the external bindings carry
+             * the test prefix (XPointer xmlns()): p:e matches any e
+             * in the bound namespace, including elements carrying
+             * that namespace via a different prefix or the default
+             * namespace. Unbound prefix falls through to the
+             * historic literal-prefix comparison. */
+            const char* test_uri = ctx
+                ? leptris_xpath_ns_lookup(
+                      (const struct leptris_xpath_ns_map*)ctx->ns_set,
+                      test->value, prefix_len)
+                : NULL;
+            if (test_uri) {
+                const char* node_uri = leptris_element_get_namespace_uri(elem);
+                return node_uri && strcmp(node_uri, test_uri) == 0 &&
+                       strcmp(node_name, test_local) == 0;
+            }
+
             /* Get node prefix */
             const char* node_prefix = leptris_element_get_prefix(elem);
             if (!node_prefix) return 0;  /* Test has prefix, node doesn't */
@@ -148,6 +165,26 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
         }
 
         case XPATH_AST_NODE_TEST_ALL: {
+            /* prefix:* — namespace-scoped wildcard (the parser stores
+             * the prefix in test->prefix with value "*"). This was
+             * previously ignored: //t:* matched EVERY element. */
+            if (test->prefix) {
+                size_t prefix_len = strlen(test->prefix);
+                const char* test_uri = ctx
+                    ? leptris_xpath_ns_lookup(
+                          (const struct leptris_xpath_ns_map*)ctx->ns_set,
+                          test->prefix, prefix_len)
+                    : NULL;
+                if (test_uri) {
+                    const char* node_uri =
+                        leptris_element_get_namespace_uri(elem);
+                    return node_uri && strcmp(node_uri, test_uri) == 0;
+                }
+                const char* node_prefix = leptris_element_get_prefix(elem);
+                if (!node_prefix) return 0;
+                return strncmp(test->prefix, node_prefix, prefix_len) == 0 &&
+                       node_prefix[prefix_len] == '\0';
+            }
             /* Wildcard - if test has prefix, match namespace */
             if (test->value) {
                 /* Fast path: No colon means match all */
@@ -156,6 +193,18 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
 
                 /* Has prefix (e.g., "ns1:*") - match namespace */
                 size_t prefix_len = colon - test->value;
+
+                const char* test_uri = ctx
+                    ? leptris_xpath_ns_lookup(
+                          (const struct leptris_xpath_ns_map*)ctx->ns_set,
+                          test->value, prefix_len)
+                    : NULL;
+                if (test_uri) {
+                    const char* node_uri =
+                        leptris_element_get_namespace_uri(elem);
+                    return node_uri && strcmp(node_uri, test_uri) == 0;
+                }
+
                 const char* node_prefix = leptris_element_get_prefix(elem);
 
                 if (!node_prefix) return 0;

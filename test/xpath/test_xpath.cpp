@@ -1158,6 +1158,88 @@ TEST(XPathResults, IndexWithManyDistinctValuesAndNames) {
     leptris_document_free(doc);
 }
 
+// ---- external namespace bindings (v1.2.0: XPointer xmlns) --------
+
+TEST(XPathNamespaces, BoundPrefixMatchesByNamespaceUri) {
+    /* t:title and the default-ns title are both in http://x; the
+     * plain title is in no namespace. */
+    const char xml[] =
+        "<r xmlns:t='http://x'>"
+        "<t:title>A</t:title>"
+        "<other xmlns='http://x'><title>B</title></other>"
+        "<title>plain</title>"
+        "</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    EXPECT_EQ(leptris_xpath_ns_set_add(ns, "p", "http://x"), LEPTRIS_OK);
+
+    /* p:title matches by URI: both namespace-carried titles. */
+    LeptrisXPathResult r = leptris_xpath_eval_ns(doc, nullptr, "//p:title", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 2u);
+    leptris_xpath_result_free(r);
+
+    /* p:* is namespace-scoped: the three elements in http://x. */
+    r = leptris_xpath_eval_ns(doc, nullptr, "//p:*", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 3u);
+    leptris_xpath_result_free(r);
+
+    /* Re-binding replaces the URI: now nothing matches. */
+    EXPECT_EQ(leptris_xpath_ns_set_add(ns, "p", "http://empty"), LEPTRIS_OK);
+    r = leptris_xpath_eval_ns(doc, nullptr, "//p:title", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+
+    leptris_xpath_ns_set_free(ns);
+    leptris_document_free(doc);
+}
+
+TEST(XPathNamespaces, UnboundPrefixesKeepLiteralSemantics) {
+    const char xml[] =
+        "<r xmlns:t='http://x'><t:title>A</t:title><b/><t:c/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* No bindings: literal prefix comparison. */
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//t:title");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    /* Regression: //t:* previously matched EVERY element (the
+     * wildcard fusion and the matcher both ignored the prefix);
+     * it must be namespace-scoped to t:. */
+    r = leptris_xpath_eval(doc, nullptr, "//t:*");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 2u);
+    leptris_xpath_result_free(r);
+
+    /* NULL bindings on the ns entry point = plain evaluation. */
+    r = leptris_xpath_eval_ns(doc, nullptr, "//t:c", nullptr);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathNamespaces, BadBindingArgumentsRejected) {
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    EXPECT_EQ(leptris_xpath_ns_set_add(ns, nullptr, "u"), LEPTRIS_ERROR_NULL_ARG);
+    EXPECT_EQ(leptris_xpath_ns_set_add(ns, "p", nullptr), LEPTRIS_ERROR_NULL_ARG);
+    EXPECT_EQ(leptris_xpath_ns_set_add(ns, "", "u"), LEPTRIS_ERROR_NULL_ARG);
+    leptris_xpath_ns_set_free(ns);
+    leptris_xpath_ns_set_free(nullptr);
+}
+
 // ---- TODO.remaining/07: compile-time folding of literal string fns --
 
 TEST(XPathConstantFolding, ConcatOfLiterals) {

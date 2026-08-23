@@ -28,6 +28,12 @@ XPathNodeSet* apply_axis(XPathContext* ctx, LeptrisNode* node,
                          const char* axis_name, XPathASTNode* test);
 XPathAxisType xpath_axis_from_name(const char* name);
 
+/* From xpath_public.c: expression-prefix -> URI lookup in the
+ * external namespace bindings (NULL when unbound). */
+struct leptris_xpath_ns_map;
+const char* leptris_xpath_ns_lookup(const struct leptris_xpath_ns_map* m,
+                                    const char* prefix, size_t prefix_len);
+
 /* From evaluator_operators.c */
 struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                               XPathASTNode* ast);
