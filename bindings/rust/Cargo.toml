@@ -1,0 +1,13 @@
+[package]
+name = "leptris"
+version = "1.1.1"
+edition = "2021"
+description = "Rust bindings for libleptris — fast XML 1.0 parsing, XPath 1.0, SAX"
+license = "MIT"
+readme = "README.md"
+links = "leptris"
+build = "build.rs"
+
+[dependencies]
+
+[dev-dependencies]

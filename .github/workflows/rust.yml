@@ -1,0 +1,69 @@
+name: Rust bindings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bindings/rust/**'
+      - '.github/workflows/rust.yml'
+      - 'src/**'
+      - 'src/include/**'
+  pull_request:
+    paths:
+      - 'bindings/rust/**'
+      - '.github/workflows/rust.yml'
+      - 'src/**'
+      - 'src/include/**'
+  workflow_dispatch:
+
+concurrency:
+  group: rust-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: cargo test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build libleptris shared library
+        shell: bash
+        run: |
+          cmake -B build-shared -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLEPTRIS_BUILD_SHARED=ON -DLEPTRIS_BUILD_STATIC=OFF \
+            -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF \
+            -DLEPTRIS_BUILD_BENCHMARKS=OFF \
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF -DLEPTRIS_ENABLE_ICONV=OFF
+          cmake --build build-shared --config Release
+          LIB=$(find build-shared -type f -o -type l 2>/dev/null | grep -iE '(lib)?leptris\.(dylib|so|dll)$' | head -1)
+          if [ -z "$LIB" ]; then
+            echo "ERROR: libleptris shared library not found"
+            exit 1
+          fi
+          echo "LEPTRIS_LIB_PATH=$(dirname "$LIB")" >> "$GITHUB_ENV"
+          echo "Built: $LIB"
+
+      - name: cargo fmt
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: bindings/rust
+        run: cargo fmt --check
+
+      - name: cargo test
+        working-directory: bindings/rust
+        shell: bash
+        env:
+          LEPTRIS_LIB_PATH: ${{ env.LEPTRIS_LIB_PATH }}
+        run: |
+          echo "using lib at: $LEPTRIS_LIB_PATH"
+          cargo test --verbose
