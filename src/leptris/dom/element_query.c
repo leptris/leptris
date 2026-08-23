@@ -460,6 +460,30 @@ LEPTRIS_API LeptrisElement leptris_element_next_sibling_any(LeptrisElement elem)
 }
 
 /**
+ * Get child elements in bulk (Public API)
+ *
+ * Fills out_children with up to max_count element children in
+ * document order, skipping interleaved text/comment/CDATA nodes —
+ * the same chain first_child_any/next_sibling_any walk, in one call.
+ * Size the array from leptris_element_child_count (which counts
+ * element children only).
+ */
+LEPTRIS_API size_t leptris_element_children(
+    LeptrisElement elem, LeptrisElement* out_children, size_t max_count) {
+    if (!elem || !out_children || max_count == 0) return 0;
+
+    size_t written = 0;
+    LeptrisNode* child = (LeptrisNode*)leptris_element_get_first_child(elem);
+    while (child && written < max_count) {
+        if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            out_children[written++] = (LeptrisElement)child;
+        }
+        child = leptris_node_get_next_sibling(child);
+    }
+    return written;
+}
+
+/**
  * Get previous sibling element regardless of name (Public API)
  * NOTE: Compact mode doesn't have prev_sibling pointer, so we search from parent
  */

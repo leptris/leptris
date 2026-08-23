@@ -401,6 +401,21 @@ LEPTRIS_API LeptrisElement leptris_element_last_child_any(LeptrisElement elem);
 LEPTRIS_API LeptrisElement leptris_element_next_sibling_any(LeptrisElement elem);
 
 /**
+ * Get child elements in bulk
+ *
+ * Fills out_children with up to max_count element children in
+ * document order, skipping interleaved text/comment/CDATA nodes.
+ * Size the array from leptris_element_child_count.
+ *
+ * @param elem Parent element
+ * @param out_children Caller-allocated output array
+ * @param max_count Capacity of out_children
+ * @return Number of element children written
+ */
+LEPTRIS_API size_t leptris_element_children(
+    LeptrisElement elem, LeptrisElement* out_children, size_t max_count);
+
+/**
  * Get previous sibling element regardless of name
  *
  * @param elem Current element
