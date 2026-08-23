@@ -141,7 +141,7 @@ jobs:
             echo "The following happen automatically:"
             echo "- Git tag \`v${VERSION}\` is created"
             echo "- GitHub release is published with notes from CHANGELOG"
-            echo "- pyleptris wheel is built, tested, and published to PyPI"
+            echo "- leptris (py) wheel is built, tested, and published to PyPI"
           } > "$PR_BODY_FILE"
 
           gh pr create \
@@ -236,20 +236,20 @@ jobs:
           echo "::notice::Release: https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
 
   # ─────────────────────────────────────────────────────────────────────────
-  # pyleptris wheel (PyPI, trusted publisher).
+  # leptris (py) wheel (PyPI, trusted publisher).
   #
   # The tag push above does NOT fire python-publish.yml's own
   # `push: tags` trigger — tags created with GITHUB_TOKEN never
   # trigger other workflows. Call it here instead.
   # ─────────────────────────────────────────────────────────────────────────
-  pyleptris:
-    name: Build and publish pyleptris wheel
+  leptris-py:
+    name: Build and publish leptris (py) wheel
     needs: [tag-and-release]
     if: needs.tag-and-release.result == 'success'
     # Reusable workflow in the split-out binding repo
-    # (leptris/pyleptris); the pin lives there in
-    # libleptris-version.txt.
-    uses: leptris/pyleptris/.github/workflows/publish.yml@main
+    # (leptris/leptris-py, package "leptris"); the pin lives there
+    # in libleptris-version.txt.
+    uses: leptris/leptris-py/.github/workflows/publish.yml@main
     with:
       publish: true
     permissions:
