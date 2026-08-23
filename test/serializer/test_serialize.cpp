@@ -412,3 +412,50 @@ TEST(SerializeOptions, PrettyTextLeavesStayOnOneLine) {
 }
 
 }  // namespace
+
+TEST(EncodingGuarantee, DeclarationNeverLies) {
+    /* Parsed as ISO-8859-1 (iconv path); the body is transcoded to
+     * UTF-8 internally. Serialization output is ALWAYS UTF-8 — the
+     * declaration must not claim ISO-8859-1 (TODO.bindings/06). */
+    const char iso[] = "<?xml version='1.0' encoding='ISO-8859-1'?>\n"
+                       "<r><t>caf\xe9</t></r>";
+    LeptrisDocument doc = leptris_parse_string(iso, std::strlen(iso), nullptr);
+    ASSERT_NE(doc, nullptr);
+    ASSERT_STREQ(leptris_document_encoding(doc), "ISO-8859-1");
+
+    LeptrisSerializeOptions opts = {0};
+    opts.xml_declaration = 1;
+    char* xml = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_NE(std::strstr(xml, "encoding=\"UTF-8\""), nullptr)
+        << "declaration must say UTF-8";
+    EXPECT_EQ(std::strstr(xml, "ISO-8859-1"), nullptr);
+    /* Body transcoded: 2-byte UTF-8 é. */
+    EXPECT_NE(std::strstr(xml, "caf\xc3\xa9"), nullptr);
+
+    /* Even an explicit non-UTF-8 request stays truthful. */
+    opts.encoding = "ISO-8859-1";
+    leptris_free_string(xml);
+    xml = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_EQ(std::strstr(xml, "ISO-8859-1"), nullptr);
+    leptris_free_string(xml);
+    leptris_document_free(doc);
+}
+
+TEST(EncodingGuarantee, DoubleSerializeIsByteStable) {
+    const char xml_in[] = "<r a='1'><t>x &amp; y</t><e/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml_in, std::strlen(xml_in), nullptr);
+    ASSERT_NE(doc, nullptr);
+    char* once = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(once, nullptr);
+    LeptrisDocument reparsed = leptris_parse_string(once, std::strlen(once), nullptr);
+    ASSERT_NE(reparsed, nullptr);
+    char* twice = leptris_document_serialize(reparsed, nullptr);
+    ASSERT_NE(twice, nullptr);
+    EXPECT_STREQ(once, twice);
+    leptris_free_string(twice);
+    leptris_document_free(reparsed);
+    leptris_free_string(once);
+    leptris_document_free(doc);
+}

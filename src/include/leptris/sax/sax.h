@@ -10,6 +10,7 @@
 #define LEPTRIS_SAX_H
 
 #include <stddef.h>
+#include "../types.h"
 
 /* Export macro.  Defined fully in leptris.h; sax.h allows standalone
  * inclusion (leptris.h is not required) so we mirror the same logic.
@@ -291,6 +292,94 @@ LEPTRIS_API void leptris_sax_parser_free(LeptrisSAXParser* parser);
  * Thread safety: Not thread-safe. Set once before the first feed().
  */
 LEPTRIS_API int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int streaming);
+
+/* ============================================================================
+ * Pull (StAX-style) API — TODO.bindings/04, issue #510 Tier 2
+ * ============================================================================ */
+
+/**
+ * Create a host-driven pull parser over an in-memory document
+ *
+ * The host drives with leptris_pull_next() instead of receiving
+ * callbacks — one event per call, no C->host dispatch. Memory stays
+ * bounded by the internal input slice, not the document size.
+ *
+ * @param xml Input (must be valid UTF-8)
+ * @param len Input length in bytes
+ * @return New puller, or NULL on invalid input / OOM
+ *
+ * Memory: free with leptris_pull_free. Event strings are owned by
+ * the puller and valid only until the next leptris_pull_next call.
+ */
+LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len);
+
+/**
+ * Return the next event, feeding input as needed
+ *
+ * @param pull Pull parser
+ * @return The event (owned by the puller, valid until the next
+ *         call), or NULL when the document is exhausted or pull is
+ *         NULL. The final events are LEPTRIS_PULL_END_DOCUMENT on
+ *         success; LEPTRIS_PULL_ERROR (text = message) on parse
+ *         failure.
+ */
+LEPTRIS_API const LeptrisPullEvent* leptris_pull_next(LeptrisPullParser pull);
+
+/* Attribute accessors — valid only during the START_ELEMENT event
+ * most recently returned by leptris_pull_next. */
+LEPTRIS_API size_t leptris_pull_attr_count(LeptrisPullParser pull);
+LEPTRIS_API const char* leptris_pull_attr_name(LeptrisPullParser pull,
+                                               size_t index);
+LEPTRIS_API const char* leptris_pull_attr_value(LeptrisPullParser pull,
+                                                size_t index);
+
+/**
+ * Free the pull parser
+ *
+ * Memory: invalidates every event and attribute string it handed out.
+ */
+LEPTRIS_API void leptris_pull_free(LeptrisPullParser pull);
+
+/* ============================================================================
+ * Incremental (iterparse) API — TODO.bindings/02, issue #510 Tier 2
+ * ============================================================================ */
+
+/**
+ * Create an incremental tree-iterator over an in-memory document
+ *
+ * Yields each TOP-LEVEL child element of the document root as it
+ * completes. The subtree is materialized in its own pool; calling
+ * leptris_iterparse_next releases the previous element and reclaims
+ * its memory — bounded by the largest subtree, not the document.
+ *
+ * v1 limitation: element names are the QName as written; namespace
+ * prefixes are not re-resolved (use the DOM path when namespace
+ * URIs matter).
+ *
+ * @param xml Input (must be valid UTF-8)
+ * @param len Input length in bytes
+ * @return New iterator, or NULL on invalid input / OOM
+ *
+ * Memory: free with leptris_iterparse_free (releases any element
+ * still held).
+ */
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new(const char* xml,
+                                                   size_t len);
+
+/**
+ * Return the next completed top-level element
+ *
+ * The previous element (its whole subtree) is released by this call.
+ *
+ * @param it Iterator
+ * @return Borrowed element, or NULL when the document is exhausted
+ *
+ * Memory: element + subtree are owned by the iterator; valid until
+ * the next leptris_iterparse_next / leptris_iterparse_free call.
+ */
+LEPTRIS_API LeptrisElement leptris_iterparse_next(LeptrisIterparse it);
+
+LEPTRIS_API void leptris_iterparse_free(LeptrisIterparse it);
 
 #ifdef __cplusplus
 }

@@ -414,6 +414,31 @@ LEPTRIS_API LeptrisDocument leptris_parse_string(const char* xml, size_t length,
  * Parse XML string into document with in-place optimization (Public API wrapper)
  */
 
+/* TODO.bindings/05: per-parse options — the thread-global
+ * strict/depth setters stay for compatibility, but callers sharing a
+ * thread (e.g. pooled bindings) can scope configuration to one call.
+ * Save/restore around the parse: NOT reentrant — do not parse from
+ * inside custom allocators invoked by this call. */
+LEPTRIS_API LeptrisDocument leptris_parse_string_ex(const char* xml,
+                                                    size_t length,
+                                                    const LeptrisParseOptions* options,
+                                                    LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!options) {
+        return leptris_parse_string(xml, length, status);
+    }
+    int saved_strict = g_leptris_strict_mode;
+    int saved_depth = g_leptris_max_depth;
+    if (options->strict_mode >= 0) g_leptris_strict_mode = options->strict_mode;
+    if (options->max_depth > 0) g_leptris_max_depth = options->max_depth;
+
+    LeptrisDocument doc = leptris_parse_string_flags(xml, length,
+                                                     options->flags, status);
+    g_leptris_strict_mode = saved_strict;
+    g_leptris_max_depth = saved_depth;
+    return doc;
+}
+
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
                                                     size_t length,
                                                     LeptrisParseFlags flags,

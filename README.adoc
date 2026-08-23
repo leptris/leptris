@@ -318,6 +318,46 @@ Supported: all 13 axes, all 27 functions, all 15 operators, full
 predicate syntax.  See <<api,xpath-coverage>> for details.
 
 [#sax]
+=== Pull (StAX-style) parsing
+
+Host-driven event loop over the streaming SAX core — no C->host
+callbacks (each costs ~a microsecond through FFI):
+
+[source,c]
+----
+LeptrisPullParser p = leptris_pull_new(xml, len);
+const LeptrisPullEvent* ev;
+while ((ev = leptris_pull_next(p)) != NULL) {
+    if (ev->type == LEPTRIS_PULL_START_ELEMENT)
+        handle(leptris_pull_attr_count(p), ev->name);
+    if (ev->type == LEPTRIS_PULL_ERROR) break;
+}
+leptris_pull_free(p);
+----
+
+Event strings live until the next `leptris_pull_next` call. Memory is
+bounded by the internal input slice, not the document.
+
+=== Incremental parsing (iterparse)
+
+Bounded-memory tree iteration for huge documents
+(`TODO.bindings/02`): each TOP-LEVEL child of the root is
+materialized in its own pool and handed out when complete; the next
+call releases it. Peak memory is bounded by the largest subtree, not
+the document.
+
+[source,c]
+----
+LeptrisIterparse it = leptris_iterparse_new(xml, len);
+LeptrisElement e;
+while ((e = leptris_iterparse_next(it)) != NULL)
+    process(e);   /* valid until the next call */
+leptris_iterparse_free(it);
+----
+
+v1: element names are QNames as written (prefixes are not
+re-resolved); use the DOM path when namespace URIs matter.
+
 === SAX (event-driven) parsing
 
 [source,c]
@@ -354,6 +394,46 @@ putchar('\n');  /* canonical output may not end with newline */
 leptris_free_string(canonical);
 leptris_free_string(canonical);
 ----
+
+=== Compiled XPath expressions
+
+`TODO.bindings/03`: compile once, evaluate many times — skips the
+per-call expression hash and cache probe of `leptris_xpath_eval`.
+
+[source,c]
+----
+LeptrisXPathCompiled c = leptris_xpath_compile("//book[@n > 3]");
+LeptrisXPathResult r = leptris_xpath_compiled_eval(c, doc, NULL);
+leptris_xpath_result_free(r);
+leptris_xpath_compiled_free(c);
+----
+
+Thread contract: the handle is immutable — any number of threads may
+evaluate it concurrently (each against its own document); free it
+only after the last evaluation returns.
+
+=== Per-parse options
+
+`TODO.bindings/05`: scoped alternative to the thread-global
+`leptris_set_strict_mode` / `leptris_set_max_depth`.
+
+[source,c]
+----
+LeptrisParseOptions o = {LEPTRIS_PARSE_DEFAULT, /*strict*/ 1, /*depth*/ 4};
+LeptrisDocument doc = leptris_parse_string_ex(xml, len, &o, &status);
+----
+
+Options apply to that one call; the thread defaults are restored on
+return. Not reentrant (applied via thread-local state).
+
+=== Serialization encoding guarantees
+
+`TODO.bindings/06`: serialization output is ALWAYS UTF-8 — the body
+is never transcoded (iconv is input-side only). The XML declaration
+never lies: a document parsed as ISO-8859-1 serializes with
+`encoding="UTF-8"` (the body was transcoded at parse time), and
+requesting another output encoding is normalized to UTF-8.
+`serialize(parse(serialize(x)))` is byte-stable.
 
 == Memory model
 

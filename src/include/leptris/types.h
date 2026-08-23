@@ -90,6 +90,64 @@ typedef enum {
 } LeptrisXPathNodeKind;
 
 /* ============================================================================
+ * Pull (StAX-style) Parsing (TODO.bindings/04)
+ * ============================================================================ */
+
+typedef enum {
+    LEPTRIS_PULL_START_ELEMENT = 0,
+    LEPTRIS_PULL_END_ELEMENT,
+    LEPTRIS_PULL_TEXT,
+    LEPTRIS_PULL_COMMENT,
+    LEPTRIS_PULL_CDATA,
+    LEPTRIS_PULL_PI,
+    LEPTRIS_PULL_END_DOCUMENT,
+    LEPTRIS_PULL_ERROR
+} LeptrisPullEventType;
+
+typedef struct {
+    LeptrisPullEventType type;
+    const char* name;   /* element name / PI target; NULL otherwise */
+    const char* text;   /* text / comment / CDATA / PI data / error
+                         * message; NULL otherwise (NUL-terminated) */
+    size_t text_len;    /* text length in bytes */
+} LeptrisPullEvent;
+
+typedef struct leptris_pull_parser* LeptrisPullParser;
+
+/* ============================================================================
+ * Incremental (iterparse) Parsing (TODO.bindings/02)
+ * ============================================================================ */
+
+typedef struct leptris_iterparse* LeptrisIterparse;
+
+/* ============================================================================
+ * Per-parse Options (TODO.bindings/05)
+ * ============================================================================ */
+
+/* Parse flags for leptris_parse_string_flags().
+ *
+ * LEPTRIS_PARSE_DROP_WS_TEXT discards whitespace-ONLY text nodes
+ * (runs between tags that contain nothing but spaces/tabs/newlines).
+ * This matches pugixml's default behavior (their parse_ws_pcdata is
+ * opt-in) and libxml2's XML_PARSE_NOBLANKS. By default leptris KEEPS
+ * these nodes — the faithful-DOM behavior of libxml2/Nokogiri and
+ * the only way to round-trip pretty-printed XML byte-for-byte.
+ * Pretty-printed documents carry one ws-only node per element;
+ * dropping them removes ~6ns of create+wire per element and wins
+ * the whitespace-heavy parse shapes outright. */
+typedef enum {
+    LEPTRIS_PARSE_DEFAULT     = 0,
+    LEPTRIS_PARSE_DROP_WS_TEXT = 1u
+} LeptrisParseFlags;
+
+typedef struct {
+    LeptrisParseFlags flags;   /* passthrough to the parser */
+    int strict_mode;           /* -1 = keep thread default (recommended),
+                                * 0 = lenient, 1 = strict W3C */
+    int max_depth;             /* 0 = engine default (256), >0 = cap */
+} LeptrisParseOptions;
+
+/* ============================================================================
  * Serialization Options
  * ============================================================================ */
 
@@ -145,6 +203,10 @@ typedef struct leptris_xpath_variable_set* LeptrisXPathVariableSet;
 /* External namespace bindings for XPath/XPointer evaluation
  * (leptris_xpath_ns_set_* below). */
 typedef struct leptris_xpath_ns_map* LeptrisXPathNsSet;
+
+/* Compiled XPath expression handle (TODO.bindings/03). Opaque; created
+ * by leptris_xpath_compile, freed by leptris_xpath_compiled_free. */
+typedef struct leptris_xpath_compiled* LeptrisXPathCompiled;
 
 /* ============================================================================
  * Memory Allocation Function Types
