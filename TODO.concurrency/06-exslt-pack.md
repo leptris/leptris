@@ -18,6 +18,9 @@ form is out of scope v1); tokenize/split build nodesets of synthetic
 text nodes (XPathNodeSet grows an owns_synthetic_text flag to free
 them, mirroring owns_attributes).
 
-DONE 2026-08-23: 14 handlers + enable API + specs for every function
+DONE 2026-08-23: 15 handlers + enable API + specs for every function
 incl. kind checks on tokenize output; registry lookup by prefixed
-name (parser stores "str:replace" for QName tokens).
+name (parser stores "str:replace" for QName tokens). Semantic split
+ honored: str:tokenize matches a CHARACTER SET (any delimiter char),
+str:split matches the whole PATTERN as a substring
+("a::b" split on "::" = a|b, not a||b).

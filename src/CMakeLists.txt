@@ -71,6 +71,7 @@ set(LEPTRIS_SOURCES
     leptris/xpath/evaluator_operators.c
     leptris/xpath/evaluator_path.c
     leptris/xpath/functions.c
+    leptris/xpath/functions_exslt.c
     leptris/xpath/xpath_variables.c
     leptris/xpath/xpath_public.c
     leptris/xpath/xpath_ast_cache.c
@@ -142,12 +143,6 @@ endif()
 if(LEPTRIS_AMALGAMATED)
     add_library(leptris_objects OBJECT ${LEPTRIS_SOURCES_AMALGAMATED})
 
-target_compile_definitions(leptris_objects PRIVATE
-    LEPTRIS_VERSION="${PROJECT_VERSION}"
-    LEPTRIS_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-    LEPTRIS_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-    LEPTRIS_VERSION_PATCH=${PROJECT_VERSION_PATCH})
-
     # The amalgamated TU needs the include search paths from src/ downward.
     target_include_directories(leptris_objects PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
@@ -155,11 +150,25 @@ else()
     add_library(leptris_objects OBJECT ${LEPTRIS_SOURCES})
 endif()
 
+# Version defines reach core.c through the object library in BOTH
+# build modes — without these the stale hand-written fallback in
+# core.c leaks into leptris_version()/leptris_version_components().
+target_compile_definitions(leptris_objects PRIVATE
+    LEPTRIS_VERSION="${PROJECT_VERSION}"
+    LEPTRIS_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    LEPTRIS_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    LEPTRIS_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+
 set_target_properties(leptris_objects PROPERTIES
     C_STANDARD 99
     C_STANDARD_REQUIRED ON
     C_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON  # Important for shared libraries
+    # TODO.concurrency/02: internal symbols stay resolvable inside the
+    # final binary (tests/CLI embed these objects) but never export
+    # from the shared library; only LEPTRIS_API (visibility default)
+    # exports. Windows is already narrow via dllexport-only.
+    C_VISIBILITY_PRESET hidden
 )
 
 target_include_directories(leptris_objects
@@ -372,10 +381,18 @@ if(LEPTRIS_BUILD_SHARED)
 
     # Set version properties for shared library
     # This creates: libleptris.so.0.3.0 -> libleptris.so.0 -> libleptris.so
+    # TODO.concurrency/05: name the DLL libleptris.dll on Windows so
+    # vendoring tooling needs no per-platform special case (every
+    # other platform already gets the lib prefix).
+    if(WIN32)
+        set(LEPTRIS_SHARED_OUTPUT_NAME libleptris)
+    else()
+        set(LEPTRIS_SHARED_OUTPUT_NAME leptris)
+    endif()
     set_target_properties(leptris_shared PROPERTIES
         VERSION ${PROJECT_VERSION}        # e.g., 0.3.0
         SOVERSION ${PROJECT_VERSION_MAJOR}  # e.g., 0
-        OUTPUT_NAME leptris
+        OUTPUT_NAME ${LEPTRIS_SHARED_OUTPUT_NAME}
         C_STANDARD 99
         C_STANDARD_REQUIRED ON
         C_EXTENSIONS OFF

@@ -74,6 +74,25 @@ static size_t count_scalar(const char* s, size_t len, char c) {
     return n;
 }
 
+/* TODO.concurrency/08: resolved at library load (constructors are
+ * supported by ELF, Mach-O and MSVC) — the old lazy "if (!fn)
+ * dispatch_init()" pattern raced when two threads hit the same
+ * entry point on first call. */
+static void dispatch_init(void);
+
+#if defined(_MSC_VER)
+#  pragma section(".CRT$XCU", read)
+static void leptris_simd_dispatch_ctor(void);
+__declspec(allocate(".CRT$XCU")) void (*leptris_simd_dispatch_ctor_ptr)(void) = leptris_simd_dispatch_ctor;
+static void leptris_simd_dispatch_ctor(void)
+#else
+__attribute__((constructor))
+static void leptris_simd_dispatch_ctor(void)
+#endif
+{
+    dispatch_init();
+}
+
 static void dispatch_init(void) {
     leptris_cpu_level lvl = leptris_cpu_detect();
 #if defined(LEPTRIS_ARCH_X86) && defined(LEPTRIS_HAS_AVX2_BUILD)

@@ -63,15 +63,25 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
         const char* parse_error = xpath_parser_error(parser);
 
         if (!ast || parse_error) {
+            /* TODO.concurrency/01: syntax errors also snapshot into
+             * the document slot — same contract as eval failures. */
+            if (parse_error && parse_error[0]) {
+                strncpy(doc->last_error_message, parse_error,
+                        sizeof(doc->last_error_message) - 1);
+                doc->last_error_message[sizeof(doc->last_error_message) - 1] = '\0';
+            } else {
+                strncpy(doc->last_error_message, "XPath syntax error",
+                        sizeof(doc->last_error_message) - 1);
+            }
             xpath_parser_free(parser);
             return NULL;
         }
 
         xpath_parser_free(parser);
 
-        /* Hand ownership to the cache. The cache returns the same
-         * pointer on subsequent lookups. */
-        xpath_ast_cache_insert(expression, expr_len, ast);
+        /* Hand ownership to the cache. Returns the canonical AST —
+         * a racing twin insert may have won the slot, so reassign. */
+        ast = xpath_ast_cache_insert(expression, expr_len, ast);
         bc = NULL;  /* not yet compiled */
     }
 
@@ -83,6 +93,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
     xpath_context_init(xpath_ctx, doc, context_elem);
     if (!xpath_ctx->document) {
         /* init refuses to populate when args are invalid. */
+        xpath_ast_cache_release(ast);
         return NULL;
     }
 
@@ -106,11 +117,24 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
         result = xpath_evaluate(xpath_ctx, ast);
     }
 
+    /* TODO.concurrency/01: evaluation failure snapshots the reason
+     * into the document's error slot (thread-local channel may be
+     * overwritten by the next call before the binding reads it). */
+    if (!result && xpath_ctx->error_msg[0]) {
+        strncpy(doc->last_error_message, xpath_ctx->error_msg,
+                sizeof(doc->last_error_message) - 1);
+        doc->last_error_message[sizeof(doc->last_error_message) - 1] = '\0';
+    }
+
     /* Cleanup. ast and bc are owned by the cache — never free here.
      * xpath_context_cleanup releases the namespace_mappings and the
      * per-call function registry if any; the storage itself is on
      * the stack and goes away when this function returns. */
     xpath_context_cleanup(xpath_ctx);
+
+    /* TODO.concurrency/08: drop the cache pin taken by get/insert
+     * before returning (evicted entries wait for this). */
+    xpath_ast_cache_release(ast);
 
     return result;
 }
@@ -177,6 +201,26 @@ LEPTRIS_API size_t leptris_xpath_result_get_nodes(
             XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ELEMENT) {
             out_nodes[copied++] = (LeptrisElement)node;
         }
+    }
+    return copied;
+}
+
+LEPTRIS_API size_t leptris_xpath_result_get_nodes_ex(
+    LeptrisXPathResult result,
+    LeptrisNodeRef* out_nodes,
+    LeptrisXPathNodeKind* out_kinds,
+    size_t max_count) {
+    if (!result || result->type != XPATH_RESULT_NODESET) return 0;
+    if (!result->value.nodeset_value) return 0;
+
+    XPathNodeSet* ns = result->value.nodeset_value;
+    size_t copied = 0;
+    for (size_t i = 0; i < ns->count && copied < max_count; i++) {
+        void* node = ns->nodes[i];
+        if ((uintptr_t)node < 0x1000) continue;
+        if (out_nodes) out_nodes[copied] = (LeptrisNodeRef)node;
+        if (out_kinds) out_kinds[copied] = leptris_xpath_result_node_kind(result, i);
+        copied++;
     }
     return copied;
 }
@@ -478,6 +522,25 @@ const char* leptris_xpath_ns_lookup(const struct leptris_xpath_ns_map* m,
     return NULL;
 }
 
+LEPTRIS_API LeptrisXPathNsSet leptris_xpath_ns_set_new_from_pairs(
+    const char* const* flat,
+    size_t pair_count) {
+    if (!flat || pair_count == 0) return NULL;
+    for (size_t i = 0; i < pair_count * 2; i++) {
+        if (!flat[i] || !flat[i][0]) return NULL;
+    }
+    LeptrisXPathNsSet set = leptris_xpath_ns_set_new();
+    if (!set) return NULL;
+    for (size_t i = 0; i < pair_count; i++) {
+        if (leptris_xpath_ns_set_add(set, flat[i * 2], flat[i * 2 + 1]) !=
+            LEPTRIS_OK) {
+            leptris_xpath_ns_set_free(set);
+            return NULL;
+        }
+    }
+    return set;
+}
+
 LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_ns(
     LeptrisDocument doc,
     LeptrisElement context,
@@ -715,12 +778,27 @@ LEPTRIS_API LeptrisStatus leptris_xpath_register_function(
  * NULL if the doc has no custom fns (the context then uses the
  * shared standard singleton). Caller frees via the registry's
  * normal lifecycle. */
+LEPTRIS_API LeptrisStatus leptris_exslt_enable(LeptrisDocument doc) {
+    if (!doc) return LEPTRIS_ERROR_NULL_ARG;
+    struct leptris_document* d = (struct leptris_document*)doc;
+    d->exslt_enabled = 1;
+    return LEPTRIS_OK;
+}
+
 XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_document* doc) {
-    if (!doc || !doc->custom_xpath_fns) return NULL;
+    if (!doc) return NULL;
+    if (!doc->custom_xpath_fns && !doc->exslt_enabled) return NULL;
 
     XPathFunctionRegistry* reg = xpath_function_registry_new();
     if (!reg) return NULL;
     xpath_function_registry_init_standard(reg);
+
+    /* EXSLT pack (TODO.concurrency/06): native handlers registered
+     * alongside (and after) the standard library. */
+    if (doc->exslt_enabled) {
+        extern void leptris_exslt_register(XPathFunctionRegistry*);
+        leptris_exslt_register(reg);
+    }
 
     for (struct leptris_custom_xpath_fn* e = doc->custom_xpath_fns;
          e; e = e->next) {

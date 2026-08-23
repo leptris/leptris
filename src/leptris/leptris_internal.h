@@ -106,6 +106,14 @@ struct leptris_mut_attr_block {
 
 struct leptris_document {
     struct leptris_element* root;             /* Root element (legacy API) */
+    /* Snapshot of this document's last failing parse message
+     * (TODO.concurrency/01; thread-safe alternative to the
+     * thread-local channel). */
+    char last_error_message[256];
+
+    /* EXSLT-style extension pack enabled via leptris_exslt_enable
+     * (TODO.concurrency/06). */
+    int exslt_enabled;
     char* encoding;                 /* UTF-8 assumed, but store if specified */
     struct leptris_processing_instruction* pis;  /* Processing instructions */
     size_t ref_count;               /* Reference counting for memory management */
@@ -288,7 +296,7 @@ typedef struct {
 } leptris_parse_options;
 
 /* Internal parse function - implemented in parse_simple.c or parser_new.c */
-extern LEPTRIS_API struct leptris_document* leptris_parse(const char* xml, size_t len);
+extern struct leptris_document* leptris_parse(const char* xml, size_t len);
 
 /* TODO 139 Phase D: trigger lazy promote if the doc has a parsed
  * FlatDoc that hasn't been built into the compact-pointer tree yet.
@@ -308,6 +316,11 @@ struct leptris_namespace {
 /* Document-order rank cache teardown (issue #485). Defined in
  * xpath/evaluator_path.c. */
 void leptris_doc_order_index_free(void* table);
+
+/* Copy the thread-local error message into the document's snapshot
+ * slot. error.c; called by the public parse entry points on
+ * failure (TODO.concurrency/01). */
+void leptris_doc_snapshot_error(struct leptris_document* doc);
 
 /* ============================================================================
  * XPath Node Type System
@@ -461,6 +474,9 @@ typedef struct xpath_nodeset {
     size_t capacity;
     int owns_attributes;         /* If true, free attribute nodes on nodeset_free */
     int owns_namespaces;         /* If true, free namespace nodes on nodeset_free */
+    int owns_synthetic_text;     /* If true, free synthetic XPathTextNode
+                                  * entries on nodeset_free (EXSLT
+                                  * str:tokenize/split results) */
     void* inline_data[XPATH_NODESET_INLINE_CAPACITY];
 } XPathNodeSet;
 

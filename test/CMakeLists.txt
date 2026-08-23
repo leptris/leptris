@@ -93,6 +93,7 @@ leptris_add_test(test_oom        memory/test_oom_injection.cpp)
 leptris_add_test(test_arena      memory/test_arena.cpp)
 leptris_add_test(test_pool_arena memory/test_pool_arena.cpp)
 leptris_add_test(test_xpath      xpath/test_xpath.cpp)
+leptris_add_test(test_exslt       xpath/test_exslt.cpp)
 leptris_add_test(test_xpath_conf xpath/test_xpath_conformance.cpp)
 leptris_add_test(test_bytecode_vm xpath/test_bytecode_vm.cpp)
 leptris_add_test(test_serialize  serializer/test_serialize.cpp)
@@ -115,6 +116,12 @@ leptris_add_test(test_xpath_custom_fns abi/test_xpath_custom_fns.cpp)
 # High-document-count stress test (issues #256, #261). Parses 5,000
 # docs in batches of 500, verifying tree integrity on each.
 leptris_add_test(test_stress_high_doc_count perf/test_stress_high_doc_count.cpp)
+# TODO.concurrency/08: thread-spawning spec needs pthreads on
+# POSIX; the helper above cannot express that.
+find_package(Threads REQUIRED)
+leptris_add_test(test_concurrency concurrency/test_concurrency.cpp)
+target_link_libraries(test_concurrency PRIVATE Threads::Threads)
+
 
 # FlatDoc + lazy-promote tests removed — direct_parse is the sole
 # parser and builds the LeptrisElement tree eagerly. The flat/
@@ -144,6 +151,19 @@ if(Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE}
                 ${PROJECT_SOURCE_DIR}/scripts/check_ffi_mirrors.py
                 ${PROJECT_SOURCE_DIR})
+endif()
+
+# Export-surface gate (TODO.concurrency/02): every symbol exported
+# from the shared library must be declared in src/include/ and vice
+# versa. Skips (exit 0) when no shared library was built.
+if(Python3_FOUND)
+    add_test(NAME export_surface_drift
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/scripts/check_export_surface.py
+                ${CMAKE_BINARY_DIR}/src/libleptris.dylib
+                ${PROJECT_SOURCE_DIR})
+    set_tests_properties(export_surface_drift PROPERTIES
+        ENVIRONMENT "PYTHONPATH=")
 endif()
 
 # libFuzzer harness (TODO 40) — built only when LEPTRIS_ENABLE_FUZZING=ON.

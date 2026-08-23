@@ -95,7 +95,7 @@ extern void leptris_doctype_free(LeptrisDoctypeNode* doctype);
  *
  * Returns 1 if the input has a DOCTYPE with internal subset, 0
  * otherwise (including no DOCTYPE at all). */
-LEPTRIS_API struct leptris_document* leptris_parse(const char* xml, size_t len) {
+struct leptris_document* leptris_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
 
     /* Fast path: try direct_parse first. It now handles DTD internal
@@ -153,7 +153,7 @@ static struct leptris_document* leptris_parse_inplace(char* xml, size_t len) {
 /**
  * Initialize parse options with defaults
  */
-LEPTRIS_API void leptris_parse_options_init(leptris_parse_options* opts) {
+void leptris_parse_options_init(leptris_parse_options* opts) {
     if (!opts) return;
 
     opts->strict = 1;              /* Strict mode by default */
@@ -550,7 +550,7 @@ LEPTRIS_API LeptrisElement leptris_parse_fragment(const char* xml,
 /**
  * Parse XML with custom options
  */
-LEPTRIS_API struct leptris_document* leptris_parse_with_options(
+struct leptris_document* leptris_parse_with_options(
     const char* xml,
     size_t len,
     const leptris_parse_options* opts

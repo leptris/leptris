@@ -1904,6 +1904,10 @@ LEPTRIS_API LeptrisStatus leptris_element_remove_namespace_definition(
 /**
  * Convert status code to human-readable string
  *
+ * The CANONICAL status->message function (leptris_error_message in
+ * error.h is a deprecated alias with identical output —
+ * TODO.concurrency/04).
+ *
  * @param status Status code from leptris_parse_string or other API
  * @return Static string (never NULL, never freed)
   *
@@ -1987,6 +1991,40 @@ LEPTRIS_API LeptrisStatus leptris_xpath_register_function(
     LeptrisXPathFn fn,
     void* user_data
 );
+/**
+ * Check whether an XPath function name is supported
+ *
+ * Covers the standard XPath 1.0 library. Custom functions
+ * registered on a document report 0 here (they are per-document).
+ *
+ * @param function_name Function name (e.g. "count")
+ * @return 1 supported, 0 unknown/NULL
+ */
+LEPTRIS_API int leptris_xpath_function_supported(const char* function_name);
+
+/**
+ * List the supported XPath function names
+ *
+ * @return NULL-terminated static array of names (do not free);
+ *         valid for the library's lifetime
+ */
+LEPTRIS_API const char** leptris_xpath_supported_functions(void);
+/**
+ * Enable the first-party EXSLT-style extension pack for a document
+ *
+ * Registers str:/set:/math: prefixed functions (replace, tokenize,
+ * split, concat, padding; distinct, intersection, difference,
+ * leading, trailing; max, min, abs, sqrt, power) as native handlers
+ * on this document — one C implementation shared by every binding
+ * instead of per-language reimplementations (TODO.concurrency/06).
+ * Prefixed names never collide with the XPath 1.0 core.
+ *
+ * @param doc Document that will own the registration
+ * @return LEPTRIS_OK, or NULL_ARG
+ */
+LEPTRIS_API LeptrisStatus leptris_exslt_enable(LeptrisDocument doc);
+
+
 
 /**
  * Get XPath result type
@@ -2023,14 +2061,43 @@ LEPTRIS_API LeptrisElement leptris_xpath_result_get(LeptrisXPathResult result, s
  * instead of N calls (#262).
  *
  * @param result XPath result (must be NODESET type)
+ * ELEMENTS ONLY: mixed nodesets (from //node(), text(), unions)
+ * copy just their element entries here — use
+ * leptris_xpath_result_get_nodes_ex for every kind
+ * (TODO.concurrency/03).
+ *
  * @param out_nodes Caller-allocated array of LeptrisElement
  * @param max_count Capacity of out_nodes
- * @return Number of nodes copied (min of result count and max_count)
+ * @return Number of ELEMENT entries copied (not the result count
+ *         when the nodeset is mixed)
  *
  * Memory: Elements are owned by document. Do not free separately.
  */
 LEPTRIS_API size_t leptris_xpath_result_get_nodes(
     LeptrisXPathResult result, LeptrisElement* out_nodes, size_t max_count);
+/**
+ * Copy every node of a mixed nodeset result with its kind
+ *
+ * Unlike leptris_xpath_result_get_nodes (which copies ELEMENT
+ * entries only), this copies every entry — elements, text, comment,
+ * CDATA, attribute, namespace — writing the node handle to
+ * out_nodes[i] and its kind to out_kinds[i]. Inspect handles via
+ * leptris_node_get_type / leptris_node_first_child; attribute-kind
+ * entries are synthetic nodes understood by the mixed-nodeset
+ * accessors (TODO.concurrency/03).
+ *
+ * @param result XPath result (NODESET type)
+ * @param out_nodes Output array (may be NULL when only counting)
+ * @param out_kinds Output kind array (may be NULL)
+ * @param max_count Capacity of both arrays
+ * @return Number of entries copied (min(result count, max_count))
+ */
+LEPTRIS_API size_t leptris_xpath_result_get_nodes_ex(
+    LeptrisXPathResult result,
+    LeptrisNodeRef* out_nodes,
+    LeptrisXPathNodeKind* out_kinds,
+    size_t max_count);
+
 
 /**
  * Get the kind of a node in a mixed nodeset result
@@ -2281,6 +2348,26 @@ LEPTRIS_API void leptris_xpath_ns_set_free(LeptrisXPathNsSet set);
  */
 LEPTRIS_API LeptrisStatus leptris_xpath_ns_set_add(
     LeptrisXPathNsSet set, const char* prefix, const char* uri);
+/**
+ * Build a namespace-binding set from a flat array of pairs
+ *
+ * One FFI call instead of new + N x add (TODO.concurrency/07).
+ * The array layout matches the c14n inclusive-namespaces argument
+ * (flat [p1, u1, p2, u2, ...]) so bindings share one adapter.
+ * Invalid entries (NULL/empty prefix or URI) fail the whole call.
+ *
+ * @param flat Array of 2*pair_count strings (prefix, URI alternating)
+ * @param pair_count Number of pairs
+ * @return New set (caller frees with leptris_xpath_ns_set_free),
+ *         or NULL on NULL/invalid input
+ *
+ * Memory: Set and its copies of the strings are owned by the
+ * caller; free with leptris_xpath_ns_set_free.
+ */
+LEPTRIS_API LeptrisXPathNsSet leptris_xpath_ns_set_new_from_pairs(
+    const char* const* flat,
+    size_t pair_count);
+
 
 /**
  * Evaluate an XPath expression with external namespace bindings
@@ -2508,6 +2595,17 @@ LEPTRIS_API const char* leptris_xinclude_get_encoding(LeptrisElement include_ele
  * Memory: Static string. Do not free.
  */
 LEPTRIS_API const char* leptris_version(void);
+
+/**
+ * Get the library version as numeric components
+ *
+ * @param major Out: major version (may be NULL)
+ * @param minor Out: minor version (may be NULL)
+ * @param patch Out: patch version (may be NULL)
+ *
+ * Memory: Writes through the out-pointers only.
+ */
+LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch);
 
 #ifdef __cplusplus
 }

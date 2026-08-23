@@ -387,6 +387,38 @@ pool and releases everything in one call.
 For bindings: the C API has opaque handles.  All freeing is
 explicit.  See the `Memory:` comment on each public function.
 
+== Threading model
+
+libleptris is thread-safe under the *one-document-per-thread*
+contract (documented in `TODO.concurrency/08`):
+
+* **Safe**: any number of threads, each owning its own `LeptrisDocument`
+  — parse, evaluate, mutate, serialize, free independently.
+* **Safe**: read-only sharing of one document across threads
+  (parse once, evaluate concurrently from many threads).
+* **Forbidden**: mutating one document from two threads at once, or
+  touching a document after another thread freed it.
+
+Process-global state is either initialized at library load (SIMD
+dispatch, the XPath function registry) or mutex-guarded (the
+process-wide XPath AST/bytecode cache).  Borrowed cache entries are
+reference-pinned for the duration of an evaluate, so eviction never
+frees an AST underneath a running thread.
+
+Error reporting is channel-split:
+
+* `leptris_last_error()` — thread-local message of the most recent
+  failure on the *calling* thread (e.g. a failed
+  `leptris_parse_string`).
+* `leptris_document_last_error(doc)` — per-document message from the
+  last failed operation against that document (e.g. a failed
+  `leptris_xpath_eval`); immune to concurrent activity on other
+  documents.
+
+The full pack is exercised by `test/concurrency/test_concurrency.cpp`
+(parse/eval/serialize/free on four threads, thread-local error
+isolation, per-document error slots), which is ThreadSanitizer-clean.
+
 [#abi]
 == ABI stability
 

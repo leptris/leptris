@@ -114,7 +114,10 @@ static inline void leptris_parse_context_set_error(LeptrisParseContext *ctx,
  *   // Use document...
  *   leptris_document_free_tree(doc);
  */
-LEPTRIS_API struct leptris_document *leptris_parse(const char *xml,
+/* Internal: callers use the public leptris_parse_string family. No
+ * LEPTRIS_API - the export-surface gate keeps it out of the shared
+ * library (TODO.concurrency/02). */
+struct leptris_document *leptris_parse(const char *xml,
                                       size_t len,
                                       LeptrisParseOptions *opts);
 

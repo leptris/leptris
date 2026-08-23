@@ -70,7 +70,14 @@ extern const char* xpath_token_type_names[];
 /* AST cache (TODO 113 perf). Lookup/insert parsed expression ASTs
  * so repeated evaluations skip the parse phase. */
 XPathASTNode* xpath_ast_cache_lookup(const char* expr, size_t expr_len);
-void xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast);
+
+/* Insert returns the CANONICAL AST for the expression — use the
+ * returned pointer, not the one passed in (a racing insert may have
+ * won the slot and freed the caller's twin). The entry comes back
+ * pinned for the caller; release it with
+ * xpath_ast_cache_release(ast) after the evaluate finishes. */
+XPathASTNode* xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast);
+void xpath_ast_cache_release(XPathASTNode* ast);
 
 /* Combined lookup (TODO 159 Phase E drive-by): single hash + scan
  * that returns both the AST and the bytecode in one pass. Replaces
@@ -92,8 +99,10 @@ int xpath_ast_cache_get(const char* expr, size_t expr_len,
  * AST. Returns NULL if the bytecode has not yet been compiled or if
  * the expression is not in the cache.
  *
- * Lifetime: the returned bytecode is owned by the cache and lives
- * until the cache slot is overwritten. Callers must not free it. */
+ * Lifetime: the returned bytecode is owned by the cache. Entries
+ * borrowed via xpath_ast_cache_get / _insert are pinned until
+ * xpath_ast_cache_release — eviction cannot free them mid-evaluate.
+ * Callers must not free them. */
 struct LeptrisXPathBytecode;  /* forward; full definition in bytecode.h */
 struct LeptrisXPathBytecode* xpath_ast_cache_get_bc(const char* expr,
                                                     size_t expr_len);

@@ -423,6 +423,7 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
 
     nodeset->count = 0;
     nodeset->owns_attributes = 0;
+    nodeset->owns_synthetic_text = 0;
     nodeset->owns_namespaces = 0;
 
     /* TODO 113 Phase 2: small-buffer optimization. For capacity ≤ the
@@ -477,6 +478,19 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
                 if (ns->prefix) LEPTRIS_FREE(ns->prefix);
                 if (ns->uri) LEPTRIS_FREE(ns->uri);
                 LEPTRIS_FREE(ns);
+            }
+        }
+    }
+
+    /* Free synthetic text nodes (EXSLT str:tokenize/split results —
+     * TODO.concurrency/06). */
+    if (nodeset->owns_synthetic_text && nodeset->nodes) {
+        for (size_t i = 0; i < nodeset->count; i++) {
+            void* node = nodeset->nodes[i];
+            if (node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT) {
+                XPathTextNode* t = (XPathTextNode*)node;
+                if (t->content) LEPTRIS_FREE(t->content);
+                LEPTRIS_FREE(t);
             }
         }
     }

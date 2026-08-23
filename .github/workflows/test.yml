@@ -113,6 +113,20 @@ jobs:
             -DLEPTRIS_ENABLE_ICONV=OFF
           cmake --build build-shared --config Release
 
+      - name: Export-surface gate (TODO.concurrency/02)
+        if: runner.os != 'Windows'
+        run: |
+          # Non-Windows exports were "everything" until the visibility
+          # preset landed; this gate proves the shared library exports
+          # EXACTLY the public headers' declarations.
+          cmake -B build-shared -S . -DBUILD_TESTING=OFF \
+            -DLEPTRIS_BUILD_CLI=OFF -DLEPTRIS_BUILD_STATIC=OFF \
+            -DLEPTRIS_BUILD_SHARED=ON \
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF -DLEPTRIS_ENABLE_ICONV=OFF
+          cmake --build build-shared -j
+          python3 scripts/check_export_surface.py \
+            build-shared/src/libleptris.dylib .
+
       - name: Check for memory leaks (Linux only)
         if: runner.os == 'Linux'
         run: |
