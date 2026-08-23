@@ -2,18 +2,56 @@
 
 ## [1.3.0] - 2026-08-23
 
-### Added
+### Concurrency & FFI (TODO.concurrency, issues #508–#510)
 
-- parse-error line/column + TODO.bindings board (issue #510) (errors)
-- leptris_element_children — bulk child-element fill (dom)
-- thread-safe errors, export gate, mixed batch copy, EXSLT pack (concurrency)
+- **Thread-safe error reporting**: `leptris_last_error()` is now
+  thread-local; parse failures record a message with byte offset;
+  failing XPath evaluations snapshot the reason into a per-document
+  slot — new `leptris_document_last_error(doc)` (also fixes the
+  v1.2.0 header/binary drift of that symbol, #508)
+- **Parse-error positions**: `leptris_last_error_position(&line,
+  &column)` — 1-based, for XMLSyntaxError/Nokogiri parity (#510)
+- **Export-surface gate**: CI + ctest diff the shared library's
+  exported symbols against every `LEPTRIS_API` declaration
+  (196 == 196); header/binary drift now fails the build. The
+  internal `leptris_parse` family is no longer exported
+- **Batch FFI accessors**: `leptris_xpath_result_get_nodes_ex`
+  copies every mixed-nodeset entry with its kind;
+  `leptris_element_children` bulk-fills child elements
+  (`leptris_element_child_count` for sizing) — closes the per-item
+  dispatch gap to lxml/libxml2 in bindings (#509)
+- **Threading contract documented** (README "Threading model"):
+  one-document-per-thread needs no locking, read-only sharing is
+  safe; the XPath AST/bytecode cache is mutex-guarded and
+  pin-counted (fixes a real use-after-free under concurrent first
+  evaluation); new `leptris_thread_cleanup()` drains per-thread
+  caches for ephemeral worker threads. Full suite is
+  ThreadSanitizer-clean
+- **EXSLT extension pack**: `leptris_exslt_enable(doc)` activates 15
+  native handlers — str:replace/tokenize/split/concat/padding,
+  set:distinct/intersection/difference/leading/trailing,
+  math:max/min/abs/sqrt/power. str:tokenize = character-set
+  delimiters; str:split = whole-pattern substring
+- **Namespace set from pairs**:
+  `leptris_xpath_ns_set_new_from_pairs(flat, n)` — one FFI call for
+  the whole prefix/URI array (layout matches the c14n
+  inclusive-namespaces argument)
 
 ### Fixed
 
-- declare leptris_element_children in the umbrella header
-- drop bindings/python/pyproject.toml from the bump commit (release)
-- CI round 2 — leak drains, mutex-lazy registry, Rust Windows link (concurrency)
-- publish gate keys on inputs.publish, not event_name (python)
+- `leptris_version()` reported a stale hand-written fallback — the
+  CMake version defines now reach `core.c` in all build modes
+- Windows DLL renamed to `libleptris.dll` (matching every other
+  platform); Rust binding links the right import library
+- Release workflow bump commit referenced the removed
+  `bindings/python/pyproject.toml` path and died before opening the
+  release PR
+
+### Board
+
+- `TODO.bindings/` — the Tier-2/3 binding asks from #510 tracked
+  for execution (mutation/construction, iterparse, compiled XPath,
+  pull API, per-parse options, encoding guarantees)
 
 
 
