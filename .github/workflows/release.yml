@@ -249,7 +249,7 @@ jobs:
     # Reusable workflow in the split-out binding repo
     # (leptris/leptris-py, package "leptris"); the pin lives there
     # in libleptris-version.txt.
-    uses: leptris/leptris-py/.github/workflows/publish.yml@main
+    uses: leptris/leptris-py/.github/workflows/release.yml@main
     with:
       publish: true
     permissions:
