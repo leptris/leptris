@@ -4,13 +4,31 @@
 
 ### Added
 
-- namespace bindings — XPointer xmlns() + URI-aware tests (xpath,xinclude)
-- fully automated release PR (release)
+- External namespace bindings for XPath: `LeptrisXPathNsSet` +
+  `leptris_xpath_eval_ns` resolve prefixed name tests by NAMESPACE
+  when the expression prefix is bound, matching elements that carry
+  the namespace via any prefix or the default namespace. XPointer
+  `xmlns(prefix=uri)` components now bind subsequent `xpointer()`
+  bodies instead of being skipped.
+- Fully automated release PRs: changelog drafted from conventional
+  commits, notes embedded in the PR body, PR created by the workflow.
 
 ### Fixed
 
-- fast-path element registration, CDATA end markers, qualified-name round-trip (dom,serialize)
-- build/publish gates survive the workflow_call event (python)
+- `prefix:*` name tests were namespace-blind everywhere (compiler
+  fusion and matcher both ignored the prefix) — `//t:*` matched every
+  element in the document; now namespace-scoped.
+- The mutation-block fast path in `leptris_element_create` skipped
+  root→doc registration, so `leptris_document_set_root` rejected
+  programmatic roots and detached elements could not resolve their
+  document. (Found via moxml's adapter contract, lutaml/moxml#96.)
+- Serializer round-trip: CDATA sections containing `]]>` split across
+  two sections (libxml2 technique); element/attribute names emit
+  `prefix:name` so namespace bindings survive reparse.
+- `leptris_document_free` freed mutation blocks before the root-map
+  unregister — use-after-free for documents with programmatic roots.
+- pyleptris build/publish gates survive the workflow_call event (the
+  release flow's tag job runs on pull_request closed).
 
 
 
