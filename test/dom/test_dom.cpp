@@ -279,6 +279,34 @@ TEST(DomBasics, TraversesChildrenInDocumentOrder) {
     leptris_document_free(doc);
 }
 
+TEST(DomBasics, ElementChildrenBulkFill) {
+    // Bulk child fill matches the first_child_any/next_sibling_any
+    // chain: document order, text/comment nodes skipped, prefix when
+    // capacity is short, safe on NULL/zero-capacity.
+    const char xml[] = "<r>t1<a/>x<b/><!--c--><d/>t2</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    ASSERT_EQ(leptris_element_child_count(root), 3u);
+
+    LeptrisElement children[3];
+    EXPECT_EQ(leptris_element_children(root, children, 3), 3u);
+    EXPECT_STREQ(leptris_element_name(children[0]), "a");
+    EXPECT_STREQ(leptris_element_name(children[1]), "b");
+    EXPECT_STREQ(leptris_element_name(children[2]), "d");
+
+    LeptrisElement first_two[2];
+    EXPECT_EQ(leptris_element_children(root, first_two, 2), 2u);
+    EXPECT_STREQ(leptris_element_name(first_two[1]), "b");
+
+    EXPECT_EQ(leptris_element_children(root, nullptr, 3), 0u);
+    EXPECT_EQ(leptris_element_children(root, first_two, 0), 0u);
+
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, NodeRefTraversalCoversAllNodeTypes) {
     // LeptrisNodeRef traversal exposes every child regardless of type;
     // LeptrisElement-only traversal skips text/comment/cdata siblings.
@@ -1197,5 +1225,44 @@ TEST(NodeTraverse, NullArgsReturnNegativeOne) {
     EXPECT_EQ(leptris_node_traverse(leptris_element_as_node(root),
                                    LEPTRIS_TRAVERSE_PRE_ORDER,
                                    nullptr, nullptr), -1);
+    leptris_document_free(doc);
+}
+
+TEST(NodeLine, ReportsOneBasedLineOfParsedNodes) {
+    const char xml[] = "<r>\n  <a/>\n  <t>x</t>\n  <!--c-->\n</r>\n";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(root)), 1);
+
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(a)), 2);
+
+    LeptrisElement t = leptris_element_next_sibling_any(a);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(t)), 3);
+    /* Text inside <t> starts on t's line. */
+    LeptrisNodeRef text = leptris_node_first_child(leptris_element_as_node(t));
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(leptris_node_get_type(text), LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_EQ(leptris_node_line(text), 3);
+
+    /* Comment on its own line. */
+    LeptrisNodeRef c = leptris_node_next_sibling(leptris_element_as_node(t));
+    while (c && leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_COMMENT) {
+        c = leptris_node_next_sibling(c);
+    }
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_node_line(c), 4);
+
+    /* Created (unattached) nodes have no source position; NULL neither. */
+    LeptrisElement made = leptris_element_create(doc, "made");
+    ASSERT_NE(made, nullptr);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(made)), 0);
+    EXPECT_EQ(leptris_node_line(nullptr), 0);
+
     leptris_document_free(doc);
 }
