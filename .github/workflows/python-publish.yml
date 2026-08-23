@@ -70,7 +70,11 @@ jobs:
           python -m pytest tests/ -q
 
   build:
-    if: github.event_name != 'pull_request'
+    # Run on any non-PR event, and when called from the release
+    # workflow with publish=true (the caller runs on pull_request
+    # closed, and github.event_name propagates through workflow_call
+    # — a plain != pull_request gate skipped the wheel build there).
+    if: github.event_name != 'pull_request' || inputs.publish == true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -109,7 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'workflow_call' && inputs.publish)
+      (github.event_name == 'workflow_call' && inputs.publish) ||
+      github.event_name == 'workflow_dispatch'
     environment:
       name: pypi
     permissions:
