@@ -44,5 +44,6 @@ use these names.
   compiler-global optimum (11 failed experiments + the SIMD floor
   probe). Do not propose loop-shape changes to it.
 - **the 40-byte attribute law** — attribute struct size and layout
-  are measured optima; the split-stream alternative is closed (see
-  TODO.remaining/08).
+  are measured optima; the split-stream alternative is closed (the
+  TODO.remaining/08 closure note lives in git history, v1.1.2-era
+  main; the verdict is summarized in TODO.md).
