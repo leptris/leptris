@@ -20,12 +20,12 @@ is genuinely still open, with pointers.
 - **Rust: serde interop** — deferred until a consumer asks for it
   (TODO.remaining/05 closure note, git history).
 - **Rust: crates.io publishing** — the crate builds and tests in CI
-  but has no publish workflow yet; mirror the pyleptris
+  but has no publish workflow yet; mirror the leptris (py)
   workflow_call pattern when wanted.
-- **pyleptris** — split into its own repo (leptris/pyleptris) with
+- **leptris (py)** — split into its own repo (leptris/leptris-py) with
   its own pin (libleptris-version.txt) and CI; the release flow calls
   its publish workflow. Pending: one-time trusted-publisher setup on
-  pypi.org against leptris/pyleptris (workflow publish.yml,
+  pypi.org against leptris/leptris-py (workflow publish.yml,
   environment pypi), then a workflow_dispatch there ships the wheel.
 
 ## Adjacent repos

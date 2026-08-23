@@ -58,10 +58,10 @@ memory handling matter.
   and event-driven SAX (one-shot + incremental streaming) via the
   `ffi` gem. No C extension compilation needed. See
   link:bindings/ruby/[Ruby binding].
-* **Python binding** — `pyleptris` via `cffi` (ABI mode, single
+* **Python binding** — `leptris` via `cffi` (ABI mode, single
   `cdef` mirroring the public headers): `Document.parse`, element
   navigation, typed XPath results, serialize. Shipped from its own
-  repository, https://github.com/leptris/pyleptris[leptris/pyleptris].
+  repository, https://github.com/leptris/leptris-py[leptris/leptris-py].
 * **Zero required runtime dependencies** — utf8proc and iconv are
   optional features, not prerequisites.
 * **Stable C ABI** with a documented FFI contract; bindings shipped
@@ -410,8 +410,8 @@ ctest --test-dir build -R HeaderHygiene
 libleptris exposes a stable C ABI.  Bindings:
 
 * *Ruby* — shipped. Uses `ffi` gem. See link:bindings/ruby/[Ruby binding].
-* *Python* — shipped as `pyleptris` via `cffi` (ABI mode), from
-  https://github.com/leptris/pyleptris[leptris/pyleptris].
+* *Python* — shipped as `leptris` via `cffi` (ABI mode), from
+  https://github.com/leptris/leptris-py[leptris/leptris-py].
 * *Rust* — shipped: crate `leptris` with safe wrappers, XPath, and
   SAX closures. See link:bindings/rust/[Rust binding].
 
