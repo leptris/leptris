@@ -58,6 +58,20 @@ LEPTRIS_API const char* leptris_error_message(LeptrisStatus status);
 LEPTRIS_API const char* leptris_last_error(void);
 
 /**
+ * Get the position of this thread's last recorded parse error
+ *
+ * Populated by DOM parse failures (leptris_parse_string returning
+ * NULL) alongside leptris_last_error — line/column parity with
+ * lxml's XMLSyntaxError and Nokogiri (issue #510).
+ *
+ * @param line Out: 1-based line (may be NULL)
+ * @param column Out: 1-based byte column (may be NULL)
+ *
+ * Memory: Writes through the out-pointers only.
+ */
+LEPTRIS_API void leptris_last_error_position(int* line, int* column);
+
+/**
  * Get the error message from this document's last failed operation
  *
  * Populated when an operation against a LIVE document fails —
