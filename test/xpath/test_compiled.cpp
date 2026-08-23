@@ -81,6 +81,8 @@ TEST(CompiledXPath, ConcurrentEvalOneHandle) {
                 if (r) leptris_xpath_result_free(r);
                 leptris_document_free(doc);
             }
+            /* Worker-exit cache drain (TODO.concurrency/08). */
+            leptris_thread_cleanup();
         });
     }
     for (auto& th : threads) th.join();
