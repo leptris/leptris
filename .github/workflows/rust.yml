@@ -69,4 +69,10 @@ jobs:
           LEPTRIS_LIB_PATH: ${{ env.LEPTRIS_LIB_PATH }}
         run: |
           echo "using lib at: $LEPTRIS_LIB_PATH"
+          # Windows: the loader searches the executable's directory
+          # first — put the DLL next to the test binaries.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp "$LEPTRIS_LIB_PATH"/leptris.dll target/debug/ 2>/dev/null || true
+            cp "$LEPTRIS_LIB_PATH"/leptris.dll target/debug/deps/ 2>/dev/null || true
+          fi
           cargo test --verbose
