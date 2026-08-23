@@ -6,3 +6,9 @@ next_event instead of callbacks. C→host callbacks cost ~µs each through FFI a
 
 Status: open. Design first (see the board README); one PR per item,
 full phases, like TODO.concurrency.
+DONE 2026-08-23: leptris_pull_new/_next/_free + attr accessors over
+the streaming SAX machine. Events queue from 256-byte input slices
+fed on demand; strings owned until the next _next. ERROR event
+carries the message; END_DOCUMENT terminates success walks. Specs:
+test/sax/test_pull.cpp (order, attrs, comment/CDATA/PI, malformed,
+invalid input).

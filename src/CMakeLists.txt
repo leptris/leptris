@@ -74,10 +74,13 @@ set(LEPTRIS_SOURCES
     leptris/xpath/functions_exslt.c
     leptris/xpath/xpath_variables.c
     leptris/xpath/xpath_public.c
+    leptris/xpath/xpath_compiled.c
     leptris/xpath/xpath_ast_cache.c
 
     # SAX
     leptris/sax/parser.c
+    leptris/sax/pull.c
+    leptris/sax/iterparse.c
     leptris/sax/streaming.c
 
     # DTD

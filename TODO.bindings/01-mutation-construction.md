@@ -6,3 +6,13 @@ leptris_document_new (alias of leptris_document_create), create element/text/com
 
 Status: open. Design first (see the board README); one PR per item,
 full phases, like TODO.concurrency.
+DONE 2026-08-23: audit showed the full surface already shipped across
+earlier TODOs — create: leptris_document_create, element_create,
+text/comment/cdata/pi_node_create; wire: element_append_child,
+insert_before/after, remove_child/children, document_adopt_child,
+node_unlink; set: element_set_text, set_attribute (+int/uint/double/
+float/bool variants), remove_attribute(+all); clone: element_copy,
+document_copy, element_append/prepend_copy. The issue text predates
+this. What was missing was proof: DomBuilder round-trip spec (build
+from scratch -> serialize -> reparse -> verify, incl. all node types
++ batch children check) + deep-copy spec now in test_dom.cpp.

@@ -481,25 +481,33 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
  */
 LEPTRIS_API LeptrisDocument leptris_parse_string(const char* xml, size_t length, LeptrisStatus* status);
 
-/* Parse flags for leptris_parse_string_flags().
- *
- * LEPTRIS_PARSE_DROP_WS_TEXT discards whitespace-ONLY text nodes
- * (runs between tags that contain nothing but spaces/tabs/newlines).
- * This matches pugixml's default behavior (their parse_ws_pcdata is
- * opt-in) and libxml2's XML_PARSE_NOBLANKS. By default leptris KEEPS
- * these nodes — the faithful-DOM behavior of libxml2/Nokogiri and
- * the only way to round-trip pretty-printed XML byte-for-byte.
- * Pretty-printed documents carry one ws-only node per element;
- * dropping them removes ~6ns of create+wire per element and wins
- * the whitespace-heavy parse shapes outright. */
-typedef enum {
-    LEPTRIS_PARSE_DEFAULT     = 0,
-    LEPTRIS_PARSE_DROP_WS_TEXT = 1u
-} LeptrisParseFlags;
 
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
                                                     size_t length,
                                                     LeptrisParseFlags flags,
+                                                    LeptrisStatus* status);
+
+/**
+ * Parse with per-call options (TODO.bindings/05)
+ *
+ * Scoped alternative to the thread-global leptris_set_strict_mode /
+ * leptris_set_max_depth: the options apply to THIS parse only; the
+ * thread defaults are restored on return. Invalid input fails with
+ * LEPTRIS_ERROR_PARSE (message + position via leptris_last_error /
+ * leptris_last_error_position).
+ *
+ * Not reentrant: do not parse from inside allocators invoked by
+ * this call (options are applied via thread-local state).
+ *
+ * @param xml Input
+ * @param length Input length in bytes
+ * @param options Options (NULL = defaults, same as parse_string)
+ * @param status Optional status out-param
+ * @return Document, or NULL on failure
+ */
+LEPTRIS_API LeptrisDocument leptris_parse_string_ex(const char* xml,
+                                                    size_t length,
+                                                    const LeptrisParseOptions* options,
                                                     LeptrisStatus* status);
 
 /**
@@ -1967,6 +1975,48 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
     LeptrisElement context,
     const char* expression
 );
+
+/**
+ * Compile an XPath expression once, evaluate many times
+ *
+ * Skips the per-call expression hash + cache probe that
+ * leptris_xpath_eval pays — the hot-loop win for bindings
+ * (TODO.bindings/03, issue #510 Tier 2).
+ *
+ * Thread contract: the compiled handle is immutable — any number of
+ * threads may evaluate it concurrently (against their own
+ * documents). Free only after the last evaluation returns.
+ *
+ * @param expression XPath 1.0 expression
+ * @return Compiled handle, or NULL on syntax error (message via
+ *         leptris_last_error)
+ *
+ * Memory: free with leptris_xpath_compiled_free.
+ */
+LEPTRIS_API LeptrisXPathCompiled leptris_xpath_compile(const char* expression);
+
+/**
+ * Evaluate a compiled expression against a document
+ *
+ * Same evaluation semantics as leptris_xpath_eval (VM path with the
+ * direct-AST fallback); failures snapshot into the document's error
+ * slot (leptris_document_last_error).
+ *
+ * @param compiled Handle from leptris_xpath_compile
+ * @param doc Document to evaluate against
+ * @param context Context element, or NULL for the document root
+ * @return Result (free with leptris_xpath_result_free), or NULL
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
+    LeptrisXPathCompiled compiled, LeptrisDocument doc,
+    LeptrisElement context);
+
+/**
+ * Free a compiled expression handle
+ *
+ * Must not race with in-flight evaluations of the same handle.
+ */
+LEPTRIS_API void leptris_xpath_compiled_free(LeptrisXPathCompiled compiled);
 
 /**
  * Custom XPath function handler (string-valued).

@@ -212,3 +212,43 @@ TEST(ParseErrorPosition, EofFailureIsOnLastLine) {
     EXPECT_EQ(line, 3);
     EXPECT_EQ(column, 4);
 }
+
+TEST(ParseOptions, AppliesDepthCapAndRestoresGlobal) {
+    const char xml[] = "<a><b><c><d/></c></b></a>";
+    int saved_depth = leptris_get_max_depth();
+
+    LeptrisParseOptions o = {LEPTRIS_PARSE_DEFAULT, -1, 0};
+    o.max_depth = 2;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string_ex(xml, std::strlen(xml), &o, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_NE(st, LEPTRIS_OK);
+    /* The thread default is restored after the call. */
+    EXPECT_EQ(leptris_get_max_depth(), saved_depth);
+}
+
+TEST(ParseOptions, DefaultsMatchPlainParse) {
+    const char xml[] = "<a><b><c><d/></c></b></a>";
+    LeptrisParseOptions o = {LEPTRIS_PARSE_DEFAULT, -1, 0};
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string_ex(xml, std::strlen(xml), &o, &st);
+    EXPECT_NE(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    leptris_document_free(doc);
+
+    /* NULL options = same as leptris_parse_string. */
+    doc = leptris_parse_string_ex(xml, std::strlen(xml), nullptr, &st);
+    EXPECT_NE(doc, nullptr);
+    leptris_document_free(doc);
+}
+
+TEST(ParseOptions, FlagsPassthrough) {
+    const char xml[] = "<r>  <a/>  </r>";
+    LeptrisParseOptions o = {LEPTRIS_PARSE_DEFAULT, -1, 0};
+    o.flags = LEPTRIS_PARSE_DROP_WS_TEXT;
+    LeptrisDocument doc = leptris_parse_string_ex(xml, std::strlen(xml), &o, nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    EXPECT_EQ(leptris_element_child_count(root), 1u);
+    leptris_document_free(doc);
+}

@@ -1151,10 +1151,19 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
         buffer_append(buf, xml_version);
         buffer_append_char(buf, '"');
 
+        /* TODO.bindings/06: serialization output is ALWAYS UTF-8 —
+         * the body is never transcoded (iconv is input-side only).
+         * A declaration naming any other encoding would be false:
+         * normalize it. Round-trip guarantee: serialize(serialize(x))
+         * is byte-stable, and the declaration never lies. */
         const char* enc = encoding ? encoding : doc->encoding;
         if (enc) {
             buffer_append(buf, " encoding=\"");
-            buffer_append(buf, enc);
+            if (enc[0] == 'U' || enc[0] == 'u') {
+                buffer_append(buf, enc);
+            } else {
+                buffer_append(buf, "UTF-8");
+            }
             buffer_append_char(buf, '"');
         }
 

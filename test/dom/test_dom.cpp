@@ -1266,3 +1266,82 @@ TEST(NodeLine, ReportsOneBasedLineOfParsedNodes) {
 
     leptris_document_free(doc);
 }
+
+/* TODO.bindings/01 — the mutation/construction surface, proven end
+ * to end: build from scratch, serialize, reparse, verify. */
+TEST(DomBuilder, RoundTripsThroughSerialization) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_element_create(doc, "order");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
+    EXPECT_EQ(leptris_element_set_attribute(root, "id", "42"), LEPTRIS_OK);
+    EXPECT_EQ(leptris_element_set_attribute_int(root, "n", 7), LEPTRIS_OK);
+
+    LeptrisElement item = leptris_element_create(doc, "item");
+    ASSERT_EQ(leptris_element_append_child(root, item), LEPTRIS_OK);
+    LeptrisNodeRef title = leptris_text_node_create(doc, "Book");
+    ASSERT_NE(title, nullptr);
+    ASSERT_EQ(leptris_element_append_child(item, (LeptrisElement)title), LEPTRIS_OK);
+
+    LeptrisNodeRef comment = leptris_comment_node_create(doc, " note ");
+    ASSERT_NE(comment, nullptr);
+    ASSERT_EQ(leptris_element_append_child(item, (LeptrisElement)comment), LEPTRIS_OK);
+
+    LeptrisNodeRef cdata = leptris_cdata_node_create(doc, "raw <>&");
+    ASSERT_NE(cdata, nullptr);
+    ASSERT_EQ(leptris_element_append_child(item, (LeptrisElement)cdata), LEPTRIS_OK);
+
+    LeptrisNodeRef pi = leptris_pi_node_create(doc, "render", "fast");
+    ASSERT_NE(pi, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, (LeptrisElement)pi), LEPTRIS_OK);
+
+    LeptrisElement extra = leptris_element_create(doc, "extra");
+    ASSERT_EQ(leptris_element_append_child(root, extra), LEPTRIS_OK);
+    EXPECT_EQ(leptris_element_set_text(extra, "body"), LEPTRIS_OK);
+
+    char* xml = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_NE(std::strstr(xml, "<order id=\"42\" n=\"7\">"), nullptr);
+    EXPECT_NE(std::strstr(xml, "<item>Book"), nullptr);
+    EXPECT_NE(std::strstr(xml, "<![CDATA[raw <>&]]>"), nullptr);
+    EXPECT_NE(std::strstr(xml, "<?render fast?>"), nullptr);
+    EXPECT_NE(std::strstr(xml, "<extra>body</extra>"), nullptr);
+
+    LeptrisDocument back = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(back, nullptr);
+    LeptrisElement rroot = leptris_document_root(back);
+    ASSERT_NE(rroot, nullptr);
+    EXPECT_STREQ(leptris_element_name(rroot), "order");
+    EXPECT_STREQ(leptris_element_attribute_string(rroot, "id", nullptr), "42");
+    /* Batch children accessor agrees with the built shape. */
+    LeptrisElement kids[4];
+    EXPECT_EQ(leptris_element_children(rroot, kids, 4), 2u);
+    EXPECT_STREQ(leptris_element_name(kids[0]), "item");
+    EXPECT_STREQ(leptris_element_name(kids[1]), "extra");
+    leptris_document_free(back);
+
+    leptris_free_string(xml);
+    leptris_document_free(doc);
+}
+
+TEST(DomBuilder, DeepCopyOfBuiltTree) {
+    LeptrisDocument doc = leptris_document_create();
+    LeptrisElement root = leptris_element_create(doc, "r");
+    leptris_document_set_root(doc, root);
+    LeptrisElement child = leptris_element_create(doc, "c");
+    leptris_element_set_attribute(child, "k", "v");
+    leptris_element_append_child(root, child);
+    leptris_element_set_text(child, "t");
+
+    LeptrisDocument copy = leptris_document_copy(doc);
+    ASSERT_NE(copy, nullptr);
+    LeptrisElement croot = leptris_document_root(copy);
+    ASSERT_NE(croot, nullptr);
+    EXPECT_STREQ(leptris_element_name(croot), "r");
+    LeptrisElement cchild = leptris_element_first_child_any(croot);
+    ASSERT_NE(cchild, nullptr);
+    EXPECT_STREQ(leptris_element_attribute_string(cchild, "k", nullptr), "v");
+    leptris_document_free(copy);
+    leptris_document_free(doc);
+}
