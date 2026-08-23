@@ -11,7 +11,6 @@
 #include "element.h"
 #include "../common/port.h"
 #include <stdlib.h>
-#include <stdio.h>
 
 #define ROOT_DOC_BUCKETS 256
 
@@ -55,11 +54,6 @@ static size_t bucket_index(LeptrisElement root) {
 void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc) {
     if (!root || !doc) return;
     size_t idx = bucket_index(root);
-    if (getenv("LEPTRIS_DIAG47")) {
-        fprintf(stderr, "[reg] root=%p doc=%p idx=%zu marked=%d flags=0x%02x\n",
-                (void*)root, (void*)doc, idx, rootmap_marked(root),
-                (unsigned)root->header.flags);
-    }
     if (rootmap_marked(root)) {
         /* Possibly already present: walk to update. */
         for (RootDocEntry* e = g_root_doc_buckets[idx]; e; e = e->next) {
@@ -115,12 +109,6 @@ void leptris_root_doc_unregister(LeptrisElement root) {
 struct leptris_document* leptris_root_doc_lookup(LeptrisElement root) {
     if (!root) return NULL;
     size_t idx = bucket_index(root);
-    if (getenv("LEPTRIS_DIAG47")) {
-        int n = 0;
-        for (RootDocEntry* e = g_root_doc_buckets[idx]; e; e = e->next) n++;
-        fprintf(stderr, "[lookup] root=%p idx=%zu chain=%d\n",
-                (void*)root, idx, n);
-    }
     for (RootDocEntry* e = g_root_doc_buckets[idx]; e; e = e->next) {
         if (e->root == root) return e->doc;
     }

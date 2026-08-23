@@ -52,10 +52,6 @@ function(leptris_add_test name)
     if(name STREQUAL "test_perf")
         gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST
                              PROPERTIES RUN_SERIAL TRUE)
-    elseif(name STREQUAL "test_dom")
-        # TEMP DIAGNOSTIC (remove before merge): CI-only set_root failure.
-        gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST
-                             PROPERTIES ENVIRONMENT "LEPTRIS_DIAG47=1")
     else()
         gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
     endif()
