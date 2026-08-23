@@ -51,7 +51,10 @@ jobs:
             echo "ERROR: libleptris shared library not found"
             exit 1
           fi
-          echo "LEPTRIS_LIB_PATH=$(cd "$(dirname "$LIB")" && pwd)" >> "$GITHUB_ENV"
+          LIBDIR=$(cd "$(dirname "$LIB")" && pwd)
+          echo "LEPTRIS_LIB_PATH=$LIBDIR" >> "$GITHUB_ENV"
+          # Windows loads DLLs from PATH (there is no rpath).
+          echo "$LIBDIR" >> "$GITHUB_PATH"
           echo "Built: $LIB"
 
       - name: cargo fmt
