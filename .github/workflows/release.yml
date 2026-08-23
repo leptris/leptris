@@ -85,7 +85,7 @@ jobs:
       - name: Commit version bump
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
-          git add CMakeLists.txt vcpkg.json CHANGELOG.md
+          git add CMakeLists.txt vcpkg.json CHANGELOG.md bindings/python/pyproject.toml
           git commit -m "release: v${VERSION}"
 
       - name: Push release branch
