@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-23
+
+### Added
+
+- parse-error line/column + TODO.bindings board (issue #510) (errors)
+- leptris_element_children — bulk child-element fill (dom)
+- thread-safe errors, export gate, mixed batch copy, EXSLT pack (concurrency)
+
+### Fixed
+
+- declare leptris_element_children in the umbrella header
+- drop bindings/python/pyproject.toml from the bump commit (release)
+- CI round 2 — leak drains, mutex-lazy registry, Rust Windows link (concurrency)
+- publish gate keys on inputs.publish, not event_name (python)
+
+
+
 ## [1.2.0] - 2026-08-23
 
 ### Added
