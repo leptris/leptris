@@ -1361,6 +1361,13 @@ fail:
         long off = (long)(p.pos ? p.pos - p.buf : 0);
         snprintf(msg, sizeof(msg), "XML parse error at byte %ld: malformed input", off);
         leptris_set_error(LEPTRIS_ERROR_PARSE_FAILED, msg);
+        /* 1-based line/column of the failure (issue #510). */
+        int line = 1, column = 1;
+        for (const char* q = p.buf; q < p.pos; q++) {
+            if (*q == '\n') { line++; column = 1; }
+            else column++;
+        }
+        leptris_set_error_position(line, column);
     }
     {
         /* Cached env lookup — getenv is a linear environ scan, too

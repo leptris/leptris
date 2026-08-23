@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "leptris.h"
+#include "leptris/error.h"
 
 #include <cstring>
 #include <string>
@@ -183,3 +184,31 @@ TEST(ParserConfigurableDepth, GetReturnsEffectiveValue) {
 }
 
 }  // namespace
+
+TEST(ParseErrorPosition, ReportsLineAndColumn) {
+    const char xml[] = "<a>\n  <b>\n</c>\n</a>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    EXPECT_EQ(doc, nullptr);
+
+    int line = -1, column = -1;
+    leptris_last_error_position(&line, &column);
+    EXPECT_EQ(line, 3);
+    EXPECT_EQ(column, 5);
+    EXPECT_NE(leptris_last_error(), nullptr);
+
+    /* NULL out-pointers are tolerated. */
+    leptris_last_error_position(nullptr, nullptr);
+}
+
+TEST(ParseErrorPosition, EofFailureIsOnLastLine) {
+    const char xml[] = "<r>\n<a/>\n</r";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    EXPECT_EQ(doc, nullptr);
+
+    int line = -1, column = -1;
+    leptris_last_error_position(&line, &column);
+    EXPECT_EQ(line, 3);
+    EXPECT_EQ(column, 4);
+}

@@ -322,6 +322,10 @@ void leptris_doc_order_index_free(void* table);
  * failure (TODO.concurrency/01). */
 void leptris_doc_snapshot_error(struct leptris_document* doc);
 
+/* Thread-local position of the most recent parse error (issue #510).
+ * Set by the parse fail path next to leptris_set_error. */
+void leptris_set_error_position(int line, int column);
+
 /* TODO.concurrency/08: per-thread cache drains, called by the public
  * leptris_thread_cleanup from each worker thread before it exits. */
 void leptris_xpath_drain_thread_caches(void);

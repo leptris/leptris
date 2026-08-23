@@ -33,6 +33,21 @@ void leptris_doc_snapshot_error(struct leptris_document* doc) {
 /**
  * Set error with message
  */
+/* TODO.concurrency/01 + issue #510: 1-based line/column of the most
+ * recent parse error on this thread. 0/0 = unknown. */
+static LEPTRIS_THREAD_LOCAL int last_error_line = 0;
+static LEPTRIS_THREAD_LOCAL int last_error_column = 0;
+
+LEPTRIS_API void leptris_last_error_position(int* line, int* column) {
+    if (line) *line = last_error_line;
+    if (column) *column = last_error_column;
+}
+
+void leptris_set_error_position(int line, int column) {
+    last_error_line = line;
+    last_error_column = column;
+}
+
 void leptris_set_error(leptris_error_code code, const char* message) {
     last_error = code;
     if (message) {
