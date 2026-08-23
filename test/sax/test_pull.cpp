@@ -141,22 +141,21 @@ TEST(Iterparse, InvalidInputRejected) {
 }
 
 /* TODO.engine/01 — file-backed sources. */
-#include <cstdio>
-
+/* Temp files land in the working directory: /tmp does not exist on
+ * Windows runners. Distinct fixed names per test (gtest runs one
+ * binary at a time). */
 namespace {
-char* write_temp(const char* content) {
-    char* path = (char*)malloc(64);
-    snprintf(path, 64, "/tmp/leptris_pull_test_%d.xml", getpid());
-    FILE* f = fopen(path, "wb");
-    if (!f) { free(path); return nullptr; }
+char* write_temp(const char* name, const char* content) {
+    FILE* f = fopen(name, "wb");
+    if (!f) return nullptr;
     fwrite(content, 1, strlen(content), f);
     fclose(f);
-    return path;
+    return strdup(name);
 }
 }  // namespace
 
 TEST(Pull, FileSourceMatchesMemorySource) {
-    char* path = write_temp(
+    char* path = write_temp("leptris_pull_file_test.xml",
         "<r><a x='1'/>text<a x='2'/><!--c--><?pi d?><![CDATA[cd]]></r>");
     ASSERT_NE(path, nullptr);
     LeptrisPullParser p = leptris_pull_new_file(path);
@@ -194,7 +193,7 @@ TEST(Pull, FileSourceMatchesMemorySource) {
 }
 
 TEST(Iterparse, FileSourceYieldsSubtrees) {
-    char* path = write_temp(
+    char* path = write_temp("leptris_iter_file_test.xml",
         "<library><book n='1'><title>A</title></book>"
         "<book n='4'><title>B</title></book></library>");
     ASSERT_NE(path, nullptr);
