@@ -558,11 +558,13 @@ TEST(XPathConformanceNodeTest, ProcessingInstructionMatchesByTarget) {
 
 TEST(XPathConformanceNodeTest, NodeMatchesAnyKind) {
     // <r> has: 2 comments, text "x", 1 PI = 4 child nodes.
-    // //node() expands to /descendant-or-self::node()/child::node(),
-    // so it returns only the *children* of (r + descendants of r) —
-    // i.e., the 4 children of r (no descendants under any leaf node).
+    // //node() per XPath 1.0 selects every node except the document
+    // node itself: the root element plus all its descendants — 5
+    // here (r + its 4 children; the leaves have no descendants).
+    // (The engine has no document node, so the folded //node() walk
+    // adds the root element explicitly.)
     auto doc = Parse("<r><!-- one --><!-- two -->x<?pi data?></r>");
     EXPECT_EQ(Count(doc, "/r/node()"), 4u);
-    EXPECT_EQ(Count(doc, "//node()"), 4u);
+    EXPECT_EQ(Count(doc, "//node()"), 5u);
     leptris_document_free(doc);
 }
