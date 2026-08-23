@@ -74,17 +74,14 @@ jobs:
           # naming schemes (MSVC drops the lib prefix; the import
           # name must match the file name).
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            ls -la "$LEPTRIS_LIB_PATH" | grep -i leptris || true
+            # Build the test binaries first: the loader searches the
+            # executable's directory, but target/debug/deps does not
+            # exist until cargo has built something into it.
+            cargo test --no-run --verbose
             for n in leptris.dll libleptris.dll; do
               for d in target/debug target/debug/deps; do
                 cp "$LEPTRIS_LIB_PATH/$n" "$d/" 2>/dev/null || true
               done
             done
-          fi
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            DUMPBIN=$(find "C:/Program Files/Microsoft Visual Studio" -name dumpbin.exe 2>/dev/null | grep -i x64 | head -1)
-            if [ -n "$DUMPBIN" ]; then
-              "$DUMPBIN" //DEPENDENTS "$LEPTRIS_LIB_PATH/leptris.dll" || true
-            fi
           fi
           cargo test --verbose
