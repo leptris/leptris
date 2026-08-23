@@ -2,13 +2,42 @@
 
 ## [1.4.0] - 2026-08-23
 
+The full TODO.bindings board (issue #510 Tier 2/3) — the APIs that
+were keeping the Python and Ruby bindings from parity.
+
 ### Added
 
-- TODO.bindings board — pull API, iterparse, compiled XPath, per-parse options, encoding guarantees (bindings)
+- **Pull (StAX-style) parsing**: `leptris_pull_new/_next/_free` over
+  the streaming SAX core — host-driven events with zero C→host
+  callbacks (each costs ~µs through FFI). Attribute accessors during
+  START_ELEMENT; ERROR/END_DOCUMENT events terminate walks; memory
+  bounded by the input slice, not the document
+- **Iterparse (bounded memory)**: `leptris_iterparse_new/_next/_free`
+  — each top-level child of the root materializes in its own pool and
+  is released on the next yield; peak memory bounded by the largest
+  subtree, not the document (v1: QNames as written, prefixes not
+  re-resolved)
+- **Compiled XPath**: `leptris_xpath_compile/_compiled_eval/
+  _compiled_free` — one parse + one pinned cache entry for the
+  handle's lifetime; skips the per-call hash + cache probe of
+  `leptris_xpath_eval`. Immutable handle: concurrent evaluation from
+  many threads is safe (4-thread one-handle stress spec'd)
+- **Per-parse options**: `LeptrisParseOptions` +
+  `leptris_parse_string_ex` — scoped strict/depth/flags with thread
+  defaults restored on return; retires the need for the thread-global
+  setters in shared-thread bindings. `LeptrisParseFlags` moved to
+  `types.h` (single canonical types source)
+- **Mutation surface proven**: DomBuilder round-trip spec (build →
+  serialize → reparse → verify, all node types + attributes) and
+  deep-copy spec — the construction/mutation API shipped across
+  earlier releases and now has end-to-end proof
 
 ### Fixed
 
-- encoding declaration is truthful per build, not unconditional (serialize)
+- Serialization encoding declarations never lie: with iconv (default)
+  bodies are UTF-8 and declarations always say so; without iconv,
+  bytes pass through unchanged and declarations echo the original
+  encoding. `serialize(parse(serialize(x)))` is byte-stable
 
 
 
