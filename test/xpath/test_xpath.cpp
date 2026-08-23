@@ -1099,6 +1099,64 @@ TEST(XPathResults, AbsoluteTypeTestWalkOrder) {
     leptris_document_free(doc);
 }
 
+// ---- perf round 19: hashed index buckets + sort-based union dedup --
+
+TEST(XPathResults, IndexWithManyDistinctValuesAndNames) {
+    /* 300 distinct id values + 300 distinct element names force the
+     * element-index build through its hashed bucket lookups. The
+     * linear scans this replaced were O(distinct^2) — 300ms on a
+     * 20k-unique-id document. */
+    std::string xml = "<root>";
+    for (int i = 0; i < 300; i++) {
+        xml += "<e" + std::to_string(i) + " id='k" + std::to_string(i) + "'>v</e";
+        xml += std::to_string(i) + ">";
+    }
+    xml += "</root>";
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml.c_str(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Two //name queries: the second triggers the index build
+     * (TODO 190). All lookups must hit the hashed buckets. */
+    for (int round = 0; round < 2; round++) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//e7");
+        ASSERT_NE(r, (LeptrisXPathResult)0);
+        EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+        leptris_xpath_result_free(r);
+
+        r = leptris_xpath_eval(doc, nullptr, "//e299");
+        ASSERT_NE(r, (LeptrisXPathResult)0);
+        EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+        leptris_xpath_result_free(r);
+
+        r = leptris_xpath_eval(doc, nullptr, "//*[@id='k0']");
+        ASSERT_NE(r, (LeptrisXPathResult)0);
+        EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+        leptris_xpath_result_free(r);
+
+        r = leptris_xpath_eval(doc, nullptr, "//*[@id='k150']");
+        ASSERT_NE(r, (LeptrisXPathResult)0);
+        EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+        leptris_xpath_result_free(r);
+
+        /* Duplicate values map to every matching element. */
+        r = leptris_xpath_eval(doc, nullptr, "//*[.='v']");
+        ASSERT_NE(r, (LeptrisXPathResult)0);
+        EXPECT_EQ(leptris_xpath_result_count(r), 300u);
+        leptris_xpath_result_free(r);
+    }
+
+    /* Union dedup: overlapping sets, no duplicates in the result. */
+    LeptrisXPathResult r = leptris_xpath_eval(
+        doc, nullptr, "//*[@id='k5'] | //e5 | //*[@id='k5']");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
 // ---- TODO.remaining/07: compile-time folding of literal string fns --
 
 TEST(XPathConstantFolding, ConcatOfLiterals) {
