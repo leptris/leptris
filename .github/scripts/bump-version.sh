@@ -9,6 +9,7 @@
 # Files updated:
 #   - CMakeLists.txt  (project(leptris VERSION ...))
 #   - vcpkg.json      (version-semver + version-string)
+#   - bindings/python/pyproject.toml (pyleptris, lockstep)
 #   - CHANGELOG.md    (new entry template)
 #
 # The script does NOT commit or tag — the caller (release workflow)
@@ -72,6 +73,14 @@ if [ -f "$CMAKE_FILE" ]; then
     print_info "Updated CMakeLists.txt"
 fi
 
+# --- Update bindings/python/pyproject.toml (pyleptris lockstep) ---
+PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
+if [ -f "$PYPROJECT" ]; then
+    sed -i.bak "s/^version = \"[^"]*\"/version = \"$NEXT\"/" "$PYPROJECT"
+    rm -f "$PYPROJECT.bak"
+    print_info "Updated bindings/python/pyproject.toml"
+fi
+
 # --- Update vcpkg.json ---
 if [ -f "$VCPKG_JSON" ]; then
     sed -i.bak "s/\"version-semver\": \"[^\"]*\"/\"version-semver\": \"$NEXT\"/" "$VCPKG_JSON"
@@ -108,5 +117,5 @@ print_info "Updated CHANGELOG.md"
 
 print_info ""
 print_info "Version bump complete: $CURRENT_VERSION → $NEXT"
-print_info "Files updated: CMakeLists.txt, vcpkg.json, CHANGELOG.md"
+print_info "Files updated: CMakeLists.txt, bindings/python/pyproject.toml, vcpkg.json, CHANGELOG.md"
 print_info "Next step: commit + push + open release PR"
