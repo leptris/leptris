@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.1.3] - 2026-08-23
+
+### Added
+
+- fully automated release PR (release)
+
+### Fixed
+
+- build/publish gates survive the workflow_call event (python)
+
+
+
 ## [1.1.2] - 2026-08-23
 
 ### Fixed
