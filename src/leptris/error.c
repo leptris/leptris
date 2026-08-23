@@ -71,6 +71,18 @@ void leptris_extract_context_snippet(
     }
 }
 
+/* The public header has declared these since the initial release
+ * but they were never defined — phantom symbols that linked nowhere
+ * (found when the Rust binding referenced leptris_error_message and
+ * MSVC failed to resolve it). */
+LEPTRIS_API const char* leptris_error_message(LeptrisStatus status) {
+    return leptris_status_string(status);
+}
+
+LEPTRIS_API const char* leptris_last_error(void) {
+    return error_message[0] ? error_message : NULL;
+}
+
 LEPTRIS_API const char* leptris_status_string(LeptrisStatus status) {
     switch (status) {
         case LEPTRIS_OK:              return "OK";

@@ -10,6 +10,19 @@
 
 #include "types.h"
 
+/* Export macro (mirrors dom/document.h). */
+#if !defined(LEPTRIS_API)
+#  if defined(_WIN32)
+#    if defined(LEPTRIS_BUILDING_DLL)
+#      define LEPTRIS_API __declspec(dllexport)
+#    else
+#      define LEPTRIS_API __declspec(dllimport)
+#    endif
+#  else
+#    define LEPTRIS_API __attribute__((visibility("default")))
+#  endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,14 +37,14 @@ extern "C" {
  * @param status Status code
  * @return Error message string (static, do not free)
  */
-const char* leptris_error_message(LeptrisStatus status);
+LEPTRIS_API const char* leptris_error_message(LeptrisStatus status);
 
 /**
  * Get last error message from the library
  *
  * @return Error message string (static, do not free)
  */
-const char* leptris_last_error(void);
+LEPTRIS_API const char* leptris_last_error(void);
 
 #ifdef __cplusplus
 }
