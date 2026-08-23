@@ -2,12 +2,39 @@
 
 ## [1.1.2] - 2026-08-23
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
+- XPath union dedup was O(n^2) in the merged-set size — `//name |
+  //item` on a 20k-element document took 229 ms per query (99% of it
+  in the per-candidate duplicate scan); the document-order sort now
+  compacts duplicates, at 1.6 ms (~140x faster). Multi-context step
+  results also dedup at any size — results past 32 entries silently
+  kept duplicates from nested descendant contexts before.
+- Element-index build scanned the distinct element names, attribute
+  names, and attribute values linearly per entry; documents with many
+  distinct values (e.g. 20k unique id attributes) paid a one-time
+  300 ms spike on the second query. All three bucket lookups are
+  hashed now (~75x on that spike).
+- `//node()` now selects the root element per XPath 1.0 (it is a
+  child of the document node); previously the result silently
+  omitted it.
+- `leptris_error_message` / `leptris_last_error` were declared in the
+  public header since the first release but never implemented —
+  phantom symbols that linked nowhere (MSVC rejected them). Both are
+  implemented and exported now.
+- pyleptris releases: the PyPI publish trigger now actually fires —
+  tags created by the release workflow never triggered the publish
+  workflow, which is now called directly from the release flow; the
+  Python binding version tracks releases via bump-version.sh, and
+  its test suite runs on all three platforms per PR.
 
-- (describe changes here)
+### Added
+
+- Rust bindings (`bindings/rust`, crate `leptris`): safe
+  Document/Element wrappers with Drop, LeptrisStatus→Result error
+  mapping, attribute and child iteration, mixed-nodeset XPath
+  accessors, SAX with closures; CI on ubuntu/macos/windows.
+  TODO.remaining/05 — the roadmap board is now empty.
 
 
 ## [1.1.1] - 2026-08-23
