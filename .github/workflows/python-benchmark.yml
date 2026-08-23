@@ -1,0 +1,69 @@
+# Python benchmark matrix: leptris (PyPI binding, cffi) vs lxml /
+# ElementTree / minidom — the Python twin of the Ruby benchmark
+# workflow. Nightly + manual; results feed www.leptris.org/benchmarks
+# (the site consumes these artifacts only — hand-measured numbers do
+# not go on the site).
+
+name: python-benchmark
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: matrix (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build libleptris shared library
+        shell: bash
+        run: |
+          set -e
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLEPTRIS_BUILD_SHARED=ON -DLEPTRIS_BUILD_STATIC=OFF \
+            -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF \
+            -DLEPTRIS_BUILD_BENCHMARKS=OFF \
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF -DLEPTRIS_ENABLE_ICONV=OFF
+          cmake --build build --config Release
+          LIB=$(find build -type f -o -type l 2>/dev/null | grep -iE '(lib)?leptris\.(dylib|so|dll)$' | head -1)
+          if [ -z "$LIB" ]; then
+            echo "ERROR: libleptris shared library not found"
+            exit 1
+          fi
+          # _ffi.py's loader dlopens the FILE named by LEPTRIS_LIB_PATH.
+          echo "LEPTRIS_LIB_PATH=$PWD/$LIB" >> "$GITHUB_ENV"
+
+      - name: Checkout the Python binding
+        uses: actions/checkout@v4
+        with:
+          repository: leptris/leptris-py
+          path: leptris-py
+
+      - name: Run the benchmark matrix
+        shell: bash
+        working-directory: leptris-py
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[bench]"
+          python -m benchmarks.matrix | tee "python-benchmark-results-${{ matrix.os }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-benchmark-results-${{ matrix.os }}
+          path: leptris-py/python-benchmark-results-*.txt
+          retention-days: 90
