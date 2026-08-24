@@ -36,6 +36,7 @@
 #endif
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* The next-document-order walker lives in xslt_exec.c. Lift it
  * here as a non-static helper so key() construction can iterate
@@ -574,7 +575,7 @@ char* xslt_format_number(const XsltStylesheet* sheet, double value,
     }
     double av = neg ? -value : value;
     if (use->multiplier != 1) av *= use->multiplier;
-    if (av == 1.0 / 0.0 || av == -1.0 / 0.0) {
+    if (av >= HUGE_VAL || av <= -HUGE_VAL) {
         if (neg && use->prefix_len) {
             char* s = (char*)malloc(use->prefix_len + strlen(inf_str) + 1);
             if (s) { memcpy(s, use->prefix, use->prefix_len);
@@ -597,7 +598,9 @@ static struct leptris_xpath_result* xslt_fn_format_number(
     char* df  = (n >= 3) ? arg_string(ctx, args, n, 2) : leptris_strdup("");
     char* out = xslt_format_number(ex ? ex->sheet : NULL, v, pat, df);
     free(pat); free(df);
-    return res_string(out ? out : "");
+    struct leptris_xpath_result* r = res_string(out ? out : "");
+    free(out);   /* res_string copies — the local is ours to free */
+    return r;
 }
 
 /* ============================================================
@@ -658,6 +661,7 @@ static struct leptris_xpath_result* xslt_fn_regexp_match_v1(
     struct leptris_xpath_result* r = res_empty_ns();
     XsltExec* ex = exec_from(ctx);
     if (!r || !src || !patstr) { free(src); free(patstr); free(flags); return r; }
+#ifdef LEPTRIS_XSLT_HAVE_REGEX
     regex_t rx;
     if (regcomp(&rx, patstr, REG_EXTENDED) == 0) {
         int global = flags && strchr(flags, 'g');
@@ -684,9 +688,13 @@ static struct leptris_xpath_result* xslt_fn_regexp_match_v1(
         }
         regfree(&rx);
     }
+#else
+    (void)ex;
+#endif
     free(src); free(patstr); free(flags);
     return r;
 }
+
 static struct leptris_xpath_result* xslt_fn_regexp_replace_v1(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
     if (n < 3) return res_string("");
