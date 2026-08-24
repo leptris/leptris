@@ -369,8 +369,12 @@ TEST(PublicSurface, RecoverReturnsEmptyDocument) {
     LeptrisParseOptions opts = {LEPTRIS_PARSE_DEFAULT, 0, 0, 0};
     opts.recover = 1;
     LeptrisStatus st = LEPTRIS_OK;
-    LeptrisDocument d = leptris_parse_string_ex(
-        "<root><unclosed>", 19, &opts, &st);
+    /* Heap copy: the SIMD copy pass reads blocks and can overread
+     * short .rodata literals (ASAN-visible). */
+    char bad[32];
+    memset(bad, 0, sizeof(bad));
+    memcpy(bad, "<root><unclosed>", 16);
+    LeptrisDocument d = leptris_parse_string_ex(bad, 16, &opts, &st);
     ASSERT_NE(d, nullptr);   /* recover: empty doc, not NULL */
     EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
     EXPECT_EQ(leptris_xpath_result_count(
