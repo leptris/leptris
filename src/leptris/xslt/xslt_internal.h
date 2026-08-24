@@ -51,7 +51,10 @@ typedef enum {
     XSLT_INSTR_PI,
     XSLT_INSTR_MESSAGE,
     XSLT_INSTR_NUMBER,
-    XSLT_INSTR_ATTR_SET_REF       /* use-attribute-sets expansion */
+    XSLT_INSTR_ATTR_SET_REF,      /* use-attribute-sets expansion */
+    XSLT_INSTR_APPLY_IMPORTS,     /* xsl:apply-imports (§5.6) */
+    XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
+                                      its xsl:fallback children (§15) */
 } XsltInstrKind;
 
 struct xslt_styles;  /* fwd */
@@ -61,6 +64,8 @@ typedef struct xslt_sort {
     LeptrisXPathCompiled select;   /* NULL → string-value of node */
     int numeric;                    /* data-type="number" */
     int descending;
+    int case_upper_first;           /* case-order="upper-first" (default);
+                                       -1 = not given, 0 = lower-first */
     struct xslt_sort* next;
 } XsltSort;
 
@@ -108,6 +113,14 @@ typedef struct xslt_instr {
 
     /* CHOOSE arms are WHEN/OTHERWISE children with test set. */
     int terminate;                  /* MESSAGE terminate */
+    int is_param;                   /* VARIABLE came from xsl:param —
+                                       template-parameter semantics
+                                       (§11.6): default applies only when
+                                       no with-param binds the name. */
+    int doe;                        /* TEXT / VALUE_OF
+                                       disable-output-escaping="yes" */
+    const char* letter_value;      /* NUMBER: "alphabetic"|"traditional"
+                                       (§7.7 disambiguator, stored raw) */
 } XsltInstr;
 
 /* One literal result-element attribute (name, raw value with
@@ -169,6 +182,14 @@ typedef struct xslt_keydef {
     struct xslt_keydef* next;
 } XsltKeyDef;
 
+/* Namespace alias (§7.1.1 xsl:namespace-alias): stylesheet-prefix
+ * → result-prefix; "#default" maps to/from the default namespace. */
+typedef struct xslt_ns_alias {
+    const char* stylesheet_prefix;   /* NULL = "#default" */
+    const char* result_prefix;       /* NULL = "#default" */
+    struct xslt_ns_alias* next;
+} XsltNsAlias;
+
 struct xslt_styles {
     /* Templates in source order; selection sorts by (import_rank,
      * priority, order) at apply time per §5.4/5.5. */
@@ -185,6 +206,7 @@ struct xslt_styles {
 
     /* Output settings (xsl:output; defaults method=xml). */
     int out_method_text;
+    int out_method_html;   /* §16.2 */
     int out_indent;
     int out_omit_decl;
     const char* out_encoding;
@@ -198,6 +220,26 @@ struct xslt_styles {
 
     /* Named attribute sets (§7.1.4). */
     XsltAttrSet* attrsets;
+
+    /* §3.4 whitespace handling on the SOURCE tree: preserve list
+     * from xsl:preserve-space, strip list from xsl:strip-space
+     * (strip wins on conflict — last declaration). Default (both
+     * NULL): whitespace-only text nodes are stripped per §3.4. */
+    char** ws_preserve;
+    char** ws_strip;
+
+    /* §7.1.1 xsl:namespace-alias table. */
+    XsltNsAlias* ns_alias;
+
+    /* §2.5 forwards-compatible processing (xsl:stylesheet version
+     * != 1.0): unknown top-level elements are ignored instead of
+     * erroring; unknown instructions fall back per §15. */
+    int forwards_compat;
+
+    /* §16.1 xsl:output standalone (-1 absent, 0 no, 1 yes) and
+     * media-type (advisory). */
+    int out_standalone;
+    const char* out_media_type;
 };
 
 typedef struct xslt_styles XsltStylesheet;
@@ -225,13 +267,24 @@ typedef struct xslt_exec {
     int terminated;                /* xsl:message terminate */
     char* message;                 /* collected message text */
     LeptrisElement pending_parent;/* current output insertion point */
-    char* top_text;                /* text emitted with no parent yet */
+    char* top_text;                /* text emitted before any element */
     size_t top_text_len, top_text_cap;
+    char* tail_text;               /* text emitted AFTER elements (root
+                                    * siblings in fragment order) */
+    size_t tail_text_len, tail_text_cap;
 
     /* current(): the node being processed by the template rule or
      * for-each in flight (§12.4) — distinct from the predicate
      * context, so save/restored around each xslt_eval. */
     LeptrisElement current_node;
+
+    /* The template rule currently executing (§5.6 apply-imports
+     * resolves candidates against THIS rule's import rank). */
+    const XsltTemplate* current_template;
+
+    /* Frame-chain depth snapshot management for block scope: the
+     * instruction walker saves/restores depth per sequence. */
+    size_t var_depth;
 
     /* xslt_functions.c state (opaque here): the per-exec registry
      * carrying the XSLT function bridge, the lazy key indexes
@@ -257,6 +310,8 @@ void xslt_exec_free(XsltExec* ex);
 
 /* xslt_parse.c — compilation. */
 XsltStylesheet* xslt_stylesheet_parse(LeptrisDocument doc);
+XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
+                                           LeptrisElement root);
 void xslt_stylesheet_free(XsltStylesheet* sheet);
 
 /* xslt_pattern.c — pattern matching (§5.2). */

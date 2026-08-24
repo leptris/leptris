@@ -32,7 +32,306 @@ std::string body(const std::string& s) {
     if (s.compare(0, strlen(decl), decl) == 0) return s.substr(strlen(decl));
     return s;
 }
+
+/* run2: stylesheet with a top-level key definition + body. */
+std::string run2(const char* body_with_key, const char* xml) {
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+                        " version='1.0'>" +
+                        "<xsl:key name='k' match='i' use='@v'/>" +
+                        body_with_key + "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    if (!x) return "(compile-failed)";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    if (!d) { leptris_xslt_free(x); return "(parse-failed)"; }
+    char* out = leptris_xslt_apply_string(x, d);
+    std::string r = out ? out : "(null)";
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    return r;
+}
 }  // namespace
+
+/* ---------------------------------------------------------------
+ * XsltFull: the complete-implementation conformance set. Every
+ * case pins a behavior that was a documented gap before this
+ * branch (each comment names the spec section + the old behavior).
+ * --------------------------------------------------------------- */
+
+/* §11 block scope: an inner xsl:variable shadows within its
+ * containing element and RESTORES the outer binding afterwards.
+ * Before: the inner binding persisted (flat chain, no scope). */
+TEST(XsltFull, BlockScopeVariablesShadowAndRestore) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='x' select=\"'outer'\"/>"
+        "<w><xsl:variable name='x' select=\"'inner'\"/>"
+        "<xsl:value-of select='$x'/></w>"
+        "<xsl:value-of select='$x'/></xsl:template>",
+        "<r/>")), "<w>inner</w>outer");
+}
+
+/* §11.6 template parameters: the default applies only when the
+ * caller does not bind the name. */
+TEST(XsltFull, TemplateParamDefaults) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:call-template name='t'/>"
+        "<xsl:call-template name='t'>"
+        "<xsl:with-param name='v' select=\"'P'\"/>"
+        "</xsl:call-template></xsl:template>"
+        "<xsl:template name='t'>"
+        "<xsl:param name='v' select=\"'D'\"/>"
+        "<p><xsl:value-of select='$v'/></p></xsl:template>",
+        "<r/>")), "<p>D</p><p>P</p>");
+}
+
+/* §5.6 apply-imports: the imported rule runs when the importing
+ * rule defers to it. Uses temp files for the import. */
+TEST(XsltFull, ApplyImports) {
+    const char* lib = "leptris_xai_lib.xsl";
+    const char* main = "leptris_xai_main.xsl";
+    FILE* f = fopen(lib, "w");
+    fputs("<?xml version='1.0'?>"
+          "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+          " version='1.0'>"
+          "<xsl:template match='r'>LIB</xsl:template></xsl:stylesheet>", f);
+    fclose(f);
+    f = fopen(main, "w");
+    fputs("<?xml version='1.0'?>"
+          "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+          " version='1.0'>"
+          "<xsl:import href='leptris_xai_lib.xsl'/>"
+          "<xsl:template match='r'>[<xsl:apply-imports/>]</xsl:template>"
+          "</xsl:stylesheet>", f);
+    fclose(f);
+    LeptrisXslt x = leptris_xslt_parse_file(main);
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<r/>", strlen("<r/>"), nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(body(std::string(out)), "[LIB]");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    remove(lib); remove(main);
+}
+
+/* §5.5 default priorities: QName (0) beats * (-0.5); a predicate
+ * pattern (0.5) beats the bare QName. Before: * was -0.25 and
+ * paths scored 0 — wrong winners. */
+TEST(XsltFull, DefaultPriorityTable) {
+    /* * vs i: i wins (0 > -0.5). */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='*'>STAR</xsl:template>"
+        "<xsl:template match='/r'><xsl:apply-templates select='//i'/></xsl:template>"
+        "<xsl:template match='i'>QNAME</xsl:template>",
+        "<r><i/></r>")), "QNAME");
+    /* i[@a] (0.5) vs i (0): the predicate template wins. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/r'><xsl:apply-templates select='//i'/></xsl:template>"
+        "<xsl:template match='i'>PLAIN</xsl:template>"
+        "<xsl:template match='i[@a]'>PRED</xsl:template>",
+        "<r><i a='1'/></r>")), "PRED");
+}
+
+/* §16.4 disable-output-escaping: the string-value passes through
+ * raw. Source carries &lt;b&gt; (string-value "<b>"); without DOE
+ * it re-escapes. Before: DOE was ignored entirely. */
+TEST(XsltFull, DisableOutputEscaping) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select='/r/t' disable-output-escaping='yes'/>"
+        "</xsl:template>", "<r><t>&lt;b&gt;</t></r>")), "<b>");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select='/r/t'/>"
+        "</xsl:template>", "<r><t>&lt;b&gt;</t></r>")), "&lt;b&gt;");
+    /* xsl:text disable-output-escaping: literal markup passes raw. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:text disable-output-escaping='yes'>&lt;hr/&gt;</xsl:text>"
+        "</xsl:template>", "<r/>")), "<hr/>");
+}
+
+/* §16.2 method=html: void elements without the self-closing
+ * slash, no XML declaration. */
+TEST(XsltFull, HtmlOutputMethod) {
+    std::string s = body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><br/><hr/>t</body></html></xsl:template>",
+        "<r/>"));
+    EXPECT_EQ(s.find("<?xml"), std::string::npos);
+    EXPECT_NE(s.find("<br>"), std::string::npos);
+    EXPECT_NE(s.find("<hr>"), std::string::npos);
+    EXPECT_EQ(s.find("<br/>"), std::string::npos);
+}
+
+/* §16.1 standalone: declared on the output declaration. */
+TEST(XsltFull, StandaloneDeclaration) {
+    std::string s = run(
+        "<xsl:output standalone='yes'/>"
+        "<xsl:template match='/'><r/></xsl:template>", "<r/>");
+    EXPECT_NE(s.find("standalone=\"yes\""), std::string::npos);
+}
+
+/* §10 case-order: with equal base keys, upper-first (default)
+ * puts A before a; lower-first reverses. */
+TEST(XsltFull, SortCaseOrder) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//i'>"
+        "<xsl:sort select='@k' case-order='upper-first'/>"
+        "<xsl:value-of select='@k'/>"
+        "</xsl:for-each></xsl:template>",
+        "<r><i k='a'/><i k='A'/></r>")), "Aa");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//i'>"
+        "<xsl:sort select='@k' case-order='lower-first'/>"
+        "<xsl:value-of select='@k'/>"
+        "</xsl:for-each></xsl:template>",
+        "<r><i k='a'/><i k='A'/></r>")), "aA");
+}
+
+/* §7.7 letter-value="alphabetic" forces a/A over roman for the
+ * ambiguous letter formats. */
+TEST(XsltFull, NumberLetterValueAlphabetic) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//c'>"
+        "<n><xsl:number format='i' letter-value='alphabetic'/></n>"
+        "</xsl:for-each></xsl:template>",
+        "<r><c/><c/><c/></r>")),
+        "<n>a</n><n>b</n><n>c</n>");
+}
+
+/* §15 fallback: an unknown xsl: instruction executes its
+ * xsl:fallback content when instantiated. Before: no-op. */
+TEST(XsltFull, FallbackForUnknownInstruction) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<w><xsl:bogus-extension>"
+        "<xsl:fallback>FELL</xsl:fallback>"
+        "</xsl:bogus-extension></w>"
+        "</xsl:template>", "<r/>")), "<w>FELL</w>");
+}
+
+/* §3.4: whitespace-only source text is stripped by default; the
+ * mixed-content text survives. */
+TEST(XsltFull, SourceWhitespaceStrippedByDefault) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/r'>"
+        "<xsl:for-each select='*'>"
+        "<xsl:value-of select='name()'/>"
+        "</xsl:for-each></xsl:template>",
+        "<r>\n  <a/>\n  <b/>\n</r>")), "ab");
+}
+
+/* §3.4 xsl:preserve-space: listed parents keep ws-only text. */
+TEST(XsltFull, PreserveSpaceKeepsWhitespace) {
+    std::string s = body(run(
+        "<xsl:preserve-space elements='pre'/>"
+        "<xsl:template match='/r'>"
+        "<pre><xsl:value-of select='pre'/></pre>"
+        "</xsl:template>",
+        "<r><pre> </pre></r>"));
+    EXPECT_NE(s.find(" "), std::string::npos);
+}
+
+/* §7.1.1 xsl:element namespace: emits an xmlns declaration. */
+TEST(XsltFull, ElementNamespaceDeclaration) {
+    std::string s = body(run(
+        "<xsl:template match='/'>"
+        "<xsl:element name='n:e' namespace='urn:x'/>"
+        "</xsl:template>", "<r/>"));
+    EXPECT_NE(s.find("xmlns:n=\"urn:x\""), std::string::npos);
+}
+
+/* §7.1.1 xsl:namespace-alias: the result prefix replaces the
+ * stylesheet prefix on literal result elements. */
+TEST(XsltFull, NamespaceAliasRewritesPrefix) {
+    std::string s = body(run(
+        "<xsl:namespace-alias stylesheet-prefix='alt' result-prefix='x'/>"
+        "<xsl:template match='/'>"
+        "<alt:out xmlns:alt='urn:z'>t</alt:out>"
+        "</xsl:template>", "<r/>"));
+    EXPECT_NE(s.find("<x:out"), std::string::npos);
+}
+
+/* §14.2 element-available / function-available. */
+TEST(XsltFull, AvailabilityFunctions) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"element-available('xsl:for-each')\"/>"
+        "<xsl:value-of select=\"element-available('xsl:bogus')\"/>"
+        "</xsl:template>", "<r/>")), "truefalse");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"function-available('key')\"/>"
+        "<xsl:value-of select=\"function-available('no-such-fn')\"/>"
+        "</xsl:template>", "<r/>")), "truefalse");
+}
+
+/* EXSLT regexp:match (first match as string) + regexp:replace
+ * with $1 backreference. */
+TEST(XsltFull, RegexpMatchAndReplace) {
+    /* value-of over the match nodeset → first match string. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"regexp:match('ab12cd', '[0-9]+')\"/>"
+        "</xsl:template>", "<r/>")), "12");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"regexp:replace('ab12', '([a-z]+)([0-9]+)', '$2$1')\"/>"
+        "</xsl:template>", "<r/>")), "12ab");
+}
+
+/* §12.2 key() with a node-set second argument: unions the buckets
+ * of every node's string-value. */
+TEST(XsltFull, KeyNodeSetArgument) {
+    EXPECT_EQ(body(run2(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select=\"key('k', //q)\">"
+        "<xsl:value-of select='@n'/>"
+        "</xsl:for-each></xsl:template>",
+        "<r><i v='x' n='1'/><i v='y' n='2'/><q>x</q><q>y</q></r>")), "12");
+}
+
+/* §2.7 embedding: xml-stylesheet PI with href="#id" selects the
+ * embedded stylesheet element. */
+TEST(XsltFull, EmbeddedStylesheet) {
+    std::string doc =
+        "<?xml-stylesheet type='text/xsl' href='#tr'?>"
+        "<r><xsl:stylesheet id='tr' "
+        "xmlns:xsl='http://www.w3.org/1999/XSL/Transform' version='1.0'>"
+        "<xsl:template match='/'><e/></xsl:template>"
+        "</xsl:stylesheet></r>";
+    LeptrisDocument d = leptris_parse_string(doc.c_str(), doc.size(),
+                                             nullptr);
+    ASSERT_NE(d, nullptr);
+    LeptrisXslt x2 = leptris_xslt_parse(doc.c_str(), doc.size());
+    EXPECT_NE(x2, nullptr);
+    if (x2) {
+        char* out = leptris_xslt_apply_string(x2, d);
+        EXPECT_NE(std::string(out ? out : "").find("<e/>"),
+                  std::string::npos);
+        leptris_free_string(out);
+        leptris_xslt_free(x2);
+    }
+    leptris_document_free(d);
+}
+
+/* §2.5 forwards-compatible processing: version != 1.0 ignores an
+ * unknown TOP-LEVEL element instead of failing compilation. */
+TEST(XsltFull, ForwardsCompatibleTopLevel) {
+    EXPECT_NE(run(
+        "<xsl:whatever-new/>"
+        "<xsl:template match='/'><r/></xsl:template>",
+        "<r/>").substr(0, 6), std::string("(null)"));
+}
+
 
 TEST(Xslt, ValueOfSelectsTextAttrNumber) {
     EXPECT_EQ(body(run(
@@ -240,19 +539,18 @@ TEST(XsltConformance, CDataSectionElements) {
         .find("<![CDATA[1 < 2]]>"), std::string::npos);
 }
 
-/* output method=text — v1 emits the result as XML (no element
- * stripping) but suppresses the XML declaration. The element-
- * stripping pass lands when the public serializer grows a text
- * method; for now we verify the declaration suppression, which
- * already works. */
-TEST(XsltConformance, OutputMethodTextSuppressesDeclaration) {
+/* §16.3 method=text: the string-value of every text node in
+ * document order — elements never appear, no declaration, no
+ * escaping. Falsifiability: the v1 approximation kept the element
+ * structure ("<wrap>a<b/>c</wrap>"); the correct output is "ac". */
+TEST(XsltConformance, OutputMethodTextStripsAllMarkup) {
     std::string s = body(run(
-        "<xsl:output method='text' omit-xml-declaration='yes'/>"
+        "<xsl:output method='text'/>"
         "<xsl:template match='/'>"
         "<wrap>a<b/>c</wrap></xsl:template>",
         "<r/>"));
-    EXPECT_EQ(s.find("<?xml"), std::string::npos);
-    EXPECT_NE(s.find("<wrap>"), std::string::npos);
+    EXPECT_EQ(s, "ac");
+    EXPECT_EQ(s.find('<'), std::string::npos);
 }
 
 /* Variable-scope shadowing. v1 doesn't track block-local variable
