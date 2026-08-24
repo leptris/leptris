@@ -1110,6 +1110,25 @@ static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
                  * #485). */
                 xpath_nodeset_sort_doc_order(
                     ctx, result->value.nodeset_value, 0);
+
+                /* Issue #514: transfer synthetic-node ownership from
+                 * the operands — see the twin fix in
+                 * evaluator_operators.c. */
+                if (ln && rn) {
+                    result->value.nodeset_value->owns_attributes =
+                        ln->owns_attributes || rn->owns_attributes;
+                    result->value.nodeset_value->owns_namespaces =
+                        ln->owns_namespaces || rn->owns_namespaces;
+                    result->value.nodeset_value->owns_synthetic_text =
+                        ln->owns_synthetic_text ||
+                        rn->owns_synthetic_text;
+                    ln->owns_attributes = 0;
+                    ln->owns_namespaces = 0;
+                    ln->owns_synthetic_text = 0;
+                    rn->owns_attributes = 0;
+                    rn->owns_namespaces = 0;
+                    rn->owns_synthetic_text = 0;
+                }
             }
         }
     }

@@ -122,13 +122,83 @@ LEPTRIS_API const char* leptris_pi_node_get_data(LeptrisNodeRef node) {
  * (every node reachable from a tree was attached via append_child,
  * which sets parent_off and propagates the document pointer on
  * element children). For unattached nodes, returns NULL. */
+/* ---- Document-level processing instructions (issue #526) -------
+ * Parsed and added PIs share the internal singly-linked list
+ * (struct leptris_processing_instruction, doc->pis); the document
+ * owns and frees it. */
+
+LEPTRIS_API size_t leptris_document_pi_count(LeptrisDocument doc) {
+    if (!doc) return 0;
+    size_t n = 0;
+    for (struct leptris_processing_instruction* pi = doc->pis; pi; pi = pi->next)
+        n++;
+    return n;
+}
+
+LEPTRIS_API const char* leptris_document_pi_target(LeptrisDocument doc,
+                                                   size_t index) {
+    if (!doc) return NULL;
+    size_t i = 0;
+    for (struct leptris_processing_instruction* pi = doc->pis; pi; pi = pi->next, i++) {
+        if (i == index) return pi->target ? pi->target : "";
+    }
+    return NULL;
+}
+
+LEPTRIS_API const char* leptris_document_pi_data(LeptrisDocument doc,
+                                                 size_t index) {
+    if (!doc) return NULL;
+    size_t i = 0;
+    for (struct leptris_processing_instruction* pi = doc->pis; pi; pi = pi->next, i++) {
+        if (i == index) return pi->data ? pi->data : "";
+    }
+    return NULL;
+}
+
+LEPTRIS_API LeptrisNodeRef leptris_document_add_pi(LeptrisDocument doc,
+                                                   const char* target,
+                                                   const char* data) {
+    if (!doc || !target || !*target) return NULL;
+    struct leptris_processing_instruction* pi =
+        (struct leptris_processing_instruction*)malloc(sizeof(*pi));
+    if (!pi) return NULL;
+    pi->target = leptris_strdup(target);
+    pi->data = leptris_strdup(data ? data : "");
+    pi->next = NULL;
+    if (!pi->target || (data && !pi->data)) {
+        free(pi->target); free(pi->data); free(pi);
+        return NULL;
+    }
+    /* Append (serialization order is list order). */
+    struct leptris_processing_instruction* tail = doc->pis;
+    if (!tail) {
+        doc->pis = pi;
+    } else {
+        while (tail->next) tail = tail->next;
+        tail->next = pi;
+    }
+    return (LeptrisNodeRef)pi;
+}
+
 static LeptrisDocument node_public_document(LeptrisNodeRef node) {
     if (!node) return NULL;
     if (node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
         return leptris_element_get_document((LeptrisElement)node);
     }
     LeptrisElement parent = leptris_node_parent(node);
-    return parent ? leptris_element_get_document(parent) : NULL;
+    if (parent) return leptris_element_get_document(parent);
+    /* Issue #519: detached non-element nodes carry their owning
+     * document — mutations must work before any attach. */
+    switch (node->type) {
+        case LEPTRIS_NODE_TYPE_PI:
+            return ((LeptrisPINode*)node)->owner_doc;
+        case LEPTRIS_NODE_TYPE_COMMENT:
+            return ((LeptrisCommentNode*)node)->owner_doc;
+        case LEPTRIS_NODE_TYPE_CDATA:
+            return ((LeptrisCDATANode*)node)->owner_doc;
+        default:
+            return NULL;
+    }
 }
 
 /* Pool-strdup helper scoped to this TU. */
@@ -169,8 +239,10 @@ LEPTRIS_API LeptrisNodeRef leptris_comment_node_create(LeptrisDocument doc,
     leptris_document_ensure_promoted(doc);
     if (!doc->pool) return NULL;
     if (!content) content = "";
-    return (LeptrisNodeRef)leptris_comment_create(content, strlen(content),
-                                                  doc->pool);
+    LeptrisCommentNode* n = leptris_comment_create(content, strlen(content),
+                                                   doc->pool);
+    if (n) n->owner_doc = doc;
+    return (LeptrisNodeRef)n;
 }
 
 LEPTRIS_API LeptrisNodeRef leptris_cdata_node_create(LeptrisDocument doc,
@@ -179,8 +251,10 @@ LEPTRIS_API LeptrisNodeRef leptris_cdata_node_create(LeptrisDocument doc,
     leptris_document_ensure_promoted(doc);
     if (!doc->pool) return NULL;
     if (!content) content = "";
-    return (LeptrisNodeRef)leptris_cdata_create(content, strlen(content),
-                                                doc->pool);
+    LeptrisCDATANode* n = leptris_cdata_create(content, strlen(content),
+                                              doc->pool);
+    if (n) n->owner_doc = doc;
+    return (LeptrisNodeRef)n;
 }
 
 LEPTRIS_API LeptrisNodeRef leptris_pi_node_create(LeptrisDocument doc,
@@ -190,8 +264,10 @@ LEPTRIS_API LeptrisNodeRef leptris_pi_node_create(LeptrisDocument doc,
     leptris_document_ensure_promoted(doc);
     if (!doc->pool || !target) return NULL;
     if (!data) data = "";
-    return (LeptrisNodeRef)leptris_pi_create(target, strlen(target),
-                                             data, strlen(data), doc->pool);
+    LeptrisPINode* n = leptris_pi_create(target, strlen(target),
+                                         data, strlen(data), doc->pool);
+    if (n) n->owner_doc = doc;
+    return (LeptrisNodeRef)n;
 }
 
 LEPTRIS_API LeptrisStatus leptris_text_node_set_content(LeptrisNodeRef node,

@@ -259,15 +259,19 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
     LeptrisElement parent = leptris_node_parent(sibling_ptr);
     if (!parent) return LEPTRIS_ERROR_INVALID_ARG;
 
-    /* Issue #217: unlink new_node from any current parent so we
-     * don't corrupt the old tree. */
-    LeptrisElement new_old_parent = leptris_node_parent(new_node_ptr);
-    if (new_old_parent && new_old_parent != parent) {
+    /* Issue #217 + #518: unlink new_node from ANY current parent —
+     * including THIS one. A same-parent move without the unlink left
+     * the old next-sibling link in place and the splice below built
+     * a cycle in the child chain (later inserts/serializes hung
+     * forever). leptris_node_unlink also decrements the old parent's
+     * child_count, so the ++ below stays balanced for moves. */
+    if (leptris_node_parent(new_node_ptr)) {
         leptris_node_unlink(new_node_ptr);
     }
 
     /* Walk the parent's true child chain (including non-element
-     * children) to find the node before sibling. */
+     * children) to find the node before sibling. MUST run after the
+     * unlink — new_node may have been in this chain. */
     LeptrisNode* prev_child = NULL;
     LeptrisNode* current = leptris_node_first_child_internal((LeptrisNode*)parent);
     while (current && current != sibling_ptr) {
@@ -338,12 +342,16 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
     LeptrisElement parent = leptris_node_parent(sibling_ptr);
     if (!parent) return LEPTRIS_ERROR_INVALID_ARG;
 
-    /* Issue #217: unlink new_node from any current parent first. */
-    LeptrisElement new_old_parent = leptris_node_parent(new_node_ptr);
-    if (new_old_parent && new_old_parent != parent) {
+    /* Issue #217 + #518: unlink from ANY current parent — including
+     * this one (a same-parent move must first come out of the chain,
+     * else the splice below cycles it; see insert_before). */
+    if (leptris_node_parent(new_node_ptr)) {
         leptris_node_unlink(new_node_ptr);
     }
 
+    /* Read AFTER the unlink: if new_node was sibling's next sibling,
+     * reading before would capture new_node itself and the splice
+     * would link it to itself. */
     LeptrisNode* next_sibling = leptris_node_get_next_sibling(sibling_ptr);
 
     /* Splice new_node between sibling and next_sibling. Use the

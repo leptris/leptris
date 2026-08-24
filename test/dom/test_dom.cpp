@@ -1345,3 +1345,109 @@ TEST(DomBuilder, DeepCopyOfBuiltTree) {
     leptris_document_free(copy);
     leptris_document_free(doc);
 }
+
+/* Issue #518: moving a sibling within the same parent corrupted the
+ * child chain — later sibling inserts or serialize hung forever. */
+TEST(ElementMutation, MoveWithinParentKeepsChainConsistent) {
+    const char xml[] = "<root><a>1</a><b>2</b></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement a = leptris_element_first_child_any(root);
+    LeptrisElement b = leptris_element_next_sibling_any(a);
+    ASSERT_NE(b, nullptr);
+
+    /* Move b before a (same parent). */
+    ASSERT_EQ(leptris_element_insert_before(a, b), LEPTRIS_OK);
+
+    /* Insert after the MOVED node — used to hang on the cycle. */
+    LeptrisElement c = leptris_element_create(doc, "c");
+    ASSERT_EQ(leptris_element_set_text(c, "3"), LEPTRIS_OK);
+    ASSERT_EQ(leptris_element_insert_after(b, c), LEPTRIS_OK);
+
+    char* x = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_STREQ(x, "<root><b>2</b><c>3</c><a>1</a></root>");
+    leptris_free_string(x);
+
+    /* Move-count integrity: still 3 element children. */
+    EXPECT_EQ(leptris_element_child_count(root), 3u);
+    leptris_document_free(doc);
+}
+
+TEST(ElementMutation, SerializeAfterSecondMoveTerminates) {
+    const char xml[] = "<root><a>1</a><b>2</b></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement a = leptris_element_first_child_any(root);
+    LeptrisElement b = leptris_element_next_sibling_any(a);
+    ASSERT_EQ(leptris_element_insert_before(a, b), LEPTRIS_OK);
+    LeptrisElement c = leptris_element_create(doc, "c");
+    ASSERT_EQ(leptris_element_set_text(c, "3"), LEPTRIS_OK);
+    ASSERT_EQ(leptris_element_insert_before(a, c), LEPTRIS_OK);
+
+    char* x = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_STREQ(x, "<root><b>2</b><c>3</c><a>1</a></root>");
+    leptris_free_string(x);
+    leptris_document_free(doc);
+}
+
+/* Issue #519: detached PI/comment/CDATA mutations failed with
+ * INVALID_ARG — the document was resolved through the parent chain,
+ * which fresh nodes don't have. */
+TEST(DetachedNodes, MutationWorksBeforeAttach) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisNodeRef pi = leptris_pi_node_create(doc, "xml-stylesheet", "href=\"x\"");
+    ASSERT_NE(pi, nullptr);
+    EXPECT_EQ(leptris_pi_node_set_target(pi, "new-target"), LEPTRIS_OK);
+    EXPECT_EQ(leptris_pi_node_set_data(pi, "data2"), LEPTRIS_OK);
+
+    LeptrisNodeRef comment = leptris_comment_node_create(doc, "c1");
+    ASSERT_NE(comment, nullptr);
+    EXPECT_EQ(leptris_comment_node_set_content(comment, "c2"), LEPTRIS_OK);
+
+    LeptrisNodeRef cdata = leptris_cdata_node_create(doc, "raw");
+    ASSERT_NE(cdata, nullptr);
+    EXPECT_EQ(leptris_cdata_node_set_content(cdata, "raw2"), LEPTRIS_OK);
+
+    /* The mutated PI survives attach + serialize. */
+    LeptrisElement root = leptris_element_create(doc, "r");
+    ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
+    ASSERT_EQ(leptris_element_append_child(root, (LeptrisElement)pi), LEPTRIS_OK);
+    char* x = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_NE(std::strstr(x, "<?new-target data2?>"), nullptr);
+    leptris_free_string(x);
+    leptris_document_free(doc);
+}
+
+/* Issue #526: document-level PI enumeration + creation. */
+TEST(DocumentPIs, EnumerateAndAdd) {
+    const char xml[] = "<?xml version='1.0'?><?docpi d1?><r/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_document_pi_count(doc), 1u);
+    EXPECT_STREQ(leptris_document_pi_target(doc, 0), "docpi");
+    EXPECT_STREQ(leptris_document_pi_data(doc, 0), "d1");
+    EXPECT_EQ(leptris_document_pi_target(doc, 9), nullptr);
+
+    EXPECT_NE(leptris_document_add_pi(doc, "extra", "d2"), nullptr);
+    EXPECT_EQ(leptris_document_pi_count(doc), 2u);
+    EXPECT_STREQ(leptris_document_pi_target(doc, 1), "extra");
+
+    LeptrisSerializeOptions opts = {0};
+    opts.xml_declaration = 1;
+    char* x = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(x, nullptr);
+    EXPECT_NE(std::strstr(x, "<?docpi d1?><?extra d2?><r/>"), nullptr);
+    leptris_free_string(x);
+
+    EXPECT_EQ(leptris_document_pi_count(nullptr), 0u);
+    EXPECT_EQ(leptris_document_add_pi(doc, nullptr, "d"), nullptr);
+    leptris_document_free(doc);
+}
