@@ -1,0 +1,1133 @@
+/* xslt/xslt_exec.c — the template engine (TODO.transform 03/04).
+ *
+ * Dispatch-table execution: each instruction kind maps to a handler
+ * registered in a static table — adding instructions (XSLT or
+ * EXSLT) never touches the walker (OCP). Template selection per
+ * §5.4/5.5: highest priority wins; among equal priorities, the LAST
+ * in document order (list append order) wins — imports prepend
+ * lower precedence by construction.
+ *
+ * Output grows in exec->result through the public mutation API;
+ * text-method output accumulates string-values only. */
+#include "xslt_internal.h"
+#include "../dom/text.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <ctype.h>
+
+#define XSLT_MAX_DEPTH 512
+
+static XsltInstrFn g_ops[XSLT_INSTR_ATTR_SET_REF + 1];
+
+void xslt_register_op(XsltInstrKind kind, XsltInstrFn fn) {
+    if ((int)kind >= 0 && kind <= XSLT_INSTR_ATTR_SET_REF) {
+        g_ops[kind] = fn;
+    }
+}
+
+/* ---- Evaluation with the variable frame chain ---- */
+
+struct leptris_xpath_result* xslt_eval(XsltExec* ex,
+                                       LeptrisXPathCompiled c,
+                                       LeptrisElement node) {
+    if (!c || !ex) return NULL;
+
+    if (!ex->vars) {
+        return leptris_xpath_compiled_eval(c, ex->source, node);
+    }
+    /* Materialize the frame chain NEWEST-FIRST so the first-match
+     * scan in the evaluator resolves the innermost binding. */
+    if (!ex->varset) {
+        ex->varset = xpath_variable_set_new();
+        if (!ex->varset) return NULL;
+    }
+    for (XsltVar* v = ex->vars; v; v = v->prev) {
+        if (!v->name) continue;
+        switch (v->value ? v->value->type : XPATH_RESULT_STRING) {
+            case XPATH_RESULT_NUMBER: {
+                XPathVariable* xv = xpath_variable_set_add(
+                    ex->varset, v->name, XPATH_VAR_TYPE_NUMBER);
+                if (xv && v->value)
+                    xpath_variable_set_number(
+                        xv, v->value->value.number_value);
+                break;
+            }
+            case XPATH_RESULT_BOOLEAN: {
+                XPathVariable* xv = xpath_variable_set_add(
+                    ex->varset, v->name, XPATH_VAR_TYPE_BOOLEAN);
+                if (xv && v->value)
+                    xpath_variable_set_boolean(
+                        xv, v->value->value.boolean_value);
+                break;
+            }
+            case XPATH_RESULT_STRING: {
+                XPathVariable* xv = xpath_variable_set_add(
+                    ex->varset, v->name, XPATH_VAR_TYPE_STRING);
+                if (xv && v->value && v->value->value.string_value)
+                    xpath_variable_set_string(
+                        xv, v->value->value.string_value);
+                break;
+            }
+            case XPATH_RESULT_NODESET: {
+                /* Node-set variables pass through as the string of
+                 * the first node v1 (typed STRING — the var type and
+                 * the payload must agree); full node-set transport
+                 * lands with the key()/node-set() phase. */
+                char* sv = leptris_xpath_result_string(v->value);
+                XPathVariable* xv = xpath_variable_set_add(
+                    ex->varset, v->name, XPATH_VAR_TYPE_STRING);
+                if (xv && sv) {
+                    xpath_variable_set_string(xv, sv);
+                }
+                if (sv) leptris_free_string(sv);
+                break;
+            }
+            default: break;
+        }
+    }
+
+    struct leptris_xpath_result* r =
+        leptris_xpath_compiled_eval_vars(c, ex->source, node,
+                                         (LeptrisXPathVariableSet)ex->varset);
+
+    /* Clear the scratch set for the next evaluation. */
+    while (ex->varset->count > 0) {
+        xpath_variable_set_remove(ex->varset,
+                                  ex->varset->variables[0]->name);
+    }
+    return r;
+}
+
+void xslt_push_var(XsltExec* ex, const char* name,
+                   struct leptris_xpath_result* v) {
+    if (!ex || !name) return;
+    XsltVar* fv = (XsltVar*)calloc(1, sizeof(*fv));
+    if (!fv) return;
+    fv->name = name;
+    fv->value = v;
+    fv->prev = ex->vars;
+    ex->vars = fv;
+}
+
+void xslt_pop_var(XsltExec* ex, const char* name) {
+    if (!ex || !ex->vars) return;
+    XsltVar* top = ex->vars;
+    ex->vars = top->prev;
+    if (top->value) leptris_xpath_result_free(top->value);
+    free(top);
+    (void)name;
+}
+
+/* ---- Shared small helpers ---- */
+
+static LeptrisElement out_append_elem(XsltExec* ex, LeptrisElement parent,
+                                      const char* name, const char* ns) {
+    LeptrisElement e = leptris_element_create(ex->result, name);
+    if (!e) return NULL;
+    (void)ns;   /* namespace declarations on output: phase 03 */
+    if (!parent) {
+        LeptrisElement root = leptris_document_root(ex->result);
+        if (!root) {
+            leptris_document_set_root(ex->result, e);
+        } else {
+            /* XSLT permits multiple top-level result elements (the
+             * result is a fragment, not a document). The flat
+             * layout carries them as the root's SIBLING chain;
+             * apply_string serializes the whole chain. */
+            LeptrisElement last = root;
+            while (leptris_node_get_next_sibling(
+                       leptris_element_as_node(last)))
+                last = (LeptrisElement)leptris_node_get_next_sibling(
+                    leptris_element_as_node(last));
+            leptris_node_set_next_sibling(
+                leptris_element_as_node(last), leptris_element_as_node(e));
+        }
+    } else {
+        leptris_element_append_child(parent, e);
+    }
+    return e;
+}
+
+static void out_append_text(XsltExec* ex, LeptrisElement parent,
+                            const char* text) {
+    if (!text || !*text) return;
+    if (parent) {
+        LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
+        if (t) leptris_element_append_child(parent, (LeptrisElement)t);
+        return;
+    }
+    /* No insertion point yet: top-level text (the text output method
+     * and built-in rules produce it). Accumulated and prepended to
+     * the serialized result. */
+    size_t tl = strlen(text);
+    if (ex->top_text_len + tl + 1 > ex->top_text_cap) {
+        size_t cap = ex->top_text_cap ? ex->top_text_cap * 2 : 64;
+        while (cap < ex->top_text_len + tl + 1) cap *= 2;
+        char* grown = (char*)realloc(ex->top_text, cap);
+        if (!grown) return;
+        ex->top_text = grown;
+        ex->top_text_cap = cap;
+    }
+    memcpy(ex->top_text + ex->top_text_len, text, tl);
+    ex->top_text_len += tl;
+    ex->top_text[ex->top_text_len] = 0;
+}
+
+/* String-value of an element subtree (XPath string-value: all
+ * descendant text concatenated). */
+static char* string_value_deep(LeptrisElement e) {
+    /* Serialize + strip tags is wrong for CDATA-marked content;
+     * walk the tree collecting TEXT/CDATA contents. */
+    size_t cap = 64, len = 0;
+    char* buf = (char*)malloc(cap);
+    if (!buf) return NULL;
+    /* Iterative DFS via our own small stack. */
+    LeptrisNodeRef stack[256];
+    int sp = 0;
+    stack[sp++] = leptris_element_as_node(e);
+    while (sp > 0) {
+        LeptrisNodeRef n = stack[--sp];
+        int ty = leptris_node_get_type(n);
+        if (ty == LEPTRIS_NODE_TYPE_TEXT || ty == LEPTRIS_NODE_TYPE_CDATA) {
+            const char* t = leptris_text_get_content((LeptrisTextNode*)n);
+            if (t) {
+                size_t tl = strlen(t);
+                if (len + tl + 1 > cap) {
+                    while (len + tl + 1 > cap) cap *= 2;
+                    char* grown = (char*)realloc(buf, cap);
+                    if (!grown) { free(buf); return NULL; }
+                    buf = grown;
+                }
+                memcpy(buf + len, t, tl);
+                len += tl;
+            }
+        } else if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
+            /* Push children (order: append then reverse siblings by
+             * pushing last-first is unnecessary for concatenation). */
+            for (LeptrisNodeRef c = leptris_node_first_child(n); c;
+                 c = leptris_node_next_sibling(c)) {
+                if (sp < 256) stack[sp++] = c;
+            }
+        }
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+/* ---- Instruction handlers (registered below) ---- */
+
+/* Evaluate an attribute-value template: "a{expr}b" pieces are
+ * concatenated; {{ and }} are literal braces (§7.1.1). */
+static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
+    if (!tmpl) return leptris_strdup("");
+    size_t cap = strlen(tmpl) + 32, len = 0;
+    char* out = (char*)malloc(cap);
+    if (!out) return NULL;
+    const char* p = tmpl;
+    while (*p) {
+        if (*p == '{' && p[1] == '{') { p += 2;
+            if (len + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
+            out[len++] = '{';
+        } else if (*p == '}' && p[1] == '}') { p += 2;
+            if (len + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
+            out[len++] = '}';
+        } else if (*p == '{') {
+            /* Find the matching close brace (no nesting in AVTs). */
+            const char* close = strchr(p + 1, '}');
+            if (!close) {
+                if (len + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
+                out[len++] = *p++;
+                continue;
+            }
+            size_t elen = (size_t)(close - p - 1);
+            char* expr = (char*)malloc(elen + 1);
+            if (expr) {
+                memcpy(expr, p + 1, elen);
+                expr[elen] = 0;
+                LeptrisXPathCompiled c = leptris_xpath_compile(expr);
+                free(expr);
+                if (c) {
+                    struct leptris_xpath_result* r =
+                        xslt_eval(ex, c, node);
+                    char* sv = r ? leptris_xpath_result_string(r) : NULL;
+                    if (r) leptris_xpath_result_free(r);
+                    leptris_xpath_compiled_free(c);
+                    if (sv) {
+                        size_t sl = strlen(sv);
+                        while (len + sl + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
+                        memcpy(out + len, sv, sl);
+                        len += sl;
+                        leptris_free_string(sv);
+                    }
+                }
+            }
+            p = close + 1;
+        } else {
+            if (len + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
+            out[len++] = *p++;
+        }
+    }
+    if (!out) return NULL;
+    out[len] = 0;
+    return out;
+}
+
+static int op_result_elem(XsltExec* ex, const XsltInstr* in,
+                          LeptrisElement node) {
+    LeptrisElement parent = ex->pending_parent;
+    LeptrisElement e = out_append_elem(ex, parent, in->name, in->ns_uri);
+    if (!e) return -1;
+    /* Attribute-value templates on literal result elements. */
+    for (XsltLAttr* a = in->attrs; a; a = a->next) {
+        char* v = eval_avt(ex, a->value, node);
+        if (v) {
+            leptris_element_set_attribute(e, a->name, v);
+            free(v);
+        }
+    }
+    ex->pending_parent = e;
+    int rc = xslt_exec_instrs(ex, in->child, node);
+    ex->pending_parent = parent;
+    return rc;
+}
+
+static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    if (ex->sheet->out_method_text) {
+        out_append_text(ex, NULL, in->text);   /* text method: root-less */
+    } else if (ex->pending_parent) {
+        out_append_text(ex, ex->pending_parent, in->text);
+    } else {
+        out_append_text(ex, NULL, in->text);
+    }
+    return 0;
+}
+
+static int op_value_of(XsltExec* ex, const XsltInstr* in,
+                       LeptrisElement node) {
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    char* sv = leptris_xpath_result_string(r);
+    leptris_xpath_result_free(r);
+    if (sv) {
+        op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT, .text = sv },
+                node);
+        leptris_free_string(sv);
+    }
+    return 0;
+}
+
+static int op_for_each(XsltExec* ex, const XsltInstr* in,
+                       LeptrisElement node) {
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    size_t n = leptris_xpath_result_count(r);
+    /* Collect the element handles first: sort swaps them, and the
+     * result may be freed mid-iteration otherwise. */
+    LeptrisElement* items = (n > 0)
+        ? (LeptrisElement*)calloc(n, sizeof(LeptrisElement)) : NULL;
+    if (items) {
+        for (size_t i = 0; i < n; i++) {
+            items[i] = leptris_xpath_result_get(r, i);
+        }
+    }
+    leptris_xpath_result_free(r);
+    if (!items) return n ? -1 : 0;
+
+    /* xsl:sort v1: stable ordering by string/number key. */
+    if (in->sorts) {
+        /* Build a key array per sort (single-key v1: first sort). */
+        XsltSort* s = in->sorts;
+        char** keys = (char**)calloc(n, sizeof(char*));
+        double* nums = s->numeric ? (double*)calloc(n, sizeof(double)) : NULL;
+        for (size_t i = 0; i < n; i++) {
+            if (s->select) {
+                struct leptris_xpath_result* kr =
+                    xslt_eval(ex, s->select, items[i]);
+                if (kr) {
+                    /* Numeric keys convert through the STRING value
+                     * — result_number of a nodeset is NaN. */
+                    char* sv = leptris_xpath_result_string(kr);
+                    if (s->numeric) {
+                        nums[i] = sv ? strtod(sv, NULL) : 0.0;
+                        if (sv) free(sv);
+                    } else {
+                        keys[i] = sv;   /* ownership kept for compare */
+                    }
+                    leptris_xpath_result_free(kr);
+                }
+            } else {
+                char* sv = string_value_deep(items[i]);
+                if (sv) {
+                    if (s->numeric) nums[i] = strtod(sv, NULL);
+                    else keys[i] = sv;
+                    if (s->numeric) free(sv);
+                }
+            }
+        }
+        /* Insertion sort (stable, N is typical transform-sized). */
+        for (size_t i = 1; i < n; i++) {
+            for (size_t j = i; j > 0; j--) {
+                int swap;
+                if (s->numeric) {
+                    swap = s->descending ? nums[j-1] < nums[j]
+                                         : nums[j-1] > nums[j];
+                } else {
+                    const char* a = keys[j-1] ? keys[j-1] : "";
+                    const char* b = keys[j] ? keys[j] : "";
+                    int cmp = strcmp(a, b);
+                    swap = s->descending ? cmp < 0 : cmp > 0;
+                }
+                if (!swap) break;
+                LeptrisElement te = items[j-1]; items[j-1] = items[j]; items[j] = te;
+                if (s->numeric) { double td = nums[j-1]; nums[j-1] = nums[j]; nums[j] = td; }
+                else { char* tk = keys[j-1]; keys[j-1] = keys[j]; keys[j] = tk; }
+            }
+        }
+        for (size_t i = 0; i < n; i++) free(keys[i]);
+        free(keys);
+        free(nums);
+    }
+
+    int rc = 0;
+    for (size_t i = 0; i < n && rc == 0; i++) {
+        rc = xslt_exec_instrs(ex, in->child, items[i]);
+    }
+    free(items);
+    return rc;
+}
+
+static int op_if(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    struct leptris_xpath_result* r = xslt_eval(ex, in->test, node);
+    int truth = r ? leptris_xpath_result_boolean(r) : 0;
+    if (r) leptris_xpath_result_free(r);
+    if (!truth) return 0;
+    return xslt_exec_instrs(ex, in->child, node);
+}
+
+static int copy_node_deep(XsltExec* ex, LeptrisElement node,
+                          LeptrisElement parent);
+
+static int op_copy_of(XsltExec* ex, const XsltInstr* in,
+                      LeptrisElement node) {
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    if (leptris_xpath_result_count(r) > 0) {
+        size_t n = leptris_xpath_result_count(r);
+        for (size_t i = 0; i < n; i++) {
+            LeptrisNodeRef cn = leptris_xpath_result_get_node(r, i);
+            if (cn && leptris_node_get_type(cn) == LEPTRIS_NODE_TYPE_ELEMENT) {
+                copy_node_deep(ex, (LeptrisElement)cn, ex->pending_parent);
+            } else if (cn) {
+                /* Text/other nodes: append their string value. */
+                char* sv = NULL;
+                if (leptris_node_get_type(cn) == LEPTRIS_NODE_TYPE_TEXT ||
+                    leptris_node_get_type(cn) == LEPTRIS_NODE_TYPE_CDATA) {
+                    sv = leptris_strdup(leptris_text_get_content((LeptrisTextNode*)cn));
+                }
+                if (sv) {
+                    out_append_text(ex, ex->pending_parent, sv);
+                    free(sv);
+                }
+            }
+        }
+    } else {
+        char* sv = leptris_xpath_result_string(r);
+        if (sv) { out_append_text(ex, ex->pending_parent, sv); free(sv); }
+    }
+    leptris_xpath_result_free(r);
+    return 0;
+}
+
+static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    const char* name = leptris_element_get_name(node);
+    if (!name) return 0;
+    LeptrisElement e = out_append_elem(ex, ex->pending_parent, name, NULL);
+    if (!e) return -1;
+    /* Copy the attributes (v1: literal names). */
+    size_t na = leptris_element_attribute_count(node);
+    for (size_t i = 0; i < na; i++) {
+        const char* an = leptris_element_attribute_name_at(node, i);
+        const char* av = leptris_element_attribute_value_at(node, i);
+        if (an && av) leptris_element_set_attribute(e, an, av);
+    }
+    LeptrisElement saved = ex->pending_parent;
+    ex->pending_parent = e;
+    int rc = xslt_exec_instrs(ex, in->child, node);
+    ex->pending_parent = saved;
+    return rc;
+}
+
+static int copy_node_deep(XsltExec* ex, LeptrisElement node,
+                          LeptrisElement parent) {
+    const char* name = leptris_element_get_name(node);
+    if (!name) return -1;
+    LeptrisElement e = out_append_elem(ex, parent, name, NULL);
+    if (!e) return -1;
+    size_t na = leptris_element_attribute_count(node);
+    for (size_t i = 0; i < na; i++) {
+        const char* an = leptris_element_attribute_name_at(node, i);
+        const char* av = leptris_element_attribute_value_at(node, i);
+        if (an && av) leptris_element_set_attribute(e, an, av);
+    }
+    char* sv = string_value_deep(node);
+    if (sv) {
+        if (sv[0]) out_append_text(ex, e, sv);
+        free(sv);
+    }
+    /* Deep-copy child ELEMENTS too (mixed content round-trips). */
+    for (LeptrisNodeRef c = leptris_node_first_child(leptris_element_as_node(node));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
+            copy_node_deep(ex, (LeptrisElement)c, e);
+        }
+    }
+    return 0;
+}
+
+static int op_variable(XsltExec* ex, const XsltInstr* in,
+                       LeptrisElement node) {
+    if (!in->name) return 0;
+    struct leptris_xpath_result* v = NULL;
+    if (in->select) {
+        v = xslt_eval(ex, in->select, node);
+    } else if (in->child) {
+        /* RTF: build into a scratch fragment; the variable holds a
+         * nodeset of the top-level nodes. v1 stores the SERIALIZED
+         * string of the fragment (string/number use is the common
+         * case); node-set transport arrives with exslt:node-set. */
+        LeptrisElement saved = ex->pending_parent;
+        ex->pending_parent = NULL;
+        xslt_exec_instrs(ex, in->child, node);
+        ex->pending_parent = saved;
+        char* sv = NULL;
+        LeptrisElement rr = leptris_document_root(ex->result);
+        if (rr) {
+            sv = string_value_deep(rr);
+            leptris_document_free(ex->result);
+            ex->result = leptris_document_create();
+        }
+        v = (struct leptris_xpath_result*)calloc(1, sizeof(*v));
+        if (v) {
+            v->type = XPATH_RESULT_STRING;
+            v->value.string_value = sv ? sv : leptris_strdup("");
+            if (sv) { /* ownership moved */ }
+        } else {
+            free(sv);
+        }
+    }
+    xslt_push_var(ex, in->name, v);
+    return 0;
+}
+
+static int op_call_template(XsltExec* ex, const XsltInstr* in,
+                            LeptrisElement node) {
+    if (!in->name) return 0;
+    const XsltTemplate* t = NULL;
+    for (const XsltTemplate* ct = ex->sheet->templates; ct; ct = ct->next) {
+        if (ct->name && strcmp(ct->name, in->name) == 0) t = ct;
+    }
+    if (!t) return 0;
+
+    /* Bind with-params in a scope popped on return. */
+    int bound = 0;
+    for (const XsltInstr* wp = in->child; wp; wp = wp->next) {
+        if (wp->kind != XSLT_INSTR_WITH_PARAM || !wp->name) continue;
+        struct leptris_xpath_result* v =
+            wp->select ? xslt_eval(ex, wp->select, node) : NULL;
+        xslt_push_var(ex, wp->name, v);
+        bound++;
+    }
+    int rc = xslt_exec_instrs(ex, t->body, node);
+    for (int i = 0; i < bound; i++) xslt_pop_var(ex, NULL);
+    return rc;
+}
+
+static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
+                              LeptrisElement node) {
+    struct leptris_xpath_result* r = in->select
+        ? xslt_eval(ex, in->select, node)
+        : NULL;
+    size_t n = 0;
+    LeptrisElement* items = NULL;
+    if (r) {
+        n = leptris_xpath_result_count(r);
+        if (n) {
+            items = (LeptrisElement*)calloc(n, sizeof(LeptrisElement));
+            if (items) {
+                for (size_t i = 0; i < n; i++)
+                    items[i] = leptris_xpath_result_get(r, i);
+            }
+        }
+        leptris_xpath_result_free(r);
+    } else {
+        /* Default: children of the current node — TEXT children copy
+         * straight through (built-in text rule, §5.8); elements go
+         * through template selection. */
+        size_t cap = 8;
+        items = (LeptrisElement*)calloc(cap, sizeof(LeptrisElement));
+        if (items) {
+            for (LeptrisNodeRef c =
+                     leptris_node_first_child(leptris_element_as_node(node));
+                 c; c = leptris_node_next_sibling(c)) {
+                int ty = leptris_node_get_type(c);
+                if (ty == LEPTRIS_NODE_TYPE_TEXT ||
+                    ty == LEPTRIS_NODE_TYPE_CDATA) {
+                    const char* t = leptris_text_get_content(
+                        (LeptrisTextNode*)c);
+                    out_append_text(ex, ex->pending_parent, t ? t : "");
+                    continue;
+                }
+                if (ty != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+                if (n == cap) {
+                    cap *= 2;
+                    LeptrisElement* grown = (LeptrisElement*)realloc(
+                        items, cap * sizeof(LeptrisElement));
+                    if (!grown) { free(items); items = NULL; break; }
+                    items = grown;
+                }
+                items[n++] = (LeptrisElement)c;
+            }
+        }
+    }
+    if (!items) return n ? -1 : 0;
+
+    /* Bind with-params for the selected template(s). */
+    int bound = 0;
+    for (const XsltInstr* wp = in->child; wp; wp = wp->next) {
+        if (wp->kind != XSLT_INSTR_WITH_PARAM || !wp->name) continue;
+        struct leptris_xpath_result* v =
+            wp->select ? xslt_eval(ex, wp->select, node) : NULL;
+        xslt_push_var(ex, wp->name, v);
+        bound++;
+    }
+
+    const char* mode = in->name;   /* mode attr parsed into ->name */
+    int rc = 0;
+    for (size_t i = 0; i < n && rc == 0; i++) {
+        /* Template selection: highest (priority, order) match. */
+        const XsltTemplate* best = NULL;
+        double best_pri = 0;
+        for (const XsltTemplate* t = ex->sheet->templates; t; t = t->next) {
+            if (!t->matches) continue;
+            if ((mode && !t->mode) || (!mode && t->mode)) continue;
+            if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
+            if (!xslt_pattern_matches(t->matches, items[i], ex->source))
+                continue;
+            double pri = t->matches->priority;   /* alt max v1 */
+            for (const XsltPattern* pa = t->matches->next; pa; pa = pa->next)
+                if (pa->priority > pri) pri = pa->priority;
+            if (!best || pri > best_pri) {
+                best = t;
+                best_pri = pri;
+            }
+        }
+        if (best) {
+            rc = xslt_exec_instrs(ex, best->body, items[i]);
+        } else {
+            /* Built-in template rules (§5.8): apply-templates for
+             * elements; text copied for text; nothing otherwise. */
+            rc = op_apply_templates(
+                ex,
+                &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                items[i]);
+        }
+    }
+    for (int i = 0; i < bound; i++) xslt_pop_var(ex, NULL);
+    free(items);
+    return rc;
+}
+
+static int op_element(XsltExec* ex, const XsltInstr* in,
+                      LeptrisElement node) {
+    char* name = NULL;
+    if (in->select) {
+        struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+        if (r) name = leptris_xpath_result_string(r);
+        if (r) leptris_xpath_result_free(r);
+    } else if (in->name) {
+        name = leptris_strdup(in->name);
+    }
+    if (!name) return 0;
+    LeptrisElement e = out_append_elem(ex, ex->pending_parent, name,
+                                       in->ns_uri);
+    free(name);
+    if (!e) return -1;
+    LeptrisElement saved = ex->pending_parent;
+    ex->pending_parent = e;
+    int rc = xslt_exec_instrs(ex, in->child, node);
+    ex->pending_parent = saved;
+    return rc;
+}
+
+static int op_attribute(XsltExec* ex, const XsltInstr* in,
+                        LeptrisElement node) {
+    if (!in->name || !ex->pending_parent) return 0;
+    /* Content becomes the value: execute into a text accumulator. */
+    char* acc = (char*)calloc(1, 1);
+    size_t len = 0;
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind == XSLT_INSTR_TEXT && c->text) {
+            size_t tl = strlen(c->text);
+            acc = (char*)realloc(acc, len + tl + 1);
+            if (!acc) return -1;
+            memcpy(acc + len, c->text, tl);
+            len += tl;
+            acc[len] = 0;
+        } else if (c->kind == XSLT_INSTR_VALUE_OF && c->select) {
+            struct leptris_xpath_result* r = xslt_eval(ex, c->select, node);
+            if (r) {
+                char* sv = leptris_xpath_result_string(r);
+                leptris_xpath_result_free(r);
+                if (sv) {
+                    size_t sl = strlen(sv);
+                    acc = (char*)realloc(acc, len + sl + 1);
+                    if (acc) {
+                        memcpy(acc + len, sv, sl);
+                        len += sl;
+                        acc[len] = 0;
+                    }
+                    leptris_free_string(sv);
+                }
+            }
+        }
+    }
+    leptris_element_set_attribute(ex->pending_parent, in->name, acc);
+    free(acc);
+    return 0;
+}
+
+static int op_comment(XsltExec* ex, const XsltInstr* in,
+                      LeptrisElement node) {
+    char* acc = (char*)calloc(1, 1);
+    size_t len = 0;
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind == XSLT_INSTR_TEXT && c->text) {
+            size_t tl = strlen(c->text);
+            acc = (char*)realloc(acc, len + tl + 1);
+            memcpy(acc + len, c->text, tl);
+            len += tl;
+            acc[len] = 0;
+        }
+    }
+    LeptrisNodeRef cm = leptris_comment_node_create(ex->result, acc);
+    if (cm && ex->pending_parent) {
+        leptris_element_append_child(ex->pending_parent, (LeptrisElement)cm);
+    }
+    free(acc);
+    return 0;
+}
+
+static int op_pi(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    char* acc = (char*)calloc(1, 1);
+    size_t len = 0;
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind == XSLT_INSTR_TEXT && c->text) {
+            size_t tl = strlen(c->text);
+            acc = (char*)realloc(acc, len + tl + 1);
+            memcpy(acc + len, c->text, tl);
+            len += tl;
+            acc[len] = 0;
+        }
+    }
+    LeptrisNodeRef pi = leptris_pi_node_create(ex->result, in->name, acc);
+    if (pi && ex->pending_parent) {
+        leptris_element_append_child(ex->pending_parent, (LeptrisElement)pi);
+    }
+    free(acc);
+    return 0;
+}
+
+static int op_message(XsltExec* ex, const XsltInstr* in,
+                      LeptrisElement node) {
+    char* acc = (char*)calloc(1, 1);
+    size_t len = 0;
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind == XSLT_INSTR_TEXT && c->text) {
+            size_t tl = strlen(c->text);
+            acc = (char*)realloc(acc, len + tl + 1);
+            memcpy(acc + len, c->text, tl);
+            len += tl;
+            acc[len] = 0;
+        }
+    }
+    fprintf(stderr, "xslt:message: %s\n", acc);
+    free(acc);
+    if (in->terminate) ex->terminated = 1;
+    return 0;
+}
+
+/* Format a positive integer per XSLT number formats (1, 01, a, A,
+ * i, I with format tokens). */
+static void format_number_token(unsigned long v, char spec,
+                                char* out, size_t outsz) {
+    static const char* lower = "abcdefghijklmnopqrstuvwxyz";
+    static const char* roman_l[] =
+        {"","i","ii","iii","iv","v","vi","vii","viii","ix","x",
+         "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx",
+         "xxi","xxii","xxiii","xxiv","xxv","xxvi","xxvii","xxviii","xxix","xxx",
+         "xl","xli","xlii","xliii","xliv","xlv","xlvi","xlvii","xlviii","xlix","l"};
+    switch (spec) {
+        case 'a': {
+            if (v == 0) { snprintf(out, outsz, "a"); break; }
+            size_t o = 0;
+            unsigned long x = v;
+            char tmp[16];
+            int ti = 0;
+            while (x && ti < 15) {
+                tmp[ti++] = lower[(x - 1) % 26];
+                x = (x - 1) / 26;
+            }
+            while (ti-- > 0 && o < outsz - 1) out[o++] = tmp[ti];
+            out[o] = 0;
+            break;
+        }
+        case 'A': {
+            format_number_token(v, 'a', out, outsz);
+            for (char* p = out; *p; p++) *p = (char)toupper((unsigned char)*p);
+            break;
+        }
+        case 'i':
+        case 'I': {
+            const char* r = v <= 50 ? roman_l[v] : "";
+            if (spec == 'I') {
+                snprintf(out, outsz, "%s", r);
+                for (char* p = out; *p; p++)
+                    *p = (char)toupper((unsigned char)*p);
+            } else {
+                snprintf(out, outsz, "%s", r);
+            }
+            break;
+        }
+        default:
+            snprintf(out, outsz, "%lu", v);
+            break;
+    }
+}
+
+/* ---- xsl:number counting (§7.7) ----
+ * Correctness first: the any-level walk is O(document); the pattern
+ * fast paths from template matching (expr_name) do not apply here
+ * because count/from are arbitrary patterns. */
+
+static LeptrisElement next_doc_order(LeptrisElement e) {
+    LeptrisElement c = leptris_element_first_child_any(e);
+    if (c) return c;
+    while (e) {
+        LeptrisElement n = leptris_element_next_sibling_any(e);
+        if (n) return n;
+        e = leptris_node_parent((LeptrisNodeRef)e);
+    }
+    return NULL;
+}
+
+/* Count predicate: the count pattern, or (default) the same expanded
+ * name as the node being numbered. */
+static int count_matches(const XsltInstr* in, LeptrisElement cand,
+                         LeptrisElement ref, LeptrisDocument doc) {
+    if (in->num_count) {
+        XsltPattern pat;
+        memset(&pat, 0, sizeof(pat));
+        pat.expr = in->num_count;
+        return xslt_pattern_matches(&pat, cand, doc);
+    }
+    const char* a = leptris_element_get_name(cand);
+    const char* b = leptris_element_get_name(ref);
+    return a && b && strcmp(a, b) == 0;
+}
+
+static int from_matches(const XsltInstr* in, LeptrisElement cand,
+                        LeptrisDocument doc) {
+    if (!in->num_from) return 0;
+    XsltPattern pat;
+    memset(&pat, 0, sizeof(pat));
+    pat.expr = in->num_from;
+    return xslt_pattern_matches(&pat, cand, doc);
+}
+
+/* Position of `target` among preceding siblings matching count. */
+static unsigned long sibling_number(const XsltInstr* in,
+                                    LeptrisElement target,
+                                    LeptrisDocument doc) {
+    unsigned long pos = 1;
+    LeptrisElement parent = leptris_node_parent((LeptrisNodeRef)target);
+    for (LeptrisElement c = leptris_element_first_child_any(parent); c;
+         c = leptris_element_next_sibling_any(c)) {
+        if (c == target) return pos;
+        if (count_matches(in, c, target, doc)) pos++;
+    }
+    return pos;
+}
+
+/* any: how many matching nodes precede `node` in document order. */
+static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
+                                LeptrisDocument doc) {
+    unsigned long pos = 1;
+    for (LeptrisElement e = leptris_document_root(doc); e;
+         e = next_doc_order(e)) {
+        if (e == node) return pos;
+        if (count_matches(in, e, node, doc)) pos++;
+    }
+    return 0;   /* detached node: §7.7 says nothing is emitted */
+}
+
+static void emit_number_chunk(unsigned long v, char spec,
+                              int group_size, char group_sep,
+                              char* out, size_t outsz) {
+    char raw[64];
+    format_number_token(v, spec, raw, sizeof(raw));
+    if (group_size > 0 && group_sep) {
+        size_t gl = strlen(raw), o = 0, cnt = 0;
+        char rev[128];
+        for (size_t i = gl; i-- > 0 && o < sizeof(rev) - 2;) {
+            rev[o++] = raw[i];
+            if (++cnt % (size_t)group_size == 0 && i > 0)
+                rev[o++] = group_sep;
+        }
+        size_t n = o < outsz - 1 ? o : outsz - 1;
+        for (size_t i = 0; i < n; i++) out[i] = rev[o - 1 - i];
+        out[n] = 0;
+    } else {
+        snprintf(out, outsz, "%s", raw);
+    }
+}
+
+/* §7.7.1: number tokens in the format string map to numbers in
+ * order — the LAST token repeats for extra numbers; literal runs are
+ * the prefix (before the first token), separators (between tokens),
+ * and suffix (after the last, emitted only when the last token was
+ * used). */
+static void emit_formatted_numbers(const unsigned long* values, int nv,
+                                   const char* fmt, const XsltInstr* in,
+                                   char* out, size_t outsz) {
+    char specs[32];
+    char sepbuf[32][48];
+    char prefixbuf[48];
+    size_t prefix_len = 0;
+    int ns = 0;
+    const char* p = fmt;
+
+    while (*p && !(*p == '1' || *p == 'a' || *p == 'A' ||
+                   *p == 'i' || *p == 'I')) {
+        if (prefix_len + 1 < sizeof(prefixbuf))
+            prefixbuf[prefix_len++] = *p;
+        p++;
+    }
+    prefixbuf[prefix_len] = 0;
+
+    while (*p && ns < 32) {
+        specs[ns++] = *p++;
+        size_t sl = 0;
+        while (*p && sl + 1 < sizeof(sepbuf[0]) &&
+               !(*p == '1' || *p == 'a' || *p == 'A' ||
+                 *p == 'i' || *p == 'I')) {
+            sepbuf[ns - 1][sl++] = *p++;
+        }
+        sepbuf[ns - 1][sl] = 0;
+    }
+    if (ns == 0) {
+        specs[0] = '1';   /* junk format: default is "1" */
+        sepbuf[0][0] = 0;
+        ns = 1;
+    }
+
+    size_t o = 0;
+    for (const char* s = prefixbuf; *s && o < outsz - 1; s++) out[o++] = *s;
+    for (int i = 0; i < nv && o < outsz - 1; i++) {
+        if (i > 0) {
+            const char* sep = "";
+            if (ns > 1) sep = sepbuf[i - 1 <= ns - 2 ? i - 1 : ns - 2];
+            for (const char* s = sep; *s && o < outsz - 1; s++) out[o++] = *s;
+        }
+        char chunk[128];
+        emit_number_chunk(values[i], specs[i < ns ? i : ns - 1],
+                          in->num_group_size, in->num_group_sep,
+                          chunk, sizeof(chunk));
+        for (const char* s = chunk; *s && o < outsz - 1; s++) out[o++] = *s;
+    }
+    if (nv >= ns) {   /* the last token was used → its tail is the suffix */
+        for (const char* s = sepbuf[ns - 1]; *s && o < outsz - 1; s++)
+            out[o++] = *s;
+    }
+    out[o] = 0;
+}
+
+static int op_number(XsltExec* ex, const XsltInstr* in,
+                     LeptrisElement node) {
+    unsigned long values[64];
+    int nv = 0;
+
+    if (in->num_value) {
+        struct leptris_xpath_result* r =
+            xslt_eval(ex, in->num_value, node);
+        if (r) {
+            double d = leptris_xpath_result_number(r);
+            leptris_xpath_result_free(r);
+            if (!(d == d) || d < 0) {
+                op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT,
+                                          .text = "NaN" }, node);
+                return 0;
+            }
+            values[0] = (unsigned long)(d + 0.5);
+        } else {
+            values[0] = 1;
+        }
+        nv = 1;
+    } else if (in->num_level == 2) {
+        values[0] = any_number(in, node, ex->source);
+        if (!values[0]) return 0;
+        nv = 1;
+    } else if (in->num_level == 1) {
+        /* multiple: every ancestor-or-self matching count, outermost
+         * first, stopping above the nearest `from` match. */
+        unsigned long rev[64];
+        int nr = 0;
+        for (LeptrisElement a = node; a && nr < 64;
+             a = leptris_node_parent((LeptrisNodeRef)a)) {
+            if (count_matches(in, a, node, ex->source))
+                rev[nr++] = sibling_number(in, a, ex->source);
+            if (from_matches(in, a, ex->source)) break;
+        }
+        for (int i = 0; i < nr; i++) values[i] = rev[nr - 1 - i];
+        nv = nr;
+    } else {
+        /* single: nearest ancestor-or-self matching count. */
+        LeptrisElement target = NULL;
+        for (LeptrisElement a = node; a;
+             a = leptris_node_parent((LeptrisNodeRef)a)) {
+            if (count_matches(in, a, node, ex->source)) { target = a; break; }
+            if (from_matches(in, a, ex->source)) break;
+        }
+        if (!target) return 0;   /* §7.7: no match → nothing emitted */
+        values[0] = sibling_number(in, target, ex->source);
+        nv = 1;
+    }
+
+    char out[512];
+    emit_formatted_numbers(values, nv,
+                           in->num_format ? in->num_format : "1",
+                           in, out, sizeof(out));
+    op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT, .text = out }, node);
+    return 0;
+}
+
+static int op_choose(XsltExec* ex, const XsltInstr* in,
+                     LeptrisElement node) {
+    /* Arms are WHEN (with test) / OTHERWISE children in order. */
+    for (const XsltInstr* arm = in->child; arm; arm = arm->next) {
+        if (arm->kind == XSLT_INSTR_WHEN && arm->test) {
+            struct leptris_xpath_result* r = xslt_eval(ex, arm->test, node);
+            int truth = r ? leptris_xpath_result_boolean(r) : 0;
+            if (r) leptris_xpath_result_free(r);
+            if (truth) return xslt_exec_instrs(ex, arm->child, node);
+        } else if (arm->kind == XSLT_INSTR_OTHERWISE) {
+            return xslt_exec_instrs(ex, arm->child, node);
+        }
+    }
+    return 0;
+}
+
+/* ---- The walker ---- */
+
+int xslt_exec_instrs(XsltExec* ex, const XsltInstr* list,
+                     LeptrisElement node) {
+    if (ex->terminated) return -1;
+    for (const XsltInstr* in = list; in; in = in->next) {
+        XsltInstrFn fn = g_ops[in->kind];
+        if (fn) {
+            int rc = fn(ex, in, node);
+            if (rc) return rc;
+        } else if (in->kind == XSLT_INSTR_VARIABLE) {
+            int rc = op_variable(ex, in, node);
+            if (rc) return rc;
+        }
+    }
+    return 0;
+}
+
+/* CHOOSE execution needs its own scan; simplest correct wiring:
+ * expose it through a WHEN handler that consults its siblings via
+ * the walker order (see xslt_exec_choose below). */
+
+static void register_ops(void) {
+    static int done = 0;
+    if (done) return;
+    done = 1;
+    g_ops[XSLT_INSTR_RESULT_ELEM] = op_result_elem;
+    g_ops[XSLT_INSTR_TEXT] = op_text;
+    g_ops[XSLT_INSTR_VALUE_OF] = op_value_of;
+    g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
+    g_ops[XSLT_INSTR_IF] = op_if;
+    g_ops[XSLT_INSTR_APPLY_TEMPLATES] = op_apply_templates;
+    g_ops[XSLT_INSTR_CALL_TEMPLATE] = op_call_template;
+    g_ops[XSLT_INSTR_COPY_OF] = op_copy_of;
+    g_ops[XSLT_INSTR_COPY] = op_copy;
+    g_ops[XSLT_INSTR_ELEMENT] = op_element;
+    g_ops[XSLT_INSTR_ATTRIBUTE] = op_attribute;
+    g_ops[XSLT_INSTR_COMMENT] = op_comment;
+    g_ops[XSLT_INSTR_PI] = op_pi;
+    g_ops[XSLT_INSTR_MESSAGE] = op_message;
+    g_ops[XSLT_INSTR_NUMBER] = op_number;
+    g_ops[XSLT_INSTR_CHOOSE] = op_choose;
+}
+
+/* ---- Public transform ---- */
+
+void xslt_exec_free(XsltExec* ex) {
+    if (!ex) return;
+    while (ex->vars) xslt_pop_var(ex, NULL);
+    free(ex->top_text);
+    if (ex->varset) xpath_variable_set_free(ex->varset);
+    if (ex->scratch) leptris_document_free(ex->scratch);
+    if (ex->result) leptris_document_free(ex->result);
+    free(ex->message);
+    free(ex);
+}
+
+XsltExec* xslt_transform(const XsltStylesheet* sheet,
+                         LeptrisDocument source) {
+    if (!sheet || !source) return NULL;
+    register_ops();
+
+    XsltExec* ex = (XsltExec*)calloc(1, sizeof(*ex));
+    if (!ex) return NULL;
+    ex->sheet = sheet;
+    ex->source = source;
+    ex->result = leptris_document_create();
+    if (!ex->result) { xslt_exec_free(ex); return NULL; }
+
+    /* Globals. */
+    for (const XsltInstr* g = sheet->globals; g; g = g->next) {
+        if (g->kind == XSLT_INSTR_VARIABLE) op_variable(ex, g, NULL);
+    }
+    if (ex->terminated) return ex;
+
+    /* Root invocation: the best-matching template for the root
+     * element (same selection rule as apply-templates), else the
+     * built-in rule (which recurses into children). */
+    const XsltTemplate* root_t = NULL;
+    double best_pri = 0;
+    LeptrisElement root_sel = leptris_document_root(source);
+    for (const XsltTemplate* t = sheet->templates; t; t = t->next) {
+        if (!t->matches || t->mode) continue;
+        if (!xslt_pattern_matches(t->matches, root_sel, source)) continue;
+        double pri = t->matches->priority;
+        for (const XsltPattern* pa = t->matches->next; pa; pa = pa->next)
+            if (pa->priority > pri) pri = pa->priority;
+        if (!root_t || pri > best_pri) { root_t = t; best_pri = pri; }
+    }
+
+    LeptrisElement root = leptris_document_root(source);
+    if (!root) return ex;
+    if (root_t) {
+        xslt_exec_instrs(ex, root_t->body, root);
+    } else {
+        op_apply_templates(
+            ex, &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+            root);
+    }
+    return ex;
+}
+
+const char* xslt_exec_take_top_text(XsltExec* ex) {
+    return ex ? ex->top_text : NULL;
+}
