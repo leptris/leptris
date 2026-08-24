@@ -748,6 +748,9 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         ttdtd_free((LeptrisDTD*)doc->dtd);
     }
 
+    /* Issue #541: release the serialization mem-cache. */
+    free(doc->ser_cache);
+
     /* Free processing instructions */
     struct leptris_processing_instruction* pi = doc->pis;
     while (pi) {
