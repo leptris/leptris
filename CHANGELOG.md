@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-24
+
+### Fixed
+
+- the four open user issues — sibling-move corruption, union attribute dangling, detached PI mutation, document PI API
+
+
+
 ## [1.5.1] - 2026-08-24
 
 Two correctness fixes (#527).
