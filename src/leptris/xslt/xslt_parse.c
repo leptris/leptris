@@ -98,6 +98,33 @@ static LeptrisXPathCompiled compile_attr_sp(SheetParser* sp,
     return c;
 }
 
+
+/* Portable, reentrant tokenizer (strtok_r is POSIX-only; the
+ * import/include recursion also makes plain strtok unsafe). */
+static char* xslt_strtok(char* s, const char* delims, char** save) {
+    char* p = s ? s : *save;
+    if (!p) return NULL;
+    while (*p) {
+        const char* d = delims;
+        int hit = 0;
+        while (*d) { if (*p == *d) { hit = 1; break; } d++; }
+        if (!hit) break;
+        p++;
+    }
+    if (!*p) { *save = p; return NULL; }
+    char* tok = p;
+    while (*p) {
+        const char* d = delims;
+        int hit = 0;
+        while (*d) { if (*p == *d) { hit = 1; break; } d++; }
+        if (hit) break;
+        p++;
+    }
+    if (*p) { *p = 0; *save = p + 1; }
+    else *save = p;
+    return tok;
+}
+
 static XsltInstr* instr_new(XsltInstrKind k) {
     XsltInstr* in = (XsltInstr*)calloc(1, sizeof(*in));
     if (in) in->kind = k;
@@ -123,8 +150,8 @@ static size_t collect_attr_sets(XsltInstr* in, LeptrisElement e) {
     size_t cap = 0, cnt = 0;
     char** arr = NULL;
     char* save = NULL;
-    for (char* tok = strtok_r(dup, " \t\n,", &save); tok;
-         tok = strtok_r(NULL, " \t\n,", &save)) {
+    for (char* tok = xslt_strtok(dup, " \t\n,", &save); tok;
+         tok = xslt_strtok(NULL, " \t\n,", &save)) {
         if (cnt == cap) {
             cap = cap ? cap * 2 : 4;
             char** na = (char**)realloc(arr, cap * sizeof(char*));
@@ -657,13 +684,13 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                     size_t cap = 4, cnt = 0;
                     char** arr = (char**)malloc(cap * sizeof(char*));
                     char* save = NULL;
-                    char* tok = strtok_r(tmp, " \t\n,", &save);
+                    char* tok = xslt_strtok(tmp, " \t\n,", &save);
                     while (tok) {
                         if (cnt + 1 >= cap) { cap *= 2;
                             arr = (char**)realloc(arr, cap * sizeof(char*)); }
                         arr[cnt++] = leptris_strdup(tok);
                         arr[cnt] = NULL;
-                        tok = strtok_r(NULL, " \t\n,", &save);
+                        tok = xslt_strtok(NULL, " \t\n,", &save);
                     }
                     free(tmp);
                     sp->sheet->out_cdata_elems = arr;
@@ -840,6 +867,7 @@ static void free_instr(XsltInstr* in) {
     free((void*)in->ns_uri);
     free((void*)in->text);
     free((void*)in->num_format);
+    free((void*)in->letter_value);
     while (in->sorts) {
         XsltSort* s = in->sorts;
         in->sorts = s->next;

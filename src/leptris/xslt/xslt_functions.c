@@ -25,8 +25,15 @@
 #include "../dom/element.h"
 #include "../dtd/model.h"
 #include <stdio.h>
-#include <regex.h>
 #include <time.h>
+/* POSIX ERE for the EXSLT regexp handlers. MSVC has no <regex.h>;
+ * Windows builds register no-op stubs until a portable engine
+ * lands (documented limitation — tracked with TODO.xpath2's
+ * expression work, which brings its own regex layer). */
+#ifndef _WIN32
+#include <regex.h>
+#define LEPTRIS_XSLT_HAVE_REGEX 1
+#endif
 #include <string.h>
 #include <stdlib.h>
 
@@ -623,6 +630,7 @@ static struct leptris_xpath_result* xslt_fn_regexp_test(
     struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
     if (!r) { free(src); free(patstr); return NULL; }
     int matched = 0;
+#ifdef LEPTRIS_XSLT_HAVE_REGEX
     if (src && patstr) {
         regex_t rx;
         if (regcomp(&rx, patstr, REG_EXTENDED) == 0) {
@@ -630,6 +638,9 @@ static struct leptris_xpath_result* xslt_fn_regexp_test(
             regfree(&rx);
         }
     }
+#else
+    (void)src; (void)patstr;
+#endif
     r->value.boolean_value = matched;
     free(src); free(patstr);
     return r;
@@ -687,8 +698,9 @@ static struct leptris_xpath_result* xslt_fn_regexp_replace_v1(
         free(src); free(patstr); free(repl); free(flags);
         return res_string("");
     }
-    regex_t rx;
     struct leptris_xpath_result* r = NULL;
+#ifdef LEPTRIS_XSLT_HAVE_REGEX
+    regex_t rx;
     if (regcomp(&rx, patstr, REG_EXTENDED) != 0) {
         free(src); free(patstr); free(repl); free(flags);
         return res_string("");
@@ -734,6 +746,10 @@ static struct leptris_xpath_result* xslt_fn_regexp_replace_v1(
     r = res_string(out);
     free(out);
     regfree(&rx);
+#else
+    (void)flags;
+    r = res_string(src);
+#endif
     free(src); free(patstr); free(repl); free(flags);
     return r;
 }
