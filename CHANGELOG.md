@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-24
+
+### Fixed
+
+- element serialize subtree leak (#523) + unprefixed XPath name tests match no-namespace only (#525)
+
+
+
 ## [1.5.0] - 2026-08-24
 
 The TODO.engine board — post-v1.4.0 gaps from shipping the last two
