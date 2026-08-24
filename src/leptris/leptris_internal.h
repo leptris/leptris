@@ -75,6 +75,14 @@ struct leptris_processing_instruction {
     struct leptris_processing_instruction* next; /* Linked list */
 };
 
+/* Top-level comment (outside the root element), the comment twin of
+ * doc->pis: heap-owned, strdup'd content, chained in parse order
+ * (#550 sweep fallout — the parser carved these but dropped them). */
+struct leptris_top_comment {
+    char* content;
+    struct leptris_top_comment* next;
+};
+
 /* Document structure */
 /* Contiguous block of mutation elements (round 18). Chained via
  * next; freed with the document. Elements are carved from [base,
@@ -116,6 +124,7 @@ struct leptris_document {
     int exslt_enabled;
     char* encoding;                 /* UTF-8 assumed, but store if specified */
     struct leptris_processing_instruction* pis;  /* Processing instructions */
+    struct leptris_top_comment* top_comments;    /* Comments outside root */
     size_t ref_count;               /* Reference counting for memory management */
     void* new_dom_root;             /* New DOM tree root (LeptrisElement) for serialization */
     /* XML Declaration support */

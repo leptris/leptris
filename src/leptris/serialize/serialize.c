@@ -735,7 +735,7 @@ static int ser_children_have_text(LeptrisNode* fc) {
  * one) and the PIs instead of returning an empty string. */
 static char* serialize_rootless_pis(struct leptris_document* doc,
                                     const LeptrisSerializeOptions* options) {
-    if (!doc || !doc->pis) return NULL;
+    if (!doc || (!doc->pis && !doc->top_comments)) return NULL;
     SerializeBuffer* pibuf = buffer_create(0);
     if (!pibuf) return NULL;
     int xml_declaration = options ? options->xml_declaration : 1;
@@ -768,6 +768,13 @@ static char* serialize_rootless_pis(struct leptris_document* doc,
             buffer_append(pibuf, pi->data);
         }
         buffer_append(pibuf, "?>");
+    }
+    /* Top-level comments (outside root) — the doc->pis twin. */
+    for (struct leptris_top_comment* tc = doc->top_comments;
+         tc; tc = tc->next) {
+        buffer_append(pibuf, "<!--");
+        if (tc->content) buffer_append(pibuf, tc->content);
+        buffer_append(pibuf, "-->");
     }
     char* out = buffer_to_string(pibuf);
     buffer_free(pibuf);
@@ -1354,6 +1361,21 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
             buffer_append(buf, pi->data);
         }
         buffer_append(buf, "?>");
+        if (indent_spaces > 0) {
+            buffer_append_newline(buf);
+        }
+    }
+
+    /* Top-level comments (outside root) — emitted before the root,
+     * after doc-level PIs. Each chain preserves its own parse order;
+     * cross-chain interleaving is not tracked (same limitation as
+     * the PI chain). */
+    for (struct leptris_top_comment* tc = doc->top_comments;
+         tc;
+         tc = tc->next) {
+        buffer_append(buf, "<!--");
+        if (tc->content) buffer_append(buf, tc->content);
+        buffer_append(buf, "-->");
         if (indent_spaces > 0) {
             buffer_append_newline(buf);
         }
