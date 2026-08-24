@@ -2,13 +2,26 @@
 
 ## [1.6.1] - 2026-08-24
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+Legacy purge + full public-surface spec coverage (#532). No API
+change.
 
-### Changed
+### Removed
 
-- (describe changes here)
+- The legacy `archive/` tree (13 files, none compiled): old parser
+  implementations superseded by direct_parse, the disabled DTD
+  validator and XInclude prototypes, and the `.bak2` evaluator
+  backup — all preserved in git history
 
+### Testing
+
+- **Every exported symbol is now exercised by specs: 217/217**
+  (was 180). New test/abi/test_public_surface.cpp covers the 37
+  previously untested functions — navigation, typed getters, the
+  copy family, file I/O round-trips, document adopt/finalize,
+  namespace declaration accessors, memory-hook getters — with
+  failure contracts, not just happy paths. Confirmed under test:
+  adopt_child keeps the adopted document's pool alive via the
+  parent (the child must not be freed separately)
 
 ## [1.6.0] - 2026-08-24
 
