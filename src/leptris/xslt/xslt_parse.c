@@ -863,6 +863,9 @@ static void free_instr(XsltInstr* in) {
     free_instr_list(in->child);
     if (in->test) leptris_xpath_compiled_free(in->test);
     if (in->select) leptris_xpath_compiled_free(in->select);
+    if (in->num_value) leptris_xpath_compiled_free(in->num_value);
+    if (in->num_count) leptris_xpath_compiled_free(in->num_count);
+    if (in->num_from) leptris_xpath_compiled_free(in->num_from);
     free((void*)in->name);
     free((void*)in->ns_uri);
     free((void*)in->text);
