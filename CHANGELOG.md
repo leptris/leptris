@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.6.2] - 2026-08-24
+
+### Fixed
+
+- never indent inside mixed-content elements (#534) (serialize)
+
+
+
 ## [1.6.1] - 2026-08-24
 
 Legacy purge + full public-surface spec coverage (#532). No API
