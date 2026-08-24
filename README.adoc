@@ -458,6 +458,16 @@ only after the last evaluation returns. Context variants:
 `leptris_xpath_compiled_eval_vars` ($var references) — compiled
 counterparts of `leptris_xpath_eval_ns` / `eval_with_vars_context`.
 
+=== FFI ergonomics (issue #535)
+
+`leptris_node_children(parent, out, max)` copies every child handle
+in one call (elements, text, comments, CDATA, PIs) — out=NULL
+returns the total across all kinds. `leptris_document_serialize_into`
+/ `leptris_element_serialize_into` write into a caller buffer:
+buf=NULL queries the needed size (including NUL); with capacity the
+copy happens in the same call — the serialize + read + free FFI
+pattern collapses to one call with zero library-side allocations.
+
 === Per-parse options
 
 `TODO.bindings/05`: scoped alternative to the thread-global

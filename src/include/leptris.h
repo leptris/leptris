@@ -156,6 +156,28 @@ LEPTRIS_API LeptrisNodeRef leptris_node_previous_sibling(LeptrisNodeRef node);
 LEPTRIS_API size_t leptris_node_child_count(LeptrisNodeRef node);
 
 /**
+ * Copy child node handles of ANY kind into a caller array (issue #535)
+ *
+ * One call instead of first_child + N next_sibling round-trips —
+ * elements, text, comments, CDATA and PIs alike. Same shape as
+ * leptris_xpath_result_get_nodes_ex.
+ *
+ * @param parent Parent node (any type that can hold children)
+ * @param out_nodes Output array of child node handles, or NULL for
+ *                  a count-only query
+ * @param max_count Capacity of out_nodes
+ * @return With out_nodes NULL: the TOTAL child count across every
+ *         kind (leptris_node_child_count counts elements only, so
+ *         it cannot size a mixed array). With out_nodes non-NULL:
+ *         the number of handles copied, min(total, max_count).
+ *
+ * Memory: Nodes are owned by the document. Do not free separately.
+ */
+LEPTRIS_API size_t leptris_node_children(LeptrisNodeRef parent,
+                                         LeptrisNodeRef* out_nodes,
+                                         size_t max_count);
+
+/**
  * Cast node to element (if node is an element)
  *
  * @param node Node handle
@@ -1720,6 +1742,27 @@ LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
                                              LeptrisSerializeOptions* options);
 
 /**
+ * Serialize a document into a caller-provided buffer (issue #535)
+ *
+ * One call, zero library-side allocations for the result: the
+ * common FFI pattern (serialize + read_string + free_string)
+ * collapses, and bindings can write into MemoryPointer-backed
+ * storage directly.
+ *
+ * @param doc Document
+ * @param buf Output buffer, or NULL to just query the size
+ * @param capacity Capacity of buf in bytes
+ * @param out_len Out: written length WITHOUT the NUL (may be NULL)
+ * @return Bytes needed INCLUDING the NUL terminator. Copy happens
+ *         only when buf is non-NULL and capacity >= return value.
+ *         0 on failure.
+ */
+LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
+                                                   char* buf,
+                                                   size_t capacity,
+                                                   size_t* out_len);
+
+/**
  * Serialize document with automatic options (legacy alias)
  *
  * Equivalent to leptris_document_serialize with options chosen from
@@ -1753,6 +1796,15 @@ LEPTRIS_API char* leptris_serialize_document(LeptrisDocument doc);
  */
 LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
                                             LeptrisSerializeOptions* options);
+
+/**
+ * Serialize an element subtree into a caller-provided buffer
+ * (issue #535) — same contract as leptris_document_serialize_into.
+ */
+LEPTRIS_API size_t leptris_element_serialize_into(LeptrisElement elem,
+                                                  char* buf,
+                                                  size_t capacity,
+                                                  size_t* out_len);
 
 /**
  * Save document to file
