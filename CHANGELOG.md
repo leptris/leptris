@@ -2,11 +2,22 @@
 
 ## [1.8.0] - 2026-08-24
 
-### Added
+### Added — expanded-name attribute APIs + namespaces-correct
+by-name semantics (#542), detached sibling inserts (#540)
 
-- expanded-name attribute APIs + by-name namespaces semantics (#542), detached sibling inserts (#540) (attrs)
-
-
+- `leptris_element_attribute_ns` / `has_attribute_ns`: lookup by
+  (URI, local) — prefix-agnostic, NULL URI = no namespace only
+- `leptris_attribute_prefix` / `attribute_namespace_uri`: per-
+  attribute accessors; URI resolves through the owning element's
+  in-scope declarations at read time (mutation-correct)
+- By-name accessor now follows the 5-point XML Namespaces spec:
+  bare names match only no-namespace attributes; qualified names
+  resolve and match cross-prefix; xml is prebound; undeclared
+  prefixes are NULL; xmlns declarations are invisible
+- `insert_before`/`insert_after` on detached siblings chain them
+  (libxml2 unlinked-node semantics) — bottom-up construction works
+- Fixed a latent serializer bug the semantics exposed: attribute
+  prefixes were doubled when cached (ns:ns:attr)
 
 ## [1.7.0] - 2026-08-24
 
