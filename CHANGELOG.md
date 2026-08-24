@@ -2,11 +2,36 @@
 
 ## [1.6.0] - 2026-08-24
 
+All six user-filed issues fixed (#527 + #529); the issue queue is
+empty.
+
 ### Fixed
 
-- the four open user issues — sibling-move corruption, union attribute dangling, detached PI mutation, document PI API
+- **Element serialization emitted following siblings (#523, in
+  1.5.1)** and **unprefixed XPath name tests matched namespaced
+  elements (#525, in 1.5.1)** — see 1.5.1 below
+- **Same-parent moves corrupted the sibling chain (#518)**:
+  insert_before/insert_after skipped the unlink when the moved
+  node's old parent equaled the target, splicing a CYCLE into the
+  child list — later sibling inserts and serialize hung forever.
+  Both issue repros (the moxml adapter blockers) now serialize
+  correctly
+- **Union nodesets exposed dangling attribute pointers (#514)**:
+  `a | a/@id` borrowed the operands' synthetic nodes, then the
+  operand frees released them — mixed nodesets reported kind=OTHER,
+  NULL name/value, garbage tags. Union results now inherit the
+  ownership flags (both union sites)
+- **Detached PI/comment/CDATA mutation failed on rootless documents
+  (#519)**: fresh nodes resolved their document through the parent
+  chain. PI/comment/CDATA carry an owner_doc backpointer stamped by
+  the factories — bottom-up document building works
 
+### Added
 
+- **Document-level processing instructions (#526)**:
+  `leptris_document_pi_count / _pi_target / _pi_data / _add_pi` —
+  enumerate and create `<?target data?>` items outside the root
+  (parsed and added alike; serialized after the declaration)
 
 ## [1.5.1] - 2026-08-24
 
