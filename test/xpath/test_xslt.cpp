@@ -275,9 +275,20 @@ TEST(XsltFull, AvailabilityFunctions) {
 }
 
 /* EXSLT regexp:match (first match as string) + regexp:replace
- * with $1 backreference. */
+ * with $1 backreference. POSIX builds run the real ERE engine;
+ * Windows (no <regex.h>) ships the documented no-op stubs — empty
+ * match nodeset, identity replace. */
 TEST(XsltFull, RegexpMatchAndReplace) {
-    /* value-of over the match nodeset → first match string. */
+#ifdef _WIN32
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"regexp:match('ab12cd', '[0-9]+')\"/>"
+        "</xsl:template>", "<r/>")), "");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"regexp:replace('ab12', '([a-z]+)([0-9]+)', '$2$1')\"/>"
+        "</xsl:template>", "<r/>")), "ab12");
+#else
     EXPECT_EQ(body(run(
         "<xsl:template match='/'>"
         "<xsl:value-of select=\"regexp:match('ab12cd', '[0-9]+')\"/>"
@@ -286,6 +297,7 @@ TEST(XsltFull, RegexpMatchAndReplace) {
         "<xsl:template match='/'>"
         "<xsl:value-of select=\"regexp:replace('ab12', '([a-z]+)([0-9]+)', '$2$1')\"/>"
         "</xsl:template>", "<r/>")), "12ab");
+#endif
 }
 
 /* §12.2 key() with a node-set second argument: unions the buckets
