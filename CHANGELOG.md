@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-24
+
+### Added
+
+- expanded-name attribute APIs + by-name namespaces semantics (#542), detached sibling inserts (#540) (attrs)
+
+
+
 ## [1.7.0] - 2026-08-24
 
 ### Added
