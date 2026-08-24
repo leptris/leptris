@@ -704,10 +704,19 @@ TEST(XsltBridge, SystemProperty) {
 
 /* EXSLT regexp:test + date:date-time via the same bridge. */
 TEST(XsltBridge, ExsltRegexpAndDate) {
+#ifdef _WIN32
+    /* No <regex.h>: the documented Windows stub always reports
+     * no-match. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"regexp:test('leptris', '^lep')\"/>"
+        "</xsl:template>", "<r/>")), "false");
+#else
     EXPECT_EQ(body(run(
         "<xsl:template match='/'>"
         "<xsl:value-of select=\"regexp:test('leptris', '^lep')\"/>"
         "</xsl:template>", "<r/>")), "true");
+#endif
     EXPECT_EQ(body(run(
         "<xsl:template match='/'>"
         "<xsl:value-of select=\"regexp:test('leptris', '^x')\"/>"
