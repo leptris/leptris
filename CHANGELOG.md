@@ -2,11 +2,25 @@
 
 ## [1.5.1] - 2026-08-24
 
+Two correctness fixes (#527).
+
 ### Fixed
 
-- element serialize subtree leak (#523) + unprefixed XPath name tests match no-namespace only (#525)
-
-
+- **Element serialization emitted following siblings (#523)**:
+  `leptris_element_serialize` walked past the requested subtree into
+  every following element — wrong output (bindings' tostring
+  returned the rest of the document) and an O(document) cost per
+  call. The walk now stops at its root frame on every completion
+  path. Single ~90-byte element in a 100-element document:
+  6151 ns -> 119 ns (52x, ahead of lxml); document serialization
+  unchanged; the non-NULL-options cost is within noise of NULL
+- **Unprefixed XPath name tests matched namespaced elements
+  (#525)**: XPath 1.0 §2.3 — an unprefixed test matches only
+  no-namespace elements. `//note` no longer matches `<p:note>`,
+  `//n` no longer matches a default-xmlns `<n>` (libxml2 / Nokogiri
+  / REXML parity; unblocked the moxml adapter). Fixed at every
+  VM inline matcher + the generic matcher; namespace-free documents
+  keep the zero-cost fast path via a has_namespaces flag
 
 ## [1.5.0] - 2026-08-24
 
