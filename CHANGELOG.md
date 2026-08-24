@@ -2,13 +2,25 @@
 
 ## [1.9.0] - 2026-08-24
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
+- **`LeptrisParseOptions.recover`** (#547): a parse failure returns
+  an empty document with the failure recorded via
+  `leptris_last_error` — the libxml2 `XML_PARSE_RECOVER` semantics
+  the moxml/libxml2 adapters emulate, now honest in the native API
 
-- (describe changes here)
+### Fixed
 
+- **Rootless documents with PIs no longer serialize to ""** (#546):
+  the serializer emits the declaration (when the source had one)
+  and every document-level PI instead of silently dropping them
+- **`serialize_into` options + single-serialization caching**
+  (#541): both `_serialize_into` functions take a
+  `const LeptrisSerializeOptions*`; the size-query + into-call
+  pattern now reuses one serialization via a per-document cache
+  (invalidated on mutation through the version stamp); the
+  mem-cache string is freed at document teardown (Linux
+  LeakSanitizer caught the leak)
 
 ## [1.8.0] - 2026-08-24
 
