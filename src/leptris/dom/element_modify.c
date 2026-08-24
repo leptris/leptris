@@ -255,9 +255,20 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
     }
 
     /* Get parent using the type-dispatching accessor — sibling may
-     * be any child node type. */
+     * be any child node type. Issue #540: a DETACHED sibling is
+     * legal — link-only mode below chains the two nodes so a later
+     * append of the chain head under a parent carries the whole
+     * sequence (libxml2 xmlAddPrevSibling semantics for unlinked
+     * nodes; the flat next-sibling layout needs no extra state). */
     LeptrisElement parent = leptris_node_parent(sibling_ptr);
-    if (!parent) return LEPTRIS_ERROR_INVALID_ARG;
+    if (!parent) {
+        if (leptris_node_parent(new_node_ptr)) {
+            leptris_node_unlink(new_node_ptr);
+        }
+        /* new_node becomes the HEAD of the detached chain. */
+        leptris_node_set_next_sibling(new_node_ptr, sibling_ptr);
+        return LEPTRIS_OK;
+    }
 
     /* Issue #217 + #518: unlink new_node from ANY current parent —
      * including THIS one. A same-parent move without the unlink left
@@ -340,7 +351,16 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
     }
 
     LeptrisElement parent = leptris_node_parent(sibling_ptr);
-    if (!parent) return LEPTRIS_ERROR_INVALID_ARG;
+    if (!parent) {
+        /* Issue #540: detached sibling — link-only append after it. */
+        if (leptris_node_parent(new_node_ptr)) {
+            leptris_node_unlink(new_node_ptr);
+        }
+        LeptrisNode* after = leptris_node_get_next_sibling(sibling_ptr);
+        leptris_node_set_next_sibling(sibling_ptr, new_node_ptr);
+        leptris_node_set_next_sibling(new_node_ptr, after);
+        return LEPTRIS_OK;
+    }
 
     /* Issue #217 + #518: unlink from ANY current parent — including
      * this one (a same-parent move must first come out of the chain,

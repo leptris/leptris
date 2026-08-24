@@ -31,6 +31,12 @@ struct leptris_namespace* leptris_namespace_new_pooled(const char* prefix,
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+/* Forward decls (issue #542): the expanded-name matcher and prefix
+ * resolver are defined in the attribute section below. */
+static struct leptris_attribute* find_attr_expanded(
+    LeptrisElement elem, const char* uri, const char* local);
+static const char* elem_resolve_attr_prefix(LeptrisElement elem,
+                                            const char* prefix);
 #include <math.h>
 
 /* ============================================================================
@@ -148,8 +154,30 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
         return NULL;  /* Not an element node */
     }
 
-    /* Use accessor function to find attribute */
-    struct leptris_attribute* attr = leptris_element_get_attribute_by_name(elem, name);
+    /* Issue #542 semantics (XML Namespaces 1.0):
+     *   1. bare name matches ONLY the no-namespace attribute —
+     *      "type" never finds xmi:type (mirror of #525)
+     *   2. qualified p:local resolves p in scope and matches by
+     *      URI+local — p:type finds q:type when the URIs agree
+     *   3. xml is prebound and needs no declaration
+     *   4. undeclared prefix -> NULL, never a string fallback
+     *   5. xmlns / xmlns:* are declarations — never matched here */
+    const char* colon = strchr(name, ':');
+    struct leptris_attribute* attr;
+    if (!colon) {
+        if (strcmp(name, "xmlns") == 0) return NULL;      /* (5) */
+        attr = find_attr_expanded(elem, NULL, name);      /* (1) */
+    } else {
+        size_t pl = (size_t)(colon - name);
+        if (pl == 5 && memcmp(name, "xmlns", 5) == 0) return NULL;  /* (5) */
+        char pbuf[64];
+        if (pl >= sizeof(pbuf)) return NULL;
+        memcpy(pbuf, name, pl);
+        pbuf[pl] = '\0';
+        const char* uri = elem_resolve_attr_prefix(elem, pbuf);  /* (3)(4) */
+        if (!uri) return NULL;                             /* (4) */
+        attr = find_attr_expanded(elem, uri, colon + 1);   /* (2) */
+    }
     if (!attr) return NULL;
 
     /* Single representation (round 4): entity values expand lazily
@@ -168,9 +196,137 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
     return attr->value_view.data;
 }
 
+/* ---- Expanded-name attribute support (issue #542) -----------------
+ *
+ * XML Namespaces 1.0 attribute semantics, mirroring #525 for
+ * elements: the PREFIX never matters, only the (URI, local) pair it
+ * resolves to through the OWNING element's in-scope declarations.
+ * The xml prefix is prebound; xmlns/xmlns:* are declarations and are
+ * invisible to the attribute accessors. */
+
+#define LEPTRIS_XML_NS "http://www.w3.org/XML/1998/namespace"
+
+/* Resolve a prefix through elem's in-scope declarations with the
+ * reserved prefixes handled. NULL result = undeclared. */
+static const char* elem_resolve_attr_prefix(LeptrisElement elem,
+                                            const char* prefix) {
+    if (!prefix || !prefix[0]) return NULL;      /* no namespace */
+    if (strcmp(prefix, "xml") == 0) return LEPTRIS_XML_NS;
+    if (strcmp(prefix, "xmlns") == 0) return NULL;  /* reserved */
+    return leptris_element_lookup_namespace(elem, prefix);
+}
+
+/* The attribute's prefix as a NUL-terminated string, or NULL for a
+ * no-namespace attribute. Name-derived, immutable. */
+LEPTRIS_API const char* leptris_attribute_prefix(LeptrisAttribute attr) {
+    if (!attr) return NULL;
+    const char* n = attr->name_view.data;
+    size_t nl = attr->name_view.length;
+    const char* colon = nl ? memchr(n, ':', nl) : NULL;
+    if (!colon) return NULL;
+    struct leptris_attr_ns_cache* c = attr_get_ns_cache(attr);
+    if (c && c->prefix) return c->prefix;
+    /* Not stamped (e.g. mutation-created before #542 setters run):
+     * derive on the fly via a bounded stack buffer is NOT possible
+     * (lifetime) — callers should treat NULL-cache as no prefix
+     * data; the element-level matchers below do their own split. */
+    return NULL;
+}
+
+/* The attribute's namespace URI resolved through the OWNER element's
+ * in-scope declarations. NULL = no namespace or undeclared prefix.
+ * Resolved per read (mutation-correct), O(depth) in the worst case. */
+LEPTRIS_API const char* leptris_attribute_namespace_uri(LeptrisAttribute attr) {
+    if (!attr) return NULL;
+    struct leptris_attr_ns_cache* c = attr_get_ns_cache(attr);
+    if (!c || !c->owner_elem) return NULL;
+    const char* pfx = leptris_attribute_prefix(attr);
+    if (!pfx) return NULL;
+    return elem_resolve_attr_prefix(c->owner_elem, pfx);
+}
+
+/* Static empty-URI check: NULL or "" both mean no namespace. */
+static int uri_is_none(const char* uri) {
+    return !uri || !uri[0];
+}
+
+/* Find an attribute by EXPANDED name. uri NULL/"" matches only
+ * no-namespace attributes; otherwise the URI must match what the
+ * attribute's prefix resolves to (prefix-agnostic). Local names
+ * compare exactly. xmlns declarations are skipped defensively. */
+static struct leptris_attribute* find_attr_expanded(
+        LeptrisElement elem, const char* uri, const char* local) {
+    size_t ll = strlen(local);
+    struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
+    while (attr) {
+        const char* n = attr->name_view.data;
+        size_t nl = attr->name_view.length;
+        if (nl < ll) goto next;
+        const char* colon = nl ? memchr(n, ':', nl) : NULL;
+        if (uri_is_none(uri)) {
+            if (colon) goto next;                    /* namespaced */
+            if (nl == ll && memcmp(n, local, ll) == 0) return attr;
+        } else {
+            if (!colon) goto next;                   /* no namespace */
+            size_t pl = (size_t)(colon - n);
+            if (nl - pl - 1 != ll || memcmp(colon + 1, local, ll) != 0)
+                goto next;
+            /* Prefix is xmlns? that's a declaration, not an attr. */
+            if (pl == 5 && memcmp(n, "xmlns", 5) == 0) goto next;
+            /* Resolve this attr's prefix through elem in scope. */
+            char pbuf[64];
+            const char* pfx;
+            struct leptris_attr_ns_cache* c = attr_get_ns_cache(attr);
+            if (c && c->prefix) {
+                pfx = c->prefix;
+            } else if (pl < sizeof(pbuf)) {
+                memcpy(pbuf, n, pl);
+                pbuf[pl] = '\0';
+                pfx = pbuf;
+            } else {
+                goto next;
+            }
+            const char* resolved = elem_resolve_attr_prefix(elem, pfx);
+            if (resolved && strcmp(resolved, uri) == 0) return attr;
+        }
+    next:
+        attr = leptris_attr_next(attr);
+    }
+    return NULL;
+}
+
+LEPTRIS_API const char* leptris_element_attribute_ns(LeptrisElement elem,
+                                                     const char* uri,
+                                                     const char* local) {
+    if (!elem || !local) return NULL;
+    if (((LeptrisNode*)elem)->type != LEPTRIS_NODE_TYPE_ELEMENT) return NULL;
+    struct leptris_attribute* attr = find_attr_expanded(elem, uri, local);
+    if (!attr) return NULL;
+    if (attr_has_entities(attr)) {
+        LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
+        char* decoded = pool
+            ? leptris_decode_entities_view(&attr->value_view, pool)
+            : NULL;
+        if (decoded) {
+            attr->value_view = leptris_sv_from_cstr(decoded);
+            attr_set_entities(attr, 0);
+        }
+    }
+    return attr->value_view.data;
+}
+
+LEPTRIS_API int leptris_element_has_attribute_ns(LeptrisElement elem,
+                                                 const char* uri,
+                                                 const char* local) {
+    if (!elem || !local) return 0;
+    return find_attr_expanded(elem, uri, local) != NULL;
+}
+
 LEPTRIS_API int leptris_element_has_attribute(LeptrisElement elem, const char* name) {
     if (!elem || !name) return 0;
-    return leptris_element_get_attribute_by_name(elem, name) != NULL;
+    /* Same expanded-name semantics as leptris_element_attribute
+     * (#542) — delegated so both stay in lockstep. */
+    return leptris_element_attribute(elem, name) != NULL;
 }
 
 /**

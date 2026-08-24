@@ -55,6 +55,11 @@ struct leptris_attr_ns_cache {
     LeptrisStringView namespace_uri_view;
     char* prefix;                /* NULL until first access */
     char* namespace_uri;         /* NULL until first access */
+    /* Issue #542: owning element for standalone expanded-name
+     * accessors — stamped at parse / set time. The URI itself stays
+     * UNRESOLVED (resolved per read through the owner's in-scope
+     * declarations, so namespace mutation stays correct). */
+    struct leptris_element* owner_elem;
 };
 
 struct leptris_attribute {

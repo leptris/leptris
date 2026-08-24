@@ -1057,6 +1057,56 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
 LEPTRIS_API int leptris_element_has_attribute(LeptrisElement elem, const char* name);
 
 /**
+ * Get attribute value by EXPANDED name (issue #542)
+ *
+ * XML Namespaces 1.0 semantics: uri NULL or "" matches only the
+ * no-namespace attribute; otherwise the value is returned when the
+ * attribute's prefix resolves to `uri` through the owning element's
+ * in-scope declarations (the written prefix itself never matters).
+ * xmlns declarations are not attributes and never match.
+ *
+ * @param elem Element
+ * @param uri Namespace URI (NULL/"" for no namespace)
+ * @param local Local name
+ * @return Attribute value (document-owned), or NULL
+ */
+LEPTRIS_API const char* leptris_element_attribute_ns(LeptrisElement elem,
+                                                     const char* uri,
+                                                     const char* local);
+
+/**
+ * Test attribute presence by EXPANDED name (issue #542)
+ *
+ * Same semantics as leptris_element_attribute_ns.
+ */
+LEPTRIS_API int leptris_element_has_attribute_ns(LeptrisElement elem,
+                                                 const char* uri,
+                                                 const char* local);
+
+/**
+ * Get an attribute's namespace prefix (issue #542)
+ *
+ * The prefix as written in the qualified name (the bytes before the
+ * colon), or NULL for a no-namespace attribute. Name-derived and
+ * immutable; does not consult declarations.
+ *
+ * Memory: String is document-owned. Do not free.
+ */
+LEPTRIS_API const char* leptris_attribute_prefix(LeptrisAttribute attr);
+
+/**
+ * Get an attribute's namespace URI (issue #542)
+ *
+ * Resolved through the OWNING element's in-scope declarations at
+ * read time (the xml prefix is prebound to
+ * http://www.w3.org/XML/1998/namespace). NULL for a no-namespace
+ * attribute or an undeclared prefix.
+ *
+ * Memory: String is document-owned. Do not free.
+ */
+LEPTRIS_API const char* leptris_attribute_namespace_uri(LeptrisAttribute attr);
+
+/**
  * Get attribute value as integer
  *
  * @param elem Element

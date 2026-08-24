@@ -1451,3 +1451,90 @@ TEST(DocumentPIs, EnumerateAndAdd) {
     EXPECT_EQ(leptris_document_add_pi(doc, nullptr, "d"), nullptr);
     leptris_document_free(doc);
 }
+
+/* Issue #542: expanded-name attribute APIs + by-name semantics
+ * (the 5-point spec) and issue #540 (detached sibling inserts). */
+TEST(AttributeExpandedName, FivePointSemantics) {
+    const char xml[] =
+        "<e xmlns:p='urn:P' xmlns:q='urn:P' xmlns:m='urn:M'"
+        "     type='bare' p:type='prefixed' q:alias='qattr'"
+        "     xml:lang='en' xmlns:d='urn:D' d:x='1'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_document_root(doc);
+
+    /* (1) bare name matches ONLY the no-namespace attribute. */
+    EXPECT_STREQ(leptris_element_attribute(e, "type"), "bare");
+
+    /* (2) qualified p:local resolves by URI — cross-prefix match. */
+    EXPECT_STREQ(leptris_element_attribute(e, "p:type"), "prefixed");
+    EXPECT_STREQ(leptris_element_attribute(e, "q:type"), "prefixed");
+    EXPECT_EQ(leptris_element_attribute(e, "m:type"), nullptr);
+
+    /* (3) xml is prebound, no declaration needed. */
+    EXPECT_STREQ(leptris_element_attribute(e, "xml:lang"), "en");
+    EXPECT_STREQ(leptris_element_attribute_ns(
+                     e, "http://www.w3.org/XML/1998/namespace", "lang"), "en");
+
+    /* (4) undeclared prefix -> NULL, never string fallback. */
+    EXPECT_EQ(leptris_element_attribute(e, "zz:type"), nullptr);
+    EXPECT_EQ(leptris_element_has_attribute(e, "zz:type"), 0);
+
+    /* (5) xmlns declarations are never attributes. */
+    EXPECT_EQ(leptris_element_attribute(e, "xmlns"), nullptr);
+    EXPECT_EQ(leptris_element_attribute(e, "xmlns:d"), nullptr);
+
+    /* has_attribute mirrors attribute. */
+    EXPECT_EQ(leptris_element_has_attribute(e, "q:type"), 1);
+    EXPECT_EQ(leptris_element_has_attribute(e, "type"), 1);
+    leptris_document_free(doc);
+}
+
+TEST(AttributeExpandedName, NsAccessorsAndLookup) {
+    const char xml[] =
+        "<e xmlns:q='urn:P' q:alias='v' plain='1'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_document_root(doc);
+
+    EXPECT_STREQ(leptris_element_attribute_ns(e, "urn:P", "alias"), "v");
+    EXPECT_EQ(leptris_element_attribute_ns(e, "urn:X", "alias"), nullptr);
+    EXPECT_STREQ(leptris_element_attribute_ns(e, nullptr, "plain"), "1");
+    EXPECT_EQ(leptris_element_attribute_ns(e, "urn:P", "plain"), nullptr);
+    EXPECT_EQ(leptris_element_has_attribute_ns(e, "urn:P", "alias"), 1);
+    EXPECT_EQ(leptris_element_has_attribute_ns(e, nullptr, "alias"), 0);
+
+    /* Per-attribute accessors: prefix as written; URI resolved
+     * through the owner. */
+    LeptrisAttribute a = leptris_element_first_attribute(e);
+    ASSERT_NE(a, nullptr);   /* q:alias is first */
+    EXPECT_STREQ(leptris_attribute_prefix(a), "q");
+    EXPECT_STREQ(leptris_attribute_namespace_uri(a), "urn:P");
+    a = leptris_attribute_next(a);
+    ASSERT_NE(a, nullptr);   /* plain */
+    EXPECT_EQ(leptris_attribute_prefix(a), nullptr);
+    EXPECT_EQ(leptris_attribute_namespace_uri(a), nullptr);
+    leptris_document_free(doc);
+}
+
+TEST(DetachedInserts, BuildBeforeAttach) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement r = leptris_element_create(doc, "r");
+    LeptrisElement a = leptris_element_create(doc, "a");
+    LeptrisElement b = leptris_element_create(doc, "b");
+
+    /* Insert before a DETACHED sibling: b becomes chain head. */
+    ASSERT_EQ(leptris_element_insert_before(a, b), LEPTRIS_OK);
+    /* Insert after the detached chain tail. */
+    LeptrisElement c = leptris_element_create(doc, "c");
+    ASSERT_EQ(leptris_element_insert_after(a, c), LEPTRIS_OK);
+    /* Attaching the head carries the whole chain. */
+    ASSERT_EQ(leptris_element_append_child(r, b), LEPTRIS_OK);
+
+    char* x = leptris_element_serialize(r, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_STREQ(x, "<r><b/><a/><c/></r>");
+    leptris_free_string(x);
+    leptris_document_free(doc);
+}

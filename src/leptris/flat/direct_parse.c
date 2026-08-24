@@ -511,6 +511,41 @@ static LEPTRIS_ALWAYS_INLINE void dp_split_hash_name(LeptrisElement elem, char* 
  * pre-allocated attr_block (zero-copy name/value, no interning).
  * Names are NUL-terminated in-place AFTER '=' is consumed; values
  * are NUL-terminated in-place at the closing quote. */
+/* Issue #542: ensure the ns side-cache exists with the owning
+ * element stamped, for every attribute whose name carries a prefix.
+ * Runs once per element at the END of the attribute loop (all of
+ * elem's OWN xmlns declarations are wired by then; ancestor decls
+ * were complete before this element opened). Prefix is materialized
+ * here too — it is name-derived and immutable. */
+static void dp_stamp_attr_owners(DParser* p, LeptrisElement elem) {
+    struct leptris_attribute* a =
+        (struct leptris_attribute*)((char*)elem + (elem->first_attribute_off ? elem->first_attribute_off : 0));
+    if (elem->first_attribute_off == 0) return;
+    while (a) {
+        const char* n = a->name_view.data;
+        size_t nl = a->name_view.length;
+        const char* colon = nl ? memchr(n, ':', nl) : NULL;
+        if (colon && attr_get_ns_cache(a) == NULL) {
+            struct leptris_attr_ns_cache* c =
+                (struct leptris_attr_ns_cache*)leptris_pool_alloc(
+                    p->pool, sizeof(*c));
+            if (c) {
+                memset(c, 0, sizeof(*c));
+                size_t pl = (size_t)(colon - n);
+                char* pfx = (char*)leptris_pool_alloc(p->pool, pl + 1);
+                if (pfx) {
+                    memcpy(pfx, n, pl);
+                    pfx[pl] = '\0';
+                    c->prefix = pfx;
+                }
+                c->owner_elem = elem;
+                attr_set_ns_cache(a, c);
+            }
+        }
+        a = leptris_attr_next(a);
+    }
+}
+
 static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
     /* Reset the per-element caches so dp_add_attr_inline and the
      * xmlns wiring below can both run in O(1) per attr. */
@@ -526,17 +561,18 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
     for (;;) {
         dp_skip_ws(p);
         char c = *p->pos;
-        if (c == '>') {
-            p->pos++;
+        if (c == '>' || (c == '/' && p->pos[1] == '>')) {
+            int self_close = (c == '/');
+            p->pos += self_close ? 2 : 1;
             elem->attr_count = (uint8_t)p->cur_attr_count;
-            return 0;
+            /* Issue #542: stamp the owner on prefixed attrs so the
+             * standalone expanded-name accessors can resolve. No
+             * tree pointers exist mid-parse, so the OWNER comes from
+             * the parse context; the URI resolves lazily per read. */
+            dp_stamp_attr_owners(p, elem);
+            return self_close ? 1 : 0;
         }
-        if (c == '/') {
-            if (p->pos[1] != '>') return -1; /* NUL sentinel fails this */
-            p->pos += 2;
-            elem->attr_count = (uint8_t)p->cur_attr_count;
-            return 1; /* self-closing */
-        }
+        if (c == '/') return -1;  /* '/' not followed by '>' */
 
         /* Attribute name — scan as (pointer, length), no NUL-term. */
         char* name_start = p->pos;
