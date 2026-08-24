@@ -490,6 +490,14 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
         const char* attr_prefix = attr_get_prefix(attr);
         size_t attr_prefix_len =
             (attr_prefix && attr_prefix[0]) ? strlen(attr_prefix) + 1 : 0;
+        /* Issue #542: qualified name_view + separate prefix emission
+         * would double the prefix — strip it from the name copy. */
+        if (attr_prefix_len && name_len > attr_prefix_len &&
+            memcmp(name_c, attr_prefix, attr_prefix_len - 1) == 0 &&
+            name_c[attr_prefix_len - 1] == ':') {
+            name_c += attr_prefix_len;
+            name_len -= attr_prefix_len;
+        }
         /* The view is authoritative: entity resolution REPLACES the
          * view (from_cstr), so length always matches the data. */
         size_t val_len = attr->value_view.length;
@@ -880,6 +888,14 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             size_t anl = attr->name_view.length;
             const char* apfx = attr_get_prefix(attr);
             size_t apl = (apfx && apfx[0]) ? strlen(apfx) + 1 : 0;
+            /* Issue #542: name_view carries the QUALIFIED name —
+             * when the prefix is emitted separately, skip its bytes
+             * so the prefix is not doubled (ns:ns:attr). */
+            if (apl && anl > apl &&
+                memcmp(name_c, apfx, apl - 1) == 0 && name_c[apl - 1] == ':') {
+                name_c += apl;
+                anl -= apl;
+            }
             /* View length is authoritative (entity resolution
              * replaces the view) — same as the recursive path. */
             size_t vlen = attr->value_view.length;
