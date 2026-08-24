@@ -980,14 +980,12 @@ leptris/
   benchmark/            # libxml2 / pugixml comparisons
   bindings/ruby/        # Ruby FFI binding (TODO 118)
   TODO.md               # open-work tracker (TODO.fix/ planning docs live in git history)
-  archive/              # historical / disabled code
   .github/workflows/    # CI
   docs/                 # README, building guide, FFI design
 ====
 
 == Roadmap
 
-See link:archive/README.md[archive/README.md] for historical
 context, and link:docs/FFI.md[docs/FFI.md] for the FFI roadmap.
 
 Shipped in v0.3.0:

@@ -91,7 +91,6 @@ The public contract. Don't break ABI without a major bump. Headers split by subs
 
 - `git log` is intentionally shallow on `main`; rely on `git log <path>` rather than expecting deep project history.
 - `test/` is a full Google Test tree (`dom`, `xpath`, `sax`, `dtd`, `xinclude`, `c14n`, `cli`, `abi`, `memory`, `parser`, `fuzz`). Add specs under the relevant subdirectory; CMake picks them up via `test/CMakeLists.txt`.
-- Several files exist as `.bak`/`.bak2` siblings under `archive/backups/` (e.g. `evaluator_axes.c.bak2`). These are historical — do not edit or rely on them. Treat `.bak*` files anywhere in the tree as historical, not active.
 
 ## Where to look for context
 
