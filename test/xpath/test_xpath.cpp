@@ -1338,3 +1338,43 @@ TEST(XPathConstantFolding, SubstringLiteralsFoldWithRounding) {
     }
     leptris_document_free(doc);
 }
+
+/* Issue #525 (XPath 1.0 §2.3): an unprefixed name test matches only
+ * NO-namespace elements — prefix-less elements under a default xmlns
+ * are namespaced and must not match. */
+TEST(NamespaceConformance, UnprefixedNameTestMatchesNoNamespaceOnly) {
+    auto count = [](LeptrisDocument d, const char* expr) -> int {
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr, expr);
+        int n = r ? (int)leptris_xpath_result_number(r) : -1;
+        if (r) leptris_xpath_result_free(r);
+        return n;
+    };
+
+    const char* prefixed =
+        "<library xmlns:p='urn:p'><p:note>x</p:note></library>";
+    LeptrisDocument d1 = leptris_parse_string(prefixed, strlen(prefixed), nullptr);
+    ASSERT_NE(d1, nullptr);
+    EXPECT_EQ(count(d1, "count(//p:note)"), 1);
+    EXPECT_EQ(count(d1, "count(//note)"), 0);
+    leptris_document_free(d1);
+
+    const char* defaulted = "<r xmlns='urn:d'><n/></r>";
+    LeptrisDocument d2 = leptris_parse_string(defaulted, strlen(defaulted), nullptr);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(count(d2, "count(//n)"), 0);
+    leptris_document_free(d2);
+
+    const char* plain = "<r><n/></r>";
+    LeptrisDocument d3 = leptris_parse_string(plain, strlen(plain), nullptr);
+    ASSERT_NE(d3, nullptr);
+    EXPECT_EQ(count(d3, "count(//n)"), 1);
+    leptris_document_free(d3);
+
+    /* Mixed document: each form selects exactly its own elements. */
+    const char* mixed =
+        "<r xmlns:p='urn:p'><a/><p:a/><a xmlns='urn:d'/></r>";
+    LeptrisDocument d4 = leptris_parse_string(mixed, strlen(mixed), nullptr);
+    ASSERT_NE(d4, nullptr);
+    EXPECT_EQ(count(d4, "count(//a)"), 1);
+    leptris_document_free(d4);
+}

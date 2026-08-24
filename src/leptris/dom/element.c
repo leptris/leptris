@@ -420,6 +420,12 @@ void leptris_element_set_namespace_uri_view(LeptrisElement elem, LeptrisStringVi
         if (elem->ns_cache) elem->ns_cache->namespace_uri = NULL;
         return;
     }
+    /* Issue #525: a namespace now exists — unprefixed XPath name
+     * tests must consult the resolver from here on. */
+    {
+        struct leptris_document* d = leptris_element_get_document(elem);
+        if (d) d->has_namespaces = 1;
+    }
     LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
     if (pool) {
         char* storage = (char*)leptris_pool_alloc(pool, uri_view.length + 1);

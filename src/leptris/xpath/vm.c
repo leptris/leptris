@@ -166,7 +166,7 @@ static struct leptris_xpath_result* vm_apply_axis_descendant_pred_attr(
 
 /* Forward decl: descendant_walk is defined below, but vm_apply_absolute
  * uses it. */
-static void descendant_walk(XPathNodeSet* out, LeptrisElement elem,
+static void descendant_walk(XPathContext* ctx, XPathNodeSet* out, LeptrisElement elem,
                               const char* name, int wild, int include_self);
 
 /* Absolute-path handlers (TODO 129). Like vm_apply_axis_descendant
@@ -225,6 +225,20 @@ static void vm_absolute_type_walk(XPathNodeSet* out, LeptrisElement elem,
     }
 }
 
+/* Issue #525 (XPath 1.0 §2.3): an UNPREFIXED name test matches only
+ * elements in NO namespace — a default-xmlns element is in a
+ * namespace even though it has no prefix. Documents without any
+ * namespace declaration skip the check (zero-cost common case). */
+static inline int vm_unprefixed_name_matches(XPathContext* ctx,
+                                             LeptrisElement e,
+                                             const char* name) {
+    const char* en = leptris_element_get_name(e);
+    if (!en || strcmp(en, name) != 0) return 0;
+    if (!ctx || !ctx->document || !ctx->document->has_namespaces) return 1;
+    const char* uri = leptris_element_get_namespace_uri(e);
+    return !uri || !uri[0];
+}
+
 static struct leptris_xpath_result* vm_apply_absolute_type(
         XPathContext* ctx, const char* type_name, const char* pi_target) {
     if (!ctx || !ctx->document) return NULL;
@@ -270,8 +284,7 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
         if (wild) {
             xpath_nodeset_add_fast(out, root);
         } else {
-            const char* rn = leptris_element_get_name(root);
-            if (rn && strcmp(rn, name) == 0) {
+            if (vm_unprefixed_name_matches(ctx, root, name)) {
                 xpath_nodeset_add_fast(out, root);
             }
         }
@@ -375,12 +388,10 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
          * was a latent off-by-one for named // queries (exposed by
          * count(//book) returning root+books). */
         if (include_self &&
-            (wild || (root->name &&
-                      leptris_elem_name_is(root, name,
-                                          leptris_name_hash_compute(name))))) {
+            (wild || vm_unprefixed_name_matches(ctx, root, name))) {
             xpath_nodeset_add_fast(out, root);
         }
-        descendant_walk(out, root, name, wild, 0);
+        descendant_walk(ctx, out, root, name, wild, 0);
     }
 
     struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
@@ -406,8 +417,7 @@ struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
             if (wild) {
                 xpath_nodeset_add_fast(out, child);
             } else {
-                const char* cn = leptris_element_get_name(child);
-                if (cn && strcmp(cn, name) == 0) {
+                if (vm_unprefixed_name_matches(ctx, child, name)) {
                     xpath_nodeset_add_fast(out, child);
                 }
             }
@@ -512,8 +522,7 @@ struct leptris_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
         if (wild) {
             xpath_nodeset_add_fast(out, elem);
         } else {
-            const char* en = leptris_element_get_name(elem);
-            if (en && strcmp(en, name) == 0) {
+            if (vm_unprefixed_name_matches(ctx, elem, name)) {
                 xpath_nodeset_add_fast(out, elem);
             }
         }
@@ -545,8 +554,7 @@ struct leptris_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm
         if (!parent) continue;
 
         if (!wild) {
-            const char* pn = leptris_element_get_name(parent);
-            if (!pn || strcmp(pn, name) != 0) continue;
+            if (!vm_unprefixed_name_matches(ctx, parent, name)) continue;
         }
 
         /* Dedup */
@@ -570,15 +578,13 @@ struct leptris_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm
  * the caller decides based on input size. */
 /* Process a single element during a subtree walk: add to out if it
  * matches the name filter. Inlined for tight loop performance. */
-static inline void descendant_visit(XPathNodeSet* out, LeptrisElement elem,
+static inline void descendant_visit(XPathContext* ctx, XPathNodeSet* out,
+                                      LeptrisElement elem,
                                       const char* name, int wild) {
     if (wild) {
         xpath_nodeset_add_fast(out, elem);
-    } else {
-        const char* en = leptris_element_get_name(elem);
-        if (en && strcmp(en, name) == 0) {
-            xpath_nodeset_add_fast(out, elem);
-        }
+    } else if (vm_unprefixed_name_matches(ctx, elem, name)) {
+        xpath_nodeset_add_fast(out, elem);
     }
 }
 
@@ -593,7 +599,7 @@ static inline void descendant_visit(XPathNodeSet* out, LeptrisElement elem,
  * `include_self`: if 1, visit `elem` itself before descending; if 0,
  * skip `elem` (it's been handled by the caller, e.g., vm_apply_absolute
  * adds root separately for descendant-or-self). */
-static void descendant_walk(XPathNodeSet* out, LeptrisElement elem,
+static void descendant_walk(XPathContext* ctx, XPathNodeSet* out, LeptrisElement elem,
                               const char* name, int wild, int include_self) {
     if (!elem) return;
 
@@ -613,12 +619,12 @@ static void descendant_walk(XPathNodeSet* out, LeptrisElement elem,
     }
 
     if (include_self) {
-        descendant_visit(out, elem, name, wild);
+        descendant_visit(ctx, out, elem, name, wild);
     }
 
     LeptrisElement cur = leptris_element_get_first_child(elem);
     while (cur) {
-        descendant_visit(out, cur, name, wild);
+        descendant_visit(ctx, out, cur, name, wild);
 
         LeptrisElement next = leptris_element_get_first_child(cur);
         if (next) {
@@ -858,7 +864,7 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
         LeptrisElement elem = (LeptrisElement)input->nodes[i];
 
         size_t mark = out->count;
-        descendant_walk(out, elem, name, wild, include_self);
+        descendant_walk(ctx, out, elem, name, wild, include_self);
 
         if (need_dedup) {
             for (size_t k = mark; k < out->count; k++) {
@@ -1478,9 +1484,8 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                                          j < bucket_count &&
                                          bucket_positions[j] <= hi2;
                                          j++) {
-                                        if (leptris_elem_name_is(
-                                                bucket_matches[j], name,
-                                                leptris_name_hash_compute(name))) {
+                                        if (vm_unprefixed_name_matches(
+                                                ctx, bucket_matches[j], name)) {
                                             xpath_nodeset_add_fast(
                                                 out, bucket_matches[j]);
                                         }
@@ -1506,7 +1511,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                         if (!node_is_element(input->nodes[i])) continue;
                         LeptrisElement elem = (LeptrisElement)input->nodes[i];
                         size_t mark = out->count;
-                        descendant_walk(out, elem, name, 0, 0);
+                        descendant_walk(ctx, out, elem, name, 0, 0);
                         for (size_t w = mark; w < out->count;) {
                             LeptrisElement e2 = (LeptrisElement)out->nodes[w];
                             const char* v = NULL;
@@ -1758,10 +1763,9 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                         }
                     }
                     if (bucket_valid) {
-                        uint16_t name_hash = leptris_name_hash_compute(name);
                         for (size_t j = 0; j < bucket_count; j++) {
-                            if (leptris_elem_name_is(bucket_matches[j],
-                                                    name, name_hash)) {
+                            if (vm_unprefixed_name_matches(
+                                    ctx, bucket_matches[j], name)) {
                                 xpath_nodeset_add_fast(out, bucket_matches[j]);
                             }
                         }
@@ -1778,7 +1782,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                         uint16_t attr_hash =
                             attr_hash15(attr_name, strlen(attr_name));
                         size_t mark = out->count;
-                        descendant_walk(out, root, name, 0, 1);
+                        descendant_walk(ctx, out, root, name, 0, 1);
                         for (size_t w = mark; w < out->count;) {
                             LeptrisElement e2 = (LeptrisElement)out->nodes[w];
                             const char* v = NULL;

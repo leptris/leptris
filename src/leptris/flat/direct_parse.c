@@ -129,6 +129,7 @@ typedef struct {
      * old code walked the ns list to find the tail on every xmlns. */
     struct leptris_attribute* current_elem_last_attr;
     struct leptris_namespace* current_elem_last_ns;
+    int saw_namespace;   /* any xmlns seen → doc->has_namespaces */
     /* DTD parsed from the DOCTYPE internal subset. NULL when the
      * document has no DTD (or only an external subset). When non-NULL,
      * text/attr entity expansion routes through
@@ -644,6 +645,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
                 }
             }
             p->current_elem_last_ns = ns;
+            p->saw_namespace = 1;
             continue;
         }
 
@@ -1317,6 +1319,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     leptris_root_doc_register(p.root, doc);
     /* Tree is eagerly built — no FlatDoc, no lazy promote. */
     doc->pis = p.pis_head;
+    doc->has_namespaces = p.saw_namespace;
     doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */
     doc->had_declaration = p.had_declaration;
     doc->standalone = p.standalone;
