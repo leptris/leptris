@@ -18,7 +18,6 @@ docs/
 │   ├── performance/       # Performance analysis and optimization reports
 │   ├── status/            # Development status reports
 │   ├── testing/           # Testing documentation
-│   └── archived/          # Historical documentation
 └── research/              # External library research (libxml2, pugixml)
 ```
 
