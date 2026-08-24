@@ -234,8 +234,8 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
             if (!kd->name || strcmp(kd->name, name) != 0) continue;
             XsltPattern pat; memset(&pat, 0, sizeof(pat));
             pat.expr = kd->match;
-            if (!xslt_pattern_matches(&pat, (LeptrisElement)e, ex->source))
-                continue;
+            int m = xslt_pattern_matches(&pat, (LeptrisElement)e, ex->source);
+            if (!m) continue;
             struct leptris_xpath_result* r =
                 leptris_xpath_compiled_eval(kd->use, ex->source,
                                             (LeptrisElement)e);
@@ -426,18 +426,18 @@ static void parse_one(const char* s, const char* end, PatternInfo* pi) {
     }
 }
 
-static void parse_pattern(const char* s, size_t len,
-                           PatternInfo* pos, PatternInfo* neg) {
+/* Returns 1 when an explicit negative subpattern was present. */
+static int parse_pattern(const char* s, size_t len,
+                          PatternInfo* pos, PatternInfo* neg) {
     const char* end = s + len;
     const char* split = find_split(s, end);
     parse_one(s, split, pos);
     if (split < end) {
         parse_one(split + 1, end, neg);
-    } else {
-        *neg = *pos;
-        neg->prefix = NULL;
-        neg->prefix_len = 0;
+        return 1;
     }
+    *neg = *pos;
+    return 0;
 }
 
 /* Format |abs_v| per the parsed pattern; returns OWNED string. */
@@ -521,14 +521,14 @@ char* xslt_format_number(const XsltStylesheet* sheet, double value,
     if (value != value) return leptris_strdup(nan_str);
     int neg = (value < 0);
     PatternInfo pos = {0}, negi = {0};
-    parse_pattern(pattern, strlen(pattern), &pos, &negi);
-    int has_neg = (negi.prefix != NULL || negi.suffix != NULL);
+    int has_neg = parse_pattern(pattern, strlen(pattern), &pos, &negi);
     PatternInfo* use = neg ? (has_neg ? &negi : &pos) : &pos;
     if (neg && !has_neg) {   /* negate with explicit minus prefix */
-        char minus[2] = { df ? df->minus_sign : '-', 0 };
-        size_t pl = strlen(use->prefix);
+        char minus = df ? df->minus_sign : '-';
+        size_t pl = use->prefix_len;   /* NOT strlen — prefix points
+                                          into the pattern string */
         char* nv = (char*)malloc(pl + 2);
-        if (nv) { memcpy(nv, use->prefix, pl); nv[pl] = minus[0]; nv[pl+1] = 0;
+        if (nv) { memcpy(nv, use->prefix, pl); nv[pl] = minus; nv[pl+1] = 0;
                   use->prefix = nv; use->prefix_len = pl + 1; }
     }
     double av = neg ? -value : value;

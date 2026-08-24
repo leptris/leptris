@@ -122,6 +122,16 @@ struct leptris_document {
     /* EXSLT-style extension pack enabled via leptris_exslt_enable
      * (TODO.concurrency/06). */
     int exslt_enabled;
+    /* Active XSLT transform state (TODO.transform 04/05): while a
+     * transform runs on this document, leptris_xpath_build_custom_
+     * registry registers the XSLT function bridge (current/key/
+     * format-number/generate-id/system-property/document + EXSLT
+     * node-set/regexp/date) with this pointer as the handlers'
+     * user_data. Set only for the transform's duration (save/
+     * restore in xslt_transform); NULL otherwise. Concurrent
+     * transforms of the SAME document are not supported — one
+     * document per mutating thread, per the README model. */
+    void* xslt_state;
     char* encoding;                 /* UTF-8 assumed, but store if specified */
     struct leptris_processing_instruction* pis;  /* Processing instructions */
     struct leptris_top_comment* top_comments;    /* Comments outside root */

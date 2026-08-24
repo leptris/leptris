@@ -800,7 +800,8 @@ LEPTRIS_API LeptrisStatus leptris_exslt_enable(LeptrisDocument doc) {
 
 XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_document* doc) {
     if (!doc) return NULL;
-    if (!doc->custom_xpath_fns && !doc->exslt_enabled) return NULL;
+    if (!doc->custom_xpath_fns && !doc->exslt_enabled && !doc->xslt_state)
+        return NULL;
 
     XPathFunctionRegistry* reg = xpath_function_registry_new();
     if (!reg) return NULL;
@@ -811,6 +812,20 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
     if (doc->exslt_enabled) {
         extern void leptris_exslt_register(XPathFunctionRegistry*);
         leptris_exslt_register(reg);
+    }
+
+    /* XSLT bridge (TODO.transform 04/05): the board's design
+     * contract — "the same path as custom functions (SSOT)". While
+     * a transform runs on this document, key()/current()/format-
+     * number()/document()/generate-id()/system-property() plus the
+     * EXSLT node-set/regexp/date subset resolve through here with
+     * the transform state as user_data. The registry's ownership
+     * stays with the eval context that built it (init → cleanup),
+     * so no lifecycle juggling here. */
+    if (doc->xslt_state) {
+        extern void xslt_register_bridge_handlers(XPathFunctionRegistry*,
+                                                  void*);
+        xslt_register_bridge_handlers(reg, doc->xslt_state);
     }
 
     for (struct leptris_custom_xpath_fn* e = doc->custom_xpath_fns;

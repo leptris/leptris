@@ -309,3 +309,102 @@ TEST(XsltConformance, NumberFullS7Point7) {
         "<r><a><b/><b/></a><a><b/></a></r>")),
         "<out><n>1.1</n><n>1.2</n><n>2.1</n></out>");
 }
+
+/* ---------------------------------------------------------------
+ * §12 function bridge (TODO.transform 04/05): key, current,
+ * format-number, generate-id, system-property, document +
+ * EXSLT node-set / regexp:test / date:date-time. The bridge
+ * registers through leptris_xpath_build_custom_registry while a
+ * transform is active on the source document (the custom-function
+ * path — the board's SSOT requirement).
+ * --------------------------------------------------------------- */
+
+/* key(): lazy per-name index; match pattern selects the nodes,
+ * use expression produces the bucket key (§12.2). */
+TEST(XsltBridge, KeyFunction) {
+    /* Top-level xsl:key (run() wraps the BODY only — key defs
+     * need a top-level slot, so build the sheet by hand here). */
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+        " version='1.0'>"
+        "<xsl:key name='k' match='i' use='@v'/>"
+        "<xsl:template match='/'>"
+        "<xsl:for-each select=\"key('k','x')\">"
+        "<xsl:value-of select='@n'/>"
+        "</xsl:for-each></xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char* kxml = "<r><i v='x' n='1'/><i v='x' n='2'/><i v='y' n='3'/></r>";
+    LeptrisDocument d = leptris_parse_string(kxml, strlen(kxml), nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(body(std::string(out)), "12");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
+/* current(): the node being processed by the template rule or
+ * for-each (§12.4) — distinct from the predicate context. Before
+ * the fix this resolved empty because current_node was only
+ * tracked on the variable-carrying eval path. */
+TEST(XsltBridge, CurrentFunction) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//i'>"
+        "<xsl:value-of select='current()/@v'/>"
+        "</xsl:for-each></xsl:template>",
+        "<r><i v='1'/><i v='2'/></r>")), "12");
+}
+
+/* format-number(): JDK1.1 pattern subset (§12.3). */
+TEST(XsltBridge, FormatNumber) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"format-number(1234.567, '#,###.00')\"/>"
+        "</xsl:template>", "<r/>")), "1,234.57");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"format-number(0.5, '0%')\"/>"
+        "</xsl:template>", "<r/>")), "50%");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"format-number(-7, '0')\"/>"
+        "</xsl:template>", "<r/>")), "-7");
+}
+
+/* generate-id(): stable + unique per node (§12.5). */
+TEST(XsltBridge, GenerateId) {
+    std::string out = body(run(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='a' select=\"generate-id(//i[1])\"/>"
+        "<xsl:variable name='b' select=\"generate-id(//i[2])\"/>"
+        "<xsl:value-of select='$a != $b'/>"
+        "</xsl:template>", "<r><i/><i/></r>"));
+    EXPECT_EQ(out, "true");
+}
+
+/* system-property(): xsl:version / vendor (§12.7). */
+TEST(XsltBridge, SystemProperty) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"system-property('xsl:version')\"/>"
+        "</xsl:template>", "<r/>")), "1.0");
+}
+
+/* EXSLT regexp:test + date:date-time via the same bridge. */
+TEST(XsltBridge, ExsltRegexpAndDate) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"regexp:test('leptris', '^lep')\"/>"
+        "</xsl:template>", "<r/>")), "true");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"regexp:test('leptris', '^x')\"/>"
+        "</xsl:template>", "<r/>")), "false");
+    /* date:date-time() — ISO 8601 UTC, length 20 (YYYY-MM-DDTHH:MM:SSZ). */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"string-length(date:date-time()) = 20\"/>"
+        "</xsl:template>", "<r/>")), "true");
+}

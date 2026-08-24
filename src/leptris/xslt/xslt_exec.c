@@ -50,15 +50,20 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
                                        LeptrisElement node) {
     if (!c || !ex) return NULL;
 
-    /* No frame chain — fast VM path. */
-    if (!ex->vars) {
-        return leptris_xpath_compiled_eval(c, ex->source, node);
-    }
-
-    /* current() (§12.4): save and set; restore on exit so predicates
-     * inside the expression don't clobber outer scopes. */
+    /* current() (§12.4): save and set on EVERY path — the var-less
+     * fast route previously skipped this and current() resolved to
+     * an empty nodeset in plain for-each bodies. Restore on exit so
+     * nested evals don't clobber outer scopes. */
     LeptrisElement saved_cur = ex->current_node;
     ex->current_node = node;
+
+    /* No frame chain — fast VM path. */
+    if (!ex->vars) {
+        struct leptris_xpath_result* r =
+            leptris_xpath_compiled_eval(c, ex->source, node);
+        ex->current_node = saved_cur;
+        return r;
+    }
 
     if (!ex->varset) {
         ex->varset = xpath_variable_set_new();
@@ -1238,11 +1243,21 @@ XsltExec* xslt_transform(const XsltStylesheet* sheet,
     ex->result = leptris_document_create();
     if (!ex->result) { xslt_exec_free(ex); return NULL; }
 
+    /* Install the function-bridge state on the SOURCE document for
+     * the transform's duration: every XPath eval on this doc (both
+     * the VM path and the AST-interpreter path) builds its registry
+     * through leptris_xpath_build_custom_registry, which registers
+     * key()/current()/format-number()/... with `ex` as user_data
+     * while xslt_state is set. Save/restore makes nesting safe. */
+    struct leptris_document* src_doc = (struct leptris_document*)source;
+    void* saved_xslt_state = src_doc->xslt_state;
+    src_doc->xslt_state = ex;
+
     /* Globals. */
     for (const XsltInstr* g = sheet->globals; g; g = g->next) {
         if (g->kind == XSLT_INSTR_VARIABLE) op_variable(ex, g, NULL);
     }
-    if (ex->terminated) return ex;
+    if (!ex->terminated) {
 
     /* Root invocation: the best-matching template for the root
      * element (same selection rule as apply-templates), else the
@@ -1260,14 +1275,18 @@ XsltExec* xslt_transform(const XsltStylesheet* sheet,
     }
 
     LeptrisElement root = leptris_document_root(source);
-    if (!root) return ex;
-    if (root_t) {
-        xslt_exec_instrs(ex, root_t->body, root);
-    } else {
-        op_apply_templates(
-            ex, &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
-            root);
+    if (root) {
+        if (root_t) {
+            xslt_exec_instrs(ex, root_t->body, root);
+        } else {
+            op_apply_templates(
+                ex, &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                root);
+        }
     }
+    }   /* !terminated */
+
+    src_doc->xslt_state = saved_xslt_state;
     return ex;
 }
 
