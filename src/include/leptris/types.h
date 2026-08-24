@@ -145,6 +145,12 @@ typedef struct {
     int strict_mode;           /* -1 = keep thread default (recommended),
                                 * 0 = lenient, 1 = strict W3C */
     int max_depth;             /* 0 = engine default (256), >0 = cap */
+    /* Issue #547: when non-zero, a parse failure returns an empty
+     * document (with the failure recorded via leptris_last_error /
+     * leptris_last_error_position) instead of returning NULL. Mirrors
+     * the recovery semantics moxml + the libxml2 adapter emulate;
+     * partial-tree recovery lands with a future parser rework. */
+    int recover;
 } LeptrisParseOptions;
 
 /* ============================================================================

@@ -129,6 +129,14 @@ struct leptris_document {
      * skip the namespace check entirely (issue #525). */
     int has_namespaces;
     int has_bom;                    /* 1 if UTF-8 BOM was present, 0 otherwise */
+    /* Issue #541 mem-cache: the last successful serialization. */
+    unsigned ser_version;          /* bump on any mutation */
+    char* ser_cache;
+    size_t ser_cache_len;
+    unsigned ser_cache_version;
+    int ser_cache_text;
+    int ser_cache_omit;
+    int ser_cache_indent;
     /* DOCTYPE support */
     void* doctype;                  /* LeptrisDoctypeNode* or NULL */
     void* dtd;                      /* LeptrisDTD* - Parsed DTD declarations */

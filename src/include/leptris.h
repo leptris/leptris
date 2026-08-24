@@ -1810,7 +1810,8 @@ LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
 LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
                                                    char* buf,
                                                    size_t capacity,
-                                                   size_t* out_len);
+                                                   size_t* out_len,
+                                                   const LeptrisSerializeOptions* options);
 
 /**
  * Serialize document with automatic options (legacy alias)
@@ -1854,7 +1855,8 @@ LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
 LEPTRIS_API size_t leptris_element_serialize_into(LeptrisElement elem,
                                                   char* buf,
                                                   size_t capacity,
-                                                  size_t* out_len);
+                                                  size_t* out_len,
+                                                  const LeptrisSerializeOptions* options);
 
 /**
  * Save document to file
@@ -2875,6 +2877,55 @@ LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch);
  * Do not call while another operation is in flight on this thread.
  */
 LEPTRIS_API void leptris_thread_cleanup(void);
+
+/* ============================================================================
+ * XSLT 1.0 (TODO.transform)
+ * ============================================================================ */
+
+typedef struct leptris_xslt* LeptrisXslt;
+
+/**
+ * Compile an XSLT 1.0 stylesheet (TODO.transform)
+ *
+ * Compile once, apply many: every select/test/name expression is
+ * compiled through the pinned XPath cache at parse time.
+ *
+ * @param stylesheet_xml The stylesheet document
+ * @param length Its length in bytes
+ * @return Compiled handle, or NULL on a parse/compile error
+ *
+ * Memory: free with leptris_xslt_free.
+ */
+LEPTRIS_API LeptrisXslt leptris_xslt_parse(const char* stylesheet_xml,
+                                            size_t length);
+
+/**
+ * Free a compiled stylesheet
+ */
+LEPTRIS_API void leptris_xslt_free(LeptrisXslt xslt);
+
+/**
+ * Apply a compiled stylesheet to a document
+ *
+ * @param xslt Compiled stylesheet
+ * @param source Source document (not modified)
+ * @return The result as a new document (xsl:output method xml), or
+ *         NULL on failure
+ *
+ * Memory: free the result with leptris_document_free.
+ */
+LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
+                                               LeptrisDocument source);
+
+/**
+ * Apply a stylesheet and return the serialized result
+ *
+ * Convenience: apply + serialize with an XML declaration.
+ *
+ * Memory: free the string with leptris_free_string.
+ */
+LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
+                                            LeptrisDocument source);
 
 #ifdef __cplusplus
 }

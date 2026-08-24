@@ -730,6 +730,50 @@ static int ser_children_have_text(LeptrisNode* fc) {
     return 0;
 }
 
+/* Issue #546: rootless documents may still carry document-level
+ * processing instructions. Emit the declaration (if the original had
+ * one) and the PIs instead of returning an empty string. */
+static char* serialize_rootless_pis(struct leptris_document* doc,
+                                    const LeptrisSerializeOptions* options) {
+    if (!doc || !doc->pis) return NULL;
+    SerializeBuffer* pibuf = buffer_create(0);
+    if (!pibuf) return NULL;
+    int xml_declaration = options ? options->xml_declaration : 1;
+    if (xml_declaration && doc->had_declaration) {
+        const char* enc = options && options->encoding
+                           ? options->encoding
+                           : (doc->encoding ? doc->encoding : "UTF-8");
+        const char* ver = doc->xml_version ? doc->xml_version : "1.0";
+        buffer_append(pibuf, "<?xml version=\"");
+        buffer_append(pibuf, ver);
+        buffer_append(pibuf, "\"");
+        if (enc) {
+            buffer_append(pibuf, " encoding=\"");
+            buffer_append(pibuf, enc);
+            buffer_append(pibuf, "\"");
+        }
+        if (doc->standalone >= 0) {
+            buffer_append(pibuf, " standalone=\"");
+            buffer_append(pibuf, doc->standalone ? "yes" : "no");
+            buffer_append(pibuf, "\"");
+        }
+        buffer_append(pibuf, "?>");
+    }
+    for (struct leptris_processing_instruction* pi = doc->pis;
+         pi; pi = pi->next) {
+        buffer_append(pibuf, "<?");
+        if (pi->target) buffer_append(pibuf, pi->target);
+        if (pi->data && pi->data[0]) {
+            buffer_append_char(pibuf, ' ');
+            buffer_append(pibuf, pi->data);
+        }
+        buffer_append(pibuf, "?>");
+    }
+    char* out = buffer_to_string(pibuf);
+    buffer_free(pibuf);
+    return out;
+}
+
 void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, int is_root) {
     if (!root_elem || !root_elem->name) return;
 
@@ -1209,7 +1253,11 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
      * by the flat-parse fast path. */
     leptris_document_ensure_promoted(doc);
     LeptrisElement root = (LeptrisElement)doc->new_dom_root;
-    if (!root) return NULL;
+    if (!root) {
+        char* rootless = serialize_rootless_pis(doc, options);
+        if (rootless) return rootless;
+        return NULL;
+    }
 
     /* Use default options if NULL */
     int xml_declaration = 0;
@@ -1345,32 +1393,62 @@ LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
     return result;
 }
 
-/* Issue #535 (4): caller-buffer serialization. Returns the number
- * of bytes needed INCLUDING the NUL terminator. When buf is non-NULL
- * and capacity covers the need, the output is copied there (and
- * *out_len, when given, receives the length WITHOUT the NUL);
- * otherwise nothing is written and the return value is the size to
- * allocate. One call, zero copies for the common case. */
+/* Issue #541: mem-cache the serialized string so the size-query
+ * + into-call pattern reuses a single serialization. */
+static int ser_cache_valid(const struct leptris_document* doc,
+                           const LeptrisSerializeOptions* options) {
+    if (!doc->ser_cache) return 0;
+    if (doc->ser_version != doc->ser_cache_version) return 0;
+    int text = options ? !options->xml_declaration : 1;
+    int omit = options ? !options->xml_declaration : 0;
+    int indent = options ? !!options->indent : 0;
+    return text == doc->ser_cache_text && omit == doc->ser_cache_omit &&
+           indent == doc->ser_cache_indent;
+}
+
 LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
                                                    char* buf,
                                                    size_t capacity,
-                                                   size_t* out_len) {
-    char* tmp = leptris_document_serialize(doc, NULL);
+                                                   size_t* out_len,
+                                                   const LeptrisSerializeOptions* options) {
+    if (!doc) return 0;
+    if (ser_cache_valid(doc, options)) {
+        size_t need = doc->ser_cache_len + 1;
+        if (buf && capacity >= need) {
+            memcpy(buf, doc->ser_cache, need);
+            if (out_len) *out_len = doc->ser_cache_len;
+        }
+        return need;
+    }
+    char* tmp = leptris_document_serialize(doc, options);
     if (!tmp) return 0;
     size_t need = strlen(tmp) + 1;
     if (buf && capacity >= need) {
         memcpy(buf, tmp, need);
         if (out_len) *out_len = need - 1;
     }
-    leptris_free_string(tmp);
+    /* Cache for the no-options (defaults) path; option permutations
+     * stay one-shot to keep the cache key simple. */
+    if (!options) {
+        free(doc->ser_cache);
+        doc->ser_cache = tmp;                 /* ownership transferred */
+        doc->ser_cache_len = need - 1;
+        doc->ser_cache_version = doc->ser_version;
+        doc->ser_cache_text = 0;
+        doc->ser_cache_omit = 0;
+        doc->ser_cache_indent = 0;
+    } else {
+        leptris_free_string(tmp);
+    }
     return need;
 }
 
 LEPTRIS_API size_t leptris_element_serialize_into(LeptrisElement elem,
                                                   char* buf,
                                                   size_t capacity,
-                                                  size_t* out_len) {
-    char* tmp = leptris_element_serialize(elem, NULL);
+                                                  size_t* out_len,
+                                                  const LeptrisSerializeOptions* options) {
+    char* tmp = leptris_element_serialize(elem, options);
     if (!tmp) return 0;
     size_t need = strlen(tmp) + 1;
     if (buf && capacity >= need) {
