@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.10.0] - 2026-08-24
+
+### Added
+
+- phases 02/04 essentials + variable transport (TODO.transform 02+04) (xslt)
+- XSLT 1.0 core engine (TODO.transform 01) (xslt)
+
+### Fixed
+
+- RTF-as-nodeset, attr-set ordering, conformance specs (xslt)
+
+
+
 ## [2.0.0] - 2026-08-24
 
 ### Added
