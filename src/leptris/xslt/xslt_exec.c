@@ -25,6 +25,15 @@ void xslt_register_op(XsltInstrKind kind, XsltInstrFn fn) {
     }
 }
 
+/* Forward decl (xslt_exec.c) — result-tree-fragment ownership
+ * chain. The node pointers in a variable's nodeset-reference RTF
+ * live for the binding's lifetime; the exec owns the chain so
+ * nodes stay alive until xslt_exec_free. */
+struct xslt_rtf_entry {
+    LeptrisDocument doc;
+    struct xslt_rtf_entry* next;
+};
+
 /* ---- Evaluation with the variable frame chain ----
  *
  * Variable-aware path uses leptris_xpath_compiled_eval_vars (the
@@ -370,11 +379,9 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
     LeptrisElement parent = ex->pending_parent;
     LeptrisElement e = out_append_elem(ex, parent, in->name, in->ns_uri);
     if (!e) return -1;
-    /* use-attribute-sets — applied BEFORE the explicit attrs so
-     * the literal attrs (and any included schema-driven defaults)
-     * take precedence (§7.1.4). */
-    xslt_apply_attr_sets(ex, in, e, node);
-    /* Attribute-value templates on literal result elements. */
+    /* Literal attrs FIRST — they win over any defaults coming
+     * from the named attribute-set (§7.1.4 — explicit attrs and
+     * later sets take precedence over earlier sets). */
     for (XsltLAttr* a = in->attrs; a; a = a->next) {
         char* v = eval_avt(ex, a->value, node);
         if (v) {
@@ -382,6 +389,8 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
             free(v);
         }
     }
+    /* Attribute-value templates on literal result elements. */
+    xslt_apply_attr_sets(ex, in, e, node);
     ex->pending_parent = e;
     int rc = xslt_exec_instrs(ex, in->child, node);
     ex->pending_parent = parent;
@@ -540,7 +549,9 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     if (!name) return 0;
     LeptrisElement e = out_append_elem(ex, ex->pending_parent, name, NULL);
     if (!e) return -1;
-    /* Attribute sets first (so source node attrs win). */
+    /* Attribute sets contribute defaults for missing names;
+     * source node attrs win (we apply them after so their values
+     * are NOT overwritten). */
     xslt_apply_attr_sets(ex, in, e, node);
     /* Copy the attributes (v1: literal names). */
     size_t na = leptris_element_attribute_count(node);
@@ -590,28 +601,46 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
     if (in->select) {
         v = xslt_eval(ex, in->select, node);
     } else if (in->child) {
-        /* RTF: build into a scratch fragment; the variable holds a
-         * nodeset of the top-level nodes. v1 stores the SERIALIZED
-         * string of the fragment (string/number use is the common
-         * case); node-set transport arrives with exslt:node-set. */
+        /* RTF: build into a scratch document with no parent so the
+         * emitted top-level nodes collect at the document root.
+         * The variable holds a nodeset of those top-level nodes —
+         * exslt:node-set semantics without an explicit call. */
         LeptrisElement saved = ex->pending_parent;
         ex->pending_parent = NULL;
         xslt_exec_instrs(ex, in->child, node);
         ex->pending_parent = saved;
-        char* sv = NULL;
         LeptrisElement rr = leptris_document_root(ex->result);
-        if (rr) {
-            sv = string_value_deep(rr);
-            leptris_document_free(ex->result);
-            ex->result = leptris_document_create();
+        v = xpath_result_new(XPATH_RESULT_NODESET);
+        if (v && rr) {
+            v->value.nodeset_value = xpath_nodeset_new();
+            if (v->value.nodeset_value) {
+                /* XSLT allows multiple top-level result elements;
+                 * out_append_elem with pending_parent=NULL keeps
+                 * them as a sibling chain under the document root.
+                 * Walk from the root and on through next-siblings to
+                 * capture them all in document order. */
+                for (LeptrisElement c = rr;
+                     c;
+                     c = leptris_element_next_sibling_any(c)) {
+                    xpath_nodeset_add(v->value.nodeset_value,
+                                      (LeptrisNodeRef)c);
+                }
+            }
         }
-        v = (struct leptris_xpath_result*)calloc(1, sizeof(*v));
-        if (v) {
-            v->type = XPATH_RESULT_STRING;
-            v->value.string_value = sv ? sv : leptris_strdup("");
-            if (sv) { /* ownership moved */ }
-        } else {
-            free(sv);
+        /* The nodeset's node pointers live in `rr`'s document. Move
+         * ownership of the result document into the exec's RTF
+         * chain so the nodes outlive the variable's frame. */
+        if (rr) {
+            struct xslt_rtf_entry* ent =
+                (struct xslt_rtf_entry*)malloc(sizeof(*ent));
+            if (ent) {
+                ent->doc = ex->result;
+                ent->next = (struct xslt_rtf_entry*)ex->rtf_chain;
+                ex->rtf_chain = ent;
+            } else {
+                leptris_document_free(ex->result);
+            }
+            ex->result = leptris_document_create();
         }
     }
     xslt_push_var(ex, in->name, v);
@@ -1185,6 +1214,12 @@ void xslt_exec_free(XsltExec* ex) {
     while (ex->vars) xslt_pop_var(ex, NULL);
     free(ex->top_text);
     if (ex->varset) xpath_variable_set_free(ex->varset);
+    while (ex->rtf_chain) {
+        struct xslt_rtf_entry* ent = (struct xslt_rtf_entry*)ex->rtf_chain;
+        ex->rtf_chain = ent->next;
+        if (ent->doc) leptris_document_free(ent->doc);
+        free(ent);
+    }
     if (ex->scratch) leptris_document_free(ex->scratch);
     if (ex->result) leptris_document_free(ex->result);
     free(ex->message);

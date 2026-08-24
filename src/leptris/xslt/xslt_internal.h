@@ -239,6 +239,15 @@ typedef struct xslt_exec {
     void* bridge;
     void* keys;
     void* docs;
+
+    /* RTF ownership chain: result-tree-fragment documents built by
+     * <xsl:variable> bodies whose lifetime must outlive the
+     * nodeset that references their nodes (§11.4 — the spec calls
+     * these RTFs; their lifetime is the binding's). Nodesets
+     * returned from op_variable carry heap-owned nodeset arrays
+     * pointing into one of these documents. Freed by
+     * xslt_exec_free. */
+    void* rtf_chain;
 } XsltExec;
 
 /* xslt_exec.c — public transform entry. */
