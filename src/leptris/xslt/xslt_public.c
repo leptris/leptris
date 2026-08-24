@@ -9,7 +9,7 @@
 #include "../dom/text.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <strings.h>
+#include <ctype.h>
 
 struct leptris_xslt {
     LeptrisDocument sheet_doc;    /* owns the stylesheet tree */
@@ -159,9 +159,18 @@ static char* to_html_method(const char* xml) {
             size_t namelen = j - (i + 1);
             int is_void = 0;
             for (size_t k = 0; kVoid[k]; k++) {
-                if (strlen(kVoid[k]) == namelen &&
-                    strncasecmp(kVoid[k], xml + i + 1, namelen) == 0) {
-                    is_void = 1; break;
+                if (strlen(kVoid[k]) == namelen) {
+                    size_t q = 0;
+                    int same = 1;
+                    const unsigned char* p =
+                        (const unsigned char*)xml + i + 1;
+                    for (; q < namelen; q++) {
+                        if (tolower(p[q]) !=
+                            tolower((unsigned char)kVoid[k][q])) {
+                            same = 0; break;
+                        }
+                    }
+                    if (same) { is_void = 1; break; }
                 }
             }
             if (is_void) {

@@ -14,9 +14,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
-#include <strings.h>
 
 #define XSLT_MAX_DEPTH 512
+
+/* Portable ASCII case-insensitive comparison (strcasecmp is
+ * POSIX-only; MSVC has _stricmp). */
+static int xslt_ci_eq(const char* a, const char* b) {
+    while (*a && *b) {
+        int ca = tolower((unsigned char)*a);
+        int cb = tolower((unsigned char)*b);
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
 
 static XsltInstrFn g_ops[XSLT_INSTR_UNKNOWN_XSL + 1];
 
@@ -583,7 +594,7 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
                      * case, "upper-first" (the default) sorts by
                      * codepoint — 'A' < 'a' — and "lower-first"
                      * reverses. Other strings compare normally. */
-                    int cmp = (strcasecmp(a, b) == 0 &&
+                    int cmp = (xslt_ci_eq(a, b) &&
                                s->case_upper_first == 0)
                                   ? -strcmp(a, b) : strcmp(a, b);
                     swap = s->descending ? cmp < 0 : cmp > 0;
