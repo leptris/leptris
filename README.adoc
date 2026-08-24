@@ -317,6 +317,45 @@ if (r) {
 Supported: all 13 axes, all 27 functions, all 15 operators, full
 predicate syntax.  See <<api,xpath-coverage>> for details.
 
+==== Parsing models: DOM, SAX, StAX, iterparse
+
+One engine, four consumption models. Pick by how you want to pay:
+
+[cols="2,2,3,3",options="header"]
+|===
+|Model |API |Memory |Use when
+
+|DOM (tree)
+|`leptris_parse_string`
+|Whole document
+|You need random access, XPath, mutation, or serialization.
+|The default; everything else is an optimization.
+
+|SAX (push)
+|`leptris_sax_parse` / feed
+|Bounded by depth
+|The engine calls YOU as it parses. Cheapest per event, but every
+|callback crosses the FFI boundary (~1 µs each through bindings).
+
+|StAX-style (pull)
+|`leptris_pull_new` / `_new_file`
+|Bounded by the input slice
+|YOU call the engine: `leptris_pull_next()` returns events on
+|demand. Same streaming guarantees as SAX with zero C→host
+|callbacks — the binding-friendly form of streaming.
+
+|Incremental (iterparse)
+|`leptris_iterparse_new` / `_new_file`
+|Bounded by the largest subtree
+|You want a TREE but not the whole document at once: each top-level
+|child materializes in its own pool and is released when you move
+|on. The huge-file document-processing shape.
+|===
+
+SAX and pull share the same streaming core (`set_streaming(1)`);
+iterparse rides the pull API. File variants (`_new_file`) stream
+from disk in bounded slices — no whole-document buffer.
+
 [#sax]
 === Pull (StAX-style) parsing
 
