@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-24
+
+### Added
+
+- node_children batch + serialize-into-buffer (issue #535) (ffi)
+
+
+
 ## [1.6.2] - 2026-08-24
 
 ### Fixed
