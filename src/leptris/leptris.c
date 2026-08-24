@@ -761,6 +761,15 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         pi = next;
     }
 
+    /* Free top-level comments (the doc->pis twin). */
+    struct leptris_top_comment* tc = doc->top_comments;
+    while (tc) {
+        struct leptris_top_comment* next = tc->next;
+        if (tc->content) LEPTRIS_FREE(tc->content);
+        LEPTRIS_FREE(tc);
+        tc = next;
+    }
+
     /* TODO 117: release adopted child documents from xi:include
      * parse="xml".  Each child was parsed into its own pool; its
      * nodes were MOVED (not copied) into our tree, so the child's

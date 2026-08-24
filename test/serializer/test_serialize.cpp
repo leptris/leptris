@@ -597,3 +597,49 @@ TEST(MixedContent, CompactModeUnchanged) {
     leptris_free_string(out);
     leptris_document_free(doc);
 }
+
+/* Issue #550 sweep fallout: comments OUTSIDE the root element were
+ * carved by the parser but never wired into the document, so they
+ * silently vanished on serialization. The doc->pis twin chain now
+ * retains them. Falsifiability: before the fix this emitted "<r/>". */
+TEST(TopLevelComments, SurviveSerialization) {
+    const char xml[] = "<!--before--><r/><!--after-->";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out, "<!--before-->"), nullptr);
+    EXPECT_NE(std::strstr(out, "<!--after-->"), nullptr);
+    EXPECT_NE(std::strstr(out, "<r/>"), nullptr);
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+/* Issue #550's suggested CI test: parse → serialize IMMEDIATELY,
+ * no intervening calls, on the raw API — plus the sizing query on
+ * serialize_into with NULL and non-NULL options. Before the
+ * doc->pis/top_comments work this class of probe was reported as
+ * returning NULL; the exact reported repro passed a truncated
+ * length, which correctly fails the parse. This spec pins the
+ * correct behavior for the raw sequence. */
+TEST(RawApiProbe, ImmediateSerializeAfterParse) {
+    const char xml[] = "<r><a/></r>";
+    LeptrisStatus st = LEPTRIS_ERROR_MEMORY;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK);
+
+    char* out = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, xml);
+    leptris_free_string(out);
+
+    /* Sizing pass first, then write pass — both option shapes. */
+    size_t need = leptris_document_serialize_into(doc, nullptr, 0, nullptr, nullptr);
+    EXPECT_GT(need, 0u);
+    LeptrisSerializeOptions opts = {0, 0, 0};
+    size_t need2 = leptris_document_serialize_into(doc, nullptr, 0, nullptr, &opts);
+    EXPECT_GT(need2, 0u);
+
+    leptris_document_free(doc);
+}

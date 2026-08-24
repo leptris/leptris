@@ -63,6 +63,8 @@ typedef struct {
     LeptrisElement root;
     struct leptris_processing_instruction* pis_head;
     struct leptris_processing_instruction* pis_tail;
+    struct leptris_top_comment* tc_head;
+    struct leptris_top_comment* tc_tail;
     /* XML declaration fields */
     char* version;
     char* encoding;
@@ -926,6 +928,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.root = NULL;
     p.pis_head = NULL;
     p.pis_tail = NULL;
+    p.tc_head = NULL;
+    p.tc_tail = NULL;
     p.version = NULL;
     p.encoding = NULL;
     p.standalone = -1;
@@ -1215,6 +1219,18 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 cn->base.frozen = 1;  /* at creation — TODO 187 */
                 if (p.depth > 0) {
                     dp_wire_child(&p, p.open_stack[p.depth - 1], (LeptrisNode*)cn);
+                } else {
+                    /* Doc-level comment: heap twin so it survives the
+                     * parse buffer (#550 sweep fallout — was dropped). */
+                    struct leptris_top_comment* tc =
+                        (struct leptris_top_comment*)malloc(sizeof(*tc));
+                    if (!tc) goto fail;
+                    tc->content = strdup((const char*)start);
+                    if (!tc->content) { free(tc); goto fail; }
+                    tc->next = NULL;
+                    if (p.tc_tail) p.tc_tail->next = tc;
+                    else p.tc_head = tc;
+                    p.tc_tail = tc;
                 }
                 p.pos += 3;
             } else if (p.end - p.pos >= 9 &&
@@ -1355,6 +1371,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     leptris_root_doc_register(p.root, doc);
     /* Tree is eagerly built — no FlatDoc, no lazy promote. */
     doc->pis = p.pis_head;
+    doc->top_comments = p.tc_head;
     doc->has_namespaces = p.saw_namespace;
     doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */
     doc->had_declaration = p.had_declaration;
