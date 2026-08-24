@@ -4,9 +4,23 @@
 
 ### Added
 
-- node_children batch + serialize-into-buffer (issue #535) (ffi)
+- **`leptris_node_children(parent, out, max)`** (issue #535): every
+  child kind — elements, text, comments, CDATA, PIs — copied in one
+  call, the same shape as `leptris_xpath_result_get_nodes_ex`.
+  `out=NULL` is a count-only query returning the TOTAL across all
+  kinds (`leptris_node_child_count` is elements-only and cannot size
+  a mixed array). Bindings' `children` drops from N+1 FFI round
+  trips to 1 call + N wraps
+- **`leptris_document_serialize_into` /
+  `leptris_element_serialize_into`** (issue #535): caller-buffer
+  serialization — `buf=NULL` queries the needed size (including the
+  NUL); with capacity the copy happens in the same call. The
+  serialize + read_string + free_string FFI pattern collapses to one
+  call with zero library-side allocations
 
+### Fixed
 
+- v1.6.2 (below): mixed-content pretty-printing — see 1.6.2
 
 ## [1.6.2] - 2026-08-24
 
