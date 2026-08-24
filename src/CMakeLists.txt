@@ -83,6 +83,7 @@ set(LEPTRIS_SOURCES
     leptris/xslt/xslt_pattern.c
     leptris/xslt/xslt_exec.c
     leptris/xslt/xslt_public.c
+    leptris/xslt/xslt_functions.c
 
     # SAX
     leptris/sax/parser.c

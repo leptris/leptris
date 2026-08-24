@@ -23,6 +23,7 @@
 #include "../xpath/xpath_internal.h"
 #include "../xpath/parser.h"
 #include "../xpath/evaluator_internal.h"
+#include "../xpath/functions.h"
 #include "../xpath/xpath_variables.h"
 #include "../dom/element.h"
 #include "../../include/leptris.h"
@@ -100,15 +101,45 @@ typedef struct xslt_instr {
     /* Sorts (FOR_EACH / APPLY_TEMPLATES). */
     XsltSort* sorts;
 
+    /* use-attribute-sets (RESULT_ELEM / ELEMENT / COPY): names
+     * applied before the instruction's own attrs (§7.1.4). */
+    char** attr_set_names;
+    size_t attr_set_count;
+
     /* CHOOSE arms are WHEN/OTHERWISE children with test set. */
     int terminate;                  /* MESSAGE terminate */
 } XsltInstr;
 
+/* One literal result-element attribute (name, raw value with
+ * possible {expr} templates — evaluated at execution). Shared by
+ * literal elements and xsl:attribute-set entries. */
 typedef struct xslt_lattr {
     const char* name;
     const char* value;      /* raw, may contain {xpath} templates */
     struct xslt_lattr* next;
 } XsltLAttr;
+
+/* Named attribute set (xsl:attribute-set, §7.1.4). */
+typedef struct xslt_attrset {
+    const char* name;
+    XsltLAttr* attrs;           /* evaluated AVTs applied at use sites */
+    struct xslt_attrset* next;
+} XsltAttrSet;
+
+/* Decimal format (xsl:decimal-format, §12.3). The sheet always has
+ * an unnamed default entry first. */
+typedef struct xslt_decformat {
+    const char* name;           /* NULL = default */
+    char decimal_sep;
+    char grouping_sep;
+    char minus_sign;
+    char percent;
+    char per_mille;             /* stored as bytes; multi-byte chars v1 truncated */
+    char zero_digit;
+    const char* infinity;
+    const char* nan;
+    struct xslt_decformat* next;
+} XsltDecimalFormat;
 
 /* One match pattern alternative (a pattern "a|b|c" is three alts). */
 typedef struct xslt_pattern {
@@ -158,6 +189,15 @@ struct xslt_styles {
     int out_omit_decl;
     const char* out_encoding;
     const char* out_version;
+    const char* out_doctype_system;
+    const char* out_doctype_public;
+    char** out_cdata_elems;        /* NULL-terminated name list */
+
+    /* xsl:decimal-format declarations; the head is the default. */
+    XsltDecimalFormat* decformats;
+
+    /* Named attribute sets (§7.1.4). */
+    XsltAttrSet* attrsets;
 };
 
 typedef struct xslt_styles XsltStylesheet;
@@ -187,6 +227,18 @@ typedef struct xslt_exec {
     LeptrisElement pending_parent;/* current output insertion point */
     char* top_text;                /* text emitted with no parent yet */
     size_t top_text_len, top_text_cap;
+
+    /* current(): the node being processed by the template rule or
+     * for-each in flight (§12.4) — distinct from the predicate
+     * context, so save/restored around each xslt_eval. */
+    LeptrisElement current_node;
+
+    /* xslt_functions.c state (opaque here): the per-exec registry
+     * carrying the XSLT function bridge, the lazy key indexes
+     * (§12.2), and the document() cache. */
+    void* bridge;
+    void* keys;
+    void* docs;
 } XsltExec;
 
 /* xslt_exec.c — public transform entry. */
@@ -201,6 +253,11 @@ void xslt_stylesheet_free(XsltStylesheet* sheet);
 /* xslt_pattern.c — pattern matching (§5.2). */
 int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
                          LeptrisDocument doc);
+
+/* xslt_exec.c — pattern + execution helpers shared with
+ * xslt_functions.c (the document-order walker reused for key-index
+ * construction and the nodeset result identifier). */
+LeptrisElement xslt_next_doc_order(LeptrisElement e);
 
 /* xslt_exec.c — instruction dispatch (registration table). */
 typedef int (*XsltInstrFn)(XsltExec* ex, const XsltInstr* in,
@@ -218,5 +275,28 @@ void xslt_push_var(XsltExec* ex, const char* name,
 void xslt_pop_var(XsltExec* ex, const char* name);
 struct leptris_xpath_result* xslt_copy_result(
     const struct leptris_xpath_result* r);
+
+/* xslt_functions.c — the context-function bridge (phases 04/05):
+ * XSLT functions (current, key, format-number, generate-id,
+ * system-property, document) + EXSLT node-set/regexp/date, bound to
+ * a per-exec registry so handlers reach this exec without touching
+ * the (shared, read-only) source document. Built lazily; freed at
+ * exec teardown. */
+void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec);
+XPathFunctionRegistry* xslt_bridge_registry(XsltExec* ex);
+void xslt_bridge_free(XsltExec* ex);
+void xslt_keys_free(XsltExec* ex);
+void xslt_docs_free(XsltExec* ex);
+
+/* format-number(§12.3) — shared by the bridge; returns an OWNED
+ * string. df_name NULL/"" selects the default decimal-format. */
+char* xslt_format_number(const XsltStylesheet* sheet, double value,
+                         const char* pattern, const char* df_name);
+
+/* Attribute-set application (xslt_exec.c): evaluates the set's AVT
+ * attrs onto `target`; existing attributes are NOT overwritten
+ * (§7.1.4 — later sets and explicit attrs win). */
+void xslt_apply_attr_sets(XsltExec* ex, const XsltInstr* in,
+                          LeptrisElement target, LeptrisElement node);
 
 #endif /* LEPTRIS_XSLT_INTERNAL_H */

@@ -1,0 +1,691 @@
+/* xslt/xslt_functions.c — XSLT/EXSLT context function bridge
+ * (TODO.transform phases 04 + 05).
+ *
+ * The board's design contract: "context-function bridge … injected
+ * through the per-eval registry copy — the same path as custom
+ * functions (SSOT)." Handlers reach this exec via
+ * ctx->current_fn_user_data (set per-dispatch by the evaluator) so
+ * the source document stays read-only.
+ *
+ * Scope (v1):
+ *   XSLT core: current, generate-id, system-property, key,
+ *              format-number, document.
+ *   EXSLT:     exslt:node-set (and bare node-set), date:date-time,
+ *              regexp:test.
+ *
+ * Deferred to follow-ups (documented inline):
+ *   regexp:match / regexp:replace — POSIX regmatch_t-then-rebuild
+ *                                    buffering is straightforward but
+ *                                    out of scope for the initial
+ *                                    convergence.
+ */
+#include "xslt_internal.h"
+#include "../xpath/evaluator_internal.h"
+#include "../xpath/functions.h"
+#include "../dom/element.h"
+#include <stdio.h>
+#include <regex.h>
+#include <time.h>
+#include <string.h>
+#include <stdlib.h>
+
+/* The next-document-order walker lives in xslt_exec.c. Lift it
+ * here as a non-static helper so key() construction can iterate
+ * every element in document order. */
+LeptrisElement xslt_next_doc_order(LeptrisElement e);
+
+/* ============================================================
+ * Result + argument helpers
+ * ============================================================ */
+
+static struct leptris_xpath_result* res_string(const char* s) {
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_STRING);
+    if (!r) return NULL;
+    r->value.string_value = s ? leptris_strdup(s) : leptris_strdup("");
+    if (!r->value.string_value) { xpath_result_free(r); return NULL; }
+    return r;
+}
+static struct leptris_xpath_result* res_empty_ns(void) {
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) return NULL;
+    r->value.nodeset_value = xpath_nodeset_new();
+    if (!r->value.nodeset_value) { xpath_result_free(r); return NULL; }
+    return r;
+}
+static struct leptris_xpath_result* res_nodeset_copy(const XPathNodeSet* in) {
+    struct leptris_xpath_result* r = res_empty_ns();
+    if (!r) return NULL;
+    if (!in) return r;
+    for (size_t i = 0; i < in->count; i++)
+        xpath_nodeset_add(r->value.nodeset_value, in->nodes[i]);
+    return r;
+}
+
+static XsltExec* exec_from(XPathContext* ctx) {
+    return (XsltExec*)ctx->current_fn_user_data;
+}
+
+static char* arg_string(XPathContext* ctx, XPathASTNode** args,
+                        size_t n, size_t i) {
+    if (i >= n) return leptris_strdup("");
+    struct leptris_xpath_result* r = evaluate_expr(ctx, args[i]);
+    if (!r) return leptris_strdup("");
+    char* s = leptris_xpath_result_string(r);
+    leptris_xpath_result_free(r);
+    return s ? s : leptris_strdup("");
+}
+static double arg_number(XPathContext* ctx, XPathASTNode** args,
+                         size_t n, size_t i) {
+    if (i >= n) return 0;
+    struct leptris_xpath_result* r = evaluate_expr(ctx, args[i]);
+    if (!r) return 0;
+    double d = leptris_xpath_result_number(r);
+    leptris_xpath_result_free(r);
+    return d;
+}
+
+/* ============================================================
+ * XSLT core (§12): current, generate-id, system-property
+ * ============================================================ */
+
+/* current() — the node being processed by the surrounding template
+ * rule or for-each (§12.4). The actual handler registered in the
+ * bridge is xslt_fn_current_real (below) — it must read the exec
+ * here since user_data wiring happens during registry init. */
+
+static struct leptris_xpath_result* xslt_fn_generate_id(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    XsltExec* ex = exec_from(ctx);
+    LeptrisElement target = NULL;
+    if (n >= 1) {
+        struct leptris_xpath_result* r = evaluate_expr(ctx, args[0]);
+        if (r && r->type == XPATH_RESULT_NODESET &&
+            r->value.nodeset_value && r->value.nodeset_value->count)
+            target = (LeptrisElement)r->value.nodeset_value->nodes[0];
+        if (r) leptris_xpath_result_free(r);
+    } else {
+        target = ex ? ex->current_node : NULL;
+    }
+    char buf[32];
+    if (!target) buf[0] = '\0';
+    else snprintf(buf, sizeof(buf), "n%zx", (size_t)target);
+    return res_string(buf);
+}
+
+static struct leptris_xpath_result* xslt_fn_system_property(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* name = arg_string(ctx, args, n, 0);
+    const char* val = "";
+    if (name) {
+        if (strcmp(name, "xsl:version") == 0) val = "1.0";
+        else if (strcmp(name, "xsl:vendor") == 0) val = "leptris";
+        else if (strcmp(name, "xsl:vendor-url") == 0) val = "https://leptris.dev";
+    }
+    free(name);
+    return res_string(val);
+}
+
+/* Patch the "current" nodeset shape — read the active template
+ * / for-each node from the exec. Centralized so handlers don't
+ * need to know the bridge mechanics. */
+static struct leptris_xpath_result* xslt_fn_current_real(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)args; (void)n;
+    XsltExec* ex = exec_from(ctx);
+    struct leptris_xpath_result* r = res_empty_ns();
+    if (ex && ex->current_node && r)
+        xpath_nodeset_add(r->value.nodeset_value,
+                          (LeptrisNodeRef)ex->current_node);
+    return r;
+}
+
+/* ============================================================
+ * xsl:key + key() (§12.2) — lazy per-(name) index
+ * ============================================================ */
+
+typedef struct xslt_key_bucket {
+    char* value;
+    XPathNodeSet* nodes;
+    struct xslt_key_bucket* next;
+} XsltKeyBucket;
+
+typedef struct xslt_key_index {
+    char* name;
+    XsltKeyBucket** buckets;
+    size_t cap;
+    struct xslt_key_index* next;
+} XsltKeyIndex;
+
+static size_t str_hash(const char* s) {
+    size_t h = 5381;
+    for (const unsigned char* p = (const unsigned char*)s; *p; p++)
+        h = ((h << 5) + h) + *p;
+    return h;
+}
+
+static XsltKeyIndex* key_index_for(const XsltExec* ex, const char* name) {
+    for (XsltKeyIndex* k = (XsltKeyIndex*)ex->keys; k; k = k->next)
+        if (strcmp(k->name, name) == 0) return k;
+    return NULL;
+}
+
+static XsltKeyIndex* key_index_new(const char* name) {
+    XsltKeyIndex* k = (XsltKeyIndex*)calloc(1, sizeof(*k));
+    if (!k) return NULL;
+    k->name = leptris_strdup(name ? name : "");
+    k->cap = 64;
+    k->buckets = (XsltKeyBucket**)calloc(k->cap, sizeof(XsltKeyBucket*));
+    if (!k->buckets || !k->name) {
+        free(k->buckets); free(k->name); free(k); return NULL;
+    }
+    return k;
+}
+
+static void key_index_put(XsltKeyIndex* k, const char* val, LeptrisNode* node) {
+    if (!val || !node) return;
+    size_t h = str_hash(val);
+    XsltKeyBucket* b = k->buckets[h % k->cap];
+    while (b && strcmp(b->value, val) != 0) b = b->next;
+    if (!b) {
+        b = (XsltKeyBucket*)calloc(1, sizeof(*b));
+        if (!b) return;
+        b->value = leptris_strdup(val);
+        if (!b->value) { free(b); return; }
+        b->nodes = xpath_nodeset_new();
+        if (!b->nodes) { free(b->value); free(b); return; }
+        b->next = k->buckets[h % k->cap];
+        k->buckets[h % k->cap] = b;
+    }
+    xpath_nodeset_add(b->nodes, node);
+}
+
+static void key_index_free(XsltKeyIndex* k) {
+    if (!k) return;
+    for (size_t i = 0; i < k->cap; i++) {
+        XsltKeyBucket* b = k->buckets[i];
+        while (b) {
+            XsltKeyBucket* nx = b->next;
+            free(b->value);
+            xpath_nodeset_free(b->nodes);
+            free(b);
+            b = nx;
+        }
+    }
+    free(k->buckets); free(k->name); free(k);
+}
+
+static int xslt_keys_build(XsltExec* ex, const char* name) {
+    if (!ex || !ex->sheet || !ex->source) return -1;
+    int any = 0;
+    for (XsltKeyDef* kd = ex->sheet->keys; kd; kd = kd->next)
+        if (kd->name && kd->match && kd->use &&
+            strcmp(kd->name, name) == 0) any = 1;
+    if (!any) return 0;
+    XsltKeyIndex* idx = key_index_new(name);
+    if (!idx) return -1;
+    /* Insert first so a concurrent lookup sees it. */
+    XsltKeyIndex** tail = (XsltKeyIndex**)&ex->keys;
+    while (*tail) tail = &(*tail)->next;
+    *tail = idx;
+
+    LeptrisNodeRef root = (LeptrisNodeRef)leptris_document_root(ex->source);
+    for (LeptrisNodeRef e = root; e; e = (LeptrisNodeRef)xslt_next_doc_order((LeptrisElement)e)) {
+        for (XsltKeyDef* kd = ex->sheet->keys; kd; kd = kd->next) {
+            if (!kd->name || strcmp(kd->name, name) != 0) continue;
+            XsltPattern pat; memset(&pat, 0, sizeof(pat));
+            pat.expr = kd->match;
+            if (!xslt_pattern_matches(&pat, (LeptrisElement)e, ex->source))
+                continue;
+            struct leptris_xpath_result* r =
+                leptris_xpath_compiled_eval(kd->use, ex->source,
+                                            (LeptrisElement)e);
+            if (!r) continue;
+            char* sv = leptris_xpath_result_string(r);
+            leptris_xpath_result_free(r);
+            if (sv) {
+                key_index_put(idx, sv, e);
+                free(sv);
+            }
+        }
+    }
+    return 0;
+}
+
+static struct leptris_xpath_result* xslt_fn_key(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    XsltExec* ex = exec_from(ctx);
+    if (!ex || n < 2) return res_empty_ns();
+    char* name = arg_string(ctx, args, n, 0);
+    char* val  = arg_string(ctx, args, n, 1);
+    struct leptris_xpath_result* r = res_empty_ns();
+    if (!r) { free(name); free(val); return NULL; }
+    if (!name || !*name) { free(name); free(val); return r; }
+    XsltKeyIndex* k = key_index_for(ex, name);
+    if (!k && ex && xslt_keys_build(ex, name) == 0)
+        k = key_index_for(ex, name);
+    free(name);
+    if (!k || !val) { free(val); return r; }
+    size_t h = str_hash(val);
+    XsltKeyBucket* b = k->buckets[h % k->cap];
+    while (b && strcmp(b->value, val) != 0) b = b->next;
+    if (b)
+        for (size_t i = 0; i < b->nodes->count; i++)
+            xpath_nodeset_add(r->value.nodeset_value, b->nodes->nodes[i]);
+    free(val);
+    return r;
+}
+
+void xslt_keys_free(XsltExec* ex) {
+    if (!ex || !ex->keys) return;
+    XsltKeyIndex* k = (XsltKeyIndex*)ex->keys;
+    while (k) { XsltKeyIndex* nx = k->next; key_index_free(k); k = nx; }
+    ex->keys = NULL;
+}
+
+/* ============================================================
+ * document() (§12.1) — lazy per-exec cache
+ * ============================================================ */
+
+typedef struct xslt_doc_cache_entry {
+    char* href;
+    LeptrisDocument doc;
+    struct xslt_doc_cache_entry* next;
+} XsltDocEntry;
+
+static LeptrisDocument xslt_doc_cache_get(XsltExec* ex, const char* href) {
+    if (!ex || !href || !*href) return NULL;
+    for (XsltDocEntry* e = (XsltDocEntry*)ex->docs; e; e = e->next)
+        if (strcmp(e->href, href) == 0) return e->doc;
+    LeptrisDocument d = leptris_parse_file(href, NULL);
+    if (!d) return NULL;
+    XsltDocEntry* ent = (XsltDocEntry*)calloc(1, sizeof(*ent));
+    if (!ent) { leptris_document_free(d); return NULL; }
+    ent->href = leptris_strdup(href);
+    ent->doc = d;
+    ent->next = (XsltDocEntry*)ex->docs;
+    ex->docs = ent;
+    return d;
+}
+
+void xslt_docs_free(XsltExec* ex) {
+    if (!ex || !ex->docs) return;
+    XsltDocEntry* e = (XsltDocEntry*)ex->docs;
+    while (e) {
+        XsltDocEntry* nx = e->next;
+        free(e->href);
+        if (e->doc) leptris_document_free(e->doc);
+        free(e);
+        e = nx;
+    }
+    ex->docs = NULL;
+}
+
+static struct leptris_xpath_result* xslt_fn_document(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    XsltExec* ex = exec_from(ctx);
+    if (!ex || n < 1) return res_empty_ns();
+    char* href = arg_string(ctx, args, n, 0);
+    if (!href || !*href) { free(href); return res_empty_ns(); }
+    LeptrisDocument d = xslt_doc_cache_get(ex, href);
+    free(href);
+    struct leptris_xpath_result* r = res_empty_ns();
+    if (!r) return NULL;
+    LeptrisElement root = d ? leptris_document_root(d) : NULL;
+    if (root) xpath_nodeset_add(r->value.nodeset_value, (LeptrisNodeRef)root);
+    return r;
+}
+
+/* ============================================================
+ * format-number() (§12.3) — JDK1.1 pattern subset
+ * ============================================================ */
+
+static const XsltDecimalFormat* find_decformat(const XsltStylesheet* s,
+                                               const char* name) {
+    if (!s || !s->decformats) return NULL;
+    for (XsltDecimalFormat* d = s->decformats; d; d = d->next) {
+        if (!name || !*name) { if (!d->name) return d; continue; }
+        if (d->name && strcmp(d->name, name) == 0) return d;
+    }
+    return name ? NULL : s->decformats;
+}
+
+typedef struct {
+    const char* prefix; size_t prefix_len;
+    const char* suffix; size_t suffix_len;
+    int min_int, max_int;     /* leading '0's and total digits */
+    int min_frac, max_frac;
+    int has_decimal;
+    int has_grouping;
+    int multiplier;            /* 1, 100, 1000 */
+} PatternInfo;
+
+static const char* find_split(const char* s, const char* end) {
+    int depth = 0;
+    for (const char* p = s; p < end; p++) {
+        if (*p == '[') depth++;
+        else if (*p == ']') depth--;
+        else if (*p == ';' && depth == 0) return p;
+    }
+    return end;
+}
+
+static void parse_one(const char* s, const char* end, PatternInfo* pi) {
+    /* Single pass: classify each char into prefix/int/digit/frac/
+     * suffix; %/mille/./0-#/, are tokens. The cursor lets the
+     * outer loop know we belong to the int vs frac part. */
+    int phase = 0;   /* 0=prefix, 1=int, 2=frac, 3=suffix */
+    pi->prefix = s; pi->prefix_len = 0;
+    pi->suffix = end; pi->suffix_len = 0;
+    pi->min_int = 0; pi->max_int = 0;
+    pi->min_frac = 0; pi->max_frac = 0;
+    pi->has_decimal = 0;
+    pi->has_grouping = 0;
+    pi->multiplier = 1;
+    /* Walk: count contiguous prefix chars; first '0' or '#' begins
+     * the int part; '.' moves to frac; '%' (and ‰ — v1 aliased to
+     * '%' since per-mille is stored as ASCII; multi-byte ‰ is
+     * treated as a multiplier trigger in the more general form) set
+     * multiplier; other chars before/after turn into prefix/suffix. */
+    const char* p = s;
+    while (p < end) {
+        unsigned char uc = (unsigned char)*p;
+        char c = (char)uc;
+        if (phase == 0) {
+            if (c == '0' || c == '#') { phase = 1; continue; }
+            pi->prefix_len++;
+            if (c == '%') pi->multiplier = 100;
+            else if (uc == 0xE2 &&
+                     p + 2 < end && p[1] == (char)0x80 &&
+                     p[2] == (char)0xB0) {  /* UTF-8 ‰ */
+                pi->multiplier = 1000; p += 2;
+            } else if (c == '.') { pi->has_decimal = 1; }
+            p++; continue;
+        }
+        if (phase == 1) {
+            if (c == '0') { pi->min_int++; pi->max_int++; p++; continue; }
+            if (c == '#') { pi->max_int++; p++; continue; }
+            if (c == ',') { pi->has_grouping = 1; p++; continue; }
+            if (c == '%') { pi->multiplier = 100; pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break; }
+            if (uc == 0xE2 && p + 2 < end && p[1] == (char)0x80 &&
+                p[2] == (char)0xB0) {
+                pi->multiplier = 1000; p += 2;
+                pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break;
+            }
+            if (c == '.') {
+                pi->has_decimal = 1;
+                phase = 2; p++; continue;
+            }
+            pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break;
+        }
+        if (phase == 2) {
+            if (c == '0') { pi->min_frac++; pi->max_frac++; p++; continue; }
+            if (c == '#') { pi->max_frac++; p++; continue; }
+            pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break;
+        }
+        break;
+    }
+}
+
+static void parse_pattern(const char* s, size_t len,
+                           PatternInfo* pos, PatternInfo* neg) {
+    const char* end = s + len;
+    const char* split = find_split(s, end);
+    parse_one(s, split, pos);
+    if (split < end) {
+        parse_one(split + 1, end, neg);
+    } else {
+        *neg = *pos;
+        neg->prefix = NULL;
+        neg->prefix_len = 0;
+    }
+}
+
+/* Format |abs_v| per the parsed pattern; returns OWNED string. */
+static char* format_value(const PatternInfo* p, double abs_v,
+                           char decimal_sep, char grouping_sep,
+                           char zero_digit) {
+    int prec = p->max_frac;
+    char body[256];
+    if (prec > 0) snprintf(body, sizeof(body), "%.*f", prec, abs_v);
+    else snprintf(body, sizeof(body), "%.0f", abs_v);
+
+    char intpart[128] = "", fracpart[128] = "";
+    const char* dot = strchr(body, '.');
+    if (dot) {
+        size_t il = (size_t)(dot - body);
+        memcpy(intpart, body, il); intpart[il] = 0;
+        snprintf(fracpart, sizeof(fracpart), "%s", dot + 1);
+    } else {
+        snprintf(intpart, sizeof(intpart), "%s", body);
+    }
+    /* Right-pad frac with zeros up to min_frac, then truncate to max_frac. */
+    {
+        size_t fl = strlen(fracpart);
+        if ((int)fl < p->min_frac) {
+            for (; (int)fl < p->min_frac && fl + 1 < sizeof(fracpart); fl++)
+                fracpart[fl] = zero_digit;
+            fracpart[fl] = 0;
+        }
+        if ((int)fl > p->max_frac) fracpart[p->max_frac] = 0;
+    }
+    /* Left-pad int with zeros to min_int. */
+    if ((int)strlen(intpart) < p->min_int) {
+        char tmp[128]; size_t t = 0;
+        for (int i = 0; i < p->min_int - (int)strlen(intpart) && t < sizeof(tmp) - 1; i++)
+            tmp[t++] = zero_digit;
+        snprintf(tmp + t, sizeof(tmp) - t, "%s", intpart);
+        snprintf(intpart, sizeof(intpart), "%s", tmp);
+    }
+    /* Insert grouping separator every 3 digits from the right. */
+    if (p->has_grouping) {
+        size_t gl = strlen(intpart);
+        char rev[160]; size_t ri = 0, cnt = 0;
+        for (size_t i = gl; i-- > 0 && ri + 1 < sizeof(rev); ) {
+            rev[ri++] = intpart[i];
+            if (++cnt % 3 == 0 && i > 0) rev[ri++] = grouping_sep;
+        }
+        /* reverse rev → intpart */
+        for (size_t i = 0; i < ri; i++) intpart[i] = rev[ri - 1 - i];
+        intpart[ri] = 0;
+    }
+    char out[512]; size_t o = 0;
+    for (size_t i = 0; i < p->prefix_len && o + 1 < sizeof(out); i++)
+        out[o++] = p->prefix[i];
+    if (p->prefix_len && p->multiplier != 1 && p->multiplier == 100) {
+        /* JDK1.1: % is appended at the start of the prefix segment
+         * (rightmost prefix char), but we already absorbed it as a
+         * prefix byte (kept verbatim). No further change. */
+    }
+    for (size_t i = 0; intpart[i] && o + 1 < sizeof(out); i++) out[o++] = intpart[i];
+    if (p->has_decimal) out[o++] = decimal_sep;
+    for (size_t i = 0; fracpart[i] && o + 1 < sizeof(out); i++) out[o++] = fracpart[i];
+    for (size_t i = 0; i < p->suffix_len && o + 1 < sizeof(out); i++)
+        out[o++] = p->suffix[i];
+    out[o] = 0;
+    return leptris_strdup(out);
+}
+
+char* xslt_format_number(const XsltStylesheet* sheet, double value,
+                         const char* pattern, const char* df_name) {
+    if (!pattern || !*pattern) pattern = "0";
+    const XsltDecimalFormat* df = find_decformat(sheet, df_name);
+    if (!df) df = find_decformat(sheet, NULL);
+    char decimal_sep  = df ? df->decimal_sep   : '.';
+    char grouping_sep = df ? df->grouping_sep  : ',';
+    char zero_digit   = df ? df->zero_digit    : '0';
+    const char* nan_str  = df && df->nan       ? df->nan       : "NaN";
+    const char* inf_str  = df && df->infinity ? df->infinity : "Infinity";
+    char minus_sign    = df ? df->minus_sign   : '-';
+    (void)minus_sign;
+
+    if (value != value) return leptris_strdup(nan_str);
+    int neg = (value < 0);
+    PatternInfo pos = {0}, negi = {0};
+    parse_pattern(pattern, strlen(pattern), &pos, &negi);
+    int has_neg = (negi.prefix != NULL || negi.suffix != NULL);
+    PatternInfo* use = neg ? (has_neg ? &negi : &pos) : &pos;
+    if (neg && !has_neg) {   /* negate with explicit minus prefix */
+        char minus[2] = { df ? df->minus_sign : '-', 0 };
+        size_t pl = strlen(use->prefix);
+        char* nv = (char*)malloc(pl + 2);
+        if (nv) { memcpy(nv, use->prefix, pl); nv[pl] = minus[0]; nv[pl+1] = 0;
+                  use->prefix = nv; use->prefix_len = pl + 1; }
+    }
+    double av = neg ? -value : value;
+    if (use->multiplier != 1) av *= use->multiplier;
+    if (av == 1.0 / 0.0 || av == -1.0 / 0.0) {
+        if (neg && use->prefix_len) {
+            char* s = (char*)malloc(use->prefix_len + strlen(inf_str) + 1);
+            if (s) { memcpy(s, use->prefix, use->prefix_len);
+                      memcpy(s + use->prefix_len, inf_str, strlen(inf_str) + 1);
+                      free((void*)use->prefix);
+                      return s; }
+        }
+        return leptris_strdup(inf_str);
+    }
+    char* out = format_value(use, av, decimal_sep, grouping_sep, zero_digit);
+    if (neg && use->prefix_len && !has_neg) free((void*)use->prefix);
+    return out;
+}
+
+static struct leptris_xpath_result* xslt_fn_format_number(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    XsltExec* ex = exec_from(ctx);
+    double v = arg_number(ctx, args, n, 0);
+    char* pat = arg_string(ctx, args, n, 1);
+    char* df  = (n >= 3) ? arg_string(ctx, args, n, 2) : leptris_strdup("");
+    char* out = xslt_format_number(ex ? ex->sheet : NULL, v, pat, df);
+    free(pat); free(df);
+    return res_string(out ? out : "");
+}
+
+/* ============================================================
+ * EXSLT pack (subset)
+ * ============================================================ */
+
+static struct leptris_xpath_result* xslt_fn_node_set(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    if (n < 1) return res_empty_ns();
+    struct leptris_xpath_result* in = evaluate_expr(ctx, args[0]);
+    if (!in) return res_empty_ns();
+    if (in->type == XPATH_RESULT_NODESET) {
+        struct leptris_xpath_result* r = res_nodeset_copy(in->value.nodeset_value);
+        leptris_xpath_result_free(in);
+        return r;
+    }
+    /* Non-nodeset input: nothing to attach to without owning a
+     * scratch doc here — return empty. Producers should ensure
+     * variables hold RTF nodesets, which they do in this engine. */
+    char* s = leptris_xpath_result_string(in);
+    leptris_xpath_result_free(in);
+    free(s);
+    return res_empty_ns();
+}
+
+static struct leptris_xpath_result* xslt_fn_regexp_test(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* src = arg_string(ctx, args, n, 0);
+    char* patstr = arg_string(ctx, args, n, 1);
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!r) { free(src); free(patstr); return NULL; }
+    int matched = 0;
+    if (src && patstr) {
+        regex_t rx;
+        if (regcomp(&rx, patstr, REG_EXTENDED) == 0) {
+            matched = (regexec(&rx, src, 0, NULL, 0) == 0);
+            regfree(&rx);
+        }
+    }
+    r->value.boolean_value = matched;
+    free(src); free(patstr);
+    return r;
+}
+
+/* regexp:match / regexp:replace — TODO. Full implementation lands
+ * with TODO.engine extension work; v1 builders can use exslt:node-
+ * set + per-call `=~`-style scripting or wait. The stubs return
+ * identity / empty so callers have well-defined responses. */
+static struct leptris_xpath_result* xslt_fn_regexp_match_v1(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)args; (void)n; (void)ctx;
+    return res_empty_ns();
+}
+static struct leptris_xpath_result* xslt_fn_regexp_replace_v1(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    if (n < 1) return res_string("");
+    char* s = arg_string(ctx, args, n, 0);
+    struct leptris_xpath_result* r = res_string(s ? s : "");
+    free(s);
+    return r;
+}
+
+static struct leptris_xpath_result* xslt_fn_date_datetime(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)args; (void)n; (void)ctx;
+    time_t t = time(NULL);
+    struct tm* tm = gmtime(&t);
+    char buf[40];
+    if (tm)
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                 tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+                 tm->tm_hour, tm->tm_min, tm->tm_sec);
+    else snprintf(buf, sizeof(buf), "1970-01-01T00:00:00Z");
+    return res_string(buf);
+}
+
+/* ============================================================
+ * Registry handler installation
+ *
+ * Per-eval path: xslt_exec.c calls xslt_register_bridge_handlers
+ * with a freshly-built registry (cleanup frees it). Each entry's
+ * user_data carries THIS exec so handlers reach keys/document
+ * cache/current_node via the per-dispatch TLS slot.
+ *
+ * Caching note: the prototype cached this per-exec. Per-eval build
+ * is correct but trades ~12 register calls for ownership
+ * simplicity; revisit once the hot-path is benchmarked.
+ * ============================================================ */
+
+static void xslt_register_handler(XPathFunctionRegistry* r, const char* name,
+                                   XPathFunctionHandler h, int min_args,
+                                   int max_args, void* user_data) {
+    xpath_function_registry_register(r, name, h, min_args, max_args);
+    if (r->count > 0)
+        r->functions[r->count - 1].user_data = user_data;
+}
+
+void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
+    if (!r) return;
+    xslt_register_handler(r, "current", xslt_fn_current_real, 0, 0, exec);
+    xslt_register_handler(r, "generate-id", xslt_fn_generate_id, 0, 1, exec);
+    xslt_register_handler(r, "system-property", xslt_fn_system_property, 1, 1, exec);
+    xslt_register_handler(r, "key", xslt_fn_key, 2, 2, exec);
+    xslt_register_handler(r, "format-number", xslt_fn_format_number, 2, 3, exec);
+    xslt_register_handler(r, "document", xslt_fn_document, 1, 2, exec);
+    xslt_register_handler(r, "exslt:node-set", xslt_fn_node_set, 1, 1, exec);
+    xslt_register_handler(r, "node-set", xslt_fn_node_set, 1, 1, exec);
+    xslt_register_handler(r, "regexp:test", xslt_fn_regexp_test, 2, 2, exec);
+    xslt_register_handler(r, "regexp:match", xslt_fn_regexp_match_v1, 2, 2, exec);
+    xslt_register_handler(r, "regexp:replace", xslt_fn_regexp_replace_v1, 3, 3, exec);
+    xslt_register_handler(r, "date:date-time", xslt_fn_date_datetime, 0, 0, exec);
+}
+
+/* The original exec-scoped builder is kept for the future cache
+ * optimization; per-eval allocates a fresh registry above. */
+
+XPathFunctionRegistry* xslt_bridge_registry(XsltExec* ex) {
+    if (!ex) return NULL;
+    if (ex->bridge) return (XPathFunctionRegistry*)ex->bridge;
+    XPathFunctionRegistry* r = xpath_function_registry_new();
+    if (!r) return NULL;
+    xpath_function_registry_init_standard(r);
+    xslt_register_bridge_handlers(r, ex);
+    ex->bridge = r;
+    return r;
+}
+
+void xslt_bridge_free(XsltExec* ex) {
+    if (!ex || !ex->bridge) return;
+    xpath_function_registry_free((XPathFunctionRegistry*)ex->bridge);
+    ex->bridge = NULL;
+}
