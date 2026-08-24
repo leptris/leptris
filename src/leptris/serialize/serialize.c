@@ -691,10 +691,41 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
  */
 #define SER_WALK_STACK_MAX 512
 
+/* Issue #534: an element whose children include TEXT (non-whitespace)
+ * or CDATA is MIXED CONTENT — indenting inside it would change the
+ * text on round-trip (inserted whitespace becomes new text nodes on
+ * reparse). libxml2 keeps such elements on one line; so do we.
+ * Whitespace-only text nodes are formatting artifacts and do NOT
+ * count (pretty documents keep indenting). */
+static int ser_children_have_text(LeptrisNode* fc) {
+    for (LeptrisNode* c = fc; c; c = leptris_node_get_next_sibling(c)) {
+        if (c->type == LEPTRIS_NODE_TYPE_CDATA) return 1;
+        if (c->type == LEPTRIS_NODE_TYPE_TEXT) {
+            LeptrisTextNode* tn = (LeptrisTextNode*)c;
+            const char* tc;
+            size_t tl;
+            if (tn->borrowed && tn->content_len > 0) {
+                tc = tn->content;
+                tl = tn->content_len;
+            } else {
+                tc = leptris_text_get_content(tn);
+                tl = tc ? tn->content_len : 0;
+            }
+            for (size_t i = 0; i < tl; i++) {
+                if (tc[i] != ' ' && tc[i] != '\t' &&
+                    tc[i] != '\n' && tc[i] != '\r') {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, int is_root) {
     if (!root_elem || !root_elem->name) return;
 
-    struct { LeptrisElement e; size_t nl; } st[SER_WALK_STACK_MAX];
+    struct { LeptrisElement e; size_t nl; int mixed; } st[SER_WALK_STACK_MAX];
     int sp = 0;
 
     LeptrisNode* cur = (LeptrisNode*)root_elem;
@@ -702,11 +733,44 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
 
     for (;;) {
         if (cur->type != LEPTRIS_NODE_TYPE_ELEMENT) {
+            /* #534 companion: in pretty mode the formatter owns the
+             * whitespace between elements of a NON-mixed parent —
+             * the source's ws-only text nodes are dropped and
+             * replaced by the canonical newline+indent the open and
+             * close paths already emit. (Before, both were emitted,
+             * doubling the blank lines on every round-trip.) Text
+             * inside a mixed parent is verbatim content: never
+             * dropped. */
+            if (buf->indent_spaces > 0 &&
+                cur->type == LEPTRIS_NODE_TYPE_TEXT &&
+                !((sp > 0) && st[sp - 1].mixed)) {
+                LeptrisTextNode* wsn = (LeptrisTextNode*)cur;
+                const char* wsc;
+                size_t wsl;
+                if (wsn->borrowed && wsn->content_len > 0) {
+                    wsc = wsn->content;
+                    wsl = wsn->content_len;
+                } else {
+                    wsc = leptris_text_get_content(wsn);
+                    wsl = wsc ? wsn->content_len : 0;
+                }
+                int ws_only = 1;
+                for (size_t i = 0; i < wsl; i++) {
+                    if (wsc[i] != ' ' && wsc[i] != '\t' &&
+                        wsc[i] != '\n' && wsc[i] != '\r') {
+                        ws_only = 0;
+                        break;
+                    }
+                }
+                if (ws_only) goto advance;   /* skip, formatter owns it */
+            }
             serialize_node_internal(cur, buf);
             goto advance;
         }
 
         LeptrisElement e = (LeptrisElement)cur;
+        /* #534: children of a mixed-content parent emit inline. */
+        int parent_mixed = (sp > 0) && st[sp - 1].mixed;
         const char* name = e->name;
         size_t nl = (e->name_len != 0xFF) ? (size_t)e->name_len
                                           : strlen(name);
@@ -743,7 +807,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * close into the same single reservation — leaves
                  * otherwise pay ~8 capacity-checked appends each
                  * (the raw-only guard was why pretty trailed). */
-                int pretty0 = buf->indent_spaces > 0;
+                int pretty0 = buf->indent_spaces > 0 && !parent_mixed;
                 /* Lead = indent spaces ONLY: the parent's open tag
                  * (or the previous sibling's close) already emitted
                  * the newline that ended this line — a leading \n
@@ -782,7 +846,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         }
 
         /* --- open tag (batched, as before) --- */
-        if (!is_root_cur && buf->indent_spaces > 0) buffer_append_indent(buf);
+        if (!is_root_cur && buf->indent_spaces > 0 && !parent_mixed)
+            buffer_append_indent(buf);
         buffer_ensure_capacity(buf, 1 + epl + nl + 1);
         char* ot = buf->data + buf->size;
         *ot++ = '<';
@@ -878,7 +943,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         LeptrisNode* fc = leptris_node_first_child_internal((LeptrisNode*)e);
         if (!fc) {
             buffer_append(buf, "/>");
-            if (!is_root_cur && buf->indent_spaces > 0) buffer_append_newline(buf);
+            if (!is_root_cur && buf->indent_spaces > 0 && !parent_mixed)
+                buffer_append_newline(buf);
             goto advance;
         }
         if (fc->type == LEPTRIS_NODE_TYPE_TEXT &&
@@ -915,7 +981,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append(buf, "</");
                 append_qualified_name(buf, epfx, name, nl);
                 buffer_append_char(buf, '>');
-                buffer_append_newline(buf);
+                if (!parent_mixed) buffer_append_newline(buf);
             }
             goto advance;
         }
@@ -944,9 +1010,12 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         }
 
         buffer_append_char(buf, '>');
-        if (buf->indent_spaces > 0) buffer_append_newline(buf);
+        int mixed = 0;
+        if (buf->indent_spaces > 0) mixed = ser_children_have_text(fc);
+        if (buf->indent_spaces > 0 && !mixed) buffer_append_newline(buf);
         st[sp].e = e;
         st[sp].nl = nl;
+        st[sp].mixed = mixed;
         sp++;
         buf->indent++;
         cur = fc;
@@ -975,7 +1044,9 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             const char* pn = pe->name;
             size_t pnl2 = st[sp].nl;
             const char* pfx2 = leptris_element_get_prefix(pe);
-            if (buf->indent_spaces > 0) buffer_append_indent(buf);
+            /* #534: no indent inside a mixed-content element. */
+            if (buf->indent_spaces > 0 && !st[sp].mixed)
+                buffer_append_indent(buf);
             buffer_append(buf, "</");
             append_qualified_name(buf, pfx2, pn, pnl2);
             buffer_append_char(buf, '>');

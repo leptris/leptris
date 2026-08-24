@@ -511,3 +511,89 @@ TEST(ElementSerialize, EmitsExactlyTheRequestedSubtree) {
     leptris_free_string(x);
     leptris_document_free(doc);
 }
+
+/* Issue #534: the indenting serializer inserted whitespace inside
+ * mixed-content elements — inserted bytes became new text nodes on
+ * reparse, so serialize∘parse was not idempotent and text content
+ * was silently altered. libxml2 semantics: mixed elements stay on
+ * one line; ws-only text between elements is formatter-owned. */
+TEST(MixedContent, PrettyPrintKeepsMixedElementsVerbatim) {
+    const char xml[] = "<b>2<!-- c --><![CDATA[<t>]]></b>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* out = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<b>2<!-- c --><![CDATA[<t>]]></b>");
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(MixedContent, ClassicMixedStaysInline) {
+    const char xml[] = "<p>Hello <b>world</b>!</p>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* out = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<p>Hello <b>world</b>!</p>");
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(MixedContent, PrettyRoundTripIsIdempotent) {
+    /* ws-only text between elements is formatting: the pretty
+     * printer owns it (canonical newline+indent), so the round trip
+     * is byte-stable — and no longer doubles the blank lines. */
+    const char xml[] = "<r>\n  <a>1</a>\n  <b>2</b>\n</r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* once = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(once, nullptr);
+    EXPECT_STREQ(once, "<r>\n  <a>1</a>\n  <b>2</b>\n</r>");
+
+    LeptrisDocument reparsed =
+        leptris_parse_string(once, std::strlen(once), nullptr);
+    ASSERT_NE(reparsed, nullptr);
+    char* twice = leptris_document_serialize(reparsed, &opts);
+    ASSERT_NE(twice, nullptr);
+    EXPECT_STREQ(once, twice);
+    leptris_free_string(twice);
+    leptris_document_free(reparsed);
+    leptris_free_string(once);
+    leptris_document_free(doc);
+}
+
+TEST(MixedContent, PrettyParentWithMixedChild) {
+    /* The parent is NOT mixed (only elements + formatting ws); the
+     * child IS mixed and must stay verbatim while the parent
+     * indents around it. */
+    const char xml[] =
+        "<div><p>Hello <b>world</b>!</p><q>plain</q></div>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* out = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+        "<div>\n  <p>Hello <b>world</b>!</p>\n  <q>plain</q>\n</div>");
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(MixedContent, CompactModeUnchanged) {
+    /* indent=0 never inserts anything — byte-identical round trip. */
+    const char xml[] = "<b>2<!-- c --><![CDATA[<t>]]></b>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, xml);
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
