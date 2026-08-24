@@ -60,6 +60,36 @@ LEPTRIS_API LeptrisXPathCompiled leptris_xpath_compile(const char* expression) {
     return c;
 }
 
+/* Run a compiled expression against a PREPARED context (the XSLT
+ * bridge installs its own function registry + variable set before
+ * calling this). VM fast path first; AST interpreter fallback. The
+ * caller owns the context storage and is responsible for cleanup. */
+struct leptris_xpath_result* leptris_xpath_compiled_eval_in(
+        LeptrisXPathCompiled compiled, XPathContext* xpath_ctx) {
+    if (!compiled || !xpath_ctx || !xpath_ctx->document) return NULL;
+    LeptrisXPathBytecode* bc = xpath_ast_cache_get_bc(compiled->expr,
+                                                      compiled->expr_len);
+    struct leptris_xpath_result* result = NULL;
+    if (bc) {
+        result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
+    } else {
+        bc = leptris_xpath_compile_ast(compiled->ast);
+        if (bc) {
+            result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
+            xpath_ast_cache_store_bc(compiled->expr, compiled->expr_len, bc);
+        }
+    }
+    if (!result) result = xpath_evaluate(xpath_ctx, compiled->ast);
+
+    if (!result && xpath_ctx->error_msg[0]) {
+        struct leptris_document* d = xpath_ctx->document;
+        strncpy(d->last_error_message, xpath_ctx->error_msg,
+                sizeof(d->last_error_message) - 1);
+        d->last_error_message[sizeof(d->last_error_message) - 1] = '\0';
+    }
+    return result;
+}
+
 LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context) {
@@ -74,27 +104,8 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
     xpath_context_init(xpath_ctx, doc, context_elem);
     if (!xpath_ctx->document) return NULL;
 
-    struct leptris_xpath_result* result = NULL;
-    LeptrisXPathBytecode* bc = xpath_ast_cache_get_bc(compiled->expr,
-                                                      compiled->expr_len);
-    if (bc) {
-        result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
-    } else {
-        bc = leptris_xpath_compile_ast(compiled->ast);
-        if (bc) {
-            result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
-            xpath_ast_cache_store_bc(compiled->expr, compiled->expr_len, bc);
-        }
-    }
-    if (!result) {
-        result = xpath_evaluate(xpath_ctx, compiled->ast);
-    }
-
-    if (!result && xpath_ctx->error_msg[0]) {
-        strncpy(doc->last_error_message, xpath_ctx->error_msg,
-                sizeof(doc->last_error_message) - 1);
-        doc->last_error_message[sizeof(doc->last_error_message) - 1] = '\0';
-    }
+    struct leptris_xpath_result* result =
+        leptris_xpath_compiled_eval_in(compiled, xpath_ctx);
 
     xpath_context_cleanup(xpath_ctx);
     return result;

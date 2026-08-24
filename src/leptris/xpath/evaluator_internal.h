@@ -79,6 +79,13 @@ struct LeptrisXPathBytecode;  /* forward; full definition in bytecode.h */
 struct leptris_xpath_result* leptris_xpath_vm_run_bc(struct LeptrisXPathBytecode* bc,
                                                     XPathContext* ctx);
 
+/* Run a compiled expression against a PREPARED context (the XSLT
+ * bridge installs its own function registry + variable set before
+ * calling this). VM fast path first; AST interpreter fallback. The
+ * caller owns the context storage and is responsible for cleanup. */
+struct leptris_xpath_result* leptris_xpath_compiled_eval_in(
+    LeptrisXPathCompiled compiled, XPathContext* ctx);
+
 /* Namespace support (in evaluator.c) */
 const char* xpath_context_resolve_prefix(XPathContext* context,
                                          const char* prefix);

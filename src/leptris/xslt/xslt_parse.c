@@ -6,10 +6,27 @@
  * qualified name + namespace. xsl:include is inlined; xsl:import
  * becomes a higher import_rank (lower precedence). Whitespace-only
  * text in the STYLESHEET is dropped (§4.8 stripping) outside
- * xsl:text. */
+ * xsl:text.
+ *
+ * Multi-file loading: import/include resolve `href` via
+ * leptris_parse_file (v1 base = CWD); a depth guard prevents
+ * cycles. Includes keep the same import_rank; imports increment
+ * it. Variables have a per-parse name table for duplicate marking.
+ */
 #include "xslt_internal.h"
 #include "../dom/text.h"
 #include <stdlib.h>
+
+#define XSLT_INCLUDE_DEPTH_MAX 64
+
+typedef struct {
+    char** paths;
+    size_t len, cap;
+} XsltImportChain;
+
+static int chain_has(XsltImportChain* c, const char* p);
+static int chain_push(XsltImportChain* c, const char* p);
+static void chain_pop(XsltImportChain* c);
 
 /* Text content of a node child (TEXT/CDATA). */
 static const char* leptris_node_text(LeptrisNodeRef n) {
@@ -28,7 +45,29 @@ typedef struct {
     XsltStylesheet* sheet;
     int import_rank;
     int errors;             /* any compile failure fails the sheet */
+    XsltImportChain chain;  /* paths seen so far for cycle detection */
 } SheetParser;
+
+static int chain_has(XsltImportChain* c, const char* p) {
+    for (size_t i = 0; i < c->len; i++)
+        if (strcmp(c->paths[i], p) == 0) return 1;
+    return 0;
+}
+static int chain_push(XsltImportChain* c, const char* p) {
+    if (c->len == c->cap) {
+        size_t nc = c->cap ? c->cap * 2 : 8;
+        char** np = (char**)realloc(c->paths, nc * sizeof(char*));
+        if (!np) return 0;
+        c->paths = np; c->cap = nc;
+    }
+    c->paths[c->len] = leptris_strdup(p);
+    if (!c->paths[c->len]) return 0;
+    c->len++;
+    return 1;
+}
+static void chain_pop(XsltImportChain* c) {
+    if (c->len) { free(c->paths[--c->len]); c->paths[c->len] = NULL; }
+}
 
 static int node_is_xsl(LeptrisElement e, const char* local) {
     if (!e) return 0;
@@ -70,6 +109,33 @@ static void instr_append(XsltInstr** list, XsltInstr* in) {
     XsltInstr* t = *list;
     while (t->next) t = t->next;
     t->next = in;
+}
+
+/* Collect use-attribute-sets into name list (comma-separated,
+ * whitespace ignored). Stores copy of each name on the
+ * instruction. Returns count. */
+static size_t collect_attr_sets(XsltInstr* in, LeptrisElement e) {
+    const char* v = leptris_element_attribute(e, "use-attribute-sets");
+    if (!v || !*v) return 0;
+    char* dup = leptris_strdup(v);
+    if (!dup) return 0;
+    size_t cap = 0, cnt = 0;
+    char** arr = NULL;
+    char* save = NULL;
+    for (char* tok = strtok_r(dup, " \t\n,", &save); tok;
+         tok = strtok_r(NULL, " \t\n,", &save)) {
+        if (cnt == cap) {
+            cap = cap ? cap * 2 : 4;
+            char** na = (char**)realloc(arr, cap * sizeof(char*));
+            if (!na) break;
+            arr = na;
+        }
+        arr[cnt++] = leptris_strdup(tok);
+    }
+    free(dup);
+    in->attr_set_names = arr;
+    in->attr_set_count = cnt;
+    return cnt;
 }
 
 static XsltSort* parse_sorts(SheetParser* sp, LeptrisElement parent) {
@@ -122,6 +188,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             *atail = la;
             atail = &la->next;
         }
+        collect_attr_sets(in, e);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -214,6 +281,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
     if (strcmp(local, "copy") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_COPY);
         if (!in) return NULL;
+        collect_attr_sets(in, e);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -223,6 +291,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->name = leptris_strdup(leptris_element_attribute(e, "name"));
         in->ns_uri = leptris_strdup(leptris_element_attribute(e, "namespace")
                                         ? leptris_element_attribute(e, "namespace") : "");
+        collect_attr_sets(in, e);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -423,13 +492,38 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
         if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
         LeptrisElement e = (LeptrisElement)n;
         if (node_is_xsl(e, "import")) {
-            /* v1: import rank only — href loading lands with the
-             * resolver board (TODO.assemble 04); single-file
-             * stylesheets compile fully today. */
+            const char* href = leptris_element_attribute(e, "href");
+            if (href && *href && !chain_has(&sp->chain, href) &&
+                sp->chain.len < XSLT_INCLUDE_DEPTH_MAX) {
+                LeptrisDocument d =
+                    leptris_parse_file(href, NULL);
+                if (!d) { sp->errors = 1; continue; }
+                sp->import_rank++;
+                chain_push(&sp->chain, href);
+                LeptrisElement r2 = leptris_document_root(d);
+                if (r2) parse_top_level(sp, r2);
+                chain_pop(&sp->chain);
+                sp->import_rank--;
+                leptris_document_free(d);
+            }
             continue;
         }
         if (node_is_xsl(e, "include")) {
-            continue;   /* same: multi-file landing with resolver */
+            const char* href = leptris_element_attribute(e, "href");
+            if (href && *href && !chain_has(&sp->chain, href) &&
+                sp->chain.len < XSLT_INCLUDE_DEPTH_MAX) {
+                LeptrisDocument d =
+                    leptris_parse_file(href, NULL);
+                if (!d) { sp->errors = 1; continue; }
+                chain_push(&sp->chain, href);
+                /* Include keeps the same import_rank — declared in
+                 * the including sheet's position. */
+                LeptrisElement r2 = leptris_document_root(d);
+                if (r2) parse_top_level(sp, r2);
+                chain_pop(&sp->chain);
+                leptris_document_free(d);
+            }
+            continue;
         }
         if (node_is_xsl(e, "template")) {
             add_template(sp, e);
@@ -462,15 +556,148 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             sp->sheet->out_encoding = enc ? leptris_strdup(enc) : NULL;
             const char* ver = leptris_element_attribute(e, "version");
             sp->sheet->out_version = ver ? leptris_strdup(ver) : NULL;
+            const char* ds = leptris_element_attribute(e, "doctype-system");
+            if (ds) { free((void*)sp->sheet->out_doctype_system);
+                      sp->sheet->out_doctype_system = leptris_strdup(ds); }
+            const char* dp = leptris_element_attribute(e, "doctype-public");
+            if (dp) { free((void*)sp->sheet->out_doctype_public);
+                      sp->sheet->out_doctype_public = leptris_strdup(dp); }
+            const char* cs = leptris_element_attribute(e, "cdata-section-elements");
+            if (cs) {
+                /* Trim + split on whitespace. */
+                char* tmp = leptris_strdup(cs);
+                if (tmp) {
+                    if (sp->sheet->out_cdata_elems) {
+                        for (size_t i = 0; sp->sheet->out_cdata_elems[i]; i++)
+                            free(sp->sheet->out_cdata_elems[i]);
+                        free(sp->sheet->out_cdata_elems);
+                    }
+                    size_t cap = 4, cnt = 0;
+                    char** arr = (char**)malloc(cap * sizeof(char*));
+                    char* save = NULL;
+                    char* tok = strtok_r(tmp, " \t\n,", &save);
+                    while (tok) {
+                        if (cnt + 1 >= cap) { cap *= 2;
+                            arr = (char**)realloc(arr, cap * sizeof(char*)); }
+                        arr[cnt++] = leptris_strdup(tok);
+                        arr[cnt] = NULL;
+                        tok = strtok_r(NULL, " \t\n,", &save);
+                    }
+                    free(tmp);
+                    sp->sheet->out_cdata_elems = arr;
+                }
+            }
             continue;
         }
         if (node_is_xsl(e, "strip-space") ||
             node_is_xsl(e, "preserve-space") ||
-            node_is_xsl(e, "decimal-format") ||
-            node_is_xsl(e, "attribute-set") ||
             node_is_xsl(e, "namespace-alias") ||
             node_is_xsl(e, "fallback")) {
-            continue;   /* registered; bodies land with their phases */
+            continue;
+        }
+        if (node_is_xsl(e, "decimal-format")) {
+            /* Find/create by name (NULL = default). */
+            const char* name = leptris_element_attribute(e, "name");
+            XsltDecimalFormat* df = NULL;
+            for (XsltDecimalFormat* d = sp->sheet->decformats; d; d = d->next) {
+                if ((!name && !d->name) ||
+                    (name && d->name && strcmp(name, d->name) == 0)) {
+                    df = d; break;
+                }
+            }
+            if (!df) {
+                df = (XsltDecimalFormat*)calloc(1, sizeof(*df));
+                if (!df) continue;
+                df->decimal_sep = '.';
+                df->grouping_sep = ',';
+                df->minus_sign = '-';
+                df->percent = '%';
+                df->per_mille = '%';
+                df->zero_digit = '0';
+                df->infinity = leptris_strdup("Infinity");
+                df->nan = leptris_strdup("NaN");
+                df->name = name ? leptris_strdup(name) : NULL;
+                /* Defaults slot at the head; named at the tail. */
+                if (!name) {
+                    df->next = sp->sheet->decformats;
+                    sp->sheet->decformats = df;
+                } else {
+                    XsltDecimalFormat** t = &sp->sheet->decformats;
+                    while (*t) t = &(*t)->next;
+                    *t = df;
+                }
+            }
+            const char* av;
+            if ((av = leptris_element_attribute(e, "decimal-separator")) && *av)
+                df->decimal_sep = av[0];
+            if ((av = leptris_element_attribute(e, "grouping-separator")) && *av)
+                df->grouping_sep = av[0];
+            if ((av = leptris_element_attribute(e, "minus-sign")) && *av)
+                df->minus_sign = av[0];
+            if ((av = leptris_element_attribute(e, "percent")) && *av)
+                df->percent = av[0];
+            if ((av = leptris_element_attribute(e, "per-mille")) && *av)
+                df->per_mille = av[0];
+            if ((av = leptris_element_attribute(e, "zero-digit")) && *av)
+                df->zero_digit = av[0];
+            if ((av = leptris_element_attribute(e, "infinity")) && *av) {
+                free((void*)df->infinity);
+                df->infinity = leptris_strdup(av);
+            }
+            if ((av = leptris_element_attribute(e, "NaN")) && *av) {
+                free((void*)df->nan);
+                df->nan = leptris_strdup(av);
+            }
+            continue;
+        }
+        if (node_is_xsl(e, "attribute-set")) {
+            const char* nm = leptris_element_attribute(e, "name");
+            if (!nm || !*nm) continue;
+            XsltAttrSet* s = (XsltAttrSet*)calloc(1, sizeof(*s));
+            if (!s) continue;
+            s->name = leptris_strdup(nm);
+            /* Prepend to the set list so later use-attribute-sets
+             * applies later sets FIRST (winning conflicts). */
+            s->next = sp->sheet->attrsets;
+            sp->sheet->attrsets = s;
+            for (LeptrisElement c =
+                     leptris_element_first_child_any(e); c;
+                 c = leptris_element_next_sibling_any(c)) {
+                if (!node_is_xsl(c, "attribute")) continue;
+                XsltLAttr* la = (XsltLAttr*)calloc(1, sizeof(*la));
+                if (!la) continue;
+                la->name = leptris_strdup(
+                    leptris_element_attribute(c, "name"));
+                const char* v = leptris_element_child_value(c);
+                la->value = leptris_strdup(v ? v : "");
+                la->next = s->attrs;
+                s->attrs = la;   /* newer first, but apply later-staged
+                                    sets first because head-of-list is
+                                    the most-recently-declared set */
+            }
+            /* The set itself can have use-attribute-sets (chained
+             * sets) — concatenate referenced set attrs onto s->attrs
+             * before s was prepended (so they're applied first). */
+            const char* uas = leptris_element_attribute(e, "use-attribute-sets");
+            if (uas && *uas) {
+                /* For v1, we only support single-name chains — full
+                 * comma-split lives in collect_attr_sets above; this
+                 * is a one-level recursion kept simple. */
+                for (XsltAttrSet* other = sp->sheet->attrsets;
+                     other && other != s; other = other->next) {
+                    if (!other->name || strcmp(other->name, uas) != 0)
+                        continue;
+                    for (XsltLAttr* a = other->attrs; a; a = a->next) {
+                        XsltLAttr* cp = (XsltLAttr*)calloc(1, sizeof(*cp));
+                        if (!cp) continue;
+                        cp->name = leptris_strdup(a->name);
+                        cp->value = leptris_strdup(a->value);
+                        cp->next = s->attrs;
+                        s->attrs = cp;
+                    }
+                }
+            }
+            continue;
         }
     }
 }
@@ -500,6 +727,11 @@ static void free_instr(XsltInstr* in) {
         free((void*)a->name);
         free((void*)a->value);
         free(a);
+    }
+    if (in->attr_set_names) {
+        for (size_t i = 0; i < in->attr_set_count; i++)
+            free(in->attr_set_names[i]);
+        free(in->attr_set_names);
     }
     free(in);
 }
@@ -541,6 +773,31 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
     free_instr_list(sheet->globals);
     free((void*)sheet->out_encoding);
     free((void*)sheet->out_version);
+    free((void*)sheet->out_doctype_system);
+    free((void*)sheet->out_doctype_public);
+    if (sheet->out_cdata_elems) {
+        for (size_t i = 0; sheet->out_cdata_elems[i]; i++)
+            free(sheet->out_cdata_elems[i]);
+        free(sheet->out_cdata_elems);
+    }
+    while (sheet->attrsets) {
+        XsltAttrSet* s = sheet->attrsets;
+        sheet->attrsets = s->next;
+        free((void*)s->name);
+        while (s->attrs) {
+            XsltLAttr* a = s->attrs; s->attrs = a->next;
+            free((void*)a->name); free((void*)a->value); free(a);
+        }
+        free(s);
+    }
+    while (sheet->decformats) {
+        XsltDecimalFormat* d = sheet->decformats;
+        sheet->decformats = d->next;
+        free((void*)d->name);
+        free((void*)d->infinity);
+        free((void*)d->nan);
+        free(d);
+    }
     free(sheet);
 }
 
@@ -554,8 +811,24 @@ XsltStylesheet* xslt_stylesheet_parse(LeptrisDocument doc) {
 
     XsltStylesheet* sheet = (XsltStylesheet*)calloc(1, sizeof(*sheet));
     if (!sheet) return NULL;
-    SheetParser sp = { doc, sheet, 0, 0 };
+    SheetParser sp;
+    sp.doc = doc; sp.sheet = sheet; sp.import_rank = 0; sp.errors = 0;
+    sp.chain.paths = NULL; sp.chain.len = 0; sp.chain.cap = 0;
+    /* Default xsl:decimal-format (always present; named formats
+     * append later). */
+    XsltDecimalFormat* df = (XsltDecimalFormat*)calloc(1, sizeof(*df));
+    if (df) {
+        df->decimal_sep = '.'; df->grouping_sep = ',';
+        df->minus_sign = '-'; df->percent = '%'; df->per_mille = '%';
+        df->zero_digit = '0';
+        df->infinity = leptris_strdup("Infinity");
+        df->nan = leptris_strdup("NaN");
+        df->next = sheet->decformats;
+        sheet->decformats = df;
+    }
     parse_top_level(&sp, root);
+    while (sp.chain.len) chain_pop(&sp.chain);
+    free(sp.chain.paths);
     if (sp.errors) {
         xslt_stylesheet_free(sheet);
         return NULL;
