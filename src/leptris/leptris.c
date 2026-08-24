@@ -436,6 +436,13 @@ LEPTRIS_API LeptrisDocument leptris_parse_string_ex(const char* xml,
                                                      options->flags, status);
     g_leptris_strict_mode = saved_strict;
     g_leptris_max_depth = saved_depth;
+    if (!doc && options->recover) {
+        /* #547: recovery mode returns an empty document. The
+         * failure is already recorded in leptris_last_error via
+         * direct_parse. */
+        doc = leptris_document_create();
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+    }
     return doc;
 }
 

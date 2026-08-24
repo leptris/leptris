@@ -313,11 +313,11 @@ TEST(PublicSurface, SerializeIntoBuffer) {
     ASSERT_NE(a, nullptr);
 
     /* Size query first. */
-    size_t need = leptris_document_serialize_into(doc, nullptr, 0, nullptr);
+    size_t need = leptris_document_serialize_into(doc, nullptr, 0, nullptr, nullptr);
     char* buf = (char*)malloc(need);
     ASSERT_NE(buf, nullptr);
     size_t len = 0;
-    EXPECT_EQ(leptris_document_serialize_into(doc, buf, need, &len), need);
+    EXPECT_EQ(leptris_document_serialize_into(doc, buf, need, &len, nullptr), need);
     char* ref = leptris_document_serialize(doc, nullptr);
     ASSERT_NE(ref, nullptr);
     EXPECT_STREQ(buf, ref);
@@ -327,17 +327,53 @@ TEST(PublicSurface, SerializeIntoBuffer) {
 
     /* Under-capacity: nothing written, need returned. */
     char small[4];
-    EXPECT_GT(leptris_document_serialize_into(doc, small, 4, nullptr), 4u);
+    EXPECT_GT(leptris_document_serialize_into(doc, small, 4, nullptr, nullptr), 4u);
     small[0] = 'Z';
-    leptris_document_serialize_into(doc, small, 4, nullptr);
+    leptris_document_serialize_into(doc, small, 4, nullptr, nullptr);
     EXPECT_EQ(small[0], 'Z');  /* untouched on under-capacity */
 
     /* Element variant. */
-    size_t eneed = leptris_element_serialize_into(a, nullptr, 0, nullptr);
+    size_t eneed = leptris_element_serialize_into(a, nullptr, 0, nullptr, nullptr);
     buf = (char*)malloc(eneed);
     ASSERT_NE(buf, nullptr);
-    EXPECT_EQ(leptris_element_serialize_into(a, buf, eneed, nullptr), eneed);
+    EXPECT_EQ(leptris_element_serialize_into(a, buf, eneed, nullptr, nullptr), eneed);
     EXPECT_STREQ(buf, "<a x=\"1\">t</a>");
     free(buf);
     leptris_document_free(doc);
+}
+
+/* Issue #546: a rootless document carrying PIs must not be silently
+ * dropped — the serializer emits the declaration (if the source
+ * had one) and the PIs. */
+TEST(PublicSurface, RootlessWithPIsIsNotDropped) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    ASSERT_NE(leptris_document_add_pi(d, "docpi", "d1"), nullptr);
+    /* Without an explicit declaration set, emit only the PIs. */
+    char* out = leptris_document_serialize(d, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out, "<?docpi d1?>"), nullptr);
+    leptris_free_string(out);
+
+    /* PI accessor contract (issue #526) still works. */
+    EXPECT_EQ(leptris_document_pi_count(d), 1u);
+    EXPECT_STREQ(leptris_document_pi_target(d, 0), "docpi");
+    EXPECT_STREQ(leptris_document_pi_data(d, 0), "d1");
+    leptris_document_free(d);
+}
+
+/* Issue #547: ParseOptions.recover returns an empty document
+ * instead of NULL on parse failure (moxml's libxml2 adapter does
+ * the same; this makes the native API honest about it). */
+TEST(PublicSurface, RecoverReturnsEmptyDocument) {
+    LeptrisParseOptions opts = {LEPTRIS_PARSE_DEFAULT, 0, 0, 0};
+    opts.recover = 1;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string_ex(
+        "<root><unclosed>", 19, &opts, &st);
+    ASSERT_NE(d, nullptr);   /* recover: empty doc, not NULL */
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+    EXPECT_EQ(leptris_xpath_result_count(
+        leptris_xpath_eval(d, nullptr, "count(//node())")), 0);
+    leptris_document_free(d);
 }
