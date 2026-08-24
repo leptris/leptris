@@ -23,6 +23,7 @@
 #include "../xpath/evaluator_internal.h"
 #include "../xpath/functions.h"
 #include "../dom/element.h"
+#include "../dtd/model.h"
 #include <stdio.h>
 #include <regex.h>
 #include <time.h>
@@ -251,27 +252,60 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
     return 0;
 }
 
+/* Append every node in bucket `val` to the result nodeset. */
+static void key_bucket_add(struct leptris_xpath_result* r,
+                           XsltKeyIndex* k, const char* val) {
+    size_t h = str_hash(val);
+    XsltKeyBucket* b = k->buckets[h % k->cap];
+    while (b && strcmp(b->value, val) != 0) b = b->next;
+    if (!b) return;
+    for (size_t i = 0; i < b->nodes->count; i++)
+        xpath_nodeset_add(r->value.nodeset_value, b->nodes->nodes[i]);
+}
+
 static struct leptris_xpath_result* xslt_fn_key(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
     XsltExec* ex = exec_from(ctx);
     if (!ex || n < 2) return res_empty_ns();
     char* name = arg_string(ctx, args, n, 0);
-    char* val  = arg_string(ctx, args, n, 1);
     struct leptris_xpath_result* r = res_empty_ns();
-    if (!r) { free(name); free(val); return NULL; }
-    if (!name || !*name) { free(name); free(val); return r; }
+    if (!r) { free(name); return NULL; }
+    if (!name || !*name) { free(name); return r; }
     XsltKeyIndex* k = key_index_for(ex, name);
-    if (!k && ex && xslt_keys_build(ex, name) == 0)
+    if (!k && xslt_keys_build(ex, name) == 0)
         k = key_index_for(ex, name);
     free(name);
-    if (!k || !val) { free(val); return r; }
-    size_t h = str_hash(val);
-    XsltKeyBucket* b = k->buckets[h % k->cap];
-    while (b && strcmp(b->value, val) != 0) b = b->next;
-    if (b)
-        for (size_t i = 0; i < b->nodes->count; i++)
-            xpath_nodeset_add(r->value.nodeset_value, b->nodes->nodes[i]);
-    free(val);
+    if (!k) return r;
+
+    /* §12.2: the second argument converts via string() — a node-set
+     * unions the buckets of EVERY node's string-value. */
+    struct leptris_xpath_result* vr = evaluate_expr(ctx, args[1]);
+    if (!vr) return r;
+    if (vr->type == XPATH_RESULT_NODESET && vr->value.nodeset_value) {
+        for (size_t i = 0; i < vr->value.nodeset_value->count; i++) {
+            LeptrisNodeRef nd = vr->value.nodeset_value->nodes[i];
+            XPathNodeSet* one = xpath_nodeset_new();
+            if (!one) continue;
+            xpath_nodeset_add(one, nd);
+            struct leptris_xpath_result tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.type = XPATH_RESULT_NODESET;
+            tmp.value.nodeset_value = one;
+            char* sv = leptris_xpath_result_string(&tmp);
+            xpath_nodeset_free(one);
+            if (sv) {
+                key_bucket_add(r, k, sv);
+                free(sv);
+            }
+        }
+    } else {
+        char* val = leptris_xpath_result_string(vr);
+        if (val) {
+            key_bucket_add(r, k, val);
+            free(val);
+        }
+    }
+    leptris_xpath_result_free(vr);
     return r;
 }
 
@@ -607,15 +641,100 @@ static struct leptris_xpath_result* xslt_fn_regexp_test(
  * identity / empty so callers have well-defined responses. */
 static struct leptris_xpath_result* xslt_fn_regexp_match_v1(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
-    (void)args; (void)n; (void)ctx;
-    return res_empty_ns();
+    char* src = arg_string(ctx, args, n, 0);
+    char* patstr = arg_string(ctx, args, n, 1);
+    char* flags = (n >= 3) ? arg_string(ctx, args, n, 2) : leptris_strdup("");
+    struct leptris_xpath_result* r = res_empty_ns();
+    XsltExec* ex = exec_from(ctx);
+    if (!r || !src || !patstr) { free(src); free(patstr); free(flags); return r; }
+    regex_t rx;
+    if (regcomp(&rx, patstr, REG_EXTENDED) == 0) {
+        int global = flags && strchr(flags, 'g');
+        LeptrisDocument host = (ex && ex->result) ? ex->result : NULL;
+        size_t pos = 0;
+        while (pos <= strlen(src)) {
+            regmatch_t m;
+            if (regexec(&rx, src + pos, 1, &m, 0) != 0) break;
+            if (host) {
+                size_t len = (size_t)(m.rm_eo - m.rm_so);
+                char* sub = (char*)malloc(len + 1);
+                if (sub) {
+                    memcpy(sub, src + pos + m.rm_so, len);
+                    sub[len] = 0;
+                    LeptrisNodeRef t = leptris_text_node_create(host, sub);
+                    free(sub);
+                    if (t) xpath_nodeset_add(r->value.nodeset_value, t);
+                }
+            }
+            size_t adv = (m.rm_eo > m.rm_so)
+                           ? (size_t)(m.rm_eo - m.rm_so) : 1;
+            pos += (size_t)m.rm_so + adv;
+            if (!global) break;
+        }
+        regfree(&rx);
+    }
+    free(src); free(patstr); free(flags);
+    return r;
 }
 static struct leptris_xpath_result* xslt_fn_regexp_replace_v1(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
-    if (n < 1) return res_string("");
-    char* s = arg_string(ctx, args, n, 0);
-    struct leptris_xpath_result* r = res_string(s ? s : "");
-    free(s);
+    if (n < 3) return res_string("");
+    char* src = arg_string(ctx, args, n, 0);
+    char* patstr = arg_string(ctx, args, n, 1);
+    char* repl = arg_string(ctx, args, n, 2);
+    char* flags = (n >= 4) ? arg_string(ctx, args, n, 3) : leptris_strdup("");
+    if (!src || !patstr || !repl) {
+        free(src); free(patstr); free(repl); free(flags);
+        return res_string("");
+    }
+    regex_t rx;
+    struct leptris_xpath_result* r = NULL;
+    if (regcomp(&rx, patstr, REG_EXTENDED) != 0) {
+        free(src); free(patstr); free(repl); free(flags);
+        return res_string("");
+    }
+    int global = flags && strchr(flags, 'g');
+    size_t srclen = strlen(src);
+    size_t cap = srclen + 64, o = 0;
+    char* out = (char*)malloc(cap);
+    size_t pos = 0;
+    regmatch_t m[11];
+    while (pos <= srclen &&
+           regexec(&rx, src + pos, 10, m, 0) == 0) {
+        /* Leading non-matching segment. */
+        size_t head = (size_t)m[0].rm_so;
+        while (o + head + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+        memcpy(out + o, src + pos, head); o += head;
+        /* Replacement with $1..$9 (and $0 = whole match). */
+        for (const char* p = repl; *p; p++) {
+            if (*p == '$' && p[1] >= '0' && p[1] <= '9') {
+                int gi = p[1] - '0';
+                p++;
+                if (m[gi].rm_so < 0) continue;
+                size_t gl = (size_t)(m[gi].rm_eo - m[gi].rm_so);
+                while (o + gl + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+                memcpy(out + o, src + pos + m[gi].rm_so, gl);
+                o += gl;
+            } else {
+                if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+                out[o++] = *p;
+            }
+        }
+        size_t adv = (m[0].rm_eo > m[0].rm_so)
+                         ? (size_t)m[0].rm_eo : 1;
+        pos += (size_t)m[0].rm_so + adv;
+        if (!global) break;
+    }
+    if (pos <= srclen) {
+        size_t tail = srclen - pos;
+        while (o + tail + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+        memcpy(out + o, src + pos, tail); o += tail;
+    }
+    out[o] = 0;
+    r = res_string(out);
+    free(out);
+    regfree(&rx);
+    free(src); free(patstr); free(repl); free(flags);
     return r;
 }
 
@@ -631,6 +750,83 @@ static struct leptris_xpath_result* xslt_fn_date_datetime(
                  tm->tm_hour, tm->tm_min, tm->tm_sec);
     else snprintf(buf, sizeof(buf), "1970-01-01T00:00:00Z");
     return res_string(buf);
+}
+
+
+/* §12.4 unparsed-entity-uri(name): the system identifier of the
+ * unparsed entity declared in the source document's DTD. */
+static struct leptris_xpath_result* xslt_fn_unparsed_entity_uri(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    XsltExec* ex = exec_from(ctx);
+    char* name = arg_string(ctx, args, n, 0);
+    if (!ex || !name || !ex->source || !ex->source) { free(name); return res_string(""); }
+    struct leptris_document* d = (struct leptris_document*)ex->source;
+    if (!d->dtd) { free(name); return res_string(""); }
+    DTDEntityDecl* ent = ttdtd_lookup_entity(
+        (const LeptrisDTD*)d->dtd, name);
+    free(name);
+    if (!ent || ent->type != DTD_ENTITY_EXTERNAL || !ent->system_id)
+        return res_string("");
+    return res_string(ent->system_id);
+}
+
+/* §14.2 element-available(name): true for the XSLT 1.0
+ * instruction set. */
+static struct leptris_xpath_result* xslt_fn_element_available(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* name = arg_string(ctx, args, n, 0);
+    static const char* kInstrs[] = {
+        "apply-imports", "apply-templates", "attribute",
+        "call-template", "choose", "comment", "copy", "copy-of",
+        "element", "fallback", "for-each", "if", "message", "number",
+        "otherwise", "processing-instruction", "text", "value-of",
+        "when", NULL };
+    int avail = 0;
+    if (name) {
+        const char* bare = strncmp(name, "xsl:", 4) == 0
+                               ? name + 4 : name;
+        for (size_t i = 0; kInstrs[i]; i++) {
+            if (strcmp(bare, kInstrs[i]) == 0) { avail = 1; break; }
+        }
+    }
+    free(name);
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (r) r->value.boolean_value = avail;
+    return r;
+}
+
+/* §14.2 function-available(name): the XPath 1.0 core + the XSLT
+ * and EXSLT bridge surface. */
+static struct leptris_xpath_result* xslt_fn_function_available(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* name = arg_string(ctx, args, n, 0);
+    int avail = 0;
+    if (name && ctx) {
+        if (ctx->function_registry) {
+            avail = xpath_function_registry_get(
+                (XPathFunctionRegistry*)ctx->function_registry, name) != NULL;
+        } else {
+            extern XPathFunctionRegistry* xpath_function_registry_get_standard(void);
+            avail = xpath_function_registry_get(
+                xpath_function_registry_get_standard(), name) != NULL;
+        }
+        if (!avail) {
+            static const char* kXslt[] = {
+                "current", "generate-id", "system-property", "key",
+                "format-number", "document", "unparsed-entity-uri",
+                "element-available", "function-available",
+                "exslt:node-set", "node-set", "regexp:test",
+                "regexp:match", "regexp:replace", "date:date-time",
+                NULL };
+            for (size_t i = 0; kXslt[i]; i++) {
+                if (strcmp(name, kXslt[i]) == 0) { avail = 1; break; }
+            }
+        }
+    }
+    free(name);
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (r) r->value.boolean_value = avail;
+    return r;
 }
 
 /* ============================================================
@@ -668,6 +864,9 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
     xslt_register_handler(r, "regexp:match", xslt_fn_regexp_match_v1, 2, 2, exec);
     xslt_register_handler(r, "regexp:replace", xslt_fn_regexp_replace_v1, 3, 3, exec);
     xslt_register_handler(r, "date:date-time", xslt_fn_date_datetime, 0, 0, exec);
+    xslt_register_handler(r, "unparsed-entity-uri", xslt_fn_unparsed_entity_uri, 1, 1, exec);
+    xslt_register_handler(r, "element-available", xslt_fn_element_available, 1, 1, exec);
+    xslt_register_handler(r, "function-available", xslt_fn_function_available, 1, 1, exec);
 }
 
 /* The original exec-scoped builder is kept for the future cache

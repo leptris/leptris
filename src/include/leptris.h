@@ -2218,6 +2218,15 @@ LEPTRIS_API LeptrisXslt leptris_xslt_parse(const char* stylesheet_xml,
                                             size_t len);
 
 /**
+ * Compile a stylesheet from a file
+ *
+ * Reads `path` (UTF-8) and compiles via leptris_xslt_parse. Also
+ * resolves §2.7 embedded stylesheets (xml-stylesheet PI with an
+ * href="#id" fragment) when the document root is not a stylesheet.
+ */
+LEPTRIS_API LeptrisXslt leptris_xslt_parse_file(const char* path);
+
+/**
  * Free a compiled stylesheet handle
  *
  * Must not race with in-flight leptris_xslt_apply calls on the same

@@ -49,7 +49,13 @@ typedef struct leptris_node_vtable LeptrisNodeVTable;
 typedef struct leptris_node {
     LeptrisNodeTypeEnum type;           /* Node type discriminator (4 bytes) */
     unsigned int frozen : 1;           /* COW: 0 = mutable, 1 = frozen (immutable) */
-    unsigned int version : 31;         /* COW 2.2: Node version for tracking modifications */
+    unsigned int raw : 1;              /* Text nodes: serialize VERBATIM — XSLT
+                                        * disable-output-escaping (§16.4) and
+                                        * method=html script/style content.
+                                        * Same bit-word as frozen; the total
+                                        * struct size is unchanged so the
+                                        * parse-time bulk strides hold. */
+    unsigned int version : 30;         /* COW 2.2: Node version for tracking modifications */
     uint32_t line;                     /* Source line (1-based, 0 = unknown). Issue #223 */
     void* binding_wrapper;             /* FFI wrapper cache (#262). NULL when no binding
                                         * is attached. Set by the language binding on

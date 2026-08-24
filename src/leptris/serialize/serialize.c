@@ -272,6 +272,14 @@ void serialize_text_internal(LeptrisTextNode* text, SerializeBuffer* buf) {
     if (!content) return;
     size_t content_len = text->content_len;
 
+    /* disable-output-escaping (XSLT §16.4) / method=html script and
+     * style content: emit the string-value verbatim — no entity
+     * escaping, characters pass through as-is. */
+    if (text->base.raw) {
+        buffer_append_len(buf, content, content_len);
+        return;
+    }
+
     /* Run-batched (TODO 194b): bulk-append ordinary bytes up to the
      * next special character; the entity lookahead only runs at '&'.
      * Quotes and apostrophes are ordinary in text content. */

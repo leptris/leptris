@@ -1310,6 +1310,7 @@ static struct leptris_xpath_result* xpath_func_local_name(
     /* Get context node if no argument */
     if (arg_count == 0) {
         node = context->context_node;
+        if (node) node_tag = (int)XPATH_NODE_TYPE(node);
     } else if (arg_count == 1) {
         /* Use first node from nodeset */
         struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
@@ -1397,6 +1398,7 @@ static struct leptris_xpath_result* xpath_func_namespace_uri(
     /* Get context node if no argument */
     if (arg_count == 0) {
         node = context->context_node;
+        if (node) node_tag = (int)XPATH_NODE_TYPE(node);
     } else if (arg_count == 1) {
         /* Use first node from nodeset */
         struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
@@ -1472,6 +1474,7 @@ static struct leptris_xpath_result* xpath_func_name(
     /* Get context node if no argument */
     if (arg_count == 0) {
         node = context->context_node;
+        if (node) node_tag = (int)XPATH_NODE_TYPE(node);
     } else if (arg_count == 1) {
         /* Use first node from nodeset */
         struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
