@@ -181,6 +181,9 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             if (!an || !av) continue;
             if (strcmp(an, "xmlns") == 0 ||
                 strncmp(an, "xmlns:", 6) == 0) continue;
+            /* use-attribute-sets is a directive, not an output
+             * attribute — captured separately by collect_attr_sets. */
+            if (strcmp(an, "use-attribute-sets") == 0) continue;
             XsltLAttr* la = (XsltLAttr*)calloc(1, sizeof(*la));
             if (!la) continue;
             la->name = leptris_strdup(an);
