@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.0] - 2026-08-24
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [1.8.0] - 2026-08-24
 
 ### Added — expanded-name attribute APIs + namespaces-correct
