@@ -9,6 +9,7 @@
 
 #include "evaluator.h"
 #include "parser.h"
+#include "xpath_variables.h"
 #include "../dom/node.h"  /* LeptrisNode for matches_node_test (TODO 109) */
 
 /* Forward declarations for internal functions */
@@ -85,6 +86,14 @@ struct leptris_xpath_result* leptris_xpath_vm_run_bc(struct LeptrisXPathBytecode
  * caller owns the context storage and is responsible for cleanup. */
 struct leptris_xpath_result* leptris_xpath_compiled_eval_in(
     LeptrisXPathCompiled compiled, XPathContext* ctx);
+
+/* Combined ns + vars eval (xslt_exec.c uses this for §4-prefixed
+ * tests inside variable-carrying transforms). */
+struct leptris_xpath_ns_map;
+struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
+    LeptrisXPathCompiled compiled, LeptrisDocument doc,
+    LeptrisElement context, struct leptris_xpath_ns_map* ns,
+    XPathVariableSet* vars);
 
 /* Namespace support (in evaluator.c) */
 const char* xpath_context_resolve_prefix(XPathContext* context,

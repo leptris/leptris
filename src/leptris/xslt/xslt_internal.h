@@ -111,6 +111,12 @@ typedef struct xslt_instr {
     char** attr_set_names;
     size_t attr_set_count;
 
+    /* §4/§5.3: in-scope namespace bindings of the stylesheet
+     * element carrying this instruction — prefixed name tests in
+     * its expressions resolve through here. NULL when the sheet
+     * declares no namespaces (the common case; hot path skips). */
+    LeptrisXPathNsSet ns;
+
     /* CHOOSE arms are WHEN/OTHERWISE children with test set. */
     int terminate;                  /* MESSAGE terminate */
     int is_param;                   /* VARIABLE came from xsl:param —
@@ -236,6 +242,10 @@ struct xslt_styles {
      * erroring; unknown instructions fall back per §15. */
     int forwards_compat;
 
+    /* Any non-xsl namespace declared on the stylesheet root — gates
+     * per-instruction ns-context building (§4 prefixed tests). */
+    int sheet_has_ns;
+
     /* §16.1 xsl:output standalone (-1 absent, 0 no, 1 yes) and
      * media-type (advisory). */
     int out_standalone;
@@ -257,6 +267,9 @@ typedef struct xslt_var {
 
 typedef struct xslt_exec {
     const XsltStylesheet* sheet;
+    LeptrisDocument sheet_doc;      /* stylesheet document —
+                                       document('') (§12.1) resolves
+                                       to this tree. */
     LeptrisDocument source;
     LeptrisDocument result;        /* output tree (owned) */
     LeptrisDocument scratch;       /* RTF fragments live here (owned) */
@@ -272,6 +285,13 @@ typedef struct xslt_exec {
     char* tail_text;               /* text emitted AFTER elements (root
                                     * siblings in fragment order) */
     size_t tail_text_len, tail_text_cap;
+    char* rtf_text;                /* RTF capture buffer: a variable
+                                    * body that produces only text has
+                                    * no element to chain nodes from —
+                                    * accumulate here instead of the
+                                    * fragment buffers. */
+    size_t rtf_text_len, rtf_text_cap;
+    int rtf_capturing;
 
     /* current(): the node being processed by the template rule or
      * for-each in flight (§12.4) — distinct from the predicate
@@ -281,6 +301,10 @@ typedef struct xslt_exec {
     /* The template rule currently executing (§5.6 apply-imports
      * resolves candidates against THIS rule's import rank). */
     const XsltTemplate* current_template;
+
+    /* §4: the in-scope ns bindings of the instruction in flight —
+     * installed by the walker, consumed by xslt_eval. */
+    LeptrisXPathNsSet current_ns;
 
     /* Frame-chain depth snapshot management for block scope: the
      * instruction walker saves/restores depth per sequence. */
@@ -304,8 +328,11 @@ typedef struct xslt_exec {
 } XsltExec;
 
 /* xslt_exec.c — public transform entry. */
-XsltExec* xslt_transform(const XsltStylesheet* sheet,
-                         LeptrisDocument source);
+XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
+                             LeptrisDocument sheet_doc,
+                             LeptrisDocument source);
+#define xslt_transform(sheet, source) \
+    xslt_transform_doc((sheet), NULL, (source))
 void xslt_exec_free(XsltExec* ex);
 
 /* xslt_parse.c — compilation. */

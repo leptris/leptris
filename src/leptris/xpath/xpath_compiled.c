@@ -154,6 +154,15 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_ns(
                                  (struct leptris_xpath_ns_map*)ns, NULL);
 }
 
+/* Combined ns + vars entry — the XSLT engine's §4 prefixed tests
+ * inside variable-carrying transforms. */
+struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
+        LeptrisXPathCompiled compiled, LeptrisDocument doc,
+        LeptrisElement context, struct leptris_xpath_ns_map* ns,
+        XPathVariableSet* vars) {
+    return compiled_eval_context(compiled, doc, context, ns, vars);
+}
+
 LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, LeptrisXPathVariableSet variables) {

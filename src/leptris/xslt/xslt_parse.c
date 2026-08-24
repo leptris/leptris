@@ -125,6 +125,7 @@ static char* xslt_strtok(char* s, const char* delims, char** save) {
     return tok;
 }
 
+
 static XsltInstr* instr_new(XsltInstrKind k) {
     XsltInstr* in = (XsltInstr*)calloc(1, sizeof(*in));
     if (in) in->kind = k;
@@ -187,8 +188,31 @@ static XsltSort* parse_sorts(SheetParser* sp, LeptrisElement parent) {
     return head;
 }
 
-/* Forward: the content compiler (element bodies). */
-static XsltInstr* parse_content(SheetParser* sp, LeptrisElement list);
+/* Forward: the instruction compiler and the content compiler. */
+static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e);
+static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
+                                   int preserve_ws);
+#define parse_content(sp, list) parse_content_ws(sp, list, 0)
+
+
+/* §4/§5.3: collect the in-scope namespace bindings for a stylesheet
+ * element (its own xmlns decls plus every ancestor's, innermost
+ * wins). Returns NULL when nothing is declared — the hot path. */
+static LeptrisXPathNsSet build_ns_context(LeptrisElement e) {
+    LeptrisXPathNsSet set = NULL;
+    for (LeptrisElement a = e; a;
+         a = leptris_node_parent((LeptrisNodeRef)a)) {
+        for (int i = 0;; i++) {
+            const char* pfx = leptris_element_namespace_decl_prefix(a, i);
+            const char* uri = leptris_element_namespace_decl_uri(a, i);
+            if (!pfx || !uri) break;
+            if (!*pfx) continue;
+            if (!set) set = leptris_xpath_ns_set_new();
+            if (set) leptris_xpath_ns_set_add(set, pfx, uri);
+        }
+    }
+    return set;
+}
 
 static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
     const char* name = leptris_element_get_name(e);
@@ -416,7 +440,9 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
     return in;
 }
 
-static XsltInstr* parse_content(SheetParser* sp, LeptrisElement list) {
+
+static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
+                                   int preserve_ws) {
     XsltInstr* out = NULL;
     for (LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(list));
          n; n = leptris_node_next_sibling(n)) {
@@ -425,19 +451,52 @@ static XsltInstr* parse_content(SheetParser* sp, LeptrisElement list) {
             /* §4.8: stylesheet whitespace-only text is stripped. */
             const char* t = leptris_node_text(n);
             if (!t) continue;
-            int ws_only = 1;
-            for (const char* p = t; *p; p++) {
-                if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
-                    ws_only = 0;
-                    break;
+            if (!preserve_ws) {
+                int ws_only = 1;
+                for (const char* p = t; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' &&
+                        *p != '\r') {
+                        ws_only = 0;
+                        break;
+                    }
+                }
+                if (ws_only) {
+                    /* libxslt blank rule (xsltproc-verified): a
+                     * ws-only text node in template content is
+                     * stripped UNLESS an immediate neighbor is a
+                     * NON-BLANK text node — i.e. only blanks that
+                     * are part of a literal text run survive. */
+                    int keep = 0;
+                    for (int side = 0; side < 2 && !keep; side++) {
+                        LeptrisNodeRef nb = side
+                            ? leptris_node_next_sibling(n)
+                            : leptris_node_previous_sibling(n);
+                        if (!nb ||
+                            leptris_node_get_type(nb) !=
+                                LEPTRIS_NODE_TYPE_TEXT)
+                            continue;
+                        const char* nt = leptris_node_text(nb);
+                        if (nt && *nt) {
+                            for (const char* p = nt; *p; p++) {
+                                if (*p != ' ' && *p != '\t' &&
+                                    *p != '\n' && *p != '\r') {
+                                    keep = 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!keep) continue;
                 }
             }
-            if (ws_only) continue;
             XsltInstr* in = instr_new(XSLT_INSTR_TEXT);
             if (in) in->text = leptris_strdup(t);
             instr_append(&out, in);
         } else if (type == LEPTRIS_NODE_TYPE_ELEMENT) {
-            instr_append(&out, parse_instruction(sp, (LeptrisElement)n));
+            XsltInstr* in = parse_instruction(sp, (LeptrisElement)n);
+            if (in && !in->ns && sp->sheet->sheet_has_ns)
+                in->ns = build_ns_context((LeptrisElement)n);
+            instr_append(&out, in);
         }
     }
     return out;
@@ -889,6 +948,7 @@ static void free_instr(XsltInstr* in) {
             free(in->attr_set_names[i]);
         free(in->attr_set_names);
     }
+    if (in->ns) leptris_xpath_ns_set_free(in->ns);
     free(in);
 }
 
@@ -997,6 +1057,10 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
      * instructions fall back per §15). */
     const char* ver = leptris_element_attribute(root, "version");
     if (ver && strcmp(ver, "1.0") != 0) sheet->forwards_compat = 1;
+    /* Any namespace declaration in the sheet (beyond xsl) means
+     * expressions may use prefixed tests — parse-time ns contexts. */
+    if (leptris_element_namespace_decl_prefix(root, 0))
+        sheet->sheet_has_ns = 1;
     /* Default xsl:decimal-format (always present; named formats
      * append later). */
     XsltDecimalFormat* df = (XsltDecimalFormat*)calloc(1, sizeof(*df));

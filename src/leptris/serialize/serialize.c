@@ -188,7 +188,42 @@ static const unsigned char leptris_escape_table[256] = {
 static char* emit_escaped_inline(char* out, const char* content,
                                  size_t len, int attr_mode) {
     unsigned mode = attr_mode ? 3u : 1u;
+    /* Control characters escape as numeric references: attributes
+     * escape \t \n \r (attribute-value normalization would eat
+     * them); text escapes \r (newline translation). libxslt-
+     * verified behavior. Rare: pre-scan and take the plain path
+     * when absent so the SIMD hot loop is untouched. */
+    int has_ctrl = 0;
+    for (size_t k = 0; k < len; k++) {
+        char c = content[k];
+        if (c == '\r' || (attr_mode && (c == '\t' || c == '\n'))) {
+            has_ctrl = 1;
+            break;
+        }
+    }
     size_t i = 0;
+    if (has_ctrl) {
+        while (i < len) {
+            char c = content[i];
+            if (c == '\r' || (attr_mode && (c == '\t' || c == '\n'))) {
+                out += sprintf(out, "&#%d;", (int)(unsigned char)c);
+            } else if (c == '&') {
+                memcpy(out, "&amp;", 5); out += 5;
+            } else if (c == '<') {
+                memcpy(out, "&lt;", 4); out += 4;
+            } else if (c == '>') {
+                memcpy(out, "&gt;", 4); out += 4;
+            } else if (attr_mode && c == '"') {
+                memcpy(out, "&quot;", 6); out += 6;
+            } else if (attr_mode && c == '\'') {
+                memcpy(out, "&apos;", 6); out += 6;
+            } else {
+                *out++ = c;
+            }
+            i++;
+        }
+        return out;
+    }
     while (i < len) {
         size_t run = i;
         if (!attr_mode && len - i >= ESCAPE_SIMD_RUN) {

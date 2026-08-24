@@ -367,7 +367,19 @@ static struct leptris_xpath_result* xslt_fn_document(
     XsltExec* ex = exec_from(ctx);
     if (!ex || n < 1) return res_empty_ns();
     char* href = arg_string(ctx, args, n, 0);
-    if (!href || !*href) { free(href); return res_empty_ns(); }
+    if (!href) return res_empty_ns();
+    /* §12.1: the empty string references the stylesheet document
+     * itself (the common lookup-table idiom). */
+    if (!*href) {
+        free(href);
+        struct leptris_xpath_result* r = res_empty_ns();
+        LeptrisElement sr = ex->sheet_doc
+                                ? leptris_document_root(ex->sheet_doc)
+                                : NULL;
+        if (r && sr)
+            xpath_nodeset_add(r->value.nodeset_value, (LeptrisNodeRef)sr);
+        return r;
+    }
     LeptrisDocument d = xslt_doc_cache_get(ex, href);
     free(href);
     struct leptris_xpath_result* r = res_empty_ns();
