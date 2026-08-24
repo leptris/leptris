@@ -1,70 +1,23 @@
 ## [Unreleased]
 
-## [2.0.0] - 2026-08-24
 
-### Added
+### In progress
 
 - **XSLT 1.0 engine** (`leptris_xslt_parse`, `leptris_xslt_apply`,
-  `leptris_xslt_apply_string`, `leptris_xslt_free`): a
-  compile-once / execute-many stylesheet engine with
-  function-pointer dispatch over an instruction forest. Patterns
-  compile to XPath ASTs and resolve via ancestor-ladder matching
-  (§5.2); select/test/match/expressions go through `leptris_xpath_compile`
-  so the existing bytecode VM evaluates them.
-  - `apply-templates` with mode selection and priority+import rank
-    ordering; `for-each` with multi-key `sort` (text|number,
-    ascending|descending)
-  - `if` / `choose` / `when` / `otherwise`
-  - `value-of`, `for-each`, `copy`, `copy-of`,
-    `element`, `attribute`, `comment`, `processing-instruction`,
-    `message` (with `terminate="yes"`)
-  - `variable` / `param` scope chain (top-level globals +
-    call-template scope); `call-template` with `with-param`
-  - **Full §7.7 `xsl:number`** — level=single/multiple/any, `count`
-    and `from` patterns, multi-token `format` (`1/a/A/i/I`) with
-    prefix/suffix/per-number grouping per §7.7.1
-  - **AVT evaluation** (`{expr}` in attribute values, including
-    `{{` / `}}` escapes)
-  - **Result-tree-fragments as nodesets** — sibling-chain elements
-    on the result root, owned by the exec via `rtf_chain` so the
-    nodes outlive the variable's frame
-  - `xml` and `text` output methods; top-text accumulator for
-    rootless text output (FRAGMENT mode)
-  - `xsl:include` and `xsl:import` with depth-bounded recursive
-    loading, cycle detection, and rank-based precedence
-  - `xsl:decimal-format` (default + named)
-  - `xsl:attribute-set` with one-level `use-attribute-sets`
-    chaining; explicit attrs win, sets fill missing
-  - `xsl:output` extras: `doctype-system`, `doctype-public`,
-    `cdata-section-elements`
-
-- **XSLT/EXSLT function bridge handlers** (defined in
-  `xslt/xslt_functions.c`; per-eval registry installation lands as
-  a `TODO.engine` follow-up to avoid a known context-cleanup race
-  in the bridge install path):
-  - XSLT: `current`, `generate-id`, `system-property`, `key`,
-    `format-number`, `document`
-  - EXSLT: `exslt:node-set` (and bare `node-set`), `regexp:test`,
-    `date:date-time`, with full `regexp:match` / `regexp:replace`
-    implementations deferred to the same follow-up
-
-- `xpath_compiled.c`: internal `leptris_xpath_compiled_eval_in`
-  entry that runs the VM/AST/error-copy flow against a
-  caller-prepared `XPathContext`; public `leptris_xpath_compiled_eval`
-  delegates through it (SSOT).
-
-### Fixed
-
-- const-correct `LeptrisSerializeOptions` across the public
-  serialize surface (warning-clean)
-- xpath result_string uses node-kind-aware string value for mixed
-  nodesets (#514 fallout)
-- the serialization cache is freed at document teardown (#541)
-- rootless-doc PIs serialize (#546); `ParseOptions.recover`
-  returns an empty document instead of NULL (#547);
-  `serialize_into` accepts an options pointer (#541)
-
-
+  `leptris_xslt_apply_string`, `leptris_xslt_free`): compile-once
+  stylesheet engine with function-pointer dispatch over an
+  instruction forest. Phase 01 (pattern matcher), phase 02/03
+  (stylesheet compiler + template engine), and phase 04
+  essentials (RTF-as-nodeset variable transport, current-node
+  tracking, decimal-format, attribute-set, include/import,
+  cdata-section-elements) shipped on `feat/xslt-engine`. §12
+  XSLT/EXSLT function bridge install, `xsl:apply-imports`,
+  `xsl:text disable-output-escaping`, `xsl:sort lang/case-order`,
+  `xsl:number lang/letter-value`, `xsl:fallback`, HTML output
+  method, block-scope variable shadowing, and `unparsed-entity-uri`
+  / `unparsed-entity-name` land before the version bumps.
+- Planned next: XSLT 2.0 / XSLT 3.0 + XPath 3.1 + XQuery
+  implementation sourced from Saxon-HE (TODO.xpath2).
 
 ## [1.9.0] - 2026-08-24
 
@@ -3827,8 +3780,6 @@ All notable changes to Leptris will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
 
 ## [0.4.2] - 2026-08-07
 
