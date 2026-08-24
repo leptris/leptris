@@ -69,10 +69,13 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
     LeptrisElement saved_cur = ex->current_node;
     ex->current_node = node;
 
-    /* No frame chain — fast VM path. */
+    /* No frame chain — fast VM path (ns contexts need the
+     * interpreter's prefixed-test resolution). */
     if (!ex->vars) {
-        struct leptris_xpath_result* r =
-            leptris_xpath_compiled_eval(c, ex->source, node);
+        struct leptris_xpath_result* r = ex->current_ns
+            ? leptris_xpath_compiled_eval_ns(
+                  c, ex->source, node, ex->current_ns)
+            : leptris_xpath_compiled_eval(c, ex->source, node);
         ex->current_node = saved_cur;
         return r;
     }
@@ -161,9 +164,13 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
     }
     free(frames);
 
-    struct leptris_xpath_result* r =
-        leptris_xpath_compiled_eval_vars(c, ex->source, node,
-                                         (LeptrisXPathVariableSet)ex->varset);
+    struct leptris_xpath_result* r = ex->current_ns
+        ? leptris_xpath_compiled_eval_ns_vars(
+              c, ex->source, node,
+              (struct leptris_xpath_ns_map*)ex->current_ns, ex->varset)
+        : leptris_xpath_compiled_eval_vars(
+              c, ex->source, node,
+              (LeptrisXPathVariableSet)ex->varset);
 
     /* Clear the scratch set for the next evaluation. */
     while (ex->varset && ex->varset->count > 0) {
@@ -264,10 +271,24 @@ static void out_append_text(XsltExec* ex, LeptrisElement parent,
      * text belongs AFTER them — tail_text, appended post-serialization
      * (§1: the result is a fragment; order matters). */
     size_t tl = strlen(text);
-    int has_elem = leptris_document_root(ex->result) != NULL;
-    char** buf = has_elem ? &ex->tail_text : &ex->top_text;
-    size_t* len = has_elem ? &ex->tail_text_len : &ex->top_text_len;
-    size_t* cap = has_elem ? &ex->tail_text_cap : &ex->top_text_cap;
+    /* RTF capture: pure-text variable bodies route here instead of
+     * leaking into the fragment output. */
+    char** buf;
+    size_t* len;
+    size_t* cap;
+    if (ex->rtf_capturing) {
+        buf = &ex->rtf_text;
+        len = &ex->rtf_text_len;
+        cap = &ex->rtf_text_cap;
+    } else if (leptris_document_root(ex->result) != NULL) {
+        buf = &ex->tail_text;
+        len = &ex->tail_text_len;
+        cap = &ex->tail_text_cap;
+    } else {
+        buf = &ex->top_text;
+        len = &ex->top_text_len;
+        cap = &ex->top_text_cap;
+    }
     if (*len + tl + 1 > *cap) {
         size_t nc = *cap ? *cap * 2 : 64;
         while (nc < *len + tl + 1) nc *= 2;
@@ -723,9 +744,19 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
          * exslt:node-set semantics without an explicit call. */
         LeptrisElement saved = ex->pending_parent;
         ex->pending_parent = NULL;
+        ex->rtf_capturing = 1;
+        ex->rtf_text_len = 0;
         xslt_exec_instrs(ex, in->child, node);
+        ex->rtf_capturing = 0;
         ex->pending_parent = saved;
         LeptrisElement rr = leptris_document_root(ex->result);
+        if (!rr && ex->rtf_text && ex->rtf_text_len) {
+            /* Pure-text RTF: the value is the string. */
+            v = xpath_result_new(XPATH_RESULT_STRING);
+            if (v) v->value.string_value = leptris_strdup(ex->rtf_text);
+            xslt_push_var(ex, in->name, v);
+            return 0;
+        }
         v = xpath_result_new(XPATH_RESULT_NODESET);
         if (v && rr) {
             v->value.nodeset_value = xpath_nodeset_new();
@@ -816,14 +847,17 @@ static int ancestor_xml_space_preserve(LeptrisElement e) {
 }
 
 static void strip_source_whitespace(XsltExec* ex) {
-    if (!ex || !ex->source) return;
+    if (!ex || !ex->source || !ex->sheet->ws_strip) return;
+    /* libxslt reference semantics: source whitespace is PRESERVED
+     * by default; only names listed in xsl:strip-space (minus
+     * preserve-space) strip, with xml:space="preserve" winning. */
     for (LeptrisElement e = leptris_document_root(ex->source); e;
          e = xslt_next_doc_order(e)) {
         const char* name = leptris_element_name(e);
         if (!name) continue;
-        int preserved = name_in_list(ex->sheet->ws_preserve, name) &&
-                        !name_in_list(ex->sheet->ws_strip, name);
-        if (preserved || ancestor_xml_space_preserve(e)) continue;
+        int strip = name_in_list(ex->sheet->ws_strip, name) &&
+                    !name_in_list(ex->sheet->ws_preserve, name);
+        if (!strip || ancestor_xml_space_preserve(e)) continue;
         for (LeptrisNodeRef c =
                  leptris_node_first_child(leptris_element_as_node(e));
              c; c = leptris_node_next_sibling(c)) {
@@ -986,6 +1020,7 @@ static int op_unknown_xsl(XsltExec* ex, const XsltInstr* in,
 
 static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                               LeptrisElement node) {
+    int rc = 0;
     struct leptris_xpath_result* r = in->select
         ? xslt_eval(ex, in->select, node)
         : NULL;
@@ -1002,39 +1037,40 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         }
         leptris_xpath_result_free(r);
     } else {
-        /* Default: children of the current node — TEXT children copy
-         * straight through (built-in text rule, §5.8); elements go
-         * through template selection. */
-        size_t cap = 8;
-        items = (LeptrisElement*)calloc(cap, sizeof(LeptrisElement));
-        if (items) {
-            for (LeptrisNodeRef c =
-                     leptris_node_first_child(leptris_element_as_node(node));
-                 c; c = leptris_node_next_sibling(c)) {
-                int ty = leptris_node_get_type(c);
-                if (ty == LEPTRIS_NODE_TYPE_TEXT ||
-                    ty == LEPTRIS_NODE_TYPE_CDATA) {
-                    const char* t = leptris_text_get_content(
-                        (LeptrisTextNode*)c);
-                    if (ex->pending_parent) {
-                        out_append_text(ex, ex->pending_parent, t ? t : "");
-                    } else if (t) {
-                        char* v = escape_fragment_text(
-                            t, ex->sheet->out_method_text);
-                        out_append_text(ex, NULL, v);
-                        if (v != t) free(v);
-                    }
-                    continue;
+        /* Default (§5.4): child nodes in DOCUMENT ORDER — text
+         * copies inline (built-in text rule, §5.8), elements select
+         * and invoke their template AS ENCOUNTERED so output order
+         * matches the source (the old batch-then-loop broke
+         * interleaving). */
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(node));
+             c && rc == 0; c = leptris_node_next_sibling(c)) {
+            int ty = leptris_node_get_type(c);
+            if (ty == LEPTRIS_NODE_TYPE_TEXT ||
+                ty == LEPTRIS_NODE_TYPE_CDATA) {
+                const char* t = leptris_text_get_content(
+                    (LeptrisTextNode*)c);
+                if (ex->pending_parent) {
+                    out_append_text(ex, ex->pending_parent, t ? t : "");
+                } else if (t) {
+                    char* v = escape_fragment_text(
+                        t, ex->sheet->out_method_text);
+                    out_append_text(ex, NULL, v);
+                    if (v != t) free(v);
                 }
-                if (ty != LEPTRIS_NODE_TYPE_ELEMENT) continue;
-                if (n == cap) {
-                    cap *= 2;
-                    LeptrisElement* grown = (LeptrisElement*)realloc(
-                        items, cap * sizeof(LeptrisElement));
-                    if (!grown) { free(items); items = NULL; break; }
-                    items = grown;
-                }
-                items[n++] = (LeptrisElement)c;
+                continue;
+            }
+            if (ty != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+            LeptrisElement item = (LeptrisElement)c;
+            const XsltTemplate* best =
+                xslt_select_template(ex, item, in->name, 0);
+            if (best) {
+                rc = xslt_invoke_template(ex, best, item, in->child);
+            } else {
+                rc = op_apply_templates(
+                    ex,
+                    &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                    item);
             }
         }
     }
@@ -1051,7 +1087,6 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
     }
 
     const char* mode = in->name;   /* mode attr parsed into ->name */
-    int rc = 0;
     for (size_t i = 0; i < n && rc == 0; i++) {
         const XsltTemplate* best =
             xslt_select_template(ex, items[i], mode, 0);
@@ -1514,14 +1549,17 @@ int xslt_exec_instrs(XsltExec* ex, const XsltInstr* list,
          * (with-param binding or default evaluation) — not executed
          * as ordinary variables on the walk. */
         if (in->kind == XSLT_INSTR_VARIABLE && in->is_param) continue;
+        LeptrisXPathNsSet saved_ns = ex->current_ns;
+        ex->current_ns = in->ns;
         XsltInstrFn fn = g_ops[in->kind];
         if (fn) {
             rc = fn(ex, in, node);
-            if (rc) break;
+            if (rc) { ex->current_ns = saved_ns; break; }
         } else if (in->kind == XSLT_INSTR_VARIABLE) {
             rc = op_variable(ex, in, node);
-            if (rc) break;
+            if (rc) { ex->current_ns = saved_ns; break; }
         }
+        ex->current_ns = saved_ns;
     }
     xslt_pop_vars_to(ex, scope_mark);
     return rc;
@@ -1566,6 +1604,7 @@ void xslt_exec_free(XsltExec* ex) {
     while (ex->vars) xslt_pop_var(ex, NULL);
     free(ex->top_text);
     free(ex->tail_text);
+    free(ex->rtf_text);
     if (ex->varset) xpath_variable_set_free(ex->varset);
     while (ex->rtf_chain) {
         struct xslt_rtf_entry* ent = (struct xslt_rtf_entry*)ex->rtf_chain;
@@ -1579,14 +1618,16 @@ void xslt_exec_free(XsltExec* ex) {
     free(ex);
 }
 
-XsltExec* xslt_transform(const XsltStylesheet* sheet,
-                         LeptrisDocument source) {
+XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
+                             LeptrisDocument sheet_doc,
+                             LeptrisDocument source) {
     if (!sheet || !source) return NULL;
     register_ops();
 
     XsltExec* ex = (XsltExec*)calloc(1, sizeof(*ex));
     if (!ex) return NULL;
     ex->sheet = sheet;
+    ex->sheet_doc = sheet_doc;   /* set BEFORE the body: document('') */
     ex->source = source;
     ex->result = leptris_document_create();
     if (!ex->result) { xslt_exec_free(ex); return NULL; }

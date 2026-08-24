@@ -102,7 +102,8 @@ LEPTRIS_API void leptris_xslt_free(LeptrisXslt xslt) {
 LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
                                                LeptrisDocument source) {
     if (!xslt || !source) return NULL;
-    XsltExec* ex = xslt_transform(xslt->compiled, source);
+    XsltExec* ex = xslt_transform_doc(xslt->compiled,
+                                     xslt->sheet_doc, source);
     if (!ex) return NULL;
     LeptrisDocument out = ex->result;
     ex->result = NULL;    /* ownership moved */
@@ -198,7 +199,8 @@ static char* to_html_method(const char* xml) {
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                                             LeptrisDocument source) {
     if (!xslt || !source) return NULL;
-    XsltExec* ex = xslt_transform(xslt->compiled, source);
+    XsltExec* ex = xslt_transform_doc(xslt->compiled,
+                                     xslt->sheet_doc, source);
     if (!ex) return NULL;
     LeptrisDocument out = ex->result;
     ex->result = NULL;
