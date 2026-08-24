@@ -271,3 +271,73 @@ TEST(PublicSurface, MemoryHookGetters) {
     EXPECT_EQ(leptris_get_memory_allocation_function(), nullptr);
     EXPECT_EQ(leptris_get_memory_deallocation_function(), nullptr);
 }
+
+/* Issue #535: the two FFI-ergonomics APIs. */
+TEST(PublicSurface, NodeChildrenBatch) {
+    const char xml[] = "<r><a/>text<!--c--><b/><b/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisNodeRef root = leptris_element_as_node(leptris_document_root(doc));
+    ASSERT_NE(root, nullptr);
+
+    /* node_child_count is elements-only (3); the count query
+     * returns every kind (5). */
+    EXPECT_EQ(leptris_node_child_count(root), 3u);
+    EXPECT_EQ(leptris_node_children(root, nullptr, 0), 5u);
+
+    LeptrisNodeRef kids[5];
+    EXPECT_EQ(leptris_node_children(root, kids, 5), 5u);
+    EXPECT_EQ(leptris_node_get_type(kids[0]), LEPTRIS_NODE_TYPE_ELEMENT);
+    EXPECT_EQ(leptris_node_get_type(kids[1]), LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_EQ(leptris_node_get_type(kids[2]), LEPTRIS_NODE_TYPE_COMMENT);
+    EXPECT_EQ(leptris_node_get_type(kids[3]), LEPTRIS_NODE_TYPE_ELEMENT);
+    EXPECT_EQ(leptris_node_get_type(kids[4]), LEPTRIS_NODE_TYPE_ELEMENT);
+
+    /* Truncation copies what fits. */
+    LeptrisNodeRef two[2];
+    EXPECT_EQ(leptris_node_children(root, two, 2), 2u);
+    EXPECT_EQ(two[1], kids[1]);
+
+    /* NULL parent; zero capacity copies nothing. */
+    EXPECT_EQ(leptris_node_children(nullptr, kids, 5), 0u);
+    EXPECT_EQ(leptris_node_children(root, kids, 0), 0u);
+    leptris_document_free(doc);
+}
+
+TEST(PublicSurface, SerializeIntoBuffer) {
+    const char xml[] = "<r><a x='1'>t</a></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement a = leptris_element_first_child_any(
+        leptris_document_root(doc));
+    ASSERT_NE(a, nullptr);
+
+    /* Size query first. */
+    size_t need = leptris_document_serialize_into(doc, nullptr, 0, nullptr);
+    char* buf = (char*)malloc(need);
+    ASSERT_NE(buf, nullptr);
+    size_t len = 0;
+    EXPECT_EQ(leptris_document_serialize_into(doc, buf, need, &len), need);
+    char* ref = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(ref, nullptr);
+    EXPECT_STREQ(buf, ref);
+    EXPECT_EQ(len, strlen(ref));
+    leptris_free_string(ref);
+    free(buf);
+
+    /* Under-capacity: nothing written, need returned. */
+    char small[4];
+    EXPECT_GT(leptris_document_serialize_into(doc, small, 4, nullptr), 4u);
+    small[0] = 'Z';
+    leptris_document_serialize_into(doc, small, 4, nullptr);
+    EXPECT_EQ(small[0], 'Z');  /* untouched on under-capacity */
+
+    /* Element variant. */
+    size_t eneed = leptris_element_serialize_into(a, nullptr, 0, nullptr);
+    buf = (char*)malloc(eneed);
+    ASSERT_NE(buf, nullptr);
+    EXPECT_EQ(leptris_element_serialize_into(a, buf, eneed, nullptr), eneed);
+    EXPECT_STREQ(buf, "<a x=\"1\">t</a>");
+    free(buf);
+    leptris_document_free(doc);
+}

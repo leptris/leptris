@@ -483,6 +483,30 @@ LEPTRIS_API size_t leptris_element_children(
     return written;
 }
 
+/* Issue #535 (3): node-level batch children — every child kind
+ * (elements, text, comments, CDATA, PIs) in one call, matching
+ * leptris_element_children's shape. Returns the number copied;
+ * size with leptris_node_child_count. */
+LEPTRIS_API size_t leptris_node_children(LeptrisNodeRef parent,
+                                         LeptrisNodeRef* out_nodes,
+                                         size_t max_count) {
+    if (!parent) return 0;
+
+    /* Count-query mode (out == NULL): the TOTAL across every child
+     * kind — leptris_node_child_count counts elements only, so it
+     * cannot size a mixed array. */
+    size_t written = 0;
+    LeptrisNode* child = leptris_node_first_child_internal((LeptrisNode*)parent);
+    while (child) {
+        if (out_nodes && written < max_count) {
+            out_nodes[written] = (LeptrisNodeRef)child;
+        }
+        written++;
+        child = leptris_node_get_next_sibling(child);
+    }
+    return out_nodes ? ((written < max_count) ? written : max_count) : written;
+}
+
 /**
  * Get previous sibling element regardless of name (Public API)
  * NOTE: Compact mode doesn't have prev_sibling pointer, so we search from parent

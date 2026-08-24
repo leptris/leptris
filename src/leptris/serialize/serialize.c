@@ -1329,6 +1329,42 @@ LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
     return result;
 }
 
+/* Issue #535 (4): caller-buffer serialization. Returns the number
+ * of bytes needed INCLUDING the NUL terminator. When buf is non-NULL
+ * and capacity covers the need, the output is copied there (and
+ * *out_len, when given, receives the length WITHOUT the NUL);
+ * otherwise nothing is written and the return value is the size to
+ * allocate. One call, zero copies for the common case. */
+LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
+                                                   char* buf,
+                                                   size_t capacity,
+                                                   size_t* out_len) {
+    char* tmp = leptris_document_serialize(doc, NULL);
+    if (!tmp) return 0;
+    size_t need = strlen(tmp) + 1;
+    if (buf && capacity >= need) {
+        memcpy(buf, tmp, need);
+        if (out_len) *out_len = need - 1;
+    }
+    leptris_free_string(tmp);
+    return need;
+}
+
+LEPTRIS_API size_t leptris_element_serialize_into(LeptrisElement elem,
+                                                  char* buf,
+                                                  size_t capacity,
+                                                  size_t* out_len) {
+    char* tmp = leptris_element_serialize(elem, NULL);
+    if (!tmp) return 0;
+    size_t need = strlen(tmp) + 1;
+    if (buf && capacity >= need) {
+        memcpy(buf, tmp, need);
+        if (out_len) *out_len = need - 1;
+    }
+    leptris_free_string(tmp);
+    return need;
+}
+
 /* Save document to file */
 LEPTRIS_API int leptris_document_save_file(struct leptris_document* doc,
                                const char* filepath,
