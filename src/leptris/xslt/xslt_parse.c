@@ -708,8 +708,8 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                 if (tmp) {
                     char** arr = NULL; size_t cnt = 0, cap = 0;
                     char* save = NULL;
-                    for (char* tok = strtok_r(tmp, " \t\n", &save); tok;
-                         tok = strtok_r(NULL, " \t\n", &save)) {
+                    for (char* tok = xslt_strtok(tmp, " \t\n", &save); tok;
+                         tok = xslt_strtok(NULL, " \t\n", &save)) {
                         if (cnt + 1 >= cap) {
                             cap = cap ? cap * 2 : 4;
                             arr = (char**)realloc(arr, cap * sizeof(char*));
