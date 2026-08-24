@@ -4,9 +4,17 @@
 
 ### Fixed
 
-- never indent inside mixed-content elements (#534) (serialize)
-
-
+- **Pretty-printing no longer inserts whitespace inside
+  mixed-content elements (#534)**: an element with non-whitespace
+  text or CDATA children emits verbatim (libxml2 semantics) — the
+  inserted bytes used to become new text nodes on reparse,
+  silently altering content and breaking serialize∘parse
+  idempotency. Whitespace-only text still counts as formatting, so
+  pretty documents keep indenting. Companion fix: pretty
+  round-trips no longer double the blank lines on every pass (the
+  formatter owns inter-element whitespace; ws-only text nodes are
+  dropped) — serialize(parse(serialize(x))) is byte-stable in both
+  compact and pretty modes
 
 ## [1.6.1] - 2026-08-24
 
