@@ -1789,7 +1789,7 @@ LEPTRIS_API LeptrisElement leptris_element_insert_copy_after(LeptrisElement sibl
  * Memory: Caller must free returned string with leptris_free_string()
  */
 LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
-                                             LeptrisSerializeOptions* options);
+                                             const LeptrisSerializeOptions* options);
 
 /**
  * Serialize a document into a caller-provided buffer (issue #535)
@@ -1846,7 +1846,7 @@ LEPTRIS_API char* leptris_serialize_document(LeptrisDocument doc);
  * Memory: Caller must free returned string with leptris_free_string()
  */
 LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
-                                            LeptrisSerializeOptions* options);
+                                            const LeptrisSerializeOptions* options);
 
 /**
  * Serialize an element subtree into a caller-provided buffer
@@ -1876,7 +1876,7 @@ LEPTRIS_API size_t leptris_element_serialize_into(LeptrisElement elem,
  */
 LEPTRIS_API LeptrisStatus leptris_document_save_file(LeptrisDocument doc,
                                                   const char* filepath,
-                                                  LeptrisSerializeOptions* options);
+                                                  const LeptrisSerializeOptions* options);
 
 /* ============================================================================
  * Canonical XML (C14N) Operations
@@ -2197,6 +2197,58 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_ns(
 LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
     LeptrisXPathCompiled compiled, LeptrisDocument doc,
     LeptrisElement context, LeptrisXPathVariableSet variables);
+
+/**
+ * Compile an XSLT 1.0 stylesheet (TODO.transform)
+ *
+ * The stylesheet is compiled ONCE into an immutable instruction
+ * forest: patterns compile to XPath ASTs, select/test expressions go
+ * through leptris_xpath_compile, and literal result elements are
+ * stored verbatim. The handle can then be applied to any number of
+ * documents with no re-parsing.
+ *
+ * @param stylesheet_xml The stylesheet document (UTF-8)
+ * @param len Byte length of stylesheet_xml
+ * @return Compiled stylesheet, or NULL on syntax error (message via
+ *         leptris_last_error)
+ *
+ * Memory: free with leptris_xslt_free.
+ */
+LEPTRIS_API LeptrisXslt leptris_xslt_parse(const char* stylesheet_xml,
+                                            size_t len);
+
+/**
+ * Free a compiled stylesheet handle
+ *
+ * Must not race with in-flight leptris_xslt_apply calls on the same
+ * handle.
+ */
+LEPTRIS_API void leptris_xslt_free(LeptrisXslt xslt);
+
+/**
+ * Apply a compiled stylesheet to a document
+ *
+ * @param xslt Compiled stylesheet (from leptris_xslt_parse)
+ * @param doc Source document (not modified)
+ * @return Result tree (free with leptris_document_free), or NULL on
+ *         error (message via leptris_document_last_error)
+ */
+LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
+                                                LeptrisDocument doc);
+
+/**
+ * Apply a compiled stylesheet and serialize the result
+ *
+ * Convenience wrapper: leptris_xslt_apply + serialize, including
+ * top-level text nodes and result fragments that the tree API would
+ * flatten.
+ *
+ * @param xslt Compiled stylesheet
+ * @param doc Source document
+ * @return Serialized result (free with leptris_free_string), or NULL
+ */
+LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
+                                             LeptrisDocument doc);
 
 /**
  * Custom XPath function handler (string-valued).

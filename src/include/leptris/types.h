@@ -214,6 +214,11 @@ typedef struct leptris_xpath_ns_map* LeptrisXPathNsSet;
  * by leptris_xpath_compile, freed by leptris_xpath_compiled_free. */
 typedef struct leptris_xpath_compiled* LeptrisXPathCompiled;
 
+/* Compiled XSLT stylesheet handle (TODO.transform). Opaque; created by
+ * leptris_xslt_parse, freed by leptris_xslt_free. Immutable once
+ * compiled — apply it to any number of documents, from any threads. */
+typedef struct leptris_xslt* LeptrisXslt;
+
 /* ============================================================================
  * Memory Allocation Function Types
  * ============================================================================ */

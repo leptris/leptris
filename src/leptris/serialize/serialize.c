@@ -1242,7 +1242,7 @@ struct leptris_document;
 
 /* Serialize document with options */
 LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
-                                 LeptrisSerializeOptions* options) {
+                                 const LeptrisSerializeOptions* options) {
     if (!doc) return NULL;
 
     /* FlatDoc serialize fast path removed — direct_parse builds the
@@ -1374,7 +1374,7 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
 
 /* Serialize element subtree to XML string */
 LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
-                                 LeptrisSerializeOptions* options) {
+                                 const LeptrisSerializeOptions* options) {
     if (!elem) return NULL;
 
     int indent_spaces = 0;
@@ -1462,7 +1462,7 @@ LEPTRIS_API size_t leptris_element_serialize_into(LeptrisElement elem,
 /* Save document to file */
 LEPTRIS_API int leptris_document_save_file(struct leptris_document* doc,
                                const char* filepath,
-                               LeptrisSerializeOptions* options) {
+                               const LeptrisSerializeOptions* options) {
     if (!doc) return -4;  /* LEPTRIS_ERROR_NULL_ARG */
     if (!filepath) return -4;  /* LEPTRIS_ERROR_NULL_ARG */
 

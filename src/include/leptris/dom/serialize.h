@@ -60,7 +60,7 @@ extern "C" {
  * Memory: Caller must free returned string with leptris_free_string()
  */
 LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
-                                             LeptrisSerializeOptions* options);
+                                             const LeptrisSerializeOptions* options);
 
 /**
  * Serialize element subtree to XML string
@@ -72,7 +72,7 @@ LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
  * Memory: Caller must free returned string with leptris_free_string()
  */
 LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
-                                            LeptrisSerializeOptions* options);
+                                            const LeptrisSerializeOptions* options);
 
 /**
  * Save document to file
@@ -92,7 +92,7 @@ LEPTRIS_API char* leptris_element_serialize(LeptrisElement elem,
  */
 LEPTRIS_API LeptrisStatus leptris_document_save_file(LeptrisDocument doc,
                                                   const char* filepath,
-                                                  LeptrisSerializeOptions* options);
+                                                  const LeptrisSerializeOptions* options);
 
 /* ============================================================================
  * Canonical XML (C14N) Operations

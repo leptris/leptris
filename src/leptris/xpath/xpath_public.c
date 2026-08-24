@@ -374,9 +374,22 @@ LEPTRIS_API char* leptris_xpath_result_string(LeptrisXPathResult result) {
                 return leptris_strdup(buffer);
             }
         case XPATH_RESULT_NODESET:
-            if (result->value.nodeset_value && result->value.nodeset_value->count > 0) {
-                const char* text = leptris_element_text((LeptrisElement)result->value.nodeset_value->nodes[0]);
-                return text ? leptris_strdup(text) : leptris_strdup("");
+            if (result->value.nodeset_value &&
+                result->value.nodeset_value->count > 0) {
+                void* first = result->value.nodeset_value->nodes[0];
+                /* First-node string-value by KIND (issue #514
+                 * fallout): attributes use their value; text/CDATA
+                 * and comments their content; elements their
+                 * descendant text. */
+                LeptrisXPathNodeKind kind =
+                    leptris_xpath_result_node_kind(result, 0);
+                if (kind == LEPTRIS_XPATH_NODE_ELEMENT) {
+                    const char* text =
+                        leptris_element_text((LeptrisElement)first);
+                    return text ? leptris_strdup(text) : leptris_strdup("");
+                }
+                const char* v = leptris_xpath_result_node_value(result, 0);
+                return v ? leptris_strdup(v) : leptris_strdup("");
             }
             /* fallthrough */
         default:

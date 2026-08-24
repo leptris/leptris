@@ -77,6 +77,13 @@ set(LEPTRIS_SOURCES
     leptris/xpath/xpath_compiled.c
     leptris/xpath/xpath_ast_cache.c
 
+    # XSLT 1.0 (TODO.transform): compile-once instruction forest,
+    # function-pointer dispatch, patterns as XPath ASTs.
+    leptris/xslt/xslt_parse.c
+    leptris/xslt/xslt_pattern.c
+    leptris/xslt/xslt_exec.c
+    leptris/xslt/xslt_public.c
+
     # SAX
     leptris/sax/parser.c
     leptris/sax/pull.c
