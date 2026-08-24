@@ -122,6 +122,12 @@ struct leptris_document {
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */
     int had_declaration;            /* 1 if input had <?xml?>, 0 otherwise */
+    /* 1 if ANY namespace declaration exists anywhere in the
+     * document (parse or mutation). XPath 1.0 §2.3: an unprefixed
+     * name test matches only no-namespace elements; when this is 0
+     * every element is no-namespace and the hot name-match paths
+     * skip the namespace check entirely (issue #525). */
+    int has_namespaces;
     int has_bom;                    /* 1 if UTF-8 BOM was present, 0 otherwise */
     /* DOCTYPE support */
     void* doctype;                  /* LeptrisDoctypeNode* or NULL */

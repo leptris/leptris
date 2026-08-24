@@ -954,6 +954,13 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         continue;
 
     advance:
+        /* The walk's root completed (any completion path — close-tag,
+         * leaf fast path, text-only, self-closing). Emit exactly the
+         * caller's subtree: do NOT continue to the root's siblings
+         * (issue #523 — the leak made element serialization both
+         * wrong and O(document)). */
+        if (sp == 0 && (LeptrisNode*)cur == (LeptrisNode*)root_elem) return;
+
         /* next sibling, else ascend closing frames */
         for (;;) {
             LeptrisNode* nsib = leptris_node_get_next_sibling(cur);
@@ -976,9 +983,13 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append_newline(buf);
             }
             if (sp == 0 && (LeptrisNode*)pe == (LeptrisNode*)root_elem) {
-                /* root closed; but root may itself have siblings if the
-                 * caller passed a non-root — handled: loop continues to
-                 * root's next sibling check at top of advance loop */
+                /* The walk's root frame closed. STOP: an element
+                 * serialize must emit exactly the caller's subtree —
+                 * continuing to the root's siblings leaked every
+                 * following element into the output (issue #523:
+                 * both the garbage results and the O(document)
+                 * per-call cost). */
+                return;
             }
             cur = (LeptrisNode*)pe;
         }

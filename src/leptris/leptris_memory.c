@@ -154,6 +154,12 @@ struct leptris_namespace* leptris_namespace_find(struct leptris_element* elem, c
  * returns declarations in the order they appear in the document.
  * Previously this prepended, giving consumers a reversed view. */
 int leptris_element_add_namespace(struct leptris_element* elem, struct leptris_namespace* ns) {
+    /* Issue #525: a namespace declaration now exists — mark the
+     * document so unprefixed XPath name tests consult the resolver. */
+    if (elem && ns) {
+        struct leptris_document* d = leptris_element_get_document((LeptrisElement)elem);
+        if (d) d->has_namespaces = 1;
+    }
     if (!elem || !ns) return -1;
 
     ns->next = NULL;

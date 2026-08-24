@@ -119,14 +119,15 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
 
             if (!colon) {
                 /* Simple name match - no prefix in test */
-                const char* node_prefix = leptris_element_get_prefix(elem);
-                DEBUG_LOG("      matches_node_test: test='%s', node_name='%s', node_prefix=%s",
-                         test->value, node_name, node_prefix ? node_prefix : "(null)");
-                /* Unprefixed test should only match unprefixed elements */
-                int match = !node_prefix && strcmp(node_name, test->value) == 0;
-                DEBUG_LOG("        -> result=%d (node_prefix=%s, name_match=%d)",
-                         match, node_prefix ? "SET" : "NULL", strcmp(node_name, test->value) == 0);
-                return match;
+                /* Issue #525 (XPath 1.0 §2.3): an unprefixed test
+                 * matches only NO-namespace elements. A prefix-less
+                 * element under a default xmlns IS namespaced —
+                 * "no prefix" is the wrong proxy. */
+                if (strcmp(node_name, test->value) != 0) return 0;
+                if (!ctx || !ctx->document || !ctx->document->has_namespaces)
+                    return 1;   /* namespace-free document: no gate */
+                const char* uri = leptris_element_get_namespace_uri(elem);
+                return !uri || !uri[0];
             }
 
             /* Has prefix - need namespace-aware matching */

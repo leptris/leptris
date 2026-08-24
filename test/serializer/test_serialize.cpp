@@ -470,3 +470,44 @@ TEST(EncodingGuarantee, DoubleSerializeIsByteStable) {
     leptris_free_string(once);
     leptris_document_free(doc);
 }
+
+/* Issue #523: element serialization leaked every FOLLOWING sibling —
+ * wrong output plus an O(document) cost per call. */
+TEST(ElementSerialize, EmitsExactlyTheRequestedSubtree) {
+    const char xml[] =
+        "<catalog><b1 id='1'>one</b1><b2 id='2'>two</b2><b3 id='3'>three</b3></catalog>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement catalog = leptris_document_root(doc);
+    LeptrisElement b1 = leptris_element_first_child_any(catalog);
+    ASSERT_NE(b1, nullptr);
+
+    char* x = leptris_element_serialize(b1, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_STREQ(x, "<b1 id=\"1\">one</b1>");
+    leptris_free_string(x);
+
+    /* Middle element with children of its own. */
+    LeptrisElement b2 = leptris_element_next_sibling_any(b1);
+    ASSERT_NE(b2, nullptr);
+    x = leptris_element_serialize(b2, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_STREQ(x, "<b2 id=\"2\">two</b2>");
+    leptris_free_string(x);
+
+    /* Pretty-printed variant stays isolated too. */
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    x = leptris_element_serialize(b2, &opts);
+    ASSERT_NE(x, nullptr);
+    EXPECT_EQ(std::strstr(x, "b3"), nullptr) << "siblings must not leak";
+    EXPECT_NE(std::strstr(x, "b2"), nullptr);
+    leptris_free_string(x);
+
+    /* Whole-document serialization is unchanged. */
+    x = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_NE(std::strstr(x, "<b3"), nullptr);
+    leptris_free_string(x);
+    leptris_document_free(doc);
+}
