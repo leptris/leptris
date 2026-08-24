@@ -24,6 +24,12 @@ typedef struct leptris_pi_node {
                                       ±256 KB range cannot hold cross-block sibling
                                       links on large documents. 0 = NULL. */
     int32_t parent_off;                /* Byte offset to parent element (0=NULL) */
+    /* Issue #519: owning document for DETACHED nodes. Parentless
+     * non-element nodes could not reach their pool (document was
+     * resolved via the parent chain) — mutations on freshly created
+     * nodes failed with INVALID_ARG until attach. NULL for parsed
+     * nodes is fine (parent route resolves first). */
+    struct leptris_document* owner_doc;
 } LeptrisPINode;
 
 /* PI node creation.  Pool-allocated with contiguous target/data

@@ -192,6 +192,27 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
              * (issue #485: pointer order is not document order). */
             xpath_nodeset_sort_doc_order(ctx, ns, 0);
 
+            /* Issue #514: the concatenated entries BORROW the
+             * operands' synthetic nodes (attributes, namespaces,
+             * EXSLT text). The operand frees below would release
+             * them and leave this nodeset with dangling pointers —
+             * transfer the ownership flags before they run. */
+            ns->owns_attributes =
+                left->value.nodeset_value->owns_attributes ||
+                right->value.nodeset_value->owns_attributes;
+            ns->owns_namespaces =
+                left->value.nodeset_value->owns_namespaces ||
+                right->value.nodeset_value->owns_namespaces;
+            ns->owns_synthetic_text =
+                left->value.nodeset_value->owns_synthetic_text ||
+                right->value.nodeset_value->owns_synthetic_text;
+            left->value.nodeset_value->owns_attributes = 0;
+            left->value.nodeset_value->owns_namespaces = 0;
+            left->value.nodeset_value->owns_synthetic_text = 0;
+            right->value.nodeset_value->owns_attributes = 0;
+            right->value.nodeset_value->owns_namespaces = 0;
+            right->value.nodeset_value->owns_synthetic_text = 0;
+
             result->value.nodeset_value = ns;
         }
     }

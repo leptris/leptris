@@ -675,6 +675,60 @@ LEPTRIS_API const char* leptris_document_encoding(LeptrisDocument doc);
  */
 LEPTRIS_API LeptrisDoctype leptris_document_internal_subset(LeptrisDocument doc);
 
+/* ============================================================================
+ * Document-level processing instructions (issue #526)
+ * ============================================================================ */
+
+/**
+ * Count the document's top-level processing instructions
+ *
+ * Parsed `<?target data?>` items outside the root element (and ones
+ * added via leptris_document_add_pi). The XML declaration is not a PI.
+ *
+ * @param doc Document
+ * @return PI count, or 0 for NULL
+ */
+LEPTRIS_API size_t leptris_document_pi_count(LeptrisDocument doc);
+
+/**
+ * Get a document-level PI's target by index
+ *
+ * @param doc Document
+ * @param index 0-based, < leptris_document_pi_count
+ * @return Target string (document-owned, lives until
+ *         leptris_document_free), or NULL when out of range
+ */
+LEPTRIS_API const char* leptris_document_pi_target(LeptrisDocument doc,
+                                                   size_t index);
+
+/**
+ * Get a document-level PI's data by index
+ *
+ * @param doc Document
+ * @param index 0-based, < leptris_document_pi_count
+ * @return Data string, "" when the PI has none (document-owned), or
+ *         NULL when out of range
+ */
+LEPTRIS_API const char* leptris_document_pi_data(LeptrisDocument doc,
+                                                 size_t index);
+
+/**
+ * Append a document-level processing instruction
+ *
+ * The PI is appended after any existing document PIs (serialized
+ * after the XML declaration, before the root element).
+ *
+ * @param doc Document (must exist)
+ * @param target PI target (copied)
+ * @param data PI data (copied; may be NULL or empty)
+ * @return Opaque non-NULL witness on success (enumerate via the
+ *         accessors above; do NOT pass it to node APIs — document
+ *         PIs are not tree nodes), or NULL on invalid input / OOM
+ */
+LEPTRIS_API LeptrisNodeRef leptris_document_add_pi(LeptrisDocument doc,
+                                                   const char* target,
+                                                   const char* data);
+
 /**
  * Get the DOCTYPE's root element name (the name following
  * `<!DOCTYPE`).

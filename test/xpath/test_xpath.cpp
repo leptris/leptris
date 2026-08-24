@@ -1378,3 +1378,23 @@ TEST(NamespaceConformance, UnprefixedNameTestMatchesNoNamespaceOnly) {
     EXPECT_EQ(count(d4, "count(//a)"), 1);
     leptris_document_free(d4);
 }
+
+/* Issue #514: mixed (union) nodesets exposed attribute entries as
+ * dangling pointers — kind=OTHER, NULL name/value, garbage tags. */
+TEST(MixedNodeset, UnionAttributesKeepIdentity) {
+    const char xml[] = "<r><a id='1'>x</a><a id='2'>y</a></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//a | //a/@id");
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_xpath_result_count(r), 4u);
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 0), LEPTRIS_XPATH_NODE_ELEMENT);
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 1), LEPTRIS_XPATH_NODE_ATTRIBUTE);
+    EXPECT_STREQ(leptris_xpath_result_node_name(r, 1), "id");
+    EXPECT_STREQ(leptris_xpath_result_node_value(r, 1), "1");
+    EXPECT_EQ(leptris_xpath_result_node_kind(r, 3), LEPTRIS_XPATH_NODE_ATTRIBUTE);
+    EXPECT_STREQ(leptris_xpath_result_node_value(r, 3), "2");
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
