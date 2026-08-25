@@ -903,6 +903,19 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
     xslt_register_handler(r, "unparsed-entity-uri", xslt_fn_unparsed_entity_uri, 1, 1, exec);
     xslt_register_handler(r, "element-available", xslt_fn_element_available, 1, 1, exec);
     xslt_register_handler(r, "function-available", xslt_fn_function_available, 1, 1, exec);
+
+    /* The first-party EXSLT pack rides along: str:/set:/math:
+     * handlers are native (TODO.concurrency/06) and the libxslt
+     * suite exercises them through XSLT sheets (set:distinct,
+     * str:tokenize…). Their entries get the exec as user_data so
+     * handlers needing context resolve it. */
+    {
+        extern void leptris_exslt_register(XPathFunctionRegistry*);
+        size_t before = r->count;
+        leptris_exslt_register(r);
+        for (size_t i = before; i < r->count; i++)
+            r->functions[i].user_data = exec;
+    }
 }
 
 /* The original exec-scoped builder is kept for the future cache
