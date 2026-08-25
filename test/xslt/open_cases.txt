@@ -1,5 +1,4 @@
 bug-100
-bug-102
 bug-104
 bug-105
 bug-108
@@ -59,7 +58,6 @@ bug-182
 bug-183
 bug-186
 bug-187
-bug-188
 bug-189
 bug-19-
 bug-190
@@ -124,7 +122,6 @@ bug-73
 bug-74
 bug-75
 bug-8-
-bug-80
 bug-82
 bug-83
 bug-84

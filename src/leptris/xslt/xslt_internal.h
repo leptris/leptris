@@ -147,10 +147,19 @@ typedef struct xslt_lattr {
     struct xslt_lattr* next;
 } XsltLAttr;
 
-/* Named attribute set (xsl:attribute-set, §7.1.4). */
+/* Named attribute set (xsl:attribute-set, §7.1.4).
+ *
+ * Sets with the same expanded name UNION (§12.1.4): the attrsets
+ * list is prepend-ordered, so walking it head-first visits the
+ * highest-precedence declaration first — with skip-if-exists at
+ * the target, higher import precedence wins per attribute.
+ * use-attribute-sets chains expand at USE time (recursively, cycle
+ * -guarded), never snapshotted at parse time. */
 typedef struct xslt_attrset {
     const char* name;
     XsltLAttr* attrs;           /* evaluated AVTs applied at use sites */
+    char** use_names;           /* use-attribute-sets (comma-split) */
+    size_t use_count;
     struct xslt_attrset* next;
 } XsltAttrSet;
 

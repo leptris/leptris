@@ -400,25 +400,36 @@ static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
 /* Apply (in order) the attribute-set names in `in->attr_set_names`,
  * evaluating AVTs against `node`. Existing attributes on the target
  * are NOT overwritten — explicit attrs and later sets win (§7.1.4). */
+/* §7.1.4/§12.1.4: apply every declaration of `name` (head-first =
+ * highest import precedence first; first writer wins), each entry's
+ * OWN attributes overriding the sets it references (the referenced
+ * names apply afterwards, skip-if-exists). */
+static void apply_named_set(XsltExec* ex, const char* name,
+                            LeptrisElement target, LeptrisElement node,
+                            int depth) {
+    if (!ex || !ex->sheet || !name || !target || depth > 8) return;
+    for (XsltAttrSet* s = ex->sheet->attrsets; s; s = s->next) {
+        if (!s->name || strcmp(s->name, name) != 0) continue;
+        for (XsltLAttr* a = s->attrs; a; a = a->next) {
+            if (!a->name) continue;
+            if (leptris_element_attribute(target, a->name)) continue;
+            char* v = eval_avt(ex, a->value, node);
+            if (v) {
+                leptris_element_set_attribute(target, a->name, v);
+                free(v);
+            }
+        }
+        for (size_t u = 0; u < s->use_count; u++)
+            apply_named_set(ex, s->use_names[u], target, node, depth + 1);
+    }
+}
+
 void xslt_apply_attr_sets(XsltExec* ex, const XsltInstr* in,
                           LeptrisElement target, LeptrisElement node) {
     if (!ex || !ex->sheet || !target || !in || in->attr_set_count == 0) return;
     for (size_t i = 0; i < in->attr_set_count; i++) {
-        const char* want = in->attr_set_names[i];
-        if (!want) continue;
-        for (XsltAttrSet* s = ex->sheet->attrsets; s; s = s->next) {
-            if (!s->name || strcmp(s->name, want) != 0) continue;
-            for (XsltLAttr* a = s->attrs; a; a = a->next) {
-                /* Skip if target already has this attribute
-                 * (later precedence wins). */
-                if (leptris_element_attribute(target, a->name)) continue;
-                char* v = eval_avt(ex, a->value, node);
-                if (v) {
-                    leptris_element_set_attribute(target, a->name, v);
-                    free(v);
-                }
-            }
-        }
+        if (!in->attr_set_names[i]) continue;
+        apply_named_set(ex, in->attr_set_names[i], target, node, 0);
     }
 }
 
