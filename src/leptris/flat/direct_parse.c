@@ -1228,6 +1228,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     tc->content = strdup((const char*)start);
                     if (!tc->content) { free(tc); goto fail; }
                     tc->next = NULL;
+                    tc->after_root = (p.root != NULL);
                     if (p.tc_tail) p.tc_tail->next = tc;
                     else p.tc_head = tc;
                     p.tc_tail = tc;
@@ -1351,6 +1352,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 pi_node->target = strdup(target_start);
                 pi_node->data = strdup(data_start);
                 pi_node->next = NULL;
+                pi_node->after_root = (p.root != NULL);
                 if (p.pis_tail) p.pis_tail->next = pi_node;
                 else p.pis_head = pi_node;
                 p.pis_tail = pi_node;
