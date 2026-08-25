@@ -506,18 +506,21 @@ TEST(Xslt, InvalidStylesheets) {
  * assertion, not just a happy path.
  * --------------------------------------------------------------- */
 
-/* RTF-as-nodeset variable transport. Before this fix, $x degraded
- * to the first node's string value — count($x) returned 1 instead
- * of 3. The variable's top-level elements now resolve as a
- * nodeset (sibling chain when there is no parent). */
+/* RTF variables bind the fragment's ROOT (document) node — the
+ * libxslt model: count($x)=1, relative paths walk the fragment
+ * ($x/a = the top-level <a/>), exsl:node-set($x) = same nodeset
+ * under any prefix binding of the EXSLT namespace. */
 TEST(XsltConformance, NodeSetVariableTransport) {
     EXPECT_EQ(body(run(
         "<xsl:variable name='x'>"
         "<a/><b/><c/>"
         "</xsl:variable>"
         "<xsl:template match='/'>"
-        "<xsl:value-of select='count($x)'/></xsl:template>",
-        "<r/>")), "3");
+        "<xsl:value-of select='count($x)'/>|"
+        "<xsl:value-of select='count($x/b)'/>|"
+        "<xsl:value-of select='name($x/b)'/>"
+        "</xsl:template>",
+        "<r/>")), "1|1|b");
 }
 
 /* use-attribute-sets precedence (§7.1.4): an explicit attr on

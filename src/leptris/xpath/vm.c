@@ -415,11 +415,16 @@ struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
         /* Document node: child axis = the root element. */
         if (nd && nd->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
             struct leptris_document* d = ((LeptrisDocumentNode*)nd)->doc;
-            LeptrisElement root = (LeptrisElement)d->new_dom_root;
-            if (!root) root = d->root;
-            if (root && (wild || vm_unprefixed_name_matches(
-                             ctx, root, name)))
-                xpath_nodeset_add_fast(out, (LeptrisNode*)root);
+            LeptrisNode* root = (LeptrisNode*)d->new_dom_root;
+            if (!root) root = (LeptrisNode*)d->root;
+            for (LeptrisNode* c = root; c;
+                 c = leptris_node_get_next_sibling(c)) {
+                if (wild ||
+                    (c->type == LEPTRIS_NODE_TYPE_ELEMENT &&
+                     vm_unprefixed_name_matches(ctx, (LeptrisElement)c,
+                                                name)))
+                    xpath_nodeset_add_fast(out, c);
+            }
             continue;
         }
         if (!node_is_element(nd)) continue;

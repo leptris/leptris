@@ -6,7 +6,8 @@
 
 #include "evaluator_internal.h"
 #include "../leptris_internal.h"
-#include "../dom/element.h"  /* For LeptrisElement structure */
+#include "../dom/element.h"
+#include "../dom/document_node.h"  /* For LeptrisElement structure */
 #include "../dom/text.h"
 #include "../dom/comment.h"
 #include "../dom/cdata.h"
@@ -46,6 +47,15 @@ char* get_node_text(void* node) {
             /* The string-value of a namespace node is its URI. */
             LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
             return leptris_strdup(ns->uri ? ns->uri : "");
+        }
+
+        case LEPTRIS_NODE_TYPE_DOCUMENT: {
+            struct leptris_document* d =
+                ((LeptrisDocumentNode*)node)->doc;
+            LeptrisElement root = (LeptrisElement)d->new_dom_root;
+            if (!root) root = d->root;
+            if (!root) return leptris_strdup("");
+            return leptris_element_get_text_content(root);
         }
 
         case LEPTRIS_NODE_TYPE_TEXT: {

@@ -755,8 +755,43 @@ static struct leptris_xpath_result* evaluate_function_call_impl(XPathContext* ct
 
     XPathFunctionRegistry* registry = (XPathFunctionRegistry*)ctx->function_registry;
 
-    /* Look up function */
-    XPathFunctionDef* func_def = xpath_function_registry_get(registry, func_name);
+    /* Look up function. Extension functions register under their
+     * canonical prefix (exslt:node-set); a stylesheet may bind the
+     * same namespace under ANY prefix. The local-name fallback runs
+     * ONLY when the prefix resolves to a known extension namespace
+     * (EXSLT/XSLT) — otherwise a user my:count would silently hit
+     * the built-in count(). */
+    XPathFunctionDef* func_def =
+        xpath_function_registry_get(registry, func_name);
+    if (!func_def) {
+        const char* colon = strchr(func_name, ':');
+        if (colon && colon[1]) {
+            const char* uri = leptris_xpath_ns_lookup(
+                (const struct leptris_xpath_ns_map*)ctx->ns_set,
+                func_name, (size_t)(colon - func_name));
+            static const char* k_ext[] = {
+                "http://exslt.org/common",
+                "http://exslt.org/sets",
+                "http://exslt.org/strings",
+                "http://exslt.org/math",
+                "http://exslt.org/date",
+                "http://exslt.org/regexp",
+                "http://exslt.org/dynamic",
+                "http://www.w3.org/1999/XSL/Transform",
+                NULL };
+            int ext = 0;
+            if (uri) {
+                for (int i = 0; k_ext[i]; i++)
+                    if (strcmp(uri, k_ext[i]) == 0) { ext = 1; break; }
+            }
+            if (ext) {
+                char local[128];
+                snprintf(local, sizeof(local), "%s", colon + 1);
+                func_def =
+                    xpath_function_registry_get(registry, local);
+            }
+        }
+    }
     if (!func_def) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                 "Unknown function: %s", func_name);

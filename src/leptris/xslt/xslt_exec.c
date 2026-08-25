@@ -728,7 +728,23 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
         size_t n = leptris_xpath_result_count(r);
         for (size_t i = 0; i < n; i++) {
             LeptrisNodeRef cn = leptris_xpath_result_get_node(r, i);
-            if (cn && leptris_node_get_type(cn) == LEPTRIS_NODE_TYPE_ELEMENT) {
+            if (cn && leptris_node_get_type(cn) ==
+                         LEPTRIS_NODE_TYPE_DOCUMENT) {
+                /* An RTF fragment root: copy its children (the
+                 * top-level nodes of the fragment). */
+                struct leptris_document* fd =
+                    ((LeptrisDocumentNode*)cn)->doc;
+                for (LeptrisNodeRef c =
+                         (LeptrisNodeRef)(fd->new_dom_root
+                              ? fd->new_dom_root : fd->root);
+                     c; c = leptris_node_next_sibling(c)) {
+                    if (leptris_node_get_type(c) ==
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        copy_node_deep(ex, (LeptrisElement)c,
+                                       ex->pending_parent);
+                }
+            } else if (cn && leptris_node_get_type(cn) ==
+                                 LEPTRIS_NODE_TYPE_ELEMENT) {
                 copy_node_deep(ex, (LeptrisElement)cn, ex->pending_parent);
             } else if (cn) {
                 int cty = leptris_node_get_type(cn);
@@ -957,17 +973,14 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
         if (v && rr) {
             v->value.nodeset_value = xpath_nodeset_new();
             if (v->value.nodeset_value) {
-                /* XSLT allows multiple top-level result elements;
-                 * out_append_elem with pending_parent=NULL keeps
-                 * them as a sibling chain under the document root.
-                 * Walk from the root and on through next-siblings to
-                 * capture them all in document order. */
-                for (LeptrisElement c = rr;
-                     c;
-                     c = leptris_element_next_sibling_any(c)) {
-                    xpath_nodeset_add(v->value.nodeset_value,
-                                      (LeptrisNodeRef)c);
-                }
+                /* §11.1: the variable's value is the result tree
+                 * FRAGMENT — bound as its root (document) node.
+                 * Relative paths ($v/row/cell) and exsl:node-set()
+                 * then see the fragment as a tree. */
+                LeptrisNodeRef dn = (LeptrisNodeRef)
+                    leptris_document_get_node(frag_doc);
+                if (dn)
+                    xpath_nodeset_add(v->value.nodeset_value, dn);
             }
         }
         /* The nodeset's node pointers live in `rr`'s document. Move
