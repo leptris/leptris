@@ -800,6 +800,17 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
 }
 
 static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    /* §7.5: copying an ATTRIBUTE (re)binds it on the pending
+     * parent — later copies override earlier xsl:attribute values
+     * (execution order wins, §7.1.3). */
+    if (node && ((LeptrisNode*)node)->type == LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisAttributeNode* a = (LeptrisAttributeNode*)node;
+        if (ex->pending_parent && a->name)
+            leptris_element_set_attribute(ex->pending_parent,
+                                          a->name,
+                                          a->value ? a->value : "");
+        return 0;
+    }
     /* §7.5: copy of a NAMESPACE node declares it on the pending
      * parent (the classic copy-the-namespaces idiom). */
     if (node && ((LeptrisNode*)node)->type == LEPTRIS_NODE_NAMESPACE) {
@@ -1103,7 +1114,8 @@ static void strip_source_whitespace(XsltExec* ex) {
 /* Comment/PI nodes match only node()-kind tests; the element-cast
  * ladder is unsafe for them. Text-level alternative scan. */
 static int pattern_matches_nodekind(const XsltPattern* p,
-                                    int node_type) {
+                                    int node_type,
+                                    const char* node_name) {
     for (const XsltPattern* alt = p; alt; alt = alt->next) {
         const char* e = leptris_xpath_compiled_text(alt->expr);
         if (!e) continue;
@@ -1115,8 +1127,37 @@ static int pattern_matches_nodekind(const XsltPattern* p,
         if (is_comment && strstr(e, "comment()")) return 1;
         if (is_pi && strstr(e, "processing-instruction()")) return 1;
         if (is_text && strstr(e, "text()")) return 1;
+        /* Attribute patterns: @* / @name (the only axis reaching
+         * attribute nodes — a text-level scan suffices). */
+        if (node_type == LEPTRIS_NODE_ATTRIBUTE) {
+            const char* at = strchr(e, '@');
+            if (at) {
+                const char* nm = at + 1;
+                if (nm[0] == '*' || !nm[0]) return 1;
+                if (node_name && strncmp(nm, node_name,
+                                         strlen(node_name)) == 0)
+                    return 1;
+            }
+        }
     }
     return 0;
+}
+
+/* Node-kind-aware pattern match: elements and document nodes run
+ * the full ladder; text/comment/PI/attribute/namespace nodes match
+ * kind tests (and @-patterns for attributes). */
+static int xslt_template_matches_node(const XsltTemplate* t,
+                                      LeptrisElement node,
+                                      const XsltExec* ex) {
+    int nty = leptris_node_get_type((LeptrisNodeRef)node);
+    if (nty == LEPTRIS_NODE_TYPE_ELEMENT ||
+        nty == LEPTRIS_NODE_TYPE_DOCUMENT)
+        return xslt_pattern_matches(t->matches, node, ex->source);
+    return pattern_matches_nodekind(
+        t->matches, nty,
+        (nty == LEPTRIS_NODE_ATTRIBUTE)
+            ? ((LeptrisAttributeNode*)node)->name
+            : NULL);
 }
 
 static const XsltTemplate* xslt_select_template(
@@ -1130,20 +1171,14 @@ static const XsltTemplate* xslt_select_template(
         if (t->import_rank < min_rank) continue;
         if ((mode && !t->mode) || (!mode && t->mode)) continue;
         if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
-        int nm;
-        {
-            int nty = leptris_node_get_type((LeptrisNodeRef)node);
-            nm = (nty == LEPTRIS_NODE_TYPE_ELEMENT ||
-                  nty == LEPTRIS_NODE_TYPE_DOCUMENT)
-                     ? xslt_pattern_matches(t->matches, node, ex->source)
-                     : pattern_matches_nodekind(t->matches, nty);
-        }
-        if (!nm) continue;
+        if (!xslt_template_matches_node(t, node, ex)) continue;
         /* Max priority among the MATCHING alternatives. */
         double pri = 0; int have = 0;
         for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
             XsltPattern one = *pa; one.next = NULL;
-            if (!xslt_pattern_matches(&one, node, ex->source)) continue;
+            if (!xslt_template_matches_node(
+                    &(XsltTemplate){ .matches = &one }, node, ex))
+                continue;
             if (!have || pa->priority > pri) { pri = pa->priority; have = 1; }
         }
         if (!have) continue;
@@ -1716,7 +1751,7 @@ static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
                 XsltPattern pat;
                 memset(&pat, 0, sizeof(pat));
                 pat.expr = in->num_count;
-                m = pattern_matches_nodekind(&pat, nty);
+                m = pattern_matches_nodekind(&pat, nty, NULL);
             } else {
                 /* §7.7 default count: the node's own kind. */
                 m = (nty == leptris_node_get_type(target));
