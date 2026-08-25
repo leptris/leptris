@@ -22,10 +22,11 @@ extern "C" {
 #include <dirent.h>
 #include <unistd.h>
 #endif
-#ifdef _WIN32
-#include <process.h>
-#endif
+#ifndef _WIN32
 #include <sys/wait.h>
+#else
+#include <process.h>   /* _cwait / _beginprocess (fork unavailable) */
+#endif
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -209,6 +210,27 @@ class LibxsltSuite : public ::testing::TestWithParam<Case> {};
  * a crashing case must fail, not stop the suite. The child writes
  * its serialized result + a status byte to a pipe. */
 std::string run_case(const Case& c, int* status) {
+#ifdef _WIN32
+    /* No fork on Win32: run inline. The open-worklist skip keeps
+     * the known crashers out of the run, so inline is safe. */
+    {
+        std::string xsl = slurp(c.xsl_path.c_str());
+        std::string xml = slurp(c.xml_path.c_str());
+        LeptrisXslt sheet = leptris_xslt_parse(xsl.c_str(), xsl.size());
+        if (!sheet) { *status = 2; return "Ecompile"; }
+        LeptrisDocument doc = leptris_parse_string(xml.c_str(),
+                                                   xml.size(), nullptr);
+        if (!doc) { leptris_xslt_free(sheet); *status = 3; return "Eparse"; }
+        char* got = leptris_xslt_apply_string(sheet, doc);
+        leptris_document_free(doc);
+        leptris_xslt_free(sheet);
+        if (!got) { *status = 4; return "Eapply"; }
+        std::string r = std::string("O") + got;
+        leptris_free_string(got);
+        *status = 0;
+        return r;
+    }
+#endif
     int fds[2];
     if (pipe(fds) != 0) { *status = -1; return ""; }
     pid_t pid = fork();
