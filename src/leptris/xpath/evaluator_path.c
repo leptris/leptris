@@ -720,10 +720,18 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                     continue;  /* Skip normal axis processing */
                 }
 
-                /* For ancestor/self axes from attributes, use owner element as context */
+                /* ancestor(-or-self) from an attribute walks the
+                 * owner's chain; self::node() on an attribute is the
+                 * ATTRIBUTE itself (XPath §2.2 — attributes are
+                 * nodes in their own right). */
+                if (strcmp(axis_name, "self") == 0) {
+                    if (matches_node_test(ctx, (LeptrisNode*)node_ptr,
+                                          node_test))
+                        xpath_nodeset_add(result, node_ptr);
+                    continue;
+                }
                 if (strcmp(axis_name, "ancestor") == 0 ||
-                    strcmp(axis_name, "ancestor-or-self") == 0 ||
-                    strcmp(axis_name, "self") == 0) {
+                    strcmp(axis_name, "ancestor-or-self") == 0) {
 
                     /* Use the owner element as context */
                     node = attr_node->owner;
