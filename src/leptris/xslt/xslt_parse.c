@@ -1029,26 +1029,25 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                                     sets first because head-of-list is
                                     the most-recently-declared set */
             }
-            /* The set itself can have use-attribute-sets (chained
-             * sets) — concatenate referenced set attrs onto s->attrs
-             * before s was prepended (so they're applied first). */
+            /* Chained sets (use-attribute-sets on the definition)
+             * are recorded, not snapshotted — §12.1.4 semantics
+             * need use-time resolution with import precedence. */
             const char* uas = leptris_element_attribute(e, "use-attribute-sets");
             if (uas && *uas) {
-                /* For v1, we only support single-name chains — full
-                 * comma-split lives in collect_attr_sets above; this
-                 * is a one-level recursion kept simple. */
-                for (XsltAttrSet* other = sp->sheet->attrsets;
-                     other && other != s; other = other->next) {
-                    if (!other->name || strcmp(other->name, uas) != 0)
-                        continue;
-                    for (XsltLAttr* a = other->attrs; a; a = a->next) {
-                        XsltLAttr* cp = (XsltLAttr*)calloc(1, sizeof(*cp));
-                        if (!cp) continue;
-                        cp->name = leptris_strdup(a->name);
-                        cp->value = leptris_strdup(a->value);
-                        cp->next = s->attrs;
-                        s->attrs = cp;
+                char* dup = leptris_strdup(uas);
+                if (dup) {
+                    char* save = NULL;
+                    for (char* tok = xslt_strtok(dup, " \t\n,", &save);
+                         tok; tok = xslt_strtok(NULL, " \t\n,", &save)) {
+                        char** grown = (char**)realloc(
+                            s->use_names,
+                            (s->use_count + 1) * sizeof(char*));
+                        if (!grown) break;
+                        s->use_names = grown;
+                        s->use_names[s->use_count++] =
+                            leptris_strdup(tok);
                     }
+                    free(dup);
                 }
             }
             continue;
