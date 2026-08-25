@@ -62,6 +62,10 @@ typedef struct SerializeBuffer {
     size_t capacity;   /* Allocated capacity */
     int indent;        /* Current indentation level (for pretty-printing) */
     int indent_spaces; /* Number of spaces per indent level (0 = compact) */
+    /* §16.1 cdata-section-elements: QNames whose text children emit
+     * as CDATA. Set by the serialization entry points. */
+    const char* const* cdata_names;
+    size_t cdata_count;
     int alloc_failed;  /* Sticky realloc-failure flag (TODO 08) */
 } SerializeBuffer;
 

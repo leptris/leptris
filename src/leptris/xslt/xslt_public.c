@@ -299,6 +299,8 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     /* §16.1 indent="yes": 2-space pretty-print via the shared
      * serializer (text-only elements stay inline — libxslt rule). */
     opts.indent = ex->sheet->out_indent ? 2 : 0;
+    opts.cdata_elements = ex->sheet->out_cdata;
+    opts.cdata_element_count = ex->sheet->out_cdata_count;
     /* Pre-root fragment nodes go FIRST — they were emitted before
      * any element anchored the chain. */
     char* first_pre = NULL;

@@ -294,6 +294,88 @@ static char* emit_escaped_inline(char* out, const char* content,
  * Node Serialization Functions
  * ============================================================================ */
 
+/* §16.1 cdata-section-elements: does this element's QName match? */
+static int is_cdata_element(SerializeBuffer* buf, LeptrisElement e) {
+    if (!buf || !buf->cdata_count || !e) return 0;
+    const char* local = leptris_element_get_name(e);
+    if (!local) return 0;
+    const char* prefix = leptris_element_get_prefix(e);
+    int has_pfx = prefix && *prefix;
+    char qn[256];
+    if (has_pfx)
+        snprintf(qn, sizeof(qn), "%s:%s", prefix, local);
+    else
+        snprintf(qn, sizeof(qn), "%s", local);
+    for (size_t i = 0; i < buf->cdata_count; i++) {
+        if (!buf->cdata_names[i]) continue;
+        if (strcmp(buf->cdata_names[i], qn) == 0) return 1;
+        /* An unprefixed entry also matches a no-namespace element. */
+        if (!strchr(buf->cdata_names[i], ':') && !has_pfx &&
+            strcmp(buf->cdata_names[i], local) == 0) return 1;
+    }
+    return 0;
+}
+
+/* Emit the CDATA BODY, splitting "]]>" across section closes. The
+ * caller owns the surrounding <![CDATA[ / ]]> brackets (run merging). */
+static void emit_cdata_body(SerializeBuffer* buf, const char* s, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+        const char* close = NULL;
+        for (size_t j = i; j + 2 < len; j++) {
+            if (s[j] == ']' && s[j+1] == ']' && s[j+2] == '>') {
+                close = s + j;
+                break;
+            }
+        }
+        size_t chunk = close ? (size_t)(close - (s + i)) + 2 : len - i;
+        buffer_append_len(buf, s + i, chunk);
+        if (close) buffer_append(buf, "]]><![CDATA[");
+        i += chunk + (close ? 1 : 0);
+    }
+}
+
+/* Standalone single-node CDATA emission (fallback sites). */
+static void emit_cdata(SerializeBuffer* buf, const char* s, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+        const char* close = NULL;
+        for (size_t j = i; j + 2 < len; j++) {
+            if (s[j] == ']' && s[j+1] == ']' && s[j+2] == '>') {
+                close = s + j;
+                break;
+            }
+        }
+        size_t chunk = close ? (size_t)(close - (s + i)) + 2 : len - i;
+        buffer_append(buf, "<![CDATA[");
+        buffer_append_len(buf, s + i, chunk);
+        buffer_append(buf, "]]>");
+        i += chunk + (close ? 1 : 0);
+    }
+}
+
+/* libxslt rule: whitespace-only text is never wrapped in CDATA. */
+static int text_is_ws_only(const char* s, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        char c = s[i];
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') return 0;
+    }
+    return 1;
+}
+
+/* Convert one text node's content per §16.1: CDATA unless the text
+ * is whitespace-only (libxslt keeps ws plain). */
+static void emit_cdata_checked(SerializeBuffer* buf, const char* s) {
+    if (!s) return;
+    size_t l = strlen(s);
+    if (text_is_ws_only(s, l)) {
+        buffer_append_len(buf, s, l);
+        return;
+    }
+    emit_cdata(buf, s, l);
+}
+
+
 void serialize_text_internal(LeptrisTextNode* text, SerializeBuffer* buf) {
     if (!text) return;
 
@@ -634,7 +716,15 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
             is_text_only = 0;
         }
 
-        if (is_text_only && buf->indent_spaces == 0) {
+        if (is_text_only && is_cdata_element(buf, elem)) {
+            LeptrisTextNode* tn = (LeptrisTextNode*)child;
+            const char* tc = leptris_text_get_content(tn);
+            buffer_append_char(buf, '>');
+            if (tc) emit_cdata_checked(buf, tc);
+            buffer_append(buf, "</");
+            append_qualified_name(buf, elem_prefix, elem_name, elem_name_len);
+            buffer_append_char(buf, '>');
+        } else if (is_text_only && buf->indent_spaces == 0) {
             /* Text-only element, compact mode: ONE reservation + inline
              * emission for the whole `<name>text</name>` (TODO 194d) —
              * was five buffer calls plus a node-dispatch hop. */
@@ -701,6 +791,13 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
                 /* Pass is_root=0 for all children */
                 if (ser_child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
                     serialize_element_recursive((LeptrisElement)ser_child, buf, 0);
+                } else if (ser_child->type == LEPTRIS_NODE_TYPE_TEXT &&
+                           !((LeptrisTextNode*)ser_child)->base.raw &&
+                           is_cdata_element(buf, elem)) {
+                    const char* tc =
+                        leptris_text_get_content((LeptrisTextNode*)ser_child);
+                    if (tc)
+                        emit_cdata_checked(buf, tc);
                 } else {
                     serialize_node_internal(ser_child, buf);
                 }
@@ -833,7 +930,7 @@ static char* serialize_rootless_pis(struct leptris_document* doc,
 void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, int is_root) {
     if (!root_elem || !root_elem->name) return;
 
-    struct { LeptrisElement e; size_t nl; int mixed; } st[SER_WALK_STACK_MAX];
+    struct { LeptrisElement e; size_t nl; int mixed; int cd_open; } st[SER_WALK_STACK_MAX];
     int sp = 0;
 
     LeptrisNode* cur = (LeptrisNode*)root_elem;
@@ -872,6 +969,39 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 }
                 if (ws_only) goto advance;   /* skip, formatter owns it */
             }
+            /* §16.1 cdata-section-elements: text children of a
+             * listed element join ONE CDATA run per consecutive
+             * text span (libxslt merges the section). */
+            int cdata_parent = sp > 0 && st[sp - 1].e &&
+                               is_cdata_element(buf, st[sp - 1].e);
+            if ((cur->type == LEPTRIS_NODE_TYPE_TEXT &&
+                 !((LeptrisTextNode*)cur)->base.raw) ||
+                (cur->type == LEPTRIS_NODE_TYPE_CDATA)) {
+                if (cdata_parent) {
+                    const char* tc =
+                        (cur->type == LEPTRIS_NODE_TYPE_CDATA)
+                            ? leptris_cdata_get_content(
+                                  (LeptrisCDATANode*)cur)
+                            : leptris_text_get_content(
+                                  (LeptrisTextNode*)cur);
+                    if (!st[sp - 1].cd_open) {
+                        buffer_append(buf, "<![CDATA[");
+                        st[sp - 1].cd_open = 1;
+                    }
+                    if (tc) emit_cdata_body(buf, tc, strlen(tc));
+                    goto advance;
+                }
+                if (sp > 0 && st[sp - 1].cd_open) {
+                    buffer_append(buf, "]]>");
+                    st[sp - 1].cd_open = 0;
+                }
+                serialize_node_internal(cur, buf);
+                goto advance;
+            }
+            if (sp > 0 && st[sp - 1].cd_open) {
+                buffer_append(buf, "]]>");
+                st[sp - 1].cd_open = 0;
+            }
             serialize_node_internal(cur, buf);
             goto advance;
         }
@@ -894,6 +1024,25 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             LeptrisNode* fc0 = leptris_node_first_child_internal((LeptrisNode*)e);
             if (fc0 && fc0->type == LEPTRIS_NODE_TYPE_TEXT &&
                 leptris_node_get_next_sibling(fc0) == NULL) {
+                /* §16.1 cdata-section-elements wins over the fused
+                 * escaped emission. */
+                if (buf->cdata_count && !((LeptrisTextNode*)fc0)->base.raw &&
+                    is_cdata_element(buf, e)) {
+                    const char* tcd =
+                        leptris_text_get_content((LeptrisTextNode*)fc0);
+                    buffer_append_char(buf, '<');
+                    append_qualified_name(
+                        buf, leptris_element_get_prefix(e), name, nl);
+                    buffer_append_char(buf, '>');
+                    if (tcd)
+                        emit_cdata_checked(buf, tcd);
+                    buffer_append(buf, "</");
+                    append_qualified_name(
+                        buf, leptris_element_get_prefix(e),
+                        name, nl);
+                    buffer_append_char(buf, '>');
+                    goto advance;
+                }
                 LeptrisTextNode* tn0 = (LeptrisTextNode*)fc0;
                 /* View-direct (round 18): for entity-free borrowed
                  * text, read the view directly — get_content would
@@ -1066,6 +1215,18 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         if (fc->type == LEPTRIS_NODE_TYPE_TEXT &&
             leptris_node_get_next_sibling(fc) == NULL) {
             /* text-only element */
+            if (is_cdata_element(buf, e) &&
+                !((LeptrisTextNode*)fc)->base.raw) {
+                buffer_append_char(buf, '>');
+                const char* tcd = leptris_text_get_content(
+                    (LeptrisTextNode*)fc);
+                if (tcd)
+                    emit_cdata_checked(buf, tcd);
+                buffer_append(buf, "</");
+                append_qualified_name(buf, epfx, name, nl);
+                buffer_append_char(buf, '>');
+                goto advance;
+            }
             if (buf->indent_spaces == 0) {
                 LeptrisTextNode* tn = (LeptrisTextNode*)fc;
                 const char* tc;
@@ -1093,7 +1254,17 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buf->data[buf->size] = '\0';
             } else {
                 buffer_append_char(buf, '>');
-                serialize_node_internal(fc, buf);
+                if (is_cdata_element(buf, e) &&
+                    (fc->type == LEPTRIS_NODE_TYPE_TEXT ||
+                     fc->type == LEPTRIS_NODE_TYPE_CDATA) &&
+                    !((LeptrisTextNode*)fc)->base.raw) {
+                    const char* tc2 =
+                        leptris_text_get_content((LeptrisTextNode*)fc);
+                    if (tc2)
+                        emit_cdata_checked(buf, tc2);
+                } else {
+                    serialize_node_internal(fc, buf);
+                }
                 buffer_append(buf, "</");
                 append_qualified_name(buf, epfx, name, nl);
                 buffer_append_char(buf, '>');
@@ -1111,6 +1282,13 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             while (c) {
                 if (c->type == LEPTRIS_NODE_TYPE_ELEMENT) {
                     serialize_element_recursive((LeptrisElement)c, buf, 0);
+                } else if (c->type == LEPTRIS_NODE_TYPE_TEXT &&
+                           !((LeptrisTextNode*)c)->base.raw &&
+                           is_cdata_element(buf, e)) {
+                    const char* tc2 =
+                        leptris_text_get_content((LeptrisTextNode*)c);
+                    if (tc2)
+                        emit_cdata_checked(buf, tc2);
                 } else {
                     serialize_node_internal(c, buf);
                 }
@@ -1125,6 +1303,11 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             goto advance;
         }
 
+        /* An element child interrupts any CDATA run of this parent. */
+        if (sp > 0 && st[sp - 1].cd_open) {
+            buffer_append(buf, "]]>");
+            st[sp - 1].cd_open = 0;
+        }
         buffer_append_char(buf, '>');
         int mixed = 0;
         if (buf->indent_spaces > 0) mixed = ser_children_have_text(fc);
@@ -1132,6 +1315,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         st[sp].e = e;
         st[sp].nl = nl;
         st[sp].mixed = mixed;
+        st[sp].cd_open = 0;
         sp++;
         buf->indent++;
         cur = fc;
@@ -1157,6 +1341,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             sp--;
             buf->indent--;
             LeptrisElement pe = st[sp].e;
+            if (st[sp].cd_open) {   /* close this element's CDATA run */
+                buffer_append(buf, "]]>");
+                st[sp].cd_open = 0;
+            }
             const char* pn = pe->name;
             size_t pnl2 = st[sp].nl;
             const char* pfx2 = leptris_element_get_prefix(pe);
@@ -1329,6 +1517,10 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
     /* Create buffer with indent support */
     SerializeBuffer* buf = buffer_create(indent_spaces);
     if (!buf) return NULL;
+    if (options) {
+        buf->cdata_names = options->cdata_elements;
+        buf->cdata_count = options->cdata_element_count;
+    }
 
     /* Output UTF-8 BOM if present in original */
     if (doc->has_bom) {
@@ -1432,6 +1624,7 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
 
     /* Serialize root element */
     serialize_element_internal(root, buf, 1);  /* is_root=1 */
+
 
     char* result = buffer_to_string(buf);
     buffer_free(buf);

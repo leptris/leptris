@@ -11,6 +11,7 @@
  * text-method output accumulates string-values only. */
 #include "xslt_internal.h"
 #include "../dom/text.h"
+#include "../dom/cdata.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -213,20 +214,16 @@ static void xslt_pop_vars_to(XsltExec* ex, XsltVar* mark) {
 
 /* ---- Shared small helpers ---- */
 
-static LeptrisElement out_append_elem(XsltExec* ex, LeptrisElement parent,
-                                      const char* name, const char* ns) {
-    LeptrisElement e = leptris_element_create(ex->result, name);
+/* Place a created element into the result (root chain or parent),
+ * preserving a source element's PREFIX and namespace URI. */
+static LeptrisElement out_place_elem(XsltExec* ex, LeptrisElement parent,
+                                     LeptrisElement e) {
     if (!e) return NULL;
-    (void)ns;   /* namespace declarations on output: phase 03 */
     if (!parent) {
         LeptrisElement root = leptris_document_root(ex->result);
         if (!root) {
             leptris_document_set_root(ex->result, e);
         } else {
-            /* XSLT permits multiple top-level result elements (the
-             * result is a fragment, not a document). The flat
-             * layout carries them as the root's SIBLING chain;
-             * apply_string serializes the whole chain. */
             LeptrisElement last = root;
             while (leptris_node_get_next_sibling(
                        leptris_element_as_node(last)))
@@ -241,29 +238,34 @@ static LeptrisElement out_append_elem(XsltExec* ex, LeptrisElement parent,
     return e;
 }
 
+static LeptrisElement out_append_elem(XsltExec* ex, LeptrisElement parent,
+                                      const char* name, const char* ns) {
+    LeptrisElement e = leptris_element_create(ex->result, name);
+    if (!e) return NULL;
+    if (ns && *ns) leptris_element_set_namespace_uri(e, ns);
+    return out_place_elem(ex, parent, e);
+}
+
+/* Copy of a source ELEMENT: same local name, prefix and namespace
+ * URI as the source (§7.5). */
+static LeptrisElement out_copy_elem(XsltExec* ex, LeptrisElement parent,
+                                    LeptrisElement src) {
+    LeptrisElement e = leptris_element_create(
+        ex->result, leptris_element_get_name(src));
+    if (!e) return NULL;
+    const char* pfx = leptris_element_get_prefix(src);
+    if (pfx && *pfx) leptris_element_set_prefix(e, pfx);
+    const char* uri = leptris_element_get_namespace_uri(src);
+    if (uri && *uri) leptris_element_set_namespace_uri(e, uri);
+    return out_place_elem(ex, parent, e);
+}
+
 static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n);
 
 static void out_append_text(XsltExec* ex, LeptrisElement parent,
                             const char* text) {
     if (!text || !*text) return;
     if (parent) {
-        /* §7.1.1 cdata-section-elements: parent name is in the list
-         * → emit the text as a CDATA node instead of a text node. */
-        if (ex->sheet->out_cdata_elems) {
-            const char* parent_name = leptris_element_get_name(parent);
-            if (parent_name) {
-                for (size_t i = 0; ex->sheet->out_cdata_elems[i]; i++) {
-                    if (strcmp(ex->sheet->out_cdata_elems[i],
-                               parent_name) == 0) {
-                        LeptrisNodeRef c =
-                            leptris_cdata_node_create(ex->result, text);
-                        if (c) leptris_element_append_child(
-                            parent, (LeptrisElement)c);
-                        return;
-                    }
-                }
-            }
-        }
         LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
         if (t) leptris_element_append_child(parent, (LeptrisElement)t);
         return;
@@ -753,8 +755,20 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
                         else
                             xslt_append_fragment_node(ex, pi);
                     }
-                } else if (cty == LEPTRIS_NODE_TYPE_TEXT ||
-                           cty == LEPTRIS_NODE_TYPE_CDATA) {
+                } else if (cty == LEPTRIS_NODE_TYPE_CDATA) {
+                    const char* ccd =
+                        leptris_text_get_content((LeptrisTextNode*)cn);
+                    LeptrisNodeRef cc = (LeptrisNodeRef)leptris_cdata_create(
+                        ccd, ccd ? strlen(ccd) : 0,
+                        ((struct leptris_document*)ex->result)->pool);
+                    if (cc) {
+                        if (ex->pending_parent)
+                            leptris_element_append_child_internal(
+                                ex->pending_parent, (LeptrisNode*)cc);
+                        else
+                            xslt_append_fragment_node(ex, cc);
+                    }
+                } else if (cty == LEPTRIS_NODE_TYPE_TEXT) {
                     const char* tc =
                         leptris_text_get_content((LeptrisTextNode*)cn);
                     if (tc) out_append_text(ex, ex->pending_parent, tc);
@@ -811,17 +825,29 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
                 xslt_append_fragment_node(ex, pi);
             return 0;
         }
-        if (nty == LEPTRIS_NODE_TYPE_TEXT ||
-            nty == LEPTRIS_NODE_TYPE_CDATA) {
+        if (nty == LEPTRIS_NODE_TYPE_CDATA) {
+            /* A copied CDATA section stays CDATA (§7.5). */
+            const char* cc = leptris_text_node_get_content(
+                (LeptrisNodeRef)node);
+            LeptrisNodeRef cn = (LeptrisNodeRef)leptris_cdata_create(
+                cc, cc ? strlen(cc) : 0,
+                ((struct leptris_document*)ex->result)->pool);
+            if (cn && ex->pending_parent)
+                leptris_element_append_child_internal(
+                    ex->pending_parent, (LeptrisNode*)cn);
+            else if (cn)
+                xslt_append_fragment_node(ex, cn);
+            return 0;
+        }
+        if (nty == LEPTRIS_NODE_TYPE_TEXT) {
             out_append_text(ex, ex->pending_parent,
                             leptris_text_node_get_content(
                                 (LeptrisNodeRef)node));
             return 0;
         }
     }
-    const char* name = leptris_element_get_name(node);
-    if (!name) return 0;
-    LeptrisElement e = out_append_elem(ex, ex->pending_parent, name, NULL);
+    if (!leptris_element_get_name(node)) return 0;
+    LeptrisElement e = out_copy_elem(ex, ex->pending_parent, node);
     if (!e) return -1;
     /* §7.5: copying an element copies its namespace nodes too —
      * the in-scope declarations travel with the copy (bug-122/124:
@@ -853,7 +879,7 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
                           LeptrisElement parent) {
     const char* name = leptris_element_get_name(node);
     if (!name) return -1;
-    LeptrisElement e = out_append_elem(ex, parent, name, NULL);
+    LeptrisElement e = out_copy_elem(ex, parent, node);
     if (!e) return -1;
     /* Namespace fidelity (§7.5 + Names Rec): copy the element's
      * in-scope DECLARATIONS verbatim — a copy of <foo xmlns="u">
