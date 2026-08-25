@@ -1196,6 +1196,9 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
                     case '"':  memcpy(out, "&quot;", 6); out += 6; break;
                     case '\'': memcpy(out, "&apos;", 6); out += 6; break;
+                    case '\t': out += sprintf(out, "&#9;");  break;
+                    case '\n': out += sprintf(out, "&#10;"); break;
+                    case '\r': out += sprintf(out, "&#13;"); break;
                     default:   *out++ = val[i]; break;
                 }
             }
