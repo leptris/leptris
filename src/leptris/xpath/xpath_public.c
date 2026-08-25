@@ -267,6 +267,10 @@ LEPTRIS_API const char* leptris_xpath_result_node_name(
         LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
         return (attr->name && attr->name[0]) ? attr->name : NULL;
     }
+    if (tag == LEPTRIS_NODE_NAMESPACE) {
+        LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
+        return (ns->prefix && ns->prefix[0]) ? ns->prefix : NULL;
+    }
     if (tag == LEPTRIS_NODE_ELEMENT) {
         const char* name = leptris_element_get_name((LeptrisElement)node);
         return (name && name[0]) ? name : NULL;
@@ -282,6 +286,9 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
     if (tag == LEPTRIS_NODE_ATTRIBUTE) {
         LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
         return attr->value;
+    }
+    if (tag == LEPTRIS_NODE_NAMESPACE) {
+        return ((LeptrisNamespaceNode*)node)->uri;
     }
     if (tag == LEPTRIS_NODE_TYPE_TEXT) {
         return leptris_text_get_content((LeptrisTextNode*)node);

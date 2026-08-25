@@ -1310,7 +1310,16 @@ static struct leptris_xpath_result* xpath_func_local_name(
     /* Get context node if no argument */
     if (arg_count == 0) {
         node = context->context_node;
-        if (node) node_tag = (int)XPATH_NODE_TYPE(node);
+        if (node) {
+            node_tag = (int)XPATH_NODE_TYPE(node);
+            if (node_tag == LEPTRIS_NODE_ATTRIBUTE) {
+                const char* n = ((LeptrisAttributeNode*)node)->name;
+                synth_name = n ? leptris_strdup(n) : NULL;
+            } else if (node_tag == LEPTRIS_NODE_NAMESPACE) {
+                const char* n = ((LeptrisNamespaceNode*)node)->prefix;
+                synth_name = n ? leptris_strdup(n) : NULL;
+            }
+        }
     } else if (arg_count == 1) {
         /* Use first node from nodeset */
         struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
@@ -1474,7 +1483,16 @@ static struct leptris_xpath_result* xpath_func_name(
     /* Get context node if no argument */
     if (arg_count == 0) {
         node = context->context_node;
-        if (node) node_tag = (int)XPATH_NODE_TYPE(node);
+        if (node) {
+            node_tag = (int)XPATH_NODE_TYPE(node);
+            if (node_tag == LEPTRIS_NODE_ATTRIBUTE) {
+                const char* n = ((LeptrisAttributeNode*)node)->name;
+                synth_name = n ? leptris_strdup(n) : NULL;
+            } else if (node_tag == LEPTRIS_NODE_NAMESPACE) {
+                const char* n = ((LeptrisNamespaceNode*)node)->prefix;
+                synth_name = n ? leptris_strdup(n) : NULL;
+            }
+        }
     } else if (arg_count == 1) {
         /* Use first node from nodeset */
         struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);

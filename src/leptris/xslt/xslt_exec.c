@@ -621,12 +621,15 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
     LeptrisElement* items = (n > 0)
         ? (LeptrisElement*)calloc(n, sizeof(LeptrisElement)) : NULL;
     if (items) {
+        /* Node-typed: for-each bodies see text/comment/PI/namespace
+         * nodes (the element-typed accessor nulls them). */
         for (size_t i = 0; i < n; i++) {
-            items[i] = leptris_xpath_result_get(r, i);
+            items[i] = (LeptrisElement)leptris_xpath_result_get_node(r, i);
         }
     }
-    leptris_xpath_result_free(r);
-    if (!items) return n ? -1 : 0;
+    /* r stays alive across the loop: synthetic namespace/attribute
+     * result nodes are RESULT-OWNED — freeing early dangles them. */
+    if (!items) { leptris_xpath_result_free(r); return n ? -1 : 0; }
 
     /* xsl:sort v1: stable ordering by string/number key. */
     if (in->sorts) {
@@ -700,6 +703,7 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
         rc = xslt_exec_instrs(ex, in->child, items[i]);
     }
     free(items);
+    leptris_xpath_result_free(r);
     return rc;
 }
 
@@ -766,6 +770,21 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
 }
 
 static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    /* §7.5: copy of a NAMESPACE node declares it on the pending
+     * parent (the classic copy-the-namespaces idiom). */
+    if (node && ((LeptrisNode*)node)->type == LEPTRIS_NODE_NAMESPACE) {
+        LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
+        /* The implicit xml prefix is always in scope — copying it
+         * would emit a redundant xmlns:xml (libxslt omits it). */
+        if (ex->pending_parent && ns->uri && ns->prefix &&
+            strcmp(ns->prefix, "xml") == 0)
+            return 0;
+        if (ex->pending_parent && ns->uri)
+            leptris_element_add_namespace_definition(
+                ex->pending_parent,
+                ns->prefix ? ns->prefix : "", ns->uri);
+        return 0;
+    }
     /* §7.5: copy of a comment/PI node copies the node itself. */
     {
         int nty = leptris_node_get_type((LeptrisNodeRef)node);
@@ -804,6 +823,14 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     if (!name) return 0;
     LeptrisElement e = out_append_elem(ex, ex->pending_parent, name, NULL);
     if (!e) return -1;
+    /* §7.5: copying an element copies its namespace nodes too —
+     * the in-scope declarations travel with the copy (bug-122/124:
+     * xmlns:* and default declarations on identity copies). */
+    for (struct leptris_namespace* ns = leptris_elem_namespaces(node);
+         ns; ns = ns->next) {
+        leptris_element_add_namespace_definition(
+            e, ns->prefix ? ns->prefix : "", ns->uri);
+    }
     /* Attribute sets contribute defaults for missing names;
      * source node attrs win (we apply them after so their values
      * are NOT overwritten). */
@@ -1210,7 +1237,8 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                         leptris_xpath_result_get_node(r, i);
             }
         }
-        leptris_xpath_result_free(r);
+        /* NOT freed here: synthetic attr/namespace items are
+         * result-owned; freed after the loop below. */
     } else {
         /* Document-node context (§5.4): the children ARE the root
          * element (this engine's document model — top-level
@@ -1312,6 +1340,7 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
     }
     for (int i = 0; i < bound; i++) xslt_pop_var(ex, NULL);
     free(items);
+    if (r) leptris_xpath_result_free(r);
     return rc;
 }
 

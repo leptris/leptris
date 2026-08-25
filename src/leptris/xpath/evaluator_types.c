@@ -42,6 +42,12 @@ char* get_node_text(void* node) {
             return leptris_strdup(attr_node->value ? attr_node->value : "");
         }
 
+        case LEPTRIS_NODE_NAMESPACE: {
+            /* The string-value of a namespace node is its URI. */
+            LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
+            return leptris_strdup(ns->uri ? ns->uri : "");
+        }
+
         case LEPTRIS_NODE_TYPE_TEXT: {
             const char* s =
                 leptris_text_get_content((LeptrisTextNode*)node);

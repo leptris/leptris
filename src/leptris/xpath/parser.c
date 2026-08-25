@@ -1058,7 +1058,11 @@ static XPathASTNode* parse_step(XPathParser* parser) {
         if (node) {
             node->value = leptris_strdup("self");
             node->axis_id = XPATH_AXIS_SELF;
-            XPathASTNode* test = ast_node_new(XPATH_AST_NODE_TEST_ALL);
+            /* "." is self::node() — a KIND test, not "*": it must
+             * match any node kind (text/comment/PI/namespace), while
+             * the name wildcard stays elements-only. */
+            XPathASTNode* test = ast_node_new(XPATH_AST_NODE_TEST_TYPE);
+            if (test) test->value = leptris_strdup("node");
             ast_node_add_child(node, test);
         }
         return node;
