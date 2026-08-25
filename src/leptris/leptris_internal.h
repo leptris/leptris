@@ -73,6 +73,7 @@ struct leptris_processing_instruction {
     char* target;                /* PI target (e.g., "xml-stylesheet") */
     char* data;                  /* PI data/content */
     struct leptris_processing_instruction* next; /* Linked list */
+    int after_root;              /* 1 = follows the root element */
 };
 
 /* Top-level comment (outside the root element), the comment twin of
@@ -81,6 +82,7 @@ struct leptris_processing_instruction {
 struct leptris_top_comment {
     char* content;
     struct leptris_top_comment* next;
+    int after_root;   /* 1 = follows the root element (doc order) */
 };
 
 /* Document structure */
@@ -141,6 +143,11 @@ struct leptris_document {
      * singleton — dom/document_node.h). XSLT's initial context and
      * "/" pattern matching run on it. */
     void* document_node;
+    /* XSLT transform prep: top-level comments/PIs materialized as
+     * real nodes chained BEFORE the root element (document order;
+     * the engine's document model keeps them in side lists
+     * otherwise — invisible to templates and numbering). */
+    void* pre_root_chain;
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */

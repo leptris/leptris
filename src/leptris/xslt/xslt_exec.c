@@ -1276,6 +1276,23 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 LEPTRIS_NODE_TYPE_DOCUMENT) {
             LeptrisElement doc_root = leptris_document_root(ex->source);
             if (!doc_root) return 0;
+            /* Document children in order: the materialized pre-root
+             * chain (top comments/PIs), then the root element. */
+            struct leptris_document* sd =
+                (struct leptris_document*)ex->source;
+            int rc = 0;
+            LeptrisNodeRef rootn = leptris_element_as_node(doc_root);
+            for (LeptrisNodeRef n = (LeptrisNodeRef)sd->pre_root_chain;
+                 n && n != rootn && rc == 0;
+                 n = leptris_node_next_sibling(n)) {
+                const XsltTemplate* best =
+                    xslt_select_template(ex, (LeptrisElement)n,
+                                        in->name, 0);
+                if (best)
+                    rc = xslt_invoke_template(ex, best,
+                                              (LeptrisElement)n, in->child);
+            }
+            if (rc) return rc;
             const XsltTemplate* best =
                 xslt_select_template(ex, doc_root, in->name, 0);
             if (best)
@@ -1470,22 +1487,33 @@ static int op_comment(XsltExec* ex, const XsltInstr* in,
             xslt_append_fragment_node(ex, cm);
         return 0;
     }
-    char* acc = (char*)calloc(1, 1);
-    size_t len = 0;
-    for (const XsltInstr* c = in->child; c; c = c->next) {
-        if (c->kind == XSLT_INSTR_TEXT && c->text) {
-            size_t tl = strlen(c->text);
-            acc = (char*)realloc(acc, len + tl + 1);
-            memcpy(acc + len, c->text, tl);
-            len += tl;
-            acc[len] = 0;
-        }
-    }
+    /* Content = the string-value of the instruction children —
+     * EVERY instruction kind may contribute (value-of, number,
+     * text...). Capture via the RTF text channel with the current
+     * node context preserved. */
+    char* saved_acc = NULL; (void)saved_acc;
+    size_t saved_len = ex->rtf_text_len;
+    char* saved_buf = ex->rtf_text;
+    int saved_cap = ex->rtf_capturing;
+    ex->rtf_capturing = 1;
+    ex->rtf_text = (char*)calloc(1, 1);
+    ex->rtf_text_len = 0;
+    LeptrisElement saved_pp = ex->pending_parent;
+    ex->pending_parent = NULL;   /* children emit text, not nodes */
+    xslt_exec_instrs(ex, in->child, node);
+    ex->pending_parent = saved_pp;
+    const char* acc = ex->rtf_text ? ex->rtf_text : "";
     LeptrisNodeRef cm = leptris_comment_node_create(ex->result, acc);
     if (cm && ex->pending_parent) {
-        leptris_element_append_child(ex->pending_parent, (LeptrisElement)cm);
+        leptris_element_append_child_internal(
+            ex->pending_parent, (LeptrisNode*)cm);
+    } else if (cm) {
+        xslt_append_fragment_node(ex, cm);
     }
-    free(acc);
+    free(ex->rtf_text);
+    ex->rtf_text = saved_buf;
+    ex->rtf_text_len = saved_len;
+    ex->rtf_capturing = saved_cap;
     return 0;
 }
 
@@ -1646,13 +1674,45 @@ static unsigned long sibling_number(const XsltInstr* in,
 }
 
 /* any: how many matching nodes precede `node` in document order. */
+/* Any-kind document-order walk (comments/PIs count too — §7.7). */
+static LeptrisNodeRef next_node_doc_order(LeptrisNodeRef n) {
+    LeptrisNodeRef c = leptris_node_first_child(n);
+    if (c) return c;
+    while (n) {
+        LeptrisNodeRef s = leptris_node_next_sibling(n);
+        if (s) return s;
+        n = leptris_node_parent(n);
+    }
+    return NULL;
+}
+
 static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
                                 LeptrisDocument doc) {
     unsigned long pos = 1;
-    for (LeptrisElement e = leptris_document_root(doc); e;
-         e = xslt_next_doc_order(e)) {
-        if (e == node) return pos;
-        if (count_matches(in, e, node, doc)) pos++;
+    LeptrisNodeRef target = (LeptrisNodeRef)node;
+    struct leptris_document* sd = (struct leptris_document*)doc;
+    LeptrisNodeRef start =
+        (LeptrisNodeRef)sd->pre_root_chain;
+    if (!start)
+        start = leptris_element_as_node(leptris_document_root(doc));
+    for (LeptrisNodeRef n = start; n; n = next_node_doc_order(n)) {
+        if (n == target) return pos;
+        int m;
+        {
+            int nty = leptris_node_get_type(n);
+            if (nty == LEPTRIS_NODE_TYPE_ELEMENT) {
+                m = count_matches(in, (LeptrisElement)n, node, doc);
+            } else if (in->num_count) {
+                XsltPattern pat;
+                memset(&pat, 0, sizeof(pat));
+                pat.expr = in->num_count;
+                m = pattern_matches_nodekind(&pat, nty);
+            } else {
+                /* §7.7 default count: the node's own kind. */
+                m = (nty == leptris_node_get_type(target));
+            }
+        }
+        if (m) pos++;
     }
     return 0;   /* detached node: §7.7 says nothing is emitted */
 }
@@ -1937,6 +1997,74 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     struct leptris_document* src_doc = (struct leptris_document*)source;
     void* saved_xslt_state = src_doc->xslt_state;
     src_doc->xslt_state = ex;
+
+    /* Document-order fidelity: the engine parks top-level comments
+     * and PIs in side lists outside the tree; templates and
+     * xsl:number must see them, so materialize them as real nodes
+     * chained before the root element. */
+    {
+        struct leptris_document* sd = (struct leptris_document*)source;
+        LeptrisElement sroot = leptris_document_root(source);
+        if (sroot && !sd->pre_root_chain) {
+            LeptrisNodeRef head = NULL, tail = NULL;
+            LeptrisNodeRef ahead = NULL, atail = NULL;
+            struct leptris_top_comment* tc = sd->top_comments;
+            struct leptris_top_comment* tcn;
+            while (tc) {
+                tcn = tc->next;
+                LeptrisNodeRef cn =
+                    leptris_comment_node_create(source, tc->content);
+                if (cn) {
+                    if (tc->after_root) {
+                        if (atail) leptris_node_set_next_sibling(atail, cn);
+                        else ahead = cn;
+                        atail = cn;
+                    } else {
+                        if (tail) leptris_node_set_next_sibling(tail, cn);
+                        else head = cn;
+                        tail = cn;
+                    }
+                }
+                free(tc->content); free(tc);
+                tc = tcn;
+            }
+            sd->top_comments = NULL;
+            struct leptris_processing_instruction* pi = sd->pis;
+            struct leptris_processing_instruction* pin;
+            while (pi) {
+                pin = pi->next;
+                LeptrisNodeRef pn = leptris_pi_node_create(
+                    source, pi->target, pi->data);
+                if (pn) {
+                    if (pi->after_root) {
+                        if (atail) leptris_node_set_next_sibling(atail, pn);
+                        else ahead = pn;
+                        atail = pn;
+                    } else {
+                        if (tail) leptris_node_set_next_sibling(tail, pn);
+                        else head = pn;
+                        tail = pn;
+                    }
+                }
+                free(pi->target); free(pi->data); free(pi);
+                pi = pin;
+            }
+            sd->pis = NULL;
+            /* before-chain → root → after-chain: document order. */
+            if (tail)
+                leptris_node_set_next_sibling(
+                    tail, leptris_element_as_node(sroot));
+            if (atail)
+                leptris_node_set_next_sibling(
+                    atail,
+                    leptris_node_next_sibling(
+                        leptris_element_as_node(sroot)));
+            if (ahead)
+                leptris_node_set_next_sibling(
+                    leptris_element_as_node(sroot), ahead);
+            sd->pre_root_chain = head;
+        }
+    }
 
     /* §3.4: strip source whitespace before any template sees it. */
     strip_source_whitespace(ex);
