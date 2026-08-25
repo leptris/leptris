@@ -117,6 +117,13 @@ typedef struct xslt_instr {
      * declares no namespaces (the common case; hot path skips). */
     LeptrisXPathNsSet ns;
 
+    /* §7.1.1 LRE namespace copy: in-scope bindings (minus XSLT)
+     * re-declared on the result element; default ns separate. */
+    char** ns_out_pfx;
+    char** ns_out_uri;
+    size_t ns_out_count;
+    char* ns_out_default;
+
     /* CHOOSE arms are WHEN/OTHERWISE children with test set. */
     int terminate;                  /* MESSAGE terminate */
     int is_param;                   /* VARIABLE came from xsl:param —

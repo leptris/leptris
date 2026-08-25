@@ -524,7 +524,7 @@ TEST(XsltConformance, AttributeSetApplication) {
         "<xsl:attribute name='c'>set</xsl:attribute>"
         "</xsl:attribute-set>"
         "<xsl:template match='/'>"
-        "<x a='lit' use-attribute-sets='as'/>"
+        "<x a='lit' xsl:use-attribute-sets='as'/>"
         "</xsl:template>",
         "<r/>")),
         "<x a=\"lit\" c=\"set\"/>");
@@ -533,7 +533,7 @@ TEST(XsltConformance, AttributeSetApplication) {
         "<xsl:attribute name='c'>from-set</xsl:attribute>"
         "</xsl:attribute-set>"
         "<xsl:template match='/'>"
-        "<x use-attribute-sets='as'/>"
+        "<x xsl:use-attribute-sets='as'/>"
         "</xsl:template>",
         "<r/>")),
         "<x c=\"from-set\"/>");

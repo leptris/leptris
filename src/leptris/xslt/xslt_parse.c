@@ -145,6 +145,8 @@ static void instr_append(XsltInstr** list, XsltInstr* in) {
  * instruction. Returns count. */
 static size_t collect_attr_sets(XsltInstr* in, LeptrisElement e) {
     const char* v = leptris_element_attribute(e, "use-attribute-sets");
+    if (!v || !*v)
+        v = leptris_element_attribute(e, "xsl:use-attribute-sets");
     if (!v || !*v) return 0;
     char* dup = leptris_strdup(v);
     if (!dup) return 0;
@@ -214,6 +216,54 @@ static LeptrisXPathNsSet build_ns_context(LeptrisElement e) {
     return set;
 }
 
+
+/* §7.1.1: the namespace declarations a literal result element
+ * copies into the result — its in-scope bindings minus the XSLT
+ * namespace (and the xsl prefix). Innermost binding wins per
+ * prefix; the default namespace (if any) is returned separately. */
+static void build_ns_copy(LeptrisElement e, char*** out_pfx,
+                          char*** out_uri, size_t* out_count,
+                          char** out_default) {
+    *out_pfx = NULL; *out_uri = NULL; *out_count = 0; *out_default = NULL;
+    char** pfx = NULL;
+    char** uri = NULL;
+    size_t cnt = 0, cap = 0;
+    char* deflt = NULL;
+    for (LeptrisElement a = e; a;
+         a = leptris_node_parent((LeptrisNodeRef)a)) {
+        for (int i = 0;; i++) {
+            const char* p = leptris_element_namespace_decl_prefix(a, i);
+            const char* u = leptris_element_namespace_decl_uri(a, i);
+            /* End of declarations: accessor returns no URI. A NULL
+             * PREFIX is the default namespace. */
+            if (!u) break;
+            if (strcmp(u, XSLT_NS) == 0) continue;   /* never copy XSLT */
+            if (!p || !*p) {
+                if (!deflt) deflt = leptris_strdup(u);
+                continue;
+            }
+            int have = 0;
+            for (size_t k = 0; k < cnt; k++)
+                if (strcmp(pfx[k], p) == 0) { have = 1; break; }
+            if (have) continue;
+            if (cnt == cap) {
+                cap = cap ? cap * 2 : 4;
+                pfx = (char**)realloc(pfx, cap * sizeof(char*));
+                uri = (char**)realloc(uri, cap * sizeof(char*));
+            }
+            pfx[cnt] = leptris_strdup(p);
+            uri[cnt] = leptris_strdup(u);
+            cnt++;
+        }
+    }
+    if (cnt || deflt) {
+        *out_pfx = pfx; *out_uri = uri; *out_count = cnt;
+        *out_default = deflt;
+    } else {
+        free(pfx); free(uri);
+    }
+}
+
 static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
     const char* name = leptris_element_get_name(e);
     const char* colon = name ? strchr(name, ':') : NULL;
@@ -245,9 +295,13 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             if (!an || !av) continue;
             if (strcmp(an, "xmlns") == 0 ||
                 strncmp(an, "xmlns:", 6) == 0) continue;
-            /* use-attribute-sets is a directive, not an output
-             * attribute — captured separately by collect_attr_sets. */
-            if (strcmp(an, "use-attribute-sets") == 0) continue;
+            /* Attributes in the XSLT namespace are directives
+             * (xsl:use-attribute-sets, xsl:version, xsl:exclude-,
+             * xsl:extension-element-prefixes) — never literal
+             * output. The unprefixed spelling is tolerated too
+             * (read by collect_attr_sets). */
+            if (strncmp(an, "xsl:", 4) == 0 ||
+                strcmp(an, "use-attribute-sets") == 0) continue;
             XsltLAttr* la = (XsltLAttr*)calloc(1, sizeof(*la));
             if (!la) continue;
             la->name = leptris_strdup(an);
@@ -256,6 +310,9 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             atail = &la->next;
         }
         collect_attr_sets(in, e);
+        /* §7.1.1: namespace declarations copied into the result. */
+        build_ns_copy(e, &in->ns_out_pfx, &in->ns_out_uri,
+                      &in->ns_out_count, &in->ns_out_default);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -357,6 +414,9 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         XsltInstr* in = instr_new(XSLT_INSTR_COPY);
         if (!in) return NULL;
         collect_attr_sets(in, e);
+        /* §7.1.1: namespace declarations copied into the result. */
+        build_ns_copy(e, &in->ns_out_pfx, &in->ns_out_uri,
+                      &in->ns_out_count, &in->ns_out_default);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -364,9 +424,27 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         XsltInstr* in = instr_new(XSLT_INSTR_ELEMENT);
         if (!in) return NULL;
         in->name = leptris_strdup(leptris_element_attribute(e, "name"));
-        in->ns_uri = leptris_strdup(leptris_element_attribute(e, "namespace")
-                                        ? leptris_element_attribute(e, "namespace") : "");
+        {
+            const char* ns = leptris_element_attribute(e, "namespace");
+            if (!ns || !*ns) {
+                /* libxslt honors a default xmlns= declaration on the
+                 * xsl:element instruction (stored as a ns decl, not
+                 * an attribute). */
+                for (int i = 0;; i++) {
+                    const char* p =
+                        leptris_element_namespace_decl_prefix(e, i);
+                    const char* u =
+                        leptris_element_namespace_decl_uri(e, i);
+                    if (!u) break;
+                    if (!p || !*p) { ns = u; break; }
+                }
+            }
+            in->ns_uri = leptris_strdup(ns ? ns : "");
+        }
         collect_attr_sets(in, e);
+        /* §7.1.1: namespace declarations copied into the result. */
+        build_ns_copy(e, &in->ns_out_pfx, &in->ns_out_uri,
+                      &in->ns_out_count, &in->ns_out_default);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -949,6 +1027,13 @@ static void free_instr(XsltInstr* in) {
         free(in->attr_set_names);
     }
     if (in->ns) leptris_xpath_ns_set_free(in->ns);
+    for (size_t i = 0; i < in->ns_out_count; i++) {
+        free(in->ns_out_pfx[i]);
+        free(in->ns_out_uri[i]);
+    }
+    free(in->ns_out_pfx);
+    free(in->ns_out_uri);
+    free(in->ns_out_default);
     free(in);
 }
 
