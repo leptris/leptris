@@ -3,7 +3,6 @@ bug-102
 bug-103
 bug-104
 bug-105
-bug-107
 bug-108
 bug-11-
 bug-112
@@ -22,7 +21,6 @@ bug-126
 bug-127
 bug-128
 bug-129
-bug-13-
 bug-130
 bug-131
 bug-132
@@ -128,7 +126,6 @@ bug-72
 bug-73
 bug-74
 bug-75
-bug-77
 bug-8-
 bug-80
 bug-82
