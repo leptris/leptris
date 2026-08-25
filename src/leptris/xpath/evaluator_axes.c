@@ -489,87 +489,85 @@ static int is_prefix_seen(char** seen_prefixes, size_t seen_count, const char* p
 }
 
 /* namespace:: axis */
+static int ns_axis_match(XPathASTNode* test, const char* prefix) {
+    if (!test || test->type == XPATH_AST_NODE_TEST_ALL) return 1;
+    if (test->type == XPATH_AST_NODE_TEST_NAME)
+        return test->value && prefix &&
+               strcmp(test->value, prefix) == 0;
+    return 0;
+}
+
+/* Push one in-scope namespace (dedup by prefix, innermost first). */
+static void ns_axis_push(XPathNodeSet* result,
+                         char*** seen_prefixes, size_t* seen_count,
+                         size_t* seen_capacity,
+                         const char* prefix, const char* uri,
+                         LeptrisElement owner, XPathASTNode* test) {
+    if (!uri) return;
+    if (is_prefix_seen(*seen_prefixes, *seen_count, prefix)) return;
+    if (*seen_count >= *seen_capacity) {
+        size_t cap = *seen_capacity == 0 ? 4 : *seen_capacity * 2;
+        char** grown = (char**)realloc(*seen_prefixes,
+                                       cap * sizeof(char*));
+        if (!grown) return;
+        *seen_prefixes = grown;
+        *seen_capacity = cap;
+    }
+    (*seen_prefixes)[(*seen_count)++] =
+        prefix ? leptris_strdup(prefix) : NULL;
+    if (!ns_axis_match(test, prefix)) return;
+    LeptrisNamespaceNode* ns_node = LEPTRIS_ALLOC(LeptrisNamespaceNode);
+    if (!ns_node) return;
+    ns_node->node_type = LEPTRIS_NODE_NAMESPACE;
+    ns_node->prefix = prefix ? leptris_strdup(prefix) : NULL;
+    ns_node->uri = leptris_strdup(uri);
+    ns_node->owner = owner;
+    xpath_nodeset_add(result, (void*)ns_node);
+}
+
+/* In-scope namespaces of `node`: the DECLARATIONS on each ancestor,
+ * innermost-first (a closer declaration overrides an outer one bound
+ * to the same prefix), plus the always-in-scope xml prefix. The old
+ * walk only saw each element's OWN prefix, missing sibling
+ * declarations such as xmlns:c beside a default xmlns. */
 static XPathNodeSet* axis_namespace(XPathContext* ctx, LeptrisElement node,
-                                   XPathASTNode* test) {
+                                    XPathASTNode* test) {
+    (void)ctx;
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    /* Track seen prefixes for deduplication (child overrides parent) */
     char** seen_prefixes = NULL;
     size_t seen_count = 0;
     size_t seen_capacity = 0;
 
-    /* Collect namespaces from element and ancestors using compact accessor functions */
-    LeptrisElement current = node;
-    while (current) {
-        /* Get namespace from element (inline in compact mode) */
-        const char* ns_prefix = leptris_element_get_prefix(current);
-        const char* ns_uri = leptris_element_get_namespace_uri(current);
-
-        /* Skip if already seen (inheritance override) or if no namespace */
-        if (ns_uri && !is_prefix_seen(seen_prefixes, seen_count, ns_prefix)) {
-            /* Check if matches node test */
-            int matches = 0;
-            if (!test || test->type == XPATH_AST_NODE_TEST_ALL) {
-                matches = 1;  /* Match all */
-            } else if (test->type == XPATH_AST_NODE_TEST_NAME) {
-                matches = (test->value && ns_prefix &&
-                          strcmp(test->value, ns_prefix) == 0);
-            }
-
-            if (matches) {
-                LeptrisNamespaceNode* ns_node = LEPTRIS_ALLOC(LeptrisNamespaceNode);
-                if (ns_node) {
-                    ns_node->node_type = LEPTRIS_NODE_NAMESPACE;
-                    ns_node->prefix = ns_prefix ? leptris_strdup(ns_prefix) : NULL;
-                    ns_node->uri = leptris_strdup(ns_uri);
-                    ns_node->owner = current;
-                    xpath_nodeset_add(result, (void*)ns_node);
-                }
-            }
-
-            /* Mark as seen */
-            if (seen_count >= seen_capacity) {
-                size_t new_cap = seen_capacity == 0 ? 4 : seen_capacity * 2;
-                char** new_arr = (char**)realloc(seen_prefixes, new_cap * sizeof(char*));
-                if (!new_arr) { free(seen_prefixes); seen_prefixes = NULL; break; }
-                seen_prefixes = new_arr;
-                seen_capacity = new_cap;
-            }
-            seen_prefixes[seen_count++] = ns_prefix ? leptris_strdup(ns_prefix) : NULL;
-        }
-
-        /* Move to parent using compact accessor */
-        current = leptris_element_get_parent(current);
+    for (LeptrisElement current = node; current;
+         current = leptris_element_get_parent(current)) {
+        for (struct leptris_namespace* decl =
+                 leptris_elem_namespaces(current);
+             decl; decl = decl->next)
+            ns_axis_push(result, &seen_prefixes, &seen_count,
+                         &seen_capacity, decl->prefix, decl->uri,
+                         current, test);
     }
+    ns_axis_push(result, &seen_prefixes, &seen_count, &seen_capacity,
+                 "xml", "http://www.w3.org/XML/1998/namespace", node,
+                 test);
 
-    /* Always add implicit xml namespace if not already present */
-    if (!is_prefix_seen(seen_prefixes, seen_count, "xml")) {
-        int matches = (!test || test->type == XPATH_AST_NODE_TEST_ALL ||
-                      (test->type == XPATH_AST_NODE_TEST_NAME &&
-                       test->value && strcmp(test->value, "xml") == 0));
-
-        if (matches) {
-            LeptrisNamespaceNode* xml_ns = LEPTRIS_ALLOC(LeptrisNamespaceNode);
-            if (xml_ns) {
-                xml_ns->node_type = LEPTRIS_NODE_NAMESPACE;
-                xml_ns->prefix = leptris_strdup("xml");
-                xml_ns->uri = leptris_strdup("http://www.w3.org/XML/1998/namespace");
-                xml_ns->owner = node;
-                xpath_nodeset_add(result, (void*)xml_ns);
-            }
-        }
-    }
-
-    /* Cleanup seen prefixes */
-    for (size_t i = 0; i < seen_count; i++) {
+    for (size_t i = 0; i < seen_count; i++)
         if (seen_prefixes[i]) free(seen_prefixes[i]);
-    }
     free(seen_prefixes);
 
-    /* Mark that result owns namespace nodes for cleanup */
-    result->owns_namespaces = 1;
+    /* libxslt axis order: REVERSED (last declaration first) — match
+     * it so copied declarations serialize in the recorded order. */
+    if (result->count > 1) {
+        for (size_t i = 0, j = result->count - 1; i < j; i++, j--) {
+            void* t = result->nodes[i];
+            result->nodes[i] = result->nodes[j];
+            result->nodes[j] = t;
+        }
+    }
 
+    result->owns_namespaces = 1;
     return result;
 }
 

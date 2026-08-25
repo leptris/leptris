@@ -8,9 +8,7 @@ bug-113
 bug-114
 bug-115
 bug-117
-bug-12-
 bug-120
-bug-122
 bug-123
 bug-124
 bug-125
@@ -109,7 +107,6 @@ bug-43-
 bug-5-
 bug-50-
 bug-53
-bug-54
 bug-56
 bug-59
 bug-6-

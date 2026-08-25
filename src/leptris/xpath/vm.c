@@ -529,8 +529,16 @@ struct leptris_xpath_result* vm_apply_axis_self(XPathContext* ctx, XPathVM* vm,
     if (!out) { xpath_nodeset_free(input); return NULL; }
 
     for (size_t i = 0; i < input->count; i++) {
-        if (!node_is_element(input->nodes[i])) continue;
-        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        LeptrisNode* nd = input->nodes[i];
+        if (!node_is_element(nd)) {
+            /* self::node() (wild) passes ANY node through — text/
+             * comment/PI/attribute/namespace contexts (e.g. `.` in
+             * a for-each over namespace::*). Name tests never match
+             * non-elements. */
+            if (nd && wild) xpath_nodeset_add_fast(out, nd);
+            continue;
+        }
+        LeptrisElement elem = (LeptrisElement)nd;
         if (wild) {
             xpath_nodeset_add_fast(out, elem);
         } else {
