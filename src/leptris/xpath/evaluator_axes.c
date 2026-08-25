@@ -145,10 +145,14 @@ static XPathNodeSet* axis_child(XPathContext* ctx, LeptrisNode* node,
     if (node->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
         struct leptris_document* d =
             ((LeptrisDocumentNode*)node)->doc;
-        LeptrisElement root = (LeptrisElement)d->new_dom_root;
-        if (!root) root = d->root;
-        if (root && matches_node_test(ctx, (LeptrisNode*)root, test))
-            xpath_nodeset_add(result, (LeptrisNode*)root);
+        LeptrisNode* root = (LeptrisNode*)d->new_dom_root;
+        if (!root) root = (LeptrisNode*)d->root;
+        /* Fragment documents chain multiple top-level elements as
+         * the root's siblings — ALL are children of the document. */
+        for (LeptrisNode* c = root; c;
+             c = leptris_node_get_next_sibling(c))
+            if (matches_node_test(ctx, c, test))
+                xpath_nodeset_add(result, c);
         return result;
     }
 

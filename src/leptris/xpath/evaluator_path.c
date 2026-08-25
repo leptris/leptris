@@ -675,9 +675,10 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
             LeptrisElement doc_root = (LeptrisElement)dd->new_dom_root;
             if (!doc_root) doc_root = dd->root;
             if (strcmp(axis_name, "child") == 0) {
-                if (doc_root && matches_node_test(
-                        ctx, (LeptrisNode*)doc_root, node_test))
-                    xpath_nodeset_add(result, (LeptrisNode*)doc_root);
+                for (LeptrisNode* c = (LeptrisNode*)doc_root; c;
+                     c = leptris_node_get_next_sibling(c))
+                    if (matches_node_test(ctx, c, node_test))
+                        xpath_nodeset_add(result, c);
             } else if (strcmp(axis_name, "self") == 0) {
                 if (matches_node_test(ctx, (LeptrisNode*)node_ptr,
                                       node_test))
