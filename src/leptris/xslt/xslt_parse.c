@@ -852,6 +852,28 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             sp->sheet->out_method_html = m && strcmp(m, "html") == 0;
             const char* ind = leptris_element_attribute(e, "indent");
             sp->sheet->out_indent = ind && strcmp(ind, "yes") == 0;
+            /* §16.1 cdata-section-elements: space-separated QNames. */
+            const char* cda =
+                leptris_element_attribute(e, "cdata-section-elements");
+            if (cda && *cda) {
+                char* dup = leptris_strdup(cda);
+                if (dup) {
+                    char* save = NULL;
+                    for (char* tok = xslt_strtok(dup, " \t\n,", &save);
+                         tok; tok = xslt_strtok(NULL, " \t\n,", &save)) {
+                        char** grown = (char**)realloc(
+                            sp->sheet->out_cdata,
+                            (sp->sheet->out_cdata_count + 1) *
+                                sizeof(char*));
+                        if (!grown) break;
+                        sp->sheet->out_cdata = grown;
+                        sp->sheet->out_cdata[
+                            sp->sheet->out_cdata_count++] =
+                            leptris_strdup(tok);
+                    }
+                    free(dup);
+                }
+            }
             const char* od = leptris_element_attribute(e, "omit-xml-declaration");
             sp->sheet->out_omit_decl = od && strcmp(od, "yes") == 0;
             const char* enc = leptris_element_attribute(e, "encoding");

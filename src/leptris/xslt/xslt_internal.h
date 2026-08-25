@@ -232,6 +232,8 @@ struct xslt_styles {
     int out_method_text;
     int out_method_html;   /* §16.2 */
     int out_indent;
+    char** out_cdata;         /* §16.1 cdata-section-elements QNames */
+    size_t out_cdata_count;
     int out_omit_decl;
     const char* out_encoding;
     const char* out_version;

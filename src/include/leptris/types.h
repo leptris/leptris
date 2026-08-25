@@ -165,6 +165,11 @@ typedef struct {
     int indent;              /* 0 = compact, >0 = pretty-print with N spaces */
     int xml_declaration;     /* 1 = include <?xml?>, 0 = omit */
     const char* encoding;    /* "UTF-8" or NULL for default */
+    /* §16.1 cdata-section-elements (XSLT): text children of elements
+     * whose serialized QName matches one of these strings emit as
+     * CDATA sections instead of escaped text. NULL/0 = none. */
+    const char* const* cdata_elements;
+    size_t cdata_element_count;
 } LeptrisSerializeOptions;
 
 /* ============================================================================
