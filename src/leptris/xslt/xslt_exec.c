@@ -817,6 +817,26 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
     if (!name) return -1;
     LeptrisElement e = out_append_elem(ex, parent, name, NULL);
     if (!e) return -1;
+    /* Namespace fidelity (§7.5 + Names Rec): copy the element's
+     * in-scope DECLARATIONS verbatim — a copy of <foo xmlns="u">
+     * keeps xmlns="u" — and when the copy lands under a parent with
+     * a default namespace the element does not have, emit xmlns=""
+     * so it stays no-namespace. */
+    {
+        int copied_default = 0;
+        for (struct leptris_namespace* ns = leptris_elem_namespaces(node);
+             ns; ns = ns->next) {
+            leptris_element_add_namespace_definition(
+                e, ns->prefix ? ns->prefix : "", ns->uri);
+            if (!ns->prefix) copied_default = 1;
+        }
+        if (!copied_default && parent) {
+            const char* pdef = leptris_element_namespace_for_prefix(
+                parent, NULL);   /* NULL = the default namespace */
+            if (pdef && *pdef && !leptris_element_get_namespace_uri(node))
+                leptris_element_add_namespace_definition(e, "", "");
+        }
+    }
     size_t na = leptris_element_attribute_count(node);
     for (size_t i = 0; i < na; i++) {
         const char* an = leptris_element_attribute_name_at(node, i);
