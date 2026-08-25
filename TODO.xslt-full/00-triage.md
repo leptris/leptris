@@ -1,4 +1,4 @@
-# 00 — Triage board (updated 2026-08-25, suite 67→66/205 tracked)
+# 00 — Triage board (updated 2026-08-26, suite 72/205)
 
 Live census of test/xslt/open_cases.txt after the root-semantics,
 namespace-axis, attr-set-chain, and serializer batches:
@@ -23,3 +23,18 @@ script (scripts/xslt_triage.sh) so every PR regenerates it:
 
 Done: the ad-hoc python used so far; productize it (SSOT: one
 script, used by CI + devs).
+
+---
+## Session log 2026-08-26 (72/205)
+
+Landed: cdata-section-elements + merged CDATA runs; prefix/ns-preserving
+copies; top-level comment/PI materialization (before/after root chains);
+xsl:number any-level node-kind walk; xsl:comment/PI content capture;
+HTML PI serialization; RTF variables bind the fragment document node
+(fragment chains = doc children on all three axis paths); namespace-gated
+extension-function local-name fallback; attribute nodes in template
+matching (@-patterns, copy, unified node-kind matcher); control-char
+attr escaping on the mutation path.
+
+Remaining census: ~85 DIFF, ~15 NUMBER, 9 SORT, 8 KEY, 7 DOCUMENT,
+~5 crash. Windows gates: bug-93, bug-102 (import path), bug-118.
