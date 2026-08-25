@@ -1374,7 +1374,14 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         if (node &&
             leptris_node_get_type((LeptrisNodeRef)node) ==
                 LEPTRIS_NODE_TYPE_DOCUMENT) {
-            LeptrisElement doc_root = leptris_document_root(ex->source);
+            /* The document node carries its OWN document — foreign
+             * docs (document(), RTFs) must not resolve through
+             * ex->source (that looped document-inclusion forever). */
+            struct leptris_document* nd =
+                ((LeptrisDocumentNode*)node)->doc;
+            LeptrisElement doc_root =
+                (LeptrisElement)(nd ? nd->new_dom_root : NULL);
+            if (!doc_root && nd) doc_root = nd->root;
             if (!doc_root) return 0;
             /* Document children in order: the materialized pre-root
              * chain (top comments/PIs), then the root element. */
