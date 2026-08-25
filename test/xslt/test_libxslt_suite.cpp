@@ -214,6 +214,9 @@ std::string run_case(const Case& c, int* status) {
     /* No fork on Win32: run inline. The open-worklist skip keeps
      * the known crashers out of the run, so inline is safe. */
     {
+        /* Same suite-dir base as the POSIX child: xsl:import/include
+         * and document() hrefs resolve relative to the stylesheet. */
+        _chdir(LEPTRIS_XSLT_SUITE_DIR);
         std::string xsl = slurp(c.xsl_path.c_str());
         std::string xml = slurp(c.xml_path.c_str());
         LeptrisXslt sheet = leptris_xslt_parse(xsl.c_str(), xsl.size());
