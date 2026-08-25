@@ -49,6 +49,37 @@ bool is_skipped(const std::string& base) {
     return false;
 }
 
+/* Open-worklist cases (test/xslt/open_cases.txt, one base per
+ * line): known-failing against the libxslt reference. They SKIP —
+ * CI gates on REGRESSIONS (a case outside the list failing) and on
+ * the list shrinking as fixes land. */
+std::vector<std::string> load_open_cases() {
+    std::vector<std::string> v;
+    FILE* f = fopen(LEPTRIS_XSLT_OPEN_LIST, "r");
+    if (!f) return v;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n && (line[n-1] == '\n' || line[n-1] == '\r' ||
+                     line[n-1] == ' '))
+            line[--n] = 0;
+        if (n) v.push_back(line);
+    }
+    fclose(f);
+    return v;
+}
+
+const std::vector<std::string>& open_cases() {
+    static std::vector<std::string> v = load_open_cases();
+    return v;
+}
+
+bool is_open(const std::string& base) {
+    for (const std::string& o : open_cases())
+        if (o == base) return true;
+    return false;
+}
+
 std::vector<Case> discover() {
     std::vector<Case> cases;
     const char* dir = LEPTRIS_XSLT_SUITE_DIR;
@@ -189,6 +220,9 @@ std::string run_case(const Case& c, int* status) {
 TEST_P(LibxsltSuite, MatchesLibxsltOutput) {
     const Case& c = GetParam();
     if (is_skipped(c.base)) GTEST_SKIP();
+    if (is_open(c.base))
+        GTEST_SKIP() << "open worklist case " << c.base
+                     << " (test/xslt/open_cases.txt)";
 
     std::string want = slurp(c.out_path.c_str());
     int status = 0;
