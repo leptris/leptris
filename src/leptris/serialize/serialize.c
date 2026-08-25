@@ -500,6 +500,44 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
     buf->size = (size_t)(ot - buf->data);
     buf->data[buf->size] = '\0';
 
+    /* Namespaces - serialize as xmlns attributes. One reservation +
+     * inline emission per namespace (TODO 194c): URIs rarely need
+     * escaping, but the 6x worst-case bound is reserved anyway. */
+    for (struct leptris_namespace* ns = leptris_elem_namespaces(elem); ns != NULL; ns = ns->next) {
+        if (!ns) continue;
+
+        const char* prefix = ns->prefix ? ns->prefix : "";
+        size_t prefix_len = ns->prefix ? strlen(ns->prefix) : 0;
+        const char* uri = ns->uri ? ns->uri : "";
+        size_t uri_len = ns->uri ? strlen(ns->uri) : 0;
+        buffer_ensure_capacity(buf, 7 + prefix_len + 2 + 6 * uri_len + 2);
+
+        char* nw = buf->data + buf->size;
+        *nw++ = ' ';
+        memcpy(nw, "xmlns", 5);
+        nw += 5;
+        if (ns->prefix) {
+            *nw++ = ':';
+            memcpy(nw, prefix, prefix_len);
+            nw += prefix_len;
+        }
+        *nw++ = '=';
+        *nw++ = '"';
+        for (size_t i = 0; i < uri_len; i++) {
+            switch (uri[i]) {
+                case '<':  memcpy(nw, "&lt;", 4);   nw += 4; break;
+                case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
+                case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
+                case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
+                case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
+                default:   *nw++ = uri[i]; break;
+            }
+        }
+        *nw++ = '"';
+        buf->size = (size_t)(nw - buf->data);
+        buf->data[buf->size] = '\0';
+    }
+
     /* Attributes - iterate through linked list */
     for (struct leptris_attribute* attr = leptris_element_get_first_attribute(elem); attr != NULL; attr = leptris_attr_next(attr)) {
         if (!attr) continue;
@@ -576,44 +614,6 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
         }
         *out++ = '"';
         buf->size = (size_t)(out - buf->data);
-        buf->data[buf->size] = '\0';
-    }
-
-    /* Namespaces - serialize as xmlns attributes. One reservation +
-     * inline emission per namespace (TODO 194c): URIs rarely need
-     * escaping, but the 6x worst-case bound is reserved anyway. */
-    for (struct leptris_namespace* ns = leptris_elem_namespaces(elem); ns != NULL; ns = ns->next) {
-        if (!ns) continue;
-
-        const char* prefix = ns->prefix ? ns->prefix : "";
-        size_t prefix_len = ns->prefix ? strlen(ns->prefix) : 0;
-        const char* uri = ns->uri ? ns->uri : "";
-        size_t uri_len = ns->uri ? strlen(ns->uri) : 0;
-        buffer_ensure_capacity(buf, 7 + prefix_len + 2 + 6 * uri_len + 2);
-
-        char* nw = buf->data + buf->size;
-        *nw++ = ' ';
-        memcpy(nw, "xmlns", 5);
-        nw += 5;
-        if (ns->prefix) {
-            *nw++ = ':';
-            memcpy(nw, prefix, prefix_len);
-            nw += prefix_len;
-        }
-        *nw++ = '=';
-        *nw++ = '"';
-        for (size_t i = 0; i < uri_len; i++) {
-            switch (uri[i]) {
-                case '<':  memcpy(nw, "&lt;", 4);   nw += 4; break;
-                case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
-                case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
-                case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
-                case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
-                default:   *nw++ = uri[i]; break;
-            }
-        }
-        *nw++ = '"';
-        buf->size = (size_t)(nw - buf->data);
         buf->data[buf->size] = '\0';
     }
 
@@ -970,6 +970,35 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         buf->data[buf->size] = '\0';
 
         /* --- attributes (identical emission) --- */
+        for (struct leptris_namespace* ns = leptris_elem_namespaces(e); ns; ns = ns->next) {
+            const char* prefix = ns->prefix ? ns->prefix : "";
+            size_t pnl = ns->prefix ? strlen(ns->prefix) : 0;
+            const char* uri = ns->uri ? ns->uri : "";
+            size_t ul = ns->uri ? strlen(ns->uri) : 0;
+            buffer_ensure_capacity(buf, 7 + pnl + 2 + 6 * ul + 2);
+            char* nw = buf->data + buf->size;
+            *nw++ = ' ';
+            memcpy(nw, "xmlns", 5);
+            nw += 5;
+            if (ns->prefix) { *nw++ = ':'; memcpy(nw, prefix, pnl); nw += pnl; }
+            *nw++ = '=';
+            *nw++ = '"';
+            for (size_t i = 0; i < ul; i++) {
+                switch (uri[i]) {
+                    case '<':  memcpy(nw, "&lt;", 4);   nw += 4; break;
+                    case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
+                    case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
+                    case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
+                    case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
+                    default:   *nw++ = uri[i]; break;
+                }
+            }
+            *nw++ = '"';
+            buf->size = (size_t)(nw - buf->data);
+            buf->data[buf->size] = '\0';
+        }
+
+        /* --- namespaces (identical emission) --- */
         for (struct leptris_attribute* attr = leptris_element_get_first_attribute(e); attr; attr = leptris_attr_next(attr)) {
             const char* val;
             if (attr_has_entities(attr)) {
@@ -1023,35 +1052,6 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             }
             *out++ = '"';
             buf->size = (size_t)(out - buf->data);
-            buf->data[buf->size] = '\0';
-        }
-
-        /* --- namespaces (identical emission) --- */
-        for (struct leptris_namespace* ns = leptris_elem_namespaces(e); ns; ns = ns->next) {
-            const char* prefix = ns->prefix ? ns->prefix : "";
-            size_t pnl = ns->prefix ? strlen(ns->prefix) : 0;
-            const char* uri = ns->uri ? ns->uri : "";
-            size_t ul = ns->uri ? strlen(ns->uri) : 0;
-            buffer_ensure_capacity(buf, 7 + pnl + 2 + 6 * ul + 2);
-            char* nw = buf->data + buf->size;
-            *nw++ = ' ';
-            memcpy(nw, "xmlns", 5);
-            nw += 5;
-            if (ns->prefix) { *nw++ = ':'; memcpy(nw, prefix, pnl); nw += pnl; }
-            *nw++ = '=';
-            *nw++ = '"';
-            for (size_t i = 0; i < ul; i++) {
-                switch (uri[i]) {
-                    case '<':  memcpy(nw, "&lt;", 4);   nw += 4; break;
-                    case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
-                    case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
-                    case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
-                    case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
-                    default:   *nw++ = uri[i]; break;
-                }
-            }
-            *nw++ = '"';
-            buf->size = (size_t)(nw - buf->data);
             buf->data[buf->size] = '\0';
         }
 
