@@ -103,7 +103,8 @@ leptris_add_test(test_xslt        xpath/test_xslt.cpp)
 # behavioral specs — data files stay in the source tree.
 leptris_add_test(test_libxslt_suite xslt/test_libxslt_suite.cpp)
 target_compile_definitions(test_libxslt_suite PRIVATE
-    LEPTRIS_XSLT_SUITE_DIR="${PROJECT_SOURCE_DIR}/test/xslt/libxslt_suite_general")
+    LEPTRIS_XSLT_SUITE_DIR="${PROJECT_SOURCE_DIR}/test/xslt/libxslt_suite_general"
+    LEPTRIS_XSLT_OPEN_LIST="${PROJECT_SOURCE_DIR}/test/xslt/open_cases.txt")
 leptris_add_test(test_serialize  serializer/test_serialize.cpp)
 leptris_add_test(test_c14n       serializer/test_c14n.cpp)
 leptris_add_test(test_perf       perf/test_perf.cpp)
