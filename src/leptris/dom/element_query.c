@@ -193,7 +193,9 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
             attr_set_entities(attr, 0);
         }
     }
-    return attr->value_view.data;
+    if (attr->value_view.data && attr->value_view.length > 0)
+        return attr->value_view.data;
+    return "";   /* present-but-empty (see attribute_value_at) */
 }
 
 /* ---- Expanded-name attribute support (issue #542) -----------------
@@ -312,7 +314,9 @@ LEPTRIS_API const char* leptris_element_attribute_ns(LeptrisElement elem,
             attr_set_entities(attr, 0);
         }
     }
-    return attr->value_view.data;
+    if (attr->value_view.data && attr->value_view.length > 0)
+        return attr->value_view.data;
+    return "";   /* present-but-empty (see attribute_value_at) */
 }
 
 LEPTRIS_API int leptris_element_has_attribute_ns(LeptrisElement elem,
@@ -1122,10 +1126,14 @@ LEPTRIS_API const char* leptris_element_attribute_value_at(LeptrisElement elem, 
                     }
                 }
             }
-            if (attr->value_view.data && attr->value_view.length > 0) {
+            if (attr->value_view.data &&
+                attr->value_view.length > 0) {
                 return attr->value_view.data;
             }
-            return NULL;
+            /* Present-but-empty value: a real empty string, not
+             * "no attribute" (issue: eg:bar="" vanished in XSLT
+             * attribute copies). */
+            return "";
         }
         i++;
         attr = leptris_attr_next(attr);
