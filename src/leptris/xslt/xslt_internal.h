@@ -292,11 +292,6 @@ typedef struct xslt_exec {
     int terminated;                /* xsl:message terminate */
     char* message;                 /* collected message text */
     LeptrisElement pending_parent;/* current output insertion point */
-    char* top_text;                /* text emitted before any element */
-    size_t top_text_len, top_text_cap;
-    char* tail_text;               /* text emitted AFTER elements (root
-                                    * siblings in fragment order) */
-    size_t tail_text_len, tail_text_cap;
     void* frag_nodes;             /* pre-root fragment nodes */
     char* rtf_text;                /* RTF capture buffer: a variable
                                     * body that produces only text has
@@ -362,6 +357,13 @@ int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
  * xslt_functions.c (the document-order walker reused for key-index
  * construction and the nodeset result identifier). */
 LeptrisElement xslt_next_doc_order(LeptrisElement e);
+
+/* Fragment chain (xslt_exec.c): the ordered pre-root result nodes.
+ * apply_string walks this then the root sibling chain. */
+typedef struct xslt_frag_node {
+    LeptrisNodeRef node;
+    struct xslt_frag_node* next;
+} XsltFragNode;
 
 /* xslt_exec.c — instruction dispatch (registration table). */
 typedef int (*XsltInstrFn)(XsltExec* ex, const XsltInstr* in,

@@ -2174,6 +2174,11 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
  *
  * Must not race with in-flight evaluations of the same handle.
  */
+/* Source text of a compiled expression (owned by the handle).
+ * Memory: valid until leptris_xpath_compiled_free. */
+LEPTRIS_API const char* leptris_xpath_compiled_text(
+        LeptrisXPathCompiled compiled);
+
 LEPTRIS_API void leptris_xpath_compiled_free(LeptrisXPathCompiled compiled);
 
 /**

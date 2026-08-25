@@ -29,7 +29,12 @@ std::string run(const char* sheet_body, const char* xml) {
 /* Strip the declaration the API adds for comparison. */
 std::string body(const std::string& s) {
     const char* decl = "<?xml version=\"1.0\"?>";
-    if (s.compare(0, strlen(decl), decl) == 0) return s.substr(strlen(decl));
+    if (s.compare(0, strlen(decl), decl) == 0) {
+        size_t rest = strlen(decl);
+        /* libxslt breaks the line after the declaration. */
+        if (rest < s.size() && s[rest] == '\n') rest++;
+        return s.substr(rest);
+    }
     return s;
 }
 

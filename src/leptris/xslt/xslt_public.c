@@ -111,34 +111,6 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
     return out;
 }
 
-/* §16.3 text output: the string-value of every text node in the
- * result tree in document order, without escaping. */
-static char* serialize_text_method(LeptrisDocument out, const char* top) {
-    size_t cap = 64, len = 0;
-    char* acc = (char*)malloc(cap);
-    if (!acc) return NULL;
-    acc[0] = 0;
-    LeptrisElement root = out ? leptris_document_root(out) : NULL;
-    for (LeptrisElement e = root; e; ) {
-        for (LeptrisNodeRef c =
-                 leptris_node_first_child(leptris_element_as_node(e));
-             c; c = leptris_node_next_sibling(c)) {
-            if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_TEXT) {
-                const char* t = leptris_text_get_content((LeptrisTextNode*)c);
-                if (!t) continue;
-                size_t tl = strlen(t);
-                while (len + tl + 1 > cap) { cap *= 2; acc = (char*)realloc(acc, cap); }
-                memcpy(acc + len, t, tl); len += tl;
-                acc[len] = 0;
-            }
-        }
-        /* Continue with next top-level element in the fragment chain. */
-        LeptrisNodeRef sib = leptris_node_next_sibling(leptris_element_as_node(e));
-        e = (LeptrisElement)sib;
-    }
-    return acc;
-}
-
 /* §16.2 HTML output: no XML declaration; known void elements emit
  * without the XHTML self-closing slash. Applied as a post-pass on
  * the XML serialization (script/style content is already raw via
@@ -196,6 +168,38 @@ static char* to_html_method(const char* xml) {
     return out;
 }
 
+
+/* One fragment node by kind: element → subtree serialize;
+ * comment/PI/text → their literal serialization. */
+static char* serialize_frag_node_text(LeptrisNodeRef n) {
+    int ty = leptris_node_get_type(n);
+    if (ty == LEPTRIS_NODE_TYPE_ELEMENT)
+        return leptris_element_serialize((LeptrisElement)n, NULL);
+    const char* body = NULL;
+    const char* target = NULL;
+    if (ty == LEPTRIS_NODE_TYPE_TEXT || ty == LEPTRIS_NODE_TYPE_CDATA)
+        body = leptris_text_node_get_content(n);
+    else if (ty == LEPTRIS_NODE_TYPE_COMMENT)
+        body = leptris_comment_node_get_content(n);
+    else if (ty == LEPTRIS_NODE_TYPE_PI) {
+        target = leptris_pi_node_get_target(n);
+        body = leptris_pi_node_get_data(n);
+    }
+    size_t cap = 16 + (body ? strlen(body) : 0) +
+                 (target ? strlen(target) : 0);
+    char* out = (char*)malloc(cap + 8);
+    if (!out) return NULL;
+    if (ty == LEPTRIS_NODE_TYPE_PI)
+        snprintf(out, cap + 8, "<?%s%s%s?>",
+                 target ? target : "", body && *body ? " " : "",
+                 body ? body : "");
+    else if (ty == LEPTRIS_NODE_TYPE_COMMENT)
+        snprintf(out, cap + 8, "<!--%s-->", body ? body : "");
+    else
+        snprintf(out, cap + 8, "%s", body ? body : "");
+    return out;
+}
+
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                                             LeptrisDocument source) {
     if (!xslt || !source) return NULL;
@@ -206,38 +210,76 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     ex->result = NULL;
 
     LeptrisElement root = out ? leptris_document_root(out) : NULL;
-    const char* top = ex->top_text;
-    size_t tlen = top ? strlen(top) : 0;
 
-    /* §16.3 text method: text nodes only — elements never serialize.
-     * Fragment-level text (top then tail) frames the tree text. */
+    /* §16.3 text method: every TEXT node in fragment order — the
+     * fragment chain carries that order now (pre-root list + the
+     * root's sibling chain, elements' children walked). */
     if (ex->sheet->out_method_text) {
-        size_t tl = ex->tail_text ? ex->tail_text_len : 0;
-        char* r = serialize_text_method(out, top);
-        size_t rl = r ? strlen(r) : 0;
-        char* full = (char*)malloc(tlen + rl + tl + 1);
-        if (full) {
-            if (top) memcpy(full, top, tlen);
-            if (r) memcpy(full + tlen, r, rl);
-            if (tl) memcpy(full + tlen + rl, ex->tail_text, tl + 1);
-            else full[tlen + rl] = 0;
+        size_t cap = 64, len = 0;
+        char* acc = (char*)malloc(cap);
+        if (!acc) { xslt_exec_free(ex); return NULL; }
+        acc[0] = 0;
+        for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
+             f = f->next) {
+            int ty = leptris_node_get_type(f->node);
+            if (ty == LEPTRIS_NODE_TYPE_TEXT ||
+                ty == LEPTRIS_NODE_TYPE_CDATA) {
+                const char* t = leptris_text_node_get_content(f->node);
+                if (t) {
+                    size_t tl = strlen(t);
+                    while (len + tl + 1 > cap) cap *= 2;
+                    acc = (char*)realloc(acc, cap);
+                    memcpy(acc + len, t, tl + 1);
+                    len += tl;
+                }
+            }
         }
-        free(r);
+        for (LeptrisElement e = root; e;
+             e = (LeptrisElement)leptris_node_get_next_sibling(
+                     leptris_element_as_node(e))) {
+            for (LeptrisNodeRef c =
+                     leptris_node_first_child(leptris_element_as_node(e));
+                 c; c = leptris_node_next_sibling(c)) {
+                int ty = leptris_node_get_type(c);
+                if (ty == LEPTRIS_NODE_TYPE_TEXT ||
+                    ty == LEPTRIS_NODE_TYPE_CDATA) {
+                    const char* t = leptris_text_node_get_content(c);
+                    if (t) {
+                        size_t tl = strlen(t);
+                        while (len + tl + 1 > cap) cap *= 2;
+                        acc = (char*)realloc(acc, cap);
+                        memcpy(acc + len, t, tl + 1);
+                        len += tl;
+                    }
+                }
+            }
+        }
         if (out) leptris_document_free(out);
         xslt_exec_free(ex);
-        return full;
+        return acc;
     }
 
     if (!root) {
-        /* Text-only result (xsl:output method=text or no elements). */
-        char* r = (char*)malloc(tlen + 1);
-        if (r) {
-            if (top) memcpy(r, top, tlen + 1);
-            else r[0] = 0;
+        /* No element anchored the fragment: the pre-root list IS
+         * the result — text/comment/PI in emitted order. */
+        size_t cap = 64, len = 0;
+        char* acc = (char*)malloc(cap);
+        if (!acc) { xslt_exec_free(ex); return NULL; }
+        acc[0] = 0;
+        for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
+             f = f->next) {
+            char* piece = serialize_frag_node_text(f->node);
+            if (!piece) continue;
+            size_t pl = strlen(piece);
+            while (len + pl + 1 > cap) cap *= 2;
+            acc = (char*)realloc(acc, cap);
+            memcpy(acc + len, piece, pl + 1);
+            len += pl;
+            free(piece);
         }
         if (out) leptris_document_free(out);
         xslt_exec_free(ex);
-        return r;
+        return acc;
     }
 
     /* §16.1 standalone: surface via the document state the shared
@@ -254,17 +296,44 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
      * every top-level element of the fragment chain. */
     LeptrisSerializeOptions opts = {0};
     opts.xml_declaration = ex->sheet->out_method_text ? 0 : 1;
-    opts.indent = 0;
-    size_t cap = tlen + 64, total = 0;
+    /* §16.1 indent="yes": 2-space pretty-print via the shared
+     * serializer (text-only elements stay inline — libxslt rule). */
+    opts.indent = ex->sheet->out_indent ? 2 : 0;
+    /* Pre-root fragment nodes go FIRST — they were emitted before
+     * any element anchored the chain. */
+    char* first_pre = NULL;
+    size_t pre_len = 0;
+    {
+        size_t pc = 64;
+        first_pre = (char*)malloc(pc);
+        if (first_pre) {
+            first_pre[0] = 0;
+            for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
+                 f = f->next) {
+                char* piece = serialize_frag_node_text(f->node);
+                if (!piece) continue;
+                size_t pl = strlen(piece);
+                while (pre_len + pl + 1 > pc) {
+                    pc *= 2;
+                    first_pre = (char*)realloc(first_pre, pc);
+                }
+                memcpy(first_pre + pre_len, piece, pl + 1);
+                pre_len += pl;
+                free(piece);
+            }
+        }
+    }
+    size_t cap = pre_len + 64, total = 0;
     char* acc = (char*)malloc(cap);
     if (!acc) {
+        free(first_pre);
         leptris_document_free(out);
         xslt_exec_free(ex);
         return NULL;
     }
-    if (tlen) {
-        memcpy(acc, top, tlen);
-        total = tlen;
+    if (pre_len) {
+        memcpy(acc, first_pre, pre_len);
+        total = pre_len;
     }
     char* first = leptris_document_serialize(out, &opts);
     if (first) {
@@ -280,8 +349,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     for (LeptrisNodeRef sib = leptris_node_next_sibling(
              leptris_element_as_node(root));
          sib; sib = leptris_node_next_sibling(sib)) {
-        char* piece = leptris_element_serialize((LeptrisElement)sib,
-                                                &opts);
+        char* piece = serialize_frag_node_text(sib);
         if (piece) {
             size_t pl = strlen(piece);
             while (total + pl + 1 > cap) cap *= 2;
@@ -291,6 +359,25 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                 total += pl;
             }
             leptris_free_string(piece);
+        }
+    }
+
+    /* libxslt always breaks the line after the declaration —
+     * including non-indenting outputs (all 162 decl-bearing
+     * expected outputs in the adopted suite do). */
+    if (acc && strncmp(acc, "<?xml", 5) == 0) {
+        const char* q = strstr(acc, "?>");
+        if (q && q[2] != '\n') {
+            size_t at = (size_t)(q - acc) + 2;
+            size_t len = strlen(acc);
+            char* fixed = (char*)malloc(len + 2);
+            if (fixed) {
+                memcpy(fixed, acc, at);
+                fixed[at] = '\n';
+                memcpy(fixed + at + 1, acc + at, len - at + 1);
+                free(acc);
+                acc = fixed;
+            }
         }
     }
 
@@ -314,18 +401,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
         }
     }
     (void)0;
-    /* Fragment-order tail text (emitted after the last element). */
-    if (ex->tail_text && ex->tail_text_len) {
-        size_t tl = ex->tail_text_len;
-        size_t fl = final ? strlen(final) : 0;
-        char* with_tail = (char*)malloc(fl + tl + 1);
-        if (with_tail) {
-            if (final) memcpy(with_tail, final, fl);
-            memcpy(with_tail + fl, ex->tail_text, tl + 1);
-            free(final);
-            final = with_tail;
-        }
-    }
+    free(first_pre);
     leptris_document_free(out);
     xslt_exec_free(ex);
     return final;

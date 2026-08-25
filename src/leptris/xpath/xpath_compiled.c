@@ -170,6 +170,10 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
                                  (XPathVariableSet*)variables);
 }
 
+LEPTRIS_API const char* leptris_xpath_compiled_text(LeptrisXPathCompiled compiled) {
+    return compiled ? compiled->expr : NULL;
+}
+
 LEPTRIS_API void leptris_xpath_compiled_free(LeptrisXPathCompiled compiled) {
     if (!compiled) return;
     xpath_ast_cache_release(compiled->ast);
