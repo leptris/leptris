@@ -1473,6 +1473,30 @@ static int op_attribute(XsltExec* ex, const XsltInstr* in,
     return 0;
 }
 
+/* Run instruction children capturing their string-value (the
+ * xsl:comment / xsl:processing-instruction content model, §7.4).
+ * Returns a malloc'd accumulation; caller frees. The caller's
+ * rtf-capture state and pending parent are preserved. */
+static char* xslt_capture_children_text(XsltExec* ex,
+                                        const XsltInstr* child,
+                                        LeptrisElement node) {
+    size_t saved_len = ex->rtf_text_len;
+    char* saved_buf = ex->rtf_text;
+    int saved_cap = ex->rtf_capturing;
+    ex->rtf_capturing = 1;
+    ex->rtf_text = (char*)calloc(1, 1);
+    ex->rtf_text_len = 0;
+    LeptrisElement saved_pp = ex->pending_parent;
+    ex->pending_parent = NULL;   /* children emit text, not nodes */
+    xslt_exec_instrs(ex, child, node);
+    ex->pending_parent = saved_pp;
+    char* acc = ex->rtf_text ? ex->rtf_text : (char*)calloc(1, 1);
+    ex->rtf_text = saved_buf;
+    ex->rtf_text_len = saved_len;
+    ex->rtf_capturing = saved_cap;
+    return acc;
+}
+
 static int op_comment(XsltExec* ex, const XsltInstr* in,
                       LeptrisElement node) {
     /* Literal comment (template content): in->text carries the
@@ -1487,33 +1511,14 @@ static int op_comment(XsltExec* ex, const XsltInstr* in,
             xslt_append_fragment_node(ex, cm);
         return 0;
     }
-    /* Content = the string-value of the instruction children —
-     * EVERY instruction kind may contribute (value-of, number,
-     * text...). Capture via the RTF text channel with the current
-     * node context preserved. */
-    char* saved_acc = NULL; (void)saved_acc;
-    size_t saved_len = ex->rtf_text_len;
-    char* saved_buf = ex->rtf_text;
-    int saved_cap = ex->rtf_capturing;
-    ex->rtf_capturing = 1;
-    ex->rtf_text = (char*)calloc(1, 1);
-    ex->rtf_text_len = 0;
-    LeptrisElement saved_pp = ex->pending_parent;
-    ex->pending_parent = NULL;   /* children emit text, not nodes */
-    xslt_exec_instrs(ex, in->child, node);
-    ex->pending_parent = saved_pp;
-    const char* acc = ex->rtf_text ? ex->rtf_text : "";
+    char* acc = xslt_capture_children_text(ex, in->child, node);
     LeptrisNodeRef cm = leptris_comment_node_create(ex->result, acc);
-    if (cm && ex->pending_parent) {
+    if (cm && ex->pending_parent)
         leptris_element_append_child_internal(
             ex->pending_parent, (LeptrisNode*)cm);
-    } else if (cm) {
+    else if (cm)
         xslt_append_fragment_node(ex, cm);
-    }
-    free(ex->rtf_text);
-    ex->rtf_text = saved_buf;
-    ex->rtf_text_len = saved_len;
-    ex->rtf_capturing = saved_cap;
+    free(acc);
     return 0;
 }
 
@@ -1529,21 +1534,13 @@ static int op_pi(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
             xslt_append_fragment_node(ex, pi);
         return 0;
     }
-    char* acc = (char*)calloc(1, 1);
-    size_t len = 0;
-    for (const XsltInstr* c = in->child; c; c = c->next) {
-        if (c->kind == XSLT_INSTR_TEXT && c->text) {
-            size_t tl = strlen(c->text);
-            acc = (char*)realloc(acc, len + tl + 1);
-            memcpy(acc + len, c->text, tl);
-            len += tl;
-            acc[len] = 0;
-        }
-    }
+    char* acc = xslt_capture_children_text(ex, in->child, node);
     LeptrisNodeRef pi = leptris_pi_node_create(ex->result, in->name, acc);
-    if (pi && ex->pending_parent) {
-        leptris_element_append_child(ex->pending_parent, (LeptrisElement)pi);
-    }
+    if (pi && ex->pending_parent)
+        leptris_element_append_child_internal(
+            ex->pending_parent, (LeptrisNode*)pi);
+    else if (pi)
+        xslt_append_fragment_node(ex, pi);
     free(acc);
     return 0;
 }
