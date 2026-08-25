@@ -373,19 +373,23 @@ static struct leptris_xpath_result* xslt_fn_document(
     if (!*href) {
         free(href);
         struct leptris_xpath_result* r = res_empty_ns();
-        LeptrisElement sr = ex->sheet_doc
-                                ? leptris_document_root(ex->sheet_doc)
-                                : NULL;
-        if (r && sr)
-            xpath_nodeset_add(r->value.nodeset_value, (LeptrisNodeRef)sr);
+        LeptrisNodeRef sd = ex->sheet_doc
+            ? (LeptrisNodeRef)leptris_document_get_node(
+                  (struct leptris_document*)ex->sheet_doc)
+            : NULL;
+        if (r && sd)
+            xpath_nodeset_add(r->value.nodeset_value, sd);
         return r;
     }
     LeptrisDocument d = xslt_doc_cache_get(ex, href);
     free(href);
     struct leptris_xpath_result* r = res_empty_ns();
     if (!r) return NULL;
-    LeptrisElement root = d ? leptris_document_root(d) : NULL;
-    if (root) xpath_nodeset_add(r->value.nodeset_value, (LeptrisNodeRef)root);
+    /* §12.1: document() yields the DOCUMENT node — /ch selects the
+     * root element itself, not its children. */
+    LeptrisNodeRef dn = d ? (LeptrisNodeRef)leptris_document_get_node(d)
+                          : NULL;
+    if (dn) xpath_nodeset_add(r->value.nodeset_value, dn);
     return r;
 }
 
