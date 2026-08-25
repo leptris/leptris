@@ -230,7 +230,7 @@ std::string run_case(const Case& c, int* status) {
         *status = 0;
         return r;
     }
-#endif
+#else
     int fds[2];
     if (pipe(fds) != 0) { *status = -1; return ""; }
     pid_t pid = fork();
@@ -278,6 +278,7 @@ std::string run_case(const Case& c, int* status) {
     waitpid(pid, &st, 0);
     *status = st;
     return out;
+#endif
 }
 
 TEST_P(LibxsltSuite, MatchesLibxsltOutput) {
