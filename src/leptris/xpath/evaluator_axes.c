@@ -243,6 +243,15 @@ static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
         current = leptris_element_get_parent(current);
     }
 
+    /* XPath §2.2: reverse axes yield REVERSE document order —
+     * outermost ancestor first. */
+    if (result->count > 1) {
+        for (size_t i = 0, j = result->count - 1; i < j; i++, j--) {
+            void* t = result->nodes[i];
+            result->nodes[i] = result->nodes[j];
+            result->nodes[j] = t;
+        }
+    }
     return result;
 }
 

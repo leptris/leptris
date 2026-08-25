@@ -1,6 +1,5 @@
 bug-100
 bug-102
-bug-108
 bug-111
 bug-113
 bug-114
