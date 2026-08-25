@@ -714,15 +714,35 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
             if (cn && leptris_node_get_type(cn) == LEPTRIS_NODE_TYPE_ELEMENT) {
                 copy_node_deep(ex, (LeptrisElement)cn, ex->pending_parent);
             } else if (cn) {
-                /* Text/other nodes: append their string value. */
-                char* sv = NULL;
-                if (leptris_node_get_type(cn) == LEPTRIS_NODE_TYPE_TEXT ||
-                    leptris_node_get_type(cn) == LEPTRIS_NODE_TYPE_CDATA) {
-                    sv = leptris_strdup(leptris_text_get_content((LeptrisTextNode*)cn));
-                }
-                if (sv) {
-                    out_append_text(ex, ex->pending_parent, sv);
-                    free(sv);
+                int cty = leptris_node_get_type(cn);
+                if (cty == LEPTRIS_NODE_TYPE_COMMENT) {
+                    LeptrisNodeRef cm = leptris_comment_node_create(
+                        ex->result,
+                        leptris_comment_node_get_content(cn));
+                    if (cm) {
+                        if (ex->pending_parent)
+                            leptris_element_append_child_internal(
+                                ex->pending_parent, (LeptrisNode*)cm);
+                        else
+                            xslt_append_fragment_node(ex, cm);
+                    }
+                } else if (cty == LEPTRIS_NODE_TYPE_PI) {
+                    LeptrisNodeRef pi = leptris_pi_node_create(
+                        ex->result,
+                        leptris_pi_node_get_target(cn),
+                        leptris_pi_node_get_data(cn));
+                    if (pi) {
+                        if (ex->pending_parent)
+                            leptris_element_append_child_internal(
+                                ex->pending_parent, (LeptrisNode*)pi);
+                        else
+                            xslt_append_fragment_node(ex, pi);
+                    }
+                } else if (cty == LEPTRIS_NODE_TYPE_TEXT ||
+                           cty == LEPTRIS_NODE_TYPE_CDATA) {
+                    const char* tc =
+                        leptris_text_get_content((LeptrisTextNode*)cn);
+                    if (tc) out_append_text(ex, ex->pending_parent, tc);
                 }
             }
         }
@@ -743,8 +763,8 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
                 ex->result, leptris_comment_node_get_content(
                                 (LeptrisNodeRef)node));
             if (cm && ex->pending_parent)
-                leptris_element_append_child(ex->pending_parent,
-                                             (LeptrisElement)cm);
+                leptris_element_append_child_internal(
+                    ex->pending_parent, (LeptrisNode*)cm);
             else if (cm)
                 xslt_append_fragment_node(ex, cm);
             return 0;
@@ -755,8 +775,8 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
                 leptris_pi_node_get_target((LeptrisNodeRef)node),
                 leptris_pi_node_get_data((LeptrisNodeRef)node));
             if (pi && ex->pending_parent)
-                leptris_element_append_child(ex->pending_parent,
-                                             (LeptrisElement)pi);
+                leptris_element_append_child_internal(
+                    ex->pending_parent, (LeptrisNode*)pi);
             else if (pi)
                 xslt_append_fragment_node(ex, pi);
             return 0;
@@ -1016,7 +1036,8 @@ static const XsltTemplate* xslt_select_template(
         int nm;
         {
             int nty = leptris_node_get_type((LeptrisNodeRef)node);
-            nm = (nty == LEPTRIS_NODE_TYPE_ELEMENT)
+            nm = (nty == LEPTRIS_NODE_TYPE_ELEMENT ||
+                  nty == LEPTRIS_NODE_TYPE_DOCUMENT)
                      ? xslt_pattern_matches(t->matches, node, ex->source)
                      : pattern_matches_nodekind(t->matches, nty);
         }
@@ -1150,12 +1171,35 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         if (n) {
             items = (LeptrisElement*)calloc(n, sizeof(LeptrisElement));
             if (items) {
+                /* Node-typed accessor: selections may carry text/
+                 * comment/PI nodes (identity transforms) — the
+                 * element-typed result_get nulls them. */
                 for (size_t i = 0; i < n; i++)
-                    items[i] = leptris_xpath_result_get(r, i);
+                    items[i] = (LeptrisElement)
+                        leptris_xpath_result_get_node(r, i);
             }
         }
         leptris_xpath_result_free(r);
     } else {
+        /* Document-node context (§5.4): the children ARE the root
+         * element (this engine's document model — top-level
+         * comments/PIs live outside the XPath tree), so template
+         * selection runs FOR it — not an enumeration of its
+         * children. No match → the built-in element rule. */
+        if (node &&
+            leptris_node_get_type((LeptrisNodeRef)node) ==
+                LEPTRIS_NODE_TYPE_DOCUMENT) {
+            LeptrisElement doc_root = leptris_document_root(ex->source);
+            if (!doc_root) return 0;
+            const XsltTemplate* best =
+                xslt_select_template(ex, doc_root, in->name, 0);
+            if (best)
+                return xslt_invoke_template(ex, best, doc_root, in->child);
+            return op_apply_templates(
+                ex,
+                &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                doc_root);
+        }
         /* Default (§5.4): child nodes in DOCUMENT ORDER — text
          * copies inline (built-in text rule, §5.8), elements select
          * and invoke their template AS ENCOUNTERED so output order
@@ -1817,18 +1861,24 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     }
     if (!ex->terminated) {
 
-    /* Root invocation: the best-matching template for the root
-     * element (same selection rule as apply-templates), else the
-     * built-in rule (which recurses into children). */
-    LeptrisElement root = leptris_document_root(source);
-    if (root) {
-        const XsltTemplate* root_t = xslt_select_template(ex, root, NULL, 0);
-        if (root_t) {
-            xslt_invoke_template(ex, root_t, root, NULL);
-        } else {
-            op_apply_templates(
-                ex, &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
-                root);
+    /* Root invocation (§5.1): the context is the DOCUMENT node —
+     * patterns match it via "/" only; other patterns never match
+     * the root. No match → the built-in root rule (apply-templates
+     * over the document's children). */
+    {
+        LeptrisElement dnode = (LeptrisElement)leptris_document_get_node(
+            (struct leptris_document*)source);
+        if (dnode) {
+            const XsltTemplate* root_t =
+                xslt_select_template(ex, dnode, NULL, 0);
+            if (root_t) {
+                xslt_invoke_template(ex, root_t, dnode, NULL);
+            } else {
+                op_apply_templates(
+                    ex,
+                    &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                    dnode);
+            }
         }
     }
     }   /* !terminated */

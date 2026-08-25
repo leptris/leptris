@@ -95,7 +95,7 @@ struct leptris_node_vtable {
 const LeptrisNodeVTable* leptris_node_vtable_for(LeptrisNodeTypeEnum type);
 
 /* Number of entries in the registry (one per LeptrisNodeTypeEnum value). */
-#define LEPTRIS_NODE_TYPE_COUNT 7
+#define LEPTRIS_NODE_TYPE_COUNT 10
 
 /* Node creation.
  *

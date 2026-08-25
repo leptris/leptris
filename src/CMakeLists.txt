@@ -23,6 +23,7 @@ set(LEPTRIS_SOURCES
     # DOM nodes
     leptris/dom/node.c
     leptris/dom/node_vtable.c
+    leptris/dom/document_node.c
     leptris/dom/node_public.c
     leptris/dom/element.c
     leptris/dom/element_query.c

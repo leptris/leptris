@@ -18,8 +18,11 @@
 #include "pi.h"
 #include "element.h"
 #include "doctype.h"
+#include "document_node.h"
 /* Include serialize.h for the full SerializeBuffer type — TODO 43. */
 #include "../serialize/serialize.h"
+
+static void document_serialize_impl(LeptrisNode* self, struct SerializeBuffer* buf);
 
 /* Forward declarations for per-type serialize wrappers.  Each wraps
  * the existing serialize_*_internal function with the vtable signature. */
@@ -61,6 +64,12 @@ static const LeptrisNodeVTable kDoctypeVtable = {
     .type_enum  = LEPTRIS_NODE_TYPE_DOCTYPE,
 };
 
+static const LeptrisNodeVTable kDocumentVtable = {
+    .serialize  = document_serialize_impl,
+    .type_name  = "document",
+    .type_enum  = LEPTRIS_NODE_TYPE_DOCUMENT,
+};
+
 /* Indexed by LeptrisNodeTypeEnum.  NULL slots = no vtable (e.g.,
  * LEPTRIS_NODE_TYPE_ATTRIBUTE — XPath-internal, not serialized). */
 static const LeptrisNodeVTable* const g_node_vtables[LEPTRIS_NODE_TYPE_COUNT] = {
@@ -71,6 +80,9 @@ static const LeptrisNodeVTable* const g_node_vtables[LEPTRIS_NODE_TYPE_COUNT] = 
     &kPiVtable,        /* 4 */
     &kDoctypeVtable,   /* 5 */
     NULL,              /* 6: ATTRIBUTE — XPath-internal */
+    NULL,              /* 7: NAMESPACE — XPath-synthetic */
+    NULL,              /* 8: TEXT — XPath-synthetic */
+    &kDocumentVtable,  /* 9: DOCUMENT */
 };
 
 const LeptrisNodeVTable* leptris_node_vtable_for(LeptrisNodeTypeEnum type) {
@@ -105,4 +117,9 @@ static void pi_serialize(LeptrisNode* self, struct SerializeBuffer* buf) {
 
 static void doctype_serialize(LeptrisNode* self, struct SerializeBuffer* buf) {
     serialize_doctype_internal((LeptrisDoctypeNode*)self, buf);
+}
+
+static void document_serialize_impl(LeptrisNode* self,
+                                    struct SerializeBuffer* buf) {
+    (void)self; (void)buf;   /* source-side only: never serialized */
 }

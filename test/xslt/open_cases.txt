@@ -6,7 +6,6 @@ bug-105
 bug-107
 bug-108
 bug-11-
-bug-111
 bug-112
 bug-113
 bug-114
@@ -47,7 +46,6 @@ bug-157
 bug-158
 bug-159
 bug-16-
-bug-160
 bug-161
 bug-163
 bug-164
@@ -78,7 +76,6 @@ bug-198
 bug-199
 bug-2-
 bug-20-
-bug-200
 bug-205
 bug-206
 bug-207
@@ -110,7 +107,6 @@ bug-35-
 bug-36-
 bug-37-
 bug-38-
-bug-39-
 bug-4-
 bug-40-
 bug-41-
@@ -120,13 +116,11 @@ bug-5-
 bug-50-
 bug-53
 bug-54
-bug-55
 bug-56
 bug-59
 bug-6-
 bug-63
 bug-65
-bug-66
 bug-68
 bug-70
 bug-71

@@ -5,7 +5,8 @@
  */
 
 #include "evaluator_internal.h"
-#include "../dom/pi.h"  /* LeptrisPINode for processing-instruction('target') */
+#include "../dom/pi.h"
+#include "../dom/document_node.h"  /* LeptrisPINode for processing-instruction('target') */
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
 #include <string.h>
@@ -663,6 +664,47 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
         LeptrisElement node = node_as_element(node_ptr);
         DEBUG_LOG("    Processing input[%zu]: node=%p", i, (void*)node);
 
+        /* Document-node contexts (XSLT "/" initial context):
+         * child = [root element]; self = the document itself;
+         * descendant(-or-self) = the root subtree; parent/
+         * ancestor = nothing. */
+        if (node_ptr && ((LeptrisNode*)node_ptr)->type ==
+                             LEPTRIS_NODE_TYPE_DOCUMENT) {
+            struct leptris_document* dd =
+                ((LeptrisDocumentNode*)node_ptr)->doc;
+            LeptrisElement doc_root = (LeptrisElement)dd->new_dom_root;
+            if (!doc_root) doc_root = dd->root;
+            if (strcmp(axis_name, "child") == 0) {
+                if (doc_root && matches_node_test(
+                        ctx, (LeptrisNode*)doc_root, node_test))
+                    xpath_nodeset_add(result, (LeptrisNode*)doc_root);
+            } else if (strcmp(axis_name, "self") == 0) {
+                if (matches_node_test(ctx, (LeptrisNode*)node_ptr,
+                                      node_test))
+                    xpath_nodeset_add(result, (LeptrisNode*)node_ptr);
+            } else if (strcmp(axis_name, "descendant") == 0 ||
+                       strcmp(axis_name, "descendant-or-self") == 0) {
+                if (axis_name[11] == '-' && /* -or-self */
+                    matches_node_test(ctx, (LeptrisNode*)node_ptr,
+                                      node_test))
+                    xpath_nodeset_add(result, (LeptrisNode*)node_ptr);
+                if (doc_root) {
+                    XPathNodeSet* sub = apply_axis(
+                        ctx, (LeptrisNode*)doc_root, axis_name,
+                        node_test);
+                    if (sub) {
+                        for (size_t j = 0;
+                             j < xpath_nodeset_count(sub); j++)
+                            xpath_nodeset_add(
+                                result, xpath_nodeset_get(sub, j));
+                        xpath_nodeset_free(sub);
+                    }
+                }
+            }
+            /* parent/ancestor/etc. from the document: empty */
+            continue;
+        }
+
         /* Handle attribute nodes for certain axes */
         if (!node) {
             LeptrisAttributeNode* attr_node = node_as_attribute(node_ptr);
@@ -690,6 +732,22 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                     DEBUG_LOG("      Axis '%s' cannot operate on attribute nodes, skipping", axis_name);
                     continue;  /* Skip non-element nodes for other axes */
                 }
+            } else if (node_ptr && ((LeptrisNode*)node_ptr)->type !=
+                       LEPTRIS_NODE_TYPE_ATTRIBUTE) {
+                /* Real DOM non-element (text/comment/cdata/pi):
+                 * self and parent still work; other axes are empty
+                 * from these nodes. */
+                if (strcmp(axis_name, "self") == 0) {
+                    if (matches_node_test(ctx, (LeptrisNode*)node_ptr,
+                                          node_test))
+                        xpath_nodeset_add(result, (LeptrisNode*)node_ptr);
+                } else if (strcmp(axis_name, "parent") == 0) {
+                    LeptrisNode* up = leptris_node_parent(
+                        (LeptrisNodeRef)node_ptr);
+                    if (up && matches_node_test(ctx, up, node_test))
+                        xpath_nodeset_add(result, up);
+                }
+                continue;
             } else {
                 DEBUG_LOG("      Skipping non-element, non-attribute node");
                 continue; /* Skip non-element, non-attribute nodes */

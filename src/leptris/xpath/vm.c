@@ -35,6 +35,7 @@
  */
 #include "bytecode.h"
 #include "evaluator_internal.h"
+#include "../dom/document_node.h"
 #include "functions.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"
@@ -410,8 +411,19 @@ struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
     if (!out) { xpath_nodeset_free(input); return NULL; }
 
     for (size_t i = 0; i < input->count; i++) {
-        if (!node_is_element(input->nodes[i])) continue;
-        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        LeptrisNode* nd = input->nodes[i];
+        /* Document node: child axis = the root element. */
+        if (nd && nd->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+            struct leptris_document* d = ((LeptrisDocumentNode*)nd)->doc;
+            LeptrisElement root = (LeptrisElement)d->new_dom_root;
+            if (!root) root = d->root;
+            if (root && (wild || vm_unprefixed_name_matches(
+                             ctx, root, name)))
+                xpath_nodeset_add_fast(out, (LeptrisNode*)root);
+            continue;
+        }
+        if (!node_is_element(nd)) continue;
+        LeptrisElement elem = (LeptrisElement)nd;
         LeptrisElement child = leptris_element_get_first_child(elem);
         while (child) {
             if (wild) {
