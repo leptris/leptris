@@ -15,9 +15,17 @@
 extern "C" {
 #include "leptris.h"
 }
+#ifdef _WIN32
+#include <windows.h>
+#include <direct.h>
+#else
 #include <dirent.h>
-#include <sys/wait.h>
 #include <unistd.h>
+#endif
+#ifdef _WIN32
+#include <process.h>
+#endif
+#include <sys/wait.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -80,32 +88,61 @@ bool is_open(const std::string& base) {
     return false;
 }
 
-std::vector<Case> discover() {
-    std::vector<Case> cases;
-    const char* dir = LEPTRIS_XSLT_SUITE_DIR;
-    DIR* d = opendir(dir);
-    if (!d) return cases;
+/* Collect complete {base}.xml/.xsl/.out triples. Portable: POSIX
+ * dirent or Win32 FindFirstFile. */
+static void collect_dir(const std::string& dir,
+                        std::vector<Case>& cases) {
+#ifdef _WIN32
+    std::string pattern = dir + "\\*.xsl";
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        const char* name = fd.cFileName;
+        size_t len = strlen(name);
+        if (len < 4 || strcmp(name + len - 4, ".xsl") != 0) continue;
+        std::string base(name, len - 4);
+        std::string xml = dir + "\\" + base + ".xml";
+        std::string out = dir + "\\" + base + ".out";
+        FILE* f1 = fopen(xml.c_str(), "rb");
+        FILE* f2 = fopen(out.c_str(), "rb");
+        if (!f1 || !f2) {
+            if (f1) fclose(f1);
+            if (f2) fclose(f2);
+            continue;
+        }
+        fclose(f1); fclose(f2);
+        cases.push_back(Case{base, xml, dir + "\\" + base + ".xsl", out});
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+#else
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
     struct dirent* ent;
     while ((ent = readdir(d)) != NULL) {
         const char* name = ent->d_name;
         size_t len = strlen(name);
         if (len < 4 || strcmp(name + len - 4, ".xsl") != 0) continue;
         std::string base(name, len - 4);
-        std::string xml = std::string(dir) + "/" + base + ".xml";
-        std::string out = std::string(dir) + "/" + base + ".out";
+        std::string xml = dir + "/" + base + ".xml";
+        std::string out = dir + "/" + base + ".out";
         FILE* f1 = fopen(xml.c_str(), "rb");
         FILE* f2 = fopen(out.c_str(), "rb");
         if (!f1 || !f2) {
             if (f1) fclose(f1);
             if (f2) fclose(f2);
-            continue;   /* not a complete triple */
+            continue;
         }
-        fclose(f1);
-        fclose(f2);
-        cases.push_back(Case{base, xml,
-                             std::string(dir) + "/" + base + ".xsl", out});
+        fclose(f1); fclose(f2);
+        cases.push_back(Case{base, xml, dir + "/" + base + ".xsl", out});
     }
     closedir(d);
+#endif
+}
+
+std::vector<Case> discover() {
+    std::vector<Case> cases;
+    collect_dir(LEPTRIS_XSLT_SUITE_DIR, cases);
     /* dirent order is unspecified — sort for deterministic runs. */
     struct Less {
         bool operator()(const Case& a, const Case& b) const {
@@ -179,7 +216,11 @@ std::string run_case(const Case& c, int* status) {
         close(fds[0]);
         /* xsl:import/include and document() hrefs resolve relative
          * to the stylesheet's location — run from the suite dir. */
+#ifdef _WIN32
+        _chdir(LEPTRIS_XSLT_SUITE_DIR);
+#else
         chdir(LEPTRIS_XSLT_SUITE_DIR);
+#endif
         std::string xsl = slurp(c.xsl_path.c_str());
         std::string xml = slurp(c.xml_path.c_str());
         LeptrisXslt sheet = leptris_xslt_parse(xsl.c_str(), xsl.size());
