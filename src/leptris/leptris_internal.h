@@ -137,6 +137,10 @@ struct leptris_document {
     struct leptris_top_comment* top_comments;    /* Comments outside root */
     size_t ref_count;               /* Reference counting for memory management */
     void* new_dom_root;             /* New DOM tree root (LeptrisElement) for serialization */
+    /* Lazy XPath document node (LEPTRIS_NODE_TYPE_DOCUMENT
+     * singleton — dom/document_node.h). XSLT's initial context and
+     * "/" pattern matching run on it. */
+    void* document_node;
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */

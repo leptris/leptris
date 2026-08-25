@@ -19,6 +19,8 @@
 #ifndef LEPTRIS_XSLT_INTERNAL_H
 #define LEPTRIS_XSLT_INTERNAL_H
 
+#include "../dom/document_node.h"
+
 #include "../leptris_internal.h"
 #include "../xpath/xpath_internal.h"
 #include "../xpath/parser.h"

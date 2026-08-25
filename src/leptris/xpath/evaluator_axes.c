@@ -5,6 +5,7 @@
  */
 
 #include "evaluator_internal.h"
+#include "../dom/document_node.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
 #include <string.h>
@@ -51,6 +52,16 @@ static void collect_descendants_or_self(XPathContext* ctx,
                                        XPathNodeSet* result,
                                        XPathASTNode* node_test) {
     if (!node) return;
+
+    if (leptris_node_get_type((LeptrisNodeRef)node) ==
+        LEPTRIS_NODE_TYPE_DOCUMENT) {
+        struct leptris_document* d =
+            ((LeptrisDocumentNode*)node)->doc;
+        LeptrisElement root = (LeptrisElement)d->new_dom_root;
+        if (!root) root = d->root;
+        collect_descendants_or_self(ctx, root, result, node_test);
+        return;
+    }
 
     if (matches_node_test(ctx, (LeptrisNode*)node, node_test)) {
         xpath_nodeset_add(result, node);
@@ -127,6 +138,19 @@ static XPathNodeSet* axis_child(XPathContext* ctx, LeptrisNode* node,
                                XPathASTNode* test) {
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
+
+    /* Document node: children = the document's root element (and,
+     * in this engine, nothing else — top-level comments/PIs live in
+     * the document's side lists, outside the XPath tree). */
+    if (node->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+        struct leptris_document* d =
+            ((LeptrisDocumentNode*)node)->doc;
+        LeptrisElement root = (LeptrisElement)d->new_dom_root;
+        if (!root) root = d->root;
+        if (root && matches_node_test(ctx, (LeptrisNode*)root, test))
+            xpath_nodeset_add(result, (LeptrisNode*)root);
+        return result;
+    }
 
     if (node->type != LEPTRIS_NODE_TYPE_ELEMENT) return result;
 

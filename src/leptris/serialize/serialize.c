@@ -702,7 +702,7 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
                 if (ser_child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
                     serialize_element_recursive((LeptrisElement)ser_child, buf, 0);
                 } else {
-                    serialize_node_internal(child, buf);
+                    serialize_node_internal(ser_child, buf);
                 }
                 ser_child = leptris_node_get_next_sibling(ser_child);
             }

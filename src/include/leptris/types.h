@@ -75,7 +75,11 @@ typedef enum {
     LEPTRIS_NODE_TYPE_CDATA = 3,
     LEPTRIS_NODE_TYPE_PI = 4,
     LEPTRIS_NODE_TYPE_DOCTYPE = 5,
-    LEPTRIS_NODE_TYPE_ATTRIBUTE = 6  /* reserved; not produced by the parser */
+    LEPTRIS_NODE_TYPE_ATTRIBUTE = 6, /* reserved; not produced by the parser */
+    /* Document node (XPath root). Values 7/8 are reserved for the
+     * XPath-synthetic internal kinds (namespace/text) — see
+     * leptris_internal.h — so the public document node sits at 9. */
+    LEPTRIS_NODE_TYPE_DOCUMENT = 9
 } LeptrisNodeKind;
 
 /* Kind of a node inside an XPath nodeset result. Nodesets are mixed:
