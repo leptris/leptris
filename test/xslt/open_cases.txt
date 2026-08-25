@@ -4,12 +4,10 @@ bug-108
 bug-111
 bug-113
 bug-114
-bug-115
 bug-117
 bug-118
 bug-120
 bug-124
-bug-125
 bug-126
 bug-127
 bug-130
@@ -109,7 +107,6 @@ bug-63
 bug-65
 bug-70
 bug-71
-bug-72
 bug-73
 bug-75
 bug-8-
@@ -122,7 +119,6 @@ bug-89
 bug-90
 bug-92
 bug-93
-bug-94
 bug-95
 bug-96
 bug-97

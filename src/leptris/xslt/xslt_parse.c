@@ -549,13 +549,17 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
 static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
                                    int preserve_ws) {
     XsltInstr* out = NULL;
+    /* §2.4: an xml:space="preserve" ancestor overrides stripping. */
+    if (!preserve_ws)
+        for (LeptrisElement a = list; a;
+             a = leptris_node_parent((LeptrisNodeRef)a)) {
+            const char* xs = leptris_element_attribute(a, "xml:space");
+            if (xs && strcmp(xs, "preserve") == 0) { preserve_ws = 1; break; }
+            if (xs && strcmp(xs, "default") == 0) break;
+        }
     /* Is the CONTAINING element a literal result element? Blank
      * nodes at its edges survive (indentation) when no xsl
      * instruction neighbors them. */
-    const char* pn = leptris_element_get_name(list);
-    const char* pcolon = pn ? strchr(pn, ':') : NULL;
-    const char* plocal = pcolon ? pcolon + 1 : pn;
-    int preserve_lre_parent = pn && !node_is_xsl(list, plocal ? plocal : "");
     for (LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(list));
          n; n = leptris_node_next_sibling(n)) {
         int type = leptris_node_get_type(n);
@@ -573,47 +577,13 @@ static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
                     }
                 }
                 if (ws_only) {
-                    /* libxslt blank rule (xsltproc-verified): a
-                     * ws-only text node is stripped UNLESS (a) an
-                     * immediate neighbor is NON-BLANK text, or (b)
-                     * its parent is a literal result element and
-                     * neither immediate neighbor is an xsl
-                     * instruction (indentation inside LREs). */
-                    int keep = 0;
-                    for (int side = 0; side < 2 && !keep; side++) {
-                        LeptrisNodeRef nb = side
-                            ? leptris_node_next_sibling(n)
-                            : leptris_node_previous_sibling(n);
-                        if (!nb ||
-                            leptris_node_get_type(nb) !=
-                                LEPTRIS_NODE_TYPE_TEXT)
-                            continue;
-                        const char* nt = leptris_node_text(nb);
-                        if (nt && *nt) {
-                            for (const char* p = nt; *p; p++) {
-                                if (*p != ' ' && *p != '\t' &&
-                                    *p != '\n' && *p != '\r') {
-                                    keep = 1;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (!keep && preserve_lre_parent) {
-                        int xsl_neighbor = 0;
-                        for (int side = 0; side < 2 && !xsl_neighbor; side++) {
-                            LeptrisNodeRef nb = side
-                                ? leptris_node_next_sibling(n)
-                                : leptris_node_previous_sibling(n);
-                            if (nb &&
-                                leptris_node_get_type(nb) ==
-                                    LEPTRIS_NODE_TYPE_ELEMENT &&
-                                node_is_xsl((LeptrisElement)nb, leptris_element_name((LeptrisElement)nb)))
-                                xsl_neighbor = 1;
-                        }
-                        if (!xsl_neighbor) keep = 1;
-                    }
-                    if (!keep) continue;
+                    /* §2.4 (xsltproc-verified): whitespace-only text
+                     * nodes in the stylesheet are ALWAYS stripped —
+                     * inside literal result elements too (indentation
+                     * does not survive); xsl:text passes
+                     * preserve_ws, and xml:space=preserve parents
+                     * keep theirs. */
+                    if (!preserve_ws) continue;
                 }
             }
             XsltInstr* in = instr_new(XSLT_INSTR_TEXT);
