@@ -777,6 +777,71 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
     XPathNodeSet* current = xpath_nodeset_new();
     if (!current) return NULL;
 
+    /* PATH_EXPR: a filter-expression head feeding steps —
+     * document('')//x, $v/a, key('k','v')/b, (@attr)/.. — the head
+     * result is the starting nodeset. Previously the head was
+     * IGNORED and the steps ran from the context node (every
+     * foreign-document and variable path silently misresolved). */
+    if (path->type == XPATH_AST_PATH_EXPR && path->child_count >= 1 &&
+        path->children[0]->type != XPATH_AST_STEP &&
+        path->children[0]->type != XPATH_AST_RELATIVE_PATH) {
+        struct leptris_xpath_result* head =
+            evaluate_expr(ctx, path->children[0]);
+        if (!head) {
+            xpath_nodeset_free(current);
+            return NULL;
+        }
+        if (head->type != XPATH_RESULT_NODESET) {
+            /* A non-nodeset head: per XPath 1.0 the path is applied
+             * to the head's VALUE as the context (rare; treat as
+             * empty — the common forms are nodeset heads). */
+            xpath_result_free(head);
+            xpath_nodeset_free(current);
+            return xpath_result_new(XPATH_RESULT_NODESET);
+        }
+        if (head->value.nodeset_value) {
+            for (size_t i = 0; i < head->value.nodeset_value->count; i++)
+                xpath_nodeset_add(current,
+                                  head->value.nodeset_value->nodes[i]);
+        }
+        xpath_result_free(head);
+        /* Process remaining children as steps. */
+        for (size_t i = 1; i < path->child_count; i++) {
+            XPathASTNode* child = path->children[i];
+            if (child->type == XPATH_AST_STEP) {
+                struct leptris_xpath_result* step_result =
+                    evaluate_step(ctx, child, current);
+                if (!step_result) {
+                    xpath_nodeset_free(current);
+                    return NULL;
+                }
+                xpath_nodeset_free(current);
+                current = step_result->value.nodeset_value;
+                step_result->value.nodeset_value = NULL;
+                xpath_result_free(step_result);
+            } else if (child->type == XPATH_AST_RELATIVE_PATH) {
+                for (size_t j = 0; j < child->child_count; j++) {
+                    XPathASTNode* step = child->children[j];
+                    struct leptris_xpath_result* step_result =
+                        evaluate_step(ctx, step, current);
+                    if (!step_result) {
+                        xpath_nodeset_free(current);
+                        return NULL;
+                    }
+                    xpath_nodeset_free(current);
+                    current = step_result->value.nodeset_value;
+                    step_result->value.nodeset_value = NULL;
+                    xpath_result_free(step_result);
+                }
+            }
+        }
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (result) result->value.nodeset_value = current;
+        else xpath_nodeset_free(current);
+        return result;
+    }
+
     /* Starting nodeset */
     if (path->type == XPATH_AST_ABSOLUTE_PATH) {
         /* Special case: Absolute path with element name as first step

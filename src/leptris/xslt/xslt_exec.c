@@ -532,6 +532,33 @@ static char* escape_fragment_text(const char* t, int doe) {
     return out;
 }
 
+
+/* Fragment-level node (comment/PI with no pending parent): chain as
+ * a child of the current result root when one exists, else hold on
+ * the frag list until an element anchors the chain. */
+typedef struct xslt_frag_node {
+    LeptrisNodeRef node;
+    struct xslt_frag_node* next;
+} XsltFragNode;
+
+static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n) {
+    LeptrisElement root = leptris_document_root(ex->result);
+    if (root) {
+        leptris_element_append_child(root, (LeptrisElement)n);
+        return;
+    }
+    XsltFragNode* fn = (XsltFragNode*)calloc(1, sizeof(*fn));
+    if (!fn) return;
+    fn->node = n;
+    if (!ex->frag_nodes) {
+        ex->frag_nodes = fn;
+    } else {
+        XsltFragNode* t = (XsltFragNode*)ex->frag_nodes;
+        while (t->next) t = t->next;
+        t->next = fn;
+    }
+}
+
 static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     LeptrisElement parent = ex->pending_parent;
     if (parent) {
@@ -629,8 +656,14 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
             for (size_t j = i; j > 0; j--) {
                 int swap;
                 if (s->numeric) {
-                    swap = s->descending ? nums[j-1] < nums[j]
-                                         : nums[j-1] > nums[j];
+                    double a = nums[j-1], b = nums[j];
+                    int a_nan = (a != a), b_nan = (b != b);
+                    int cmp;
+                    if (a_nan && b_nan) cmp = 0;
+                    else if (a_nan) cmp = -1;   /* NaN sorts first */
+                    else if (b_nan) cmp = 1;
+                    else cmp = (a < b) ? -1 : (a > b) ? 1 : 0;
+                    swap = s->descending ? cmp < 0 : cmp > 0;
                 } else {
                     const char* a = keys[j-1] ? keys[j-1] : "";
                     const char* b = keys[j] ? keys[j] : "";
@@ -1162,6 +1195,14 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
         }
         free(ns_avt);
     }
+    /* §7.1: in-scope declarations from the instruction. */
+    for (size_t i = 0; i < in->ns_out_count; i++) {
+        const char* cur = leptris_element_namespace_for_prefix(
+            e, in->ns_out_pfx[i]);
+        if (cur && strcmp(cur, in->ns_out_uri[i]) == 0) continue;
+        leptris_element_add_namespace_definition(e, in->ns_out_pfx[i],
+                                                 in->ns_out_uri[i]);
+    }
     xslt_apply_attr_sets(ex, in, e, node);
     LeptrisElement saved = ex->pending_parent;
     ex->pending_parent = e;
@@ -1209,6 +1250,18 @@ static int op_attribute(XsltExec* ex, const XsltInstr* in,
 
 static int op_comment(XsltExec* ex, const XsltInstr* in,
                       LeptrisElement node) {
+    /* Literal comment (template content): in->text carries the
+     * content verbatim — no instruction children. */
+    if (!in->child && in->text) {
+        LeptrisNodeRef cm = leptris_comment_node_create(ex->result,
+                                                        in->text);
+        if (cm && ex->pending_parent)
+            leptris_element_append_child(ex->pending_parent,
+                                         (LeptrisElement)cm);
+        else if (cm)
+            xslt_append_fragment_node(ex, cm);
+        return 0;
+    }
     char* acc = (char*)calloc(1, 1);
     size_t len = 0;
     for (const XsltInstr* c = in->child; c; c = c->next) {
@@ -1229,6 +1282,17 @@ static int op_comment(XsltExec* ex, const XsltInstr* in,
 }
 
 static int op_pi(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    /* Literal PI (template content). */
+    if (!in->child && in->name) {
+        LeptrisNodeRef pi = leptris_pi_node_create(
+            ex->result, in->name, in->text ? in->text : "");
+        if (pi && ex->pending_parent)
+            leptris_element_append_child(ex->pending_parent,
+                                         (LeptrisElement)pi);
+        else if (pi)
+            xslt_append_fragment_node(ex, pi);
+        return 0;
+    }
     char* acc = (char*)calloc(1, 1);
     size_t len = 0;
     for (const XsltInstr* c = in->child; c; c = c->next) {

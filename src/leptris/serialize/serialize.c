@@ -565,6 +565,12 @@ static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* bu
                 case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
                 case '"':  memcpy(out, "&quot;", 6); out += 6; break;
                 case '\'': memcpy(out, "&apos;", 6); out += 6; break;
+                /* Attribute values escape control chars as numeric
+                 * references (attribute-value normalization eats
+                 * literal \t/\n/\r) — libxslt-verified. */
+                case '\t': out += sprintf(out, "&#9;");  break;
+                case '\n': out += sprintf(out, "&#10;"); break;
+                case '\r': out += sprintf(out, "&#13;"); break;
                 default:   *out++ = val[i]; break;
             }
         }

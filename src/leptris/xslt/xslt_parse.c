@@ -221,9 +221,35 @@ static LeptrisXPathNsSet build_ns_context(LeptrisElement e) {
  * copies into the result — its in-scope bindings minus the XSLT
  * namespace (and the xsl prefix). Innermost binding wins per
  * prefix; the default namespace (if any) is returned separately. */
-static void build_ns_copy(LeptrisElement e, char*** out_pfx,
-                          char*** out_uri, size_t* out_count,
-                          char** out_default) {
+static int prefix_excluded(SheetParser* sp, LeptrisElement e,
+                           const char* pfx) {
+    /* Sheet-wide exclude-result-prefixes / extension-element-
+     * prefixes, plus any xsl:exclude-result-prefixes on the
+     * instruction element itself (v1: not the full ancestor walk). */
+    for (size_t i = 0; i < sp->sheet->exclude_count; i++)
+        if (strcmp(sp->sheet->exclude_pfx[i], pfx) == 0) return 1;
+    const char* loc = leptris_element_attribute(e,
+                                                "xsl:exclude-result-"
+                                                "prefixes");
+    if (!loc || !*loc)
+        loc = leptris_element_attribute(e, "exclude-result-prefixes");
+    if (loc && *loc) {
+        char* dup = leptris_strdup(loc);
+        if (dup) {
+            char* save = NULL;
+            for (char* tok = xslt_strtok(dup, " \t\n,", &save); tok;
+                 tok = xslt_strtok(NULL, " \t\n,", &save)) {
+                if (strcmp(tok, pfx) == 0) { free(dup); return 1; }
+            }
+            free(dup);
+        }
+    }
+    return 0;
+}
+
+static void build_ns_copy(SheetParser* sp, LeptrisElement e,
+                          char*** out_pfx, char*** out_uri,
+                          size_t* out_count, char** out_default) {
     *out_pfx = NULL; *out_uri = NULL; *out_count = 0; *out_default = NULL;
     char** pfx = NULL;
     char** uri = NULL;
@@ -238,6 +264,7 @@ static void build_ns_copy(LeptrisElement e, char*** out_pfx,
              * PREFIX is the default namespace. */
             if (!u) break;
             if (strcmp(u, XSLT_NS) == 0) continue;   /* never copy XSLT */
+            if (prefix_excluded(sp, a, p)) continue;
             if (!p || !*p) {
                 if (!deflt) deflt = leptris_strdup(u);
                 continue;
@@ -311,7 +338,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         }
         collect_attr_sets(in, e);
         /* §7.1.1: namespace declarations copied into the result. */
-        build_ns_copy(e, &in->ns_out_pfx, &in->ns_out_uri,
+        build_ns_copy(sp, e, &in->ns_out_pfx, &in->ns_out_uri,
                       &in->ns_out_count, &in->ns_out_default);
         in->child = parse_content(sp, e);
         return in;
@@ -415,7 +442,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         if (!in) return NULL;
         collect_attr_sets(in, e);
         /* §7.1.1: namespace declarations copied into the result. */
-        build_ns_copy(e, &in->ns_out_pfx, &in->ns_out_uri,
+        build_ns_copy(sp, e, &in->ns_out_pfx, &in->ns_out_uri,
                       &in->ns_out_count, &in->ns_out_default);
         in->child = parse_content(sp, e);
         return in;
@@ -443,7 +470,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         }
         collect_attr_sets(in, e);
         /* §7.1.1: namespace declarations copied into the result. */
-        build_ns_copy(e, &in->ns_out_pfx, &in->ns_out_uri,
+        build_ns_copy(sp, e, &in->ns_out_pfx, &in->ns_out_uri,
                       &in->ns_out_count, &in->ns_out_default);
         in->child = parse_content(sp, e);
         return in;
@@ -522,6 +549,13 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
 static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
                                    int preserve_ws) {
     XsltInstr* out = NULL;
+    /* Is the CONTAINING element a literal result element? Blank
+     * nodes at its edges survive (indentation) when no xsl
+     * instruction neighbors them. */
+    const char* pn = leptris_element_get_name(list);
+    const char* pcolon = pn ? strchr(pn, ':') : NULL;
+    const char* plocal = pcolon ? pcolon + 1 : pn;
+    int preserve_lre_parent = pn && !node_is_xsl(list, plocal ? plocal : "");
     for (LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(list));
          n; n = leptris_node_next_sibling(n)) {
         int type = leptris_node_get_type(n);
@@ -540,10 +574,11 @@ static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
                 }
                 if (ws_only) {
                     /* libxslt blank rule (xsltproc-verified): a
-                     * ws-only text node in template content is
-                     * stripped UNLESS an immediate neighbor is a
-                     * NON-BLANK text node — i.e. only blanks that
-                     * are part of a literal text run survive. */
+                     * ws-only text node is stripped UNLESS (a) an
+                     * immediate neighbor is NON-BLANK text, or (b)
+                     * its parent is a literal result element and
+                     * neither immediate neighbor is an xsl
+                     * instruction (indentation inside LREs). */
                     int keep = 0;
                     for (int side = 0; side < 2 && !keep; side++) {
                         LeptrisNodeRef nb = side
@@ -564,6 +599,20 @@ static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
                             }
                         }
                     }
+                    if (!keep && preserve_lre_parent) {
+                        int xsl_neighbor = 0;
+                        for (int side = 0; side < 2 && !xsl_neighbor; side++) {
+                            LeptrisNodeRef nb = side
+                                ? leptris_node_next_sibling(n)
+                                : leptris_node_previous_sibling(n);
+                            if (nb &&
+                                leptris_node_get_type(nb) ==
+                                    LEPTRIS_NODE_TYPE_ELEMENT &&
+                                node_is_xsl((LeptrisElement)nb, leptris_element_name((LeptrisElement)nb)))
+                                xsl_neighbor = 1;
+                        }
+                        if (!xsl_neighbor) keep = 1;
+                    }
                     if (!keep) continue;
                 }
             }
@@ -575,6 +624,22 @@ static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
             if (in && !in->ns && sp->sheet->sheet_has_ns)
                 in->ns = build_ns_context((LeptrisElement)n);
             instr_append(&out, in);
+        } else if (type == LEPTRIS_NODE_TYPE_COMMENT) {
+            /* Literal comment in template content — copied verbatim
+             * (§7.4 semantics via the literal path). */
+            XsltInstr* in = instr_new(XSLT_INSTR_COMMENT);
+            if (in) {
+                in->text = leptris_strdup(
+                    leptris_comment_node_get_content(n));
+                instr_append(&out, in);
+            }
+        } else if (type == LEPTRIS_NODE_TYPE_PI) {
+            XsltInstr* in = instr_new(XSLT_INSTR_PI);
+            if (in) {
+                in->name = leptris_strdup(leptris_pi_node_get_target(n));
+                in->text = leptris_strdup(leptris_pi_node_get_data(n));
+                instr_append(&out, in);
+            }
         }
     }
     return out;
@@ -1108,6 +1173,9 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         free(na);
     }
     free((void*)sheet->out_media_type);
+    for (size_t i = 0; i < sheet->exclude_count; i++)
+        free(sheet->exclude_pfx[i]);
+    free(sheet->exclude_pfx);
     while (sheet->decformats) {
         XsltDecimalFormat* d = sheet->decformats;
         sheet->decformats = d->next;
@@ -1146,6 +1214,31 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
      * expressions may use prefixed tests — parse-time ns contexts. */
     if (leptris_element_namespace_decl_prefix(root, 0))
         sheet->sheet_has_ns = 1;
+    /* §7.1.1/§14.1 excluded prefixes: exclude-result-prefixes +
+     * extension-element-prefixes on the stylesheet root. */
+    {
+        const char* lists[2] = {
+            leptris_element_attribute(root, "exclude-result-prefixes"),
+            leptris_element_attribute(root, "extension-element-prefixes"),
+        };
+        for (int li = 0; li < 2; li++) {
+            const char* v = lists[li];
+            if (!v || !*v) continue;
+            char* dup = leptris_strdup(v);
+            if (!dup) continue;
+            char* save = NULL;
+            for (char* tok = xslt_strtok(dup, " \t\n,", &save); tok;
+                 tok = xslt_strtok(NULL, " \t\n,", &save)) {
+                if (strcmp(tok, "#all") == 0) continue;   /* v1 */
+                sheet->exclude_pfx = (char**)realloc(
+                    sheet->exclude_pfx,
+                    (sheet->exclude_count + 1) * sizeof(char*));
+                sheet->exclude_pfx[sheet->exclude_count++] =
+                    leptris_strdup(tok);
+            }
+            free(dup);
+        }
+    }
     /* Default xsl:decimal-format (always present; named formats
      * append later). */
     XsltDecimalFormat* df = (XsltDecimalFormat*)calloc(1, sizeof(*df));

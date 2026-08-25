@@ -253,6 +253,11 @@ struct xslt_styles {
      * per-instruction ns-context building (§4 prefixed tests). */
     int sheet_has_ns;
 
+    /* §7.1.1 exclude-result-prefixes (+ extension-element-prefixes,
+     * §14.1: extension prefixes never reach the result). */
+    char** exclude_pfx;
+    size_t exclude_count;
+
     /* §16.1 xsl:output standalone (-1 absent, 0 no, 1 yes) and
      * media-type (advisory). */
     int out_standalone;
@@ -292,6 +297,7 @@ typedef struct xslt_exec {
     char* tail_text;               /* text emitted AFTER elements (root
                                     * siblings in fragment order) */
     size_t tail_text_len, tail_text_cap;
+    void* frag_nodes;             /* pre-root fragment nodes */
     char* rtf_text;                /* RTF capture buffer: a variable
                                     * body that produces only text has
                                     * no element to chain nodes from —
