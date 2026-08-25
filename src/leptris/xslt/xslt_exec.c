@@ -794,18 +794,23 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
     if (in->select) {
         v = xslt_eval(ex, in->select, node);
     } else if (in->child) {
-        /* RTF: build into a scratch document with no parent so the
-         * emitted top-level nodes collect at the document root.
-         * The variable holds a nodeset of those top-level nodes —
-         * exslt:node-set semantics without an explicit call. */
+        /* RTF: build into a FRESH scratch document (§11.1) — never
+         * into the result tree, which may carry a partially built
+         * element the variable sits inside (a variable mid-template
+         * used to steal the whole result). The variable holds a
+         * nodeset of the fragment's top-level nodes. */
+        LeptrisDocument main_result = ex->result;
         LeptrisElement saved = ex->pending_parent;
+        ex->result = leptris_document_create();
         ex->pending_parent = NULL;
         ex->rtf_capturing = 1;
         ex->rtf_text_len = 0;
         xslt_exec_instrs(ex, in->child, node);
         ex->rtf_capturing = 0;
         ex->pending_parent = saved;
-        LeptrisElement rr = leptris_document_root(ex->result);
+        LeptrisDocument frag_doc = ex->result;
+        ex->result = main_result;
+        LeptrisElement rr = leptris_document_root(frag_doc);
         if (!rr && ex->rtf_text && ex->rtf_text_len) {
             /* Pure-text RTF: the value is the string. */
             v = xpath_result_new(XPATH_RESULT_STRING);
@@ -837,13 +842,14 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
             struct xslt_rtf_entry* ent =
                 (struct xslt_rtf_entry*)malloc(sizeof(*ent));
             if (ent) {
-                ent->doc = ex->result;
+                ent->doc = frag_doc;
                 ent->next = (struct xslt_rtf_entry*)ex->rtf_chain;
                 ex->rtf_chain = ent;
             } else {
-                leptris_document_free(ex->result);
+                leptris_document_free(frag_doc);
             }
-            ex->result = leptris_document_create();
+        } else {
+            leptris_document_free(frag_doc);
         }
     }
     xslt_push_var(ex, in->name, v);
