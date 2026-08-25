@@ -246,6 +246,24 @@ static LeptrisElement out_append_elem(XsltExec* ex, LeptrisElement parent,
     return out_place_elem(ex, parent, e);
 }
 
+/* Is `prefix` already bound to `uri` on a RESULT ancestor? Then a
+ * copy's declaration would be redundant (libxslt omits it). */
+static int result_ns_in_scope(LeptrisElement e, const char* prefix,
+                              const char* uri) {
+    const char* pf = prefix ? prefix : "";
+    for (LeptrisElement a = leptris_node_parent((LeptrisNodeRef)e);
+         a; a = leptris_node_parent((LeptrisNodeRef)a)) {
+        for (struct leptris_namespace* ns = leptris_elem_namespaces(a);
+             ns; ns = ns->next) {
+            const char* npf = ns->prefix ? ns->prefix : "";
+            if (strcmp(npf, pf) == 0 && ns->uri && uri &&
+                strcmp(ns->uri, uri) == 0)
+                return 1;
+        }
+    }
+    return 0;
+}
+
 /* Copy of a source ELEMENT: same local name, prefix and namespace
  * URI as the source (§7.5). */
 static LeptrisElement out_copy_elem(XsltExec* ex, LeptrisElement parent,
@@ -879,10 +897,27 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     /* §7.5: copying an element copies its namespace nodes too —
      * the in-scope declarations travel with the copy (bug-122/124:
      * xmlns:* and default declarations on identity copies). */
-    for (struct leptris_namespace* ns = leptris_elem_namespaces(node);
-         ns; ns = ns->next) {
-        leptris_element_add_namespace_definition(
-            e, ns->prefix ? ns->prefix : "", ns->uri);
+    {
+        /* §7.5: in-scope namespaces (innermost binding per prefix). */
+        char seen_pfx[32][96];
+        size_t seen = 0;
+        for (LeptrisElement anc = node; anc && seen < 32;
+             anc = leptris_node_parent((LeptrisNodeRef)anc)) {
+            for (struct leptris_namespace* ns =
+                     leptris_elem_namespaces(anc);
+                 ns; ns = ns->next) {
+                const char* pf = ns->prefix ? ns->prefix : "";
+                int dup = 0;
+                for (size_t k = 0; k < seen; k++)
+                    if (strcmp(seen_pfx[k], pf) == 0) { dup = 1; break; }
+                if (dup) continue;
+                if (seen < 32)
+                    snprintf(seen_pfx[seen++], 96, "%s", pf);
+                if (ns->uri &&
+                    !result_ns_in_scope(e, pf, ns->uri))
+                    leptris_element_add_namespace_definition(e, pf, ns->uri);
+            }
+        }
     }
     /* Attribute sets contribute defaults for missing names;
      * source node attrs win (we apply them after so their values
@@ -915,11 +950,28 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
      * so it stays no-namespace. */
     {
         int copied_default = 0;
-        for (struct leptris_namespace* ns = leptris_elem_namespaces(node);
-             ns; ns = ns->next) {
-            leptris_element_add_namespace_definition(
-                e, ns->prefix ? ns->prefix : "", ns->uri);
-            if (!ns->prefix) copied_default = 1;
+        /* §7.5: the copy carries the IN-SCOPE namespaces (ancestor
+         * declarations, innermost binding per prefix wins). */
+        char seen_pfx[32][96];
+        size_t seen = 0;
+        for (LeptrisElement anc = node; anc && seen < 32;
+             anc = leptris_node_parent((LeptrisNodeRef)anc)) {
+            for (struct leptris_namespace* ns =
+                     leptris_elem_namespaces(anc);
+                 ns; ns = ns->next) {
+                const char* pf = ns->prefix ? ns->prefix : "";
+                int dup = 0;
+                for (size_t k = 0; k < seen; k++)
+                    if (strcmp(seen_pfx[k], pf) == 0) { dup = 1; break; }
+                if (dup) continue;
+                if (seen < 32)
+                    snprintf(seen_pfx[seen++], 96, "%s", pf);
+                if (ns->uri &&
+                    !result_ns_in_scope(e, pf, ns->uri))
+                    leptris_element_add_namespace_definition(
+                        e, pf, ns->uri);
+                if (!ns->prefix) copied_default = 1;
+            }
         }
         if (!copied_default && parent) {
             const char* pdef = leptris_element_namespace_for_prefix(
