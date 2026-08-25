@@ -63,6 +63,17 @@ Porting discipline (same as TODO.transform):
 - Reference: net/sf/saxon/query/.
 
 ### 06-conformance-suites
+- The Saxon/W3C XSLT 3.0 test suite is now local:
+  ~/src/external/saxon-xslt30tests (Saxonica/xslt30-test, 470 MB,
+  8,486 stylesheets). Layout: root catalog.xml → test-set files
+  (tests/*/*/_name-test-set.xml) → test-case elements carrying the
+  scenario (stylesheet, initial context, result assertions).
+  XSLT 2.0 semantics are covered by the version="2.0" stylesheets
+  plus the shared core cases.
+- Harness: a catalog-driven runner in the libxslt-suite style
+  (fork-isolated, open-worklist skips) but assertion-aware — the
+  W3C cases assert structurally (assert-xml, assert-result-document,
+  error codes), not by byte comparison.
 - Port the W3C XSLT/XPath/XQuery 3.1 test-suite runner cases as
   in-tree specs (same layout as test/xpath/test_xpath_conformance).
 
