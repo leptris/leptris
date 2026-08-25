@@ -125,6 +125,24 @@ static char* to_html_method(const char* xml) {
     char* out = (char*)malloc(cap);
     if (!out) return NULL;
     for (size_t i = 0; i < len; ) {
+        /* §16.2 HTML PIs: no trailing '?' (<?php ... >, not XML's
+         * <?php ... ?>). The XML declaration is stripped earlier. */
+        if (xml[i] == '<' && xml[i + 1] == '?' &&
+            strncmp(xml + i + 2, "xml", 3) != 0) {
+            /* leave the declaration to the strip step */
+            const char* close = strstr(xml + i, "?>");
+            if (close) {
+                size_t body = (size_t)(close - (xml + i));  /* excl. '?' */
+                while (body--) {
+                    if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+                    out[o++] = xml[i++];
+                }
+                if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+                out[o++] = '>';
+                i += 2;   /* skip "?>" */
+                continue;
+            }
+        }
         if (xml[i] == '<') {
             /* Find "<name .../>" self-closing; convert known voids. */
             size_t j = i + 1;
@@ -198,6 +216,24 @@ static char* serialize_frag_node_text(LeptrisNodeRef n) {
     else
         snprintf(out, cap + 8, "%s", body ? body : "");
     return out;
+}
+
+/* §16.2 post-pass: strip the XML declaration, unslash void
+ * elements, PHP-style PIs. Returns a fresh string (caller frees the
+ * input). */
+static char* html_post_pass(char* acc) {
+    char* html = to_html_method(acc);
+    if (!html) return acc;
+    char* decl = strstr(html, "<?xml");
+    if (decl == html) {
+        char* end = strstr(html, "?>");
+        if (end) {
+            size_t rest = strlen(end + 2);
+            memmove(html, end + 2, rest + 1);
+        }
+    }
+    free(acc);
+    return html;
 }
 
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
@@ -278,6 +314,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             free(piece);
         }
         if (out) leptris_document_free(out);
+        if (ex->sheet->out_method_html) acc = html_post_pass(acc);
         xslt_exec_free(ex);
         return acc;
     }
@@ -384,24 +421,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     }
 
     char* final = acc;
-    if (ex->sheet->out_method_html) {
-        /* §16.2: post-pass — drop any XML declaration and unslash
-         * the known void elements. */
-        char* html = to_html_method(acc);
-        if (html) {
-            /* Also strip a leading declaration if present. */
-            char* decl = strstr(html, "<?xml");
-            if (decl == html) {
-                char* end = strstr(html, "?>");
-                if (end) {
-                    size_t rest = strlen(end + 2);
-                    memmove(html, end + 2, rest + 1);
-                }
-            }
-            free(acc);
-            final = html;
-        }
-    }
+    if (ex->sheet->out_method_html) final = html_post_pass(acc);
     (void)0;
     free(first_pre);
     leptris_document_free(out);
