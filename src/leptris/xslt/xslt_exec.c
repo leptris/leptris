@@ -241,6 +241,8 @@ static LeptrisElement out_append_elem(XsltExec* ex, LeptrisElement parent,
     return e;
 }
 
+static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n);
+
 static void out_append_text(XsltExec* ex, LeptrisElement parent,
                             const char* text) {
     if (!text || !*text) return;
@@ -273,33 +275,27 @@ static void out_append_text(XsltExec* ex, LeptrisElement parent,
     size_t tl = strlen(text);
     /* RTF capture: pure-text variable bodies route here instead of
      * leaking into the fragment output. */
-    char** buf;
-    size_t* len;
-    size_t* cap;
     if (ex->rtf_capturing) {
-        buf = &ex->rtf_text;
-        len = &ex->rtf_text_len;
-        cap = &ex->rtf_text_cap;
-    } else if (leptris_document_root(ex->result) != NULL) {
-        buf = &ex->tail_text;
-        len = &ex->tail_text_len;
-        cap = &ex->tail_text_cap;
-    } else {
-        buf = &ex->top_text;
-        len = &ex->top_text_len;
-        cap = &ex->top_text_cap;
+        if (ex->rtf_text_len + tl + 1 > ex->rtf_text_cap) {
+            size_t nc = ex->rtf_text_cap ? ex->rtf_text_cap * 2 : 64;
+            while (nc < ex->rtf_text_len + tl + 1) nc *= 2;
+            char* grown = (char*)realloc(ex->rtf_text, nc);
+            if (!grown) return;
+            ex->rtf_text = grown;
+            ex->rtf_text_cap = nc;
+        }
+        memcpy(ex->rtf_text + ex->rtf_text_len, text, tl);
+        ex->rtf_text_len += tl;
+        ex->rtf_text[ex->rtf_text_len] = 0;
+        return;
     }
-    if (*len + tl + 1 > *cap) {
-        size_t nc = *cap ? *cap * 2 : 64;
-        while (nc < *len + tl + 1) nc *= 2;
-        char* grown = (char*)realloc(*buf, nc);
-        if (!grown) return;
-        *buf = grown;
-        *cap = nc;
+    /* Fragment text = an ordered node like any other (§1: the
+     * result is a fragment; text keeps its position among the
+     * elements/comments/PIs). */
+    {
+        LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
+        if (t) xslt_append_fragment_node(ex, t);
     }
-    memcpy(*buf + *len, text, tl);
-    *len += tl;
-    (*buf)[*len] = 0;
 }
 
 /* String-value of an element subtree (XPath string-value: all
@@ -536,15 +532,16 @@ static char* escape_fragment_text(const char* t, int doe) {
 /* Fragment-level node (comment/PI with no pending parent): chain as
  * a child of the current result root when one exists, else hold on
  * the frag list until an element anchors the chain. */
-typedef struct xslt_frag_node {
-    LeptrisNodeRef node;
-    struct xslt_frag_node* next;
-} XsltFragNode;
-
 static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n) {
     LeptrisElement root = leptris_document_root(ex->result);
     if (root) {
-        leptris_element_append_child(root, (LeptrisElement)n);
+        /* Chain AFTER the root's sibling tail — the same layout
+         * out_append_elem uses for multiple top-level elements, so
+         * serialization walks one chain for every node kind. */
+        LeptrisNodeRef last = leptris_element_as_node(root);
+        while (leptris_node_get_next_sibling(last))
+            last = leptris_node_get_next_sibling(last);
+        leptris_node_set_next_sibling(last, n);
         return;
     }
     XsltFragNode* fn = (XsltFragNode*)calloc(1, sizeof(*fn));
@@ -738,6 +735,40 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
 }
 
 static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    /* §7.5: copy of a comment/PI node copies the node itself. */
+    {
+        int nty = leptris_node_get_type((LeptrisNodeRef)node);
+        if (nty == LEPTRIS_NODE_TYPE_COMMENT) {
+            LeptrisNodeRef cm = leptris_comment_node_create(
+                ex->result, leptris_comment_node_get_content(
+                                (LeptrisNodeRef)node));
+            if (cm && ex->pending_parent)
+                leptris_element_append_child(ex->pending_parent,
+                                             (LeptrisElement)cm);
+            else if (cm)
+                xslt_append_fragment_node(ex, cm);
+            return 0;
+        }
+        if (nty == LEPTRIS_NODE_TYPE_PI) {
+            LeptrisNodeRef pi = leptris_pi_node_create(
+                ex->result,
+                leptris_pi_node_get_target((LeptrisNodeRef)node),
+                leptris_pi_node_get_data((LeptrisNodeRef)node));
+            if (pi && ex->pending_parent)
+                leptris_element_append_child(ex->pending_parent,
+                                             (LeptrisElement)pi);
+            else if (pi)
+                xslt_append_fragment_node(ex, pi);
+            return 0;
+        }
+        if (nty == LEPTRIS_NODE_TYPE_TEXT ||
+            nty == LEPTRIS_NODE_TYPE_CDATA) {
+            out_append_text(ex, ex->pending_parent,
+                            leptris_text_node_get_content(
+                                (LeptrisNodeRef)node));
+            return 0;
+        }
+    }
     const char* name = leptris_element_get_name(node);
     if (!name) return 0;
     LeptrisElement e = out_append_elem(ex, ex->pending_parent, name, NULL);
@@ -952,6 +983,25 @@ static void strip_source_whitespace(XsltExec* ex) {
  * among the alternatives that actually MATCH. min_rank excludes
  * the importing sheets' own rules for xsl:apply-imports (§5.6). */
 
+/* Comment/PI nodes match only node()-kind tests; the element-cast
+ * ladder is unsafe for them. Text-level alternative scan. */
+static int pattern_matches_nodekind(const XsltPattern* p,
+                                    int node_type) {
+    for (const XsltPattern* alt = p; alt; alt = alt->next) {
+        const char* e = leptris_xpath_compiled_text(alt->expr);
+        if (!e) continue;
+        int is_comment = node_type == LEPTRIS_NODE_TYPE_COMMENT;
+        int is_pi = node_type == LEPTRIS_NODE_TYPE_PI;
+        int is_text = node_type == LEPTRIS_NODE_TYPE_TEXT ||
+                      node_type == LEPTRIS_NODE_TYPE_CDATA;
+        if (strstr(e, "node()")) return 1;
+        if (is_comment && strstr(e, "comment()")) return 1;
+        if (is_pi && strstr(e, "processing-instruction()")) return 1;
+        if (is_text && strstr(e, "text()")) return 1;
+    }
+    return 0;
+}
+
 static const XsltTemplate* xslt_select_template(
         const XsltExec* ex, LeptrisElement node, const char* mode,
         int min_rank) {
@@ -963,7 +1013,14 @@ static const XsltTemplate* xslt_select_template(
         if (t->import_rank < min_rank) continue;
         if ((mode && !t->mode) || (!mode && t->mode)) continue;
         if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
-        if (!xslt_pattern_matches(t->matches, node, ex->source)) continue;
+        int nm;
+        {
+            int nty = leptris_node_get_type((LeptrisNodeRef)node);
+            nm = (nty == LEPTRIS_NODE_TYPE_ELEMENT)
+                     ? xslt_pattern_matches(t->matches, node, ex->source)
+                     : pattern_matches_nodekind(t->matches, nty);
+        }
+        if (!nm) continue;
         /* Max priority among the MATCHING alternatives. */
         double pri = 0; int have = 0;
         for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
@@ -1122,17 +1179,32 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 }
                 continue;
             }
+            if (ty == LEPTRIS_NODE_TYPE_COMMENT ||
+                ty == LEPTRIS_NODE_TYPE_PI) {
+                /* Comments/PIs go through template selection too
+                 * (§5.4); the built-in rule for them is a no-op, but
+                 * match='node()'/comment()/processing-instruction()
+                 * templates MUST see them (the identity transform). */
+                LeptrisElement item = (LeptrisElement)c;
+                const XsltTemplate* best =
+                    xslt_select_template(ex, item, in->name, 0);
+                if (best)
+                    rc = xslt_invoke_template(ex, best, item, in->child);
+                continue;
+            }
             if (ty != LEPTRIS_NODE_TYPE_ELEMENT) continue;
-            LeptrisElement item = (LeptrisElement)c;
-            const XsltTemplate* best =
-                xslt_select_template(ex, item, in->name, 0);
-            if (best) {
-                rc = xslt_invoke_template(ex, best, item, in->child);
-            } else {
-                rc = op_apply_templates(
-                    ex,
-                    &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
-                    item);
+            {
+                LeptrisElement item = (LeptrisElement)c;
+                const XsltTemplate* best =
+                    xslt_select_template(ex, item, in->name, 0);
+                if (best) {
+                    rc = xslt_invoke_template(ex, best, item, in->child);
+                } else {
+                    rc = op_apply_templates(
+                        ex,
+                        &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                        item);
+                }
             }
         }
     }
@@ -1693,8 +1765,11 @@ void xslt_exec_free(XsltExec* ex) {
     xslt_docs_free(ex);
     xslt_bridge_free(ex);
     while (ex->vars) xslt_pop_var(ex, NULL);
-    free(ex->top_text);
-    free(ex->tail_text);
+    while (ex->frag_nodes) {
+        XsltFragNode* f = (XsltFragNode*)ex->frag_nodes;
+        ex->frag_nodes = f->next;
+        free(f);
+    }
     free(ex->rtf_text);
     if (ex->varset) xpath_variable_set_free(ex->varset);
     while (ex->rtf_chain) {
@@ -1762,6 +1837,3 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     return ex;
 }
 
-const char* xslt_exec_take_top_text(XsltExec* ex) {
-    return ex ? ex->top_text : NULL;
-}
