@@ -1,3 +1,5 @@
+# 02 — Document-node context for match='/' — DONE (2026-08-25, a524706)
+
 # 02 — Document-node context for match='/' (part of EMPTY, ~12 cases)
 
 match='/' is the DOCUMENT node: child::*/node() from it select the
@@ -17,3 +19,16 @@ Work (SSOT — fix at the model, not per-expression):
 Verify: name(/*), count(node()), select='*' from "/" all agree
 with xsltproc; 45/45 XsltFull stays green (match='/r' is ELEMENT
 context — distinct semantics, one test each way).
+
+---
+## DONE — implemented in a524706
+
+- DOM: LEPTRIS_NODE_TYPE_DOCUMENT singleton (dom/document_node.{h,c}).
+- Evaluator: doc-node child/descendant axes (VM + AST paths); self/parent
+  from non-element nodes.
+- XSLT: entry + built-in root rule run on the document node; "/" matches
+  only it; apply-templates/copy/copy-of take the node-typed accessor.
+- Identity transforms (bug-107 family) verified end-to-end.
+- Remaining known open: bug-119 (libxslt emits the literal body of a
+  source-side xsl:template matched via an attribute pattern — a
+  recorded-libxslt-quirk case; needs a quirk-equivalence decision).
