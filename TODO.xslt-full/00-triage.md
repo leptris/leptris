@@ -60,3 +60,52 @@ Next clusters: ~80 DIFF (mixed one-offs — AVT-in-attribute-name
 xsl:number NaN→0 quirk bug-187), 16 NUMBER, 8 SORT, 7 KEY, ~5 crash.
 Windows gates: bug-93, bug-102 (xsl:import path resolution on Win32),
 bug-118 (copy-of select='/').
+
+---
+## Session log 3 (102 → 129/205, HEAD after 934acb9 + 5 commits)
+
+Reference-oracle upgrade: libxml2 2.16.0 + libxslt checkouts at
+~/src/external — all serializer behavior now ported from source
+(HTMLtree.c htmlNodeDumpInternal, xsltutils.c xsltSaveResultTo),
+not empirical probing.
+
+Landed:
+1. libxml2-parity HTML output (e709dad): serializer html_method
+   mode — element descriptor table (EMPTY/INLINE/BLOCK, bsearch),
+   the four newline sites, zero nesting spaces, p/pre/param
+   parent-side rule; DOM-level <meta charset> injection
+   (htmlSetMetaEncoding port); §16.1 unnamespaced-html-root default
+   method + indent tri-state (-1: html yes, xml no); non-void empty
+   → open+close pairs; full void-element set.
+2. position() (2cb8cc5): exec carries current_pos; for-each +
+   apply-templates (selection + default child walk) set it; new
+   leptris_xpath_compiled_eval_ctx seeds ctx->context_position
+   (VM + interpreter read the same field).
+3. strip-space '*' (934acb9): NameTest wildcard in name_in_list;
+   zero-length text children are stripped nodes (parse never
+   creates them) — skipped in the child walk.
+4. call-template §11 scope (later commit): exec snapshots the
+   globals-only chain head; call resets there.
+5. copy-of verbatim mixed content: every child kind in document
+   order (was string-value + elements only).
+6. Element-less results keep the XML declaration (§16.1).
+7. EXSLT func module (3 commits): func:function/func:result/
+   func:param — registry bindings, globals-only scope, RTF
+   node-set returns, caller-context arg binding, function-ns
+   output exclusion (pre-scan before template compile).
+8. Namespace-URI pattern matching: XsltTemplate.ns (build_ns_
+   context), pattern ladder evaluates through it; selection-loop
+   temp template keeps .ns; /name fast path resolves the test
+   prefix through ctx->ns_set. Cross-prefix matches now correct.
+
+Suite: 129/205. Remaining census (76): 35 no-marker one-offs,
+7 xsl:number, 7 namespace, 6 document(), 5 import, 4 id(), 3 key,
+2 format-number, 2 exsl, ~10 more. Named next targets:
+- bug-53: DTD ATTLIST DEFAULT attribute materialization at parse
+  (parser-level feature — the dtd/ model stores default_value but
+  nothing applies it on the parse path)
+- bug-83: HTML URL-escaping of href attribute values (%20)
+- bug-33-: script/style raw text (serializer isRaw/dataMode)
+- bug-216: post-root document text (source trailing \n)
+- Windows gates: bug-93, bug-102, bug-118 — now PASSING on POSIX,
+  removed from the worklist (runner is POSIX-forked)
