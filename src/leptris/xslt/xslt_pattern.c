@@ -12,6 +12,7 @@
  * special-cased (the evaluator's context is the root element, not a
  * document node, so child::name cannot select the root itself). */
 #include "xslt_internal.h"
+#include <stdio.h>
 
 static int nodeset_contains(LeptrisXPathResult r, LeptrisElement node) {
     size_t n = leptris_xpath_result_count(r);
