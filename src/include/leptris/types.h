@@ -170,6 +170,12 @@ typedef struct {
      * CDATA sections instead of escaped text. NULL/0 = none. */
     const char* const* cdata_elements;
     size_t cdata_element_count;
+    /* §16.2 method="html" (XSLT): newline-per-block-element layout
+     * with zero nesting spaces, the HTML element table governing
+     * which elements may break lines, and void elements self-close
+     * without the slash (libxml2 HTMLtree.c parity). Requires
+     * indent > 0 to indent at all. */
+    int html_method;
 } LeptrisSerializeOptions;
 
 /* ============================================================================

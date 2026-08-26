@@ -66,8 +66,19 @@ typedef struct SerializeBuffer {
      * as CDATA. Set by the serialization entry points. */
     const char* const* cdata_names;
     size_t cdata_count;
+    /* §16.2 method="html": newline-per-block-element layout governed
+     * by the HTML element table (html_elem_flags). */
+    int html_method;
     int alloc_failed;  /* Sticky realloc-failure flag (TODO 08) */
 } SerializeBuffer;
+
+/* HTML element flags (§16.2, libxml2 html40ElementTable parity).
+ * Returns 0 for unknown elements: they never take part in the HTML
+ * indent decisions (no line breaks around or inside them). */
+#define HTML_F_EMPTY   1   /* void element: <br>, <img>, … */
+#define HTML_F_INLINE  2   /* inline content model: <span>, <b>, … */
+#define HTML_F_BLOCK   4   /* known block element: <div>, <p>, … */
+int html_elem_flags(const char* name, size_t len);
 
 /* The typedef name `SerializeBuffer` is already declared above as
  * part of `typedef struct SerializeBuffer { ... } SerializeBuffer;`

@@ -178,6 +178,35 @@ static char* to_html_method(const char* xml) {
                 }
                 continue;
             }
+
+            /* §16.2: non-void elements always emit open+close pair —
+             * an XML `<head/>` self-closer becomes `<head></head>`
+             * (HTML5 foreign-content rule). Scan to the tag's '>'
+             * (attributes may intervene) and check for a preceding
+             * '/'. */
+            {
+                const char* gt2 = xml + j;
+                while (gt2 < xml + len && *gt2 != '>') gt2++;
+                if (gt2 < xml + len && gt2 > xml && gt2[-1] == '/') {
+                    const char* sc = gt2 - 1;
+                    size_t attrs = (size_t)(sc - (xml + i + 1 + namelen));
+                    size_t need = namelen * 2 + attrs + 5;
+                    while (o + need + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+                    out[o++] = '<';
+                    memcpy(out + o, xml + i + 1, namelen);
+                    o += namelen;
+                    memcpy(out + o, xml + i + 1 + namelen, attrs);
+                    o += attrs;
+                    out[o++] = '>';
+                    out[o++] = '<';
+                    out[o++] = '/';
+                    memcpy(out + o, xml + i + 1, namelen);
+                    o += namelen;
+                    out[o++] = '>';
+                    i = (size_t)(gt2 - xml) + 1;   /* past '>' */
+                    continue;
+                }
+            }
         }
         if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
         out[o++] = xml[i++];
@@ -219,9 +248,12 @@ static char* serialize_frag_node_text(LeptrisNodeRef n) {
 }
 
 /* §16.2 post-pass: strip the XML declaration, unslash void
- * elements, PHP-style PIs. Returns a fresh string (caller frees the
- * input). */
-static char* html_post_pass(char* acc) {
+ * elements, decode &apos; in attribute values, PHP-style PIs. The
+ * meta-charset injection and the newline layout are NOT string
+ * transforms — they happen at the DOM/serializer level. Returns a
+ * fresh string (caller frees the input). */
+static char* html_post_pass(char* acc, const char* encoding) {
+    (void)encoding;
     /* The XML serializer always emits &apos; for an apostrophe in
      * an attribute value; the HTML method writes a raw apostrophe. */
     char* apos;
@@ -238,12 +270,89 @@ static char* html_post_pass(char* acc) {
     if (decl == html) {
         char* end = strstr(html, "?>");
         if (end) {
-            size_t rest = strlen(end + 2);
-            memmove(html, end + 2, rest + 1);
+            /* The shared serializer emits a newline immediately
+             * after the declaration (libxslt parity, see the post-
+             * pass below for XML); the HTML method wants neither —
+             * strip the declaration AND its trailing newline so
+             * no leading whitespace leaks into the HTML output. */
+            const char* p = end + 2;
+            if (*p == '\n') p++;
+            size_t rest = strlen(p);
+            memmove(html, p, rest + 1);
         }
     }
+
     free(acc);
     return html;
+}
+
+/* §16.1 default output method: when xsl:output names no method, an
+ * UNNAMESPACED html result root selects the html method (libxslt
+ * parity — the exact condition also requires the root to be the
+ * first non-blank result node; a namespaced xhtml root stays xml). */
+static int effective_html_method(const XsltStylesheet* sheet,
+                                 LeptrisElement root) {
+    if (sheet->out_method_html) return 1;
+    if (sheet->out_method_text) return 0;
+    if (root && leptris_element_get_namespace_uri(root) == NULL) {
+        const char* n = leptris_element_name(root);
+        if (n) {
+            size_t l = strlen(n);
+            if ((l == 4 && (n[3] == 'l' || n[3] == 'L')) &&
+                tolower((unsigned char)n[0]) == 'h' &&
+                tolower((unsigned char)n[1]) == 't' &&
+                tolower((unsigned char)n[2]) == 'm')
+                return 1;
+        }
+    }
+    return 0;
+}
+
+/* §16.1 default indent: html method indents yes unless the sheet
+ * said otherwise; xml defaults no. */
+static int effective_indent(const XsltStylesheet* sheet, int html) {
+    if (sheet->out_indent >= 0) return sheet->out_indent;
+    return html;
+}
+
+/* §16.2 meta charset injection (libxslt htmlSetMetaEncoding
+ * parity): a head with no encoding-bearing meta gets
+ * <meta charset="ENC"> prepended as its first child — at the DOM
+ * level, BEFORE serialization, so the html indent rules treat it
+ * like any other child. */
+static void inject_html_meta(LeptrisDocument out, const char* enc) {
+    if (!out || !enc || !*enc) return;
+    LeptrisElement root = leptris_document_root(out);
+    if (!root) return;
+    LeptrisElement head = NULL;
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(root));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
+            const char* n = leptris_element_name((LeptrisElement)c);
+            if (n && strcmp(n, "head") == 0) { head = (LeptrisElement)c; break; }
+        }
+    }
+    if (!head) return;
+    /* An author-provided meta wins — charset attr or http-equiv. */
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(head));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        const char* n = leptris_element_name((LeptrisElement)c);
+        if (!n || strcmp(n, "meta") != 0) continue;
+        if (leptris_element_attribute((LeptrisElement)c, "charset") ||
+            leptris_element_attribute((LeptrisElement)c, "http-equiv"))
+            return;
+    }
+    LeptrisElement m = leptris_element_create(out, "meta");
+    if (!m) return;
+    if (leptris_element_set_attribute(m, "charset", enc) != LEPTRIS_OK) {
+        /* The pool owns m; a failed attr leaves it detached and
+         * document-free — safe to leak-free via the doc. */
+        return;
+    }
+    leptris_node_prepend_child((LeptrisNodeRef)head, (LeptrisNodeRef)m);
 }
 
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
@@ -256,6 +365,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     ex->result = NULL;
 
     LeptrisElement root = out ? leptris_document_root(out) : NULL;
+    int html_method = effective_html_method(ex->sheet, root);
 
     /* §16.3 text method: every TEXT node in fragment order — the
      * fragment chain carries that order now (pre-root list + the
@@ -324,7 +434,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             free(piece);
         }
         if (out) leptris_document_free(out);
-        if (ex->sheet->out_method_html) acc = html_post_pass(acc);
+        if (html_method) acc = html_post_pass(acc, ex->sheet->out_encoding);
         xslt_exec_free(ex);
         return acc;
     }
@@ -344,10 +454,15 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     LeptrisSerializeOptions opts = {0};
     opts.xml_declaration = ex->sheet->out_method_text ? 0 : 1;
     /* §16.1 indent="yes": 2-space pretty-print via the shared
-     * serializer (text-only elements stay inline — libxslt rule). */
-    opts.indent = ex->sheet->out_indent ? 2 : 0;
+     * serializer (text-only elements stay inline — libxslt rule).
+     * HTML method: the serializer's §16.2 newline layout. */
+    opts.indent = effective_indent(ex->sheet, html_method) ? 2 : 0;
+    opts.html_method = html_method;
     opts.cdata_elements = ex->sheet->out_cdata;
     opts.cdata_element_count = ex->sheet->out_cdata_count;
+    if (html_method)
+        inject_html_meta(out, ex->sheet->out_encoding
+                                ? ex->sheet->out_encoding : "UTF-8");
     /* Pre-root fragment nodes go FIRST — they were emitted before
      * any element anchored the chain. */
     char* first_pre = NULL;
@@ -445,7 +560,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     }
 
     char* final = acc;
-    if (ex->sheet->out_method_html) final = html_post_pass(acc);
+    if (html_method) final = html_post_pass(acc, ex->sheet->out_encoding);
     (void)0;
     free(first_pre);
     leptris_document_free(out);
