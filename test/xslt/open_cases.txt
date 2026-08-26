@@ -5,7 +5,6 @@ bug-113
 bug-114
 bug-117
 bug-118
-bug-120
 bug-124
 bug-127
 bug-130
