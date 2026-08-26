@@ -302,6 +302,11 @@ typedef struct xslt_exec {
     LeptrisDocument result;        /* output tree (owned) */
     LeptrisDocument scratch;       /* RTF fragments live here (owned) */
     XsltVar* vars;                 /* frame chain */
+    XsltVar* global_vars;          /* chain head AFTER globals ran —
+                                      xsl:call-template resets the
+                                      chain here (§11: callees see
+                                      globals + own locals, never the
+                                      caller's locals) */
     XPathVariableSet* varset;      /* scratch set for evaluation */
     struct leptris_xpath_result* pending; /* with-params of the
                                              in-flight call */

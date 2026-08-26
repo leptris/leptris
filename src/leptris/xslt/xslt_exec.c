@@ -1087,8 +1087,14 @@ static int op_call_template(XsltExec* ex, const XsltInstr* in,
         if (ct->name && strcmp(ct->name, in->name) == 0) t = ct;
     }
     if (!t) return 0;
+    /* §11 scoping: the callee sees globals + its own locals + the
+     * call's with-params — NOT the caller's local frames. */
+    XsltVar* saved_vars = ex->vars;
+    ex->vars = ex->global_vars;
     /* with-params + §11.6 param defaults + current-template tracking. */
-    return xslt_invoke_template(ex, t, node, in->child);
+    int rc = xslt_invoke_template(ex, t, node, in->child);
+    ex->vars = saved_vars;
+    return rc;
 }
 
 
@@ -2254,6 +2260,7 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     for (const XsltInstr* g = sheet->globals; g; g = g->next) {
         if (g->kind == XSLT_INSTR_VARIABLE) op_variable(ex, g, NULL);
     }
+    ex->global_vars = ex->vars;   /* §11: the call-template reset point */
     if (!ex->terminated) {
 
     /* Root invocation (§5.1): the context is the DOCUMENT node —
