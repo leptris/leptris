@@ -1,5 +1,76 @@
 ## [Unreleased]
 
+## [1.9.1] - 2026-08-26
+
+### Added
+
+- ATTLIST default values materialize at parse time (XML 1.0 §3.3.2) (dtd)
+- the serializer owns the whole HTML method — string post-passes deleted (serialize)
+- EXSLT func:function — stylesheet-defined XPath functions (xslt)
+- libxml2-parity HTML output — indent rules, meta injection, default method (xslt/serialize)
+- core XPath PATH_EXPR heads + suite batch — 48/205 (xslt)
+- §7.1.1 namespace copying + xsl:* attr stripping (suite-driven) (xslt)
+- complete XSLT 1.0 — audit-driven gap closure (TODO.transform) (xslt)
+- §12 function bridge live — key/current/format-number/generate-id/system-property/document + EXSLT (TODO.transform 04/05) (xslt)
+- phases 02/04 essentials + variable transport (TODO.transform 02+04) (xslt)
+- XSLT 1.0 core engine (TODO.transform 01) (xslt)
+
+### Fixed
+
+- NCNames carry non-ASCII; leading keyword tokens are NameTests (xpath)
+- §3.4 strip/preserve-space NameTests resolve prefixes (xslt)
+- §11 template scoping moved to the invocation seam (bug-42-) (xslt)
+- id() resolves DTD-declared ID-typed attributes under any QName (§4.1) (xpath)
+- namespace-URI resolution for prefixed patterns and /name tests (§5.3) (xslt/xpath)
+- EXSLT func:param argument binding + function-ns output exclusion (xslt)
+- EXSLT func:result content returns a node-set, not a string (xslt)
+- element-less results keep the XML declaration (§16.1) (xslt)
+- xsl:copy-of copies mixed content verbatim (§11.3) (xslt)
+- call-template scopes to globals, not the caller's locals (§11) (xslt)
+- xsl:strip-space '*' wildcard strips whitespace-only source text (§3.4) (xslt)
+- position() reflects the in-flight node-list position (§12.4) (xslt/xpath)
+- HTML method decodes &apos; in attribute values (xslt)
+- LRE ns copy suppresses bindings already on any result ancestor (was parent-only — bug-150, bug-168). The result tree can have an LRE deeply nested, so the suppression must walk the full result-ancestor chain, not just the immediate parent. Suite 101/205. (xslt)
+- current() during xsl:key use evaluation (xslt)
+- NULL-safe namespace prefix strcmps — the default ns has a NULL prefix; the wrapper comparison segfaulted on the default-ns fall-through inside build_ns_copy. One xs_ns_strcmp helper guards prefix_excluded and the dedup compare. Three crash cases now pass on POSIX (stale-binary detections). (xslt)
+- filter expressions — the parser's XPATH_AST_PREDICATE nodes (xpath)
+- xsl:sort — multi-key (case 2+) + apply-templates support + strict numeric keys (xslt)
+- non-numeric sort keys are NaN (§10 — they sort before all numbers ascending; strtod("")==0 was masquerading as 0 and splitting the number run, bug-120). Suite 91/205. (xslt)
+- xsl:number corners — literal comment/PI drop, zero/negative rules, full roman (xslt)
+- format-number optional fraction digits + level=multiple join (xslt)
+- named decimal-formats are namespace-expanded names (§12.3) (xslt)
+- declaration split + after-root chain in document order (xslt)
+- AVT names + PI node string accessors + declaration ordering (xslt)
+- foreign document nodes resolve their OWN root (xslt)
+- document() yields the DOCUMENT node (§12.1) — /ch now selects the loaded document's root element; document('') the same for the stylesheet document (bug-153 family) (xslt)
+- self:: from attribute nodes + ancestor-or-self document order (xpath)
+- stylesheet whitespace — §2.4 as implemented by libxslt (xslt)
+- copies carry IN-SCOPE namespaces (§7.5) — ancestor walk, innermost binding per prefix, redundant declarations (already bound identically on a result ancestor) suppressed (bug-128) (xslt)
+- attribute nodes through templates — @-patterns, copy, control-char attr escaping (xslt)
+- RTF fragments bind their document node (libxslt model) (xslt/xpath)
+- xsl:processing-instruction content capture + HTML PI serialization (xslt)
+- document-order fidelity for top-level comments/PIs + xsl:comment content (xslt)
+- cdata-section-elements (§16.1) + prefix-preserving element copies (xslt/serialize)
+- namespace declarations precede attributes in the open tag (serializer)
+- the namespace axis, kind tests, and synthetic-node lifetimes (xpath/xslt)
+- attribute-set chains resolve at use time (§7.1.4/§12.1.4) (xslt)
+- copy-of namespace fidelity + present-but-empty attribute values (xslt)
+- document-node semantics — the XPath root as initial context (§5.1) (xslt)
+- comment/PI nodes in templates — node-kind pattern match, xsl:copy kinds, decl newline, indent=yes wiring (xslt)
+- RTF variables build into a scratch doc (§11.1) — 49/205 (xslt)
+- last strtok_r in strip-space list → xslt_strtok (xslt)
+- MSVC build — HUGE_VAL over const division, gate regexp:match (xslt)
+- free xsl:number compiled expressions (LeakSanitizer) (xslt)
+- portable builds + letter_value leak (xslt)
+- retain top-level comments (#550 sweep fallout) (serialize)
+- RTF-as-nodeset, attr-set ordering, conformance specs (xslt)
+
+### Performance
+
+- document-cached function registry + dirty-skip varset — 2.3-3.7x transforms (xslt/xpath)
+
+
+
 
 ### In progress
 
