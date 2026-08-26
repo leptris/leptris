@@ -689,9 +689,23 @@ TEST(XsltBridge, FormatNumber) {
         "<xsl:template match='/'>"
         "<xsl:value-of select=\"format-number(-7, '0')\"/>"
         "</xsl:template>", "<r/>")), "-7");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"format-number(100000000000, '#,##0.##')\"/>"
+        "</xsl:template>", "<r/>")), "100,000,000,000");
 }
 
 /* generate-id(): stable + unique per node (§12.5). */
+
+TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
+    EXPECT_EQ(body(run2(
+        "<xsl:key name='by-current' match='i' use='current()/@k'/>"
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"key('by-current', 'x')\"/>"
+        "</xsl:template>",
+        "<r><i k='x'>hit</i><i k='y'>miss</i></r>")), "hit");
+}
+
 TEST(XsltBridge, GenerateId) {
     std::string out = body(run(
         "<xsl:template match='/'>"
