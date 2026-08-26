@@ -314,6 +314,15 @@ struct leptris_document {
      * allocated docs (leptris_document_copy, leptris_parse_fragment)
      * leave this 0 and get freed via LEPTRIS_FREE. TODO 154. */
     int doc_pool_allocated;
+
+    /* Cached merged function registry (TODO.transform perf): built
+     * once from custom_xpath_fns + exslt_enabled + xslt_state, then
+     * REUSED by every evaluation context on this document. A
+     * transform builds ~45 registrations per expression otherwise.
+     * Invalidate (free + NULL) whenever any of the three inputs
+     * changes; document_free releases it. Evaluation contexts mark
+     * it borrowed so their cleanup leaves it alive. */
+    void* cached_fn_registry;
 };
 
 /* Open-addressed (element, name-hash) -> attribute index for the
@@ -616,6 +625,10 @@ typedef struct xpath_context {
      * invoking the handler; restored after so recursion works.
      * Standard handlers ignore the slot. */
     void* current_fn_user_data;
+
+    /* The registry came from the document's cached_fn_registry —
+     * context cleanup must NOT free it (the document owns it). */
+    int registry_borrowed;
 } XPathContext;
 
 /* XPath operator types - From ext/leptris/xpath.h */

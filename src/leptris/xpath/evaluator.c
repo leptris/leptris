@@ -99,6 +99,10 @@ void xpath_context_init(XPathContext* context,
     context->function_registry = leptris_xpath_build_custom_registry(document);
     if (!context->function_registry) {
         context->function_registry = xpath_function_registry_get_standard();
+    } else if (context->function_registry == document->cached_fn_registry) {
+        /* The document's cached registry — shared across every eval
+         * on this document; the DOC owns it. */
+        context->registry_borrowed = 1;
     }
 
     context->current_fn_user_data = NULL;
@@ -126,14 +130,16 @@ void xpath_context_cleanup(XPathContext* context) {
     }
 
     /* Function registry: usually the shared singleton (TODO 113
-     * perf) — do NOT free it. But if the doc had custom XPath
-     * functions registered (TODO 148 Phase 5), the context owns a
-     * freshly-built per-context registry that needs freeing. */
+     * perf) — do NOT free it. A per-context registry built for the
+     * doc's custom XPath functions (TODO 148 Phase 5) is freed
+     * here; a registry BORROWED from the document cache stays with
+     * the document. */
     extern XPathFunctionRegistry* xpath_function_registry_get_standard(void);
-    if (context->function_registry &&
+    if (context->function_registry && !context->registry_borrowed &&
         context->function_registry != xpath_function_registry_get_standard()) {
         xpath_function_registry_free((XPathFunctionRegistry*)context->function_registry);
     }
+    context->registry_borrowed = 0;
 }
 
 const char* xpath_context_error(XPathContext* context) {

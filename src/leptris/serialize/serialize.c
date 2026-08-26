@@ -46,6 +46,10 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->indent = 0;
     buf->indent_spaces = indent_spaces;
     buf->html_method = 0;
+    buf->cdata_names = NULL;   /* callers with cdata-section-elements
+                                * install theirs; every other buffer
+                                * must read "none", not heap garbage */
+    buf->cdata_count = 0;
     buf->alloc_failed = 0;
 
     return buf;

@@ -757,6 +757,9 @@ cleanup:
     return result;
 }
 
+/* Defined below (registry cache invalidation). */
+void leptris_xpath_invalidate_fn_registry(struct leptris_document* doc);
+
 LEPTRIS_API LeptrisStatus leptris_xpath_register_function(
     LeptrisDocument doc,
     const char* name,
@@ -794,6 +797,7 @@ LEPTRIS_API LeptrisStatus leptris_xpath_register_function(
     entry->user_data = state;
     entry->next = doc->custom_xpath_fns;
     doc->custom_xpath_fns = entry;
+    leptris_xpath_invalidate_fn_registry(doc);
     return LEPTRIS_OK;
 }
 
@@ -806,6 +810,7 @@ LEPTRIS_API LeptrisStatus leptris_exslt_enable(LeptrisDocument doc) {
     if (!doc) return LEPTRIS_ERROR_NULL_ARG;
     struct leptris_document* d = (struct leptris_document*)doc;
     d->exslt_enabled = 1;
+    leptris_xpath_invalidate_fn_registry(d);
     return LEPTRIS_OK;
 }
 
@@ -813,6 +818,13 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
     if (!doc) return NULL;
     if (!doc->custom_xpath_fns && !doc->exslt_enabled && !doc->xslt_state)
         return NULL;
+
+    /* TODO.transform perf: the merged registry depends only on the
+     * three inputs above; while none changes, EVERY evaluation
+     * context on this document can share one build (a transform
+     * otherwise rebuilds ~45 registrations per expression). */
+    if (doc->cached_fn_registry)
+        return (XPathFunctionRegistry*)doc->cached_fn_registry;
 
     XPathFunctionRegistry* reg = xpath_function_registry_new();
     if (!reg) return NULL;
@@ -851,13 +863,26 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
             reg->functions[reg->count - 1].user_data = e->user_data;
         }
     }
+    doc->cached_fn_registry = reg;
     return reg;
+}
+
+/* Drop the cached merged registry — call whenever any input changes
+ * (custom fns registered/removed, exslt toggled, xslt_state swapped
+ * by transform enter/exit). The next build_custom_registry call
+ * rebuilds. Evaluation contexts hold it only for their lifetime, so
+ * invalidation between evaluations is safe. */
+void leptris_xpath_invalidate_fn_registry(struct leptris_document* doc) {
+    if (!doc || !doc->cached_fn_registry) return;
+    xpath_function_registry_free((XPathFunctionRegistry*)doc->cached_fn_registry);
+    doc->cached_fn_registry = NULL;
 }
 
 /* Release the doc's custom-fn list. Called from
  * leptris_document_free. */
 void leptris_xpath_free_custom_fns(struct leptris_document* doc) {
     if (!doc) return;
+    leptris_xpath_invalidate_fn_registry(doc);
     struct leptris_custom_xpath_fn* e = doc->custom_xpath_fns;
     while (e) {
         struct leptris_custom_xpath_fn* next = e->next;
