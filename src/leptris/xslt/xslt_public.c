@@ -362,26 +362,40 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             }
         }
     }
-    size_t cap = pre_len + 64, total = 0;
+    char* first = leptris_document_serialize(out, &opts);
+    /* Declaration FIRST, then the pre-root fragment nodes, then the
+     * document body (top-level comments/PIs precede the root
+     * element in document order). */
+    size_t decl_len = 0;
+    if (first && strncmp(first, "<?xml", 5) == 0) {
+        const char* nl = strchr(first, '\n');
+        decl_len = nl ? (size_t)(nl - first) + 1 : strlen(first);
+    }
+    size_t cap = pre_len + (first ? strlen(first) : 0) + 64, total = 0;
     char* acc = (char*)malloc(cap);
     if (!acc) {
         free(first_pre);
+        leptris_free_string(first);
         leptris_document_free(out);
         xslt_exec_free(ex);
         return NULL;
     }
-    if (pre_len) {
-        memcpy(acc, first_pre, pre_len);
-        total = pre_len;
+    if (decl_len) {
+        memcpy(acc, first, decl_len);
+        total = decl_len;
     }
-    char* first = leptris_document_serialize(out, &opts);
+    if (pre_len) {
+        memcpy(acc + total, first_pre, pre_len);
+        total += pre_len;
+    }
     if (first) {
         size_t fl = strlen(first);
         while (total + fl + 1 > cap) cap *= 2;
         acc = (char*)realloc(acc, cap);
         if (acc) {
-            memcpy(acc + total, first, fl + 1);
-            total += fl;
+            memcpy(acc + total, first + decl_len,
+                   fl - decl_len + 1);
+            total += fl - decl_len;
         }
         leptris_free_string(first);
     }

@@ -5,6 +5,7 @@
  * leptris_xpath_variable_set_* helpers.
  */
 
+#include "../dom/pi.h"
 #include "../include/leptris.h"
 #include "../leptris_internal.h"
 #include "parser.h"
@@ -298,6 +299,9 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
     }
     if (tag == LEPTRIS_NODE_TYPE_COMMENT) {
         return leptris_comment_get_content((LeptrisCommentNode*)node);
+    }
+    if (tag == LEPTRIS_NODE_TYPE_PI) {
+        return leptris_pi_get_data((LeptrisPINode*)node);
     }
     if (tag == LEPTRIS_NODE_TEXT) {
         XPathTextNode* text = (XPathTextNode*)node;

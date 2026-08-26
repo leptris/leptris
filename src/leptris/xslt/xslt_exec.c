@@ -18,6 +18,10 @@
 
 #define XSLT_MAX_DEPTH 512
 
+static char* xslt_capture_children_text(XsltExec* ex,
+                                        const XsltInstr* child,
+                                        LeptrisElement node);
+
 /* Portable ASCII case-insensitive comparison (strcasecmp is
  * POSIX-only; MSVC has _stricmp). */
 static int xslt_ci_eq(const char* a, const char* b) {
@@ -1546,36 +1550,16 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
 static int op_attribute(XsltExec* ex, const XsltInstr* in,
                         LeptrisElement node) {
     if (!in->name || !ex->pending_parent) return 0;
-    /* Content becomes the value: execute into a text accumulator. */
-    char* acc = (char*)calloc(1, 1);
-    size_t len = 0;
-    for (const XsltInstr* c = in->child; c; c = c->next) {
-        if (c->kind == XSLT_INSTR_TEXT && c->text) {
-            size_t tl = strlen(c->text);
-            acc = (char*)realloc(acc, len + tl + 1);
-            if (!acc) return -1;
-            memcpy(acc + len, c->text, tl);
-            len += tl;
-            acc[len] = 0;
-        } else if (c->kind == XSLT_INSTR_VALUE_OF && c->select) {
-            struct leptris_xpath_result* r = xslt_eval(ex, c->select, node);
-            if (r) {
-                char* sv = leptris_xpath_result_string(r);
-                leptris_xpath_result_free(r);
-                if (sv) {
-                    size_t sl = strlen(sv);
-                    acc = (char*)realloc(acc, len + sl + 1);
-                    if (acc) {
-                        memcpy(acc + len, sv, sl);
-                        len += sl;
-                        acc[len] = 0;
-                    }
-                    leptris_free_string(sv);
-                }
-            }
-        }
-    }
-    leptris_element_set_attribute(ex->pending_parent, in->name, acc);
+    /* §7.1.3: the name is an ATTRIBUTE VALUE TEMPLATE; the content
+     * is the string-value of ALL child instructions (the shared
+     * capture — value-of, xsl:number, xsl:text all contribute). */
+    char* nm = strchr(in->name, '{')
+                   ? eval_avt(ex, in->name, node)
+                   : leptris_strdup(in->name);
+    char* acc = xslt_capture_children_text(ex, in->child, node);
+    if (nm && acc)
+        leptris_element_set_attribute(ex->pending_parent, nm, acc);
+    free(nm);
     free(acc);
     return 0;
 }
@@ -1630,25 +1614,32 @@ static int op_comment(XsltExec* ex, const XsltInstr* in,
 }
 
 static int op_pi(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    /* §7.3: the name is an attribute value template. */
+    char* nm = in->name && strchr(in->name, '{')
+                   ? eval_avt(ex, in->name, node)
+                   : (in->name ? leptris_strdup(in->name) : NULL);
     /* Literal PI (template content). */
-    if (!in->child && in->name) {
+    if (!in->child && nm) {
         LeptrisNodeRef pi = leptris_pi_node_create(
-            ex->result, in->name, in->text ? in->text : "");
+            ex->result, nm, in->text ? in->text : "");
         if (pi && ex->pending_parent)
-            leptris_element_append_child(ex->pending_parent,
-                                         (LeptrisElement)pi);
+            leptris_element_append_child_internal(
+                ex->pending_parent, (LeptrisNode*)pi);
         else if (pi)
             xslt_append_fragment_node(ex, pi);
+        free(nm);
         return 0;
     }
     char* acc = xslt_capture_children_text(ex, in->child, node);
-    LeptrisNodeRef pi = leptris_pi_node_create(ex->result, in->name, acc);
+    LeptrisNodeRef pi = nm ? leptris_pi_node_create(ex->result, nm, acc)
+                           : NULL;
     if (pi && ex->pending_parent)
         leptris_element_append_child_internal(
             ex->pending_parent, (LeptrisNode*)pi);
     else if (pi)
         xslt_append_fragment_node(ex, pi);
     free(acc);
+    free(nm);
     return 0;
 }
 
@@ -1792,6 +1783,21 @@ static LeptrisNodeRef next_node_doc_order(LeptrisNodeRef n) {
 
 static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
                                 LeptrisDocument doc) {
+    /* Attributes number within their OWNER's attribute list (the
+     * libxslt level=any rule — the tree walk never enters attrs). */
+    if (leptris_node_get_type((LeptrisNodeRef)node) ==
+        LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisAttributeNode* a = (LeptrisAttributeNode*)node;
+        LeptrisElement owner = (LeptrisElement)a->owner;
+        size_t na = owner ? leptris_element_attribute_count(owner) : 0;
+        for (size_t i = 0; i < na; i++) {
+            const char* cn =
+                leptris_element_attribute_name_at(owner, i);
+            if (cn && a->name && strcmp(cn, a->name) == 0)
+                return (unsigned long)(i + 1);
+        }
+        return 1;
+    }
     unsigned long pos = 1;
     LeptrisNodeRef target = (LeptrisNodeRef)node;
     struct leptris_document* sd = (struct leptris_document*)doc;
