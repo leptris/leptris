@@ -397,14 +397,31 @@ static struct leptris_xpath_result* xslt_fn_document(
  * format-number() (§12.3) — JDK1.1 pattern subset
  * ============================================================ */
 
-static const XsltDecimalFormat* find_decformat(const XsltStylesheet* s,
-                                               const char* name) {
+static const XsltDecimalFormat* find_decformat(
+        const XsltStylesheet* s, const char* name,
+        const struct leptris_xpath_ns_map* ns) {
     if (!s || !s->decformats) return NULL;
-    for (XsltDecimalFormat* d = s->decformats; d; d = d->next) {
-        if (!name || !*name) { if (!d->name) return d; continue; }
-        if (d->name && strcmp(d->name, name) == 0) return d;
+    if (!name || !*name) return s->decformats;
+    /* Namespace-expanded match: resolve the CALL's prefix through
+     * the expression's ns context, then compare URI + local. */
+    const char* colon = strchr(name, ':');
+    char uri[256] = "";
+    const char* local = name;
+    if (colon) {
+        local = colon + 1;
+        const char* u = leptris_xpath_ns_lookup(
+            (const struct leptris_xpath_ns_map*)ns, name,
+            (size_t)(colon - name));
+        snprintf(uri, sizeof(uri), "%s", u ? u : "");
     }
-    return name ? NULL : s->decformats;
+    for (XsltDecimalFormat* d = s->decformats; d; d = d->next) {
+        if (!d->name) continue;
+        if (strcmp(d->name, name) == 0) return d;   /* literal */
+        if (d->local && d->uri && *d->uri && strcmp(d->local, local) == 0 &&
+            strcmp(d->uri, uri) == 0)
+            return d;
+    }
+    return NULL;
 }
 
 typedef struct {
@@ -427,7 +444,8 @@ static const char* find_split(const char* s, const char* end) {
     return end;
 }
 
-static void parse_one(const char* s, const char* end, PatternInfo* pi) {
+static void parse_one(const char* s, const char* end, PatternInfo* pi,
+                       char dsep, char gsep) {
     /* Single pass: classify each char into prefix/int/digit/frac/
      * suffix; %/mille/./0-#/, are tokens. The cursor lets the
      * outer loop know we belong to the int vs frac part. */
@@ -456,22 +474,24 @@ static void parse_one(const char* s, const char* end, PatternInfo* pi) {
                      p + 2 < end && p[1] == (char)0x80 &&
                      p[2] == (char)0xB0) {  /* UTF-8 ‰ */
                 pi->multiplier = 1000; p += 2;
-            } else if (c == '.') { pi->has_decimal = 1; }
+            } else if (c == dsep) { pi->has_decimal = 1; }
             p++; continue;
         }
         if (phase == 1) {
             if (c == '0') { pi->min_int++; pi->max_int++; p++; continue; }
             if (c == '#') { pi->max_int++; p++; continue; }
-            if (c == ',') { pi->has_grouping = 1; p++; continue; }
+            /* When both separators are the same character, the
+             * DECIMAL reading wins (§12.3 ambiguity — libxslt). */
+            if (c == dsep) {
+                pi->has_decimal = 1;
+                phase = 2; p++; continue;
+            }
+            if (c == gsep) { pi->has_grouping = 1; p++; continue; }
             if (c == '%') { pi->multiplier = 100; pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break; }
             if (uc == 0xE2 && p + 2 < end && p[1] == (char)0x80 &&
                 p[2] == (char)0xB0) {
                 pi->multiplier = 1000; p += 2;
                 pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break;
-            }
-            if (c == '.') {
-                pi->has_decimal = 1;
-                phase = 2; p++; continue;
             }
             pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break;
         }
@@ -486,12 +506,13 @@ static void parse_one(const char* s, const char* end, PatternInfo* pi) {
 
 /* Returns 1 when an explicit negative subpattern was present. */
 static int parse_pattern(const char* s, size_t len,
-                          PatternInfo* pos, PatternInfo* neg) {
+                          PatternInfo* pos, PatternInfo* neg,
+                          char dsep, char gsep) {
     const char* end = s + len;
     const char* split = find_split(s, end);
-    parse_one(s, split, pos);
+    parse_one(s, split, pos, dsep, gsep);
     if (split < end) {
-        parse_one(split + 1, end, neg);
+        parse_one(split + 1, end, neg, dsep, gsep);
         return 1;
     }
     *neg = *pos;
@@ -564,10 +585,11 @@ static char* format_value(const PatternInfo* p, double abs_v,
 }
 
 char* xslt_format_number(const XsltStylesheet* sheet, double value,
-                         const char* pattern, const char* df_name) {
+                         const char* pattern, const char* df_name,
+                         const struct leptris_xpath_ns_map* ns) {
     if (!pattern || !*pattern) pattern = "0";
-    const XsltDecimalFormat* df = find_decformat(sheet, df_name);
-    if (!df) df = find_decformat(sheet, NULL);
+    const XsltDecimalFormat* df = find_decformat(sheet, df_name, ns);
+    if (!df) df = find_decformat(sheet, NULL, NULL);
     char decimal_sep  = df ? df->decimal_sep   : '.';
     char grouping_sep = df ? df->grouping_sep  : ',';
     char zero_digit   = df ? df->zero_digit    : '0';
@@ -579,7 +601,8 @@ char* xslt_format_number(const XsltStylesheet* sheet, double value,
     if (value != value) return leptris_strdup(nan_str);
     int neg = (value < 0);
     PatternInfo pos = {0}, negi = {0};
-    int has_neg = parse_pattern(pattern, strlen(pattern), &pos, &negi);
+    int has_neg = parse_pattern(pattern, strlen(pattern), &pos, &negi,
+                                  decimal_sep, grouping_sep);
     PatternInfo* use = neg ? (has_neg ? &negi : &pos) : &pos;
     if (neg && !has_neg) {   /* negate with explicit minus prefix */
         char minus = df ? df->minus_sign : '-';
@@ -612,7 +635,8 @@ static struct leptris_xpath_result* xslt_fn_format_number(
     double v = arg_number(ctx, args, n, 0);
     char* pat = arg_string(ctx, args, n, 1);
     char* df  = (n >= 3) ? arg_string(ctx, args, n, 2) : leptris_strdup("");
-    char* out = xslt_format_number(ex ? ex->sheet : NULL, v, pat, df);
+    char* out = xslt_format_number(ex ? ex->sheet : NULL, v, pat, df,
+                                ctx->ns_set);
     free(pat); free(df);
     struct leptris_xpath_result* r = res_string(out ? out : "");
     free(out);   /* res_string copies — the local is ours to free */
