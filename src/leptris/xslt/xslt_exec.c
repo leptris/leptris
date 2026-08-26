@@ -1399,19 +1399,37 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 const XsltTemplate* best =
                     xslt_select_template(ex, (LeptrisElement)n,
                                         in->name, 0);
+                if (best) {
+                    rc = xslt_invoke_template(ex, best,
+                                              (LeptrisElement)n, in->child);
+                }
+            }
+            if (rc) return rc;
+            int root_rc;
+            {
+                const XsltTemplate* best =
+                    xslt_select_template(ex, doc_root, in->name, 0);
+                root_rc = best
+                    ? xslt_invoke_template(ex, best, doc_root, in->child)
+                    : op_apply_templates(
+                          ex,
+                          &(XsltInstr){
+                              .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                          doc_root);
+            }
+            if (root_rc) return root_rc;
+            /* The after-root chain (top comments/PIs following the
+             * root element) completes document order. */
+            for (LeptrisNodeRef n = leptris_node_next_sibling(rootn);
+                 n && rc == 0; n = leptris_node_next_sibling(n)) {
+                const XsltTemplate* best =
+                    xslt_select_template(ex, (LeptrisElement)n,
+                                        in->name, 0);
                 if (best)
                     rc = xslt_invoke_template(ex, best,
                                               (LeptrisElement)n, in->child);
             }
-            if (rc) return rc;
-            const XsltTemplate* best =
-                xslt_select_template(ex, doc_root, in->name, 0);
-            if (best)
-                return xslt_invoke_template(ex, best, doc_root, in->child);
-            return op_apply_templates(
-                ex,
-                &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
-                doc_root);
+            return rc;
         }
         /* Default (§5.4): child nodes in DOCUMENT ORDER — text
          * copies inline (built-in text rule, §5.8), elements select
