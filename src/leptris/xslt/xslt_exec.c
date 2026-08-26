@@ -670,7 +670,12 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
                      * — result_number of a nodeset is NaN. */
                     char* sv = leptris_xpath_result_string(kr);
                     if (s->numeric) {
-                        nums[i] = sv ? strtod(sv, NULL) : 0.0;
+                        /* A non-numeric string key is NaN (§10: NaN
+                         * sorts before all numbers ascending) —
+                         * strtod("")==0 must not masquerade as one. */
+                        char* end = NULL;
+                        nums[i] = (sv && sv[0]) ? strtod(sv, &end) : (0.0/0.0);
+                        if (sv && end == sv) nums[i] = 0.0/0.0;
                         if (sv) free(sv);
                     } else {
                         keys[i] = sv;   /* ownership kept for compare */
@@ -680,9 +685,14 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
             } else {
                 char* sv = string_value_deep(items[i]);
                 if (sv) {
-                    if (s->numeric) nums[i] = strtod(sv, NULL);
-                    else keys[i] = sv;
-                    if (s->numeric) free(sv);
+                    if (s->numeric) {
+                        char* end = NULL;
+                        nums[i] = sv[0] ? strtod(sv, &end) : (0.0/0.0);
+                        if (end == sv) nums[i] = 0.0/0.0;
+                        free(sv);
+                    } else {
+                        keys[i] = sv;
+                    }
                 }
             }
         }
