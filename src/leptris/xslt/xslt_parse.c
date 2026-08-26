@@ -221,13 +221,18 @@ static LeptrisXPathNsSet build_ns_context(LeptrisElement e) {
  * copies into the result — its in-scope bindings minus the XSLT
  * namespace (and the xsl prefix). Innermost binding wins per
  * prefix; the default namespace (if any) is returned separately. */
+
+static int xs_ns_strcmp(const char* a, const char* b) {
+    return strcmp(a ? a : "", b ? b : "");
+}
 static int prefix_excluded(SheetParser* sp, LeptrisElement e,
                            const char* pfx) {
     /* Sheet-wide exclude-result-prefixes / extension-element-
      * prefixes, plus any xsl:exclude-result-prefixes on the
      * instruction element itself (v1: not the full ancestor walk). */
     for (size_t i = 0; i < sp->sheet->exclude_count; i++)
-        if (strcmp(sp->sheet->exclude_pfx[i], pfx) == 0) return 1;
+        
+if (xs_ns_strcmp(sp->sheet->exclude_pfx[i], pfx) == 0) return 1;
     const char* loc = leptris_element_attribute(e,
                                                 "xsl:exclude-result-"
                                                 "prefixes");
@@ -239,7 +244,7 @@ static int prefix_excluded(SheetParser* sp, LeptrisElement e,
             char* save = NULL;
             for (char* tok = xslt_strtok(dup, " \t\n,", &save); tok;
                  tok = xslt_strtok(NULL, " \t\n,", &save)) {
-                if (strcmp(tok, pfx) == 0) { free(dup); return 1; }
+                if (xs_ns_strcmp(tok, pfx) == 0) { free(dup); return 1; }
             }
             free(dup);
         }
@@ -255,7 +260,7 @@ static void build_ns_copy(SheetParser* sp, LeptrisElement e,
     char** uri = NULL;
     size_t cnt = 0, cap = 0;
     char* deflt = NULL;
-    for (LeptrisElement a = e; a;
+        for (LeptrisElement a = e; a;
          a = leptris_node_parent((LeptrisNodeRef)a)) {
         for (int i = 0;; i++) {
             const char* p = leptris_element_namespace_decl_prefix(a, i);
@@ -263,7 +268,7 @@ static void build_ns_copy(SheetParser* sp, LeptrisElement e,
             /* End of declarations: accessor returns no URI. A NULL
              * PREFIX is the default namespace. */
             if (!u) break;
-            if (strcmp(u, XSLT_NS) == 0) continue;   /* never copy XSLT */
+            if (xs_ns_strcmp(u, XSLT_NS) == 0) continue;   /* never copy XSLT */
             if (prefix_excluded(sp, a, p)) continue;
             if (!p || !*p) {
                 if (!deflt) deflt = leptris_strdup(u);
@@ -271,7 +276,9 @@ static void build_ns_copy(SheetParser* sp, LeptrisElement e,
             }
             int have = 0;
             for (size_t k = 0; k < cnt; k++)
-                if (strcmp(pfx[k], p) == 0) { have = 1; break; }
+                if (xs_ns_strcmp(pfx[k], p) == 0) {
+                    have = 1; break;
+                }
             if (have) continue;
             if (cnt == cap) {
                 cap = cap ? cap * 2 : 4;
