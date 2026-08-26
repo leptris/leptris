@@ -1109,10 +1109,14 @@ static int ws_only(const char* t) {
     return 1;
 }
 
+/* §3.4 name-test list entry: "*" matches every element name (a
+ * NameTest per the patterns grammar), anything else is an exact
+ * QName comparison. */
 static int name_in_list(char** list, const char* name) {
-    if (!list) return 0;
+    if (!list || !name) return 0;
     for (size_t i = 0; list[i]; i++)
-        if (strcmp(list[i], name) == 0) return 1;
+        if (strcmp(list[i], "*") == 0 || strcmp(list[i], name) == 0)
+            return 1;
     return 0;
 }
 
@@ -1440,14 +1444,19 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
          * and invoke their template AS ENCOUNTERED so output order
          * matches the source (the old batch-then-loop broke
          * interleaving). The node-list being processed here is the
-         * child axis — position() counts every child, all kinds. */
+         * child axis — position() counts every child, all kinds.
+         * A zero-length text child is a stripped §3.4 node (parse
+         * never creates empty text nodes) — it is gone. */
         size_t saved_cpos = ex->current_pos;
         size_t cpos = 0;
         for (LeptrisNodeRef c =
                  leptris_node_first_child(leptris_element_as_node(node));
              c && rc == 0; c = leptris_node_next_sibling(c)) {
-            ex->current_pos = ++cpos;
             int ty = leptris_node_get_type(c);
+            if (ty == LEPTRIS_NODE_TYPE_TEXT &&
+                leptris_text_node_get_content(c)[0] == '\0')
+                continue;
+            ex->current_pos = ++cpos;
             if (ty == LEPTRIS_NODE_TYPE_TEXT ||
                 ty == LEPTRIS_NODE_TYPE_CDATA) {
                 const char* t = leptris_text_get_content(
