@@ -875,6 +875,37 @@ TEST(XsltCore, FragmentResultKeepsDeclaration) {
         "href='s.css'?>");
 }
 
+/* EXSLT func:function (http://exslt.org/functions): stylesheet-
+ * defined extension functions callable from XPath. func:result
+ * yields the return (select value, or content as RTF string). The
+ * call runs with the CALLER's context node and its own variable
+ * scope (globals + locals). libxslt bug-212. */
+TEST(XsltCore, ExsltUserFunction) {
+    const char* sheet =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform' version='1.0'"
+        " xmlns:func='http://exslt.org/functions'"
+        " xmlns:myf='urn:my' extension-element-prefixes='func'>"
+        "<xsl:output method='text'/>"
+        "<xsl:template match='/'>"
+        "<xsl:variable name='a' select='myf:twice()'/>"
+        "<xsl:value-of select='$a'/><xsl:text>,</xsl:text>"
+        "<xsl:value-of select='$a'/>"
+        "</xsl:template>"
+        "<func:function name='myf:twice'>"
+        "<func:result><xsl:text>a</xsl:text></func:result>"
+        "</func:function>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet, strlen(sheet));
+    ASSERT_NE(x, (LeptrisXslt) nullptr);
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, (char*) nullptr);
+    EXPECT_STREQ(out, "a,a");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {

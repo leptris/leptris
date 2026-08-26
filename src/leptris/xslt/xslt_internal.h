@@ -55,6 +55,8 @@ typedef enum {
     XSLT_INSTR_NUMBER,
     XSLT_INSTR_ATTR_SET_REF,      /* use-attribute-sets expansion */
     XSLT_INSTR_APPLY_IMPORTS,     /* xsl:apply-imports (§5.6) */
+    XSLT_INSTR_FUNC_RESULT,      /* EXSLT func:result — yields the
+                                     user function's return value */
     XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
                                       its xsl:fallback children (§15) */
 } XsltInstrKind;
@@ -200,6 +202,17 @@ typedef struct xslt_template {
     struct xslt_template* next;     /* sheet order (imports first) */
 } XsltTemplate;
 
+/* EXSLT func:function (http://exslt.org/functions): a stylesheet-
+ * defined extension function callable from XPath. Registered in the
+ * per-eval bridge registry under its raw qname; the body runs with
+ * the CALLER's context node and globals-only variable scope;
+ * func:result yields the return value. */
+typedef struct xslt_userfunc {
+    const char* name;               /* raw qname attr (e.g. "myf:dup") */
+    XsltInstr* body;
+    struct xslt_userfunc* next;
+} XsltUserFunc;
+
 /* Key definition (xsl:key). */
 typedef struct xslt_keydef {
     const char* name;
@@ -249,6 +262,9 @@ struct xslt_styles {
 
     /* Named attribute sets (§7.1.4). */
     XsltAttrSet* attrsets;
+
+    /* EXSLT func:function definitions (see XsltUserFunc). */
+    XsltUserFunc* funcs;
 
     /* §3.4 whitespace handling on the SOURCE tree: preserve list
      * from xsl:preserve-space, strip list from xsl:strip-space
@@ -352,6 +368,15 @@ typedef struct xslt_exec {
     void* keys;
     void* docs;
 
+    /* EXSLT func:function in flight: func:result stores the return
+     * value here and flags the walker to unwind. */
+    struct leptris_xpath_result* fn_result;
+    int fn_yield;
+
+    /* xslt_functions.c: exec-owned func:function registry bindings
+     * (see XsltUfnBinding). */
+    void* ufn;
+
     /* RTF ownership chain: result-tree-fragment documents built by
      * <xsl:variable> bodies whose lifetime must outlive the
      * nodeset that references their nodes (§11.4 — the spec calls
@@ -420,6 +445,7 @@ XPathFunctionRegistry* xslt_bridge_registry(XsltExec* ex);
 void xslt_bridge_free(XsltExec* ex);
 void xslt_keys_free(XsltExec* ex);
 void xslt_docs_free(XsltExec* ex);
+void xslt_ufn_free(XsltExec* ex);
 
 /* format-number(§12.3) — shared by the bridge; returns an OWNED
  * string. df_name NULL/"" selects the default decimal-format. */

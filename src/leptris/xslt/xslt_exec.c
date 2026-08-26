@@ -2092,6 +2092,52 @@ static int op_choose(XsltExec* ex, const XsltInstr* in,
     return 0;
 }
 
+/* EXSLT func:result: store the user function's return value and
+ * unwind the body walker (the function call reads ex->fn_result).
+ * select → that value verbatim; content → the RTF's string value
+ * (EXSLT: content results are strings). */
+static int op_func_result(XsltExec* ex, const XsltInstr* in,
+                          LeptrisElement node) {
+    if (ex->fn_result) {
+        leptris_xpath_result_free(ex->fn_result);
+        ex->fn_result = NULL;
+    }
+    if (in->select) {
+        ex->fn_result = xslt_eval(ex, in->select, node);
+    } else if (in->child) {
+        /* RTF capture (the op_variable pattern), collapsed to its
+         * string value. */
+        LeptrisDocument main_result = ex->result;
+        LeptrisElement saved = ex->pending_parent;
+        ex->result = leptris_document_create();
+        ex->pending_parent = NULL;
+        ex->rtf_capturing = 1;
+        ex->rtf_text_len = 0;
+        xslt_exec_instrs(ex, in->child, node);
+        ex->rtf_capturing = 0;
+        ex->pending_parent = saved;
+        LeptrisDocument frag_doc = ex->result;
+        ex->result = main_result;
+        char* sv = NULL;
+        LeptrisElement rr = leptris_document_root(frag_doc);
+        if (rr) {
+            sv = leptris_element_get_text_content(rr);
+        } else if (ex->rtf_text && ex->rtf_text_len) {
+            sv = leptris_strdup(ex->rtf_text);
+        }
+        if (sv) {
+            ex->fn_result = xpath_result_new(XPATH_RESULT_STRING);
+            if (ex->fn_result)
+                ex->fn_result->value.string_value = sv;
+            else
+                free(sv);
+        }
+        leptris_document_free(frag_doc);
+    }
+    ex->fn_yield = 1;
+    return 0;
+}
+
 /* ---- The walker ---- */
 
 int xslt_exec_instrs(XsltExec* ex, const XsltInstr* list,
@@ -2103,6 +2149,7 @@ int xslt_exec_instrs(XsltExec* ex, const XsltInstr* list,
     XsltVar* scope_mark = ex->vars;
     int rc = 0;
     for (const XsltInstr* in = list; in; in = in->next) {
+        if (ex->fn_yield) break;   /* func:result unwinds to the call */
         /* §11.6: xsl:param declarations are consumed by the invoker
          * (with-param binding or default evaluation) — not executed
          * as ordinary variables on the walk. */
@@ -2150,6 +2197,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_ATTR_SET_REF] = op_attr_set_ref;
     g_ops[XSLT_INSTR_APPLY_IMPORTS] = op_apply_imports;
     g_ops[XSLT_INSTR_UNKNOWN_XSL] = op_unknown_xsl;
+    g_ops[XSLT_INSTR_FUNC_RESULT] = op_func_result;
 }
 
 /* ---- Public transform ---- */
@@ -2159,6 +2207,8 @@ void xslt_exec_free(XsltExec* ex) {
     xslt_keys_free(ex);
     xslt_docs_free(ex);
     xslt_bridge_free(ex);
+    xslt_ufn_free(ex);
+    if (ex->fn_result) leptris_xpath_result_free(ex->fn_result);
     while (ex->vars) xslt_pop_var(ex, NULL);
     while (ex->frag_nodes) {
         XsltFragNode* f = (XsltFragNode*)ex->frag_nodes;

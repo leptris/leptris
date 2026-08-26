@@ -88,6 +88,20 @@ static int node_is_xsl(LeptrisElement e, const char* local) {
     return strcmp(local_n, local) == 0;
 }
 
+#define EXSLT_FUNCTIONS_NS "http://exslt.org/functions"
+
+/* EXSLT func module element (any prefix bound to the functions ns). */
+static int node_is_exslt_func(LeptrisElement e, const char* local) {
+    if (!e) return 0;
+    const char* uri = leptris_element_get_namespace_uri(e);
+    if (!uri || strcmp(uri, EXSLT_FUNCTIONS_NS) != 0) return 0;
+    const char* n = leptris_element_get_name(e);
+    if (!n) return 0;
+    const char* colon = strchr(n, ':');
+    const char* local_n = colon ? colon + 1 : n;
+    return strcmp(local_n, local) == 0;
+}
+
 static LeptrisXPathCompiled compile_attr_sp(SheetParser* sp,
                                              LeptrisElement e,
                                              const char* attr) {
@@ -305,6 +319,14 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
     int is_xsl = node_is_xsl(e, local ? local : "");
 
     if (!is_xsl) {
+        /* EXSLT func:result: the user-function yield instruction. */
+        if (node_is_exslt_func(e, "result")) {
+            XsltInstr* in = instr_new(XSLT_INSTR_FUNC_RESULT);
+            if (!in) return NULL;
+            in->select = compile_attr_sp(sp, e, "select");
+            in->child = parse_content(sp, e);
+            return in;
+        }
         /* Literal result element. The stored name is the FULL QName
          * (prefix:local) — element_name() yields only the local
          * part, and xsl:namespace-alias + namespace output need the
@@ -794,6 +816,21 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             add_template(sp, e);
             continue;
         }
+        /* EXSLT func:function: a stylesheet-defined XPath function. */
+        if (node_is_exslt_func(e, "function")) {
+            const char* fn = leptris_element_attribute(e, "name");
+            if (fn && *fn) {
+                XsltUserFunc* f = (XsltUserFunc*)calloc(1, sizeof(*f));
+                if (f) {
+                    f->name = leptris_strdup(fn);
+                    f->body = parse_content(sp, e);
+                    XsltUserFunc** tail = &sp->sheet->funcs;
+                    while (*tail) tail = &(*tail)->next;
+                    *tail = f;
+                }
+            }
+            continue;
+        }
         if (node_is_xsl(e, "variable") || node_is_xsl(e, "param")) {
             XsltInstr* in = parse_instruction(sp, e);
             if (in) instr_append(&sp->sheet->globals, in);
@@ -1144,6 +1181,13 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         if (k->use) leptris_xpath_compiled_free(k->use);
         free((void*)k->name);
         free(k);
+    }
+    while (sheet->funcs) {
+        XsltUserFunc* f = sheet->funcs;
+        sheet->funcs = f->next;
+        free((void*)f->name);
+        free_instr_list(f->body);
+        free(f);
     }
     free_instr_list(sheet->globals);
     free((void*)sheet->out_encoding);
