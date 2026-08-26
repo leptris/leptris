@@ -368,8 +368,8 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
      * element in document order). */
     size_t decl_len = 0;
     if (first && strncmp(first, "<?xml", 5) == 0) {
-        const char* nl = strchr(first, '\n');
-        decl_len = nl ? (size_t)(nl - first) + 1 : strlen(first);
+        const char* end = strstr(first, "?>");
+        if (end) decl_len = (size_t)(end - first) + 2;
     }
     size_t cap = pre_len + (first ? strlen(first) : 0) + 64, total = 0;
     char* acc = (char*)malloc(cap);
