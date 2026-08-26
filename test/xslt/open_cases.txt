@@ -63,7 +63,6 @@ bug-35-
 bug-36-
 bug-37-
 bug-38-
-bug-4-
 bug-41-
 bug-42-
 bug-43-
@@ -87,7 +86,6 @@ bug-89
 bug-90
 bug-92
 bug-95
-bug-96
 bug-97
 bug-98
 bug-99

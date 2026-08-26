@@ -994,16 +994,35 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
         const char* av = leptris_element_attribute_value_at(node, i);
         if (an && av) leptris_element_set_attribute(e, an, av);
     }
-    char* sv = string_value_deep(node);
-    if (sv) {
-        if (sv[0]) out_append_text(ex, e, sv);
-        free(sv);
-    }
-    /* Deep-copy child ELEMENTS too (mixed content round-trips). */
-    for (LeptrisNodeRef c = leptris_node_first_child(leptris_element_as_node(node));
+    /* §11.3 verbatim deep copy: every child kind in document order —
+     * text/CDATA/comment/PI/element — not the concatenated
+     * string-value ahead of the child elements (that duplicated
+     * mixed content and dropped the tail whitespace). */
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             leptris_element_as_node(node));
          c; c = leptris_node_next_sibling(c)) {
-        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
+        int ty = leptris_node_get_type(c);
+        if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
             copy_node_deep(ex, (LeptrisElement)c, e);
+        } else if (ty == LEPTRIS_NODE_TYPE_CDATA) {
+            const char* t =
+                leptris_text_get_content((LeptrisTextNode*)c);
+            LeptrisNodeRef cc = (LeptrisNodeRef)leptris_cdata_create(
+                t, t ? strlen(t) : 0,
+                ((struct leptris_document*)ex->result)->pool);
+            if (cc) leptris_element_append_child_internal(e, (LeptrisNode*)cc);
+        } else if (ty == LEPTRIS_NODE_TYPE_COMMENT) {
+            LeptrisNodeRef cm = leptris_comment_node_create(
+                ex->result, leptris_comment_node_get_content(c));
+            if (cm) leptris_element_append_child_internal(e, (LeptrisNode*)cm);
+        } else if (ty == LEPTRIS_NODE_TYPE_PI) {
+            LeptrisNodeRef pi = leptris_pi_node_create(
+                ex->result, leptris_pi_node_get_target(c),
+                leptris_pi_node_get_data(c));
+            if (pi) leptris_element_append_child_internal(e, (LeptrisNode*)pi);
+        } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+            const char* t = leptris_text_get_content((LeptrisTextNode*)c);
+            if (t && t[0]) out_append_text(ex, e, t);
         }
     }
     return 0;

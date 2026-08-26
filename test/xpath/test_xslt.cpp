@@ -850,6 +850,18 @@ TEST(XsltCore, CallTemplateVariableScope) {
         "</xsl:template>", "<doc/>")), "SUCCESS");
 }
 
+/* §11.3 xsl:copy-of: a node copies VERBATIM — every child kind in
+ * order (text/CDATA/comment/PI/element), not the string-value
+ * concatenated ahead of the child elements (libxslt bug-4-). */
+TEST(XsltCore, CopyOfMixedContentVerbatim) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:copy-of select='m'/>"
+        "</xsl:template>",
+        "<m name='M'>\n  <c>inner</c>\n</m>")),
+        "<m name=\"M\">\n  <c>inner</c>\n</m>");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
