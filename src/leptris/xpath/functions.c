@@ -11,6 +11,7 @@
 #include "../dom/element.h"
 #include "../dom/pi.h"
 #include "../common/port.h"
+#include "../dtd/model.h"   /* ttdtd_lookup_attribute (id() §4.1) */
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -1269,23 +1270,45 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
  * XPath Node-set Functions
  * ============================================================================ */
 
+/* XPath §4.1: an attribute identifies its element when the DTD
+ * declares it ID-typed (any QName — bug-163's myns:id) or it is the
+ * conventional unprefixed "id" (xml:id-style documents without a
+ * DTD still resolve). */
+static int attr_is_id_typed(struct leptris_document* doc,
+                            LeptrisElement elem, const char* attr_name) {
+    if (strcmp(attr_name, "id") == 0 || strcmp(attr_name, "xml:id") == 0)
+        return 1;
+    if (!doc || !doc->dtd) return 0;
+    DTDAttributeDecl* ad = ttdtd_lookup_attribute(
+        (const LeptrisDTD*)doc->dtd,
+        leptris_element_get_name(elem), attr_name);
+    return ad && ad->attr_type && strcmp(ad->attr_type, "ID") == 0;
+}
+
 /* Helper to recursively find elements by id */
-static void find_elements_by_id(LeptrisElement node, const char* id,
+static void find_elements_by_id(struct leptris_document* doc,
+    LeptrisElement node, const char* id,
     XPathNodeSet* result) {
     if (!node) return;
 
-    /* Check this node's id attribute */
-    /* Use the element's attribute accessor for proper hash table handling */
-    const char* id_attr = leptris_element_attribute(node, "id");
-    if (id_attr && strcmp(id_attr, id) == 0) {
-        xpath_nodeset_add(result, node);
+    /* Check every attribute — an ID may live under any QName the
+     * DTD declares ID-typed. */
+    size_t na = leptris_element_attribute_count(node);
+    for (size_t i = 0; i < na; i++) {
+        const char* an = leptris_element_attribute_name_at(node, i);
+        const char* av = leptris_element_attribute_value_at(node, i);
+        if (an && av && strcmp(av, id) == 0 &&
+            attr_is_id_typed(doc, node, an)) {
+            xpath_nodeset_add(result, node);
+            break;
+        }
     }
 
     /* Recursively check children using compact accessor functions */
     LeptrisElement child_elem = leptris_element_get_first_child(node);
     while (child_elem) {
         /* Only recurse into element nodes */
-        find_elements_by_id(child_elem, id, result);
+        find_elements_by_id(doc, child_elem, id, result);
         child_elem = leptris_element_get_next_sibling(child_elem);
     }
 }
@@ -1629,7 +1652,7 @@ static struct leptris_xpath_result* xpath_func_id(
         char* token;
         char* rest = str;
         while ((token = strtok_r(rest, " \t\n\r", &rest))) {
-            find_elements_by_id(root, token, nodeset);
+            find_elements_by_id(context->document, root, token, nodeset);
         }
     }
 
