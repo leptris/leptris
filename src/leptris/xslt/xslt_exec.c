@@ -2105,8 +2105,10 @@ static int op_func_result(XsltExec* ex, const XsltInstr* in,
     if (in->select) {
         ex->fn_result = xslt_eval(ex, in->select, node);
     } else if (in->child) {
-        /* RTF capture (the op_variable pattern), collapsed to its
-         * string value. */
+        /* RTF capture (the op_variable pattern). Content results
+         * are NODE-SETS (the fragment's document node) — value-of
+         * contexts see the string value, copy-of copies the nodes
+         * (EXSLT: bug-209 <result/>, bug-212 'a'). */
         LeptrisDocument main_result = ex->result;
         LeptrisElement saved = ex->pending_parent;
         ex->result = leptris_document_create();
@@ -2118,21 +2120,42 @@ static int op_func_result(XsltExec* ex, const XsltInstr* in,
         ex->pending_parent = saved;
         LeptrisDocument frag_doc = ex->result;
         ex->result = main_result;
-        char* sv = NULL;
         LeptrisElement rr = leptris_document_root(frag_doc);
-        if (rr) {
-            sv = leptris_element_get_text_content(rr);
-        } else if (ex->rtf_text && ex->rtf_text_len) {
-            sv = leptris_strdup(ex->rtf_text);
-        }
-        if (sv) {
+        if (!rr && ex->rtf_text && ex->rtf_text_len) {
+            /* Pure-text RTF: the value is the string. */
             ex->fn_result = xpath_result_new(XPATH_RESULT_STRING);
             if (ex->fn_result)
-                ex->fn_result->value.string_value = sv;
-            else
-                free(sv);
+                ex->fn_result->value.string_value =
+                    leptris_strdup(ex->rtf_text);
+            leptris_document_free(frag_doc);
+        } else {
+            ex->fn_result = xpath_result_new(XPATH_RESULT_NODESET);
+            if (ex->fn_result && rr) {
+                ex->fn_result->value.nodeset_value = xpath_nodeset_new();
+                if (ex->fn_result->value.nodeset_value) {
+                    LeptrisNodeRef dn = (LeptrisNodeRef)
+                        leptris_document_get_node(frag_doc);
+                    if (dn)
+                        xpath_nodeset_add(
+                            ex->fn_result->value.nodeset_value, dn);
+                }
+            }
+            /* The nodeset's nodes live in frag_doc — move it into
+             * the exec's RTF chain so they outlive the call. */
+            if (rr) {
+                struct xslt_rtf_entry* ent =
+                    (struct xslt_rtf_entry*)malloc(sizeof(*ent));
+                if (ent) {
+                    ent->doc = frag_doc;
+                    ent->next = (struct xslt_rtf_entry*)ex->rtf_chain;
+                    ex->rtf_chain = ent;
+                } else {
+                    leptris_document_free(frag_doc);
+                }
+            } else {
+                leptris_document_free(frag_doc);
+            }
         }
-        leptris_document_free(frag_doc);
     }
     ex->fn_yield = 1;
     return 0;
