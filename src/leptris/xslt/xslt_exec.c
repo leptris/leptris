@@ -1164,17 +1164,72 @@ static int ancestor_xml_space_preserve(LeptrisElement e) {
     return 0;
 }
 
+/* §3.4 NameTest against a list entry: exact QName, "*", "p:*"
+ * (any element in p's namespace), "p:name". The stylesheet root's
+ * declarations resolve the prefixes. */
+static int strip_entry_matches(char** list, const char* entry,
+                               const char* local, const char* elem_uri,
+                               LeptrisElement sheet_root) {
+    (void)list;
+    if (!entry || !local) return 0;
+    const char* colon = strchr(entry, ':');
+    if (!colon) {
+        /* Unprefixed: "*" wildcard or a no-namespace exact name. */
+        return strcmp(entry, "*") == 0 || strcmp(entry, local) == 0;
+    }
+    if (!sheet_root) return 0;
+    size_t plen = (size_t)(colon - entry);
+    const char* rest = colon + 1;
+    /* Resolve the prefix through the stylesheet root's declarations. */
+    const char* uri = NULL;
+    for (int i = 0;; i++) {
+        const char* p = leptris_element_namespace_decl_prefix(
+            sheet_root, i);
+        const char* u = leptris_element_namespace_decl_uri(
+            sheet_root, i);
+        if (!p || !u) break;
+        if (strlen(p) == plen && strncmp(p, entry, plen) == 0) {
+            uri = u;
+            break;
+        }
+    }
+    if (!uri) return 0;
+    if (!elem_uri || strcmp(uri, elem_uri) != 0) return 0;
+    return strcmp(rest, "*") == 0 || strcmp(rest, local) == 0;
+}
+
 static void strip_source_whitespace(XsltExec* ex) {
     if (!ex || !ex->source || !ex->sheet->ws_strip) return;
     /* libxslt reference semantics: source whitespace is PRESERVED
      * by default; only names listed in xsl:strip-space (minus
      * preserve-space) strip, with xml:space="preserve" winning. */
+    LeptrisElement sheet_root =
+        ex->sheet_doc ? leptris_document_root(ex->sheet_doc) : NULL;
     for (LeptrisElement e = leptris_document_root(ex->source); e;
          e = xslt_next_doc_order(e)) {
         const char* name = leptris_element_name(e);
         if (!name) continue;
-        int strip = name_in_list(ex->sheet->ws_strip, name) &&
-                    !name_in_list(ex->sheet->ws_preserve, name);
+        const char* euri = leptris_element_get_namespace_uri(e);
+        int strip = 0;
+        for (size_t i = 0; ex->sheet->ws_strip[i]; i++) {
+            if (strip_entry_matches(ex->sheet->ws_strip,
+                                    ex->sheet->ws_strip[i], name,
+                                    euri, sheet_root)) {
+                strip = 1;
+                break;
+            }
+        }
+        if (strip) {
+            for (size_t i = 0; ex->sheet->ws_preserve &&
+                              ex->sheet->ws_preserve[i]; i++) {
+                if (strip_entry_matches(ex->sheet->ws_preserve,
+                                        ex->sheet->ws_preserve[i],
+                                        name, euri, sheet_root)) {
+                    strip = 0;
+                    break;
+                }
+            }
+        }
         if (!strip || ancestor_xml_space_preserve(e)) continue;
         for (LeptrisNodeRef c =
                  leptris_node_first_child(leptris_element_as_node(e));
