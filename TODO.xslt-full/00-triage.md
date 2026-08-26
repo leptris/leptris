@@ -109,3 +109,38 @@ Suite: 129/205. Remaining census (76): 35 no-marker one-offs,
 - bug-216: post-root document text (source trailing \n)
 - Windows gates: bug-93, bug-102, bug-118 — now PASSING on POSIX,
   removed from the worklist (runner is POSIX-forked)
+
+---
+## Session log 4 (129 → 131/205 + architecture/perf pass)
+
+Architecture review (report: architecture-review-20260826-xslt-perf.html,
+4 candidates) — ALL IMPLEMENTED:
+
+1. exec-scoped eval environment: document-cached function registry
+   (invalidate on custom-fn register / exslt_enable / transform
+   enter-exit) + dirty-skip varset mirror. Transform perf:
+   bug-5- 115.3 → 48.5 ms (2.4x), doc 0.204 → 0.056 ms (3.6x).
+2. HTML single-owner in the serializer: voids, non-void pairs,
+   attr escaping (raw ', href/src URI %XX), rawtext elements
+   (script/style/...), PI '>' close, indent=no semantics, method
+   tri-state. to_html_method + html_post_pass DELETED (~200 lines).
+   Suite: bug-83 minimal shape exact.
+3. position() SSOT folded into leptris_xpath_compiled_eval_ctx.
+4. Recursive serializer walker DELETED (-369/+64): heap-growable
+   frames (2000-deep verified, ASAN-clean).
+
+Latent bugs fixed along the way (ASAN-exposed):
+- xslt_capture_children_text: stale rtf_text_cap overflowed the
+  fresh buffer on nested captures
+- buffer_create: uninitialized cdata_names/cdata_count read as the
+  cdata list in every options-NULL serialization
+- text-node base.raw never initialized in either creator
+- leptris_node_prepend_child SEVERED the old first child's sibling
+  link — every prepend dropped the children-chain tail (public API
+  bug, exposed by the meta injection)
+
+Known-environmental: test_cli spawns die with SIGKILL on this
+machine (binary runs clean from shell; reproduced on HEAD stashed).
+
+Suite 131/205; 983/983 ctest green. Remaining 74: same census as
+log 3 minus closed items (bug-33-/83/159 cluster partially closed).
