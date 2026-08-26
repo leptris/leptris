@@ -9,6 +9,7 @@
 #include "evaluator.h"
 #include "../include/leptris.h"
 #include "../dom/element.h"
+#include "../dom/pi.h"
 #include "../common/port.h"
 #include <string.h>
 #include <stdlib.h>
@@ -1318,6 +1319,9 @@ static struct leptris_xpath_result* xpath_func_local_name(
             } else if (node_tag == LEPTRIS_NODE_NAMESPACE) {
                 const char* n = ((LeptrisNamespaceNode*)node)->prefix;
                 synth_name = n ? leptris_strdup(n) : NULL;
+            } else if (node_tag == LEPTRIS_NODE_TYPE_PI) {
+                const char* t = leptris_pi_get_target((LeptrisPINode*)node);
+                synth_name = t ? leptris_strdup(t) : NULL;
             }
         }
     } else if (arg_count == 1) {
@@ -1491,6 +1495,9 @@ static struct leptris_xpath_result* xpath_func_name(
             } else if (node_tag == LEPTRIS_NODE_NAMESPACE) {
                 const char* n = ((LeptrisNamespaceNode*)node)->prefix;
                 synth_name = n ? leptris_strdup(n) : NULL;
+            } else if (node_tag == LEPTRIS_NODE_TYPE_PI) {
+                const char* t = leptris_pi_get_target((LeptrisPINode*)node);
+                synth_name = t ? leptris_strdup(t) : NULL;
             }
         }
     } else if (arg_count == 1) {
