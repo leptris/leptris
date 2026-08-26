@@ -62,15 +62,12 @@ bug-216
 bug-217
 bug-218
 bug-219
-bug-22-
 bug-220
 bug-221
 bug-222
 bug-223
 bug-224
 bug-225
-bug-23-
-bug-24-
 bug-25-
 bug-28-
 bug-31-
