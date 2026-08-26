@@ -431,6 +431,7 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
 void xslt_push_var(XsltExec* ex, const char* name,
                    struct leptris_xpath_result* v);
 void xslt_pop_var(XsltExec* ex, const char* name);
+void xslt_pop_vars_to(XsltExec* ex, XsltVar* mark);
 struct leptris_xpath_result* xslt_copy_result(
     const struct leptris_xpath_result* r);
 
