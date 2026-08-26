@@ -946,6 +946,21 @@ TEST(XsltHtml, HrefUrlEscaped) {
               std::string::npos);
 }
 
+/* id() (XPath §4.1): an element matches when its ID-TYPED
+ * attribute — declared in the DTD internal subset, ANY QName —
+ * equals the argument (libxslt bug-163: myns:id). */
+TEST(XsltCore, IdFindsDtdTypedIds) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select=\"id('indexme')/@some-attr\"/>"
+        "</xsl:template>",
+        "<!DOCTYPE my-root ["
+        "<!ATTLIST my-root myns:id ID #IMPLIED>"
+        "]>"
+        "<my-root xmlns:myns='uri' myns:id='indexme' some-attr='findme'/>")),
+        "findme");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
