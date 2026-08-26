@@ -1685,11 +1685,6 @@ static int op_message(XsltExec* ex, const XsltInstr* in,
 static void format_number_token(unsigned long v, char spec,
                                 char* out, size_t outsz) {
     static const char* lower = "abcdefghijklmnopqrstuvwxyz";
-    static const char* roman_l[] =
-        {"","i","ii","iii","iv","v","vi","vii","viii","ix","x",
-         "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx",
-         "xxi","xxii","xxiii","xxiv","xxv","xxvi","xxvii","xxviii","xxix","xxx",
-         "xl","xli","xlii","xliii","xliv","xlv","xlvi","xlvii","xlviii","xlix","l"};
     switch (spec) {
         case 'a': {
             if (v == 0) { snprintf(out, outsz, "a"); break; }
@@ -1712,14 +1707,31 @@ static void format_number_token(unsigned long v, char spec,
         }
         case 'i':
         case 'I': {
-            const char* r = v <= 50 ? roman_l[v] : "";
-            if (spec == 'I') {
-                snprintf(out, outsz, "%s", r);
+            if (v > 3999) {
+                /* Beyond roman capacity libxslt prints the digits. */
+                snprintf(out, outsz, "%lu", v);
+                break;
+            }
+            /* Subtractive algorithm (the 50-entry table only covered
+             * the first roman numerals). */
+            static const unsigned val[] = {1000, 900, 500, 400, 100, 90,
+                                           50, 40, 10, 9, 5, 4, 1};
+            static const char* sym[] = {"m", "cm", "d", "cd", "c", "xc",
+                                        "l", "xl", "x", "ix", "v", "iv", "i"};
+            size_t o = 0;
+            unsigned long x = v;
+            for (int k = 0; k < 13 && x; k++) {
+                while (x >= val[k] && o + 3 < outsz) {
+                    size_t sl = strlen(sym[k]);
+                    memcpy(out + o, sym[k], sl);
+                    o += sl;
+                    x -= val[k];
+                }
+            }
+            out[o] = 0;
+            if (spec == 'I')
                 for (char* p = out; *p; p++)
                     *p = (char)toupper((unsigned char)*p);
-            } else {
-                snprintf(out, outsz, "%s", r);
-            }
             break;
         }
         default:
@@ -1918,9 +1930,14 @@ static void emit_formatted_numbers(const unsigned long* values, int nv,
             for (const char* s = sep; *s && o < outsz - 1; s++) out[o++] = *s;
         }
         char chunk[128];
-        emit_number_chunk(values[i], specs[i < ns ? i : ns - 1],
-                          in->num_group_size, in->num_group_sep,
-                          chunk, sizeof(chunk));
+        char spec = specs[i < ns ? i : ns - 1];
+        if (values[i] == 0 &&
+            (spec == 'a' || spec == 'A' || spec == 'i' || spec == 'I')) {
+            snprintf(chunk, sizeof(chunk), "0");   /* no zeroth letter */
+        } else {
+            emit_number_chunk(values[i], spec, in->num_group_size,
+                              in->num_group_sep, chunk, sizeof(chunk));
+        }
         for (const char* s = chunk; *s && o < outsz - 1; s++) out[o++] = *s;
     }
     if (nv >= ns) {   /* the last token was used → its tail is the suffix */
@@ -1941,9 +1958,16 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
         if (r) {
             double d = leptris_xpath_result_number(r);
             leptris_xpath_result_free(r);
-            if (!(d == d) || d < 0) {
+            if (!(d == d)) {
                 op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT,
                                           .text = "NaN" }, node);
+                return 0;
+            }
+            if (d < 0) {
+                /* libxslt: a negative value emits the literal "0"
+                 * (never NaN, never token-formatted). */
+                op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT,
+                                          .text = "0" }, node);
                 return 0;
             }
             values[0] = (unsigned long)(d + 0.5);
