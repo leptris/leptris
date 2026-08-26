@@ -327,6 +327,18 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             in->child = parse_content(sp, e);
             return in;
         }
+        /* EXSLT func:param: a VARIABLE with template-parameter
+         * semantics — the call binds the argument; the walker skips
+         * it (is_param) like xsl:param. */
+        if (node_is_exslt_func(e, "param")) {
+            XsltInstr* in = instr_new(XSLT_INSTR_VARIABLE);
+            if (!in) return NULL;
+            const char* pn = leptris_element_attribute(e, "name");
+            in->name = leptris_strdup(pn);
+            in->select = compile_attr_sp(sp, e, "select");
+            in->is_param = 1;
+            return in;
+        }
         /* Literal result element. The stored name is the FULL QName
          * (prefix:local) — element_name() yields only the local
          * part, and xsl:namespace-alias + namespace output need the
@@ -774,6 +786,34 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
 }
 
 static void parse_top_level(SheetParser* sp, LeptrisElement root) {
+    /* EXSLT func pre-scan: the function namespaces are excluded from
+     * LRE ns-copy (EXSLT: they never reach the result), and the
+     * exclusion must be in place BEFORE any template's literal
+     * result elements compile. */
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        LeptrisElement e = (LeptrisElement)n;
+        if (!node_is_exslt_func(e, "function")) continue;
+        const char* fn = leptris_element_attribute(e, "name");
+        if (!fn || !*fn) continue;
+        const char* colon = strchr(fn, ':');
+        if (!colon || colon == fn) continue;
+        char** grown = (char**)realloc(
+            sp->sheet->exclude_pfx,
+            (sp->sheet->exclude_count + 1) * sizeof(char*));
+        if (!grown) continue;
+        sp->sheet->exclude_pfx = grown;
+        sp->sheet->exclude_pfx[sp->sheet->exclude_count] =
+            (char*)malloc((size_t)(colon - fn) + 1);
+        if (sp->sheet->exclude_pfx[sp->sheet->exclude_count]) {
+            memcpy(sp->sheet->exclude_pfx[sp->sheet->exclude_count],
+                   fn, (size_t)(colon - fn));
+            sp->sheet->exclude_pfx[sp->sheet->exclude_count][colon - fn] = 0;
+            sp->sheet->exclude_count++;
+        }
+    }
     for (LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
         if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT) continue;

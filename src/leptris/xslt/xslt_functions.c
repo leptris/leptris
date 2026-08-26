@@ -947,11 +947,30 @@ static struct leptris_xpath_result* xslt_fn_user_func(
     ex->fn_result = NULL;
     ex->fn_yield = 0;
 
+    /* Argument binding (func:param): declaration-order params pair
+     * with the call's argument expressions, evaluated in the
+     * CALLER's context. Unbound params fall to their select
+     * default (or empty). */
+    {
+        size_t ai = 0;
+        for (const XsltInstr* p = fn->body; p; p = p->next) {
+            if (p->kind != XSLT_INSTR_VARIABLE || !p->is_param ||
+                !p->name)
+                continue;
+            struct leptris_xpath_result* v =
+                (ai < n) ? evaluate_expr(ctx, args[ai++]) : NULL;
+            if (!v && p->select) v = xslt_eval(ex, p->select, ctxnode);
+            xslt_push_var(ex, p->name, v);
+        }
+    }
+    XsltVar* fn_mark = ex->vars;
+
     xslt_exec_instrs(ex, fn->body, ctxnode);
 
     struct leptris_xpath_result* got = ex->fn_result;
     ex->fn_result = NULL;
     ex->fn_yield = saved_yield;
+    xslt_pop_vars_to(ex, fn_mark);
 
     leptris_document_free(ex->result);
     ex->result = main_result;
@@ -1051,7 +1070,7 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
             for (const XsltUserFunc* f = ex->sheet->funcs; f;
                  f = f->next, i++)
                 xslt_register_handler(r, f->name, xslt_fn_user_func,
-                                      0, 0, &arr[i]);
+                                      0, 8, &arr[i]);
         }
     }
 }

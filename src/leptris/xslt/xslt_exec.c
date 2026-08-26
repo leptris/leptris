@@ -210,7 +210,7 @@ void xslt_pop_var(XsltExec* ex, const char* name) {
  * siblings persists for those siblings and their descendants but
  * is gone when the containing sequence (element body, template
  * body, for-each iteration) completes. */
-static void xslt_pop_vars_to(XsltExec* ex, XsltVar* mark) {
+void xslt_pop_vars_to(XsltExec* ex, XsltVar* mark) {
     while (ex->vars && ex->vars != mark) xslt_pop_var(ex, NULL);
 }
 
