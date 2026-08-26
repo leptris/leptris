@@ -12,7 +12,6 @@ bug-131
 bug-132
 bug-133
 bug-137
-bug-138
 bug-140
 bug-142
 bug-147
@@ -103,4 +102,3 @@ bug-97
 bug-98
 bug-99
 date_add
-doc
