@@ -695,6 +695,16 @@ TEST(XsltBridge, FormatNumber) {
         "</xsl:template>", "<r/>")), "100,000,000,000");
 }
 
+/* §16.2 HTML attribute escape: &apos; in input value renders as the
+ * apostrophe (not the literal entity reference) under method=html. */
+TEST(XsltBridge, HtmlAttributeAposDecoded) {
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<x><input value=\"&quot;'&quot;\"/></x>"
+        "</xsl:template>", "<r/>")), "<x><input value=\"&quot;'&quot;\"></x>");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
