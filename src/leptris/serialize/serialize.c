@@ -689,8 +689,6 @@ void serialize_doctype_internal(LeptrisDoctypeNode* doctype, SerializeBuffer* bu
     buffer_append_char(buf, '>');
 }
 
-/* Recursive serializer (kept as the deep-tree fallback for the
- * iterative walker below). */
 /* Emit a qualified element/attribute name: XML requires names in a
  * namespace to serialize with their prefix (prefix:name). libleptris
  * stores the prefix beside the local name, so every name-emission
@@ -702,342 +700,6 @@ static void append_qualified_name(SerializeBuffer* buf, const char* prefix,
         buffer_append_char(buf, ':');
     }
     buffer_append_len(buf, name, name_len);
-}
-
-static void serialize_element_recursive(LeptrisElement elem, SerializeBuffer* buf, int is_root) {
-    if (!elem) return;
-
-    /* Get element name - use cached string if available, otherwise use StringView directly */
-    const char* elem_name;
-    size_t elem_name_len;
-
-    if (elem->name) {
-        /* Use cached NULL-terminated string; name_len byte avoids
-         * the per-element strlen (0xFF = long-name fallback). */
-        elem_name = elem->name;
-        elem_name_len = (elem->name_len != 0xFF)
-            ? (size_t)elem->name_len : strlen(elem->name);
-    } else {
-        return;
-    }
-
-    const char* elem_prefix = leptris_element_get_prefix(elem);
-    size_t elem_prefix_len =
-        (elem_prefix && elem_prefix[0]) ? strlen(elem_prefix) + 1 : 0;
-
-    /* Add indentation before opening tag (not for root element) */
-    if (!is_root && buf->indent_spaces > 0) {
-        buffer_append_indent(buf);
-    }
-
-    /* Opening tag — one reservation + inline emission (TODO 194c):
-     * replaces separate '<' and name appends (two capacity checks
-     * and two NUL stores per element). */
-    buffer_ensure_capacity(buf, 1 + elem_prefix_len + elem_name_len + 1);
-    char* ot = buf->data + buf->size;
-    *ot++ = '<';
-    if (elem_prefix_len) {
-        memcpy(ot, elem_prefix, elem_prefix_len - 1);
-        ot += elem_prefix_len - 1;
-        *ot++ = ':';
-    }
-    memcpy(ot, elem_name, elem_name_len);
-    ot += elem_name_len;
-    buf->size = (size_t)(ot - buf->data);
-    buf->data[buf->size] = '\0';
-
-    /* Namespaces - serialize as xmlns attributes. One reservation +
-     * inline emission per namespace (TODO 194c): URIs rarely need
-     * escaping, but the 6x worst-case bound is reserved anyway. */
-    for (struct leptris_namespace* ns = leptris_elem_namespaces(elem); ns != NULL; ns = ns->next) {
-        if (!ns) continue;
-
-        const char* prefix = ns->prefix ? ns->prefix : "";
-        size_t prefix_len = ns->prefix ? strlen(ns->prefix) : 0;
-        const char* uri = ns->uri ? ns->uri : "";
-        size_t uri_len = ns->uri ? strlen(ns->uri) : 0;
-        buffer_ensure_capacity(buf, 7 + prefix_len + 2 + 6 * uri_len + 2);
-
-        char* nw = buf->data + buf->size;
-        *nw++ = ' ';
-        memcpy(nw, "xmlns", 5);
-        nw += 5;
-        if (ns->prefix) {
-            *nw++ = ':';
-            memcpy(nw, prefix, prefix_len);
-            nw += prefix_len;
-        }
-        *nw++ = '=';
-        *nw++ = '"';
-        for (size_t i = 0; i < uri_len; i++) {
-            switch (uri[i]) {
-                case '<':  memcpy(nw, "&lt;", 4);   nw += 4; break;
-                case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
-                case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
-                case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
-                case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
-                default:   *nw++ = uri[i]; break;
-            }
-        }
-        *nw++ = '"';
-        buf->size = (size_t)(nw - buf->data);
-        buf->data[buf->size] = '\0';
-    }
-
-    /* Attributes - iterate through linked list */
-    for (struct leptris_attribute* attr = leptris_element_get_first_attribute(elem); attr != NULL; attr = leptris_attr_next(attr)) {
-        if (!attr) continue;
-
-        /* Expand entity-containing values lazily before re-escaping
-         * (single representation, round 4: the expanded copy REPLACES
-         * the view so the raw '&' doesn't double-escape). */
-        const char* val;
-        if (attr_has_entities(attr)) {
-            struct leptris_document* doc = leptris_element_get_document(elem);
-            LeptrisMemoryPool* pool = doc ? doc->pool : NULL;
-            char* resolved = pool
-                ? leptris_decode_entities_view(&attr->value_view, pool)
-                : NULL;
-            if (resolved) {
-                attr->value_view = leptris_sv_from_cstr(resolved);
-                attr_set_entities(attr, 0);
-            }
-            val = attr_cvalue(attr);
-        } else {
-            val = attr_cvalue(attr);
-        }
-
-        /* One capacity reservation + raw emission per attribute
-         * (TODO 194): worst-case escaping is 6 bytes per value byte,
-         * so name + quotes + fully-escaped value fits one check.
-         * Replaces five append calls (each with its own capacity
-         * check and NUL store) per attribute. */
-        const char* name_c = attr_cname(attr);
-        size_t name_len = attr->name_view.length;
-        const char* attr_prefix = attr_get_prefix(attr);
-        size_t attr_prefix_len =
-            (attr_prefix && attr_prefix[0]) ? strlen(attr_prefix) + 1 : 0;
-        /* Issue #542: qualified name_view + separate prefix emission
-         * would double the prefix — strip it from the name copy. */
-        if (attr_prefix_len && name_len > attr_prefix_len &&
-            memcmp(name_c, attr_prefix, attr_prefix_len - 1) == 0 &&
-            name_c[attr_prefix_len - 1] == ':') {
-            name_c += attr_prefix_len;
-            name_len -= attr_prefix_len;
-        }
-        /* The view is authoritative: entity resolution REPLACES the
-         * view (from_cstr), so length always matches the data. */
-        size_t val_len = attr->value_view.length;
-        size_t needed = 1 + attr_prefix_len + name_len + 2 + 6 * val_len + 2;
-        buffer_ensure_capacity(buf, needed + 1);
-
-        char* out = buf->data + buf->size;
-        *out++ = ' ';
-        if (attr_prefix_len) {
-            memcpy(out, attr_prefix, attr_prefix_len - 1);
-            out += attr_prefix_len - 1;
-            *out++ = ':';
-        }
-        memcpy(out, name_c, name_len);
-        out += name_len;
-        *out++ = '=';
-        *out++ = '"';
-        for (size_t i = 0; i < val_len; i++) {
-            switch (val[i]) {
-                case '<':  memcpy(out, "&lt;", 4);   out += 4; break;
-                case '>':  memcpy(out, "&gt;", 4);   out += 4; break;
-                case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
-                case '"':  memcpy(out, "&quot;", 6); out += 6; break;
-                case '\'': memcpy(out, "&apos;", 6); out += 6; break;
-                /* Attribute values escape control chars as numeric
-                 * references (attribute-value normalization eats
-                 * literal \t/\n/\r) — libxslt-verified. */
-                case '\t': out += sprintf(out, "&#9;");  break;
-                case '\n': out += sprintf(out, "&#10;"); break;
-                case '\r': out += sprintf(out, "&#13;"); break;
-                default:   *out++ = val[i]; break;
-            }
-        }
-        *out++ = '"';
-        buf->size = (size_t)(out - buf->data);
-        buf->data[buf->size] = '\0';
-    }
-
-    /* Check if element has children */
-    if (leptris_node_first_child_internal((LeptrisNode*)elem)) {
-        /* Check if this is a text-only element (single text child, no element children) */
-        int is_text_only = 1;
-        LeptrisNode* child = leptris_node_first_child_internal((LeptrisNode*)elem);
-
-        /* Check if there's only one child and it's a text node */
-        if (child && child->type == LEPTRIS_NODE_TYPE_TEXT) {
-            /* Check if there are any siblings (more children) */
-            if (leptris_node_get_next_sibling(child) != NULL) {
-                is_text_only = 0;
-            }
-        } else {
-            /* Not a single text node */
-            is_text_only = 0;
-        }
-
-        if (is_text_only && is_cdata_element(buf, elem)) {
-            LeptrisTextNode* tn = (LeptrisTextNode*)child;
-            const char* tc = leptris_text_get_content(tn);
-            buffer_append_char(buf, '>');
-            if (tc) emit_cdata_checked(buf, tc);
-            buffer_append(buf, "</");
-            append_qualified_name(buf, elem_prefix, elem_name, elem_name_len);
-            buffer_append_char(buf, '>');
-        } else if (is_text_only && buf->indent_spaces == 0) {
-            /* Text-only element, compact mode: ONE reservation + inline
-             * emission for the whole `<name>text</name>` (TODO 194d) —
-             * was five buffer calls plus a node-dispatch hop. */
-            LeptrisTextNode* tn = (LeptrisTextNode*)child;
-            const char* tc;
-            size_t tlen;
-            if (tn->borrowed && tn->content_len > 0 &&
-                !memchr(tn->content, '&', tn->content_len)) {
-                tc = tn->content;
-                tlen = tn->content_len;
-            } else {
-                tc = leptris_text_get_content(tn);
-                tlen = tc ? tn->content_len : 0;
-            }
-            buffer_ensure_capacity(buf, 2 + elem_prefix_len + elem_name_len + 6 * tlen + 2 + 1);
-            char* te = buf->data + buf->size;
-            *te++ = '>';
-            if (tc && tlen) {
-                te = emit_escaped_inline(te, tc, tlen, 0);
-            }
-            *te++ = '<';
-            *te++ = '/';
-            if (elem_prefix_len) {
-                memcpy(te, elem_prefix, elem_prefix_len - 1);
-                te += elem_prefix_len - 1;
-                *te++ = ':';
-            }
-            memcpy(te, elem_name, elem_name_len);
-            te += elem_name_len;
-            *te++ = '>';
-            buf->size = (size_t)(te - buf->data);
-            buf->data[buf->size] = '\0';
-        } else if (is_text_only && buf->indent_spaces > 0) {
-            /* Text-only element with indenting - serialize with newlines */
-            /* Close opening tag */
-            buffer_append_char(buf, '>');
-
-            /* Serialize the single text child */
-            serialize_node_internal(leptris_node_first_child_internal((LeptrisNode*)elem), buf);
-
-            /* Closing tag */
-            buffer_append(buf, "</");
-            append_qualified_name(buf, elem_prefix, elem_name, elem_name_len);
-            buffer_append_char(buf, '>');
-
-            /* Add newline after closing tag when indenting */
-            buffer_append_newline(buf);
-        } else {
-            /* Element has element children or multiple children - use pretty formatting */
-            /* Close opening tag */
-            buffer_append_char(buf, '>');
-
-            /* Add newline after opening tag if indenting */
-            if (buf->indent_spaces > 0) {
-                buffer_append_newline(buf);
-            }
-
-            /* Increase indent level for children */
-            buf->indent++;
-
-            /* Serialize children */
-            LeptrisNode* ser_child = leptris_node_first_child_internal((LeptrisNode*)elem);
-            while (ser_child) {
-                /* Pass is_root=0 for all children */
-                if (ser_child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
-                    serialize_element_recursive((LeptrisElement)ser_child, buf, 0);
-                } else if (ser_child->type == LEPTRIS_NODE_TYPE_TEXT &&
-                           !((LeptrisTextNode*)ser_child)->base.raw &&
-                           is_cdata_element(buf, elem)) {
-                    const char* tc =
-                        leptris_text_get_content((LeptrisTextNode*)ser_child);
-                    if (tc)
-                        emit_cdata_checked(buf, tc);
-                } else {
-                    serialize_node_internal(ser_child, buf);
-                }
-                ser_child = leptris_node_get_next_sibling(ser_child);
-            }
-
-            /* Decrease indent level after children */
-            buf->indent--;
-
-            /* Add indentation before closing tag */
-            if (buf->indent_spaces > 0) {
-                buffer_append_indent(buf);
-            }
-
-            /* Closing tag */
-            buffer_append(buf, "</");
-            append_qualified_name(buf, elem_prefix, elem_name, elem_name_len);
-            buffer_append_char(buf, '>');
-
-            /* Add newline after closing tag if not root */
-            if (!is_root && buf->indent_spaces > 0) {
-                buffer_append_newline(buf);
-            }
-        }
-    } else {
-        /* Self-closing tag */
-        buffer_append(buf, "/>");
-
-        /* Add newline after self-closing tag if indenting and not root */
-        if (!is_root && buf->indent_spaces > 0) {
-            buffer_append_newline(buf);
-        }
-    }
-}
-
-
-/* ============================================================================
- * Iterative serializer (TODO 194e): one frame, explicit descent stack,
- * no per-child call — the recursive walker's call frame was ~15 ns per
- * element, the largest single item left in the text-heavy gap vs
- * pugixml. Element siblings stay in this frame; only DESCENT pushes.
- * Depth beyond the stack falls back to the recursive walker (which
- * also keeps unbounded-depth documents serializable).
- * ============================================================================
- */
-#define SER_WALK_STACK_MAX 512
-
-/* Issue #534: an element whose children include TEXT (non-whitespace)
- * or CDATA is MIXED CONTENT — indenting inside it would change the
- * text on round-trip (inserted whitespace becomes new text nodes on
- * reparse). libxml2 keeps such elements on one line; so do we.
- * Whitespace-only text nodes are formatting artifacts and do NOT
- * count (pretty documents keep indenting). */
-static int ser_children_have_text(LeptrisNode* fc) {
-    for (LeptrisNode* c = fc; c; c = leptris_node_get_next_sibling(c)) {
-        if (c->type == LEPTRIS_NODE_TYPE_CDATA) return 1;
-        if (c->type == LEPTRIS_NODE_TYPE_TEXT) {
-            LeptrisTextNode* tn = (LeptrisTextNode*)c;
-            const char* tc;
-            size_t tl;
-            if (tn->borrowed && tn->content_len > 0) {
-                tc = tn->content;
-                tl = tn->content_len;
-            } else {
-                tc = leptris_text_get_content(tn);
-                tl = tc ? tn->content_len : 0;
-            }
-            for (size_t i = 0; i < tl; i++) {
-                if (tc[i] != ' ' && tc[i] != '\t' &&
-                    tc[i] != '\n' && tc[i] != '\r') {
-                    return 1;
-                }
-            }
-        }
-    }
-    return 0;
 }
 
 /* Issue #546: rootless documents may still carry document-level
@@ -1091,11 +753,52 @@ static char* serialize_rootless_pis(struct leptris_document* doc,
     return out;
 }
 
+#define SER_WALK_STACK_MAX 512
+
+typedef struct { LeptrisElement e; size_t nl; int mixed; int cd_open;
+                 int close_brk; } SerFrame;
+
+/* Issue #534: an element whose children include TEXT (non-whitespace)
+ * or CDATA is MIXED CONTENT — indenting inside it would change the
+ * text on round-trip (inserted whitespace becomes new text nodes on
+ * reparse). libxml2 keeps such elements on one line; so do we.
+ * Whitespace-only text nodes are formatting artifacts and do NOT
+ * count (pretty documents keep indenting). */
+static int ser_children_have_text(LeptrisNode* fc) {
+    for (LeptrisNode* c = fc; c; c = leptris_node_get_next_sibling(c)) {
+        if (c->type == LEPTRIS_NODE_TYPE_CDATA) return 1;
+        if (c->type == LEPTRIS_NODE_TYPE_TEXT) {
+            LeptrisTextNode* tn = (LeptrisTextNode*)c;
+            const char* tc;
+            size_t tl;
+            if (tn->borrowed && tn->content_len > 0) {
+                tc = tn->content;
+                tl = tn->content_len;
+            } else {
+                tc = leptris_text_get_content(tn);
+                tl = tc ? tn->content_len : 0;
+            }
+            for (size_t i = 0; i < tl; i++) {
+                if (tc[i] != ' ' && tc[i] != '\t' &&
+                    tc[i] != '\n' && tc[i] != '\r') {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, int is_root) {
     if (!root_elem || !root_elem->name) return;
 
-    struct { LeptrisElement e; size_t nl; int mixed; int cd_open;
-             int close_brk; } st[SER_WALK_STACK_MAX];
+    /* Heap-grown frames (TODO 194e follow-up): a fixed 512-deep
+     * array needed a recursive fallback walker that duplicated the
+     * whole emission path — every serializer feature landed twice.
+     * The frames grow by doubling; the duplicate walker is gone. */
+    size_t st_cap = SER_WALK_STACK_MAX;
+    SerFrame* st = (SerFrame*)malloc(st_cap * sizeof(SerFrame));
+    if (!st) return;
     int sp = 0;
 
     LeptrisNode* cur = (LeptrisNode*)root_elem;
@@ -1553,34 +1256,22 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             goto advance;
         }
 
-        /* complex children: descend (stack overflow guard -> recurse) */
-        if (sp == SER_WALK_STACK_MAX) {
-            buffer_append_char(buf, '>');
-            if (buf->indent_spaces > 0) buffer_append_newline(buf);
-            buf->indent++;
-            LeptrisNode* c = fc;
-            while (c) {
-                if (c->type == LEPTRIS_NODE_TYPE_ELEMENT) {
-                    serialize_element_recursive((LeptrisElement)c, buf, 0);
-                } else if (c->type == LEPTRIS_NODE_TYPE_TEXT &&
-                           !((LeptrisTextNode*)c)->base.raw &&
-                           is_cdata_element(buf, e)) {
-                    const char* tc2 =
-                        leptris_text_get_content((LeptrisTextNode*)c);
-                    if (tc2)
-                        emit_cdata_checked(buf, tc2);
-                } else {
-                    serialize_node_internal(c, buf);
-                }
-                c = leptris_node_get_next_sibling(c);
+        /* complex children: descend — grow the frame stack at the
+         * cap instead of switching walkers (unbounded depth is safe;
+         * malloc failure truncates rather than recursing). */
+        if ((size_t)sp == st_cap) {
+            size_t nc = st_cap * 2;
+            SerFrame* grown = (SerFrame*)realloc(st, nc * sizeof(SerFrame));
+            if (!grown) {
+                buffer_append_char(buf, '>');
+                buffer_append(buf, "</");
+                append_qualified_name(buf, epfx, name, nl);
+                buffer_append_char(buf, '>');
+                free(st);
+                return;
             }
-            buf->indent--;
-            if (buf->indent_spaces > 0) buffer_append_indent(buf);
-            buffer_append(buf, "</");
-            append_qualified_name(buf, epfx, name, nl);
-            buffer_append_char(buf, '>');
-            if (!is_root_cur && buf->indent_spaces > 0) buffer_append_newline(buf);
-            goto advance;
+            st = grown;
+            st_cap = nc;
         }
 
         /* An element child interrupts any CDATA run of this parent. */
@@ -1621,7 +1312,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
          * caller's subtree: do NOT continue to the root's siblings
          * (issue #523 — the leak made element serialization both
          * wrong and O(document)). */
-        if (sp == 0 && (LeptrisNode*)cur == (LeptrisNode*)root_elem) return;
+        if (sp == 0 && (LeptrisNode*)cur == (LeptrisNode*)root_elem) {
+            free(st);
+            return;
+        }
 
         /* next sibling, else ascend closing frames */
         for (;;) {
@@ -1630,7 +1324,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 cur = nsib;
                 break;
             }
-            if (sp == 0) return;  /* root fully emitted */
+            if (sp == 0) { free(st); return; }  /* root fully emitted */
             sp--;
             buf->indent--;
             LeptrisElement pe = st[sp].e;
@@ -1668,6 +1362,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * following element into the output (issue #523:
                  * both the garbage results and the O(document)
                  * per-call cost). */
+                free(st);
                 return;
             }
             cur = (LeptrisNode*)pe;
