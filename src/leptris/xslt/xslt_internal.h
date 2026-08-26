@@ -167,6 +167,8 @@ typedef struct xslt_attrset {
  * an unnamed default entry first. */
 typedef struct xslt_decformat {
     const char* name;           /* NULL = default */
+    const char* uri;            /* resolved namespace (name qname) */
+    const char* local;          /* local part of the name qname */
     char decimal_sep;
     char grouping_sep;
     char minus_sign;
@@ -409,8 +411,10 @@ void xslt_docs_free(XsltExec* ex);
 
 /* format-number(§12.3) — shared by the bridge; returns an OWNED
  * string. df_name NULL/"" selects the default decimal-format. */
+struct leptris_xpath_ns_map;
 char* xslt_format_number(const XsltStylesheet* sheet, double value,
-                         const char* pattern, const char* df_name);
+                         const char* pattern, const char* df_name,
+                         const struct leptris_xpath_ns_map* ns);
 
 /* Attribute-set application (xslt_exec.c): evaluates the set's AVT
  * attrs onto `target`; existing attributes are NOT overwritten

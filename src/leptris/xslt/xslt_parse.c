@@ -944,12 +944,34 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
         if (node_is_xsl(e, "decimal-format")) {
             /* Find/create by name (NULL = default). */
             const char* name = leptris_element_attribute(e, "name");
+            /* Resolve the declaration's qname so same-literal names
+             * in DIFFERENT namespaces stay distinct entries. */
+            const char* duri = NULL;
+            const char* dlocal = name;
+            if (name) {
+                const char* dc = strchr(name, ':');
+                if (dc) {
+                    dlocal = dc + 1;
+                    char dp[64];
+                    size_t dl = (size_t)(dc - name);
+                    if (dl < sizeof(dp)) {
+                        memcpy(dp, name, dl);
+                        dp[dl] = 0;
+                        duri = leptris_element_namespace_for_prefix(
+                            e, dp);
+                    }
+                }
+            }
             XsltDecimalFormat* df = NULL;
             for (XsltDecimalFormat* d = sp->sheet->decformats; d; d = d->next) {
-                if ((!name && !d->name) ||
-                    (name && d->name && strcmp(name, d->name) == 0)) {
-                    df = d; break;
+                if (!name || !d->name) {
+                    if (!name && !d->name) { df = d; break; }
+                    continue;
                 }
+                if (strcmp(name, d->name) != 0) continue;
+                const char* euri = d->uri ? d->uri : "";
+                const char* curi = duri ? duri : "";
+                if (strcmp(euri, curi) == 0) { df = d; break; }
             }
             if (!df) {
                 df = (XsltDecimalFormat*)calloc(1, sizeof(*df));
@@ -963,6 +985,8 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                 df->infinity = leptris_strdup("Infinity");
                 df->nan = leptris_strdup("NaN");
                 df->name = name ? leptris_strdup(name) : NULL;
+                df->uri = duri ? leptris_strdup(duri) : NULL;
+                df->local = dlocal ? leptris_strdup(dlocal) : NULL;
                 /* Defaults slot at the head; named at the tail. */
                 if (!name) {
                     df->next = sp->sheet->decformats;
