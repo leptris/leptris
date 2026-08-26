@@ -31,6 +31,7 @@ LeptrisTextNode* leptris_text_create(const char* content,
     node->base.type = LEPTRIS_NODE_TYPE_TEXT;
     node->base.frozen = 0;
     node->base.version = 0;
+    node->base.raw = 0;   /* uninitialized: see create_borrowed */
       /* Explicit: pool memory is not zeroed and the retained arena
      * recycles dirty pages — a stale binding_wrapper would hand
      * bindings a dangling pointer. */
@@ -67,6 +68,10 @@ LeptrisTextNode* leptris_text_create_borrowed(const char* content,
     node->base.type = LEPTRIS_NODE_TYPE_TEXT;
     node->base.frozen = 0;
     node->base.version = 0;
+    /* Pool memory is dirty (and ASAN's allocator fills 0xbe): an
+     * uninitialized raw bit silently flips DOE/cdata behavior by
+     * build configuration. */
+    node->base.raw = 0;
     node->content = (char*)content;  /* Non-owning; caller guarantees lifetime. */
     node->content_len = content_len;
     node->pool = pool;

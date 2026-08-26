@@ -18,6 +18,10 @@
 
 #define XSLT_MAX_DEPTH 512
 
+/* xpath/xpath_public.c — drops the doc's cached merged registry
+ * (xslt_state is one of its three inputs). */
+void leptris_xpath_invalidate_fn_registry(struct leptris_document* doc);
+
 static char* xslt_capture_children_text(XsltExec* ex,
                                         const XsltInstr* child,
                                         LeptrisElement node);
@@ -89,6 +93,17 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
     if (!ex->varset) {
         ex->varset = xpath_variable_set_new();
         if (!ex->varset) { ex->current_node = saved_cur; return NULL; }
+    }
+    /* The scratch varset mirrors the frame chain. Frames only change
+     * through push/pop — both mark vars_dirty — so a clean varset is
+     * a faithful mirror and the (frame-count × type-switch) rebuild
+     * is skipped entirely: eval-heavy loops with stable bindings pay
+     * the materialization once per scope, not per expression. */
+    if (ex->vars_dirty) {
+    ex->vars_dirty = 0;
+    while (ex->varset->count > 0) {
+        xpath_variable_set_remove(ex->varset,
+                                  ex->varset->variables[0]->name);
     }
     /* Shadowing (§11): the scratch set keeps the FIRST binding of a
      * name (xpath_variable_set_add returns existing), so materialize
@@ -169,17 +184,13 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
         }
     }
     free(frames);
+    }   /* vars_dirty rebuild */
 
     struct leptris_xpath_result* r = leptris_xpath_compiled_eval_ctx(
         c, ex->source, node,
         (struct leptris_xpath_ns_map*)ex->current_ns, ex->varset,
         ex->current_pos);
 
-    /* Clear the scratch set for the next evaluation. */
-    while (ex->varset && ex->varset->count > 0) {
-        xpath_variable_set_remove(ex->varset,
-                                  ex->varset->variables[0]->name);
-    }
     ex->current_node = saved_cur;
     return r;
 }
@@ -193,12 +204,14 @@ void xslt_push_var(XsltExec* ex, const char* name,
     fv->value = v;
     fv->prev = ex->vars;
     ex->vars = fv;
+    ex->vars_dirty = 1;   /* the scratch varset is stale */
 }
 
 void xslt_pop_var(XsltExec* ex, const char* name) {
     if (!ex || !ex->vars) return;
     XsltVar* top = ex->vars;
     ex->vars = top->prev;
+    ex->vars_dirty = 1;
     if (top->value) leptris_xpath_result_free(top->value);
     free(top);
     (void)name;
@@ -1642,10 +1655,14 @@ static char* xslt_capture_children_text(XsltExec* ex,
                                         LeptrisElement node) {
     size_t saved_len = ex->rtf_text_len;
     char* saved_buf = ex->rtf_text;
-    int saved_cap = ex->rtf_capturing;
+    size_t saved_cap = ex->rtf_text_cap;
+    int saved_capturing = ex->rtf_capturing;
     ex->rtf_capturing = 1;
     ex->rtf_text = (char*)calloc(1, 1);
     ex->rtf_text_len = 0;
+    ex->rtf_text_cap = 1;   /* MUST match the fresh 1-byte buffer —
+                             * a stale outer cap skips the grow and
+                             * overflows (ASAN, nested captures). */
     LeptrisElement saved_pp = ex->pending_parent;
     ex->pending_parent = NULL;   /* children emit text, not nodes */
     xslt_exec_instrs(ex, child, node);
@@ -1653,7 +1670,8 @@ static char* xslt_capture_children_text(XsltExec* ex,
     char* acc = ex->rtf_text ? ex->rtf_text : (char*)calloc(1, 1);
     ex->rtf_text = saved_buf;
     ex->rtf_text_len = saved_len;
-    ex->rtf_capturing = saved_cap;
+    ex->rtf_text_cap = saved_cap;
+    ex->rtf_capturing = saved_capturing;
     return acc;
 }
 
@@ -2276,9 +2294,12 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
      * the VM path and the AST-interpreter path) builds its registry
      * through leptris_xpath_build_custom_registry, which registers
      * key()/current()/format-number()/... with `ex` as user_data
-     * while xslt_state is set. Save/restore makes nesting safe. */
+     * while xslt_state is set. Save/restore makes nesting safe.
+     * The state pointer keys the doc's cached registry — drop the
+     * cache so it rebuilds for this exec (and again on restore). */
     struct leptris_document* src_doc = (struct leptris_document*)source;
     void* saved_xslt_state = src_doc->xslt_state;
+    leptris_xpath_invalidate_fn_registry(src_doc);
     src_doc->xslt_state = ex;
 
     /* Document-order fidelity: the engine parks top-level comments
@@ -2382,6 +2403,7 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     }   /* !terminated */
 
     src_doc->xslt_state = saved_xslt_state;
+    leptris_xpath_invalidate_fn_registry(src_doc);
     return ex;
 }
 

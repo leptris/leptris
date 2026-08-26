@@ -327,6 +327,10 @@ typedef struct xslt_exec {
                                       chain here (§11: callees see
                                       globals + own locals, never the
                                       caller's locals) */
+    int vars_dirty;                /* a frame changed since the last
+                                      varset materialization — the
+                                      next xslt_eval rebuilds the
+                                      scratch set */
     XPathVariableSet* varset;      /* scratch set for evaluation */
     struct leptris_xpath_result* pending; /* with-params of the
                                              in-flight call */
