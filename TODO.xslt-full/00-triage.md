@@ -144,3 +144,28 @@ machine (binary runs clean from shell; reproduced on HEAD stashed).
 
 Suite 131/205; 983/983 ctest green. Remaining 74: same census as
 log 3 minus closed items (bug-33-/83/159 cluster partially closed).
+
+---
+## Session log 5 (136/205, morning 2026-08-27)
+
+Landed: §11 scoping moved into xslt_invoke_template (apply-templates
+twin, bug-42-); ATTLIST default-value materialization at parse
+(bug-53/90 cluster); strip/preserve-space prefixed NameTests p:* (bug-124);
+UTF-8 NCNames in the XPath lexer (bug-155); leading div/mod/and/or
+tokens are NameTests — match="div" / "div|obj" compile (bug-70);
+serializer ns order (default first, bug-150/155); xsl:output encoding
+in the result declaration (bug-132).
+
+KNOWN OPEN with root cause (bug-16-): `//NAME` and
+`/descendant::NAME` from a document-node ("/") context DROP the root
+element — the absolute-path branch seeds the walk with the ROOT
+ELEMENT, so descendant:: walks children-only from it. Seeding with
+the DOCUMENT node instead fixes /descendant:: but over-counts the
+-or-self forms (double root add) and still misses //NAME's child
+step from the doc node — the proper fix needs the doc-branch
+child/descendant routes audited together (attempt reverted; the
+regression risk was not worth the single case at session end).
+count(//*), /descendant-or-self::*, /NAME unaffected.
+
+Suite 136/205. Remaining census: ~31 no-marker one-offs, 7 number,
+7 namespace, 6 document(), 5 import, 3 id, 3 key.
