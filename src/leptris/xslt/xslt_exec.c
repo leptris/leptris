@@ -497,28 +497,21 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
     const char* out_name = apply_ns_alias(ex->sheet, in->name);
     LeptrisElement e = out_append_elem(ex, parent, out_name, in->ns_uri);
     if (!e) return -1;
-    /* §7.1.1: copy in-scope namespace declarations (minus XSLT).
-     * Skip bindings the result parent already declares identically
-     * so nested LREs don't re-emit. */
+    /* §7.1.1: copy in-scope namespace declarations. Skip any
+     * binding already present on a RESULT ancestor (full chain,
+     * not just the immediate parent — a literal-result-element
+     * may appear deeply nested without redeclaring its ancestors'
+     * ns). */
     for (size_t i = 0; i < in->ns_out_count; i++) {
-        const char* cur = parent
-            ? leptris_element_namespace_for_prefix(parent,
-                                                   in->ns_out_pfx[i])
-            : NULL;
-        if (cur && strcmp(cur, in->ns_out_uri[i]) == 0) continue;
+        if (result_ns_in_scope(e, in->ns_out_pfx[i],
+                               in->ns_out_uri[i])) continue;
         leptris_element_add_namespace_definition(e, in->ns_out_pfx[i],
                                                  in->ns_out_uri[i]);
     }
-    if (in->ns_out_default) {
-        const char* cur = parent
-            ? leptris_element_namespace_for_prefix(parent, "")
-            : NULL;
-        if (cur && strcmp(cur, in->ns_out_default) == 0) {
-            /* same default ns in scope — skip */
-        } else {
-            leptris_element_add_namespace_definition(e, "",
-                                                     in->ns_out_default);
-        }
+    if (in->ns_out_default &&
+        !result_ns_in_scope(e, "", in->ns_out_default)) {
+        leptris_element_add_namespace_definition(e, "",
+                                                 in->ns_out_default);
     }
     /* Literal attrs FIRST — they win over any defaults coming
      * from the named attribute-set (§7.1.4 — explicit attrs and
