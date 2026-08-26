@@ -91,14 +91,19 @@ void xpath_lexer_free(XPathLexer* lexer) {
     }
 }
 
-/* Check if character is NCName start character */
+/* Check if character is NCName start character. Multi-byte UTF-8
+ * sequences (every lead byte >= 0xC2) are name characters per the
+ * NCName production (Namespaces 1.0: the Unicode base set) —
+ * expressions like select="Ältestenrat" must lex. */
 static int is_ncname_start(char c) {
-    return isalpha((unsigned char)c) || c == '_';
+    unsigned char u = (unsigned char)c;
+    return isalpha(u) || u == '_' || u >= 0x80;
 }
 
 /* Check if character is NCName character */
 static int is_ncname_char(char c) {
-    return isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.';
+    unsigned char u = (unsigned char)c;
+    return isalnum(u) || u == '_' || u == '-' || u == '.' || u >= 0x80;
 }
 
 /* Skip whitespace and update position */

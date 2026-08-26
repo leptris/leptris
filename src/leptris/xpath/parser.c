@@ -599,6 +599,19 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
         return parse_location_path(parser);
     }
 
+    /* XPath 1.0 §3.7 lexical disambiguation: an operator KEYWORD at
+     * the START of a path expression can only be a NameTest (an
+     * element named div/mod/and/or — patterns like match="div" and
+     * union patterns div|obj). As operators they need a left operand,
+     * which a path start cannot supply. parse_node_test already
+     * accepts the keyword tokens as names. */
+    if (current_token_is(parser, TOK_DIV) ||
+        current_token_is(parser, TOK_MOD) ||
+        current_token_is(parser, TOK_AND) ||
+        current_token_is(parser, TOK_OR)) {
+        return parse_location_path(parser);
+    }
+
     /* Check for relative paths starting with NCName/QName */
     if (current_token_is(parser, TOK_NCNAME) || current_token_is(parser, TOK_QNAME)) {
         XPathToken* next = peek_token(parser, 1);

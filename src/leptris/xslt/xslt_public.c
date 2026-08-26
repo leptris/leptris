@@ -326,6 +326,9 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
      * HTML method: the serializer's §16.2 newline layout. */
     opts.indent = effective_indent(ex->sheet, html_method) ? 2 : 0;
     opts.html_method = html_method;
+    /* §16.1: xsl:output encoding names the output declaration's
+     * encoding (bug-132). */
+    opts.encoding = ex->sheet->out_encoding;
     opts.cdata_elements = ex->sheet->out_cdata;
     opts.cdata_element_count = ex->sheet->out_cdata_count;
     if (html_method)
@@ -428,7 +431,6 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     }
 
     char* final = acc;
-    (void)0;
     free(first_pre);
     leptris_document_free(out);
     xslt_exec_free(ex);
