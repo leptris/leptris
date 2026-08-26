@@ -903,6 +903,93 @@ static struct leptris_xpath_result* xslt_fn_function_available(
 }
 
 /* ============================================================
+ * EXSLT func:function — stylesheet-defined XPath functions.
+ *
+ * Each definition is registered in the bridge registry under its
+ * raw qname; the registry entry's user_data is a BINDING (exec-
+ * owned array) carrying both the exec and the definition, because
+ * handlers receive only ctx->current_fn_user_data.
+ * ============================================================ */
+
+typedef struct xslt_ufn_binding {
+    XsltExec* ex;
+    const XsltUserFunc* fn;
+} XsltUfnBinding;
+
+extern int xslt_exec_instrs(XsltExec*, const XsltInstr*, LeptrisElement);
+
+static struct leptris_xpath_result* xslt_fn_user_func(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)args; (void)n;
+    XsltUfnBinding* b = (XsltUfnBinding*)ctx->current_fn_user_data;
+    if (!b || !b->ex || !b->fn || !b->fn->body) {
+        struct leptris_xpath_result* r =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (r) r->value.string_value = leptris_strdup("");
+        return r;
+    }
+    XsltExec* ex = b->ex;
+    const XsltUserFunc* fn = b->fn;
+    LeptrisElement ctxnode = (LeptrisElement)ctx->context_node;
+
+    /* Function scope (EXSLT): globals + own locals — the caller's
+     * local frames are not visible. The body emits ONLY through
+     * func:result; switch the output doc so stray text lands in a
+     * scratch fragment instead of the result tree. */
+    XsltVar* saved_vars = ex->vars;
+    ex->vars = ex->global_vars;
+    struct leptris_xpath_result* saved_result = ex->fn_result;
+    int saved_yield = ex->fn_yield;
+    LeptrisDocument main_result = ex->result;
+    LeptrisElement saved_parent = ex->pending_parent;
+    ex->result = leptris_document_create();
+    ex->pending_parent = NULL;
+    ex->fn_result = NULL;
+    ex->fn_yield = 0;
+
+    xslt_exec_instrs(ex, fn->body, ctxnode);
+
+    struct leptris_xpath_result* got = ex->fn_result;
+    ex->fn_result = NULL;
+    ex->fn_yield = saved_yield;
+
+    leptris_document_free(ex->result);
+    ex->result = main_result;
+    ex->pending_parent = saved_parent;
+    ex->vars = saved_vars;
+    if (saved_result) leptris_xpath_result_free(saved_result);
+
+    if (!got) {
+        got = xpath_result_new(XPATH_RESULT_STRING);
+        if (got) got->value.string_value = leptris_strdup("");
+    }
+    return got;
+}
+
+/* Bindings live on the exec (registry entries point into them; the
+ * registry is rebuilt per eval, the bindings are not). */
+static XsltUfnBinding* ufn_bindings(XsltExec* ex) {
+    if (ex->ufn) return (XsltUfnBinding*)ex->ufn;
+    size_t n = 0;
+    for (const XsltUserFunc* f = ex->sheet->funcs; f; f = f->next) n++;
+    if (!n) return NULL;
+    XsltUfnBinding* arr = (XsltUfnBinding*)calloc(n, sizeof(*arr));
+    if (!arr) return NULL;
+    size_t i = 0;
+    for (const XsltUserFunc* f = ex->sheet->funcs; f; f = f->next, i++) {
+        arr[i].ex = ex;
+        arr[i].fn = f;
+    }
+    ex->ufn = arr;
+    return arr;
+}
+
+void xslt_ufn_free(XsltExec* ex) {
+    free(ex->ufn);
+    ex->ufn = NULL;
+}
+
+/* ============================================================
  * Registry handler installation
  *
  * Per-eval path: xslt_exec.c calls xslt_register_bridge_handlers
@@ -952,6 +1039,20 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
         leptris_exslt_register(r);
         for (size_t i = before; i < r->count; i++)
             r->functions[i].user_data = exec;
+    }
+
+    /* Stylesheet-defined EXSLT functions (func:function): one
+     * registry entry per definition, user_data = the binding. */
+    if (exec) {
+        XsltExec* ex = (XsltExec*)exec;
+        XsltUfnBinding* arr = ufn_bindings(ex);
+        if (arr) {
+            size_t i = 0;
+            for (const XsltUserFunc* f = ex->sheet->funcs; f;
+                 f = f->next, i++)
+                xslt_register_handler(r, f->name, xslt_fn_user_func,
+                                      0, 0, &arr[i]);
+        }
     }
 }
 

@@ -34,7 +34,6 @@ bug-186
 bug-189
 bug-19-
 bug-190
-bug-192
 bug-193
 bug-195
 bug-199
@@ -43,10 +42,7 @@ bug-207
 bug-209
 bug-210
 bug-211
-bug-212
-bug-213
 bug-214
-bug-216
 bug-217
 bug-218
 bug-219
