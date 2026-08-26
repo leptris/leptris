@@ -822,6 +822,21 @@ TEST(XsltCore, PositionInForEachAndAvt) {
         "<BAR INDEX=\"1\"/><BAR INDEX=\"2\"><MID/></BAR><BAR INDEX=\"3\"/>");
 }
 
+/* §3.4 xsl:strip-space elements='*': the wildcard matches every
+ * element — whitespace-only source text disappears (position() over
+ * the children counts only elements; no stray text reaches the
+ * result). libxslt suite bug-2-. */
+TEST(XsltCore, StripSpaceWildcard) {
+    EXPECT_EQ(body(run(
+        "<xsl:strip-space elements='*'/>"
+        "<xsl:template match='foo'><FOO><xsl:apply-templates/></FOO></xsl:template>"
+        "<xsl:template match='bar'>"
+        "<BAR INDEX='{position()}'><xsl:value-of select='.'/></BAR>"
+        "</xsl:template>",
+        "<foo>\n  <bar>b1</bar>\n  <bar>b2</bar>\n</foo>")),
+        "<FOO><BAR INDEX=\"1\">b1</BAR><BAR INDEX=\"2\">b2</BAR></FOO>");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
