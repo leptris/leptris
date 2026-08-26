@@ -862,6 +862,19 @@ TEST(XsltCore, CopyOfMixedContentVerbatim) {
         "<m name=\"M\">\n  <c>inner</c>\n</m>");
 }
 
+/* §16.1: an element-less result (only comment/PI nodes) still
+ * carries the XML declaration unless omitted — libxslt parity
+ * (bug-31-). */
+TEST(XsltCore, FragmentResultKeepsDeclaration) {
+    EXPECT_EQ(run(
+        "<xsl:template match='processing-instruction()'>"
+        "<xsl:copy/>"
+        "</xsl:template>",
+        "<?xml-stylesheet type='text/css' href='s.css'?><d/>"),
+        "<?xml version=\"1.0\"?>\n<?xml-stylesheet type='text/css' "
+        "href='s.css'?>");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {

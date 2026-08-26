@@ -417,11 +417,20 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
 
     if (!root) {
         /* No element anchored the fragment: the pre-root list IS
-         * the result — text/comment/PI in emitted order. */
+         * the result — text/comment/PI in emitted order. §16.1: the
+         * declaration still leads unless omitted or text-method
+         * (libxslt parity — bug-31-). */
         size_t cap = 64, len = 0;
         char* acc = (char*)malloc(cap);
         if (!acc) { xslt_exec_free(ex); return NULL; }
         acc[0] = 0;
+        if (!html_method && !ex->sheet->out_method_text &&
+            !ex->sheet->out_omit_decl) {
+            const char* decl = "<?xml version=\"1.0\"?>\n";
+            size_t dl = strlen(decl);
+            memcpy(acc, decl, dl + 1);
+            len = dl;
+        }
         for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
              f = f->next) {
             char* piece = serialize_frag_node_text(f->node);
