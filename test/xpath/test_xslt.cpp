@@ -985,6 +985,32 @@ TEST(XsltCore, DtdDefaultAttributes) {
         "SUCCESS");
 }
 
+/* §3.4 strip-space NameTests: "p:*" strips whitespace-only text
+ * from every element in the namespace bound to p (bug-124). */
+TEST(XsltCore, StripSpacePrefixedWildcard) {
+    /* run() wraps its body with only the xsl prefix; this case needs
+     * a SECOND prefix bound on the stylesheet root — build directly. */
+    const char* sheet =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:p='urn:x' version='1.0'>"
+        "<xsl:strip-space elements='p:*'/>"
+        "<xsl:template match='@*|node()'>"
+        "<xsl:copy><xsl:apply-templates select='@*|node()'/></xsl:copy>"
+        "</xsl:template></xsl:stylesheet>";
+    const char* xml = "<r xmlns:p='urn:x'><p:a>\n  <p:b/>\n</p:a></r>";
+    LeptrisXslt x = leptris_xslt_parse(sheet, strlen(sheet));
+    ASSERT_NE(x, (LeptrisXslt) nullptr);
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(d, (LeptrisDocument) nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, (char*) nullptr);
+    EXPECT_EQ(body(std::string(out)),
+              "<r xmlns:p=\"urn:x\"><p:a><p:b/></p:a></r>");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
