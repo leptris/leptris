@@ -78,12 +78,13 @@ void leptris_node_prepend_child(LeptrisNode* parent, LeptrisNode* child) {
     /* Set parent relationship */
     leptris_element_set_parent(parent_elem, child_elem);
 
-    /* Insert at beginning of children list */
+    /* Insert at beginning of children list. The old first child's
+     * own next-sibling link is untouched — it already points at the
+     * rest of the chain; severing it (the old code NULLed it) drops
+     * every following sibling from the tree. */
     LeptrisElement first = leptris_element_get_first_child(parent_elem);
     if (first) {
         leptris_element_set_next_sibling(child_elem, first);
-        leptris_element_set_next_sibling(first, NULL);  /* Will be updated by loop */
-        /* Update: Need to set child as first */
         leptris_element_set_first_child(parent_elem, child_elem);
     } else {
         leptris_element_set_first_child(parent_elem, child_elem);

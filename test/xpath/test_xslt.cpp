@@ -906,6 +906,46 @@ TEST(XsltCore, ExsltUserFunction) {
     leptris_xslt_free(x);
 }
 
+/* §16.2 raw text elements: script/style content (HTML5 rawtext,
+ * libxml2 dataMode >= DATA_RAWTEXT) emits VERBATIM under
+ * method=html — no &lt; re-escaping (bug-33-). */
+TEST(XsltHtml, ScriptContentRaw) {
+    /* head carries the injected meta → 2 children → line breaks
+     * (libxslt site-1 rule); the script text itself is verbatim. */
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><head><script>if (a &lt; b) alert();</script></head></html>"
+        "</xsl:template>", "<r/>")),
+        "<html><head>\n<meta charset=\"UTF-8\">\n"
+        "<script>if (a < b) alert();</script>\n</head></html>");
+}
+
+/* §16.2 HTML PIs have no trailing '?': <?php ... > (libxml2
+ * HTMLtree.c HTML_PI_NODE case). */
+TEST(XsltHtml, PiDropsQuestionMark) {
+    /* Literal PIs in template bodies are dropped (xsltproc-verified)
+     * — the PI form is reachable through xsl:processing-instruction. */
+    EXPECT_NE(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><xsl:processing-instruction name='php'>"
+        "echo 1;</xsl:processing-instruction></body></html>"
+        "</xsl:template>", "<r/>")).find("<?php echo 1;>"),
+              std::string::npos);
+}
+
+/* §16.2 href URL-escaping: non-ASCII (and spaces) in href values
+ * percent-encode as UTF-8 (libxml2 htmlAttrDumpOutput, bug-83). */
+TEST(XsltHtml, HrefUrlEscaped) {
+    EXPECT_NE(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><a href=\"a b c\">x</a></body></html>"
+        "</xsl:template>", "<r/>")).find("href=\"a%20b%20c\""),
+              std::string::npos);
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {

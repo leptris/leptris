@@ -111,111 +111,6 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
     return out;
 }
 
-/* §16.2 HTML output: no XML declaration; known void elements emit
- * without the XHTML self-closing slash. Applied as a post-pass on
- * the XML serialization (script/style content is already raw via
- * the text-node raw flag). */
-static char* to_html_method(const char* xml) {
-    if (!xml) return NULL;
-    static const char* kVoid[] = {
-        "area", "base", "br", "col", "hr", "img", "input", "link",
-        "meta", "param", NULL };
-    size_t len = strlen(xml);
-    size_t cap = len + 1, o = 0;
-    char* out = (char*)malloc(cap);
-    if (!out) return NULL;
-    for (size_t i = 0; i < len; ) {
-        /* §16.2 HTML PIs: no trailing '?' (<?php ... >, not XML's
-         * <?php ... ?>). The XML declaration is stripped earlier. */
-        if (xml[i] == '<' && xml[i + 1] == '?' &&
-            strncmp(xml + i + 2, "xml", 3) != 0) {
-            /* leave the declaration to the strip step */
-            const char* close = strstr(xml + i, "?>");
-            if (close) {
-                size_t body = (size_t)(close - (xml + i));  /* excl. '?' */
-                while (body--) {
-                    if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
-                    out[o++] = xml[i++];
-                }
-                if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
-                out[o++] = '>';
-                i += 2;   /* skip "?>" */
-                continue;
-            }
-        }
-        if (xml[i] == '<') {
-            /* Find "<name .../>" self-closing; convert known voids. */
-            size_t j = i + 1;
-            while (j < len && xml[j] != '>' && xml[j] != ' ' && xml[j] != '/') j++;
-            size_t namelen = j - (i + 1);
-            int is_void = 0;
-            for (size_t k = 0; kVoid[k]; k++) {
-                if (strlen(kVoid[k]) == namelen) {
-                    size_t q = 0;
-                    int same = 1;
-                    const unsigned char* p =
-                        (const unsigned char*)xml + i + 1;
-                    for (; q < namelen; q++) {
-                        if (tolower(p[q]) !=
-                            tolower((unsigned char)kVoid[k][q])) {
-                            same = 0; break;
-                        }
-                    }
-                    if (same) { is_void = 1; break; }
-                }
-            }
-            if (is_void) {
-                /* Copy up to the '/>' and drop the slash. */
-                while (i < len && xml[i] != '/') {
-                    if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
-                    out[o++] = xml[i++];
-                }
-                i++;   /* skip '/' */
-                if (i < len && xml[i] == '>') {
-                    if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
-                    out[o++] = '>';
-                    i++;
-                }
-                continue;
-            }
-
-            /* §16.2: non-void elements always emit open+close pair —
-             * an XML `<head/>` self-closer becomes `<head></head>`
-             * (HTML5 foreign-content rule). Scan to the tag's '>'
-             * (attributes may intervene) and check for a preceding
-             * '/'. */
-            {
-                const char* gt2 = xml + j;
-                while (gt2 < xml + len && *gt2 != '>') gt2++;
-                if (gt2 < xml + len && gt2 > xml && gt2[-1] == '/') {
-                    const char* sc = gt2 - 1;
-                    size_t attrs = (size_t)(sc - (xml + i + 1 + namelen));
-                    size_t need = namelen * 2 + attrs + 5;
-                    while (o + need + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
-                    out[o++] = '<';
-                    memcpy(out + o, xml + i + 1, namelen);
-                    o += namelen;
-                    memcpy(out + o, xml + i + 1 + namelen, attrs);
-                    o += attrs;
-                    out[o++] = '>';
-                    out[o++] = '<';
-                    out[o++] = '/';
-                    memcpy(out + o, xml + i + 1, namelen);
-                    o += namelen;
-                    out[o++] = '>';
-                    i = (size_t)(gt2 - xml) + 1;   /* past '>' */
-                    continue;
-                }
-            }
-        }
-        if (o + 1 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
-        out[o++] = xml[i++];
-    }
-    out[o] = 0;
-    return out;
-}
-
-
 /* One fragment node by kind: element → subtree serialize;
  * comment/PI/text → their literal serialization. */
 static char* serialize_frag_node_text(LeptrisNodeRef n) {
@@ -247,45 +142,6 @@ static char* serialize_frag_node_text(LeptrisNodeRef n) {
     return out;
 }
 
-/* §16.2 post-pass: strip the XML declaration, unslash void
- * elements, decode &apos; in attribute values, PHP-style PIs. The
- * meta-charset injection and the newline layout are NOT string
- * transforms — they happen at the DOM/serializer level. Returns a
- * fresh string (caller frees the input). */
-static char* html_post_pass(char* acc, const char* encoding) {
-    (void)encoding;
-    /* The XML serializer always emits &apos; for an apostrophe in
-     * an attribute value; the HTML method writes a raw apostrophe. */
-    char* apos;
-    while ((apos = strstr(acc, "&apos;")) != NULL) {
-        /* The entity is exactly the 6-byte sequence &apos;; the
-         * post-entity string is preserved as-is. Insert a raw
-         * apostrophe and shift the tail left by 5 (net). */
-        memmove(apos + 1, apos + 6, strlen(apos + 6) + 1);
-        *apos = '\'';
-    }
-    char* html = to_html_method(acc);
-    if (!html) return acc;
-    char* decl = strstr(html, "<?xml");
-    if (decl == html) {
-        char* end = strstr(html, "?>");
-        if (end) {
-            /* The shared serializer emits a newline immediately
-             * after the declaration (libxslt parity, see the post-
-             * pass below for XML); the HTML method wants neither —
-             * strip the declaration AND its trailing newline so
-             * no leading whitespace leaks into the HTML output. */
-            const char* p = end + 2;
-            if (*p == '\n') p++;
-            size_t rest = strlen(p);
-            memmove(html, p, rest + 1);
-        }
-    }
-
-    free(acc);
-    return html;
-}
-
 /* §16.1 default output method: when xsl:output names no method, an
  * UNNAMESPACED html result root selects the html method (libxslt
  * parity — the exact condition also requires the root to be the
@@ -293,7 +149,7 @@ static char* html_post_pass(char* acc, const char* encoding) {
 static int effective_html_method(const XsltStylesheet* sheet,
                                  LeptrisElement root) {
     if (sheet->out_method_html) return 1;
-    if (sheet->out_method_text) return 0;
+    if (sheet->out_method_set) return 0;
     if (root && leptris_element_get_namespace_uri(root) == NULL) {
         const char* n = leptris_element_name(root);
         if (n) {
@@ -443,7 +299,6 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             free(piece);
         }
         if (out) leptris_document_free(out);
-        if (html_method) acc = html_post_pass(acc, ex->sheet->out_encoding);
         xslt_exec_free(ex);
         return acc;
     }
@@ -461,7 +316,11 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     /* XML result: the declaration (unless text-method) + top text +
      * every top-level element of the fragment chain. */
     LeptrisSerializeOptions opts = {0};
-    opts.xml_declaration = ex->sheet->out_method_text ? 0 : 1;
+    /* §16.2: the html method never writes a declaration — the
+     * serializer owns every HTML semantic now (layout, voids,
+     * raw text, attr escaping, PI form). */
+    opts.xml_declaration =
+        (!ex->sheet->out_method_text && !html_method) ? 1 : 0;
     /* §16.1 indent="yes": 2-space pretty-print via the shared
      * serializer (text-only elements stay inline — libxslt rule).
      * HTML method: the serializer's §16.2 newline layout. */
@@ -569,7 +428,6 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     }
 
     char* final = acc;
-    if (html_method) final = html_post_pass(acc, ex->sheet->out_encoding);
     (void)0;
     free(first_pre);
     leptris_document_free(out);
