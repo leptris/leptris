@@ -892,6 +892,7 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             const char* m = leptris_element_attribute(e, "method");
             sp->sheet->out_method_text = m && strcmp(m, "text") == 0;
             sp->sheet->out_method_html = m && strcmp(m, "html") == 0;
+            sp->sheet->out_method_set = m && *m;
             const char* ind = leptris_element_attribute(e, "indent");
             if (ind) sp->sheet->out_indent = strcmp(ind, "yes") == 0;
             /* §16.1 cdata-section-elements: space-separated QNames. */

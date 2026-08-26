@@ -362,7 +362,7 @@ static const HtmlElemFlags kHtmlElems[] = {
     { "h4", HTML_F_BLOCK }, { "h5", HTML_F_BLOCK },
     { "h6", HTML_F_BLOCK }, { "head", HTML_F_BLOCK },
     { "hr", HTML_F_EMPTY | HTML_F_BLOCK }, { "html", HTML_F_BLOCK },
-    { "i", HTML_F_INLINE }, { "iframe", HTML_F_INLINE },
+    { "i", HTML_F_INLINE }, { "iframe", HTML_F_INLINE | HTML_F_RAW },
     { "img", HTML_F_EMPTY | HTML_F_INLINE },
     { "input", HTML_F_EMPTY | HTML_F_INLINE }, { "ins", HTML_F_INLINE },
     { "isindex", HTML_F_EMPTY | HTML_F_BLOCK },
@@ -373,20 +373,20 @@ static const HtmlElemFlags kHtmlElems[] = {
     { "link", HTML_F_EMPTY | HTML_F_BLOCK },
     { "map", HTML_F_INLINE }, { "menu", HTML_F_BLOCK },
     { "meta", HTML_F_EMPTY | HTML_F_BLOCK },
-    { "noembed", HTML_F_BLOCK }, { "noframes", HTML_F_BLOCK },
+    { "noembed", HTML_F_BLOCK | HTML_F_RAW }, { "noframes", HTML_F_BLOCK | HTML_F_RAW },
     { "noscript", HTML_F_BLOCK },
     { "object", HTML_F_INLINE }, { "ol", HTML_F_BLOCK },
     { "optgroup", HTML_F_BLOCK },
     { "option", HTML_F_BLOCK }, { "p", HTML_F_BLOCK },
     { "param", HTML_F_EMPTY | HTML_F_BLOCK },
-    { "plaintext", HTML_F_BLOCK }, { "pre", HTML_F_BLOCK },
+    { "plaintext", HTML_F_BLOCK | HTML_F_RAW }, { "pre", HTML_F_BLOCK },
     { "q", HTML_F_INLINE }, { "s", HTML_F_INLINE },
     { "samp", HTML_F_INLINE },
-    { "script", HTML_F_INLINE }, { "select", HTML_F_INLINE },
+    { "script", HTML_F_INLINE | HTML_F_RAW }, { "select", HTML_F_INLINE },
     { "small", HTML_F_INLINE },
     { "source", HTML_F_EMPTY | HTML_F_BLOCK },
     { "span", HTML_F_INLINE }, { "strike", HTML_F_INLINE },
-    { "strong", HTML_F_INLINE }, { "style", HTML_F_BLOCK },
+    { "strong", HTML_F_INLINE }, { "style", HTML_F_BLOCK | HTML_F_RAW },
     { "sub", HTML_F_INLINE },
     { "sup", HTML_F_INLINE }, { "table", HTML_F_BLOCK },
     { "tbody", HTML_F_BLOCK },
@@ -397,7 +397,7 @@ static const HtmlElemFlags kHtmlElems[] = {
     { "track", HTML_F_EMPTY | HTML_F_BLOCK }, { "tt", HTML_F_INLINE },
     { "u", HTML_F_INLINE }, { "ul", HTML_F_BLOCK },
     { "var", HTML_F_INLINE },
-    { "wbr", HTML_F_EMPTY | HTML_F_BLOCK }, { "xmp", HTML_F_INLINE },
+    { "wbr", HTML_F_EMPTY | HTML_F_BLOCK }, { "xmp", HTML_F_INLINE | HTML_F_RAW },
 };
 
 int html_elem_flags(const char* name, size_t len) {
@@ -652,7 +652,9 @@ void serialize_pi_internal(LeptrisPINode* pi, SerializeBuffer* buf) {
         buffer_append(buf, pi->data);
     }
 
-    buffer_append(buf, "?>");
+    /* §16.2: HTML PIs close with '>' — no trailing '?' (libxml2
+     * HTMLtree.c). */
+    buffer_append(buf, buf->html_method ? ">" : "?>");
 }
 
 void serialize_doctype_internal(LeptrisDoctypeNode* doctype, SerializeBuffer* buf) {
@@ -1159,6 +1161,21 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     buffer_append(buf, "]]>");
                     st[sp - 1].cd_open = 0;
                 }
+                /* §16.2 rawtext parent: mixed-content text inside
+                 * script/style is verbatim under method=html. */
+                if (buf->html_method && sp > 0 && st[sp - 1].e) {
+                    const char* rn = st[sp - 1].e->name;
+                    size_t rnl = (st[sp - 1].e->name_len != 0xFF)
+                        ? (size_t)st[sp - 1].e->name_len
+                        : (rn ? strlen(rn) : 0);
+                    if (rn &&
+                        (html_elem_flags_ci(rn, rnl) & HTML_F_RAW)) {
+                        const char* tr = leptris_text_get_content(
+                            (LeptrisTextNode*)cur);
+                        if (tr) buffer_append(buf, tr);
+                        goto advance;
+                    }
+                }
                 serialize_node_internal(cur, buf);
                 goto advance;
             }
@@ -1182,9 +1199,13 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         /* --- total-fusion fast path (TODO 194f): a compact-mode leaf
          * element with no attributes and no namespaces emits its ENTIRE
          * `<name>text</name>` from one reservation — the dominant shape
-         * in text-heavy documents paid two reservations + finalize. */
+         * in text-heavy documents paid two reservations + finalize.
+         * RAW parents (html script/style) escape the fusion: their
+         * text is verbatim. */
         if (leptris_element_get_first_attribute(e) == NULL &&
-            leptris_elem_namespaces(e) == NULL) {
+            leptris_elem_namespaces(e) == NULL &&
+            !(buf->html_method &&
+              (html_elem_flags_ci(name, nl) & HTML_F_RAW))) {
             LeptrisNode* fc0 = leptris_node_first_child_internal((LeptrisNode*)e);
             if (fc0 && fc0->type == LEPTRIS_NODE_TYPE_TEXT &&
                 leptris_node_get_next_sibling(fc0) == NULL) {
@@ -1344,6 +1365,57 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             /* View length is authoritative (entity resolution
              * replaces the view) — same as the recursive path. */
             size_t vlen = attr->value_view.length;
+            /* §16.2 html: href/src values percent-encode as URIs
+             * (libxml2 htmlAttrDumpOutput, bug-83); apostrophes
+             * stay raw (the XML serializer's &apos; is HTML-wrong). */
+            int html_uri_attr = 0;
+            if (buf->html_method && anl &&
+                ((anl == 4 && memcmp(name_c, "href", 4) == 0) ||
+                 (anl == 3 && memcmp(name_c, "src", 3) == 0)))
+                html_uri_attr = 1;
+            int html_escape_raw_quote = buf->html_method;
+            if (html_uri_attr) {
+                buffer_ensure_capacity(
+                    buf, 1 + apl + anl + 2 + 3 * vlen + 2 + 1);
+                char* out = buf->data + buf->size;
+                *out++ = ' ';
+                if (apl) {
+                    memcpy(out, apfx, apl - 1);
+                    out += apl - 1;
+                    *out++ = ':';
+                }
+                memcpy(out, name_c, anl);
+                out += anl;
+                *out++ = '=';
+                *out++ = '"';
+                for (size_t i = 0; i < vlen; i++) {
+                    unsigned char uc = (unsigned char)val[i];
+                    if (uc <= 0x20 || uc >= 0x7f) {
+                        /* UTF-8 bytes ≥ 0x80 and ASCII controls/spaces
+                         * percent-encode; keep XML-unsafe chars escaped
+                         * below for safety. */
+                        if (uc == '<' || uc == '>' || uc == '"' ||
+                            uc == '&' || uc == '\'') {
+                            /* fall into entity handling */
+                        } else {
+                            out += sprintf(out, "%%%02X", uc);
+                            continue;
+                        }
+                    }
+                    switch (val[i]) {
+                        case '<':  memcpy(out, "&lt;", 4);   out += 4; break;
+                        case '>':  memcpy(out, "&gt;", 4);   out += 4; break;
+                        case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
+                        case '"':  memcpy(out, "&quot;", 6); out += 6; break;
+                        case '\'': *out++ = '\''; break;
+                        default:   *out++ = val[i]; break;
+                    }
+                }
+                *out++ = '"';
+                buf->size = (size_t)(out - buf->data);
+                buf->data[buf->size] = '\0';
+                continue;
+            }
             buffer_ensure_capacity(buf, 1 + apl + anl + 2 + 6 * vlen + 2 + 1);
             char* out = buf->data + buf->size;
             *out++ = ' ';
@@ -1362,7 +1434,9 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     case '>':  memcpy(out, "&gt;", 4);   out += 4; break;
                     case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
                     case '"':  memcpy(out, "&quot;", 6); out += 6; break;
-                    case '\'': memcpy(out, "&apos;", 6); out += 6; break;
+                    case '\'':
+                        if (html_escape_raw_quote) { *out++ = '\''; break; }
+                        memcpy(out, "&apos;", 6); out += 6; break;
                     case '\t': out += sprintf(out, "&#9;");  break;
                     case '\n': out += sprintf(out, "&#10;"); break;
                     case '\r': out += sprintf(out, "&#13;"); break;
@@ -1377,7 +1451,20 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         /* --- children --- */
         LeptrisNode* fc = leptris_node_first_child_internal((LeptrisNode*)e);
         if (!fc) {
-            buffer_append(buf, "/>");
+            /* §16.2 html method: void elements end at '>'; every
+             * other element closes explicitly (never `<x/>`). */
+            if (buf->html_method) {
+                int hf = html_elem_flags_ci(name, nl);
+                if (hf & HTML_F_EMPTY) {
+                    buffer_append(buf, ">");
+                } else {
+                    buffer_append(buf, "></");
+                    append_qualified_name(buf, epfx, name, nl);
+                    buffer_append_char(buf, '>');
+                }
+            } else {
+                buffer_append(buf, "/>");
+            }
             if (!is_root_cur && buf->indent_spaces > 0 &&
                 (buf->html_method
                      ? html_break_after_elem(e, name, nl,
@@ -1396,6 +1483,19 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     (LeptrisTextNode*)fc);
                 if (tcd)
                     emit_cdata_checked(buf, tcd);
+                buffer_append(buf, "</");
+                append_qualified_name(buf, epfx, name, nl);
+                buffer_append_char(buf, '>');
+                goto advance;
+            }
+            /* §16.2 rawtext elements (script/style/…): the single
+             * text child is VERBATIM under method=html. */
+            if (buf->html_method &&
+                (html_elem_flags_ci(name, nl) & HTML_F_RAW)) {
+                const char* tr = leptris_text_get_content(
+                    (LeptrisTextNode*)fc);
+                buffer_append_char(buf, '>');
+                if (tr) buffer_append(buf, tr);
                 buffer_append(buf, "</");
                 append_qualified_name(buf, epfx, name, nl);
                 buffer_append_char(buf, '>');
@@ -1724,10 +1824,12 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
     if (options) {
         buf->cdata_names = options->cdata_elements;
         buf->cdata_count = options->cdata_element_count;
-        /* §16.2: html layout only indents when indent was requested
-         * (the XSLT layer defaults html method to indent=yes). */
-        buf->html_method =
-            options->html_method && indent_spaces > 0;
+        /* §16.2: html semantics (void elements, attr escaping, raw
+         * text, PI form) apply whenever the method is html — also
+         * with indent="no". The newline LAYOUT self-gates: every
+         * html break site goes through buffer_append_newline, which
+         * is a no-op at indent_spaces == 0. */
+        buf->html_method = options->html_method != 0;
     }
 
     /* Output UTF-8 BOM if present in original */

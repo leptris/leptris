@@ -243,7 +243,8 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
             if (!kd->name || strcmp(kd->name, name) != 0) continue;
             XsltPattern pat; memset(&pat, 0, sizeof(pat));
             pat.expr = kd->match;
-            int m = xslt_pattern_matches(&pat, (LeptrisElement)e, ex->source);
+            int m = xslt_pattern_matches(&pat, (LeptrisElement)e, ex->source,
+                                       NULL);
             if (!m) continue;
             LeptrisElement saved_cur = ex->current_node;
             ex->current_node = (LeptrisElement)e;

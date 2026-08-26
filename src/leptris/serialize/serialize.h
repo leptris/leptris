@@ -78,6 +78,7 @@ typedef struct SerializeBuffer {
 #define HTML_F_EMPTY   1   /* void element: <br>, <img>, … */
 #define HTML_F_INLINE  2   /* inline content model: <span>, <b>, … */
 #define HTML_F_BLOCK   4   /* known block element: <div>, <p>, … */
+#define HTML_F_RAW     8   /* rawtext content: <script>, <style>, … */
 int html_elem_flags(const char* name, size_t len);
 
 /* The typedef name `SerializeBuffer` is already declared above as
