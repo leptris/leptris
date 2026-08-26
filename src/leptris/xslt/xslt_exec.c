@@ -635,6 +635,82 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
     return 0;
 }
 
+/* §10 stable sort by string/number key — shared by for-each and
+ * apply-templates (single-key v1: the first xsl:sort). */
+/* §10 stable multi-key comparator. */
+static int xslt_sort_compare(const XsltInstr* in,
+                            const char* a_str, const char* b_str) {
+    for (const XsltSort* s = in->sorts; s; s = s->next) {
+        (void)a_str; (void)b_str;
+    }
+    return 0;
+}
+
+/* §10 stable multi-key sort — caches each (item,sort-key) string,
+ * compares by walking all sort keys in order (single comparator). */
+static void xslt_sort_items(XsltExec* ex, const XsltInstr* in,
+                            LeptrisElement* items, size_t n) {
+    if (n < 2 || !in->sorts) return;
+    size_t nsorts = 0;
+    for (const XsltSort* s = in->sorts; s; s = s->next) nsorts++;
+    char** keys = (char**)calloc(nsorts * n, sizeof(char*));
+    for (size_t i = 0; i < n; i++) {
+        const XsltSort* s = in->sorts;
+        for (size_t k = 0; k < nsorts && s; k++, s = s->next) {
+            char* kp = NULL;
+            if (s->select) {
+                struct leptris_xpath_result* r =
+                    xslt_eval(ex, s->select, items[i]);
+                if (r) {
+                    kp = leptris_xpath_result_string(r);
+                    leptris_xpath_result_free(r);
+                }
+            } else {
+                kp = string_value_deep(items[i]);
+            }
+            keys[k * n + i] = kp;
+        }
+    }
+    for (size_t i = 1; i < n; i++) {
+        for (size_t j = i; j > 0; j--) {
+            int cmp = 0;
+            for (size_t k = 0; k < nsorts && !cmp; k++) {
+                const char* a = keys[k * n + (j-1)];
+                const char* b = keys[k * n + j];
+                const XsltSort* s = in->sorts;
+                for (size_t ki = 0; ki < k; ki++) s = s->next;
+                const char* a0 = a ? a : "";
+                const char* b0 = b ? b : "";
+                if (s->numeric) {
+                    char *ea = NULL, *eb = NULL;
+                    double av = a0[0] ? strtod(a0, &ea) : (0.0/0.0);
+                    if (a0[0] && ea == a0) av = 0.0/0.0;
+                    double bv = b0[0] ? strtod(b0, &eb) : (0.0/0.0);
+                    if (b0[0] && eb == b0) bv = 0.0/0.0;
+                    int an = (av != av), bn = (bv != bv);
+                    if (an && bn) cmp = 0;
+                    else if (an) cmp = -1;
+                    else if (bn) cmp = 1;
+                    else cmp = (av < bv) ? -1 : (av > bv) ? 1 : 0;
+                } else {
+                    cmp = (xslt_ci_eq(a0, b0) && !s->case_upper_first)
+                              ? -strcmp(a0, b0) : strcmp(a0, b0);
+                }
+                if (s->descending) cmp = -cmp;
+            }
+            if (cmp <= 0) break;
+            LeptrisElement te = items[j-1]; items[j-1] = items[j]; items[j] = te;
+            for (size_t k = 0; k < nsorts; k++) {
+                char* tk = keys[k * n + (j-1)];
+                keys[k * n + (j-1)] = keys[k * n + j];
+                keys[k * n + j] = tk;
+            }
+        }
+    }
+    for (size_t i = 0; i < nsorts * n; i++) free(keys[i]);
+    free(keys);
+}
+
 static int op_for_each(XsltExec* ex, const XsltInstr* in,
                        LeptrisElement node) {
     struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
@@ -655,83 +731,7 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
      * result nodes are RESULT-OWNED — freeing early dangles them. */
     if (!items) { leptris_xpath_result_free(r); return n ? -1 : 0; }
 
-    /* xsl:sort v1: stable ordering by string/number key. */
-    if (in->sorts) {
-        /* Build a key array per sort (single-key v1: first sort). */
-        XsltSort* s = in->sorts;
-        char** keys = (char**)calloc(n, sizeof(char*));
-        double* nums = s->numeric ? (double*)calloc(n, sizeof(double)) : NULL;
-        for (size_t i = 0; i < n; i++) {
-            if (s->select) {
-                struct leptris_xpath_result* kr =
-                    xslt_eval(ex, s->select, items[i]);
-                if (kr) {
-                    /* Numeric keys convert through the STRING value
-                     * — result_number of a nodeset is NaN. */
-                    char* sv = leptris_xpath_result_string(kr);
-                    if (s->numeric) {
-                        /* A non-numeric string key is NaN (§10: NaN
-                         * sorts before all numbers ascending) —
-                         * strtod("")==0 must not masquerade as one. */
-                        char* end = NULL;
-                        nums[i] = (sv && sv[0]) ? strtod(sv, &end) : (0.0/0.0);
-                        if (sv && end == sv) nums[i] = 0.0/0.0;
-                        if (sv) free(sv);
-                    } else {
-                        keys[i] = sv;   /* ownership kept for compare */
-                    }
-                    leptris_xpath_result_free(kr);
-                }
-            } else {
-                char* sv = string_value_deep(items[i]);
-                if (sv) {
-                    if (s->numeric) {
-                        char* end = NULL;
-                        nums[i] = sv[0] ? strtod(sv, &end) : (0.0/0.0);
-                        if (end == sv) nums[i] = 0.0/0.0;
-                        free(sv);
-                    } else {
-                        keys[i] = sv;
-                    }
-                }
-            }
-        }
-        /* Insertion sort (stable, N is typical transform-sized). */
-        for (size_t i = 1; i < n; i++) {
-            for (size_t j = i; j > 0; j--) {
-                int swap;
-                if (s->numeric) {
-                    double a = nums[j-1], b = nums[j];
-                    int a_nan = (a != a), b_nan = (b != b);
-                    int cmp;
-                    if (a_nan && b_nan) cmp = 0;
-                    else if (a_nan) cmp = -1;   /* NaN sorts first */
-                    else if (b_nan) cmp = 1;
-                    else cmp = (a < b) ? -1 : (a > b) ? 1 : 0;
-                    swap = s->descending ? cmp < 0 : cmp > 0;
-                } else {
-                    const char* a = keys[j-1] ? keys[j-1] : "";
-                    const char* b = keys[j] ? keys[j] : "";
-                    /* §10 case-order: for strings differing only by
-                     * case, "upper-first" (the default) sorts by
-                     * codepoint — 'A' < 'a' — and "lower-first"
-                     * reverses. Other strings compare normally. */
-                    int cmp = (xslt_ci_eq(a, b) &&
-                               s->case_upper_first == 0)
-                                  ? -strcmp(a, b) : strcmp(a, b);
-                    swap = s->descending ? cmp < 0 : cmp > 0;
-                }
-                if (!swap) break;
-                LeptrisElement te = items[j-1]; items[j-1] = items[j]; items[j] = te;
-                if (s->numeric) { double td = nums[j-1]; nums[j-1] = nums[j]; nums[j] = td; }
-                else { char* tk = keys[j-1]; keys[j-1] = keys[j]; keys[j] = tk; }
-            }
-        }
-        for (size_t i = 0; i < n; i++) free(keys[i]);
-        free(keys);
-        free(nums);
-    }
-
+    if (in->sorts) xslt_sort_items(ex, in, items, n);
     int rc = 0;
     for (size_t i = 0; i < n && rc == 0; i++) {
         rc = xslt_exec_instrs(ex, in->child, items[i]);
@@ -1494,6 +1494,9 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         }
     }
     if (!items) return n ? -1 : 0;
+
+    /* §10: xsl:sort children order the selection. */
+    if (in->sorts) xslt_sort_items(ex, in, items, n);
 
     /* Bind with-params for the selected template(s). */
     int bound = 0;
