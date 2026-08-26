@@ -25,8 +25,11 @@ static int nodeset_contains(LeptrisXPathResult r, LeptrisElement node) {
 
 /* Does this alternative select `node` when evaluated from `ctx`? */
 static int selects_from(LeptrisXPathCompiled expr, LeptrisDocument doc,
-                        LeptrisElement ctx, LeptrisElement node) {
-    LeptrisXPathResult r = leptris_xpath_compiled_eval(expr, doc, ctx);
+                        LeptrisElement ctx, LeptrisElement node,
+                        LeptrisXPathNsSet ns) {
+    LeptrisXPathResult r =
+        ns ? leptris_xpath_compiled_eval_ns(expr, doc, ctx, ns)
+           : leptris_xpath_compiled_eval(expr, doc, ctx);
     if (!r) return 0;
     int hit = nodeset_contains(r, node);
     leptris_xpath_result_free(r);
@@ -45,7 +48,7 @@ static int alt_is_root_pattern(const XsltPattern* alt) {
 }
 
 int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
-                         LeptrisDocument doc) {
+                         LeptrisDocument doc, LeptrisXPathNsSet ns) {
     if (!p || !node || !doc) return 0;
 
     LeptrisElement root = leptris_document_root(doc);
@@ -74,7 +77,7 @@ int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
          * with the DOCUMENT node as the final rung so child-axis
          * patterns (node(), NAME, *) reach the root element. */
         for (LeptrisElement ctx = node; ctx; ) {
-            if (selects_from(alt->expr, doc, ctx, node)) return 1;
+            if (selects_from(alt->expr, doc, ctx, node, ns)) return 1;
             LeptrisElement up = leptris_node_parent((LeptrisNodeRef)ctx);
             if (!up) {
                 if (ctx != root) break;         /* detached: stop */
@@ -83,7 +86,7 @@ int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
                     leptris_document_get_node(
                         (struct leptris_document*)doc);
                 if (!dnode || dnode == (LeptrisElement)node) break;
-                if (selects_from(alt->expr, doc, dnode, node))
+                if (selects_from(alt->expr, doc, dnode, node, ns))
                     return 1;
                 break;
             }

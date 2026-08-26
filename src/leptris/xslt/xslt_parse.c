@@ -733,6 +733,7 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
     t->name = name ? leptris_strdup(name) : NULL;
     t->mode = mode ? leptris_strdup(mode) : NULL;
     t->import_rank = sp->import_rank;
+    t->ns = build_ns_context(e);   /* §5.3 pattern prefix resolution */
     t->body = parse_content(sp, e);
 
     if (match) {
@@ -1209,6 +1210,7 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
             p = pn;
         }
         free_instr_list(t->body);
+        if (t->ns) leptris_xpath_ns_set_free(t->ns);
         free((void*)t->name);
         free((void*)t->mode);
         free(t);

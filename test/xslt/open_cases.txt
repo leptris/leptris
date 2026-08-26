@@ -26,12 +26,10 @@ bug-171
 bug-175
 bug-177
 bug-179
-bug-18-
 bug-181
 bug-182
 bug-186
 bug-189
-bug-19-
 bug-190
 bug-193
 bug-195
@@ -50,7 +48,6 @@ bug-32-
 bug-33-
 bug-35-
 bug-36-
-bug-37-
 bug-38-
 bug-41-
 bug-42-
@@ -60,13 +57,11 @@ bug-50-
 bug-53
 bug-56
 bug-59
-bug-6-
 bug-63
 bug-65
 bug-70
 bug-71
 bug-73
-bug-8-
 bug-82
 bug-83
 bug-86
