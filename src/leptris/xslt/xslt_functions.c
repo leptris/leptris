@@ -245,9 +245,12 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
             pat.expr = kd->match;
             int m = xslt_pattern_matches(&pat, (LeptrisElement)e, ex->source);
             if (!m) continue;
+            LeptrisElement saved_cur = ex->current_node;
+            ex->current_node = (LeptrisElement)e;
             struct leptris_xpath_result* r =
                 leptris_xpath_compiled_eval(kd->use, ex->source,
                                             (LeptrisElement)e);
+            ex->current_node = saved_cur;
             if (!r) continue;
             char* sv = leptris_xpath_result_string(r);
             leptris_xpath_result_free(r);
