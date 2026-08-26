@@ -1119,14 +1119,9 @@ static int op_call_template(XsltExec* ex, const XsltInstr* in,
         if (ct->name && strcmp(ct->name, in->name) == 0) t = ct;
     }
     if (!t) return 0;
-    /* §11 scoping: the callee sees globals + its own locals + the
-     * call's with-params — NOT the caller's local frames. */
-    XsltVar* saved_vars = ex->vars;
-    ex->vars = ex->global_vars;
-    /* with-params + §11.6 param defaults + current-template tracking. */
-    int rc = xslt_invoke_template(ex, t, node, in->child);
-    ex->vars = saved_vars;
-    return rc;
+    /* §11 scoping lives in xslt_invoke_template (shared with
+     * apply-templates): globals + own locals, never caller locals. */
+    return xslt_invoke_template(ex, t, node, in->child);
 }
 
 
@@ -1354,19 +1349,30 @@ static int xslt_bind_param_defaults(XsltExec* ex, const XsltInstr* body,
 static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
                                 LeptrisElement node,
                                 const XsltInstr* with_params) {
-    XsltVar* mark = ex->vars;
     const XsltTemplate* saved_t = ex->current_template;
     ex->current_template = t;
-    for (const XsltInstr* wp = with_params; wp; wp = wp->next) {
+    /* §11: with-param expressions evaluate in the CALLER's scope;
+     * the body runs on globals + its own params/locals — the
+     * caller's local frames are not visible (bug-40-/42-). */
+    struct leptris_xpath_result* vals[16];
+    const char* names[16];
+    size_t nv = 0;
+    for (const XsltInstr* wp = with_params; wp && nv < 16; wp = wp->next) {
         if (wp->kind != XSLT_INSTR_WITH_PARAM || !wp->name) continue;
-        struct leptris_xpath_result* v =
-            wp->select ? xslt_eval(ex, wp->select, node) : NULL;
-        xslt_push_var(ex, wp->name, v);
+        vals[nv] = wp->select ? xslt_eval(ex, wp->select, node) : NULL;
+        names[nv] = wp->name;
+        nv++;
     }
+    XsltVar* caller = ex->vars;
+    XsltVar* mark = ex->global_vars;
+    ex->vars = mark;
+    for (size_t i = 0; i < nv; i++)
+        xslt_push_var(ex, names[i], vals[i]);
     xslt_bind_param_defaults(ex, t->body, node);
     int rc = xslt_exec_instrs(ex, t->body, node);
     ex->current_template = saved_t;
     xslt_pop_vars_to(ex, mark);
+    ex->vars = caller;
     return rc;
 }
 
@@ -1546,16 +1552,7 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
     /* §10: xsl:sort children order the selection. */
     if (in->sorts) xslt_sort_items(ex, in, items, n);
 
-    /* Bind with-params for the selected template(s). */
-    int bound = 0;
-    for (const XsltInstr* wp = in->child; wp; wp = wp->next) {
-        if (wp->kind != XSLT_INSTR_WITH_PARAM || !wp->name) continue;
-        struct leptris_xpath_result* v =
-            wp->select ? xslt_eval(ex, wp->select, node) : NULL;
-        xslt_push_var(ex, wp->name, v);
-        bound++;
-    }
-
+    /* with-params bind per invocation (xslt_invoke_template). */
     const char* mode = in->name;   /* mode attr parsed into ->name */
     size_t saved_pos = ex->current_pos;
     for (size_t i = 0; i < n && rc == 0; i++) {
@@ -1574,7 +1571,6 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         }
     }
     ex->current_pos = saved_pos;
-    for (int i = 0; i < bound; i++) xslt_pop_var(ex, NULL);
     free(items);
     if (r) leptris_xpath_result_free(r);
     return rc;
