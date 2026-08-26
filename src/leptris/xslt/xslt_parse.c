@@ -594,23 +594,10 @@ static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
             if (in && !in->ns && sp->sheet->sheet_has_ns)
                 in->ns = build_ns_context((LeptrisElement)n);
             instr_append(&out, in);
-        } else if (type == LEPTRIS_NODE_TYPE_COMMENT) {
-            /* Literal comment in template content — copied verbatim
-             * (§7.4 semantics via the literal path). */
-            XsltInstr* in = instr_new(XSLT_INSTR_COMMENT);
-            if (in) {
-                in->text = leptris_strdup(
-                    leptris_comment_node_get_content(n));
-                instr_append(&out, in);
-            }
-        } else if (type == LEPTRIS_NODE_TYPE_PI) {
-            XsltInstr* in = instr_new(XSLT_INSTR_PI);
-            if (in) {
-                in->name = leptris_strdup(leptris_pi_node_get_target(n));
-                in->text = leptris_strdup(leptris_pi_node_get_data(n));
-                instr_append(&out, in);
-            }
         }
+        /* Literal comment/PI nodes in template content are DROPPED
+         * (xsltproc-verified): only xsl:comment/xsl:processing-
+         * instruction emit them (§7.4). */
     }
     return out;
 }
