@@ -322,6 +322,12 @@ typedef struct xslt_exec {
      * context, so save/restored around each xslt_eval. */
     LeptrisElement current_node;
 
+    /* position() (§12.4): the 1-based position of current_node in
+     * the node-list being processed (for-each/apply-templates
+     * iteration). Set by the iterating ops; 1 outside them (the
+     * XPath default). */
+    size_t current_pos;
+
     /* The template rule currently executing (§5.6 apply-imports
      * resolves candidates against THIS rule's import rank). */
     const XsltTemplate* current_template;

@@ -115,11 +115,13 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
  * run the direct evaluator (VM fast paths skip prefixed name tests),
  * so these evaluate the pinned AST with ns_set / variable_set
  * installed — the same semantics as leptris_xpath_eval_ns /
- * leptris_xpath_eval_with_vars_context, minus the re-parse. */
+ * leptris_xpath_eval_with_vars_context, minus the re-parse. pos is
+ * the caller's in-flight node-list position (§12.4 position()); the
+ * wrappers pass 1 (the XPath default context position). */
 static struct leptris_xpath_result* compiled_eval_context(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, struct leptris_xpath_ns_map* ns,
-        XPathVariableSet* vars) {
+        XPathVariableSet* vars, size_t pos) {
     if (!compiled || !doc) return NULL;
 
     LeptrisElement context_elem =
@@ -133,6 +135,7 @@ static struct leptris_xpath_result* compiled_eval_context(
 
     xpath_ctx->ns_set = ns;
     xpath_ctx->variable_set = vars;
+    xpath_ctx->context_position = pos;
 
     struct leptris_xpath_result* result =
         xpath_evaluate(xpath_ctx, compiled->ast);
@@ -151,7 +154,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_ns(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, LeptrisXPathNsSet ns) {
     return compiled_eval_context(compiled, doc, context,
-                                 (struct leptris_xpath_ns_map*)ns, NULL);
+                                 (struct leptris_xpath_ns_map*)ns, NULL, 1);
 }
 
 /* Combined ns + vars entry — the XSLT engine's §4 prefixed tests
@@ -160,14 +163,45 @@ struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, struct leptris_xpath_ns_map* ns,
         XPathVariableSet* vars) {
-    return compiled_eval_context(compiled, doc, context, ns, vars);
+    return compiled_eval_context(compiled, doc, context, ns, vars, 1);
+}
+
+/* Full-context eval for the XSLT engine: the VM fast path when
+ * neither ns nor vars are bound (identical semantics to
+ * leptris_xpath_compiled_eval), the AST interpreter otherwise, and
+ * the context position carries the in-flight node-list position so
+ * position() (§12.4) reflects the for-each / apply-templates
+ * iteration instead of the XPath default 1. */
+struct leptris_xpath_result* leptris_xpath_compiled_eval_ctx(
+        LeptrisXPathCompiled compiled, LeptrisDocument doc,
+        LeptrisElement context, struct leptris_xpath_ns_map* ns,
+        XPathVariableSet* vars, size_t pos) {
+    if (!compiled || !doc) return NULL;
+    if (ns || vars)
+        return compiled_eval_context(compiled, doc, context, ns, vars, pos);
+
+    LeptrisElement context_elem =
+        context ? context : leptris_document_root(doc);
+    if (!context_elem) return NULL;
+
+    XPathContext ctx_storage;
+    XPathContext* xpath_ctx = &ctx_storage;
+    xpath_context_init(xpath_ctx, doc, context_elem);
+    if (!xpath_ctx->document) return NULL;
+    xpath_ctx->context_position = pos;
+
+    struct leptris_xpath_result* result =
+        leptris_xpath_compiled_eval_in(compiled, xpath_ctx);
+
+    xpath_context_cleanup(xpath_ctx);
+    return result;
 }
 
 LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, LeptrisXPathVariableSet variables) {
     return compiled_eval_context(compiled, doc, context, NULL,
-                                 (XPathVariableSet*)variables);
+                                 (XPathVariableSet*)variables, 1);
 }
 
 LEPTRIS_API const char* leptris_xpath_compiled_text(LeptrisXPathCompiled compiled) {

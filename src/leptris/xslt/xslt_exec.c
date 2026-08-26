@@ -75,12 +75,13 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
     ex->current_node = node;
 
     /* No frame chain — fast VM path (ns contexts need the
-     * interpreter's prefixed-test resolution). */
+     * interpreter's prefixed-test resolution). current_pos rides
+     * along so position() sees the in-flight iteration (§12.4). */
     if (!ex->vars) {
-        struct leptris_xpath_result* r = ex->current_ns
-            ? leptris_xpath_compiled_eval_ns(
-                  c, ex->source, node, ex->current_ns)
-            : leptris_xpath_compiled_eval(c, ex->source, node);
+        struct leptris_xpath_result* r = leptris_xpath_compiled_eval_ctx(
+            c, ex->source, node,
+            (struct leptris_xpath_ns_map*)ex->current_ns,
+            NULL, ex->current_pos);
         ex->current_node = saved_cur;
         return r;
     }
@@ -169,13 +170,10 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
     }
     free(frames);
 
-    struct leptris_xpath_result* r = ex->current_ns
-        ? leptris_xpath_compiled_eval_ns_vars(
-              c, ex->source, node,
-              (struct leptris_xpath_ns_map*)ex->current_ns, ex->varset)
-        : leptris_xpath_compiled_eval_vars(
-              c, ex->source, node,
-              (LeptrisXPathVariableSet)ex->varset);
+    struct leptris_xpath_result* r = leptris_xpath_compiled_eval_ctx(
+        c, ex->source, node,
+        (struct leptris_xpath_ns_map*)ex->current_ns, ex->varset,
+        ex->current_pos);
 
     /* Clear the scratch set for the next evaluation. */
     while (ex->varset && ex->varset->count > 0) {
@@ -726,9 +724,12 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
 
     if (in->sorts) xslt_sort_items(ex, in, items, n);
     int rc = 0;
+    size_t saved_pos = ex->current_pos;
     for (size_t i = 0; i < n && rc == 0; i++) {
+        ex->current_pos = i + 1;
         rc = xslt_exec_instrs(ex, in->child, items[i]);
     }
+    ex->current_pos = saved_pos;
     free(items);
     leptris_xpath_result_free(r);
     return rc;
@@ -1438,10 +1439,14 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
          * copies inline (built-in text rule, §5.8), elements select
          * and invoke their template AS ENCOUNTERED so output order
          * matches the source (the old batch-then-loop broke
-         * interleaving). */
+         * interleaving). The node-list being processed here is the
+         * child axis — position() counts every child, all kinds. */
+        size_t saved_cpos = ex->current_pos;
+        size_t cpos = 0;
         for (LeptrisNodeRef c =
                  leptris_node_first_child(leptris_element_as_node(node));
              c && rc == 0; c = leptris_node_next_sibling(c)) {
+            ex->current_pos = ++cpos;
             int ty = leptris_node_get_type(c);
             if (ty == LEPTRIS_NODE_TYPE_TEXT ||
                 ty == LEPTRIS_NODE_TYPE_CDATA) {
@@ -1485,6 +1490,7 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 }
             }
         }
+        ex->current_pos = saved_cpos;
     }
     if (!items) return n ? -1 : 0;
 
@@ -1502,7 +1508,9 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
     }
 
     const char* mode = in->name;   /* mode attr parsed into ->name */
+    size_t saved_pos = ex->current_pos;
     for (size_t i = 0; i < n && rc == 0; i++) {
+        ex->current_pos = i + 1;
         const XsltTemplate* best =
             xslt_select_template(ex, items[i], mode, 0);
         if (best) {
@@ -1516,6 +1524,7 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 items[i]);
         }
     }
+    ex->current_pos = saved_pos;
     for (int i = 0; i < bound; i++) xslt_pop_var(ex, NULL);
     free(items);
     if (r) leptris_xpath_result_free(r);
@@ -2147,6 +2156,7 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     ex->sheet = sheet;
     ex->sheet_doc = sheet_doc;   /* set BEFORE the body: document('') */
     ex->source = source;
+    ex->current_pos = 1;   /* §12.4: position() default context position */
     ex->result = leptris_document_create();
     if (!ex->result) { xslt_exec_free(ex); return NULL; }
 

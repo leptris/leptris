@@ -95,6 +95,14 @@ struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
     LeptrisElement context, struct leptris_xpath_ns_map* ns,
     XPathVariableSet* vars);
 
+/* Full-context eval (xslt_eval): VM fast path when neither ns nor
+ * vars are bound; pos is the caller's in-flight node-list position
+ * (§12.4 position() — for-each / apply-templates iteration). */
+struct leptris_xpath_result* leptris_xpath_compiled_eval_ctx(
+    LeptrisXPathCompiled compiled, LeptrisDocument doc,
+    LeptrisElement context, struct leptris_xpath_ns_map* ns,
+    XPathVariableSet* vars, size_t pos);
+
 /* Namespace support (in evaluator.c) */
 const char* xpath_context_resolve_prefix(XPathContext* context,
                                          const char* prefix);
