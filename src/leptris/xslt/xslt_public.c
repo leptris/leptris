@@ -222,6 +222,16 @@ static char* serialize_frag_node_text(LeptrisNodeRef n) {
  * elements, PHP-style PIs. Returns a fresh string (caller frees the
  * input). */
 static char* html_post_pass(char* acc) {
+    /* The XML serializer always emits &apos; for an apostrophe in
+     * an attribute value; the HTML method writes a raw apostrophe. */
+    char* apos;
+    while ((apos = strstr(acc, "&apos;")) != NULL) {
+        /* The entity is exactly the 6-byte sequence &apos;; the
+         * post-entity string is preserved as-is. Insert a raw
+         * apostrophe and shift the tail left by 5 (net). */
+        memmove(apos + 1, apos + 6, strlen(apos + 6) + 1);
+        *apos = '\'';
+    }
     char* html = to_html_method(acc);
     if (!html) return acc;
     char* decl = strstr(html, "<?xml");
