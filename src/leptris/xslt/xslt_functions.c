@@ -546,6 +546,12 @@ static char* format_value(const PatternInfo* p, double abs_v,
             fracpart[fl] = 0;
         }
         if ((int)fl > p->max_frac) fracpart[p->max_frac] = 0;
+        /* Optional fraction digits: trailing zeros beyond min_frac
+         * are not shown ('#,##0.##' of an integral value has no
+         * decimal part). */
+        while (fl > 0 && (int)fl > p->min_frac &&
+               fracpart[fl - 1] == zero_digit)
+            fracpart[--fl] = 0;
     }
     /* Left-pad int with zeros to min_int. */
     if ((int)strlen(intpart) < p->min_int) {
@@ -576,7 +582,7 @@ static char* format_value(const PatternInfo* p, double abs_v,
          * prefix byte (kept verbatim). No further change. */
     }
     for (size_t i = 0; intpart[i] && o + 1 < sizeof(out); i++) out[o++] = intpart[i];
-    if (p->has_decimal) out[o++] = decimal_sep;
+    if (p->has_decimal && fracpart[0]) out[o++] = decimal_sep;
     for (size_t i = 0; fracpart[i] && o + 1 < sizeof(out); i++) out[o++] = fracpart[i];
     for (size_t i = 0; i < p->suffix_len && o + 1 < sizeof(out); i++)
         out[o++] = p->suffix[i];

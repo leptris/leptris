@@ -100,11 +100,9 @@ bug-65
 bug-70
 bug-71
 bug-73
-bug-75
 bug-8-
 bug-82
 bug-83
-bug-84
 bug-86
 bug-87
 bug-89

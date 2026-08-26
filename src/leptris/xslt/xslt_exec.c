@@ -1909,8 +1909,12 @@ static void emit_formatted_numbers(const unsigned long* values, int nv,
     for (const char* s = prefixbuf; *s && o < outsz - 1; s++) out[o++] = *s;
     for (int i = 0; i < nv && o < outsz - 1; i++) {
         if (i > 0) {
-            const char* sep = "";
-            if (ns > 1) sep = sepbuf[i - 1 <= ns - 2 ? i - 1 : ns - 2];
+            /* §7.7.1: once the format tokens are exhausted the last
+             * token repeats; the join separator is "." (libxslt's
+             * default when the format has a single token). */
+            const char* sep = (ns > 1)
+                ? sepbuf[i - 1 <= ns - 2 ? i - 1 : ns - 2]
+                : ".";
             for (const char* s = sep; *s && o < outsz - 1; s++) out[o++] = *s;
         }
         char chunk[128];
