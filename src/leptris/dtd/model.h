@@ -108,6 +108,13 @@ struct LeptrisDTD {
     size_t notation_count;
     size_t attribute_count;
 
+    /* Default-bearing attribute declarations (#FIXED / default
+     * "value"), collected at declaration time for the parse-time
+     * application pass (XML 1.0 §3.3.2). Defaults are rare — the
+     * hot path never touches this list. */
+    DTDAttributeDecl** default_decls;
+    size_t default_decl_count;
+
     /* Ownership flag: 1 when this DTD owns its pool (created via
      * leptris_dtd_parse public API), 0 when the pool belongs to a
      * document (created via leptris_dtd_parse_internal_subset called
