@@ -807,6 +807,21 @@ TEST(XsltHtml, MetaCharsetRespectsEncoding) {
               std::string::npos);
 }
 
+/* position() must reflect the in-flight node-list position — in
+ * for-each bodies, in apply-templates, and inside AVTs (§4/§12.4;
+ * the libxslt suite's bug-2-/bug-20- shape). */
+TEST(XsltCore, PositionInForEachAndAvt) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='foo'>"
+        "<xsl:for-each select='bar'>"
+        "<BAR INDEX='{position()}'>"
+        "<xsl:if test='position()=2'><MID/></xsl:if>"
+        "</BAR>"
+        "</xsl:for-each>"
+        "</xsl:template>", "<foo><bar/><bar/><bar/></foo>")),
+        "<BAR INDEX=\"1\"/><BAR INDEX=\"2\"><MID/></BAR><BAR INDEX=\"3\"/>");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
