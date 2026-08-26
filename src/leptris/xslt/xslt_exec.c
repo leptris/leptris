@@ -1241,7 +1241,8 @@ static int xslt_template_matches_node(const XsltTemplate* t,
     int nty = leptris_node_get_type((LeptrisNodeRef)node);
     if (nty == LEPTRIS_NODE_TYPE_ELEMENT ||
         nty == LEPTRIS_NODE_TYPE_DOCUMENT)
-        return xslt_pattern_matches(t->matches, node, ex->source);
+        return xslt_pattern_matches(t->matches, node, ex->source,
+                                   t->ns);
     return pattern_matches_nodekind(
         t->matches, nty,
         (nty == LEPTRIS_NODE_ATTRIBUTE)
@@ -1266,7 +1267,8 @@ static const XsltTemplate* xslt_select_template(
         for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
             XsltPattern one = *pa; one.next = NULL;
             if (!xslt_template_matches_node(
-                    &(XsltTemplate){ .matches = &one }, node, ex))
+                    &(XsltTemplate){ .matches = &one, .ns = t->ns },
+                    node, ex))
                 continue;
             if (!have || pa->priority > pri) { pri = pa->priority; have = 1; }
         }
@@ -1817,7 +1819,8 @@ static int count_matches(const XsltInstr* in, LeptrisElement cand,
         XsltPattern pat;
         memset(&pat, 0, sizeof(pat));
         pat.expr = in->num_count;
-        return xslt_pattern_matches(&pat, cand, doc);
+        return xslt_pattern_matches(&pat, cand, doc,
+                                    (LeptrisXPathNsSet)in->ns);
     }
     const char* a = leptris_element_get_name(cand);
     const char* b = leptris_element_get_name(ref);
@@ -1830,7 +1833,8 @@ static int from_matches(const XsltInstr* in, LeptrisElement cand,
     XsltPattern pat;
     memset(&pat, 0, sizeof(pat));
     pat.expr = in->num_from;
-    return xslt_pattern_matches(&pat, cand, doc);
+    return xslt_pattern_matches(&pat, cand, doc,
+                                (LeptrisXPathNsSet)in->ns);
 }
 
 /* Position of `target` among preceding siblings matching count. */

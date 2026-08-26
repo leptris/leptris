@@ -10,7 +10,6 @@
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
 #include <string.h>
-#include <stdio.h>
 #include <stdlib.h>  /* qsort (document-order merge, issue #485) */
 
 /* Debug logging - Set to 0 to disable */
@@ -968,10 +967,28 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
                             /* Check if root element name matches */
                             int names_match = (strcmp(root_local, test_local) == 0);
 
-                            /* If test has prefix, also check prefix */
+                            /* If test has prefix: resolve through the
+                             * context bindings — the root may carry the
+                             * namespace under a different prefix (or the
+                             * default). Unbound prefix falls back to the
+                             * literal comparison. */
                             if (names_match && test_prefix) {
-                                const char* root_prefix = leptris_element_get_prefix(root);
-                                names_match = (root_prefix && strcmp(root_prefix, test_prefix) == 0);
+                                const char* test_uri = ctx
+                                    ? leptris_xpath_ns_lookup(
+                                          (const struct leptris_xpath_ns_map*)ctx->ns_set,
+                                          test_prefix, strlen(test_prefix))
+                                    : NULL;
+                                if (test_uri) {
+                                    const char* root_uri =
+                                        leptris_element_get_namespace_uri(root);
+                                    names_match = root_uri &&
+                                        strcmp(root_uri, test_uri) == 0;
+                                } else {
+                                    const char* root_prefix =
+                                        leptris_element_get_prefix(root);
+                                    names_match = (root_prefix &&
+                                        strcmp(root_prefix, test_prefix) == 0);
+                                }
                             }
 
                             if (names_match) {

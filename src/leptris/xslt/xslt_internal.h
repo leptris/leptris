@@ -199,6 +199,10 @@ typedef struct xslt_template {
     const char* mode;               /* NULL = default mode */
     XsltInstr* body;
     int import_rank;                /* 0 = this sheet, 1+ = imported */
+    LeptrisXPathNsSet ns;           /* §5.3 in-scope bindings of the
+                                       template element — prefixed
+                                       name tests in its patterns
+                                       resolve through here */
     struct xslt_template* next;     /* sheet order (imports first) */
 } XsltTemplate;
 
@@ -401,9 +405,11 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
                                            LeptrisElement root);
 void xslt_stylesheet_free(XsltStylesheet* sheet);
 
-/* xslt_pattern.c — pattern matching (§5.2). */
+/* xslt_pattern.c — pattern matching (§5.2). ns carries the owning
+ * template's in-scope bindings so prefixed name tests resolve by
+ * namespace URI, not prefix spelling (§5.3). */
 int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
-                         LeptrisDocument doc);
+                         LeptrisDocument doc, LeptrisXPathNsSet ns);
 
 /* xslt_exec.c — pattern + execution helpers shared with
  * xslt_functions.c (the document-order walker reused for key-index
