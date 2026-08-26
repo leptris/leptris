@@ -11,12 +11,9 @@ bug-130
 bug-131
 bug-132
 bug-133
-bug-134
-bug-135
 bug-137
 bug-138
 bug-140
-bug-141
 bug-142
 bug-147
 bug-15-
@@ -63,7 +60,6 @@ bug-217
 bug-218
 bug-219
 bug-220
-bug-221
 bug-222
 bug-223
 bug-224

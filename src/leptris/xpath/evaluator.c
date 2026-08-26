@@ -855,6 +855,27 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
     if (!ctx || !ast) return NULL;
 
     switch (ast->type) {
+        case XPATH_AST_PREDICATE: {
+            /* Filter expression: <primary>[pred][pred]... — the
+             * parser builds PREDICATE nodes when the primary is not
+             * a plain name-test step (node()[1], (@a)[2], (a|b)[1]).
+             * Evaluate the primary, then filter in place. */
+            if (ast->child_count < 1) return NULL;
+            struct leptris_xpath_result* base =
+                evaluate_expr(ctx, ast->children[0]);
+            if (!base) return NULL;
+            if (base->type != XPATH_RESULT_NODESET ||
+                !base->value.nodeset_value) {
+                xpath_result_free(base);
+                return xpath_result_new(XPATH_RESULT_NODESET);
+            }
+            if (ast->child_count > 1) {
+                apply_predicates(ctx, base->value.nodeset_value,
+                                 &ast->children[1],
+                                 ast->child_count - 1);
+            }
+            return base;
+        }
         case XPATH_AST_STEP:
             /* Bare step (e.g., @id, ., ..) - evaluate as relative path from context node */
             {
