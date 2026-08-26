@@ -961,6 +961,19 @@ TEST(XsltCore, IdFindsDtdTypedIds) {
         "findme");
 }
 
+/* §11 variable scoping via apply-templates: the SELECTED template
+ * also sees globals + own locals, never the caller's locals (the
+ * apply-templates twin of CallTemplateVariableScope — bug-42-). */
+TEST(XsltCore, ApplyTemplatesVariableScope) {
+    EXPECT_EQ(body(run(
+        "<xsl:variable name='foo' select=\"'SUCCESS'\"/>"
+        "<xsl:template match='doc'><xsl:value-of select='$foo'/></xsl:template>"
+        "<xsl:template match='/'>"
+        "<xsl:variable name='foo' select=\"'FAILURE'\"/>"
+        "<xsl:apply-templates/>"
+        "</xsl:template>", "<doc/>")), "SUCCESS");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
