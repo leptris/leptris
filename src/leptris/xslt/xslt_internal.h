@@ -233,7 +233,8 @@ struct xslt_styles {
     /* Output settings (xsl:output; defaults method=xml). */
     int out_method_text;
     int out_method_html;   /* §16.2 */
-    int out_indent;
+    int out_indent;        /* -1 unspecified (html default yes,
+                              xml no), 0 no, 1 yes */
     char** out_cdata;         /* §16.1 cdata-section-elements QNames */
     size_t out_cdata_count;
     int out_omit_decl;

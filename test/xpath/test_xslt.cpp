@@ -705,6 +705,108 @@ TEST(XsltBridge, HtmlAttributeAposDecoded) {
         "</xsl:template>", "<r/>")), "<x><input value=\"&quot;'&quot;\"></x>");
 }
 
+/* §16.2 HTML output: inject <meta charset="..."> into <head> when no
+ * xsl:output meta declaration + no existing <meta charset> present.
+ * The encoder reports UTF-8 by default; absent any encoding attr we
+ * append the platform-standard <meta charset="UTF-8"/>. */
+TEST(XsltBridge, HtmlInjectsMetaCharset) {
+    EXPECT_NE(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><head><title>t</title></head><body/></html>"
+        "</xsl:template>", "<r/>")).find("<meta charset=\"UTF-8\""),
+              std::string::npos);
+}
+
+/* §16.2 HTML indent rules (libxml2 HTMLtree.c parity):
+ *   - newline after the opening tag of a block parent (≥2 children,
+ *     first child not text, name not p*), between non-inline element
+ *     siblings, and before the closing tag — but ZERO nesting spaces
+ *   - single-child parents stay inline
+ *   - inline elements (span/b/…) and p* never break lines
+ *   - unknown elements never break lines
+ *   - the injected <meta charset> participates as a normal child. */
+TEST(XsltHtml, IndentBlockParentNewlinesNoSpaces) {
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><head><title>t</title></head>"
+        "<body><div><p>one</p><p>two</p></div></body></html>"
+        "</xsl:template>", "<r/>")),
+        "<html>\n"
+        "<head>\n"
+        "<meta charset=\"UTF-8\">\n"
+        "<title>t</title>\n"
+        "</head>\n"
+        "<body><div>\n"
+        "<p>one</p>\n"
+        "<p>two</p>\n"
+        "</div></body>\n"
+        "</html>");
+}
+
+TEST(XsltHtml, IndentSingleChildParentInline) {
+    /* body with exactly one child stays inline; its child may still
+     * indent internally. */
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><p>only</p></body></html>"
+        "</xsl:template>", "<r/>")),
+        "<html><body><p>only</p></body></html>");
+}
+
+TEST(XsltHtml, IndentInlineParentNeverBreaks) {
+    /* span is inline in the HTML element table; p* is excluded by the
+     * libxml2 first-byte rule — neither ever breaks lines. */
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><span><em>a</em><em>b</em></span></body></html>"
+        "</xsl:template>", "<r/>")),
+        "<html><body><span><em>a</em><em>b</em></span></body></html>");
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><p><div>a</div><div>b</div></p></body></html>"
+        "</xsl:template>", "<r/>")),
+        "<html><body><p><div>a</div><div>b</div></p></body></html>");
+}
+
+TEST(XsltHtml, IndentUnknownElementNeverBreaks) {
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><foo><f1>a</f1><f2>b</f2></foo></body></html>"
+        "</xsl:template>", "<r/>")),
+        "<html><body><foo><f1>a</f1><f2>b</f2></foo></body></html>");
+}
+
+TEST(XsltHtml, IndentInlineSiblingsCluster) {
+    /* A block parent breaks around its children, but inline children
+     * cluster together on one line (no newline after them); html and
+     * body here have a single child each and stay inline. */
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<html><body><div><span>a</span><p>p1</p><span>b</span></div></body></html>"
+        "</xsl:template>", "<r/>")),
+        "<html><body><div>\n"
+        "<span>a</span><p>p1</p>\n"
+        "<span>b</span>\n"
+        "</div></body></html>");
+}
+
+TEST(XsltHtml, MetaCharsetRespectsEncoding) {
+    /* xsl:output encoding flows into the injected meta. */
+    EXPECT_NE(body(run(
+        "<xsl:output method='html' encoding='iso-8859-1'/>"
+        "<xsl:template match='/'>"
+        "<html><head><title>t</title></head></html>"
+        "</xsl:template>", "<r/>")).find("<meta charset=\"iso-8859-1\">"),
+              std::string::npos);
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {

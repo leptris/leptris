@@ -815,7 +815,7 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             sp->sheet->out_method_text = m && strcmp(m, "text") == 0;
             sp->sheet->out_method_html = m && strcmp(m, "html") == 0;
             const char* ind = leptris_element_attribute(e, "indent");
-            sp->sheet->out_indent = ind && strcmp(ind, "yes") == 0;
+            if (ind) sp->sheet->out_indent = strcmp(ind, "yes") == 0;
             /* §16.1 cdata-section-elements: space-separated QNames. */
             const char* cda =
                 leptris_element_attribute(e, "cdata-section-elements");
@@ -1211,6 +1211,7 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
     XsltStylesheet* sheet = (XsltStylesheet*)calloc(1, sizeof(*sheet));
     if (!sheet) return NULL;
     sheet->out_standalone = -1;
+    sheet->out_indent = -1;
     SheetParser sp;
     sp.doc = doc; sp.sheet = sheet; sp.import_rank = 0; sp.errors = 0;
     sp.chain.paths = NULL; sp.chain.len = 0; sp.chain.cap = 0;

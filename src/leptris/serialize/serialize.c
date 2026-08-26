@@ -45,6 +45,7 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->data[0] = '\0';
     buf->indent = 0;
     buf->indent_spaces = indent_spaces;
+    buf->html_method = 0;
     buf->alloc_failed = 0;
 
     return buf;
@@ -117,6 +118,9 @@ void buffer_append_char(SerializeBuffer* buf, char c) {
 
 void buffer_append_indent(SerializeBuffer* buf) {
     if (!buf || buf->indent_spaces <= 0) return;
+    /* §16.2 html method: newline-only layout — libxml2's HTML dump
+     * never nests with spaces. */
+    if (buf->html_method) return;
 
     int spaces = buf->indent * buf->indent_spaces;
     buffer_ensure_capacity(buf, spaces + 1);
@@ -314,6 +318,160 @@ static int is_cdata_element(SerializeBuffer* buf, LeptrisElement e) {
             strcmp(buf->cdata_names[i], local) == 0) return 1;
     }
     return 0;
+}
+
+/* §16.2 HTML element descriptor table (libxml2 html40ElementTable
+ * parity, sorted for bsearch). EMPTY mirrors the table's empty flag;
+ * INLINE mirrors its isinline flag (values 1 and 2 both inline).
+ * Absent elements return 0 — unknown markup never joins the HTML
+ * indent decisions. */
+typedef struct {
+    const char* name;
+    unsigned char flags;
+} HtmlElemFlags;
+
+static const HtmlElemFlags kHtmlElems[] = {
+    { "a", HTML_F_INLINE }, { "abbr", HTML_F_INLINE },
+    { "acronym", HTML_F_INLINE }, { "address", HTML_F_BLOCK },
+    { "applet", HTML_F_INLINE }, { "area", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "b", HTML_F_INLINE }, { "base", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "basefont", HTML_F_EMPTY | HTML_F_INLINE },
+    { "bdo", HTML_F_INLINE },
+    { "bgsound", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "big", HTML_F_INLINE }, { "blockquote", HTML_F_BLOCK },
+    { "body", HTML_F_BLOCK },
+    { "br", HTML_F_EMPTY | HTML_F_INLINE }, { "button", HTML_F_INLINE },
+    { "caption", HTML_F_BLOCK }, { "center", HTML_F_BLOCK },
+    { "cite", HTML_F_INLINE },
+    { "code", HTML_F_INLINE }, { "col", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "colgroup", HTML_F_BLOCK }, { "dd", HTML_F_BLOCK },
+    { "del", HTML_F_INLINE },
+    { "dfn", HTML_F_INLINE }, { "dir", HTML_F_BLOCK },
+    { "div", HTML_F_BLOCK }, { "dl", HTML_F_BLOCK },
+    { "dt", HTML_F_BLOCK }, { "em", HTML_F_INLINE },
+    { "embed", HTML_F_EMPTY | HTML_F_INLINE },
+    { "fieldset", HTML_F_BLOCK },
+    { "font", HTML_F_INLINE }, { "form", HTML_F_BLOCK },
+    { "frame", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "frameset", HTML_F_BLOCK }, { "h1", HTML_F_BLOCK },
+    { "h2", HTML_F_BLOCK }, { "h3", HTML_F_BLOCK },
+    { "h4", HTML_F_BLOCK }, { "h5", HTML_F_BLOCK },
+    { "h6", HTML_F_BLOCK }, { "head", HTML_F_BLOCK },
+    { "hr", HTML_F_EMPTY | HTML_F_BLOCK }, { "html", HTML_F_BLOCK },
+    { "i", HTML_F_INLINE }, { "iframe", HTML_F_INLINE },
+    { "img", HTML_F_EMPTY | HTML_F_INLINE },
+    { "input", HTML_F_EMPTY | HTML_F_INLINE }, { "ins", HTML_F_INLINE },
+    { "isindex", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "kbd", HTML_F_INLINE },
+    { "keygen", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "label", HTML_F_INLINE },
+    { "legend", HTML_F_BLOCK }, { "li", HTML_F_BLOCK },
+    { "link", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "map", HTML_F_INLINE }, { "menu", HTML_F_BLOCK },
+    { "meta", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "noembed", HTML_F_BLOCK }, { "noframes", HTML_F_BLOCK },
+    { "noscript", HTML_F_BLOCK },
+    { "object", HTML_F_INLINE }, { "ol", HTML_F_BLOCK },
+    { "optgroup", HTML_F_BLOCK },
+    { "option", HTML_F_BLOCK }, { "p", HTML_F_BLOCK },
+    { "param", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "plaintext", HTML_F_BLOCK }, { "pre", HTML_F_BLOCK },
+    { "q", HTML_F_INLINE }, { "s", HTML_F_INLINE },
+    { "samp", HTML_F_INLINE },
+    { "script", HTML_F_INLINE }, { "select", HTML_F_INLINE },
+    { "small", HTML_F_INLINE },
+    { "source", HTML_F_EMPTY | HTML_F_BLOCK },
+    { "span", HTML_F_INLINE }, { "strike", HTML_F_INLINE },
+    { "strong", HTML_F_INLINE }, { "style", HTML_F_BLOCK },
+    { "sub", HTML_F_INLINE },
+    { "sup", HTML_F_INLINE }, { "table", HTML_F_BLOCK },
+    { "tbody", HTML_F_BLOCK },
+    { "td", HTML_F_BLOCK }, { "textarea", HTML_F_INLINE },
+    { "tfoot", HTML_F_BLOCK },
+    { "th", HTML_F_BLOCK }, { "thead", HTML_F_BLOCK },
+    { "title", HTML_F_BLOCK }, { "tr", HTML_F_BLOCK },
+    { "track", HTML_F_EMPTY | HTML_F_BLOCK }, { "tt", HTML_F_INLINE },
+    { "u", HTML_F_INLINE }, { "ul", HTML_F_BLOCK },
+    { "var", HTML_F_INLINE },
+    { "wbr", HTML_F_EMPTY | HTML_F_BLOCK }, { "xmp", HTML_F_INLINE },
+};
+
+int html_elem_flags(const char* name, size_t len) {
+    if (!name || !len) return 0;
+    size_t lo = 0, hi = sizeof(kHtmlElems) / sizeof(kHtmlElems[0]);
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        int c = strncmp(kHtmlElems[mid].name, name, len);
+        if (c == 0 && kHtmlElems[mid].name[len] == '\0')
+            return (int)kHtmlElems[mid].flags;
+        if (c < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return 0;
+}
+
+/* HTML names are matched case-insensitively; the serializer sees the
+ * document's spelling, so lowercase into a bounded scratch first. */
+static int html_elem_flags_ci(const char* name, size_t len) {
+    char lower[16];
+    if (!name || !len || len >= sizeof(lower)) return 0;
+    for (size_t i = 0; i < len; i++)
+        lower[i] = (char)tolower((unsigned char)name[i]);
+    return html_elem_flags(lower, len);
+}
+
+/* §16.2 newline sites (libxml2 htmlNodeDumpInternal parity). The
+ * p/pre/param first-byte rule gates the PARENT-side sites only — a
+ * block child named p* still takes its after-close newline when its
+ * parent allows it. */
+static int html_breaks_block(const char* name, size_t len, int flags) {
+    (void)len;
+    return (flags & HTML_F_BLOCK) && name != NULL;
+}
+
+/* Site 1: newline after this element's opening tag — block element,
+ * first child exists and is not text, more than one child. */
+static int html_break_before_children(LeptrisElement elem,
+                                      const char* name, size_t len,
+                                      int flags) {
+    if (!html_breaks_block(name, len, flags)) return 0;
+    if (name[0] == 'p') return 0;
+    LeptrisNode* first =
+        leptris_node_first_child_internal((LeptrisNode*)elem);
+    if (!first || first->type == LEPTRIS_NODE_TYPE_TEXT) return 0;
+    return leptris_node_get_next_sibling(first) != NULL;
+}
+
+/* Site 3: newline before this element's closing tag — block element,
+ * more than one child, last child is not text. */
+static int html_break_before_close(LeptrisElement elem,
+                                   const char* name, size_t len,
+                                   int flags) {
+    if (!html_breaks_block(name, len, flags)) return 0;
+    if (name[0] == 'p') return 0;
+    LeptrisNode* c =
+        leptris_node_first_child_internal((LeptrisNode*)elem);
+    if (!c) return 0;
+    LeptrisNode* last = c;
+    while (leptris_node_get_next_sibling(last))
+        last = leptris_node_get_next_sibling(last);
+    if (last == c) return 0;   /* single child: libxml2 keeps inline */
+    return last->type != LEPTRIS_NODE_TYPE_TEXT;
+}
+
+/* Site 2/4 (merged): newline after this element's closing tag (or
+ * lone void tag) — block element, a non-text next sibling exists,
+ * and the parent is not a p* element. */
+static int html_break_after_elem(LeptrisElement elem,
+                                 const char* name, size_t len,
+                                 int flags) {
+    if (!html_breaks_block(name, len, flags)) return 0;
+    LeptrisNode* next =
+        leptris_node_get_next_sibling((LeptrisNode*)elem);
+    if (!next || next->type == LEPTRIS_NODE_TYPE_TEXT) return 0;
+    LeptrisElement parent = leptris_element_get_parent(elem);
+    if (parent && parent->name && parent->name[0] == 'p') return 0;
+    return 1;
 }
 
 /* Emit the CDATA BODY, splitting "]]>" across section closes. The
@@ -930,7 +1088,8 @@ static char* serialize_rootless_pis(struct leptris_document* doc,
 void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, int is_root) {
     if (!root_elem || !root_elem->name) return;
 
-    struct { LeptrisElement e; size_t nl; int mixed; int cd_open; } st[SER_WALK_STACK_MAX];
+    struct { LeptrisElement e; size_t nl; int mixed; int cd_open;
+             int close_brk; } st[SER_WALK_STACK_MAX];
     int sp = 0;
 
     LeptrisNode* cur = (LeptrisNode*)root_elem;
@@ -945,8 +1104,9 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
              * close paths already emit. (Before, both were emitted,
              * doubling the blank lines on every round-trip.) Text
              * inside a mixed parent is verbatim content: never
-             * dropped. */
-            if (buf->indent_spaces > 0 &&
+             * dropped. HTML mode prints text verbatim (libxml2 has
+             * no formatter-owned whitespace there). */
+            if (buf->indent_spaces > 0 && !buf->html_method &&
                 cur->type == LEPTRIS_NODE_TYPE_TEXT &&
                 !((sp > 0) && st[sp - 1].mixed)) {
                 LeptrisTextNode* wsn = (LeptrisTextNode*)cur;
@@ -1064,15 +1224,18 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * close into the same single reservation — leaves
                  * otherwise pay ~8 capacity-checked appends each
                  * (the raw-only guard was why pretty trailed). */
-                int pretty0 = buf->indent_spaces > 0 && !parent_mixed;
-                /* Lead = indent spaces ONLY: the parent's open tag
-                 * (or the previous sibling's close) already emitted
-                 * the newline that ended this line — a leading \n
-                 * here inserts blank lines. Trail mirrors the close-
-                 * tag site: newline after non-root closes. */
+                int pretty0 = buf->indent_spaces > 0 &&
+                              !buf->html_method && !parent_mixed;
+                /* HTML mode: zero lead ever; trail follows the
+                 * after-close break rule (mixed is not a gate). */
+                int htrail0 = buf->html_method && !is_root_cur &&
+                              html_break_after_elem(
+                                  e, name, nl,
+                                  html_elem_flags_ci(name, nl));
                 int lead = (!is_root_cur && pretty0)
                     ? buf->indent * buf->indent_spaces : 0;
-                int trail = (pretty0 && !is_root_cur) ? 1 : 0;
+                int trail = htrail0 ||
+                            (pretty0 && !is_root_cur);
                 buffer_ensure_capacity(
                     buf, (size_t)(lead + trail) + 2 * (epl + nl) + 6 * tl0 + 6);
                 char* q = buf->data + buf->size;
@@ -1211,7 +1374,11 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         LeptrisNode* fc = leptris_node_first_child_internal((LeptrisNode*)e);
         if (!fc) {
             buffer_append(buf, "/>");
-            if (!is_root_cur && buf->indent_spaces > 0 && !parent_mixed)
+            if (!is_root_cur && buf->indent_spaces > 0 &&
+                (buf->html_method
+                     ? html_break_after_elem(e, name, nl,
+                                             html_elem_flags_ci(name, nl))
+                     : !parent_mixed))
                 buffer_append_newline(buf);
             goto advance;
         }
@@ -1271,7 +1438,13 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append(buf, "</");
                 append_qualified_name(buf, epfx, name, nl);
                 buffer_append_char(buf, '>');
-                if (!parent_mixed) buffer_append_newline(buf);
+                if (buf->html_method) {
+                    if (html_break_after_elem(e, name, nl,
+                                              html_elem_flags_ci(name, nl)))
+                        buffer_append_newline(buf);
+                } else if (!parent_mixed) {
+                    buffer_append_newline(buf);
+                }
             }
             goto advance;
         }
@@ -1313,12 +1486,25 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         }
         buffer_append_char(buf, '>');
         int mixed = 0;
-        if (buf->indent_spaces > 0) mixed = ser_children_have_text(fc);
-        if (buf->indent_spaces > 0 && !mixed) buffer_append_newline(buf);
+        int close_brk = 0;
+        if (buf->html_method) {
+            /* §16.2: mixed is not a gate — the site rules own the
+             * newlines. mixed=1 keeps ws-only text verbatim. */
+            mixed = 1;
+            int hf = html_elem_flags_ci(name, nl);
+            if (html_break_before_children(e, name, nl, hf))
+                buffer_append_newline(buf);
+            close_brk = html_break_before_close(e, name, nl, hf);
+        } else {
+            if (buf->indent_spaces > 0) mixed = ser_children_have_text(fc);
+            if (buf->indent_spaces > 0 && !mixed)
+                buffer_append_newline(buf);
+        }
         st[sp].e = e;
         st[sp].nl = nl;
         st[sp].mixed = mixed;
         st[sp].cd_open = 0;
+        st[sp].close_brk = close_brk;
         sp++;
         buf->indent++;
         cur = fc;
@@ -1351,14 +1537,25 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             const char* pn = pe->name;
             size_t pnl2 = st[sp].nl;
             const char* pfx2 = leptris_element_get_prefix(pe);
-            /* #534: no indent inside a mixed-content element. */
-            if (buf->indent_spaces > 0 && !st[sp].mixed)
+            /* #534: no indent inside a mixed-content element. HTML
+             * mode: site-3 newline before the close tag, no spaces. */
+            if (buf->html_method) {
+                if (st[sp].close_brk) buffer_append_newline(buf);
+            } else if (buf->indent_spaces > 0 && !st[sp].mixed) {
                 buffer_append_indent(buf);
+            }
             buffer_append(buf, "</");
             append_qualified_name(buf, pfx2, pn, pnl2);
             buffer_append_char(buf, '>');
-            if (buf->indent_spaces > 0 && !(sp == 0 && (LeptrisNode*)pe == (LeptrisNode*)root_elem && is_root)) {
-                buffer_append_newline(buf);
+            if (buf->indent_spaces > 0 &&
+                !(sp == 0 && (LeptrisNode*)pe == (LeptrisNode*)root_elem && is_root)) {
+                if (buf->html_method) {
+                    if (html_break_after_elem(
+                            pe, pn, pnl2, html_elem_flags_ci(pn, pnl2)))
+                        buffer_append_newline(buf);
+                } else {
+                    buffer_append_newline(buf);
+                }
             }
             if (sp == 0 && (LeptrisNode*)pe == (LeptrisNode*)root_elem) {
                 /* The walk's root frame closed. STOP: an element
@@ -1523,6 +1720,10 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
     if (options) {
         buf->cdata_names = options->cdata_elements;
         buf->cdata_count = options->cdata_element_count;
+        /* §16.2: html layout only indents when indent was requested
+         * (the XSLT layer defaults html method to indent=yes). */
+        buf->html_method =
+            options->html_method && indent_spaces > 0;
     }
 
     /* Output UTF-8 BOM if present in original */
