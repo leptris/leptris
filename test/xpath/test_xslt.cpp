@@ -974,6 +974,17 @@ TEST(XsltCore, ApplyTemplatesVariableScope) {
         "</xsl:template>", "<doc/>")), "SUCCESS");
 }
 
+/* XML 1.0 §3.3.2: ATTLIST DEFAULT values materialize on elements
+ * that don't carry the attribute (libxslt bug-53). */
+TEST(XsltCore, DtdDefaultAttributes) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='doc'><xsl:value-of select='@defatt'/></xsl:template>",
+        "<!DOCTYPE doc [<!ELEMENT doc EMPTY>"
+        "<!ATTLIST doc defatt (SUCCESS|FAILURE) 'SUCCESS'>]>"
+        "<doc/>")),
+        "SUCCESS");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {

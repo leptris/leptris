@@ -759,6 +759,52 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
  *       lives outside the arena; the document frees it via
  *       doc->xml_buffer_needs_free.
  */
+/* §3.3.2 defaults pass: walk the finished tree; for every default-
+ * bearing declaration whose element matches, materialize the value
+ * when the element does not carry the attribute. */
+static void dp_apply_attr_defaults_one(LeptrisElement e,
+                                       const LeptrisDTD* dtd,
+                                       struct leptris_document* doc);
+static void dp_apply_attr_defaults(LeptrisElement root,
+                                   const LeptrisDTD* dtd,
+                                   struct leptris_document* doc) {
+    LeptrisNodeRef stack[128];
+    int sp = 0;
+    stack[sp++] = leptris_element_as_node(root);
+    while (sp > 0) {
+        LeptrisNodeRef n = stack[--sp];
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        dp_apply_attr_defaults_one((LeptrisElement)n, dtd, doc);
+        /* push children (order is irrelevant for defaults) */
+        for (LeptrisNodeRef c = leptris_node_next_sibling(
+                 leptris_element_as_node((LeptrisElement)n));
+             c && sp < 128; c = leptris_node_next_sibling(c))
+            ;
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node((LeptrisElement)n));
+             c && sp < 128; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT)
+                stack[sp++] = c;
+        }
+    }
+}
+static void dp_apply_attr_defaults_one(LeptrisElement e,
+                                       const LeptrisDTD* dtd,
+                                       struct leptris_document* doc) {
+    (void)doc;
+    const char* name = leptris_element_get_name(e);
+    if (!name) return;
+    for (size_t i = 0; i < dtd->default_decl_count; i++) {
+        DTDAttributeDecl* ad = dtd->default_decls[i];
+        if (!ad->element_name || strcmp(ad->element_name, name) != 0)
+            continue;
+        if (leptris_element_attribute(e, ad->attr_name) != NULL)
+            continue;
+        leptris_element_set_attribute(e, ad->attr_name,
+                                      ad->default_value);
+    }
+}
+
 static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                      int owns_buffer,
                                                      int drop_ws_text) {
@@ -1376,6 +1422,14 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     doc->top_comments = p.tc_head;
     doc->has_namespaces = p.saw_namespace;
     doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */
+
+    /* XML 1.0 §3.3.2: ATTLIST default values materialize on elements
+     * that don't carry the attribute (a post-parse pass — the hot
+     * parse loop stays untouched; DTD-less documents never enter).
+     * First-declaration-wins keeps re-declared attributes stable. */
+    if (p.dtd && p.dtd->default_decl_count && p.root) {
+        dp_apply_attr_defaults(p.root, p.dtd, doc);
+    }
     doc->had_declaration = p.had_declaration;
     doc->standalone = p.standalone;
     /* encoding and xml_version are borrowed pointers into doc->xml_buffer.

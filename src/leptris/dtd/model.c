@@ -167,6 +167,7 @@ LeptrisDTD* leptris_dtd_create(LeptrisMemoryPool* pool) {
  */
 void ttdtd_free(LeptrisDTD* dtd) {
     if (!dtd) return;
+    free(dtd->default_decls);   /* decls themselves are pool-owned */
     /* Only destroy the pool when this DTD owns it (i.e., it was
      * created via the public leptris_dtd_parse API). Document-pool
      * DTDs (created internally by the parser) leave pool ownership
@@ -385,6 +386,17 @@ int ttdtd_add_attribute(LeptrisDTD* dtd, DTDAttributeDecl* attr) {
     free(key);
     if (rc) {
         dtd->attribute_count++;
+        if ((attr->default_type == DTD_ATTR_DEFAULT ||
+             attr->default_type == DTD_ATTR_FIXED) &&
+            attr->default_value && attr->default_value[0]) {
+            DTDAttributeDecl** grown = (DTDAttributeDecl**)realloc(
+                dtd->default_decls,
+                (dtd->default_decl_count + 1) * sizeof(*grown));
+            if (grown) {
+                grown[dtd->default_decl_count++] = attr;
+                dtd->default_decls = grown;
+            }
+        }
         return 1;
     }
     return 0;
