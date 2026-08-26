@@ -1009,8 +1009,12 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         buf->size = (size_t)(ot - buf->data);
         buf->data[buf->size] = '\0';
 
-        /* --- attributes (identical emission) --- */
+        /* --- namespace declarations: the DEFAULT namespace leads,
+         * then prefixed declarations in list order (libxml2). */
+        for (int pass = 0; pass < 2; pass++) {
         for (struct leptris_namespace* ns = leptris_elem_namespaces(e); ns; ns = ns->next) {
+            if ((pass == 0) != (ns->prefix == NULL || !ns->prefix[0]))
+                continue;   /* pass 0: default only; pass 1: prefixed */
             const char* prefix = ns->prefix ? ns->prefix : "";
             size_t pnl = ns->prefix ? strlen(ns->prefix) : 0;
             const char* uri = ns->uri ? ns->uri : "";
@@ -1020,7 +1024,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             *nw++ = ' ';
             memcpy(nw, "xmlns", 5);
             nw += 5;
-            if (ns->prefix) { *nw++ = ':'; memcpy(nw, prefix, pnl); nw += pnl; }
+            if (pnl) { *nw++ = ':'; memcpy(nw, prefix, pnl); nw += pnl; }
             *nw++ = '=';
             *nw++ = '"';
             for (size_t i = 0; i < ul; i++) {
@@ -1036,6 +1040,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             *nw++ = '"';
             buf->size = (size_t)(nw - buf->data);
             buf->data[buf->size] = '\0';
+        }
         }
 
         /* --- namespaces (identical emission) --- */
