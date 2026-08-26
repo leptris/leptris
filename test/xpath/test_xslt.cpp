@@ -837,6 +837,19 @@ TEST(XsltCore, StripSpaceWildcard) {
         "<FOO><BAR INDEX=\"1\">b1</BAR><BAR INDEX=\"2\">b2</BAR></FOO>");
 }
 
+/* §11 variable scoping: a called template sees the GLOBALS and its
+ * own locals — never the CALLER's locals. A caller-local shadowing
+ * a global must not leak into the callee (libxslt bug-40-). */
+TEST(XsltCore, CallTemplateVariableScope) {
+    EXPECT_EQ(body(run(
+        "<xsl:variable name='foo' select=\"'SUCCESS'\"/>"
+        "<xsl:template name='test'><xsl:value-of select='$foo'/></xsl:template>"
+        "<xsl:template match='/'>"
+        "<xsl:variable name='foo' select=\"'FAILURE'\"/>"
+        "<xsl:call-template name='test'/>"
+        "</xsl:template>", "<doc/>")), "SUCCESS");
+}
+
 /* generate-id(): stable + unique per node (§12.5). */
 
 TEST(XsltBridge, KeyUseCanReferenceCurrentNode) {
