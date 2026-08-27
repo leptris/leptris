@@ -339,6 +339,55 @@ LEPTRIS_API const LeptrisPullEvent* leptris_pull_next(LeptrisPullParser pull);
 
 /* Attribute accessors — valid only during the START_ELEMENT event
  * most recently returned by leptris_pull_next. */
+/**
+ * Advance up to max_count events, staging them for bulk delivery
+ * (issue #589)
+ *
+ * The cursor sibling of the chunked SAX recorder (#585): one call
+ * delivers up to max_count events, written into the caller's array
+ * in the same layout leptris_pull_next hands out. All staged name/
+ * text strings live in a staging arena and remain valid until the
+ * NEXT leptris_pull_next_batch / leptris_pull_next / free call.
+ * Through FFI this collapses the per-event dispatch cost
+ * (~1.7 us/event measured through Ruby — streaming was 145x slower
+ * than a DOM parse of the same bytes) to amortized noise.
+ *
+ * Attribute accessors (leptris_pull_attr_count / _name / _value /
+ * leptris_pull_attrs) serve ONLY the most recent event — end a
+ * batch ON a start_element to read its attributes.
+ *
+ * @param pull Pull parser
+ * @param out_events Caller array (may be NULL: count-only drain is
+ *                   not supported — pass a real array)
+ * @param max_count Array capacity; the batch drains at most this
+ *                  many events
+ * @return Events written; 0 when the document is exhausted
+ */
+LEPTRIS_API size_t leptris_pull_next_batch(LeptrisPullParser pull,
+                                           LeptrisPullEvent* out_events,
+                                           size_t max_count);
+
+/**
+ * Copy the current event's attributes as a flat alternating
+ * name/value pointer array (issue #562)
+ *
+ * The 1+2N round-trip shape (count, then name(i)+value(i) per
+ * index) collapses to count + one flat copy — the char** wire
+ * format SAX callbacks already use. Valid only during the START
+ * _ELEMENT event most recently returned (cursor or batch).
+ *
+ * @param pull Pull parser
+ * @param attrs Caller array receiving up to max_count name/value
+ *             pointer pairs (2*max_count slots), or NULL for a
+ *             count-only query
+ * @param max_count Pair capacity of attrs
+ * @return Total attribute pairs on the current event (0 when the
+ *         current event carries none), regardless of truncation
+ */
+LEPTRIS_API size_t leptris_pull_attrs(LeptrisPullParser pull,
+                                      const char** attrs,
+                                      size_t max_count);
+
 LEPTRIS_API size_t leptris_pull_attr_count(LeptrisPullParser pull);
 LEPTRIS_API const char* leptris_pull_attr_name(LeptrisPullParser pull,
                                                size_t index);
