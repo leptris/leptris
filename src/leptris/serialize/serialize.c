@@ -1715,8 +1715,11 @@ LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
         size_t need = doc->ser_cache_len + 1;
         if (buf && capacity >= need) {
             memcpy(buf, doc->ser_cache, need);
-            if (out_len) *out_len = doc->ser_cache_len;
         }
+        /* #550: the sizing pass (buf NULL / too small) reports the
+         * needed length through out_len too — callers allocate from
+         * it. The cached path previously left it untouched. */
+        if (out_len) *out_len = doc->ser_cache_len;
         return need;
     }
     char* tmp = leptris_document_serialize(doc, options);
@@ -1724,8 +1727,8 @@ LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
     size_t need = strlen(tmp) + 1;
     if (buf && capacity >= need) {
         memcpy(buf, tmp, need);
-        if (out_len) *out_len = need - 1;
     }
+    if (out_len) *out_len = need - 1;
     /* Cache for the no-options (defaults) path; option permutations
      * stay one-shot to keep the cache key simple. */
     if (!options) {
@@ -1752,8 +1755,8 @@ LEPTRIS_API size_t leptris_element_serialize_into(LeptrisElement elem,
     size_t need = strlen(tmp) + 1;
     if (buf && capacity >= need) {
         memcpy(buf, tmp, need);
-        if (out_len) *out_len = need - 1;
     }
+    if (out_len) *out_len = need - 1;   /* sizing pass too (#550) */
     leptris_free_string(tmp);
     return need;
 }
