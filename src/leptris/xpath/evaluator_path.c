@@ -750,10 +750,13 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                                           node_test))
                         xpath_nodeset_add(result, (LeptrisNode*)node_ptr);
                 } else if (strcmp(axis_name, "parent") == 0) {
-                    LeptrisNode* up = leptris_node_parent(
+                    /* leptris_node_parent returns LeptrisElement —
+                     * musl GCC rejects the mismatched store (#582). */
+                    LeptrisElement up = leptris_node_parent(
                         (LeptrisNodeRef)node_ptr);
-                    if (up && matches_node_test(ctx, up, node_test))
-                        xpath_nodeset_add(result, up);
+                    if (up &&
+                        matches_node_test(ctx, (LeptrisNode*)up, node_test))
+                        xpath_nodeset_add(result, (LeptrisNode*)up);
                 }
                 continue;
             } else {

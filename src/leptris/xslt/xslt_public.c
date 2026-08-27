@@ -332,7 +332,8 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     /* §16.1: xsl:output encoding names the output declaration's
      * encoding (bug-132). */
     opts.encoding = ex->sheet->out_encoding;
-    ext.cdata_elements = ex->sheet->out_cdata;
+    /* musl GCC rejects the qualified-pointer store (#582). */
+    ext.cdata_elements = (const char* const*)ex->sheet->out_cdata;
     ext.cdata_element_count = ex->sheet->out_cdata_count;
     if (html_method)
         inject_html_meta(out, ex->sheet->out_encoding

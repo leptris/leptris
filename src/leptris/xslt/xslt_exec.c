@@ -1934,7 +1934,8 @@ static LeptrisNodeRef next_node_doc_order(LeptrisNodeRef n) {
     while (n) {
         LeptrisNodeRef s = leptris_node_next_sibling(n);
         if (s) return s;
-        n = leptris_node_parent(n);
+        /* musl GCC rejects the implicit LeptrisElement store (#582). */
+        n = (LeptrisNodeRef)leptris_node_parent(n);
     }
     return NULL;
 }
