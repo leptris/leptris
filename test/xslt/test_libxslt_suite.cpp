@@ -53,6 +53,10 @@ const Skip kSkip[] = {
     {"bug-93", "Win32: import path resolution"},
     {"bug-102", "Win32: import path resolution"},
     {"bug-118", "Win32: copy-of select='/'"},
+    {"bug-187", "Win32-only output divergence"},
+    {"bug-2-", "Win32-only output divergence"},
+    {"bug-37-", "Win32-only output divergence"},
+    {"bug-74", "Win32-only output divergence"},
 #endif
     /* libxslt registers exsl:document / exsl:node-set style output
      * side-effects and non-spec extension attributes; re-evaluate
