@@ -401,6 +401,36 @@ re-resolved); use the DOM path when namespace URIs matter.
 `leptris_iterparse_new_file(path)` iterates a document on disk with
 memory bounded by the largest subtree.
 
+==== Iterparse v2: full-document mode, namespaces, errors (issue #586)
+
+[source,c]
+----
+/* Every element, in completion order (post-order: children before
+ * parents), each with its completed subtree attached. */
+LeptrisIterparse it = leptris_iterparse_new_ex(
+    xml, len, LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+LeptrisElement e;
+while ((e = leptris_iterparse_next(it)) != NULL) {
+    /* namespace context of THIS element, captured at parse time */
+    const char* uri = leptris_iterparse_ns_uri(it, "p");  /* or NULL
+        for the default namespace binding */
+    size_t nscopes = leptris_iterparse_ns_count(it);      /* bulk FFI */
+    process(e, uri);
+}
+if (leptris_iterparse_error(it))
+    fprintf(stderr, "truncated: %s\n", leptris_iterparse_error(it));
+----
+
+- Full mode keeps the v1 memory discipline — a fresh pool per
+  top-level child, released as you advance — and materializes the
+  root in its own pool (it yields childless at document end).
+- Namespace bindings come from the streaming core's prefix-mapping
+  events; yielded elements carry resolved namespaces
+  (`leptris_element_namespace`), and the iterator snapshots the
+  in-scope scope per yield.
+- Truncated or malformed input stops iteration with a retrievable
+  message instead of failing silently.
+
 === SAX (event-driven) parsing
 
 [source,c]
