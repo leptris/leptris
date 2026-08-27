@@ -39,6 +39,17 @@ struct leptris_pull_parser {
     pull_event* queue;
     size_t head, tail, cap;   /* ring buffer; head==tail = empty */
     pull_event current;       /* the event handed out by _next */
+    /* Staged batch (#589): drained events live here — strings in one
+     * arena, valid until the next batch/_next/free call. current may
+     * point into the arena (current_staged=1) — queue_reset_event
+     * must not free arena pointers. */
+    char* stage_arena;
+    size_t stage_arena_len, stage_arena_cap;
+    int current_staged;
+    char** stage_last_attrs;      /* most recent START's mirror */
+    size_t stage_last_attr_count;
+    char** mirror_attrs;          /* persistent mirror block (#589) */
+    size_t mirror_cap;
 };
 
 static void queue_reset_event(pull_event* e) {
@@ -239,8 +250,17 @@ LEPTRIS_API LeptrisPullParser leptris_pull_new_file(const char* path) {
     return p;
 }
 
+static void stage_reset(struct leptris_pull_parser* p);
+
 LEPTRIS_API const LeptrisPullEvent* leptris_pull_next(LeptrisPullParser pull) {
     if (!pull) return NULL;
+    /* A staged batch may still hold current — drop that reference
+     * WITHOUT clearing the stage (a batch loop drives _next; the
+     * arena must live across the whole batch). */
+    if (pull->current_staged) {
+        memset(&pull->current, 0, sizeof(pull->current));
+        pull->current_staged = 0;
+    }
 
     /* Feed more input while the queue is empty and input remains. */
     while (queue_empty(pull) && !pull->finished && !pull->failed) {
@@ -298,11 +318,140 @@ LEPTRIS_API const char* leptris_pull_attr_value(LeptrisPullParser pull,
     return pull->current.attrs[index * 2 + 1];
 }
 
+/* ---- Batched delivery (#589) ---- */
+
+
+static char* stage_put(struct leptris_pull_parser* p, const char* s,
+                       size_t len) {
+    if (p->stage_arena_len + len + 1 > p->stage_arena_cap) {
+        size_t want = p->stage_arena_cap ? p->stage_arena_cap * 2 : 256;
+        while (want < p->stage_arena_len + len + 1) want *= 2;
+        char* grown = (char*)realloc(p->stage_arena, want);
+        if (!grown) return NULL;
+        p->stage_arena = grown;
+        p->stage_arena_cap = want;
+    }
+    if (!s || len == 0) {
+        p->stage_arena[p->stage_arena_len] = '\0';
+        return p->stage_arena + p->stage_arena_len++;
+    }
+    memcpy(p->stage_arena + p->stage_arena_len, s, len);
+    char* at = p->stage_arena + p->stage_arena_len;
+    p->stage_arena_len += len;
+    p->stage_arena[p->stage_arena_len++] = '\0';
+    return at;
+}
+
+static void stage_reset(struct leptris_pull_parser* p) {
+    if (p->current_staged) {
+        /* current points into the arena — clear without freeing. */
+        memset(&p->current, 0, sizeof(p->current));
+        p->current_staged = 0;
+    }
+    p->stage_arena_len = 0;
+}
+
+LEPTRIS_API size_t leptris_pull_next_batch(LeptrisPullParser pull,
+                                           LeptrisPullEvent* out_events,
+                                           size_t max_count) {
+    if (!pull || !out_events || max_count == 0) return 0;
+    stage_reset(pull);
+    size_t n = 0;
+    /* Attr accessors serve the batch's most recent START element —
+     * remembered during the loop, re-pointed AFTER it (the internal
+     * _next calls replace current each step). */
+    LeptrisPullEvent* last_start_out = NULL;
+    while (n < max_count) {
+        const LeptrisPullEvent* e = leptris_pull_next(pull);
+        if (!e) break;
+        LeptrisPullEvent* out = &out_events[n];
+        out->type = e->type;
+        out->name = NULL;
+        out->text = NULL;
+        out->text_len = e->text_len;
+        if (e->name) {
+            char* staged = stage_put(pull, e->name, strlen(e->name));
+            if (!staged) break;
+            out->name = staged;
+        }
+        if (e->text) {
+            char* staged = stage_put(pull, e->text, e->text_len);
+            if (!staged) break;
+            out->text = staged;
+        }
+        n++;
+        /* Attr accessors serve the most recent START element of the
+         * batch: mirror each start's attrs into the stage as it
+         * passes (the previous mirror is replaced). */
+        if (e->type == LEPTRIS_PULL_START_ELEMENT &&
+            pull->current.attr_count) {
+            /* Mirror into ONE persistent block (grown as needed, freed
+             * with the parser — no per-start calloc/free churn). */
+            size_t na = pull->current.attr_count;
+            if (na * 2 + 1 > pull->mirror_cap) {
+                size_t want = pull->mirror_cap ? pull->mirror_cap : 8;
+                while (want < na * 2 + 1) want *= 2;
+                char** grown = (char**)realloc(pull->mirror_attrs,
+                                               want * sizeof(char*));
+                if (grown) {
+                    pull->mirror_attrs = grown;
+                    pull->mirror_cap = want;
+                }
+            }
+            if (na * 2 + 1 <= pull->mirror_cap) {
+                int ok = 1;
+                for (size_t i = 0; i < na * 2 && ok; i++) {
+                    const char* a = pull->current.attrs[i];
+                    char* st = a ? stage_put(pull, a, strlen(a)) : NULL;
+                    if (a && !st) ok = 0;
+                    pull->mirror_attrs[i] = st;
+                }
+                if (ok) {
+                    last_start_out = out;
+                    pull->stage_last_attrs = pull->mirror_attrs;
+                    pull->stage_last_attr_count = na;
+                }
+            }
+        }
+    }
+    if (last_start_out) {
+        /* Free the last-drained event's owned strings before the
+         * mirror overwrites current — they are queue-allocated
+         * (Linux LSan, PR #597). */
+        if (!pull->current_staged) queue_reset_event(&pull->current);
+        memset(&pull->current, 0, sizeof(pull->current));
+        pull->current.type = LEPTRIS_PULL_START_ELEMENT;
+        pull->current.name = last_start_out->name;
+        pull->current.attrs = pull->stage_last_attrs;
+        pull->current.attr_count = pull->stage_last_attr_count;
+        pull->current_staged = 1;
+    }
+    return n;
+}
+
+/* Flat attribute fetch (#562). */
+LEPTRIS_API size_t leptris_pull_attrs(LeptrisPullParser pull,
+                                      const char** attrs,
+                                      size_t max_count) {
+    if (!pull || pull->current.type != LEPTRIS_PULL_START_ELEMENT)
+        return 0;
+    size_t pairs = pull->current.attr_count;
+    if (!attrs) return pairs;
+    size_t copy = pairs < max_count ? pairs : max_count;
+    for (size_t i = 0; i < copy; i++) {
+        attrs[2 * i] = pull->current.attrs[2 * i];
+        attrs[2 * i + 1] = pull->current.attrs[2 * i + 1];
+    }
+    return pairs;
+}
+
 LEPTRIS_API void leptris_pull_free(LeptrisPullParser pull) {
     if (!pull) return;
     if (pull->file) fclose(pull->file);
     if (pull->sax) leptris_sax_parser_free(pull->sax);
-    queue_reset_event(&pull->current);
+    if (!pull->current_staged) queue_reset_event(&pull->current);
+    free(pull->stage_arena);
+    free(pull->mirror_attrs);
     for (size_t i = pull->head; i != pull->tail; i = (i + 1) % pull->cap)
         queue_reset_event(&pull->queue[i]);
     free(pull->queue);
