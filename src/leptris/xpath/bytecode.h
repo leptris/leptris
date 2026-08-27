@@ -79,6 +79,9 @@ typedef enum {
      * descendant-or-self-correct by construction (the root is in
      * the bucket iff it carries attr=value). TODO 192d. */
     XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ,
+    /* u16 u16 u16: name, attr, VARIABLE name — RHS resolved at run
+     * time from the context's variable set (issue #565). */
+    XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ_VAR,
 
     /* Fused axis+predicate opcodes (TODO 134). Combines the axis
      * walk with the predicate filter into a single pass, and uses

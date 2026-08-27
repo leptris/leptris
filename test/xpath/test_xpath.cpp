@@ -1432,3 +1432,67 @@ TEST(NsAbsolutePaths, PrefixedDoubleSlashMatchesNamespacedRoot) {
     leptris_xpath_ns_set_free(ns);
     leptris_document_free(doc);
 }
+
+/* Issue #565: variable-bound evaluation — the fused @attr=$var
+ * predicate rides the index-backed VM path, not the interpreter. */
+TEST(VarBoundEval, AttrEqVarStringMatchesLiteralForm) {
+    const char xml[] =
+        "<r><book id='b1'>A</book><book id='b7'>G</book>"
+        "<book id='b9'>I</book></r>";
+    LeptrisDocument d = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathVariableSet vs = leptris_xpath_variable_set_new();
+    leptris_xpath_variable_set_string(vs, "want", "b7");
+
+    LeptrisXPathResult r = leptris_xpath_eval_with_vars(
+        d, "count(//book[@id=$want])", vs);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+
+    /* reversed operand order: [$var=@attr] */
+    r = leptris_xpath_eval_with_vars(
+        d, "count(//book[$want=@id])", vs);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_xpath_variable_set_free(vs);
+    leptris_document_free(d);
+}
+
+TEST(VarBoundEval, AttrEqVarNumberStringifies) {
+    const char xml[] = "<r><e n='10'>x</e><e n='11'>y</e></r>";
+    LeptrisDocument d = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathVariableSet vs = leptris_xpath_variable_set_new();
+    leptris_xpath_variable_set_number(vs, "k", 10.0);
+    LeptrisXPathResult r = leptris_xpath_eval_with_vars(
+        d, "count(//e[@n=$k])", vs);
+    ASSERT_NE(r, nullptr);
+    /* string(@n)='10' = string(10)='10' — one match */
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_xpath_variable_set_free(vs);
+    leptris_document_free(d);
+}
+
+TEST(VarBoundEval, UndefinedVariableBareIsAnError) {
+    const char xml[] = "<r><e n='1'/></r>";
+    LeptrisDocument d = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathVariableSet vs = leptris_xpath_variable_set_new();
+    /* A bare $var reference is a hard error. Inside a PREDICATE an
+     * undefined variable counts as a non-match (apply_predicates
+     * filters in place; its callers merge whatever remains) — so
+     * count(//e[@n=$missing]) is 0, not an error. Pinned so the
+     * engine boundary stays observable: hard error at expression
+     * level, soft-fail under a predicate filter. */
+    LeptrisXPathResult r = leptris_xpath_eval_with_vars(d, "$missing", vs);
+    EXPECT_EQ(r, nullptr);
+    r = leptris_xpath_eval_with_vars(d, "count(//e[@n=$missing])", vs);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 0.0);
+    leptris_xpath_result_free(r);
+    leptris_xpath_variable_set_free(vs);
+    leptris_document_free(d);
+}
