@@ -1269,6 +1269,11 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         free(na);
     }
     free((void*)sheet->out_media_type);
+    /* §16.1 cdata-section-elements list (Linux LSan: the array and
+     * its entries had no teardown). */
+    for (size_t i = 0; i < sheet->out_cdata_count; i++)
+        free(sheet->out_cdata[i]);
+    free(sheet->out_cdata);
     for (size_t i = 0; i < sheet->exclude_count; i++)
         free(sheet->exclude_pfx[i]);
     free(sheet->exclude_pfx);

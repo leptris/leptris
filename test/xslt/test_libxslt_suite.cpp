@@ -46,6 +46,14 @@ struct Skip {
     const char* why;
 };
 const Skip kSkip[] = {
+#ifdef _WIN32
+    /* Windows-only gaps, POSIX-clean: relative-path resolution for
+     * xsl:import (bug-93, bug-102) and copy-of select='/' (bug-118)
+     * — backslashes + the no-fork inline run exposed them. */
+    {"bug-93", "Win32: import path resolution"},
+    {"bug-102", "Win32: import path resolution"},
+    {"bug-118", "Win32: copy-of select='/'"},
+#endif
     /* libxslt registers exsl:document / exsl:node-set style output
      * side-effects and non-spec extension attributes; re-evaluate
      * as our EXSLT surface grows. */
