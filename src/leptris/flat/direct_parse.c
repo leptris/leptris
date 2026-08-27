@@ -1238,15 +1238,20 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 close_local_len = close_len - (colon + 1 - close_start);
             }
             if (open_len != close_local_len) goto fail;
-            if (close_local_len <= 8 && p.probe_slack) {
-                /* Masked 64-bit compare for short names — one load
-                 * each side vs a libc memcmp call (the TODO 174 law:
-                 * setup dominates sub-8-byte compares; ~9% of the
-                 * element-heavy corpus profile). probe_slack guards
-                 * the 8-byte load past the name: only the parser's
-                 * owned copy carries the zeroed tail; open_name
-                 * always has the document's remainder after it, and
-                 * close_local near the end lands in the slack. */
+            /* Masked 64-bit compare for short names — one load
+             * each side vs a libc memcmp call (the TODO 174 law:
+             * setup dominates sub-8-byte compares; ~9% of the
+             * element-heavy corpus profile). The 8-byte load may
+             * read past the name: safe outright on the owned copy
+             * (zeroed slack), and safe on caller buffers whenever
+             * the load stays inside [buf, end] (the sentinel at
+             * buf[len] is the +1) — only names within 8 bytes of the
+             * document end fall back to memcmp (issue #561: gating
+             * the whole fast path on probe_slack cost inplace
+             * parsing a memcmp per element). */
+            if (close_local_len <= 8 &&
+                (p.probe_slack ||
+                 close_local + 8 <= p.end + 1)) {
                 uint64_t mask = (close_local_len == 8)
                     ? ~(uint64_t)0
                     : ((1ull << (close_local_len * 8)) - 1);
