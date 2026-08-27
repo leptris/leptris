@@ -45,6 +45,7 @@
 #include "../dom/pi.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <math.h>
 
 typedef struct {
@@ -233,6 +234,31 @@ static void vm_absolute_type_walk(XPathNodeSet* out, LeptrisElement elem,
 static inline int vm_unprefixed_name_matches(XPathContext* ctx,
                                              LeptrisElement e,
                                              const char* name) {
+    /* Prefixed QNames (issue #564): resolve through the context's
+     * namespace bindings — the same semantics as the interpreter's
+     * matches_node_test. A bound prefix matches by namespace URI
+     * (any element prefix or the default ns); an unbound prefix
+     * falls back to the literal prefix comparison. */
+    const char* colon = name ? strchr(name, ':') : NULL;
+    if (colon) {
+        size_t plen = (size_t)(colon - name);
+        const char* local = colon + 1;
+        const char* en = leptris_element_get_name(e);
+        if (!en || strcmp(en, local) != 0) return 0;
+        const char* test_uri = ctx
+            ? leptris_xpath_ns_lookup(
+                  (const struct leptris_xpath_ns_map*)ctx->ns_set,
+                  name, plen)
+            : NULL;
+        if (test_uri) {
+            const char* node_uri = leptris_element_get_namespace_uri(e);
+            return node_uri && strcmp(node_uri, test_uri) == 0;
+        }
+        const char* node_prefix = leptris_element_get_prefix(e);
+        return node_prefix &&
+               strlen(node_prefix) == plen &&
+               strncmp(node_prefix, name, plen) == 0;
+    }
     const char* en = leptris_element_get_name(e);
     if (!en || strcmp(en, name) != 0) return 0;
     if (!ctx || !ctx->document || !ctx->document->has_namespaces) return 1;
@@ -268,6 +294,28 @@ static struct leptris_xpath_result* vm_apply_absolute_type(
     if (!r) { xpath_nodeset_free(out); return NULL; }
     r->value.nodeset_value = out;
     return r;
+}
+
+/* Prefixed-QName bucket path (issue #564): the index keys elements
+ * by LOCAL name, so a prefixed test resolves through the local
+ * bucket and verifies each (small) candidate with the ns-aware
+ * matcher — instead of walking the whole tree. */
+static void vm_add_prefixed_bucket(XPathContext* ctx,
+                                   struct leptris_element_index* idx,
+                                   const char* qname, int mode,
+                                   LeptrisElement root,
+                                   XPathNodeSet* out) {
+    const char* colon = strchr(qname, ':');
+    if (!colon) return;
+    const LeptrisElementIndexBucket* bucket =
+        leptris_element_index_lookup(idx, colon + 1);
+    if (!bucket) return;
+    for (size_t i = 0; i < bucket->count; i++) {
+        LeptrisElement m = (LeptrisElement)bucket->matches[i];
+        if (mode == 1 && m == root) continue;  /* descendant excludes */
+        if (vm_unprefixed_name_matches(ctx, m, qname))
+            xpath_nodeset_add_fast(out, m);
+    }
 }
 
 static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
@@ -332,10 +380,31 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
                     out->capacity = n;
                 }
             }
+        } else if (strchr(name, ':')) {
+            /* Prefixed test: local-name bucket + ns verification. */
+            vm_add_prefixed_bucket(ctx, idx, name, mode, root, out);
         } else {
             const LeptrisElementIndexBucket* bucket =
                 leptris_element_index_lookup(idx, name);
             if (bucket) {
+                /* #525 gate: on namespace-bearing documents the
+                 * bucket keys by LOCAL name — verify each entry
+                 * (unprefixed tests match no-namespace elements
+                 * only). The plain fast memcpy stays for
+                 * namespace-free documents. */
+                if (ctx && ctx->document && ctx->document->has_namespaces) {
+                    for (size_t i = 0; i < bucket->count; i++) {
+                        LeptrisElement m = (LeptrisElement)bucket->matches[i];
+                        if (mode == 1 && m == root) continue;
+                        if (vm_unprefixed_name_matches(ctx, m, name))
+                            xpath_nodeset_add_fast(out, m);
+                    }
+                    struct leptris_xpath_result* rg =
+                        xpath_result_new(XPATH_RESULT_NODESET);
+                    if (!rg) { xpath_nodeset_free(out); return NULL; }
+                    rg->value.nodeset_value = out;
+                    return rg;
+                }
                 void** src = (void**)bucket->matches;
                 size_t n = bucket->count;
                 /* Mode 1: skip root if it's in the bucket. */
@@ -403,7 +472,6 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
 
 struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
                                                  const char* name, int wild) {
-    (void)ctx;
     XPathNodeSet* input = vm_detach_input_nodeset(vm);
     if (!input) return NULL;
 
@@ -1203,6 +1271,8 @@ static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
     vm_push(vm, result);
     return 0;
 }
+
+
 
 static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                                            XPathContext* ctx) {

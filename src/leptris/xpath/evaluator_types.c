@@ -123,8 +123,12 @@ double xpath_to_number(struct leptris_xpath_result* result) {
             /* Skip leading whitespace */
             while (isspace((unsigned char)*str)) str++;
 
-            /* Per W3C XPath 1.0 Section 4.4: empty string converts to 0 */
-            if (*str == '\0') return 0.0;
+            /* XPath 1.0 §4.4 number(string): a string that is not
+             * optional-whitespace + a valid Number converts to NaN —
+             * the empty string included (bug-61: number('') is NaN;
+             * the old 0.0 misread the spec, masked by the
+             * interpreter-only path). */
+            if (*str == '\0') return NAN;
 
             /* Parse number */
             char* endptr;
