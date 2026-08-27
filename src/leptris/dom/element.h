@@ -269,6 +269,14 @@ struct leptris_ns_cache {
     char* prefix;                       /* This element's prefix (from `<p:loc>`) */
     char* namespace_uri;                /* Resolved URI for this element's prefix */
     struct leptris_namespace* declarations;  /* xmlns:* declared on this element */
+    /* Document-owned chain (issue: LSan leak): HEAP strings on a
+     * POOL-allocated cache need an explicit document_free walk. The
+     * flags mark exactly which pointers are heap-owned — the cache
+     * also carries pool-allocated and borrowed (parse zero-copy)
+     * strings the pool/buffer own. */
+    struct leptris_ns_cache* doc_next;
+    unsigned char prefix_heap;
+    unsigned char uri_heap;
 };
 
 struct leptris_element {
@@ -368,8 +376,8 @@ static inline char* leptris_elem_ns_uri(const LeptrisElement e) {
     return e && e->ns_cache ? e->ns_cache->namespace_uri : NULL;
 }
 
-/* Allocate ns_cache if needed, then set prefix. Pool required for
- * the one-time allocation. The cache struct is zeroed so all three
+/* Allocate ns_cache if needed, then set the prefix. Pool required
+ * for the one-time allocation. The cache struct is zeroed so all
  * fields (prefix, namespace_uri, declarations) start as NULL. */
 static inline void leptris_elem_set_prefix(LeptrisElement e, char* prefix,
                                            LeptrisMemoryPool* pool) {
@@ -386,6 +394,7 @@ static inline void leptris_elem_set_prefix(LeptrisElement e, char* prefix,
     e->ns_cache->prefix = prefix;
 }
 
+/* Allocate ns_cache if needed, then set the namespace URI. */
 static inline void leptris_elem_set_ns_uri(LeptrisElement e, char* uri,
                                             LeptrisMemoryPool* pool) {
     if (!e) return;

@@ -471,22 +471,33 @@ const char* leptris_element_get_namespace_uri(LeptrisElement elem) {
 }
 
 
-/* Legacy functions for C string input */
+/* Legacy functions for C string input.
+ *
+ * POOL-STORAGE (Linux LSan leak): these used to heap-strdup into a
+ * POOL-allocated cache — document_free never freed the strings, so
+ * every XSLT result element with a namespace leaked them. The
+ * copies are pool-allocated now: the pool owns cache AND strings
+ * and frees both at teardown, so a re-set simply orphans the old
+ * pool bytes (bounded; prefix/URI re-assignment is rare). Pool-less
+ * (detached) elements keep the heap copy — nothing else could own
+ * it — which the (rare) explicit free contract covers. */
 void leptris_element_set_prefix(LeptrisElement elem, const char* prefix) {
     if (!elem) return;
-    char* old = leptris_elem_prefix(elem);
-    if (old) free(old);
-    char* copy = prefix ? leptris_strdup(prefix) : NULL;
     LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
+    char* copy = (prefix && *prefix)
+        ? (pool ? leptris_pool_strdup(pool, prefix)
+                : leptris_strdup(prefix))
+        : NULL;
     leptris_elem_set_prefix(elem, copy, pool);
 }
 
 void leptris_element_set_namespace_uri(LeptrisElement elem, const char* uri) {
     if (!elem) return;
-    char* old = leptris_elem_ns_uri(elem);
-    if (old) free(old);
-    char* copy = uri ? leptris_strdup(uri) : NULL;
     LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
+    char* copy = (uri && *uri)
+        ? (pool ? leptris_pool_strdup(pool, uri)
+                : leptris_strdup(uri))
+        : NULL;
     leptris_elem_set_ns_uri(elem, copy, pool);
 }
 
