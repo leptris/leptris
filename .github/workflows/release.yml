@@ -43,7 +43,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # leptris-ci machine user (write access): every push, PR,
+          # and tag below is authored by a collaborator, so no
+          # workflow run ever lands in the action_required approval
+          # gate (GITHUB_TOKEN's bot only has read on PR events).
+          token: ${{ secrets.LEPTRIS_CI_PAT_TOKEN }}
 
       - name: Validate version input
         id: validate
@@ -71,8 +75,8 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "leptris-ci"
+          git config user.email "leptris-ci@users.noreply.github.com"
 
       - name: Create release branch
         id: create_branch
@@ -85,6 +89,8 @@ jobs:
       - name: Commit version bump
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
+          git config user.name "leptris-ci"
+          git config user.email "leptris-ci@users.noreply.github.com"
           git add CMakeLists.txt vcpkg.json CHANGELOG.md
           git commit -m "release: v${VERSION}"
 
@@ -102,10 +108,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.validate-and-bump.outputs.release_branch }}
+          token: ${{ secrets.LEPTRIS_CI_PAT_TOKEN }}
 
       - name: Create Pull Request
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Author the release PR as leptris-ci: pull_request events
+          # from a write-access collaborator run without approval.
+          GH_TOKEN: ${{ secrets.LEPTRIS_CI_PAT_TOKEN }}
           RELEASE_BRANCH: ${{ needs.validate-and-bump.outputs.release_branch }}
           VERSION: ${{ needs.validate-and-bump.outputs.version }}
         run: |
@@ -172,7 +181,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.LEPTRIS_CI_PAT_TOKEN }}
 
       - name: Get version from CMakeLists.txt
         id: get_version
@@ -209,8 +218,8 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "leptris-ci"
+          git config user.email "leptris-ci@users.noreply.github.com"
 
       - name: Create and push git tag
         run: |
