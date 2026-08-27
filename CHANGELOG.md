@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+## [1.9.6] - 2026-08-27
+
+### Performance
+
+- variable-bound expressions evaluate on the bytecode VM with the
+  compiled-handle cache — `leptris_xpath_compiled_eval_vars` on
+  `//book[@id=$var]` at parity with the plain VM path (3.17 vs
+  3.09 µs on a 2000-element document, was ~12 µs interpreter-bound);
+  fused `//name[@attr=$var]` opcode served from the attr-value index
+  bucket (#565) (xpath)
+
+### Fixed
+
+- `/descendant::name` and `/descendant::*` include the root element
+  — the context is the document node; the old root-skip implemented
+  element-relative semantics (NsAbsolutePaths, red on main since
+  1.9.5) (xpath)
+- `$var/step`, `fn()/step`, `(...)/step` paths compile the head
+  expression as the path input — the head was silently dropped and
+  the steps seeded from the context node (libxslt bug-76) (xpath)
+- nodeset comparisons in the VM follow XPath 1.0 §3.4 any-pair
+  semantics instead of comparing first nodes (xpath)
+- libxslt suite 136 → 137 (bug-76 closes)
+
 ## [1.9.5] - 2026-08-27
 
 ### Added
