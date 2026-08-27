@@ -21,10 +21,8 @@
 #include "bytecode.h"
 #include "evaluator_internal.h"
 #include "../leptris_internal.h"
-#include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <stdio.h>
 
 typedef struct {
     LeptrisXPathBytecode* bc;
@@ -499,15 +497,16 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
     XPathASTNode* test = (step->child_count >= 1) ? step->children[0] : NULL;
     if (!test) return 0;
 
-    /* The test value carries the qualified name (may contain ':').
-     * For namespace-aware fast path we'd need to split + resolve.
-     * For now, only fast-path the no-colon case. */
     int has_name = (test->type == XPATH_AST_NODE_TEST_NAME);
     /* prefix:* is namespace-scoped, not a plain wildcard — the
      * matcher (literal or URI-bound) must see it, so no fusion. */
     int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL && !test->prefix);
     if (!has_name && !has_wild) return 0;
-    if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
+    /* Prefixed name tests fuse too (issue #564): the VM matcher is
+     * namespace-aware — it resolves the test prefix through the
+     * evaluation context's bindings exactly as the interpreter's
+     * matches_node_test does. */
+    if (has_name && !test->value) return 0;
 
     /* Predicates: child_count==1 means no predicates. >1 means
      * there are predicates; check each is simple.
@@ -708,8 +707,7 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                     XPathASTNode* ctest = next->children[0];
                     int c_name = (ctest &&
                                   ctest->type == XPATH_AST_NODE_TEST_NAME &&
-                                  ctest->value &&
-                                  !strchr(ctest->value, ':'));
+                                  ctest->value);
                     int c_wild = (ctest &&
                                   ctest->type == XPATH_AST_NODE_TEST_ALL);
                     /* Attribute and child-num-cmp predicates are
@@ -849,7 +847,10 @@ static int try_compile_absolute_root_step(CompilerState* st, XPathASTNode* step)
      * matcher (literal or URI-bound) must see it, so no fusion. */
     int has_wild = (test->type == XPATH_AST_NODE_TEST_ALL && !test->prefix);
     if (!has_name && !has_wild) return 0;
-    if (has_name && (!test->value || strchr(test->value, ':'))) return 0;
+    /* Prefixed names fuse too (issue #564): the VM's name matcher
+     * resolves the test prefix through the evaluation context's ns
+     * bindings — identical semantics to the interpreter. */
+    if (has_name && !test->value) return 0;
 
     XPathAxisType axis = step->axis_id;
     XPathOpcode op_name, op_wild;
@@ -953,8 +954,12 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                 second_step->axis_id == XPATH_AXIS_CHILD &&
                 second_step->child_count >= 1) {
                 XPathASTNode* ctest = second_step->children[0];
+                /* Prefixed names fold too (issue #564): the VM's
+                 * absolute-name handler resolves the test prefix
+                 * through the context's ns bindings (local-name
+                 * bucket + URI verification). */
                 int c_has_name = (ctest && ctest->type == XPATH_AST_NODE_TEST_NAME &&
-                                  ctest->value && !strchr(ctest->value, ':'));
+                                  ctest->value);
                 int c_has_wild = (ctest && ctest->type == XPATH_AST_NODE_TEST_ALL &&
                                  !ctest->prefix);
                 int c_has_type = (ctest && ctest->type == XPATH_AST_NODE_TEST_TYPE &&

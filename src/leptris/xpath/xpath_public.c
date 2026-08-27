@@ -575,40 +575,15 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_ns(
         return NULL;
     }
 
-    LeptrisElement context_elem = context ? context : leptris_document_root(doc);
-    if (!context_elem) return NULL;
-
-    /* Mirror the variable-bound path: parse + AST eval directly. The
-     * VM fast paths skip prefixed name tests at compile time, so the
-     * generic matcher is the only consumer of ns_set. */
-    XPathParser* parser = xpath_parser_new(expression, strlen(expression));
-    if (!parser) return NULL;
-
-    XPathASTNode* ast = xpath_parse(parser);
-    const char* parse_error = xpath_parser_error(parser);
-
-    if (!ast || parse_error) {
-        xpath_parser_free(parser);
-        return NULL;
-    }
-
-    xpath_parser_free(parser);
-
-    XPathContext ctx_storage;
-    XPathContext* xpath_ctx = &ctx_storage;
-    xpath_context_init(xpath_ctx, doc, context_elem);
-    if (!xpath_ctx->document) {
-        ast_node_free(ast);
-        return NULL;
-    }
-
-    xpath_ctx->ns_set = (struct leptris_xpath_ns_map*)ns;
-
-    struct leptris_xpath_result* result = xpath_evaluate(xpath_ctx, ast);
-
-    xpath_context_cleanup(xpath_ctx);
-    ast_node_free(ast);
-
+    /* Compiled-handle route (issue #564): the pinned AST comes from
+     * the shared expression cache (no per-call parse) and the
+     * compiled evaluator runs the VM first — its name matcher is
+     * namespace-aware — with the interpreter as fallback. */
+    LeptrisXPathCompiled compiled = leptris_xpath_compile(expression);
+    if (!compiled) return NULL;
+    struct leptris_xpath_result* result =
+        leptris_xpath_compiled_eval_ns(compiled, doc, context, ns);
+    leptris_xpath_compiled_free(compiled);
     return result;
 }
 

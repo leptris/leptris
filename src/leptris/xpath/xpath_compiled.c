@@ -137,8 +137,37 @@ static struct leptris_xpath_result* compiled_eval_context(
     xpath_ctx->variable_set = vars;
     xpath_ctx->context_position = pos;
 
-    struct leptris_xpath_result* result =
-        xpath_evaluate(xpath_ctx, compiled->ast);
+    /* VM fast path first (issue #564): the VM's name matcher is
+     * namespace-aware and the absolute folds lower prefixed tests
+     * through the local-name bucket + URI verification, so ns-bound
+     * expressions ride the same index-backed paths as plain ones.
+     * The bytecode comes from the shared per-expression cache.
+     *
+     * Variable-bound expressions stay on the interpreter for now
+     * (#565 follow-up): the VM's operator/variable interop still
+     * diverges on union-of-variable-nodesets (bug-76). */
+    struct leptris_xpath_result* result = NULL;
+    if (!vars) {
+        /* Pinned borrow (the raw get_bc returns an unpinned pointer —
+         * a re-entrant store during the run can evict and free it;
+         * ASAN caught exactly that in libxslt bug-147, PR #600). */
+        XPathCacheEntry ce;
+        int hit = xpath_ast_cache_get(compiled->expr, compiled->expr_len,
+                                      &ce);
+        LeptrisXPathBytecode* bc = hit ? ce.bc : NULL;
+        if (hit && !bc) {
+            bc = leptris_xpath_compile_ast(compiled->ast);
+            if (bc) xpath_ast_cache_store_bc(compiled->expr,
+                                             compiled->expr_len, bc);
+        }
+        if (bc) {
+            result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
+            if (!result) xpath_ctx->error_msg[0] = '\0';
+        }
+        if (hit) xpath_ast_cache_release(ce.ast);
+    }
+    if (!result)
+        result = xpath_evaluate(xpath_ctx, compiled->ast);
 
     if (!result && xpath_ctx->error_msg[0]) {
         strncpy(doc->last_error_message, xpath_ctx->error_msg,
