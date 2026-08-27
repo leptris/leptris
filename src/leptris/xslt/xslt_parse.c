@@ -245,7 +245,7 @@ static int prefix_excluded(SheetParser* sp, LeptrisElement e,
      * prefixes, plus any xsl:exclude-result-prefixes on the
      * instruction element itself (v1: not the full ancestor walk). */
     for (size_t i = 0; i < sp->sheet->exclude_count; i++)
-        
+
 if (xs_ns_strcmp(sp->sheet->exclude_pfx[i], pfx) == 0) return 1;
     const char* loc = leptris_element_attribute(e,
                                                 "xsl:exclude-result-"
