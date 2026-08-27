@@ -1350,9 +1350,17 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             if (!IS_NAME_START(*p.pos)) goto fail;
             p.pos++;
             dp_scan_name(&p);
-            *p.pos = '\0';
-            p.pos++;
+            /* NUL-terminate the target by consuming ONE separator
+             * byte — but only when there is one. A dataless PI
+             * (`<?pi?>`, issue #577) ends the target at the CLOSING
+             * '?'; clobbering it would leave nothing for the data
+             * scan to find and fail the whole parse. */
             char* data_start = p.pos;
+            if (*p.pos != '?') {
+                *p.pos = '\0';
+                p.pos++;
+                data_start = p.pos;
+            }
             /* memchr for '?' — fast-skip PI data bodies. */
             {
                 char* q = (char*)memchr(p.pos, '?', p.end - p.pos);

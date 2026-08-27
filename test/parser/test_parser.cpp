@@ -292,5 +292,38 @@ TEST(AttributeNormalization, CleanValuesStayZeroCopy) {
     LeptrisElement root = leptris_document_root(doc);
     EXPECT_STREQ(leptris_element_attribute(root, "a"), "plain");
     EXPECT_STREQ(leptris_element_attribute(root, "b"), "with space");
+/* Issue #577: a PI in the epilog (after the document element) is
+ * valid XML 1.0 — prolog and epilog both allow PIs. A dataless PI
+ * additionally exposed a scan bug: the byte after the target name
+ * is the closing '?', which the target's NUL-termination clobbered,
+ * failing the whole parse. */
+TEST(EpilogMisc, PiAfterRootParses) {
+    const char xml[] = "<root/><?pi-after?>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    ASSERT_EQ(leptris_document_pi_count(doc), 1u);
+    EXPECT_STREQ(leptris_document_pi_target(doc, 0), "pi-after");
+    EXPECT_STREQ(leptris_document_pi_data(doc, 0), "");
+    leptris_document_free(doc);
+}
+
+TEST(EpilogMisc, PiAfterRootWithDataParses) {
+    const char xml[] = "<r></r><?tail data=\"x\"?>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    ASSERT_EQ(leptris_document_pi_count(doc), 1u);
+    EXPECT_STREQ(leptris_document_pi_target(doc, 0), "tail");
+    EXPECT_STREQ(leptris_document_pi_data(doc, 0), "data=\"x\"");
+    leptris_document_free(doc);
+}
+
+TEST(EpilogMisc, DatalessPiInsideTreeStillParses) {
+    const char xml[] = "<r><child/><?ping?></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
     leptris_document_free(doc);
 }
