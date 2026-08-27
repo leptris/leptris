@@ -45,6 +45,12 @@ typedef struct leptris_arena {
  * at least 8-byte aligned (malloc guarantees max_align_t). */
 LeptrisArena* leptris_arena_create(size_t size);
 
+/* Bump-reset for reuse (issue #563): returns every byte to the pool
+ * of available space without freeing the allocation. Safe only when
+ * nothing outside the arena still points into it — the caller owns
+ * that lifetime (iterparse's subtree documents die as a unit). */
+void leptris_arena_reset(LeptrisArena* arena);
+
 /* Destroy the arena and the single backing allocation. NULL-safe.
  * All pointers handed out by the arena become invalid. */
 void leptris_arena_destroy(LeptrisArena* arena);

@@ -181,6 +181,12 @@ LeptrisArena* leptris_arena_create(size_t size) {
     return arena;
 }
 
+void leptris_arena_reset(LeptrisArena* arena) {
+    if (!arena) return;
+    arena->used = 0;
+    arena->failed = 0;
+}
+
 void leptris_arena_destroy(LeptrisArena* arena) {
     if (!arena) return;
     retain_give(arena->base, arena->size);
