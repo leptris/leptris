@@ -260,7 +260,24 @@ static inline void dp_wire_child(DParser* p, LeptrisElement parent,
 static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
                                       char* name, size_t name_len,
                                       char* val, size_t val_len,
-                                      int has_amp) {
+                                      int has_amp, int has_ws) {
+    /* Attribute-value normalization (XML 1.0 §3.3.3, issue #576):
+     * each literal tab/LF/CR in a CDATA attribute becomes a single
+     * space. Character references (&#9;) are ASCII text here —
+     * untouched by the replacement, so they expand later as literal
+     * whitespace, exactly as the spec requires. Clean values keep
+     * the zero-copy view; only affected values pay the pool copy. */
+    if (has_ws) {
+        char* norm = (char*)leptris_pool_alloc(p->pool, val_len + 1);
+        if (!norm) return -1;
+        for (size_t i = 0; i < val_len; i++) {
+            char ch = val[i];
+            norm[i] = (ch == '\t' || ch == '\n' || ch == '\r')
+                          ? ' ' : ch;
+        }
+        norm[val_len] = '\0';
+        val = norm;
+    }
     struct leptris_attribute* attr = p->attr_cursor;
     if (DP_UNLIKELY(attr >= p->attr_end)) {
         attr = (struct leptris_attribute*)leptris_pool_alloc(
@@ -612,6 +629,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         p->pos++;
         char* val_start = p->pos;
         int has_amp = 0;
+        int has_ws = 0;   /* literal \t/\n/\r — §3.3.3 (#576) */
         char* val_end = NULL;
         {
             const char* q = p->pos;
@@ -622,14 +640,25 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
                 char vch = *q;
                 if (vch == quote) { val_end = (char*)q; goto value_done; }
                 if (vch == '&') has_amp = 1;
+                else if (vch == '\t' || vch == '\n' || vch == '\r')
+                    has_ws = 1;
                 q++;
             }
             if (q >= p->end) return -1; /* unterminated */
             val_end = (char*)memchr(q, quote, p->end - q);
             if (!val_end) return -1;
             if (q < val_end) {
-                has_amp = has_amp ||
-                          leptris_text_contains(q, (size_t)(val_end - q), '&');
+                if (!has_amp &&
+                    leptris_text_contains(q, (size_t)(val_end - q), '&'))
+                    has_amp = 1;
+                if (!has_ws) {
+                    for (const char* w = q; w < val_end; w++) {
+                        if (*w == '\t' || *w == '\n' || *w == '\r') {
+                            has_ws = 1;
+                            break;
+                        }
+                    }
+                }
             }
         }
     value_done:
@@ -689,7 +718,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
 
         /* Regular attribute — zero-copy name/value, bulk-allocated struct. */
         if (dp_add_attr_inline(p, elem, name_start, name_len,
-                                val_start, val_len, has_amp) != 0)
+                                val_start, val_len, has_amp, has_ws) != 0)
             return -1;
     }
     /* for (;;): every exit is a return inside the loop (0 = tag

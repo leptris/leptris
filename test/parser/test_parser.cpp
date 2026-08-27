@@ -252,3 +252,45 @@ TEST(ParseOptions, FlagsPassthrough) {
     EXPECT_EQ(leptris_element_child_count(root), 1u);
     leptris_document_free(doc);
 }
+
+/* Issue #576: attribute-value normalization (XML 1.0 §3.3.3). For a
+ * CDATA attribute, each literal #x20/#xD/#xA/#x9 in the value is
+ * replaced by a single #x20. Character references to whitespace
+ * (&#9; &#xA; &#xD;) are exempt — they are not literal whitespace
+ * at parse time and must survive expansion unnormalized. */
+TEST(AttributeNormalization, LiteralWhitespaceBecomesSpace) {
+    const char xml[] = "<root attr=\"value\twith\nwhitespace\r\"/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    const char* v = leptris_element_attribute(root, "attr");
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v, "value with whitespace ");
+    leptris_document_free(doc);
+}
+
+TEST(AttributeNormalization, MixedRefAndLiteralKeepsRefLiteral) {
+    /* a="&#9;<TAB>b" — the ref expands to a literal tab, the parsed
+     * tab normalizes to a space. libxml2 returns "\t b". */
+    const char xml[] = "<r a=\"&#9;\tb\"/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    const char* v = leptris_element_attribute(root, "a");
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v, "\t b");
+    leptris_document_free(doc);
+}
+
+TEST(AttributeNormalization, CleanValuesStayZeroCopy) {
+    const char xml[] = "<r a=\"plain\" b=\"with space\" c=\"&amp;\"/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    EXPECT_STREQ(leptris_element_attribute(root, "a"), "plain");
+    EXPECT_STREQ(leptris_element_attribute(root, "b"), "with space");
+    leptris_document_free(doc);
+}
