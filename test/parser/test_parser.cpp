@@ -292,6 +292,9 @@ TEST(AttributeNormalization, CleanValuesStayZeroCopy) {
     LeptrisElement root = leptris_document_root(doc);
     EXPECT_STREQ(leptris_element_attribute(root, "a"), "plain");
     EXPECT_STREQ(leptris_element_attribute(root, "b"), "with space");
+    leptris_document_free(doc);
+}
+
 /* Issue #577: a PI in the epilog (after the document element) is
  * valid XML 1.0 — prolog and epilog both allow PIs. A dataless PI
  * additionally exposed a scan bug: the byte after the target name
@@ -325,5 +328,51 @@ TEST(EpilogMisc, DatalessPiInsideTreeStillParses) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
     ASSERT_NE(doc, nullptr);
+    leptris_document_free(doc);
+}
+
+/* Issue #578: comments in the epilog are valid XML 1.0 content.
+ * They are parsed and retained (since #550) but were never exposed
+ * through any public API, and serialization hoisted them into the
+ * prolog — round-trips moved content across the root element. */
+TEST(EpilogMisc, CommentAfterRootIsExposed) {
+    const char xml[] = "<root/><!-- after -->";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_document_comment_count(doc), 1u);
+    EXPECT_STREQ(leptris_document_comment_content(doc, 0), " after ");
+    EXPECT_EQ(leptris_document_comment_content(doc, 1), nullptr);
+    leptris_document_free(doc);
+}
+
+TEST(EpilogMisc, CommentChainsKeepDocumentOrder) {
+    const char xml[] = "<!-- pre --><r/><!-- mid --><!-- last -->";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_document_comment_count(doc), 3u);
+    EXPECT_STREQ(leptris_document_comment_content(doc, 0), " pre ");
+    EXPECT_STREQ(leptris_document_comment_content(doc, 2), " last ");
+    leptris_document_free(doc);
+}
+
+TEST(EpilogMisc, SerializeKeepsEpilogCommentAfterRoot) {
+    const char xml[] = "<!-- pre --><root/><!-- after -->";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    std::string s(out);
+    size_t pre = s.find("<!-- pre -->");
+    size_t root = s.find("<root/>");
+    size_t post = s.find("<!-- after -->");
+    ASSERT_NE(pre, std::string::npos);
+    ASSERT_NE(root, std::string::npos);
+    ASSERT_NE(post, std::string::npos);
+    EXPECT_LT(pre, root);
+    EXPECT_LT(root, post) << "epilog comment must serialize AFTER the root";
+    leptris_free_string(out);
     leptris_document_free(doc);
 }

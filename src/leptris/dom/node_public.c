@@ -155,6 +155,28 @@ LEPTRIS_API const char* leptris_document_pi_data(LeptrisDocument doc,
     return NULL;
 }
 
+/* ---- Document-level comments (issue #578) ------------------------
+ * Parsed top-level comments share doc->top_comments (heap twins,
+ * strdup'd content); the document owns and frees the chain. */
+LEPTRIS_API size_t leptris_document_comment_count(LeptrisDocument doc) {
+    if (!doc) return 0;
+    size_t n = 0;
+    for (struct leptris_top_comment* tc = doc->top_comments; tc; tc = tc->next)
+        n++;
+    return n;
+}
+
+LEPTRIS_API const char* leptris_document_comment_content(LeptrisDocument doc,
+                                                         size_t index) {
+    if (!doc) return NULL;
+    size_t i = 0;
+    for (struct leptris_top_comment* tc = doc->top_comments;
+         tc; tc = tc->next, i++) {
+        if (i == index) return tc->content ? tc->content : "";
+    }
+    return NULL;
+}
+
 LEPTRIS_API LeptrisNodeRef leptris_document_add_pi(LeptrisDocument doc,
                                                    const char* target,
                                                    const char* data) {
