@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.6] - 2026-08-27
+
+### Performance
+
+- VM-first variable-bound eval; fix /descendant:: root (#565) (xpath)
+
+
+
 ## [1.9.5] - 2026-08-27
 
 ### Added
