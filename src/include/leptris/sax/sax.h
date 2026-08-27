@@ -353,6 +353,82 @@ LEPTRIS_API const char* leptris_pull_attr_value(LeptrisPullParser pull,
 LEPTRIS_API void leptris_pull_free(LeptrisPullParser pull);
 
 /* ============================================================================
+ * Chunked event recorder (issue #585)
+ * ============================================================================ */
+
+/**
+ * Create a chunked SAX event recorder
+ *
+ * A SAX parser that BUFFERS events C-side instead of dispatching
+ * callbacks: fixed-size LeptrisSaxEventRecord entries plus a packed
+ * string arena. Feed a chunk, then read the accumulated records and
+ * arena with the two accessors below — one bulk read per chunk, and
+ * the host iterates events in host code. The callback count becomes
+ * O(chunks), not O(events): through FFI, per-event callback dispatch
+ * (the ffi gem's generic machinery) cost more than the parse itself.
+ *
+ * Each leptris_sax_recorder_feed starts a fresh chunk: records and
+ * arena are reset at feed entry, so drain after every feed. Streamed
+ * incrementally, memory stays bounded by one chunk's events plus the
+ * parser's internal depth state — not the document.
+ *
+ * Event semantics are identical to the callback API (the recorder is
+ * a handler on the same streaming state machine), including entity
+ * expansion in text and attribute values.
+ *
+ * @return New recorder, or NULL on OOM
+ *
+ * Memory: free with leptris_sax_recorder_free.
+ */
+LEPTRIS_API LeptrisSaxRecorder leptris_sax_recorder_new(void);
+
+/**
+ * Feed one input chunk and buffer the events it produces
+ *
+ * @param r Recorder
+ * @param xml Chunk (must be valid UTF-8)
+ * @param len Chunk length in bytes
+ * @param is_final 1 when this is the last chunk
+ * @return 0 on success, -1 on error (an ERROR event is recorded with
+ *         position; records/arena still expose everything parsed)
+ */
+LEPTRIS_API int leptris_sax_recorder_feed(LeptrisSaxRecorder r,
+                                          const char* xml, size_t len,
+                                          int is_final);
+
+/**
+ * Read the current chunk's buffered event records
+ *
+ * The pointer is valid until the next feed/free. Records reference
+ * strings by offset into the arena from
+ * leptris_sax_recorder_arena — read both in the same drain.
+ *
+ * @param r Recorder
+ * @param count Out: number of records (0 when the chunk produced none)
+ * @return Record array, or NULL for a NULL recorder
+ */
+LEPTRIS_API const LeptrisSaxEventRecord* leptris_sax_recorder_records(
+    LeptrisSaxRecorder r, size_t* count);
+
+/**
+ * Read the current chunk's packed string arena
+ *
+ * One contiguous byte block holding every name/text/attribute string
+ * of the chunk's records. Valid until the next feed/free.
+ *
+ * @param r Recorder
+ * @param len Out: arena length in bytes
+ * @return Arena pointer, or NULL for a NULL recorder
+ */
+LEPTRIS_API const char* leptris_sax_recorder_arena(LeptrisSaxRecorder r,
+                                                   size_t* len);
+
+/**
+ * Free a recorder
+ */
+LEPTRIS_API void leptris_sax_recorder_free(LeptrisSaxRecorder r);
+
+/* ============================================================================
  * Incremental (iterparse) API — TODO.bindings/02, issue #510 Tier 2
  * ============================================================================ */
 
