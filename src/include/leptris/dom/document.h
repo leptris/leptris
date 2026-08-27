@@ -70,7 +70,13 @@ LEPTRIS_API LeptrisDocument leptris_parse_string(const char* xml, size_t length,
  * - Caller must keep xml buffer alive until document is freed
  * - xml buffer will be modified (NULL terminators inserted)
  *
- * Performance: 3-5x faster than leptris_parse_string() due to zero allocations
+ * Performance: saves the document-copy allocation of
+ * leptris_parse_string() (zero-copy: name/value views alias this
+ * buffer) — measured at parity or a few percent faster than
+ * parse_string (issue #561; the historical "3-5x faster" claim was
+ * wrong: the copying path's fused copy+count kernel prefetches the
+ * parse's exact working set, and the owned copy enables the
+ * zeroed-slack probe windows, so the copy was never the bottleneck).
  * Thread safety: Not thread-safe. One document per thread.
  */
 LEPTRIS_API LeptrisDocument leptris_parse_string_inplace(char* xml, size_t length, LeptrisStatus* status);
