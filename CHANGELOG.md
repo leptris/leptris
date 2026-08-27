@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.4] - 2026-08-27
+
+### Added
+
+- iterparse v2 — full-document mode, namespace resolution, error channel (#586) (sax)
+- chunked event delivery — records + packed arena drained in bulk (#585) (sax)
+
+
+
 ## [1.9.3] - 2026-08-27
 
 ### Added
