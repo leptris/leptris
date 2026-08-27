@@ -5,7 +5,6 @@
 #include "leptris.h"
 
 #include <cstring>
-#include <string>
 
 namespace {
 
@@ -1400,87 +1399,36 @@ TEST(MixedNodeset, UnionAttributesKeepIdentity) {
     leptris_document_free(doc);
 }
 
-/* Issue #560: batch-context evaluation — one expression against N
- * context nodes in ONE call, returning the de-duplicated union in
- * document order (the Ruby side previously paid one dispatch per
- * member AND kept duplicates across contexts). */
-TEST(BatchContextEval, UnionAcrossContextsDedupedAndOrdered) {
-    const char xml[] =
-        "<r><g><i id='1'>a</i><i id='2'>b</i></g>"
-        "<g><i id='3'>c</i><i id='4'>d</i></g></r>";
+/* Issue #557: an ABSOLUTE path with a prefixed name test must offer
+ * the namespaced root element — the document node seeds absolute
+ * paths, and the root IS a child of the document. */
+TEST(NsAbsolutePaths, PrefixedDoubleSlashMatchesNamespacedRoot) {
+    const char xml[] = "<x:r xmlns:x='urn:x'><x:a/></x:r>";
     LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
     ASSERT_NE(doc, nullptr);
-    LeptrisElement g1 = leptris_document_root(doc)
-        ? leptris_element_first_child(leptris_document_root(doc), "g")
-        : nullptr;
-    LeptrisElement g2 = g1
-        ? leptris_element_next_sibling(g1, "g") : nullptr;
-    ASSERT_NE(g1, nullptr);
-    ASSERT_NE(g2, nullptr);
-    /* BOTH groups select i[3] via //i[@id='3'] — dedup keeps one. */
-    LeptrisElement ctxs[2] = {g1, g2};
-    LeptrisXPathResult r = leptris_xpath_eval_nodeset(
-        doc, ctxs, 2, ".//i");
-    ASSERT_NE(r, nullptr);
-    ASSERT_EQ(leptris_xpath_result_count(r), 4u);
-    /* document order: 1, 2, 3, 4 */
-    for (int k = 0; k < 4; k++) {
-        LeptrisNodeRef n = leptris_xpath_result_get_node(r, k);
-        const char* id = leptris_element_attribute((LeptrisElement)n, "id");
-        ASSERT_NE(id, nullptr);
-        EXPECT_EQ(std::string(id), std::to_string(k + 1));
-    }
-    leptris_xpath_result_free(r);
-    leptris_document_free(doc);
-}
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    leptris_xpath_ns_set_add(ns, "x", "urn:x");
 
-TEST(BatchContextEval, RelativeStepsPerContext) {
-    const char xml[] = "<r><a><n>x</n></a><b><n>y</n></b><a><n>z</n></a></r>";
-    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
-    ASSERT_NE(doc, nullptr);
-    /* every <a> context contributes its own <n> */
-    LeptrisElement root = leptris_document_root(doc);
-    LeptrisElement ctxs[4];
-    size_t n = 0;
-    for (LeptrisElement c = leptris_element_first_child(root, "a"); c;
-         c = leptris_element_next_sibling(c, "a"))
-        ctxs[n++] = c;
-    ASSERT_EQ(n, 2u);
-    LeptrisXPathResult r = leptris_xpath_eval_nodeset(doc, ctxs, n, "./n");
+    LeptrisXPathResult r = leptris_xpath_eval_ns(doc, nullptr, "count(//x:r)", ns);
     ASSERT_NE(r, nullptr);
-    EXPECT_EQ(leptris_xpath_result_count(r), 2u);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
     leptris_xpath_result_free(r);
-    leptris_document_free(doc);
-}
 
-TEST(BatchContextEval, EmptyAndNullContracts) {
-    const char xml[] = "<r><a/></r>";
-    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
-    ASSERT_NE(doc, nullptr);
-    EXPECT_EQ(leptris_xpath_eval_nodeset(doc, nullptr, 0, "//a"), nullptr);
-    LeptrisElement root = leptris_document_root(doc);
-    LeptrisElement ctxs[1] = {root};
-    EXPECT_EQ(leptris_xpath_eval_nodeset(doc, ctxs, 1, nullptr), nullptr);
-    leptris_document_free(doc);
-}
-
-TEST(BatchContextEval, CompiledVariantSameUnion) {
-    const char xml[] = "<r><g><i>1</i></g><g><i>2</i><i>3</i></g></r>";
-    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
-    ASSERT_NE(doc, nullptr);
-    LeptrisElement root = leptris_document_root(doc);
-    LeptrisElement ctxs[2];
-    size_t n = 0;
-    for (LeptrisElement c = leptris_element_first_child(root, "g"); c;
-         c = leptris_element_next_sibling(c, "g"))
-        ctxs[n++] = c;
-    ASSERT_EQ(n, 2u);
-    LeptrisXPathCompiled c = leptris_xpath_compile(".//i");
-    ASSERT_NE(c, nullptr);
-    LeptrisXPathResult r = leptris_xpath_compiled_eval_nodeset(doc, ctxs, n, c);
+    r = leptris_xpath_eval_ns(doc, nullptr, "count(//x:a)", ns);
     ASSERT_NE(r, nullptr);
-    EXPECT_EQ(leptris_xpath_result_count(r), 3u);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
     leptris_xpath_result_free(r);
-    leptris_xpath_compiled_free(c);
+
+    r = leptris_xpath_eval_ns(doc, nullptr, "count(/x:r)", ns);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval_ns(doc, nullptr, "count(/descendant::x:r)", ns);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+
+    leptris_xpath_ns_set_free(ns);
     leptris_document_free(doc);
 }

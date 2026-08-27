@@ -376,3 +376,75 @@ TEST(EpilogMisc, SerializeKeepsEpilogCommentAfterRoot) {
     leptris_free_string(out);
     leptris_document_free(doc);
 }
+
+/* Issue #550: parse -> serialize/xpath with NO intervening call, for
+ * every parse path. The flat-path lazy-promote gap (v1.9.0) is gone —
+ * these pin the contract so it cannot return: a freshly parsed,
+ * valid document serializes and evaluates XPath immediately. */
+TEST(FreshDocumentContract, SerializeImmediatelyAfterParse) {
+    const char xml[] = "<r><a/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* s = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "<r><a/></r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+TEST(FreshDocumentContract, SerializeIntoSizingImmediately) {
+    const char xml[] = "<r><a/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    size_t need = 0;
+    size_t n = leptris_document_serialize_into(doc, nullptr, 0, &need, nullptr);
+    EXPECT_GT(n, 0u);
+    /* return = buffer size (incl. NUL); out_len = string length */
+    EXPECT_EQ(need + 1, n);
+    /* And with options (the sizing-with-options variant from #550). */
+    LeptrisSerializeOptions o = {2, 1, "UTF-8"};
+    n = leptris_document_serialize_into(doc, nullptr, 0, &need, &o);
+    EXPECT_GT(n, 0u);
+    leptris_document_free(doc);
+}
+
+TEST(FreshDocumentContract, XpathImmediatelyAfterParse) {
+    const char xml[] = "<r><a/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "count(//r)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(FreshDocumentContract, InplacePathSameContract) {
+    char buf[] = "<r a=\"1\"><a/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string_inplace(buf, std::strlen(buf), &st);
+    ASSERT_NE(doc, nullptr);
+    char* s = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "<r a=\"1\"><a/></r>");
+    leptris_free_string(s);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "count(//a)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(FreshDocumentContract, TruncatedLengthIsACleanParseError) {
+    /* The #550 repro passed length 10 for an 11-byte document. The
+     * contract: NULL document + LEPTRIS_ERROR_PARSE — never a
+     * partially-built tree that later serializes to NULL/NaN. */
+    const char xml[] = "<r><a/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, 10, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+}
