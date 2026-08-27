@@ -15,11 +15,9 @@ bug-155
 bug-157
 bug-158
 bug-159
-bug-16-
 bug-161
 bug-166
 bug-168
-bug-169
 bug-171
 bug-175
 bug-177
