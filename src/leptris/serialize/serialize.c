@@ -1489,8 +1489,11 @@ char* leptris_serialize_document_with_declaration(LeptrisElement root,
 struct leptris_document;
 
 /* Serialize document with options */
-LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
-                                 const LeptrisSerializeOptions* options) {
+/* Full entry: public options + the internal extended settings.
+ * extended==NULL leaves cdata/html off (the public default). */
+char* leptris_document_serialize_ex(struct leptris_document* doc,
+                                    const LeptrisSerializeOptions* options,
+                                    const LeptrisSerializeExtended* extended) {
     if (!doc) return NULL;
 
     /* FlatDoc serialize fast path removed — direct_parse builds the
@@ -1521,15 +1524,15 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
     /* Create buffer with indent support */
     SerializeBuffer* buf = buffer_create(indent_spaces);
     if (!buf) return NULL;
-    if (options) {
-        buf->cdata_names = options->cdata_elements;
-        buf->cdata_count = options->cdata_element_count;
+    if (extended) {
+        buf->cdata_names = extended->cdata_elements;
+        buf->cdata_count = extended->cdata_element_count;
         /* §16.2: html semantics (void elements, attr escaping, raw
          * text, PI form) apply whenever the method is html — also
          * with indent="no". The newline LAYOUT self-gates: every
          * html break site goes through buffer_append_newline, which
          * is a no-op at indent_spaces == 0. */
-        buf->html_method = options->html_method != 0;
+        buf->html_method = extended->html_method != 0;
     }
 
     /* Output UTF-8 BOM if present in original */
@@ -1641,6 +1644,14 @@ LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
 
     return result;
 }
+
+/* Public entry (ABI-frozen options only — issue #568): reads
+ * exclusively the three frozen fields; cdata/html stay off. */
+LEPTRIS_API char* leptris_document_serialize(struct leptris_document* doc,
+                                 const LeptrisSerializeOptions* options) {
+    return leptris_document_serialize_ex(doc, options, NULL);
+}
+
 
 /* ============================================================================
  * Element Serialization (matches leptris.h public API)

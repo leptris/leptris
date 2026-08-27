@@ -7,6 +7,7 @@
  * omit-xml-declaration, encoding declaration). */
 #include "xslt_internal.h"
 #include "../dom/text.h"
+#include "../serialize/serialize.h"   /* LeptrisSerializeExtended (issue #568) */
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -323,14 +324,16 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
         (!ex->sheet->out_method_text && !html_method) ? 1 : 0;
     /* §16.1 indent="yes": 2-space pretty-print via the shared
      * serializer (text-only elements stay inline — libxslt rule).
-     * HTML method: the serializer's §16.2 newline layout. */
+     * The cdata/html-method settings ride the extended-options
+     * entry — the public struct is ABI-frozen (issue #568). */
     opts.indent = effective_indent(ex->sheet, html_method) ? 2 : 0;
-    opts.html_method = html_method;
+    LeptrisSerializeExtended ext = {0};
+    ext.html_method = html_method;
     /* §16.1: xsl:output encoding names the output declaration's
      * encoding (bug-132). */
     opts.encoding = ex->sheet->out_encoding;
-    opts.cdata_elements = ex->sheet->out_cdata;
-    opts.cdata_element_count = ex->sheet->out_cdata_count;
+    ext.cdata_elements = ex->sheet->out_cdata;
+    ext.cdata_element_count = ex->sheet->out_cdata_count;
     if (html_method)
         inject_html_meta(out, ex->sheet->out_encoding
                                 ? ex->sheet->out_encoding : "UTF-8");
@@ -358,7 +361,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             }
         }
     }
-    char* first = leptris_document_serialize(out, &opts);
+    char* first = leptris_document_serialize_ex(out, &opts, &ext);
     /* Declaration FIRST, then the pre-root fragment nodes, then the
      * document body (top-level comments/PIs precede the root
      * element in document order). */
