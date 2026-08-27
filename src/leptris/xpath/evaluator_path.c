@@ -319,7 +319,6 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
 
     DEBUG_LOG("    === apply_predicates: pred_count=%zu, nodeset size=%zu ===",
              pred_count, xpath_nodeset_count(nodes));
-
     /* Apply each predicate in sequence, filtering in-place */
     for (size_t p = 0; p < pred_count; p++) {
         DEBUG_LOG("      Processing predicate %zu", p);
@@ -631,6 +630,38 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
     return 0;
 }
 
+/* Shared tail of evaluate_step's per-input loop: apply the step's
+ * predicates to one input's axis result, then merge into the step
+ * result. The document-node branch and the element branch MUST flow
+ * through here together — a doc-branch shortcut that skipped
+ * predicates silently dropped them (the double-wildcard-with-
+ * predicate query, bug-16- follow-up). */
+static void merge_step_axis_result(XPathContext* ctx,
+                                   XPathNodeSet* result,
+                                   XPathNodeSet* axis_result,
+                                   const char* axis_name,
+                                   XPathASTNode* step) {
+    if (!axis_result) return;
+    if (step->child_count > 1)
+        apply_predicates(ctx, axis_result,
+                         &step->children[1], step->child_count - 1);
+
+    /* Ownership is determined by axis type, not by node kind: sets
+     * from the attribute/namespace axes carry synthetic nodes the
+     * result must own (frees only tag-matched entries). */
+    if (strcmp(axis_name, "attribute") == 0)
+        result->owns_attributes = 1;
+    else if (strcmp(axis_name, "namespace") == 0)
+        result->owns_namespaces = 1;
+
+    for (size_t j = 0; j < xpath_nodeset_count(axis_result); j++)
+        xpath_nodeset_add(result, xpath_nodeset_get(axis_result, j));
+
+    axis_result->owns_attributes = 0;
+    axis_result->owns_namespaces = 0;
+    xpath_nodeset_free(axis_result);
+}
+
 struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                                           XPathASTNode* step,
                                           XPathNodeSet* input) {
@@ -643,7 +674,6 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
 
     const char* axis_name = step->value ? step->value : "child";
     XPathASTNode* node_test = (step->child_count > 0) ? step->children[0] : NULL;
-
     DEBUG_LOG("    axis_name = %s", axis_name);
     DEBUG_LOG("    node_test = %p (type=%d)", (void*)node_test, node_test ? node_test->type : -1);
     if (node_test && node_test->value) {
@@ -666,42 +696,57 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
         /* Document-node contexts (XSLT "/" initial context):
          * child = [root element]; self = the document itself;
          * descendant(-or-self) = the root subtree; parent/
-         * ancestor = nothing. */
+         * ancestor = nothing. Results flow through the SAME
+         * predicate + merge tail as element inputs. */
         if (node_ptr && ((LeptrisNode*)node_ptr)->type ==
                              LEPTRIS_NODE_TYPE_DOCUMENT) {
             struct leptris_document* dd =
                 ((LeptrisDocumentNode*)node_ptr)->doc;
             LeptrisElement doc_root = (LeptrisElement)dd->new_dom_root;
             if (!doc_root) doc_root = dd->root;
+            XPathNodeSet* axis_result = xpath_nodeset_new();
+            if (!axis_result) continue;
             if (strcmp(axis_name, "child") == 0) {
                 for (LeptrisNode* c = (LeptrisNode*)doc_root; c;
                      c = leptris_node_get_next_sibling(c))
                     if (matches_node_test(ctx, c, node_test))
-                        xpath_nodeset_add(result, c);
+                        xpath_nodeset_add(axis_result, c);
             } else if (strcmp(axis_name, "self") == 0) {
                 if (matches_node_test(ctx, (LeptrisNode*)node_ptr,
                                       node_test))
-                    xpath_nodeset_add(result, (LeptrisNode*)node_ptr);
+                    xpath_nodeset_add(axis_result,
+                                      (LeptrisNode*)node_ptr);
             } else if (strcmp(axis_name, "descendant") == 0 ||
                        strcmp(axis_name, "descendant-or-self") == 0) {
-                if (axis_name[11] == '-' && /* -or-self */
+                /* bug-16-: two document-node rules. (1) '-' sits at
+                 * index 10 of "descendant-or-self", not 11 — the
+                 * self-add never fired, so //NAME's first step lost
+                 * the document node. (2) The root ELEMENT is itself
+                 * a descendant of the document: from here the root
+                 * subtree walks with -or-self semantics either way. */
+                int or_self = axis_name[10] == '-';
+                if (or_self &&
                     matches_node_test(ctx, (LeptrisNode*)node_ptr,
                                       node_test))
-                    xpath_nodeset_add(result, (LeptrisNode*)node_ptr);
+                    xpath_nodeset_add(axis_result,
+                                      (LeptrisNode*)node_ptr);
                 if (doc_root) {
                     XPathNodeSet* sub = apply_axis(
-                        ctx, (LeptrisNode*)doc_root, axis_name,
-                        node_test);
+                        ctx, (LeptrisNode*)doc_root,
+                        "descendant-or-self", node_test);
                     if (sub) {
                         for (size_t j = 0;
                              j < xpath_nodeset_count(sub); j++)
                             xpath_nodeset_add(
-                                result, xpath_nodeset_get(sub, j));
+                                axis_result,
+                                xpath_nodeset_get(sub, j));
                         xpath_nodeset_free(sub);
                     }
                 }
             }
             /* parent/ancestor/etc. from the document: empty */
+            merge_step_axis_result(ctx, result, axis_result,
+                                   axis_name, step);
             continue;
         }
 
@@ -776,46 +821,8 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
         XPathNodeSet* axis_result = apply_axis(ctx, (LeptrisNode*)node, axis_name, node_test);
         DEBUG_LOG("      axis_result count = %zu", axis_result ? xpath_nodeset_count(axis_result) : 0);
 
-        if (axis_result) {
-            /* Apply predicates if present - NOW MODIFIES IN-PLACE
-             * No need to create new nodeset or free old one! */
-            if (step->child_count > 1) {
-                apply_predicates(ctx, axis_result,
-                               &step->children[1],
-                               step->child_count - 1);
-                /* axis_result is now filtered in-place */
-            }
-
-            /* Transfer nodes to result (result will own the attribute/namespace nodes)
-             *
-             * IMPORTANT: Determine ownership by axis type, not by node type checking!
-             * A nodeset from the attribute axis may also carry non-attribute
-             * nodes after predicates/unions; owns_attributes frees only
-             * entries whose tag is LEPTRIS_NODE_ATTRIBUTE, so real DOM
-             * nodes in the same set are never freed here. */
-            if (strcmp(axis_name, "attribute") == 0) {
-                /* Attribute axis creates LeptrisAttributeNode structures that must be freed */
-                result->owns_attributes = 1;
-            } else if (strcmp(axis_name, "namespace") == 0) {
-                /* Namespace axis creates LeptrisNamespaceNode structures that must be freed */
-                result->owns_namespaces = 1;
-            }
-
-            for (size_t j = 0; j < xpath_nodeset_count(axis_result); j++) {
-                /* No inline duplicate scan: duplicates only arise
-                 * with multiple context nodes, and the document-order
-                 * sort below compacts them. (The old linear scan was
-                 * O(n^2) when the result grew past 32 entries, and
-                 * large sets skipped it entirely — silently keeping
-                 * duplicates from nested descendant contexts.) */
-                xpath_nodeset_add(result, xpath_nodeset_get(axis_result, j));
-            }
-
-            /* Don't free attribute/namespace nodes from intermediate node sets - result now owns them */
-            axis_result->owns_attributes = 0;  /* Result nodeset now owns the attributes */
-            axis_result->owns_namespaces = 0;  /* Result nodeset now owns the namespaces */
-            xpath_nodeset_free(axis_result);
-        }
+        merge_step_axis_result(ctx, result, axis_result,
+                               axis_name, step);
     }
 
     DEBUG_LOG("    Final result count = %zu", xpath_nodeset_count(result));
@@ -1065,8 +1072,15 @@ normal_absolute_path:
                 }
             }
 
-            xpath_nodeset_add(current, (LeptrisElement)ctx->document->new_dom_root);
-            DEBUG_LOG("  Nodeset count after adding root: %zu", xpath_nodeset_count(current));
+            /* Seed the DOCUMENT node, not the root element (bug-16-):
+             * an absolute path's first step runs against the document
+             * — child:: yields the root element, descendant(-or-self)
+             * must offer the root element itself. The doc-branch in
+             * apply_axis handles every axis from this node type. */
+            xpath_nodeset_add(current,
+                (LeptrisElement)leptris_document_get_node(ctx->document));
+            DEBUG_LOG("  Nodeset count after adding document node: %zu",
+                      xpath_nodeset_count(current));
 
             /* Process steps - handle both direct steps and those in RELATIVE_PATH */
             DEBUG_LOG("  Processing %zu children", (size_t)path->child_count);
@@ -1075,9 +1089,6 @@ normal_absolute_path:
                 DEBUG_LOG("  Child[%zu]: type=%d", i, child->type);
 
                 if (child->type == XPATH_AST_STEP) {
-                    DEBUG_LOG("    Processing STEP child");
-                    DEBUG_LOG("    Input nodeset count: %zu", xpath_nodeset_count(current));
-                    /* Direct step child - process it */
                     struct leptris_xpath_result* step_result = evaluate_step(ctx, child, current);
                     if (!step_result) {
                         DEBUG_LOG("    STEP evaluation FAILED");

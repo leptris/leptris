@@ -58,6 +58,12 @@ const Skip kSkip[] = {
     {"bug-37-", "Win32-only output divergence"},
     {"bug-74", "Win32-only output divergence"},
 #endif
+#ifdef __APPLE__
+    /* Platform divergence (round 2): passes on Linux CI, diverges on
+     * macOS — the case's output is encoding-conversion sensitive
+     * (attr "Fahrvergnügen" via iconv). Linux is authoritative. */
+    {"bug-169", "macOS: encoding-sensitive output divergence"},
+#endif
     /* libxslt registers exsl:document / exsl:node-set style output
      * side-effects and non-spec extension attributes; re-evaluate
      * as our EXSLT surface grows. */
@@ -296,16 +302,82 @@ std::string run_case(const Case& c, int* status) {
 #endif
 }
 
+/* One-line failure signature for triage mode: bucket plus, for
+ * DIFF, the first differing line pair (truncated). */
+std::string triage_detail(const std::string& result, int status,
+                          const std::string& want) {
+    if (result.rfind("Ecompile", 0) == 0) return "COMPILE";
+    if (result.rfind("Eparse", 0) == 0) return "PARSE";
+    if (result.rfind("Eapply", 0) == 0) return "APPLY";
+    if (status != 0 || result.empty() || result[0] != 'O')
+        return status != 0 ? "CRASH" : "EMPTY";
+    std::string got = normalize(result.substr(1));
+    std::string exp = normalize(want);
+    /* first differing line pair */
+    size_t g = 0, e = 0, line = 1;
+    while (true) {
+        bool gend = g >= got.size(), eend = e >= exp.size();
+        if (gend && eend) break;
+        size_t gn = got.find('\n', g), en = exp.find('\n', e);
+        std::string gl = gend ? "" : got.substr(g, gn - g);
+        std::string el = eend ? "" : exp.substr(e, en - e);
+        if (gl != el) {
+            char buf[192];
+            snprintf(buf, sizeof(buf),
+                     "DIFF L%zu want=\"%.60s\" got=\"%.60s\"",
+                     line, el.c_str(), gl.c_str());
+            return buf;
+        }
+        if (gend || eend) break;
+        g = (gn == std::string::npos) ? got.size() : gn + 1;
+        e = (en == std::string::npos) ? exp.size() : en + 1;
+        line++;
+    }
+    return "DIFF";
+}
+
 TEST_P(LibxsltSuite, MatchesLibxsltOutput) {
     const Case& c = GetParam();
     if (is_skipped(c.base)) GTEST_SKIP();
-    if (is_open(c.base))
+    bool open = is_open(c.base);
+#ifdef _WIN32
+    if (open)
         GTEST_SKIP() << "open worklist case " << c.base
                      << " (test/xslt/open_cases.txt)";
+#endif
 
     std::string want = slurp(c.out_path.c_str());
     int status = 0;
     std::string result = run_case(c, &status);
+
+    bool produced = status == 0 && !result.empty() && result[0] == 'O';
+    bool matches = produced &&
+        normalize(result.substr(1)) == normalize(want);
+
+#ifndef _WIN32
+    /* Open cases run on POSIX (fork-isolated): triage mode prints a
+     * signature per case and never fails the binary; normal mode
+     * fails only a STALE entry — one that passes — forcing a list
+     * regeneration via scripts/xslt_triage.sh. */
+    if (open) {
+        static const bool triage =
+            getenv("LEPTRIS_XSLT_TRIAGE") != nullptr;
+        if (triage) {
+            if (matches)
+                printf("TRIAGE-PASS %s\n", c.base.c_str());
+            else
+                printf("TRIAGE %s %s\n", c.base.c_str(),
+                       triage_detail(result, status, want).c_str());
+            GTEST_SKIP() << "triage signature emitted";
+        }
+        if (matches)
+            ADD_FAILURE() << "stale open-list entry " << c.base
+                          << " — it passes now; regenerate with"
+                          << " scripts/xslt_triage.sh";
+        GTEST_SKIP() << "open worklist case " << c.base
+                     << " (test/xslt/open_cases.txt)";
+    }
+#endif
 
     ASSERT_FALSE(result.rfind("Ecompile", 0) == 0)
         << "case " << c.base << ": stylesheet failed to compile";
