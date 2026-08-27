@@ -157,6 +157,26 @@ static void cb_end_document(void* ud) {
     e->type = LEPTRIS_PULL_END_DOCUMENT;
 }
 
+static void cb_start_prefix(void* ud, const char* prefix, const char* uri) {
+    struct leptris_pull_parser* p = (struct leptris_pull_parser*)ud;
+    pull_event* e = queue_push(p);
+    if (!e) return;
+    e->type = LEPTRIS_PULL_START_PREFIX;
+    e->name = pull_strdup_n(prefix ? prefix : "",
+                            prefix ? strlen(prefix) : 0);
+    e->text = pull_strdup_n(uri ? uri : "", uri ? strlen(uri) : 0);
+    e->text_len = uri ? strlen(uri) : 0;
+}
+
+static void cb_end_prefix(void* ud, const char* prefix) {
+    struct leptris_pull_parser* p = (struct leptris_pull_parser*)ud;
+    pull_event* e = queue_push(p);
+    if (!e) return;
+    e->type = LEPTRIS_PULL_END_PREFIX;
+    e->name = pull_strdup_n(prefix ? prefix : "",
+                            prefix ? strlen(prefix) : 0);
+}
+
 static void cb_error(void* ud, const char* message, int line, int column) {
     (void)line; (void)column;
     struct leptris_pull_parser* p = (struct leptris_pull_parser*)ud;
@@ -183,6 +203,8 @@ static struct leptris_pull_parser* pull_alloc(void) {
     p->handler.comment = cb_comment;
     p->handler.cdata = cb_cdata;
     p->handler.processing_instruction = cb_pi;
+    p->handler.start_prefix_mapping = cb_start_prefix;
+    p->handler.end_prefix_mapping = cb_end_prefix;
     p->handler.end_document = cb_end_document;
     p->handler.error = cb_error;
 

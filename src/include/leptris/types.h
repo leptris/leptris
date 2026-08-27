@@ -106,7 +106,9 @@ typedef enum {
     LEPTRIS_PULL_CDATA,
     LEPTRIS_PULL_PI,
     LEPTRIS_PULL_END_DOCUMENT,
-    LEPTRIS_PULL_ERROR
+    LEPTRIS_PULL_ERROR,
+    LEPTRIS_PULL_START_PREFIX,
+    LEPTRIS_PULL_END_PREFIX
 } LeptrisPullEventType;
 
 typedef struct {
@@ -165,6 +167,11 @@ typedef struct leptris_sax_recorder* LeptrisSaxRecorder;
 /* ============================================================================
  * Incremental (iterparse) Parsing (TODO.bindings/02)
  * ============================================================================ */
+
+typedef enum {
+    LEPTRIS_ITERPARSE_TOP_LEVEL = 0,       /* v1: root's children only */
+    LEPTRIS_ITERPARSE_FULL_DOCUMENT = 1    /* v2: every element */
+} LeptrisIterparseMode;
 
 typedef struct leptris_iterparse* LeptrisIterparse;
 

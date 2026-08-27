@@ -455,6 +455,18 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new(const char* xml,
                                                    size_t len);
 
 /**
+ * Create an incremental tree-iterator with explicit yield mode
+ *
+ * `LEPTRIS_ITERPARSE_TOP_LEVEL` is the v1 behavior: yield completed
+ * children of the document root. `LEPTRIS_ITERPARSE_FULL_DOCUMENT`
+ * yields every element as it completes, in document-order completion
+ * (post-order): a child is handed out before its parent, with the
+ * completed subtree still attached.
+ */
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_ex(
+    const char* xml, size_t len, LeptrisIterparseMode mode);
+
+/**
  * Create an incremental tree-iterator over a file (TODO.engine/01)
  *
  * Same yield semantics as leptris_iterparse_new, streaming from disk
@@ -464,6 +476,12 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new(const char* xml,
  * @return New iterator, or NULL when the file cannot be opened
  */
 LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file(const char* path);
+
+/**
+ * Create an incremental tree-iterator over a file with explicit mode
+ */
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file_ex(
+    const char* path, LeptrisIterparseMode mode);
 
 /**
  * Return the next completed top-level element
@@ -477,6 +495,23 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file(const char* path);
  * the next leptris_iterparse_next / leptris_iterparse_free call.
  */
 LEPTRIS_API LeptrisElement leptris_iterparse_next(LeptrisIterparse it);
+
+/**
+ * Return the URI bound to a prefix in the last yielded element's
+ * in-scope namespace snapshot
+ *
+ * @param it Iterator
+ * @param prefix Prefix, or NULL / "" for the default namespace
+ * @return URI string owned by the iterator, or NULL when unbound
+ */
+LEPTRIS_API const char* leptris_iterparse_ns_uri(LeptrisIterparse it,
+                                                 const char* prefix);
+
+/** Number of namespace bindings in the last yielded element's scope */
+LEPTRIS_API size_t leptris_iterparse_ns_count(LeptrisIterparse it);
+
+/** Last parse error, or NULL for well-formed/exhausted input */
+LEPTRIS_API const char* leptris_iterparse_error(LeptrisIterparse it);
 
 LEPTRIS_API void leptris_iterparse_free(LeptrisIterparse it);
 
