@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.3] - 2026-08-27
+
+### Added
+
+- expose document-level comments; serialize epilog comments after the root (#578) (dom)
+
+### Fixed
+
+- accept dataless PIs — do not clobber the closing '?' when terminating the target (#577) (parser)
+- musl GCC -Werror=incompatible-pointer-types failures (#582) (build)
+- attribute-value normalization per XML 1.0 §3.3.3 (#576) (parser)
+
+
+
 ## [1.9.2] - 2026-08-27
 
 ### Fixed
