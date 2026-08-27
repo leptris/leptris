@@ -11,6 +11,7 @@
 #define LEPTRIS_TYPES_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -117,6 +118,49 @@ typedef struct {
 } LeptrisPullEvent;
 
 typedef struct leptris_pull_parser* LeptrisPullParser;
+
+/* ============================================================================
+ * SAX event recorder (issue #585)
+ * ============================================================================
+ * Fixed-size records + a packed string arena, drained in bulk per fed
+ * chunk — callback count becomes O(chunks), not O(events), for FFI
+ * hosts (ffi's generic callback dispatch cost more per event than the
+ * parse itself). */
+
+typedef enum {
+    LEPTRIS_SAX_EVENT_START_DOCUMENT = 0,
+    LEPTRIS_SAX_EVENT_END_DOCUMENT,
+    LEPTRIS_SAX_EVENT_START_ELEMENT,
+    LEPTRIS_SAX_EVENT_END_ELEMENT,
+    LEPTRIS_SAX_EVENT_CHARACTERS,
+    LEPTRIS_SAX_EVENT_COMMENT,
+    LEPTRIS_SAX_EVENT_CDATA,
+    LEPTRIS_SAX_EVENT_PI,
+    LEPTRIS_SAX_EVENT_START_PREFIX,
+    LEPTRIS_SAX_EVENT_END_PREFIX,
+    LEPTRIS_SAX_EVENT_ERROR
+} LeptrisSaxEventKind;
+
+/* One buffered event. Strings are NOT inline: name/text/attrs slice
+ * the arena returned by leptris_sax_recorder_arena — the host reads
+ * the whole arena in one bulk transfer, then slices in host code.
+ *
+ * START_ELEMENT: name = element name; attrs_off addresses
+ * name\0value\0… pairs, attr_count pairs.
+ * PI: name = target, text = data. START_PREFIX: name = prefix (may
+ * be ""), text = URI. ERROR: text = message, line/column set.
+ * All other kinds: only the fields their event carries. */
+typedef struct LeptrisSaxEventRecord {
+    uint8_t kind;
+    uint8_t reserved[7];
+    uint32_t name_off, name_len;
+    uint32_t text_off, text_len;
+    uint32_t attrs_off;
+    uint32_t attr_count;
+    uint32_t line, column;
+} LeptrisSaxEventRecord;   /* fixed layout — FFI mirrors this */
+
+typedef struct leptris_sax_recorder* LeptrisSaxRecorder;
 
 /* ============================================================================
  * Incremental (iterparse) Parsing (TODO.bindings/02)

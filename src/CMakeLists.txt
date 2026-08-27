@@ -91,6 +91,7 @@ set(LEPTRIS_SOURCES
     leptris/sax/pull.c
     leptris/sax/iterparse.c
     leptris/sax/streaming.c
+    leptris/sax/recorder.c
 
     # DTD
     leptris/dtd/model.c

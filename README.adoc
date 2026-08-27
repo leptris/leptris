@@ -415,6 +415,33 @@ handler.start_element = on_start;
 leptris_sax_parse(xml, len, &handler, NULL);
 ----
 
+==== Chunked SAX delivery (issue #585)
+
+Callback SAX through an FFI binding pays one dispatch per event — the
+ffi gem's generic callback machinery costs more per event than the
+parse itself (measured: leptris SAX *slower* than Nokogiri SAX through
+Ruby). The recorder buffers events C-side and hands them over in bulk:
+
+[source,c]
+----
+LeptrisSaxRecorder rec = leptris_sax_recorder_new();
+leptris_sax_recorder_feed(rec, chunk, chunk_len, is_final);
+
+size_t n = 0, alen = 0;
+const LeptrisSaxEventRecord* rs = leptris_sax_recorder_records(rec, &n);
+const char* arena = leptris_sax_recorder_arena(rec, &alen);
+/* iterate n fixed-size records; strings slice the arena by the
+ * record's offset+length fields (attributes: name\0value\0 pairs
+ * at attrs_off, attr_count pairs) */
+----
+
+Each `feed` starts a fresh chunk (records and arena reset), so a
+streaming host drains after every chunk and stays bounded. Event
+semantics are identical to the callback API — the recorder is a
+handler on the same streaming state machine. Callback count becomes
+O(chunks), not O(events): 20 host calls for a 41,806-event document
+(64 KB chunks).
+
 [#serialize]
 === Serialization
 
