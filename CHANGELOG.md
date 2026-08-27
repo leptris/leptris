@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.5] - 2026-08-27
+
+### Added
+
+- batched pull delivery + flat attribute fetch (#589, #562) (sax)
+- batch-context evaluation — one expression, N contexts, one call (#560) (xpath)
+
+### Fixed
+
+- sizing pass writes out_len; 550/557 regression contracts (serialize)
+- absolute paths seed the document node — //NAME and /descendant:: from document context offer the root element (bug-16-) (xpath)
+
+### Performance
+
+- VM fast paths for namespace-bound evaluation (#564) (xpath)
+- reuse one subtree arena across iterparse yields (#563) (sax)
+- ungate the close-tag masked compare for in-place parsing (#561) (parser)
+
+
+
 ## [1.9.4] - 2026-08-27
 
 ### Added
