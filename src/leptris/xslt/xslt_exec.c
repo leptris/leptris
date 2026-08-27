@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <math.h>   /* NAN — MSVC rejects constant NAN (C2124) */
 
 #define XSLT_MAX_DEPTH 512
 
@@ -687,10 +688,10 @@ static void xslt_sort_items(XsltExec* ex, const XsltInstr* in,
                 const char* b0 = b ? b : "";
                 if (s->numeric) {
                     char *ea = NULL, *eb = NULL;
-                    double av = a0[0] ? strtod(a0, &ea) : (0.0/0.0);
-                    if (a0[0] && ea == a0) av = 0.0/0.0;
-                    double bv = b0[0] ? strtod(b0, &eb) : (0.0/0.0);
-                    if (b0[0] && eb == b0) bv = 0.0/0.0;
+                    double av = a0[0] ? strtod(a0, &ea) : (NAN);
+                    if (a0[0] && ea == a0) av = NAN;
+                    double bv = b0[0] ? strtod(b0, &eb) : (NAN);
+                    if (b0[0] && eb == b0) bv = NAN;
                     int an = (av != av), bn = (bv != bv);
                     if (an && bn) cmp = 0;
                     else if (an) cmp = -1;
