@@ -198,6 +198,39 @@ LEPTRIS_API LeptrisDocument leptris_document_create(void) {
     return doc;
 }
 
+/* Internal (issue #563): a document over a CALLER-OWNED arena.
+ * The pool is arena-backed and does not own the arena — destroying
+ * the document frees the pool struct and its extension blocks, the
+ * arena lives on (and may be bump-reset) under the caller. Used by
+ * iterparse, which materializes one subtree per yield and reuses
+ * one arena across children instead of paying a 32 KB page create/
+ * destroy cycle per element. */
+struct leptris_document* leptris_document_create_on_arena(
+        LeptrisArena* arena) {
+    extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
+        LeptrisArena*, int);
+    if (!arena) return NULL;
+    LeptrisMemoryPool* pool =
+        leptris_pool_create_arena_backed(arena, 0);
+    if (!pool) return NULL;
+    struct leptris_document* doc =
+        (struct leptris_document*)leptris_pool_alloc(
+            pool, sizeof(struct leptris_document));
+    if (!doc) {
+        extern void leptris_pool_destroy(LeptrisMemoryPool*);
+        leptris_pool_destroy(pool);
+        return NULL;
+    }
+    memset(doc, 0, sizeof(*doc));
+    doc->doc_pool_allocated = 1;
+    doc->strict_mode = g_leptris_strict_mode;
+    doc->pool = pool;
+    doc->page_base = leptris_arena_base(arena);
+    doc->ref_count = 1;
+    doc->standalone = -1;
+    return doc;
+}
+
 /**
  * Attach an element as the document root (Public API)
  *

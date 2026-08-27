@@ -15,10 +15,15 @@
 #include "../../include/leptris.h"
 #include "../../include/leptris/sax/sax.h"
 #include "../dom/element.h"   /* leptris_element_set_prefix (internal) */
+#include "../memory/arena.h"  /* subtree arena reuse (#563) */
 #include <stdlib.h>
 #include <string.h>
 
+extern struct leptris_document* leptris_document_create_on_arena(
+    LeptrisArena*);
+
 #define IT_MAX_DEPTH 4096
+#define IT_SUBTREE_ARENA_BYTES 16384
 
 typedef struct ns_binding {
     char* prefix;                 /* "" for default */
@@ -36,6 +41,7 @@ struct leptris_iterparse {
     LeptrisPullParser pull;
     LeptrisDocument doc;          /* pool of the current top-level subtree */
     LeptrisDocument root_doc;     /* full mode: the root element's own pool */
+    LeptrisArena* sub_arena;      /* reused across subtrees (#563) */
     LeptrisElement stack[IT_MAX_DEPTH];
     int depth;                    /* open element depth (root=1) */
     LeptrisIterparseMode mode;
@@ -169,6 +175,7 @@ static LeptrisIterparse it_new_common(LeptrisPullParser pull,
     if (!it) { leptris_pull_free(pull); return NULL; }
     it->pull = pull;
     it->mode = mode;
+    it->sub_arena = leptris_arena_create(IT_SUBTREE_ARENA_BYTES);
     return it;
 }
 
@@ -200,7 +207,22 @@ static void release_done(struct leptris_iterparse* it) {
     if (!it->done) return;
     if (it->done_depth <= 2) {
         it->done = NULL;
-        if (it->doc) { leptris_document_free(it->doc); it->doc = NULL; }
+        if (it->doc) {
+            leptris_document_free(it->doc);
+            it->doc = NULL;
+            /* #563: bump-reset the reused subtree arena (or grow it
+             * when the child nearly filled the span). */
+            if (it->sub_arena) {
+                if (leptris_arena_remaining(it->sub_arena) <
+                        it->sub_arena->size / 4) {
+                    size_t want = it->sub_arena->size * 2;
+                    leptris_arena_destroy(it->sub_arena);
+                    it->sub_arena = leptris_arena_create(want);
+                } else {
+                    leptris_arena_reset(it->sub_arena);
+                }
+            }
+        }
         it->depth = 1;
         return;
     }
@@ -245,10 +267,14 @@ static LeptrisElement handle_start(struct leptris_iterparse* it,
             if (!it->root_doc) { it->exhausted = 1; return NULL; }
         }
     }
-    /* depth==1: a new top-level child — fresh pool for this subtree
-     * (release_done freed the previous one). */
+    /* depth==1: a new top-level child — a fresh document over the
+     * REUSED arena (bump-reset at release; grown when a child nearly
+     * fills the span). Arena creation failure falls back to the
+     * plain 32 KB-page document. */
     if (it->depth == 1 && !it->doc) {
-        it->doc = leptris_document_create();
+        it->doc = it->sub_arena
+            ? leptris_document_create_on_arena(it->sub_arena)
+            : leptris_document_create();
         if (!it->doc) { it->exhausted = 1; return NULL; }
     }
     /* QName split: create with the LOCAL name; the prefix is set
@@ -380,6 +406,7 @@ LEPTRIS_API void leptris_iterparse_free(LeptrisIterparse it) {
     if (it->pull) leptris_pull_free(it->pull);
     if (it->doc) leptris_document_free(it->doc);
     if (it->root_doc) leptris_document_free(it->root_doc);
+    if (it->sub_arena) leptris_arena_destroy(it->sub_arena);
     free(it->text_buf);
     free(it->error_msg);
     it_clear_snapshot(it);
