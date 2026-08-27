@@ -277,7 +277,12 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
     ctx->context_size = context_size;
     ctx->current_predicate_node = node;  /* The actual node (can be attribute) */
 
-    /* Evaluate predicate */
+    /* Evaluate predicate. A NULL result with an error set (e.g. an
+     * undefined variable) counts as a NON-MATCH — the filter keeps
+     * its in-place contract with merge_step_axis_result, which
+     * ignores this function's return and merges whatever remains.
+     * Hard-error propagation would need every caller audited; the
+     * bare-variable error still surfaces outside predicates. */
     struct leptris_xpath_result* pred_result = evaluate_expr(ctx, predicate);
     int matches = 0;
 

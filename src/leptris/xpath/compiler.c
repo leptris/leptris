@@ -367,6 +367,7 @@ typedef enum {
     PRED_KIND_NONE,
     PRED_KIND_ATTR_EXISTS,
     PRED_KIND_ATTR_EQ_STRING,
+    PRED_KIND_ATTR_EQ_VAR,
     PRED_KIND_POSITION,
     PRED_KIND_CHILD_NUM_CMP
 } PredKind;
@@ -419,11 +420,13 @@ static const char* pred_number_child_step_name(XPathASTNode* pred) {
 static PredKind classify_predicate(XPathASTNode* pred,
                                      const char** out_attr_name,
                                      const char** out_attr_value,
-                                     long* out_position) {
+                                     long* out_position,
+                                     const char** out_var_name) {
     if (!pred) return PRED_KIND_NONE;
     *out_attr_name = NULL;
     *out_attr_value = NULL;
     *out_position = 0;
+    if (out_var_name) *out_var_name = NULL;   /* callers pass NULL */
 
     /* [N] — numeric literal. */
     if (pred->type == XPATH_AST_NUMBER) {
@@ -454,6 +457,30 @@ static PredKind classify_predicate(XPathASTNode* pred,
             *out_attr_name = attr;
             *out_attr_value = rhs->value;
             return PRED_KIND_ATTR_EQ_STRING;
+        }
+        /* [@attr = $var] and [$var = @attr] (issue #565): the RHS
+         * resolves at RUN time through the evaluation context's
+         * variable set — the fused opcode reads it once per query. */
+        if (rhs && rhs->type == XPATH_AST_VARIABLE_REFERENCE &&
+            rhs->value && attr) {
+            *out_attr_name = attr;
+            if (out_var_name) *out_var_name = rhs->value;
+            return PRED_KIND_ATTR_EQ_VAR;
+        }
+        /* reversed order [$var = @attr] — guard the node kind before
+         * navigating: pred_attr_name reads step fields. */
+        XPathASTNode* rhs2 = pred->children[1];
+        if (rhs2 && (rhs2->type == XPATH_AST_STEP ||
+                     rhs2->type == XPATH_AST_PATH_EXPR)) {
+            const char* attr_r = pred_attr_name(rhs2);
+            XPathASTNode* lhs = pred->children[0];
+            if (attr_r && lhs &&
+                lhs->type == XPATH_AST_VARIABLE_REFERENCE &&
+                lhs->value) {
+                *out_attr_name = attr_r;
+                if (out_var_name) *out_var_name = lhs->value;
+                return PRED_KIND_ATTR_EQ_VAR;
+            }
         }
     }
 
@@ -527,12 +554,20 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
             XPathASTNode* pred = step->children[1 + i];
             const char *a, *v;
             long p;
-            PredKind kind = classify_predicate(pred, &a, &v, &p);
+            PredKind kind = classify_predicate(pred, &a, &v, &p, NULL);
             if (kind == PRED_KIND_NONE) {
                 return 0;  /* non-simple predicate — fall back */
             }
             if (kind == PRED_KIND_POSITION) {
                 return 0;  /* position is per-context — fall back */
+            }
+            /* Var-bound attr predicates fuse ONLY in the absolute
+             * `//name[@attr=$var]` fold (its handler resolves the
+             * variable). Here there is no fused var opcode — bail
+             * BEFORE any emission (a mid-loop return 0 would leave
+             * the axis opcode already emitted in the stream). */
+            if (kind == PRED_KIND_ATTR_EQ_VAR) {
+                return 0;
             }
         }
     }
@@ -565,7 +600,7 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
         has_wild && pred_count == 1) {
         const char *a, *v;
         long p;
-        PredKind kind = classify_predicate(step->children[1], &a, &v, &p);
+        PredKind kind = classify_predicate(step->children[1], &a, &v, &p, NULL);
         XPathOpcode exists_op, eq_op;
         if (axis == XPATH_AXIS_DESCENDANT) {
             exists_op = XPATH_BC_AXIS_DESCENDANT_WILD_PRED_ATTR_EXISTS;
@@ -606,7 +641,7 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
         XPathASTNode* pred = step->children[1 + i];
         const char *a, *v;
         long p;
-        PredKind kind = classify_predicate(pred, &a, &v, &p);
+        PredKind kind = classify_predicate(pred, &a, &v, &p, NULL);
 
         switch (kind) {
             case PRED_KIND_ATTR_EXISTS:
@@ -722,7 +757,7 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                         const char *a, *v;
                         long p;
                         PredKind pk = classify_predicate(
-                            next->children[1 + pi], &a, &v, &p);
+                            next->children[1 + pi], &a, &v, &p, NULL);
                         if (pk != PRED_KIND_ATTR_EXISTS &&
                             pk != PRED_KIND_ATTR_EQ_STRING &&
                             pk != PRED_KIND_CHILD_NUM_CMP) {
@@ -738,8 +773,9 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                         if (cpred == 1 && c_name) {
                             const char *fa, *fv;
                             long fp;
+                            const char* fvn2 = NULL;
                             PredKind fk = classify_predicate(next->children[1],
-                                                             &fa, &fv, &fp);
+                                                             &fa, &fv, &fp, &fvn2);
                             /* 0xFFFF value operand marks attr-EXISTS. */
                             if ((fk == PRED_KIND_ATTR_EQ_STRING && fa && fv) ||
                                 (fk == PRED_KIND_ATTR_EXISTS && fa)) {
@@ -771,7 +807,7 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                             const char *a, *v;
                             long p;
                             XPathASTNode* pred_ast = next->children[1 + pi];
-                            PredKind k = classify_predicate(pred_ast, &a, &v, &p);
+                            PredKind k = classify_predicate(pred_ast, &a, &v, &p, NULL);
                             if (k == PRED_KIND_ATTR_EXISTS) {
                                 emit_op_u16(st, XPATH_BC_PRED_ATTR_EXISTS,
                                             add_const_string(st, a));
@@ -1007,12 +1043,20 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                         const char *a, *v;
                         long p;
                         PredKind pk = classify_predicate(
-                            second_step->children[1 + i], &a, &v, &p);
+                            second_step->children[1 + i], &a, &v, &p, NULL);
                         if (pk != PRED_KIND_ATTR_EXISTS &&
                             pk != PRED_KIND_ATTR_EQ_STRING &&
                             pk != PRED_KIND_CHILD_NUM_CMP) {
-                            preds_ok = 0;
-                            break;
+                            /* ATTR_EQ_VAR is accepted below ONLY in
+                             * the single-pred named fused emission —
+                             * anything else would fall through to the
+                             * generic pred loop, which silently
+                             * drops it. */
+                            if (pk != PRED_KIND_ATTR_EQ_VAR ||
+                                cpred != 1 || !c_has_name) {
+                                preds_ok = 0;
+                                break;
+                            }
                         }
                     }
 
@@ -1025,8 +1069,30 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                         if (cpred == 1 && c_has_name) {
                             const char *fa, *fv;
                             long fp;
+                            const char* fvn = NULL;
                             PredKind fk = classify_predicate(second_step->children[1],
-                                                             &fa, &fv, &fp);
+                                                             &fa, &fv, &fp, &fvn);
+                            /* `//name[@attr=$var]` (issue #565): the VM
+                             * handler resolves the variable at RUN time
+                             * (string() of its value) and scans the
+                             * attr-value bucket — same index path as the
+                             * literal form, one var read per query. */
+                            if (fk == PRED_KIND_ATTR_EQ_VAR && fa && fvn) {
+                                uint16_t n1 = add_const_string(st, ctest->value);
+                                uint16_t n2 = add_const_string(st, fa);
+                                uint16_t n3 = add_const_string(st, fvn);
+                                if (reserve_code(st, 7) == 0) {
+                                    st->bc->code[st->bc->code_len++] =
+                                        (unsigned char)XPATH_BC_ABSOLUTE_DESCENDANT_NAME_ATTREQ_VAR;
+                                    st->bc->code[st->bc->code_len++] = (n1 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n1 & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (n2 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n2 & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = (n3 >> 8) & 0xFF;
+                                    st->bc->code[st->bc->code_len++] = n3 & 0xFF;
+                                }
+                                return;
+                            }
                             /* 0xFFFF value operand marks attr-EXISTS. */
                             if ((fk == PRED_KIND_ATTR_EQ_STRING && fa && fv) ||
                                 (fk == PRED_KIND_ATTR_EXISTS && fa)) {
@@ -1071,7 +1137,7 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                             const char *a, *v;
                             long p;
                             XPathASTNode* pred_ast = second_step->children[1 + i];
-                            PredKind k = classify_predicate(pred_ast, &a, &v, &p);
+                            PredKind k = classify_predicate(pred_ast, &a, &v, &p, NULL);
                             if (k == PRED_KIND_ATTR_EXISTS) {
                                 emit_op_u16(st, XPATH_BC_PRED_ATTR_EXISTS,
                                             add_const_string(st, a));
@@ -1163,11 +1229,32 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
             break;
 
         case XPATH_AST_RELATIVE_PATH:
-        case XPATH_AST_PATH_EXPR:
             /* Push context node, then walk each step. */
             emit_op(st, XPATH_BC_PATH_RELATIVE);
             compile_step_sequence(st, node->children, node->child_count);
             break;
+
+        case XPATH_AST_PATH_EXPR: {
+            /* Filter-expression head (issue #565): $var/step,
+             * fn()/step, (...)/step — the head's nodeset IS the path
+             * input (evaluator_path.c's PATH_EXPR branch). Compiling
+             * these as PATH_RELATIVE silently dropped the head and
+             * seeded the steps from the context node instead —
+             * $first/.. | $last/.. then unioned context-derived nodes
+             * (libxslt bug-76). */
+            XPathASTNode* head =
+                node->child_count >= 1 ? node->children[0] : NULL;
+            if (head && head->type != XPATH_AST_STEP &&
+                head->type != XPATH_AST_RELATIVE_PATH) {
+                compile_node(st, head);
+                compile_step_sequence(st, node->children + 1,
+                                      node->child_count - 1);
+            } else {
+                emit_op(st, XPATH_BC_PATH_RELATIVE);
+                compile_step_sequence(st, node->children, node->child_count);
+            }
+            break;
+        }
 
         case XPATH_AST_STEP:
             /* Bare step (e.g. `@id`, `.`, `..`) — evaluate as a

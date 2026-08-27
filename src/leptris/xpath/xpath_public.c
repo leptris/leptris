@@ -605,45 +605,15 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_with_vars_context(
         return NULL;
     }
 
-    /* Resolve context: explicit context if provided, else root. */
-    LeptrisElement context_elem = context ? context : leptris_document_root(doc);
-    if (!context_elem) return NULL;
-
-    /* Parse XPath expression. The variable-bound path is not yet on
-     * the AST cache + bytecode fast path (TODO 120 Phase F follow-up);
-     * we parse + eval directly. */
-    XPathParser* parser = xpath_parser_new(expression, strlen(expression));
-    if (!parser) return NULL;
-
-    XPathASTNode* ast = xpath_parse(parser);
-    const char* parse_error = xpath_parser_error(parser);
-
-    if (!ast || parse_error) {
-        xpath_parser_free(parser);
-        return NULL;
-    }
-
-    xpath_parser_free(parser);
-
-    /* Create evaluation context. TODO 163: stack-allocated. */
-    XPathContext ctx_storage;
-    XPathContext* xpath_ctx = &ctx_storage;
-    xpath_context_init(xpath_ctx, doc, context_elem);
-    if (!xpath_ctx->document) {
-        ast_node_free(ast);
-        return NULL;
-    }
-
-    /* Set variable set in context */
-    xpath_ctx->variable_set = variables;
-
-    /* Evaluate expression */
-    struct leptris_xpath_result* result = xpath_evaluate(xpath_ctx, ast);
-
-    /* Cleanup */
-    xpath_context_cleanup(xpath_ctx);
-    ast_node_free(ast);
-
+    /* Compiled-handle route (issue #565): shared expression cache (no
+     * per-call parse), VM first — variable references resolve through
+     * BC_FALLBACK_EVAL subtrees and `@attr=$var` predicates run on the
+     * fused opcode — interpreter fallback when the VM declines. */
+    LeptrisXPathCompiled compiled = leptris_xpath_compile(expression);
+    if (!compiled) return NULL;
+    struct leptris_xpath_result* result =
+        leptris_xpath_compiled_eval_vars(compiled, doc, context, variables);
+    leptris_xpath_compiled_free(compiled);
     return result;
 }
 

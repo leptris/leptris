@@ -143,11 +143,15 @@ static struct leptris_xpath_result* compiled_eval_context(
      * expressions ride the same index-backed paths as plain ones.
      * The bytecode comes from the shared per-expression cache.
      *
-     * Variable-bound expressions stay on the interpreter for now
-     * (#565 follow-up): the VM's operator/variable interop still
-     * diverges on union-of-variable-nodesets (bug-76). */
+     * Variable-bound expressions ride it too (#565): $var
+     * references compile to BC_FALLBACK_EVAL subtrees that evaluate
+     * with THIS context, so bindings resolve, and a fused
+     * name[attr=$var] predicate runs on the index-backed opcode.
+     * The earlier bug-76 divergence was the position-predicate
+     * absolute tail — which never merged; /doc/*[1] stays on the
+     * interpreter path. */
     struct leptris_xpath_result* result = NULL;
-    if (!vars) {
+    {
         /* Pinned borrow (the raw get_bc returns an unpinned pointer —
          * a re-entrant store during the run can evict and free it;
          * ASAN caught exactly that in libxslt bug-147, PR #600). */
