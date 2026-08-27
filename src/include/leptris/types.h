@@ -172,8 +172,13 @@ typedef struct {
     int xml_declaration;     /* 1 = include <?xml?>, 0 = omit */
     const char* encoding;    /* "UTF-8" or NULL for default */
 } LeptrisSerializeOptions;
+#ifdef __cplusplus
+static_assert(sizeof(LeptrisSerializeOptions) == 2 * sizeof(int) + sizeof(void*),
+              "LeptrisSerializeOptions layout is ABI-frozen (issue #568)");
+#else
 _Static_assert(sizeof(LeptrisSerializeOptions) == 2 * sizeof(int) + sizeof(void*),
               "LeptrisSerializeOptions layout is ABI-frozen (issue #568)");
+#endif
 
 /* ============================================================================
  * C14N (Canonical XML) Types
