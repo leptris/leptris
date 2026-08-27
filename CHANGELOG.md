@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.2] - 2026-08-27
+
+### Fixed
+
+- C89-portable size pin — MSVC C lacks _Static_assert (abi)
+- portable static_assert spelling for C++ translation units (abi)
+- LeptrisSerializeOptions layout is frozen — #568 segfault (abi)
+- NaN via math.h — MSVC rejects constant 0.0/0.0 (C2124) (xslt)
+- drop trailing whitespace on xslt_parse.c:248 (checks gate) (xslt)
+
+
+
 ## [1.9.1] - 2026-08-26
 
 ### Added
