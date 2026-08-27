@@ -102,6 +102,20 @@ int  buffer_has_error(SerializeBuffer* buf);
  * Internal Serialization Functions
  * ============================================================================ */
 
+/* Extended serialization settings (issue #568): everything the
+ * XSLT layer needs beyond the ABI-frozen public options. Passed
+ * only through leptris_document_serialize_ex — never by growing
+ * the public struct. */
+typedef struct {
+    const char* const* cdata_elements;   /* §16.1 cdata-section-elements */
+    size_t cdata_element_count;
+    int html_method;                     /* §16.2 method="html" */
+} LeptrisSerializeExtended;
+
+char* leptris_document_serialize_ex(struct leptris_document* doc,
+                                    const LeptrisSerializeOptions* options,
+                                    const LeptrisSerializeExtended* extended);
+
 void serialize_node_internal(LeptrisNode* node, SerializeBuffer* buf);
 void serialize_element_internal(LeptrisElement elem, SerializeBuffer* buf, int is_root);
 void serialize_text_internal(LeptrisTextNode* text, SerializeBuffer* buf);

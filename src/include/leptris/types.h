@@ -161,22 +161,19 @@ typedef struct {
  * Serialization Options
  * ============================================================================ */
 
+/* ABI-FROZEN (issue #568): callers allocate this struct. The
+ * 1.9.1 release appended fields here and every binding compiled
+ * against the 1.9.0 layout segfaulted (the serializer read past
+ * the caller's allocation). Layout is now pinned by static
+ * assert; new options go through the internal extended-options
+ * entry, never by growing this struct. */
 typedef struct {
     int indent;              /* 0 = compact, >0 = pretty-print with N spaces */
     int xml_declaration;     /* 1 = include <?xml?>, 0 = omit */
     const char* encoding;    /* "UTF-8" or NULL for default */
-    /* §16.1 cdata-section-elements (XSLT): text children of elements
-     * whose serialized QName matches one of these strings emit as
-     * CDATA sections instead of escaped text. NULL/0 = none. */
-    const char* const* cdata_elements;
-    size_t cdata_element_count;
-    /* §16.2 method="html" (XSLT): newline-per-block-element layout
-     * with zero nesting spaces, the HTML element table governing
-     * which elements may break lines, and void elements self-close
-     * without the slash (libxml2 HTMLtree.c parity). Requires
-     * indent > 0 to indent at all. */
-    int html_method;
 } LeptrisSerializeOptions;
+_Static_assert(sizeof(LeptrisSerializeOptions) == 2 * sizeof(int) + sizeof(void*),
+              "LeptrisSerializeOptions layout is ABI-frozen (issue #568)");
 
 /* ============================================================================
  * C14N (Canonical XML) Types
