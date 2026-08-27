@@ -1620,13 +1620,15 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
         }
     }
 
-    /* Top-level comments (outside root) — emitted before the root,
-     * after doc-level PIs. Each chain preserves its own parse order;
-     * cross-chain interleaving is not tracked (same limitation as
-     * the PI chain). */
+    /* Top-level comments (outside root), in two runs so document
+     * order survives the round-trip (#578): prolog comments before
+     * the root, epilog comments after it. Each chain preserves its
+     * own parse order; cross-chain interleaving is not tracked
+     * (same limitation as the PI chain). */
     for (struct leptris_top_comment* tc = doc->top_comments;
          tc;
          tc = tc->next) {
+        if (tc->after_root) continue;
         buffer_append(buf, "<!--");
         if (tc->content) buffer_append(buf, tc->content);
         buffer_append(buf, "-->");
@@ -1637,6 +1639,18 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
 
     /* Serialize root element */
     serialize_element_internal(root, buf, 1);  /* is_root=1 */
+
+    for (struct leptris_top_comment* tc = doc->top_comments;
+         tc;
+         tc = tc->next) {
+        if (!tc->after_root) continue;
+        buffer_append(buf, "<!--");
+        if (tc->content) buffer_append(buf, tc->content);
+        buffer_append(buf, "-->");
+        if (indent_spaces > 0) {
+            buffer_append_newline(buf);
+        }
+    }
 
 
     char* result = buffer_to_string(buf);

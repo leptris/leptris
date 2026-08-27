@@ -734,6 +734,32 @@ LEPTRIS_API const char* leptris_document_pi_target(LeptrisDocument doc,
 LEPTRIS_API const char* leptris_document_pi_data(LeptrisDocument doc,
                                                  size_t index);
 
+/* ============================================================================
+ * Document-level comments (issue #578)
+ * ============================================================================ */
+
+/**
+ * Count the document's top-level comments
+ *
+ * Parsed `<!-- ... -->` items outside the root element, in document
+ * order (prolog comments first, then epilog comments).
+ *
+ * @param doc Document
+ * @return Comment count, or 0 for NULL
+ */
+LEPTRIS_API size_t leptris_document_comment_count(LeptrisDocument doc);
+
+/**
+ * Get a document-level comment's content by index
+ *
+ * @param doc Document
+ * @param index 0-based, < leptris_document_comment_count
+ * @return Content between the markers (document-owned, lives until
+ *         leptris_document_free), or NULL when out of range
+ */
+LEPTRIS_API const char* leptris_document_comment_content(LeptrisDocument doc,
+                                                         size_t index);
+
 /**
  * Append a document-level processing instruction
  *
