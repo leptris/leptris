@@ -2154,6 +2154,37 @@ LEPTRIS_API const char* leptris_status_string(LeptrisStatus status);
  * - All operators: =, !=, <, <=, >, >=, +, -, *, div, mod, |, and, or
  * - Predicates: [1], [\@attr], [position() > 2], etc.
  */
+/* ============================================================================
+ * Batch-context evaluation (issue #560)
+ * ============================================================================ */
+
+/**
+ * Evaluate one expression against N context nodes in a single call
+ *
+ * Union semantics (NodeSet#xpath): each context element evaluates
+ * the expression independently; the results merge into ONE
+ * de-duplicated nodeset in document order — the same-node match from
+ * several contexts is kept once, and the C side does the work that
+ * bindings previously paid N dispatches for.
+ *
+ * @param doc Document
+ * @param contexts Caller array of context elements (all non-NULL)
+ * @param count Number of contexts
+ * @param expression XPath 1.0 expression
+ * @return De-duplicated, document-ordered nodeset, or NULL on
+ *         NULL/empty inputs or evaluation failure
+ *
+ * Memory: free with leptris_xpath_result_free.
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_nodeset(
+    LeptrisDocument doc, LeptrisElement* contexts, size_t count,
+    const char* expression);
+
+/** Compiled-expression variant of leptris_xpath_eval_nodeset. */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_nodeset(
+    LeptrisDocument doc, LeptrisElement* contexts, size_t count,
+    LeptrisXPathCompiled compiled);
+
 LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
     LeptrisDocument doc,
     LeptrisElement context,

@@ -893,3 +893,69 @@ void leptris_xpath_free_custom_fns(struct leptris_document* doc) {
     }
     doc->custom_xpath_fns = NULL;
 }
+
+/* ============================================================================
+ * Batch-context evaluation (issue #560)
+ * ========================================================================= */
+
+/* Shared engine: evaluate `compiled' with each context as the
+ * context node, merge every nodeset result into one, then sort into
+ * document order — which also compacts duplicates (a node matching
+ * from several contexts is kept once; the rank table's stable
+ * partition groups identical nodes). Non-nodeset results
+ * (booleans/numbers/strings) contribute nothing to the union. */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_nodeset(
+        LeptrisDocument doc, LeptrisElement* contexts, size_t count,
+        LeptrisXPathCompiled compiled) {
+    if (!doc || !contexts || count == 0 || !compiled) return NULL;
+
+    XPathNodeSet* merged = xpath_nodeset_new();
+    if (!merged) return NULL;
+
+    for (size_t i = 0; i < count; i++) {
+        if (!contexts[i]) continue;
+        struct leptris_xpath_result* r =
+            leptris_xpath_compiled_eval(compiled, doc, contexts[i]);
+        if (!r) continue;
+        if (r->type == LEPTRIS_XPATH_NODESET && r->value.nodeset_value) {
+            XPathNodeSet* ns = r->value.nodeset_value;
+            for (size_t j = 0; j < ns->count; j++)
+                xpath_nodeset_add(merged, ns->nodes[j]);
+            /* The entries themselves are either real DOM nodes
+             * (document-owned) or synthetic attrs the RESULT owned —
+             * transfer ownership markers to the merged set before
+             * the source frees. */
+            if (ns->owns_attributes) merged->owns_attributes = 1;
+            if (ns->owns_namespaces) merged->owns_namespaces = 1;
+            ns->owns_attributes = 0;
+            ns->owns_namespaces = 0;
+        }
+        leptris_xpath_result_free(r);
+    }
+
+    /* Document order + dedup via the shared rank-table sort. */
+    XPathContext ctx_storage;
+    XPathContext* ctx = &ctx_storage;
+    xpath_context_init(ctx, doc, contexts[0]);
+    if (merged->count > 1)
+        xpath_nodeset_sort_doc_order(ctx, merged, 0);
+    xpath_context_cleanup(ctx);
+
+    struct leptris_xpath_result* out =
+        xpath_result_new(LEPTRIS_XPATH_NODESET);
+    if (!out) { xpath_nodeset_free(merged); return NULL; }
+    out->value.nodeset_value = merged;
+    return out;
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_nodeset(
+        LeptrisDocument doc, LeptrisElement* contexts, size_t count,
+        const char* expression) {
+    if (!doc || !contexts || count == 0 || !expression) return NULL;
+    LeptrisXPathCompiled compiled = leptris_xpath_compile(expression);
+    if (!compiled) return NULL;
+    struct leptris_xpath_result* r = leptris_xpath_compiled_eval_nodeset(
+        doc, contexts, count, compiled);
+    leptris_xpath_compiled_free(compiled);
+    return r;
+}
