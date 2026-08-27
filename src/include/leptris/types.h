@@ -172,13 +172,13 @@ typedef struct {
     int xml_declaration;     /* 1 = include <?xml?>, 0 = omit */
     const char* encoding;    /* "UTF-8" or NULL for default */
 } LeptrisSerializeOptions;
-#ifdef __cplusplus
-static_assert(sizeof(LeptrisSerializeOptions) == 2 * sizeof(int) + sizeof(void*),
-              "LeptrisSerializeOptions layout is ABI-frozen (issue #568)");
-#else
-_Static_assert(sizeof(LeptrisSerializeOptions) == 2 * sizeof(int) + sizeof(void*),
-              "LeptrisSerializeOptions layout is ABI-frozen (issue #568)");
-#endif
+/* C89-portable size pin: a negative array type fails to compile on
+ * every compiler (clang, gcc, MSVC C and C++) the moment the struct
+ * grows. _Static_assert is C11-only and static_assert C++-only. */
+typedef char leptris_serialize_options_abi_frozen_[
+    sizeof(LeptrisSerializeOptions) ==
+            2 * sizeof(int) + sizeof(void*)
+        ? 1 : -1];
 
 /* ============================================================================
  * C14N (Canonical XML) Types
