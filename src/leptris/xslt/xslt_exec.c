@@ -1603,7 +1603,12 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         }
         ex->current_pos = saved_cpos;
     }
-    if (!items) return n ? -1 : 0;
+    if (!items) {
+        /* Early exit must not strand the selection (Linux LSan —
+         * attr/namespace nodesets are result-owned either way). */
+        if (r) leptris_xpath_result_free(r);
+        return n ? -1 : 0;
+    }
 
     /* §10: xsl:sort children order the selection. */
     if (in->sorts) xslt_sort_items(ex, in, items, n);
