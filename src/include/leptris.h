@@ -790,6 +790,24 @@ LEPTRIS_API const char* leptris_document_comment_content(LeptrisDocument doc,
  *         accessors above; do NOT pass it to node APIs — document
  *         PIs are not tree nodes), or NULL on invalid input / OOM
  */
+/**
+ * Remove a document-level processing instruction (issue #612)
+ *
+ * Identifies the PI by target (first match in document order), or
+ * by index among the document's PIs when target is NULL. The node
+ * is unlinked from the document's child chain and returned — it is
+ * pool-owned and remains valid until leptris_document_free (this
+ * API does not free it).
+ *
+ * @param doc Document
+ * @param target PI target to match, or NULL to use index
+ * @param index 0-based index among the document's PIs (target=NULL)
+ * @return the removed node, or NULL when not found
+ */
+LEPTRIS_API LeptrisNodeRef leptris_document_remove_pi(LeptrisDocument doc,
+                                                      const char* target,
+                                                      size_t index);
+
 LEPTRIS_API LeptrisNodeRef leptris_document_add_pi(LeptrisDocument doc,
                                                    const char* target,
                                                    const char* data);
@@ -1850,6 +1868,10 @@ LEPTRIS_API char* leptris_document_serialize(LeptrisDocument doc,
  *         only when buf is non-NULL and capacity >= return value.
  *         0 on failure.
  */
+LEPTRIS_API char* leptris_document_serialize_ext(LeptrisDocument doc,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext);
+
 LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
                                                    char* buf,
                                                    size_t capacity,

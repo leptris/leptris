@@ -258,7 +258,77 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
     extern void leptris_root_doc_register(LeptrisElement root,
                                           struct leptris_document* doc);
     leptris_root_doc_register(root, doc);
+    /* #612: keep the document-child chain coherent — the document
+     * node's view must list the NEW root at the old root's slot
+     * (prolog nodes before, epilog after), not the previous one. */
+    {
+        LeptrisNode* newn = (LeptrisNode*)root;
+        LeptrisNode* c = (LeptrisNode*)doc->doc_children_head;
+        LeptrisNode* prev = NULL;
+        while (c && c->type != LEPTRIS_NODE_TYPE_ELEMENT) {
+            prev = c;
+            c = leptris_node_get_next_sibling(c);
+        }
+        if (doc->doc_children_head) {
+            /* Maintain an EXISTING chain only — parsed documents and
+             * ones with document-level nodes. Result-fragment docs
+             * chain top-level nodes as root SIBLINGS without a chain
+             * (their serializer owns that walk); creating one here
+             * double-emitted their epilog. */
+            if (c) {
+                /* Splice new in at the old root's position. */
+                if (prev) leptris_node_set_next_sibling(prev, newn);
+                else doc->doc_children_head = newn;
+                leptris_node_set_next_sibling(
+                    newn, leptris_node_get_next_sibling(c));
+            } else {
+                /* Rootless chain: append the root at the tail. */
+                LeptrisNode* t = (LeptrisNode*)doc->doc_children_head;
+                while (leptris_node_get_next_sibling(t))
+                    t = leptris_node_get_next_sibling(t);
+                leptris_node_set_next_sibling(t, newn);
+            }
+            doc->doc_children_tail = newn;
+        }
+    }
     return LEPTRIS_OK;
+}
+
+/* #612: remove a document-level PI. Identifies it by target string
+ * (first match in document order) or, when target is NULL, by index
+ * among the document's PIs. The node is pool-owned — it is unlinked,
+ * not freed; its lifetime remains the document's. */
+LEPTRIS_API LeptrisNodeRef leptris_document_remove_pi(LeptrisDocument doc,
+                                                      const char* target,
+                                                      size_t index) {
+    if (!doc) return NULL;
+    LeptrisNode* prev = NULL;
+    size_t i = 0;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c; ) {
+        LeptrisNode* next = leptris_node_get_next_sibling(c);
+        if (c->type == LEPTRIS_NODE_TYPE_PI) {
+            int hit;
+            if (target) {
+                const char* t = leptris_pi_get_target((LeptrisPINode*)c);
+                hit = t && strcmp(t, target) == 0;
+            } else {
+                hit = (i == index);
+            }
+            if (hit) {
+                if (prev)
+                    leptris_node_set_next_sibling(prev, next);
+                else
+                    doc->doc_children_head = next;
+                if (doc->doc_children_tail == c)
+                    doc->doc_children_tail = prev;
+                return (LeptrisNodeRef)c;
+            }
+            i++;
+        }
+        prev = c;
+        c = next;
+    }
+    return NULL;
 }
 
 /**

@@ -239,6 +239,20 @@ typedef char leptris_serialize_options_abi_frozen_[
             2 * sizeof(int) + sizeof(void*)
         ? 1 : -1];
 
+/* Post-1.9.x serialization extensions (issue #129): the frozen
+ * options struct cannot grow, so newer knobs live here and ride the
+ * leptris_document_serialize_ext entry. Zero-initialize; every field
+ * defaults to the historical behavior. This struct MAY grow — pass
+ * its size-correct allocation (sizeof this type at your compile
+ * time) via leptris_document_serialize_ext. */
+typedef struct {
+    /* 1 = the formatter also indents TEXT and mixed content (the
+     * pretty-printer normally keeps mixed elements on one line to
+     * guarantee byte-exact round-trips — #534). Display-oriented:
+     * output is NOT guaranteed to round-trip. */
+    int indent_text;
+} LeptrisSerializeExtOptions;
+
 /* ============================================================================
  * C14N (Canonical XML) Types
  * ============================================================================ */

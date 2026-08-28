@@ -138,3 +138,63 @@ TEST(DocumentChildren, AddPiIsVisibleInChainAndXpath) {
 }
 
 }  // namespace
+
+/* Issue #612: parse-created doc-level PIs carry document linkage
+ * (setters work); leptris_document_remove_pi unlinks by target or
+ * index; set_root splices the new root into the chain. */
+TEST(DocumentChildren, ParseCreatedPiHasDocumentLinkage) {
+    const char xml[] = "<?pi x?><root/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisNodeRef n = leptris_node_first_child(leptris_document_node(doc));
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(leptris_node_get_type(n), LEPTRIS_NODE_TYPE_PI);
+    EXPECT_EQ(leptris_pi_node_set_target(n, "t"), LEPTRIS_OK);
+    EXPECT_EQ(leptris_pi_node_set_data(n, "d"), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_pi_node_get_target(n), "t");
+    leptris_document_free(doc);
+}
+
+TEST(DocumentChildren, RemovePiByTargetAndIndex) {
+    const char xml[] = "<?a x?><?b y?><r/><?c z?><?a w?>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_document_pi_count(doc), 4u);
+
+    LeptrisNodeRef gone = leptris_document_remove_pi(doc, "b", 0);
+    ASSERT_NE(gone, nullptr);
+    EXPECT_EQ(leptris_document_pi_count(doc), 3u);
+    /* Chain order preserved: a (head), root, c, a. */
+    LeptrisNodeRef c = leptris_node_first_child(leptris_document_node(doc));
+    EXPECT_EQ(leptris_node_get_type(c), LEPTRIS_NODE_TYPE_PI);
+
+    /* index path targets the SECOND PI now ("c" after b removed? no —
+     * remaining PIs: a, c, a → index 1 = c). */
+    gone = leptris_document_remove_pi(doc, nullptr, 1);
+    ASSERT_NE(gone, nullptr);
+    EXPECT_STREQ(leptris_pi_node_get_target(gone), "c");
+    EXPECT_EQ(leptris_document_pi_count(doc), 2u);
+    leptris_document_free(doc);
+}
+
+TEST(DocumentChildren, SetRootSplicesChain) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement built = leptris_element_create(doc, "built");
+    ASSERT_NE(built, nullptr);
+    ASSERT_EQ(leptris_document_set_root(doc, built), LEPTRIS_OK);
+    LeptrisNodeRef n = leptris_node_first_child(leptris_document_node(doc));
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(leptris_node_get_type(n), LEPTRIS_NODE_TYPE_ELEMENT);
+    EXPECT_EQ((LeptrisElement)n, built);
+
+    /* Replace: new root takes the old slot between prolog/epilog. */
+    leptris_document_add_pi(doc, "pre", "v");
+    LeptrisElement second = leptris_element_create(doc, "second");
+    ASSERT_EQ(leptris_document_set_root(doc, second), LEPTRIS_OK);
+    n = leptris_node_first_child(leptris_document_node(doc));
+    EXPECT_EQ(leptris_node_get_type(n), LEPTRIS_NODE_TYPE_PI);  /* prolog */
+    n = leptris_node_next_sibling(n);
+    ASSERT_EQ((LeptrisElement)n, second);   /* new root at old slot */
+    leptris_document_free(doc);
+}

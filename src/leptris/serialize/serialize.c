@@ -46,6 +46,8 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->indent = 0;
     buf->indent_spaces = indent_spaces;
     buf->html_method = 0;
+    buf->indent_text = 0;
+    buf->at_line_start = 0;
     buf->cdata_names = NULL;   /* callers with cdata-section-elements
                                 * install theirs; every other buffer
                                 * must read "none", not heap garbage */
@@ -111,6 +113,7 @@ void buffer_append_len(SerializeBuffer* buf, const char* str, size_t len) {
     memcpy(buf->data + buf->size, str, len);
     buf->size += len;
     buf->data[buf->size] = '\0';
+    buf->at_line_start = (len > 0 && str[len - 1] == '\n');
 }
 
 void buffer_append_char(SerializeBuffer* buf, char c) {
@@ -118,6 +121,7 @@ void buffer_append_char(SerializeBuffer* buf, char c) {
 
     buf->data[buf->size++] = c;
     buf->data[buf->size] = '\0';
+    buf->at_line_start = (c == '\n');
 }
 
 void buffer_append_indent(SerializeBuffer* buf) {
@@ -137,6 +141,10 @@ void buffer_append_indent(SerializeBuffer* buf) {
 
 void buffer_append_newline(SerializeBuffer* buf) {
     if (!buf || buf->indent_spaces <= 0) return;
+    /* #129 indent_text collapses consecutive breaks; every other
+     * mode keeps the historical (stacking) newline sites — html
+     * layout relies on them. */
+    if (buf->indent_text && buf->at_line_start) return;
     buffer_append_char(buf, '\n');
 }
 
@@ -849,6 +857,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
     LeptrisNode* cur = (LeptrisNode*)root_elem;
     int is_root_cur = is_root;
 
+    int trailing_text_nl = 0;
     for (;;) {
         if (cur->type != LEPTRIS_NODE_TYPE_ELEMENT) {
             /* #534 companion: in pretty mode the formatter owns the
@@ -882,6 +891,34 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     }
                 }
                 if (ws_only) goto advance;   /* skip, formatter owns it */
+            }
+            /* #129 indent_text: non-whitespace text sits on its own
+             * indented line (display form — not round-trip). */
+            if (buf->indent_text && buf->indent_spaces > 0 &&
+                cur->type == LEPTRIS_NODE_TYPE_TEXT) {
+                LeptrisTextNode* itn = (LeptrisTextNode*)cur;
+                const char* isc;
+                size_t isl;
+                if (itn->borrowed && itn->content_len > 0) {
+                    isc = itn->content; isl = itn->content_len;
+                } else {
+                    isc = leptris_text_get_content(itn);
+                    isl = isc ? itn->content_len : 0;
+                }
+                int ws_only = 1;
+                for (size_t k = 0; k < isl; k++) {
+                    char c = isc[k];
+                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                        ws_only = 0; break;
+                    }
+                }
+                if (!ws_only) {
+                    buffer_append_newline(buf);
+                    buffer_append_indent(buf);
+                    /* text ends the line: the next child or the close
+                     * tag indents from a fresh line. */
+                    trailing_text_nl = 1;
+                }
             }
             /* §16.1 cdata-section-elements: text children of a
              * listed element join ONE CDATA run per consecutive
@@ -922,6 +959,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     }
                 }
                 serialize_node_internal(cur, buf);
+                if (trailing_text_nl) {
+                    buffer_append_newline(buf);
+                    trailing_text_nl = 0;
+                }
                 goto advance;
             }
             if (sp > 0 && st[sp - 1].cd_open)
@@ -945,7 +986,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
          * in text-heavy documents paid two reservations + finalize.
          * RAW parents (html script/style) escape the fusion: their
          * text is verbatim. */
-        if (leptris_element_get_first_attribute(e) == NULL &&
+        if (buf->indent_text == 0 &&
+            leptris_element_get_first_attribute(e) == NULL &&
             leptris_elem_namespaces(e) == NULL &&
             !(buf->html_method &&
               (html_elem_flags_ci(name, nl) & HTML_F_RAW))) {
@@ -1221,7 +1263,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append_newline(buf);
             goto advance;
         }
-        if (fc->type == LEPTRIS_NODE_TYPE_TEXT &&
+        if (buf->indent_text == 0 &&
+            fc->type == LEPTRIS_NODE_TYPE_TEXT &&
             leptris_node_get_next_sibling(fc) == NULL) {
             /* text-only element */
             if (is_cdata_element(buf, e) &&
@@ -1334,7 +1377,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append_newline(buf);
             close_brk = html_break_before_close(e, name, nl, hf);
         } else {
-            if (buf->indent_spaces > 0) mixed = ser_children_have_text(fc);
+            /* #129 indent_text: the formatter owns ALL whitespace —
+             * no element is "mixed" for layout purposes. */
+            if (buf->indent_spaces > 0 && !buf->indent_text)
+                mixed = ser_children_have_text(fc);
             if (buf->indent_spaces > 0 && !mixed)
                 buffer_append_newline(buf);
         }
@@ -1532,6 +1578,19 @@ struct leptris_document;
 /* Serialize document with options */
 /* Full entry: public options + the internal extended settings.
  * extended==NULL leaves cdata/html off (the public default). */
+/* #129: public extended options (LeptrisSerializeExtOptions) bridge
+ * onto the internal LeptrisSerializeExtended — one conversion site,
+ * the walker below reads only the SerializeBuffer fields. */
+LEPTRIS_API char* leptris_document_serialize_ext(
+    struct leptris_document* doc,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext) {
+    LeptrisSerializeExtended internal;
+    memset(&internal, 0, sizeof(internal));
+    if (ext) internal.indent_text = ext->indent_text;
+    return leptris_document_serialize_ex(doc, options, &internal);
+}
+
 char* leptris_document_serialize_ex(struct leptris_document* doc,
                                     const LeptrisSerializeOptions* options,
                                     const LeptrisSerializeExtended* extended) {
@@ -1574,6 +1633,7 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
          * html break site goes through buffer_append_newline, which
          * is a no-op at indent_spaces == 0. */
         buf->html_method = extended->html_method != 0;
+        buf->indent_text = extended->indent_text != 0;
     }
 
     /* Output UTF-8 BOM if present in original */

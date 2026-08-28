@@ -203,9 +203,16 @@ LeptrisNode* leptris_node_first_child_internal(LeptrisNode* node) {
     if (!node) return NULL;
     if (node->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
         /* Issue #580: the document node's children are the document
-         * child chain — [prolog nodes..., root, epilog nodes...]. */
-        return (LeptrisNode*)((LeptrisDocumentNode*)node)->doc
-                   ->doc_children_head;
+         * child chain — [prolog nodes..., root, epilog nodes...].
+         * Chain-less documents (built via create + set_root, no
+         * document-level nodes) fall back to the root element —
+         * the same view the XPath document-node axes use (#612). */
+        struct leptris_document* d =
+            ((LeptrisDocumentNode*)node)->doc;
+        if (d->doc_children_head)
+            return (LeptrisNode*)d->doc_children_head;
+        return (LeptrisNode*)(d->new_dom_root ? d->new_dom_root
+                                               : d->root);
     }
     if (node->type != LEPTRIS_NODE_TYPE_ELEMENT) return NULL;
 
