@@ -690,9 +690,18 @@ struct leptris_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm
     /* Parent axis can produce duplicates (multiple children → same
      * parent). Inline a pointer-equality dedup. */
     for (size_t i = 0; i < input->count; i++) {
-        if (!node_is_element(input->nodes[i])) continue;
-        LeptrisElement elem = (LeptrisElement)input->nodes[i];
-        LeptrisElement parent = leptris_element_get_parent(elem);
+        LeptrisNode* in = input->nodes[i];
+        LeptrisElement parent;
+        if (in && in->type == LEPTRIS_NODE_NAMESPACE) {
+            /* Namespace nodes' parent is the OWNER element (63). */
+            parent = ((LeptrisNamespaceNode*)in)->owner;
+        } else if (node_is_element(in)) {
+            parent = leptris_element_get_parent((LeptrisElement)in);
+        } else {
+            /* Text/comment/PI contexts resolve through the
+             * any-kind parent (key use expressions, bug-133). */
+            parent = leptris_node_parent((LeptrisNodeRef)in);
+        }
         if (!parent) continue;
 
         if (!wild) {

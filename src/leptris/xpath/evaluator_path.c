@@ -5,6 +5,7 @@
  */
 
 #include "evaluator_internal.h"
+#include <stdlib.h>
 #include "../dom/pi.h"
 #include "../dom/document_node.h"  /* LeptrisPINode for processing-instruction('target') */
 #include "../leptris_internal.h"
@@ -829,11 +830,37 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                     DEBUG_LOG("      Axis '%s' cannot operate on attribute nodes, skipping", axis_name);
                     continue;  /* Skip non-element nodes for other axes */
                 }
+            } else if (node_ptr && ((LeptrisNode*)node_ptr)->type ==
+                       LEPTRIS_NODE_NAMESPACE) {
+                /* Synthetic namespace nodes: parent/ancestor axes
+                 * resolve through the OWNER element (bug-63); self
+                 * is the ns node itself. */
+                LeptrisElement owner =
+                    ((LeptrisNamespaceNode*)node_ptr)->owner;
+                if (strcmp(axis_name, "self") == 0) {
+                    if (matches_node_test(ctx, (LeptrisNode*)node_ptr,
+                                          node_test))
+                        xpath_nodeset_add(result, node_ptr);
+                } else if (strcmp(axis_name, "parent") == 0) {
+                    if (owner &&
+                        matches_node_test(ctx, (LeptrisNode*)owner,
+                                          node_test))
+                        xpath_nodeset_add(result, (LeptrisNode*)owner);
+                } else if (owner &&
+                           (strcmp(axis_name, "ancestor") == 0 ||
+                            strcmp(axis_name, "ancestor-or-self") == 0)) {
+                    node = owner;
+                } else {
+                    continue;
+                }
             } else if (node_ptr && ((LeptrisNode*)node_ptr)->type !=
                        LEPTRIS_NODE_TYPE_ATTRIBUTE) {
                 /* Real DOM non-element (text/comment/cdata/pi):
-                 * self and parent still work; other axes are empty
-                 * from these nodes. */
+                 * self/parent work; sibling + ancestor axes work
+                 * through the node links (XPath: a text node has
+                 * siblings — key use expressions evaluated from text
+                 * contexts, bug-133); child/descendant axes are
+                 * empty from these nodes. */
                 if (strcmp(axis_name, "self") == 0) {
                     if (matches_node_test(ctx, (LeptrisNode*)node_ptr,
                                           node_test))
@@ -846,8 +873,20 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                     if (up &&
                         matches_node_test(ctx, (LeptrisNode*)up, node_test))
                         xpath_nodeset_add(result, (LeptrisNode*)up);
+                    continue;
+                } else if (strcmp(axis_name, "ancestor") == 0 ||
+                           strcmp(axis_name, "ancestor-or-self") == 0 ||
+                           strcmp(axis_name, "preceding-sibling") == 0 ||
+                           strcmp(axis_name, "following-sibling") == 0 ||
+                           strcmp(axis_name, "preceding") == 0 ||
+                           strcmp(axis_name, "following") == 0) {
+                    /* Fall through: the generic walkers below use the
+                     * node links, which text/comment/PI nodes carry
+                     * (bug-133 — evaluated from text contexts). */
+                    node = (LeptrisElement)node_ptr;
+                } else {
+                    continue;
                 }
-                continue;
             } else {
                 DEBUG_LOG("      Skipping non-element, non-attribute node");
                 continue; /* Skip non-element, non-attribute nodes */
