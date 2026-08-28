@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.13] - 2026-08-28
+
+### Fixed
+
+- document-level whitespace text nodes (parse,serialize,xpath)
+
+
+
 ## [1.9.12] - 2026-08-28
 
 libxslt general suite: 174 -> 180/205.
