@@ -7,15 +7,12 @@ bug-142
 bug-152
 bug-155
 bug-159
-bug-161
 bug-166
 bug-168
 bug-177
-bug-193
 bug-195
 bug-219
 bug-225
-bug-32-
 bug-41-
 bug-43-
 bug-5-
@@ -24,7 +21,6 @@ bug-56
 bug-63
 bug-65
 bug-82
-bug-89
 bug-90
 bug-95
 bug-99

@@ -1025,6 +1025,16 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
                     const char* tc =
                         leptris_text_get_content((LeptrisTextNode*)cn);
                     if (tc) out_append_text(ex, ex->pending_parent, tc);
+                } else if (cty == LEPTRIS_NODE_ATTRIBUTE) {
+                    /* §11.3: copy-of an attribute node adds the
+                     * name/value onto the pending parent (bug-3-:
+                     * previously masked by the copy auto-adding
+                     * attributes). */
+                    LeptrisAttributeNode* an = (LeptrisAttributeNode*)cn;
+                    if (ex->pending_parent && an->name)
+                        leptris_element_set_attribute(
+                            ex->pending_parent, an->name,
+                            an->value ? an->value : "");
                 } else if (cty == LEPTRIS_NODE_NAMESPACE) {
                     /* §7.5/§12.1: copying a namespace node adds the
                      * declaration onto the pending parent element
@@ -1160,17 +1170,11 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
             }
         }
     }
-    /* Attribute sets contribute defaults for missing names;
-     * source node attrs win (we apply them after so their values
-     * are NOT overwritten). */
+    /* §7.5: xsl:copy copies the element and its namespace nodes,
+     * NOT its attributes — they reach the result only through
+     * apply-templates/@* (libxslt bug-32-: match="@p:*" drop
+     * templates never fired because the copy re-added them). */
     xslt_apply_attr_sets(ex, in, e, node);
-    /* Copy the attributes (v1: literal names). */
-    size_t na = leptris_element_attribute_count(node);
-    for (size_t i = 0; i < na; i++) {
-        const char* an = leptris_element_attribute_name_at(node, i);
-        const char* av = leptris_element_attribute_value_at(node, i);
-        if (an && av) leptris_element_set_attribute(e, an, av);
-    }
     LeptrisElement saved = ex->pending_parent;
     ex->pending_parent = e;
     int rc = xslt_exec_instrs(ex, in->child, node);
@@ -1645,6 +1649,9 @@ static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
 /* §5.6 xsl:apply-imports: select the best matching rule from the
  * stylesheets IMPORTED by (i.e. lower precedence than) the one
  * containing the currently executing rule. */
+static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
+                              LeptrisElement node);
+
 static int op_apply_imports(XsltExec* ex, const XsltInstr* in,
                             LeptrisElement node) {
     (void)in;
@@ -1653,8 +1660,16 @@ static int op_apply_imports(XsltExec* ex, const XsltInstr* in,
     const XsltTemplate* t = xslt_select_template(
         ex, node, ex->current_template ? ex->current_template->mode : NULL,
         min_rank);
-    if (!t) return 0;
-    return xslt_invoke_template(ex, t, node, NULL);
+    if (t) return xslt_invoke_template(ex, t, node, NULL);
+    /* No imported candidate: libxslt applies the BUILT-IN rule for
+     * the node (the element rule re-enters selection for the
+     * children — bug-193's <result> gets "passed"). */
+    return op_apply_templates(
+        ex,
+        &(XsltInstr){ .kind = XSLT_INSTR_APPLY_IMPORTS,
+                      .name = ex->current_template
+                          ? ex->current_template->mode : NULL },
+        node);
 }
 
 /* §15 fallback for unknown xsl: instructions (forward-compatible
@@ -1690,6 +1705,27 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         /* NOT freed here: synthetic attr/namespace items are
          * result-owned; freed after the loop below. */
     } else {
+        /* No-select apply-templates ON a text item (built-in TEXT
+         * rule via the items loop, §5.8): copy the text itself —
+         * the child walk below would enumerate a text node's
+         * (nonexistent) children and drop it (bug-161). */
+        int sel_ty = node
+            ? leptris_node_get_type((LeptrisNodeRef)node) : 0;
+        if (sel_ty == LEPTRIS_NODE_TYPE_TEXT ||
+            sel_ty == LEPTRIS_NODE_TYPE_CDATA) {
+            const char* t =
+                leptris_text_get_content((LeptrisTextNode*)node);
+            if (ex->pending_parent) {
+                out_append_text(ex, ex->pending_parent, t ? t : "");
+            } else if (t) {
+                char* v = escape_fragment_text(
+                    t, ex->sheet->out_method_text);
+                out_append_text(ex, NULL, v);
+                if (v != t) free(v);
+            }
+            if (r) leptris_xpath_result_free(r);
+            return 0;
+        }
         /* Document-node context (§5.4): the children ARE the root
          * element (this engine's document model — top-level
          * comments/PIs live outside the XPath tree), so template
