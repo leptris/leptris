@@ -1707,14 +1707,20 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
         const char* enc = encoding ? encoding : doc->encoding;
         if (enc) {
             buffer_append(buf, " encoding=\"");
-#ifdef LEPTRIS_HAS_ICONV
-            if (enc[0] == 'U' || enc[0] == 'u') {
+            if ((options && options->encoding) ||
+                (enc[0] == 'U' || enc[0] == 'u')) {
+                /* An EXPLICITLY requested encoding is emitted
+                 * verbatim — xsl:output encoding names it and the
+                 * XSLT layer transcodes the body to match (bug-140).
+                 * The parse-echo fallback below only applies to
+                 * encodings inherited from a parsed document. */
                 buffer_append(buf, enc);
+#ifdef LEPTRIS_HAS_ICONV
             } else {
                 buffer_append(buf, "UTF-8");
             }
 #else
-            buffer_append(buf, enc);
+            }
 #endif
             buffer_append_char(buf, '"');
         }
