@@ -11,11 +11,9 @@ bug-161
 bug-166
 bug-168
 bug-177
-bug-179
 bug-193
 bug-195
 bug-219
-bug-220
 bug-225
 bug-32-
 bug-38-

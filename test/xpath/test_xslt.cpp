@@ -1500,6 +1500,48 @@ TEST(XsltLiteralElement, OwnPrefixBindingFirst) {
               std::string::npos) << r;
 }
 
+/* bug-220: an element in an extension namespace with no known
+ * implementation runs only its xsl:fallback children — the element
+ * itself and non-fallback children are dropped. */
+TEST(XsltFallback, ExtensionElementRunsFallbackOnly) {
+    std::string sheet =
+        "<xsl:stylesheet version='1.0'"
+        " xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:ext='ext' extension-element-prefixes='ext'>"
+        "<xsl:template match='/'>"
+        "<r><ext:e>"
+        "<xsl:fallback><fallback/></xsl:fallback>"
+        "<ext:f/>"
+        "</ext:e></r>"
+        "</xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<doc/>", 6, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_EQ(r, "<r><fallback/></r>") << r;
+}
+
+/* bug-179: an xsl:element namespace attribute matching the result
+ * parent's in-scope default emits NO redundant declaration — the
+ * serializer relies on inheritance, like libxslt. */
+TEST(XsltElement, NamespaceAttrSkipsRedundantDefaultDecl) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<r xmlns='urn:d'>"
+        "<xsl:element name='baz' namespace='urn:d'>x</xsl:element>"
+        "</r>"
+        "</xsl:template>",
+        "<doc/>")),
+        "<r xmlns=\"urn:d\"><baz>x</baz></r>");
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */

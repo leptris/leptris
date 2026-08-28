@@ -306,6 +306,12 @@ struct xslt_styles {
     char** exclude_pfx;
     size_t exclude_count;
 
+    /* §15 extension-element-prefixes ONLY (elements in these
+     * namespaces are unknown extension elements — xsl:fallback
+     * semantics). */
+    char** ext_pfx;
+    size_t ext_count;
+
     /* §16.1 xsl:output standalone (-1 absent, 0 no, 1 yes) and
      * media-type (advisory). */
     int out_standalone;
