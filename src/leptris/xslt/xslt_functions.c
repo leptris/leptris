@@ -435,6 +435,8 @@ typedef struct {
     int min_frac, max_frac;
     int has_decimal;
     int has_grouping;
+    int group_size;            /* digit slots after the LAST grouping
+                                * separator (JDK semantics: '#,#0' = 2) */
     int multiplier;            /* 1, 100, 1000 */
 } PatternInfo;
 
@@ -448,8 +450,16 @@ static const char* find_split(const char* s, const char* end) {
     return end;
 }
 
+/* Does the byte at p start the multi-byte-safe separator sep? */
+static int sep_at(const char* p, const char* end, const char* sep) {
+    if (!sep) return 0;
+    size_t sl = strlen(sep);
+    if ((size_t)(end - p) < sl) return 0;
+    return memcmp(p, sep, sl) == 0;
+}
+
 static void parse_one(const char* s, const char* end, PatternInfo* pi,
-                       char dsep, char gsep) {
+                       const char* dsep, const char* gsep) {
     /* Single pass: classify each char into prefix/int/digit/frac/
      * suffix; %/mille/./0-#/, are tokens. The cursor lets the
      * outer loop know we belong to the int vs frac part. */
@@ -460,6 +470,7 @@ static void parse_one(const char* s, const char* end, PatternInfo* pi,
     pi->min_frac = 0; pi->max_frac = 0;
     pi->has_decimal = 0;
     pi->has_grouping = 0;
+    pi->group_size = 0;
     pi->multiplier = 1;
     /* Walk: count contiguous prefix chars; first '0' or '#' begins
      * the int part; '.' moves to frac; '%' (and ‰ — v1 aliased to
@@ -478,19 +489,34 @@ static void parse_one(const char* s, const char* end, PatternInfo* pi,
                      p + 2 < end && p[1] == (char)0x80 &&
                      p[2] == (char)0xB0) {  /* UTF-8 ‰ */
                 pi->multiplier = 1000; p += 2;
-            } else if (c == dsep) { pi->has_decimal = 1; }
+            } else if (sep_at(p, end, dsep)) { pi->has_decimal = 1; }
             p++; continue;
         }
         if (phase == 1) {
-            if (c == '0') { pi->min_int++; pi->max_int++; p++; continue; }
-            if (c == '#') { pi->max_int++; p++; continue; }
-            /* When both separators are the same character, the
-             * DECIMAL reading wins (§12.3 ambiguity — libxslt). */
-            if (c == dsep) {
-                pi->has_decimal = 1;
-                phase = 2; p++; continue;
+            if (c == '0') {
+                pi->min_int++; pi->max_int++;
+                if (pi->has_grouping) pi->group_size++;
+                p++; continue;
             }
-            if (c == gsep) { pi->has_grouping = 1; p++; continue; }
+            if (c == '#') {
+                pi->max_int++;
+                if (pi->has_grouping) pi->group_size++;
+                p++; continue;
+            }
+            /* When both separators are the same string, the
+             * DECIMAL reading wins (§12.3 ambiguity — libxslt). */
+            if (sep_at(p, end, dsep)) {
+                pi->has_decimal = 1;
+                phase = 2; p += strlen(dsep); continue;
+            }
+            if (sep_at(p, end, gsep)) {
+                pi->has_grouping = 1;
+                /* JDK grouping size: digit slots after the LAST
+                 * separator — reset the count at each separator. */
+                pi->group_size = 0;
+                p += strlen(gsep); continue;
+            }
+
             if (c == '%') { pi->multiplier = 100; pi->suffix = p; pi->suffix_len = (size_t)(end - p); phase = 3; break; }
             if (uc == 0xE2 && p + 2 < end && p[1] == (char)0x80 &&
                 p[2] == (char)0xB0) {
@@ -511,7 +537,7 @@ static void parse_one(const char* s, const char* end, PatternInfo* pi,
 /* Returns 1 when an explicit negative subpattern was present. */
 static int parse_pattern(const char* s, size_t len,
                           PatternInfo* pos, PatternInfo* neg,
-                          char dsep, char gsep) {
+                          const char* dsep, const char* gsep) {
     const char* end = s + len;
     const char* split = find_split(s, end);
     parse_one(s, split, pos, dsep, gsep);
@@ -523,10 +549,14 @@ static int parse_pattern(const char* s, size_t len,
     return 0;
 }
 
-/* Format |abs_v| per the parsed pattern; returns OWNED string. */
+/* Format |abs_v| per the parsed pattern; returns OWNED string.
+ * Separators are full strings (any UTF-8 character). */
 static char* format_value(const PatternInfo* p, double abs_v,
-                           char decimal_sep, char grouping_sep,
+                           const char* decimal_sep,
+                           const char* grouping_sep,
                            char zero_digit) {
+    size_t dsl = strlen(decimal_sep);
+    size_t gsl = strlen(grouping_sep);
     int prec = p->max_frac;
     char body[256];
     if (prec > 0) snprintf(body, sizeof(body), "%.*f", prec, abs_v);
@@ -565,17 +595,28 @@ static char* format_value(const PatternInfo* p, double abs_v,
         snprintf(tmp + t, sizeof(tmp) - t, "%s", intpart);
         snprintf(intpart, sizeof(intpart), "%s", tmp);
     }
-    /* Insert grouping separator every 3 digits from the right. */
+    /* Insert the grouping separator every group_size digits from
+     * the right — the size the PATTERN defines (digit slots after
+     * the last separator; '#,#0' groups by 2, '#,##0' by 3). */
+    int gsz = p->group_size > 0 ? p->group_size : 3;
     if (p->has_grouping) {
         size_t gl = strlen(intpart);
-        char rev[160]; size_t ri = 0, cnt = 0;
-        for (size_t i = gl; i-- > 0 && ri + 1 < sizeof(rev); ) {
+        char rev[320]; size_t ri = 0, cnt = 0;
+        for (size_t i = gl; i-- > 0 && ri + gsl < sizeof(rev); ) {
             rev[ri++] = intpart[i];
-            if (++cnt % 3 == 0 && i > 0) rev[ri++] = grouping_sep;
+            if (++cnt % (size_t)gsz == 0 && i > 0 &&
+                ri + gsl < sizeof(rev)) {
+                /* Store the separator REVERSED — the whole rev
+                 * buffer is byte-reversed below, which restores
+                 * multi-byte separators in order. */
+                for (size_t k = gsl; k-- > 0; )
+                    rev[ri++] = grouping_sep[k];
+            }
         }
         /* reverse rev → intpart */
-        for (size_t i = 0; i < ri; i++) intpart[i] = rev[ri - 1 - i];
-        intpart[ri] = 0;
+        for (size_t i = 0; i < ri && i + 1 < sizeof(intpart); i++)
+            intpart[i] = rev[ri - 1 - i];
+        intpart[ri < sizeof(intpart) ? ri : sizeof(intpart) - 1] = 0;
     }
     char out[512]; size_t o = 0;
     for (size_t i = 0; i < p->prefix_len && o + 1 < sizeof(out); i++)
@@ -586,7 +627,10 @@ static char* format_value(const PatternInfo* p, double abs_v,
          * prefix byte (kept verbatim). No further change. */
     }
     for (size_t i = 0; intpart[i] && o + 1 < sizeof(out); i++) out[o++] = intpart[i];
-    if (p->has_decimal && fracpart[0]) out[o++] = decimal_sep;
+    if (p->has_decimal && fracpart[0] && o + dsl < sizeof(out)) {
+        memcpy(out + o, decimal_sep, dsl);
+        o += dsl;
+    }
     for (size_t i = 0; fracpart[i] && o + 1 < sizeof(out); i++) out[o++] = fracpart[i];
     for (size_t i = 0; i < p->suffix_len && o + 1 < sizeof(out); i++)
         out[o++] = p->suffix[i];
@@ -600,8 +644,8 @@ char* xslt_format_number(const XsltStylesheet* sheet, double value,
     if (!pattern || !*pattern) pattern = "0";
     const XsltDecimalFormat* df = find_decformat(sheet, df_name, ns);
     if (!df) df = find_decformat(sheet, NULL, NULL);
-    char decimal_sep  = df ? df->decimal_sep   : '.';
-    char grouping_sep = df ? df->grouping_sep  : ',';
+    const char* decimal_sep  = df ? df->decimal_sep   : ".";
+    const char* grouping_sep = df ? df->grouping_sep  : ",";
     char zero_digit   = df ? df->zero_digit    : '0';
     const char* nan_str  = df && df->nan       ? df->nan       : "NaN";
     const char* inf_str  = df && df->infinity ? df->infinity : "Infinity";
