@@ -1497,13 +1497,13 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 (LeptrisElement)(nd ? nd->new_dom_root : NULL);
             if (!doc_root && nd) doc_root = nd->root;
             if (!doc_root) return 0;
-            /* Document children in order: the materialized pre-root
-             * chain (top comments/PIs), then the root element. */
+            /* Document children in order: the document child chain
+             * (prolog top comments/PIs), then the root element. */
             struct leptris_document* sd =
                 (struct leptris_document*)ex->source;
             int rc = 0;
             LeptrisNodeRef rootn = leptris_element_as_node(doc_root);
-            for (LeptrisNodeRef n = (LeptrisNodeRef)sd->pre_root_chain;
+            for (LeptrisNodeRef n = (LeptrisNodeRef)sd->doc_children_head;
                  n && n != rootn && rc == 0;
                  n = leptris_node_next_sibling(n)) {
                 const XsltTemplate* best =
@@ -1961,7 +1961,7 @@ static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
     LeptrisNodeRef target = (LeptrisNodeRef)node;
     struct leptris_document* sd = (struct leptris_document*)doc;
     LeptrisNodeRef start =
-        (LeptrisNodeRef)sd->pre_root_chain;
+        (LeptrisNodeRef)sd->doc_children_head;
     if (!start)
         start = leptris_element_as_node(leptris_document_root(doc));
     for (LeptrisNodeRef n = start; n; n = next_node_doc_order(n)) {
@@ -2360,73 +2360,6 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     leptris_xpath_invalidate_fn_registry(src_doc);
     src_doc->xslt_state = ex;
 
-    /* Document-order fidelity: the engine parks top-level comments
-     * and PIs in side lists outside the tree; templates and
-     * xsl:number must see them, so materialize them as real nodes
-     * chained before the root element. */
-    {
-        struct leptris_document* sd = (struct leptris_document*)source;
-        LeptrisElement sroot = leptris_document_root(source);
-        if (sroot && !sd->pre_root_chain) {
-            LeptrisNodeRef head = NULL, tail = NULL;
-            LeptrisNodeRef ahead = NULL, atail = NULL;
-            struct leptris_top_comment* tc = sd->top_comments;
-            struct leptris_top_comment* tcn;
-            while (tc) {
-                tcn = tc->next;
-                LeptrisNodeRef cn =
-                    leptris_comment_node_create(source, tc->content);
-                if (cn) {
-                    if (tc->after_root) {
-                        if (atail) leptris_node_set_next_sibling(atail, cn);
-                        else ahead = cn;
-                        atail = cn;
-                    } else {
-                        if (tail) leptris_node_set_next_sibling(tail, cn);
-                        else head = cn;
-                        tail = cn;
-                    }
-                }
-                free(tc->content); free(tc);
-                tc = tcn;
-            }
-            sd->top_comments = NULL;
-            struct leptris_processing_instruction* pi = sd->pis;
-            struct leptris_processing_instruction* pin;
-            while (pi) {
-                pin = pi->next;
-                LeptrisNodeRef pn = leptris_pi_node_create(
-                    source, pi->target, pi->data);
-                if (pn) {
-                    if (pi->after_root) {
-                        if (atail) leptris_node_set_next_sibling(atail, pn);
-                        else ahead = pn;
-                        atail = pn;
-                    } else {
-                        if (tail) leptris_node_set_next_sibling(tail, pn);
-                        else head = pn;
-                        tail = pn;
-                    }
-                }
-                free(pi->target); free(pi->data); free(pi);
-                pi = pin;
-            }
-            sd->pis = NULL;
-            /* before-chain → root → after-chain: document order. */
-            if (tail)
-                leptris_node_set_next_sibling(
-                    tail, leptris_element_as_node(sroot));
-            if (atail)
-                leptris_node_set_next_sibling(
-                    atail,
-                    leptris_node_next_sibling(
-                        leptris_element_as_node(sroot)));
-            if (ahead)
-                leptris_node_set_next_sibling(
-                    leptris_element_as_node(sroot), ahead);
-            sd->pre_root_chain = head;
-        }
-    }
 
     /* §3.4: strip source whitespace before any template sees it. */
     strip_source_whitespace(ex);

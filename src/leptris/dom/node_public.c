@@ -13,6 +13,7 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include "document_node.h"
 #include "root_doc_map.h"
 #include <stdio.h>
 #include <string.h>
@@ -123,15 +124,22 @@ LEPTRIS_API const char* leptris_pi_node_get_data(LeptrisNodeRef node) {
  * which sets parent_off and propagates the document pointer on
  * element children). For unattached nodes, returns NULL. */
 /* ---- Document-level processing instructions (issue #526) -------
- * Parsed and added PIs share the internal singly-linked list
- * (struct leptris_processing_instruction, doc->pis); the document
- * owns and frees it. */
+ * Document-level comments and PIs are tree children of the document
+ * node (issue #580): one node chain, [prolog..., root, epilog...].
+ * The #526 flat accessors below are the cheap flat view over that
+ * chain. */
+
+LEPTRIS_API LeptrisNodeRef leptris_document_node(LeptrisDocument doc) {
+    if (!doc) return NULL;
+    return (LeptrisNodeRef)leptris_document_get_node(doc);
+}
 
 LEPTRIS_API size_t leptris_document_pi_count(LeptrisDocument doc) {
     if (!doc) return 0;
     size_t n = 0;
-    for (struct leptris_processing_instruction* pi = doc->pis; pi; pi = pi->next)
-        n++;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c))
+        if (c->type == LEPTRIS_NODE_TYPE_PI) n++;
     return n;
 }
 
@@ -139,8 +147,12 @@ LEPTRIS_API const char* leptris_document_pi_target(LeptrisDocument doc,
                                                    size_t index) {
     if (!doc) return NULL;
     size_t i = 0;
-    for (struct leptris_processing_instruction* pi = doc->pis; pi; pi = pi->next, i++) {
-        if (i == index) return pi->target ? pi->target : "";
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c->type != LEPTRIS_NODE_TYPE_PI) continue;
+        if (i == index)
+            return leptris_pi_get_target((LeptrisPINode*)c);
+        i++;
     }
     return NULL;
 }
@@ -149,20 +161,23 @@ LEPTRIS_API const char* leptris_document_pi_data(LeptrisDocument doc,
                                                  size_t index) {
     if (!doc) return NULL;
     size_t i = 0;
-    for (struct leptris_processing_instruction* pi = doc->pis; pi; pi = pi->next, i++) {
-        if (i == index) return pi->data ? pi->data : "";
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c->type != LEPTRIS_NODE_TYPE_PI) continue;
+        if (i == index)
+            return leptris_pi_get_data((LeptrisPINode*)c);
+        i++;
     }
     return NULL;
 }
 
-/* ---- Document-level comments (issue #578) ------------------------
- * Parsed top-level comments share doc->top_comments (heap twins,
- * strdup'd content); the document owns and frees the chain. */
+/* ---- Document-level comments (issue #578) ------------------------ */
 LEPTRIS_API size_t leptris_document_comment_count(LeptrisDocument doc) {
     if (!doc) return 0;
     size_t n = 0;
-    for (struct leptris_top_comment* tc = doc->top_comments; tc; tc = tc->next)
-        n++;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c))
+        if (c->type == LEPTRIS_NODE_TYPE_COMMENT) n++;
     return n;
 }
 
@@ -170,9 +185,12 @@ LEPTRIS_API const char* leptris_document_comment_content(LeptrisDocument doc,
                                                          size_t index) {
     if (!doc) return NULL;
     size_t i = 0;
-    for (struct leptris_top_comment* tc = doc->top_comments;
-         tc; tc = tc->next, i++) {
-        if (i == index) return tc->content ? tc->content : "";
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c->type != LEPTRIS_NODE_TYPE_COMMENT) continue;
+        if (i == index)
+            return leptris_comment_get_content((LeptrisCommentNode*)c);
+        i++;
     }
     return NULL;
 }
@@ -181,25 +199,30 @@ LEPTRIS_API LeptrisNodeRef leptris_document_add_pi(LeptrisDocument doc,
                                                    const char* target,
                                                    const char* data) {
     if (!doc || !target || !*target) return NULL;
-    struct leptris_processing_instruction* pi =
-        (struct leptris_processing_instruction*)malloc(sizeof(*pi));
-    if (!pi) return NULL;
-    pi->target = leptris_strdup(target);
-    pi->data = leptris_strdup(data ? data : "");
-    pi->next = NULL;
-    if (!pi->target || (data && !pi->data)) {
-        free(pi->target); free(pi->data); free(pi);
-        return NULL;
+    LeptrisNodeRef n = leptris_pi_node_create(doc, target, data);
+    if (!n) return NULL;
+    /* Insert at the end of the PROLOG (before the root element) —
+     * the #526 contract: added PIs serialize before the root. On a
+     * rootless document the chain is empty; append. */
+    LeptrisNode* rootn = (LeptrisNode*)doc->new_dom_root;
+    if (!rootn) rootn = (LeptrisNode*)doc->root;
+    if (!rootn) {
+        LeptrisNode* tail = (LeptrisNode*)doc->doc_children_tail;
+        if (tail) leptris_node_set_next_sibling(tail, (LeptrisNode*)n);
+        else doc->doc_children_head = n;
+        doc->doc_children_tail = n;
+        return n;
     }
-    /* Append (serialization order is list order). */
-    struct leptris_processing_instruction* tail = doc->pis;
-    if (!tail) {
-        doc->pis = pi;
-    } else {
-        while (tail->next) tail = tail->next;
-        tail->next = pi;
+    LeptrisNode* prev = NULL;
+    LeptrisNode* c = (LeptrisNode*)doc->doc_children_head;
+    while (c && c != rootn) {
+        prev = c;
+        c = leptris_node_get_next_sibling(c);
     }
-    return (LeptrisNodeRef)pi;
+    if (prev) leptris_node_set_next_sibling(prev, (LeptrisNode*)n);
+    else doc->doc_children_head = n;
+    leptris_node_set_next_sibling((LeptrisNode*)n, rootn);
+    return n;
 }
 
 static LeptrisDocument node_public_document(LeptrisNodeRef node) {

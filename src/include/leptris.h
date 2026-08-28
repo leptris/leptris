@@ -702,6 +702,23 @@ LEPTRIS_API LeptrisDoctype leptris_document_internal_subset(LeptrisDocument doc)
  * ============================================================================ */
 
 /**
+ * The document node — XPath/XSLT root (issue #580)
+ *
+ * Navigation head for the document's children: prolog comments/PIs,
+ * the root element, then epilog comments/PIs, in document order.
+ * Standard node APIs (leptris_node_first_child, next_sibling,
+ * get_type, leptris_node_children) walk that chain; document-level
+ * nodes are visible to leptris_xpath_eval (/processing-instruction(),
+ * /comment(), //comment()).
+ *
+ * The handle is a stable, document-owned singleton.
+ *
+ * @param doc Document
+ * @return The document node, or NULL for NULL
+ */
+LEPTRIS_API LeptrisNodeRef leptris_document_node(LeptrisDocument doc);
+
+/**
  * Count the document's top-level processing instructions
  *
  * Parsed `<?target data?>` items outside the root element (and ones

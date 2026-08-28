@@ -61,10 +61,13 @@ typedef struct {
     LeptrisNode* last_child_stack[DP_MAX_DEPTH];
     int depth;
     LeptrisElement root;
-    struct leptris_processing_instruction* pis_head;
-    struct leptris_processing_instruction* pis_tail;
-    struct leptris_top_comment* tc_head;
-    struct leptris_top_comment* tc_tail;
+    /* Document children (issue #580): [prolog..., root, epilog...]
+     * as ONE node chain in document order — the document node's
+     * child list. root_chained moves the root element into the
+     * chain at the first epilog capture (or at finalize). */
+    LeptrisNode* dc_head;
+    LeptrisNode* dc_tail;
+    int root_chained;
     /* XML declaration fields */
     char* version;
     char* encoding;
@@ -248,6 +251,22 @@ static inline void dp_wire_child(DParser* p, LeptrisElement parent,
     if (t == LEPTRIS_NODE_TYPE_ELEMENT) {
         parent->child_count++;
     }
+}
+
+/* Append a node to the document-child chain (issue #580). The first
+ * epilog capture moves the root element into the chain between the
+ * prolog nodes and everything that follows. */
+static inline void dp_doc_child(DParser* p, LeptrisNode* n) {
+    if (!p->root_chained && p->root) {
+        LeptrisNode* rn = (LeptrisNode*)p->root;
+        if (p->dc_tail) leptris_node_set_next_sibling(p->dc_tail, rn);
+        else p->dc_head = rn;
+        p->dc_tail = rn;
+        p->root_chained = 1;
+    }
+    if (p->dc_tail) leptris_node_set_next_sibling(p->dc_tail, n);
+    else p->dc_head = n;
+    p->dc_tail = n;
 }
 
 /* Inline attribute allocation. Takes the next slot from the
@@ -1001,10 +1020,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.doc = doc;
     p.depth = 0;
     p.root = NULL;
-    p.pis_head = NULL;
-    p.pis_tail = NULL;
-    p.tc_head = NULL;
-    p.tc_tail = NULL;
+    p.dc_head = NULL;
+    p.dc_tail = NULL;
+    p.root_chained = 0;
     p.version = NULL;
     p.encoding = NULL;
     p.standalone = -1;
@@ -1300,18 +1318,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 if (p.depth > 0) {
                     dp_wire_child(&p, p.open_stack[p.depth - 1], (LeptrisNode*)cn);
                 } else {
-                    /* Doc-level comment: heap twin so it survives the
-                     * parse buffer (#550 sweep fallout — was dropped). */
-                    struct leptris_top_comment* tc =
-                        (struct leptris_top_comment*)malloc(sizeof(*tc));
-                    if (!tc) goto fail;
-                    tc->content = strdup((const char*)start);
-                    if (!tc->content) { free(tc); goto fail; }
-                    tc->next = NULL;
-                    tc->after_root = (p.root != NULL);
-                    if (p.tc_tail) p.tc_tail->next = tc;
-                    else p.tc_head = tc;
-                    p.tc_tail = tc;
+                    /* Doc-level comment: a tree child of the document
+                     * node (#580) — the carved node chains directly,
+                     * no heap twin. */
+                    dp_doc_child(&p, (LeptrisNode*)cn);
                 }
                 p.pos += 3;
             } else if (p.end - p.pos >= 9 &&
@@ -1433,17 +1443,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             if (p.depth > 0) {
                 dp_wire_child(&p, p.open_stack[p.depth - 1], (LeptrisNode*)pi);
             } else {
-                /* Doc-level PI. */
-                struct leptris_processing_instruction* pi_node =
-                    (struct leptris_processing_instruction*)malloc(sizeof(*pi_node));
-                if (!pi_node) goto fail;
-                pi_node->target = strdup(target_start);
-                pi_node->data = strdup(data_start);
-                pi_node->next = NULL;
-                pi_node->after_root = (p.root != NULL);
-                if (p.pis_tail) p.pis_tail->next = pi_node;
-                else p.pis_head = pi_node;
-                p.pis_tail = pi_node;
+                /* Doc-level PI: a tree child of the document node
+                 * (#580) — the carved node chains directly. */
+                dp_doc_child(&p, (LeptrisNode*)pi);
             }
         }
         else {
@@ -1460,8 +1462,17 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * hash so non-root elements can reach the doc via walk + lookup. */
     leptris_root_doc_register(p.root, doc);
     /* Tree is eagerly built — no FlatDoc, no lazy promote. */
-    doc->pis = p.pis_head;
-    doc->top_comments = p.tc_head;
+    doc->doc_children_head = p.dc_head;
+    doc->doc_children_tail = p.dc_tail;
+    if (!p.root_chained && p.root) {
+        LeptrisNode* rn = (LeptrisNode*)p.root;
+        if (doc->doc_children_tail)
+            leptris_node_set_next_sibling(
+                (LeptrisNode*)doc->doc_children_tail, rn);
+        else
+            doc->doc_children_head = rn;
+        doc->doc_children_tail = rn;
+    }
     doc->has_namespaces = p.saw_namespace;
     doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */
 

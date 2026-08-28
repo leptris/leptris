@@ -784,24 +784,8 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     /* Issue #541: release the serialization mem-cache. */
     free(doc->ser_cache);
 
-    /* Free processing instructions */
-    struct leptris_processing_instruction* pi = doc->pis;
-    while (pi) {
-        struct leptris_processing_instruction* next = pi->next;
-        if (pi->target) LEPTRIS_FREE(pi->target);
-        if (pi->data) LEPTRIS_FREE(pi->data);
-        LEPTRIS_FREE(pi);
-        pi = next;
-    }
-
-    /* Free top-level comments (the doc->pis twin). */
-    struct leptris_top_comment* tc = doc->top_comments;
-    while (tc) {
-        struct leptris_top_comment* next = tc->next;
-        if (tc->content) LEPTRIS_FREE(tc->content);
-        LEPTRIS_FREE(tc);
-        tc = next;
-    }
+    /* Document-level comment/PI nodes are pool-owned (issue #580) —
+     * reclaimed with the pool; nothing to free here. */
 
     /* TODO 117: release adopted child documents from xi:include
      * parse="xml".  Each child was parsed into its own pool; its

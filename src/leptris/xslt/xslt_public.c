@@ -7,6 +7,7 @@
  * omit-xml-declaration, encoding declaration). */
 #include "xslt_internal.h"
 #include "../dom/text.h"
+#include "../dom/pi.h"
 #include "../serialize/serialize.h"   /* LeptrisSerializeExtended (issue #568) */
 #include <stdlib.h>
 #include <stdio.h>
@@ -21,9 +22,14 @@ struct leptris_xslt {
  * fragment and compile THAT element as the stylesheet root. */
 static LeptrisElement resolve_embedded_root(LeptrisDocument doc) {
     if (!doc) return NULL;
-    for (struct leptris_processing_instruction* pi =
-             ((struct leptris_document*)doc)->pis;
-         pi; pi = pi->next) {
+    /* Document child chain (issue #580): prolog PIs are the head of
+     * the chain, before the root element. */
+    for (LeptrisNode* n =
+             (LeptrisNode*)((struct leptris_document*)doc)->doc_children_head;
+         n; n = leptris_node_get_next_sibling(n)) {
+        if (n->type == LEPTRIS_NODE_TYPE_ELEMENT) break;
+        if (n->type != LEPTRIS_NODE_TYPE_PI) continue;
+        LeptrisPINode* pi = (LeptrisPINode*)n;
         if (!pi->target || strcmp(pi->target, "xml-stylesheet") != 0)
             continue;
         if (!pi->data || !strstr(pi->data, "text/xsl")) continue;

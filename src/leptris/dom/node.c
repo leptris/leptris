@@ -9,6 +9,7 @@
 
 #include "node.h"
 #include "element.h"
+#include "document_node.h"
 #include "text.h"
 #include "cdata.h"
 #include "comment.h"
@@ -200,6 +201,12 @@ void leptris_node_remove(LeptrisNode* node) {
 /* Get first child of node (any type: element, text, comment, CDATA, etc.) */
 LeptrisNode* leptris_node_first_child_internal(LeptrisNode* node) {
     if (!node) return NULL;
+    if (node->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+        /* Issue #580: the document node's children are the document
+         * child chain — [prolog nodes..., root, epilog nodes...]. */
+        return (LeptrisNode*)((LeptrisDocumentNode*)node)->doc
+                   ->doc_children_head;
+    }
     if (node->type != LEPTRIS_NODE_TYPE_ELEMENT) return NULL;
 
     LeptrisElement elem = (LeptrisElement)node;

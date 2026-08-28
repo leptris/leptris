@@ -703,11 +703,12 @@ static void append_qualified_name(SerializeBuffer* buf, const char* prefix,
 }
 
 /* Issue #546: rootless documents may still carry document-level
- * processing instructions. Emit the declaration (if the original had
- * one) and the PIs instead of returning an empty string. */
+ * nodes. Emit the declaration (if the original had one) and the
+ * child chain (no root element exists in it) instead of returning
+ * an empty string. */
 static char* serialize_rootless_pis(struct leptris_document* doc,
                                     const LeptrisSerializeOptions* options) {
-    if (!doc || (!doc->pis && !doc->top_comments)) return NULL;
+    if (!doc || !doc->doc_children_head) return NULL;
     SerializeBuffer* pibuf = buffer_create(0);
     if (!pibuf) return NULL;
     int xml_declaration = options ? options->xml_declaration : 1;
@@ -731,22 +732,25 @@ static char* serialize_rootless_pis(struct leptris_document* doc,
         }
         buffer_append(pibuf, "?>");
     }
-    for (struct leptris_processing_instruction* pi = doc->pis;
-         pi; pi = pi->next) {
-        buffer_append(pibuf, "<?");
-        if (pi->target) buffer_append(pibuf, pi->target);
-        if (pi->data && pi->data[0]) {
-            buffer_append_char(pibuf, ' ');
-            buffer_append(pibuf, pi->data);
+    /* Document children (issue #580): comment/PI nodes in document
+     * order — the interleaving the old side lists lost. */
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c->type == LEPTRIS_NODE_TYPE_PI) {
+            LeptrisPINode* pi = (LeptrisPINode*)c;
+            buffer_append(pibuf, "<?");
+            if (pi->target) buffer_append(pibuf, pi->target);
+            if (pi->data && pi->data[0]) {
+                buffer_append_char(pibuf, ' ');
+                buffer_append(pibuf, pi->data);
+            }
+            buffer_append(pibuf, "?>");
+        } else if (c->type == LEPTRIS_NODE_TYPE_COMMENT) {
+            buffer_append(pibuf, "<!--");
+            buffer_append(pibuf,
+                leptris_comment_get_content((LeptrisCommentNode*)c));
+            buffer_append(pibuf, "-->");
         }
-        buffer_append(pibuf, "?>");
-    }
-    /* Top-level comments (outside root) — the doc->pis twin. */
-    for (struct leptris_top_comment* tc = doc->top_comments;
-         tc; tc = tc->next) {
-        buffer_append(pibuf, "<!--");
-        if (tc->content) buffer_append(pibuf, tc->content);
-        buffer_append(pibuf, "-->");
     }
     char* out = buffer_to_string(pibuf);
     buffer_free(pibuf);
@@ -1601,57 +1605,70 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
         }
     }
 
-    /* Output document-level processing instructions.  These are PIs
-     * that appeared before or after the root element in the original
-     * document (e.g. <?xml-stylesheet?>).  Order is preserved by the
-     * parser appending to a linked list. */
-    for (struct leptris_processing_instruction* pi = doc->pis;
-         pi;
-         pi = pi->next) {
-        buffer_append(buf, "<?");
-        if (pi->target) buffer_append(buf, pi->target);
-        if (pi->data && pi->data[0]) {
-            buffer_append_char(buf, ' ');
-            buffer_append(buf, pi->data);
-        }
-        buffer_append(buf, "?>");
-        if (indent_spaces > 0) {
-            buffer_append_newline(buf);
-        }
-    }
-
-    /* Top-level comments (outside root), in two runs so document
-     * order survives the round-trip (#578): prolog comments before
-     * the root, epilog comments after it. Each chain preserves its
-     * own parse order; cross-chain interleaving is not tracked
-     * (same limitation as the PI chain). */
-    for (struct leptris_top_comment* tc = doc->top_comments;
-         tc;
-         tc = tc->next) {
-        if (tc->after_root) continue;
-        buffer_append(buf, "<!--");
-        if (tc->content) buffer_append(buf, tc->content);
-        buffer_append(buf, "-->");
-        if (indent_spaces > 0) {
-            buffer_append_newline(buf);
+    /* Document-level nodes (issue #580): the child chain in document
+     * order — prolog nodes before the root, the root itself
+     * serialized below, epilog nodes after. The single chain keeps
+     * comment/PI interleaving the old side lists lost. */
+    LeptrisNode* doc_root_node = (LeptrisNode*)root;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c == doc_root_node) break;
+        if (c->type == LEPTRIS_NODE_TYPE_PI) {
+            LeptrisPINode* pi = (LeptrisPINode*)c;
+            buffer_append(buf, "<?");
+            if (pi->target) buffer_append(buf, pi->target);
+            if (pi->data && pi->data[0]) {
+                buffer_append_char(buf, ' ');
+                buffer_append(buf, pi->data);
+            }
+            buffer_append(buf, "?>");
+            if (indent_spaces > 0) {
+                buffer_append_newline(buf);
+            }
+        } else if (c->type == LEPTRIS_NODE_TYPE_COMMENT) {
+            buffer_append(buf, "<!--");
+            buffer_append(buf,
+                leptris_comment_get_content((LeptrisCommentNode*)c));
+            buffer_append(buf, "-->");
+            if (indent_spaces > 0) {
+                buffer_append_newline(buf);
+            }
         }
     }
 
     /* Serialize root element */
     serialize_element_internal(root, buf, 1);  /* is_root=1 */
 
-    for (struct leptris_top_comment* tc = doc->top_comments;
-         tc;
-         tc = tc->next) {
-        if (!tc->after_root) continue;
-        buffer_append(buf, "<!--");
-        if (tc->content) buffer_append(buf, tc->content);
-        buffer_append(buf, "-->");
-        if (indent_spaces > 0) {
-            buffer_append_newline(buf);
+    /* Epilog: the chain nodes AFTER the root element. Gated on the
+     * #580 chain — result-fragment documents chain top-level nodes
+     * as root siblings WITHOUT a doc_children chain, and their
+     * serializer (xslt_public) owns that walk. */
+    if (doc->doc_children_head) {
+    for (LeptrisNode* c = leptris_node_get_next_sibling(doc_root_node); c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c->type == LEPTRIS_NODE_TYPE_PI) {
+            LeptrisPINode* pi = (LeptrisPINode*)c;
+            buffer_append(buf, "<?");
+            if (pi->target) buffer_append(buf, pi->target);
+            if (pi->data && pi->data[0]) {
+                buffer_append_char(buf, ' ');
+                buffer_append(buf, pi->data);
+            }
+            buffer_append(buf, "?>");
+            if (indent_spaces > 0) {
+                buffer_append_newline(buf);
+            }
+        } else if (c->type == LEPTRIS_NODE_TYPE_COMMENT) {
+            buffer_append(buf, "<!--");
+            buffer_append(buf,
+                leptris_comment_get_content((LeptrisCommentNode*)c));
+            buffer_append(buf, "-->");
+            if (indent_spaces > 0) {
+                buffer_append_newline(buf);
+            }
         }
     }
-
+    }
 
     char* result = buffer_to_string(buf);
     buffer_free(buf);

@@ -352,8 +352,15 @@ LEPTRIS_API char* leptris_c14n_canonicalize(struct leptris_document* doc, int ve
     if (!buf) return NULL;
     buf[0] = '\0';
 
-    /* Add document-level processing instructions before root element */
-    for (struct leptris_processing_instruction* pi = doc->pis; pi; pi = pi->next) {
+    /* Add document-level processing instructions before the root
+     * element (issue #580: the document child chain, prolog nodes
+     * only — C14N document order). */
+    LeptrisNode* c14n_root_node = (LeptrisNode*)root;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c == c14n_root_node) break;
+        if (c->type != LEPTRIS_NODE_TYPE_PI) continue;
+        LeptrisPINode* pi = (LeptrisPINode*)c;
         char temp[1024];
         int len;
         if (pi->target) {

@@ -535,7 +535,23 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
             return -1;
         }
         int64_t seq = 0;
+        /* #580: rank the document child chain in order — prolog
+         * nodes rank before the root subtree, epilog nodes after —
+         * so mixed nodesets (//comment() unions) sort in true
+         * document order. */
+        for (LeptrisNode* c =
+                 (LeptrisNode*)ctx->document->doc_children_head;
+             c; c = leptris_node_get_next_sibling(c)) {
+            if (c->type == LEPTRIS_NODE_TYPE_ELEMENT) break;
+            doc_rank_table_put(t, c, seq++);
+        }
         doc_rank_walk(t, (LeptrisElement)ctx->document->new_dom_root, &seq);
+        for (LeptrisNode* c =
+                 leptris_node_get_next_sibling(
+                     (LeptrisNode*)ctx->document->new_dom_root);
+             c; c = leptris_node_get_next_sibling(c)) {
+            doc_rank_table_put(t, c, seq++);
+        }
         t->built_version = ctx->document->mutation_version;
         ctx->document->doc_order_index = t;
     }
@@ -699,10 +715,12 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
         DEBUG_LOG("    Processing input[%zu]: node=%p", i, (void*)node);
 
         /* Document-node contexts (XSLT "/" initial context):
-         * child = [root element]; self = the document itself;
-         * descendant(-or-self) = the root subtree; parent/
-         * ancestor = nothing. Results flow through the SAME
-         * predicate + merge tail as element inputs. */
+         * child = the document child chain — prolog comments/PIs,
+         * the root element, epilog nodes (#580); self = the document
+         * itself; descendant(-or-self) = prolog + the root subtree +
+         * epilog, in document order; parent/ancestor = nothing.
+         * Results flow through the SAME predicate + merge tail as
+         * element inputs. */
         if (node_ptr && ((LeptrisNode*)node_ptr)->type ==
                              LEPTRIS_NODE_TYPE_DOCUMENT) {
             struct leptris_document* dd =
@@ -712,7 +730,9 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
             XPathNodeSet* axis_result = xpath_nodeset_new();
             if (!axis_result) continue;
             if (strcmp(axis_name, "child") == 0) {
-                for (LeptrisNode* c = (LeptrisNode*)doc_root; c;
+                LeptrisNode* start = (LeptrisNode*)dd->doc_children_head;
+                if (!start) start = (LeptrisNode*)doc_root;
+                for (LeptrisNode* c = start; c;
                      c = leptris_node_get_next_sibling(c))
                     if (matches_node_test(ctx, c, node_test))
                         xpath_nodeset_add(axis_result, c);
@@ -728,24 +748,33 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                  * self-add never fired, so //NAME's first step lost
                  * the document node. (2) The root ELEMENT is itself
                  * a descendant of the document: from here the root
-                 * subtree walks with -or-self semantics either way. */
+                 * subtree walks with -or-self semantics either way.
+                 * #580: document-level nodes are descendants too —
+                 * walk the chain in order, recursing into the root
+                 * subtree at the root's position. */
                 int or_self = axis_name[10] == '-';
                 if (or_self &&
                     matches_node_test(ctx, (LeptrisNode*)node_ptr,
                                       node_test))
                     xpath_nodeset_add(axis_result,
                                       (LeptrisNode*)node_ptr);
-                if (doc_root) {
-                    XPathNodeSet* sub = apply_axis(
-                        ctx, (LeptrisNode*)doc_root,
-                        "descendant-or-self", node_test);
-                    if (sub) {
-                        for (size_t j = 0;
-                             j < xpath_nodeset_count(sub); j++)
-                            xpath_nodeset_add(
-                                axis_result,
-                                xpath_nodeset_get(sub, j));
-                        xpath_nodeset_free(sub);
+                LeptrisNode* start = (LeptrisNode*)dd->doc_children_head;
+                if (!start) start = (LeptrisNode*)doc_root;
+                for (LeptrisNode* c = start; c;
+                     c = leptris_node_get_next_sibling(c)) {
+                    if (c->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+                        XPathNodeSet* sub = apply_axis(
+                            ctx, c, "descendant-or-self", node_test);
+                        if (sub) {
+                            for (size_t j = 0;
+                                 j < xpath_nodeset_count(sub); j++)
+                                xpath_nodeset_add(
+                                    axis_result,
+                                    xpath_nodeset_get(sub, j));
+                            xpath_nodeset_free(sub);
+                        }
+                    } else if (matches_node_test(ctx, c, node_test)) {
+                        xpath_nodeset_add(axis_result, c);
                     }
                 }
             }
