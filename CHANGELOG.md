@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.9] - 2026-08-28
+
+### Added
+
+- serialize_ext indent_text (#129 ask); #612 — doc-level PI linkage, remove_pi, set_root chain splice
+
+### Fixed
+
+- free replaced decimal-format defaults + uri/local (LSan) (xslt)
+- built-in text rule routes through templates; decimal-format UTF-8 separators + pattern grouping size (bug-171, bug-73, bug-222) (xslt)
+- attribute-axis entity expansion, html PI form, global-variable ns context (bug-59, bug-11-, bug-36-) (xslt)
+- cdata-section runs split ']]>' across node boundaries (bug-132) (serialize)
+
+
+
 ## [1.9.8] - 2026-08-28
 
 ### Fixed
