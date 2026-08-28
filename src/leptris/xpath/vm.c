@@ -528,7 +528,6 @@ struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
 
 struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* vm,
                                                      const char* name, int wild) {
-    (void)ctx;
     XPathNodeSet* input = vm_detach_input_nodeset(vm);
     if (!input) return NULL;
 
@@ -539,6 +538,17 @@ struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM*
      * result must own them so they're freed when the result is. */
     out->owns_attributes = 1;
 
+    /* A prefixed name test resolves through the binding set and
+     * matches (URI, local) — the attribute's own spelling may use a
+     * different prefix for the same namespace (libxslt bug-97). */
+    const char* tcolon = name ? strchr(name, ':') : NULL;
+    const char* test_uri = NULL;
+    if (tcolon && ctx->ns_set) {
+        test_uri = leptris_xpath_ns_lookup(
+            (const struct leptris_xpath_ns_map*)ctx->ns_set,
+            name, (size_t)(tcolon - name));
+    }
+
     for (size_t i = 0; i < input->count; i++) {
         if (!node_is_element(input->nodes[i])) continue;
         LeptrisElement elem = (LeptrisElement)input->nodes[i];
@@ -548,6 +558,19 @@ struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM*
             int matches = 0;
             if (wild) {
                 matches = 1;
+            } else if (test_uri && nv.length > 0 && nv.data) {
+                const char* ac =
+                    (const char*)memchr(nv.data, ':', nv.length);
+                const char* ans = leptris_attribute_namespace_uri(
+                    (LeptrisAttribute)attr);
+                if (ac && ans) {
+                    size_t ll = nv.length - (size_t)(ac - nv.data) - 1;
+                    size_t tl = strlen(tcolon + 1);
+                    matches =
+                        ll == tl &&
+                        memcmp(ac + 1, tcolon + 1, tl) == 0 &&
+                        strcmp(ans, test_uri) == 0;
+                }
             } else if (name && nv.length > 0 && nv.data) {
                 matches = (strlen(name) == nv.length &&
                            memcmp(name, nv.data, nv.length) == 0);

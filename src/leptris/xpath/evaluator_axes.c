@@ -459,7 +459,36 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, LeptrisElement node,
         if (test && test->type == XPATH_AST_NODE_TEST_NAME) {
             /* Specific attribute name test - handle both StringView and cached name */
             int name_matches = 0;
-            if (!leptris_sv_is_empty(&attr->name_view)) {
+            const char* tv = test->value;
+            const char* tcolon = tv ? strchr(tv, ':') : NULL;
+            if (tcolon && ctx->ns_set) {
+                /* Prefixed test: resolve through the binding set and
+                 * match (URI, local) — the attribute's own spelling
+                 * may use a different prefix for the same namespace
+                 * (libxslt bug-97). Unbound prefix: fall through to
+                 * the literal compare (legacy behavior). */
+                const char* uri = leptris_xpath_ns_lookup(
+                    (const struct leptris_xpath_ns_map*)ctx->ns_set,
+                    tv, (size_t)(tcolon - tv));
+                if (uri && !leptris_sv_is_empty(&attr->name_view)) {
+                    const char* a = attr->name_view.data;
+                    size_t al = attr->name_view.length;
+                    const char* ac =
+                        (const char*)memchr(a, ':', al);
+                    const char* ans = leptris_attribute_namespace_uri(
+                        (LeptrisAttribute)attr);
+                    if (ac && ans) {
+                        size_t ll = al - (size_t)(ac - a) - 1;
+                        size_t tl = strlen(tcolon + 1);
+                        name_matches =
+                            ll == tl &&
+                            strncmp(ac + 1, tcolon + 1, tl) == 0 &&
+                            strcmp(ans, uri) == 0;
+                    }
+                }
+            }
+            if (!name_matches && !tcolon &&
+                !leptris_sv_is_empty(&attr->name_view)) {
                 name_matches = leptris_sv_equals_cstr(&attr->name_view, test->value);
             }
             matches = name_matches;
