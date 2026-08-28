@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.8] - 2026-08-28
+
+### Fixed
+
+- ATTLIST defaults opt-in (#606); doctype output, element-name AVTs, full pattern ladder (xslt)
+
+
+
 ## [1.9.7] - 2026-08-28
 
 ### Added
