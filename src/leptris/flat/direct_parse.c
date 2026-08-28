@@ -716,6 +716,16 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             if (!ns) return -1;
             ns->prefix = (char*)ns_prefix;
             ns->uri = val_start; /* already NUL-terminated */
+            /* Entity-bearing xmlns values (bug-140: xmlns="&svgns;")
+             * expand through the DTD — the raw view must never
+             * become a namespace URI. */
+            if (has_amp && p->dtd) {
+                LeptrisStringView nsv =
+                    leptris_sv_from_ptr(val_start, val_len);
+                char* nuri = leptris_decode_entities_view_with_dtd(
+                    &nsv, p->dtd, p->pool);
+                if (nuri) ns->uri = nuri;
+            }
             ns->next = NULL;
             /* TODO 155 Phase A: parser has the pool directly; use it
              * to allocate ns_cache without going through the

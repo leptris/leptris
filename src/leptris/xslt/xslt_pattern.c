@@ -13,7 +13,6 @@
  * document node, so child::name cannot select the root itself). */
 #include "xslt_internal.h"
 #include "../dom/element.h"   /* LeptrisAttributeNode */
-#include <stdio.h>
 
 /* Node identity for pattern membership. The attribute/namespace
  * axes mint FRESH synthetic nodes on every evaluation — pointer
