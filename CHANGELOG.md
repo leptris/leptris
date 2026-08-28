@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.10] - 2026-08-28
+
+### Added
+
+- leptris_sax_recorder_reset — reuse one recorder across documents (#594) (sax)
+
+
+
 ## [1.9.9] - 2026-08-28
 
 ### Added
