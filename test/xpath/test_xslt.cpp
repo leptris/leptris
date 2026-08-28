@@ -1434,6 +1434,30 @@ TEST(XsltFunctions, GenerateIdSequentialAndStable) {
         "<r>id1-id2</r>");
 }
 
+/* bug-97: prefixed attribute node-tests resolve by namespace URI
+ * — the source may spell a different prefix for the same binding. */
+TEST(XsltApplyTemplates, AttributeTestResolvesByUri) {
+    std::string sheet =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:m='urn:x' xmlns:m2='urn:x' version='1.0'>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='r/m:man/@m2:a'/>]"
+        "</xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char xml[] = "<r xmlns:m='urn:x'><m:man m:a='V'/></r>";
+    LeptrisDocument d = leptris_parse_string(xml, sizeof(xml) - 1, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_NE(r.find("[V]"), std::string::npos) << r;
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */
