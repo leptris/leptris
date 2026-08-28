@@ -1053,8 +1053,8 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             if (!df) {
                 df = (XsltDecimalFormat*)calloc(1, sizeof(*df));
                 if (!df) continue;
-                df->decimal_sep = '.';
-                df->grouping_sep = ',';
+                df->decimal_sep = leptris_strdup(".");
+                df->grouping_sep = leptris_strdup(",");
                 df->minus_sign = '-';
                 df->percent = '%';
                 df->per_mille = '%';
@@ -1076,9 +1076,9 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             }
             const char* av;
             if ((av = leptris_element_attribute(e, "decimal-separator")) && *av)
-                df->decimal_sep = av[0];
+                df->decimal_sep = leptris_strdup(av);
             if ((av = leptris_element_attribute(e, "grouping-separator")) && *av)
-                df->grouping_sep = av[0];
+                df->grouping_sep = leptris_strdup(av);
             if ((av = leptris_element_attribute(e, "minus-sign")) && *av)
                 df->minus_sign = av[0];
             if ((av = leptris_element_attribute(e, "percent")) && *av)
@@ -1285,6 +1285,8 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         XsltDecimalFormat* d = sheet->decformats;
         sheet->decformats = d->next;
         free((void*)d->name);
+        free((void*)d->decimal_sep);
+        free((void*)d->grouping_sep);
         free((void*)d->infinity);
         free((void*)d->nan);
         free(d);
@@ -1349,7 +1351,8 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
      * append later). */
     XsltDecimalFormat* df = (XsltDecimalFormat*)calloc(1, sizeof(*df));
     if (df) {
-        df->decimal_sep = '.'; df->grouping_sep = ',';
+        df->decimal_sep = leptris_strdup(".");
+        df->grouping_sep = leptris_strdup(",");
         df->minus_sign = '-'; df->percent = '%'; df->per_mille = '%';
         df->zero_digit = '0';
         df->infinity = leptris_strdup("Infinity");

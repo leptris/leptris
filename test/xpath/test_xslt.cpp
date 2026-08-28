@@ -1236,3 +1236,63 @@ TEST(XsltVariables, GlobalVariableSelectUsesDeclaringNsContext) {
     leptris_document_free(d);
     leptris_xslt_free(x);
 }
+
+/* §5.4/§5.8: the built-in element rule applies templates to children
+ * of EVERY kind — a user match="text()" template must see text nodes
+ * reached through the built-in rule, not just via an explicit select
+ * (libxslt bug-171: match="text()" override ignored, text leaked). */
+TEST(XsltBuiltInRules, UserTextTemplateOverridesBuiltInCopy) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='b[2]'>[<xsl:value-of select='.'/>]"
+        "</xsl:template>"
+        "<xsl:template match='text()'/>"
+        "<xsl:template match='/'>"
+        "<xsl:apply-templates select='/r/node()'/>"
+        "</xsl:template>",
+        "<r><b>one</b><b>two</b></r>")),
+        "[two]");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='text()'>T[<xsl:value-of select='.'/>]"
+        "</xsl:template>"
+        "<xsl:template match='/'>"
+        "<xsl:apply-templates select='/r/node()'/>"
+        "</xsl:template>",
+        "<r><b>x</b>tail</r>")),
+        "T[x]T[tail]");
+}
+
+/* §12.3 xsl:decimal-format: grouping/decimal separators may be ANY
+ * character — multi-byte included (braille ⠢, libxslt bug-222) — and
+ * the grouping SIZE comes from the pattern (digit slots after the
+ * last separator: '#⠢0' groups by 1 → 10 becomes 1⠢0). */
+TEST(XsltNumber, DecimalFormatMultiByteSeparators) {
+    std::string sheet =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " version='1.0'>"
+        "<xsl:decimal-format name='f' grouping-separator='\xe2\xa0\xa2'/>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"format-number(10,'#\xe2\xa0\xa2" "0','f')\"/>]"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string want = "1";
+    want += "\xe2\xa0\xa2";
+    want += "0";
+    EXPECT_NE(std::string(out).find(want), std::string::npos)
+        << out;
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
+TEST(XsltNumber, DecimalFormatGroupingSizeFromPattern) {
+    /* '#,#0' groups by 2: 12345 → 1,23,45 */
+    EXPECT_NE(body(run(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"format-number(12345,'#,#0')\"/>]"
+        "</xsl:template>", "<r/>"))
+        .find("[1,23,45]"), std::string::npos);
+}

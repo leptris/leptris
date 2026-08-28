@@ -171,8 +171,8 @@ typedef struct xslt_decformat {
     const char* name;           /* NULL = default */
     const char* uri;            /* resolved namespace (name qname) */
     const char* local;          /* local part of the name qname */
-    char decimal_sep;
-    char grouping_sep;
+    const char* decimal_sep;      /* full string — any UTF-8 char */
+    const char* grouping_sep;
     char minus_sign;
     char percent;
     char per_mille;             /* stored as bytes; multi-byte chars v1 truncated */

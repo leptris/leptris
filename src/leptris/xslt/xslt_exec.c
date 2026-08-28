@@ -1553,6 +1553,18 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
             ex->current_pos = ++cpos;
             if (ty == LEPTRIS_NODE_TYPE_TEXT ||
                 ty == LEPTRIS_NODE_TYPE_CDATA) {
+                /* §5.4: text children route through template
+                 * selection like every other kind — a user
+                 * match="text()" overrides the built-in copy rule
+                 * (bug-171: match="text()"/ was ignored here). */
+                LeptrisElement item = (LeptrisElement)c;
+                const XsltTemplate* best =
+                    xslt_select_template(ex, item, in->name, 0);
+                if (best) {
+                    rc = xslt_invoke_template(ex, best, item,
+                                              in->child);
+                    continue;
+                }
                 const char* t = leptris_text_get_content(
                     (LeptrisTextNode*)c);
                 if (ex->pending_parent) {
