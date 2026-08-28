@@ -371,6 +371,36 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             in->is_param = 1;
             return in;
         }
+        /* §15: an element in an extension namespace is an unknown
+         * extension element — compile to its xsl:fallback children
+         * only (bug-220); the element itself and non-fallback
+         * children are dropped. */
+        {
+            const char* epfx = leptris_element_prefix(e);
+            if (epfx && *epfx && sp->sheet->ext_count) {
+                int is_ext = 0;
+                for (size_t i = 0; i < sp->sheet->ext_count; i++)
+                    if (strcmp(sp->sheet->ext_pfx[i], epfx) == 0) {
+                        is_ext = 1; break;
+                    }
+                if (is_ext) {
+                    XsltInstr* fin = instr_new(XSLT_INSTR_UNKNOWN_XSL);
+                    if (!fin) return NULL;
+                    fin->name = leptris_strdup(name);
+                    XsltInstr** ftail = &fin->child;
+                    for (LeptrisElement c =
+                             leptris_element_first_child_any(e); c;
+                         c = leptris_element_next_sibling_any(c)) {
+                        if (!node_is_xsl(c, "fallback")) continue;
+                        XsltInstr* content = parse_content(sp, c);
+                        if (!content) continue;
+                        *ftail = content;
+                        while (*ftail) ftail = &(*ftail)->next;
+                    }
+                    return fin;
+                }
+            }
+        }
         /* Literal result element. The stored name is the FULL QName
          * (prefix:local) — element_name() yields only the local
          * part, and xsl:namespace-alias + namespace output need the
@@ -1356,6 +1386,9 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
     for (size_t i = 0; i < sheet->exclude_count; i++)
         free(sheet->exclude_pfx[i]);
     free(sheet->exclude_pfx);
+    for (size_t i = 0; i < sheet->ext_count; i++)
+        free(sheet->ext_pfx[i]);
+    free(sheet->ext_pfx);
     while (sheet->decformats) {
         XsltDecimalFormat* d = sheet->decformats;
         sheet->decformats = d->next;
@@ -1420,6 +1453,15 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
                     (sheet->exclude_count + 1) * sizeof(char*));
                 sheet->exclude_pfx[sheet->exclude_count++] =
                     leptris_strdup(tok);
+                if (li == 1) {
+                    /* extension-element-prefixes: also an extension
+                     * list (§15 fallback semantics). */
+                    sheet->ext_pfx = (char**)realloc(
+                        sheet->ext_pfx,
+                        (sheet->ext_count + 1) * sizeof(char*));
+                    sheet->ext_pfx[sheet->ext_count++] =
+                        leptris_strdup(tok);
+                }
             }
             free(dup);
         }

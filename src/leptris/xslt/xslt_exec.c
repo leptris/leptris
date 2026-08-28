@@ -1864,14 +1864,18 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
     if (ns_avt) {
         const char* en = leptris_element_name(e);
         const char* colon = en ? strchr(en, ':') : NULL;
+        char pfx[80];
+        const char* dpfx = "";
         if (colon) {
             size_t pl = (size_t)(colon - en);
-            char pfx[80];
             snprintf(pfx, sizeof(pfx), "%.*s", (int)pl, en);
-            leptris_element_add_namespace_definition(e, pfx, ns_avt);
-        } else {
-            leptris_element_add_namespace_definition(e, "", ns_avt);
+            dpfx = pfx;
         }
+        /* Skip the declaration when the result ancestors already
+         * bind the prefix (or default) to the same URI — libxslt
+         * relies on inheritance (bug-179). */
+        if (!result_ns_in_scope(e, dpfx, ns_avt))
+            leptris_element_add_namespace_definition(e, dpfx, ns_avt);
         free(ns_avt);
     }
     /* §7.1: in-scope declarations from the instruction. */
