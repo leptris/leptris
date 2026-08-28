@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.11] - 2026-08-28
+
+### Fixed
+
+- xsl:element no longer copies in-scope namespaces (xslt)
+- copy-of namespace nodes; raw apostrophes in attrs (xslt,serialize)
+- extension-element fallback; skip redundant element ns decl (xslt)
+- namespace declarations emit in declaration order (serialize,xslt)
+- prefixed attribute node-tests resolve by namespace URI (xpath)
+- function-call pattern priority, generate-id sequence, globals context; ns-node filter leak (xslt)
+- priority attr, count/from patterns, ns numbering, attribute sets (xslt)
+
+
+
 ## [1.9.10] - 2026-08-28
 
 ### Added
