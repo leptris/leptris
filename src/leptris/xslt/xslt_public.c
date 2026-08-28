@@ -337,6 +337,9 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     opts.indent = effective_indent(ex->sheet, html_method) ? 2 : 0;
     LeptrisSerializeExtended ext = {0};
     ext.html_method = html_method;
+    /* libxslt serialize semantics: ws-only text children count as
+     * mixed (the formatter stops below them, bug-98). */
+    if (!html_method && opts.indent) ext.ws_mixed = 1;
     /* §16.1: xsl:output encoding names the output declaration's
      * encoding (bug-132). */
     opts.encoding = ex->sheet->out_encoding;

@@ -1578,6 +1578,39 @@ TEST(XsltElement, DoesNotCopyInScopeNamespaces) {
     EXPECT_EQ(r, "<toto>x</toto>") << r;
 }
 
+/* bug-98: under indent="yes", whitespace text nodes copied from
+ * the source make the parent mixed — libxslt stops formatting the
+ * whole subtree below it (the visible "indent" is the copied
+ * whitespace itself). */
+TEST(XsltOutput, IndentStopsBelowWhitespaceMixedResult) {
+    std::string sheet =
+        "<xsl:stylesheet version='1.0'"
+        " xmlns:xsl='http://www.w3.org/1999/XSL/Transform'>"
+        "<xsl:output method='xml' indent='yes'/>"
+        "<xsl:template match='/*'>"
+        "<result><xsl:apply-templates/></result>"
+        "</xsl:template>"
+        "<xsl:template match='l'>"
+        "<total><type><xsl:value-of select='@t'/></type>"
+        "<a><xsl:value-of select='@v'/></a></total>"
+        "</xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char xml[] = "<r>\n  <l t='one' v='3'/>\n</r>";
+    LeptrisDocument d = leptris_parse_string(xml, sizeof(xml) - 1, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_EQ(r,
+              "<result>\n  <total><type>one</type><a>3</a></total>\n"
+              "</result>") << r;
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */
