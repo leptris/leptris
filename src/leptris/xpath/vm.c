@@ -302,7 +302,7 @@ static struct leptris_xpath_result* vm_apply_absolute_type(
                 vm_absolute_type_walk(out, root, want, pi_target);
                 continue;
             }
-            int match = 0;
+            int match = (want == 0);   /* node() matches all kinds */
             if (want == 1) {
                 match = (c->type == LEPTRIS_NODE_TYPE_TEXT ||
                          c->type == LEPTRIS_NODE_TYPE_CDATA);
