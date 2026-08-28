@@ -681,17 +681,48 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
      * binding already present on a RESULT ancestor (full chain,
      * not just the immediate parent — a literal-result-element
      * may appear deeply nested without redeclaring its ancestors'
-     * ns). */
-    for (size_t i = 0; i < in->ns_out_count; i++) {
+     * ns). The element's OWN prefix binding leads the chain —
+     * libxslt creates the element with its namespace, then copies
+     * the remaining in-scope declarations (bug-71). */
+    const char* oname = out_name ? out_name : "";
+    const char* ocolon = strchr(oname, ':');
+    const char* own_pfx = NULL;
+    char pbuf[96];
+    if (ocolon && in->ns_uri) {
+        size_t pl = (size_t)(ocolon - oname);
+        if (pl < sizeof(pbuf)) {
+            memcpy(pbuf, oname, pl);
+            pbuf[pl] = 0;
+            own_pfx = pbuf;
+            if (!result_ns_in_scope(e, own_pfx, in->ns_uri))
+                leptris_element_add_namespace_definition(e, own_pfx,
+                                                         in->ns_uri);
+        }
+    }
+    /* The default namespace emits at its SOURCE position among the
+     * prefixed declarations (bug-150), not pinned last. */
+    size_t dpos = in->ns_out_count;
+    if (in->ns_out_default &&
+        in->ns_out_default_pos != (size_t)-1 &&
+        in->ns_out_default_pos <= in->ns_out_count)
+        dpos = in->ns_out_default_pos;
+    for (size_t i = 0; i <= in->ns_out_count; i++) {
+        if (in->ns_out_default && i == dpos &&
+            !result_ns_in_scope(e, "", in->ns_out_default)) {
+            leptris_element_add_namespace_definition(
+                e, "", in->ns_out_default);
+        }
+        if (i == in->ns_out_count) break;
         if (result_ns_in_scope(e, in->ns_out_pfx[i],
                                in->ns_out_uri[i])) continue;
+        /* The hoisted own-prefix binding (same URI) is covered. */
+        if (own_pfx && in->ns_out_pfx[i] &&
+            strcmp(own_pfx, in->ns_out_pfx[i]) == 0 &&
+            in->ns_out_uri[i] && in->ns_uri &&
+            strcmp(in->ns_out_uri[i], in->ns_uri) == 0)
+            continue;
         leptris_element_add_namespace_definition(e, in->ns_out_pfx[i],
                                                  in->ns_out_uri[i]);
-    }
-    if (in->ns_out_default &&
-        !result_ns_in_scope(e, "", in->ns_out_default)) {
-        leptris_element_add_namespace_definition(e, "",
-                                                 in->ns_out_default);
     }
     /* §7.1.4: literal attrs first (they win positions and values);
      * the resolved attribute-set vector then fills missing names. */

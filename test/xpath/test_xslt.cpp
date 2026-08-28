@@ -1458,6 +1458,48 @@ TEST(XsltApplyTemplates, AttributeTestResolvesByUri) {
     EXPECT_NE(r.find("[V]"), std::string::npos) << r;
 }
 
+/* bug-104: copy-of keeps the source's namespace-declaration
+ * ORDER — the serializer must emit the declaration chain verbatim,
+ * not hoist the default namespace to the front. */
+TEST(XsltCopyOf, NamespaceDeclarationsKeepSourceOrder) {
+    EXPECT_NE(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:copy-of select='node()'/>"
+        "</xsl:template>",
+        "<foo xmlns:eg='http://example.org'"
+        " xmlns='http://example.org' eg:bar=''/>"))
+        .find("<foo xmlns:eg=\"http://example.org\""
+              " xmlns=\"http://example.org\" eg:bar=\"\"/>"),
+        std::string::npos);
+}
+
+/* bug-71: a literal result element's OWN prefix binding is emitted
+ * first, before the other in-scope declarations (libxslt creates
+ * the element with its namespace, then copies the rest). */
+TEST(XsltLiteralElement, OwnPrefixBindingFirst) {
+    std::string sheet =
+        "<xsl:stylesheet version='1.0'"
+        " xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:rdf='urn:test:rdf' xmlns:pa='urn:test:pa'>"
+        "<xsl:template match='/'>"
+        "<pa:Contact rdf:about='hello'/>"
+        "</xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_NE(r.find("<pa:Contact xmlns:pa=\"urn:test:pa\""
+                     " xmlns:rdf=\"urn:test:rdf\" rdf:about=\"hello\"/>"),
+              std::string::npos) << r;
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */

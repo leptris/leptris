@@ -291,12 +291,15 @@ if (xs_ns_strcmp(sp->sheet->exclude_pfx[i], pfx) == 0) return 1;
 
 static void build_ns_copy(SheetParser* sp, LeptrisElement e,
                           char*** out_pfx, char*** out_uri,
-                          size_t* out_count, char** out_default) {
+                          size_t* out_count, char** out_default,
+                          size_t* out_default_pos) {
     *out_pfx = NULL; *out_uri = NULL; *out_count = 0; *out_default = NULL;
+    *out_default_pos = (size_t)-1;
     char** pfx = NULL;
     char** uri = NULL;
     size_t cnt = 0, cap = 0;
     char* deflt = NULL;
+    size_t dpos = (size_t)-1;
         for (LeptrisElement a = e; a;
          a = leptris_node_parent((LeptrisNodeRef)a)) {
         for (int i = 0;; i++) {
@@ -308,7 +311,12 @@ static void build_ns_copy(SheetParser* sp, LeptrisElement e,
             if (xs_ns_strcmp(u, XSLT_NS) == 0) continue;   /* never copy XSLT */
             if (prefix_excluded(sp, a, p)) continue;
             if (!p || !*p) {
-                if (!deflt) deflt = leptris_strdup(u);
+                if (!deflt) {
+                    deflt = leptris_strdup(u);
+                    /* Source position: how many prefixed entries
+                     * precede it decides its emission slot. */
+                    dpos = cnt;
+                }
                 continue;
             }
             int have = 0;
@@ -330,6 +338,7 @@ static void build_ns_copy(SheetParser* sp, LeptrisElement e,
     if (cnt || deflt) {
         *out_pfx = pfx; *out_uri = uri; *out_count = cnt;
         *out_default = deflt;
+        *out_default_pos = dpos;
     } else {
         free(pfx); free(uri);
     }
@@ -403,7 +412,8 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         collect_attr_sets(in, e);
         /* §7.1.1: namespace declarations copied into the result. */
         build_ns_copy(sp, e, &in->ns_out_pfx, &in->ns_out_uri,
-                      &in->ns_out_count, &in->ns_out_default);
+                      &in->ns_out_count, &in->ns_out_default,
+                      &in->ns_out_default_pos);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -511,7 +521,8 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         collect_attr_sets(in, e);
         /* §7.1.1: namespace declarations copied into the result. */
         build_ns_copy(sp, e, &in->ns_out_pfx, &in->ns_out_uri,
-                      &in->ns_out_count, &in->ns_out_default);
+                      &in->ns_out_count, &in->ns_out_default,
+                      &in->ns_out_default_pos);
         in->child = parse_content(sp, e);
         return in;
     }
@@ -539,7 +550,8 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         collect_attr_sets(in, e);
         /* §7.1.1: namespace declarations copied into the result. */
         build_ns_copy(sp, e, &in->ns_out_pfx, &in->ns_out_uri,
-                      &in->ns_out_count, &in->ns_out_default);
+                      &in->ns_out_count, &in->ns_out_default,
+                      &in->ns_out_default_pos);
         in->child = parse_content(sp, e);
         return in;
     }
