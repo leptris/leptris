@@ -1498,7 +1498,9 @@ TEST(PredicatesOnNonElements, PositionSelectsTextAndMixedNodes) {
     for (auto& c : cases) {
         LeptrisXPathResult r = leptris_xpath_eval(d, nullptr, c.q);
         ASSERT_NE(r, nullptr) << c.q;
-        EXPECT_STREQ(leptris_xpath_result_string(r), c.want) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        EXPECT_STREQ(s ? s : "", c.want) << c.q;
+        leptris_free_string(s);
         leptris_xpath_result_free(r);
     }
     leptris_document_free(d);
