@@ -394,6 +394,11 @@ typedef struct xslt_exec {
      * (see XsltUfnBinding). */
     void* ufn;
 
+    /* xslt_functions.c: generate-id() sequential numbering map
+     * (bug-224) — node identity → id, assigned in first-request
+     * order (libxslt's deterministic per-transform counter). */
+    void* gids;
+
     /* RTF ownership chain: result-tree-fragment documents built by
      * <xsl:variable> bodies whose lifetime must outlive the
      * nodeset that references their nodes (§11.4 — the spec calls
@@ -477,6 +482,7 @@ void xslt_bridge_free(XsltExec* ex);
 void xslt_keys_free(XsltExec* ex);
 void xslt_docs_free(XsltExec* ex);
 void xslt_ufn_free(XsltExec* ex);
+void xslt_gids_free(XsltExec* ex);
 
 /* format-number(§12.3) — shared by the bridge; returns an OWNED
  * string. df_name NULL/"" selects the default decimal-format. */

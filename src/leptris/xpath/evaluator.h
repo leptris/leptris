@@ -96,6 +96,7 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity);
  * @param nodeset Nodeset to free
  */
 void xpath_nodeset_free(XPathNodeSet* nodeset);
+void xpath_nodeset_dispose_node(void* node);
 
 /**
  * Get nodeset count

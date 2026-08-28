@@ -478,6 +478,30 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
     return nodeset;
 }
 
+/* Dispose ONE heap-owned synthetic node (attribute/namespace/text).
+ * Shared by xpath_nodeset_free and the in-place predicate filter,
+ * which drops entries without removing the nodeset's ownership
+ * (bug: filtered-out namespace nodes leaked — Linux LSan). */
+void xpath_nodeset_dispose_node(void* node) {
+    if (!node) return;
+    if (XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
+        if (attr->name) LEPTRIS_FREE(attr->name);
+        if (attr->value) LEPTRIS_FREE(attr->value);
+        if (attr->namespace_uri) LEPTRIS_FREE(attr->namespace_uri);
+        LEPTRIS_FREE(attr);
+    } else if (XPATH_NODE_TYPE(node) == LEPTRIS_NODE_NAMESPACE) {
+        LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
+        if (ns->prefix) LEPTRIS_FREE(ns->prefix);
+        if (ns->uri) LEPTRIS_FREE(ns->uri);
+        LEPTRIS_FREE(ns);
+    } else if (XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT) {
+        XPathTextNode* t = (XPathTextNode*)node;
+        if (t->content) LEPTRIS_FREE(t->content);
+        LEPTRIS_FREE(t);
+    }
+}
+
 void xpath_nodeset_free(XPathNodeSet* nodeset) {
     if (!nodeset) return;
 
@@ -486,11 +510,7 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
         for (size_t i = 0; i < nodeset->count; i++) {
             void* node = nodeset->nodes[i];
             if (node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ATTRIBUTE) {
-                LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
-                if (attr->name) LEPTRIS_FREE(attr->name);
-                if (attr->value) LEPTRIS_FREE(attr->value);
-                if (attr->namespace_uri) LEPTRIS_FREE(attr->namespace_uri);
-                LEPTRIS_FREE(attr);
+                xpath_nodeset_dispose_node(node);
             }
         }
     }

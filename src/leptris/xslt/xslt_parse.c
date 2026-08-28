@@ -710,6 +710,9 @@ static double default_priority(const char* pattern) {
         strcmp(leaf, "comment()") == 0 || strcmp(leaf, "text()") == 0)
         return -0.5;
     if (strncmp(leaf, "processing-instruction", 22) == 0) return -0.5;
+    /* Function-call patterns (id(...), key(...)) fall to the
+     * "otherwise" row — NOT the bare-QName 0.0 (bug-113). */
+    if (strchr(leaf, '(')) return 0.5;
     /* QName (possibly prefixed). */
     return 0.0;
 }
