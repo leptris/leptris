@@ -559,6 +559,29 @@ TEST(XsltConformance, CDataSectionElements) {
         .find("<![CDATA[1 < 2]]>"), std::string::npos);
 }
 
+/* cdata-section-elements: a "]]>" inside (or ending) the text is
+ * split across sections — the only legal encoding inside CDATA
+ * (libxslt bug-132). The old scanner missed a close at the very END
+ * of a span and emitted it raw, terminating the section early. */
+TEST(XsltConformance, CDataSectionSplitsAtCloseSequence) {
+    /* close in the middle */
+    EXPECT_NE(body(run(
+        "<xsl:output cdata-section-elements='x'/>"
+        "<xsl:template match='/'>"
+        "<x>abc]]&gt;def</x>"
+        "</xsl:template>",
+        "<r/>"))
+        .find("<![CDATA[abc]]]]><![CDATA[>def]]>"), std::string::npos);
+    /* close at the very END of the content */
+    EXPECT_NE(body(run(
+        "<xsl:output cdata-section-elements='x'/>"
+        "<xsl:template match='/'>"
+        "<x>abc]]&gt;</x>"
+        "</xsl:template>",
+        "<r/>"))
+        .find("<![CDATA[abc]]]]><![CDATA[>]]>"), std::string::npos);
+}
+
 /* §16.3 method=text: the string-value of every text node in
  * document order — elements never appear, no declaration, no
  * escaping. Falsifiability: the v1 approximation kept the element

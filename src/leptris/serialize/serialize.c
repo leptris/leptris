@@ -479,21 +479,26 @@ static int html_break_after_elem(LeptrisElement elem,
 }
 
 /* Emit the CDATA BODY, splitting "]]>" across section closes. The
- * caller owns the surrounding <![CDATA[ / ]]> brackets (run merging). */
+ * caller owns the surrounding <![CDATA[ / ]]> brackets (run merging).
+ * The close scan runs to len-3 INCLUSIVE — a "]]>" at the very END
+ * of the span is a close too (the old j+2<len bound missed it and
+ * emitted it raw, terminating the section early — bug-132). */
 static void emit_cdata_body(SerializeBuffer* buf, const char* s, size_t len) {
     size_t i = 0;
     while (i < len) {
         const char* close = NULL;
-        for (size_t j = i; j + 2 < len; j++) {
+        for (size_t j = i; j + 3 <= len; j++) {
             if (s[j] == ']' && s[j+1] == ']' && s[j+2] == '>') {
                 close = s + j;
                 break;
             }
         }
+        /* chunk ends after "]]"; the '>' carries into the reopened
+         * section (i advances by chunk only). */
         size_t chunk = close ? (size_t)(close - (s + i)) + 2 : len - i;
         buffer_append_len(buf, s + i, chunk);
         if (close) buffer_append(buf, "]]><![CDATA[");
-        i += chunk + (close ? 1 : 0);
+        i += chunk;
     }
 }
 
@@ -502,17 +507,18 @@ static void emit_cdata(SerializeBuffer* buf, const char* s, size_t len) {
     size_t i = 0;
     while (i < len) {
         const char* close = NULL;
-        for (size_t j = i; j + 2 < len; j++) {
+        for (size_t j = i; j + 3 <= len; j++) {
             if (s[j] == ']' && s[j+1] == ']' && s[j+2] == '>') {
                 close = s + j;
                 break;
             }
         }
+        /* chunk ends after "]]"; the '>' opens the next section. */
         size_t chunk = close ? (size_t)(close - (s + i)) + 2 : len - i;
         buffer_append(buf, "<![CDATA[");
         buffer_append_len(buf, s + i, chunk);
         buffer_append(buf, "]]>");
-        i += chunk + (close ? 1 : 0);
+        i += chunk;
     }
 }
 
@@ -760,7 +766,7 @@ static char* serialize_rootless_pis(struct leptris_document* doc,
 #define SER_WALK_STACK_MAX 512
 
 typedef struct { LeptrisElement e; size_t nl; int mixed; int cd_open;
-                 int close_brk; } SerFrame;
+                 int close_brk; char* cd_buf; size_t cd_len, cd_cap; } SerFrame;
 
 /* Issue #534: an element whose children include TEXT (non-whitespace)
  * or CDATA is MIXED CONTENT — indenting inside it would change the
@@ -791,6 +797,41 @@ static int ser_children_have_text(LeptrisNode* fc) {
         }
     }
     return 0;
+}
+
+static int ser_frame_cd_append(SerFrame* f, const char* s) {
+    if (!f || !s) return 1;
+    size_t len = strlen(s);
+    if (len == 0) return 1;
+    if (f->cd_len + len + 1 > f->cd_cap) {
+        size_t cap = f->cd_cap ? f->cd_cap * 2 : 128;
+        while (cap < f->cd_len + len + 1) cap *= 2;
+        char* grown = (char*)realloc(f->cd_buf, cap);
+        if (!grown) return 0;
+        f->cd_buf = grown;
+        f->cd_cap = cap;
+    }
+    memcpy(f->cd_buf + f->cd_len, s, len);
+    f->cd_len += len;
+    f->cd_buf[f->cd_len] = '\0';
+    f->cd_open = 1;
+    return 1;
+}
+
+static void ser_frame_cd_flush(SerializeBuffer* buf, SerFrame* f) {
+    if (!f || !f->cd_open) return;
+    buffer_append(buf, "<![CDATA[");
+    if (f->cd_buf && f->cd_len)
+        emit_cdata_body(buf, f->cd_buf, f->cd_len);
+    buffer_append(buf, "]]>");
+    f->cd_open = 0;
+    f->cd_len = 0;
+}
+
+static void ser_frames_free(SerFrame* st, int sp) {
+    if (!st) return;
+    for (int i = 0; i < sp; i++) free(st[i].cd_buf);
+    free(st);
 }
 
 void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, int is_root) {
@@ -857,17 +898,14 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                                   (LeptrisCDATANode*)cur)
                             : leptris_text_get_content(
                                   (LeptrisTextNode*)cur);
-                    if (!st[sp - 1].cd_open) {
-                        buffer_append(buf, "<![CDATA[");
-                        st[sp - 1].cd_open = 1;
+                    if (tc && !ser_frame_cd_append(&st[sp - 1], tc)) {
+                        ser_frames_free(st, sp);
+                        return;
                     }
-                    if (tc) emit_cdata_body(buf, tc, strlen(tc));
                     goto advance;
                 }
-                if (sp > 0 && st[sp - 1].cd_open) {
-                    buffer_append(buf, "]]>");
-                    st[sp - 1].cd_open = 0;
-                }
+                if (sp > 0 && st[sp - 1].cd_open)
+                    ser_frame_cd_flush(buf, &st[sp - 1]);
                 /* §16.2 rawtext parent: mixed-content text inside
                  * script/style is verbatim under method=html. */
                 if (buf->html_method && sp > 0 && st[sp - 1].e) {
@@ -886,10 +924,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 serialize_node_internal(cur, buf);
                 goto advance;
             }
-            if (sp > 0 && st[sp - 1].cd_open) {
-                buffer_append(buf, "]]>");
-                st[sp - 1].cd_open = 0;
-            }
+            if (sp > 0 && st[sp - 1].cd_open)
+                ser_frame_cd_flush(buf, &st[sp - 1]);
             serialize_node_internal(cur, buf);
             goto advance;
         }
@@ -1276,7 +1312,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append(buf, "</");
                 append_qualified_name(buf, epfx, name, nl);
                 buffer_append_char(buf, '>');
-                free(st);
+                ser_frames_free(st, sp);
                 return;
             }
             st = grown;
@@ -1284,10 +1320,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         }
 
         /* An element child interrupts any CDATA run of this parent. */
-        if (sp > 0 && st[sp - 1].cd_open) {
-            buffer_append(buf, "]]>");
-            st[sp - 1].cd_open = 0;
-        }
+        if (sp > 0 && st[sp - 1].cd_open)
+            ser_frame_cd_flush(buf, &st[sp - 1]);
         buffer_append_char(buf, '>');
         int mixed = 0;
         int close_brk = 0;
@@ -1308,6 +1342,9 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         st[sp].nl = nl;
         st[sp].mixed = mixed;
         st[sp].cd_open = 0;
+        st[sp].cd_buf = NULL;
+        st[sp].cd_len = 0;
+        st[sp].cd_cap = 0;
         st[sp].close_brk = close_brk;
         sp++;
         buf->indent++;
@@ -1337,10 +1374,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             sp--;
             buf->indent--;
             LeptrisElement pe = st[sp].e;
-            if (st[sp].cd_open) {   /* close this element's CDATA run */
-                buffer_append(buf, "]]>");
-                st[sp].cd_open = 0;
-            }
+            if (st[sp].cd_open)   /* close this element's CDATA run */
+                ser_frame_cd_flush(buf, &st[sp]);
+            free(st[sp].cd_buf);
+            st[sp].cd_buf = NULL;
             const char* pn = pe->name;
             size_t pnl2 = st[sp].nl;
             const char* pfx2 = leptris_element_get_prefix(pe);
@@ -1371,7 +1408,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * following element into the output (issue #523:
                  * both the garbage results and the O(document)
                  * per-call cost). */
-                free(st);
+                ser_frames_free(st, sp);
                 return;
             }
             cur = (LeptrisNode*)pe;
