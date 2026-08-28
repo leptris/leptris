@@ -1065,3 +1065,116 @@ TEST(XsltBridge, ExsltRegexpAndDate) {
         "<xsl:value-of select=\"string-length(date:date-time()) = 20\"/>"
         "</xsl:template>", "<r/>")), "true");
 }
+
+/* §16.2 xsl:output doctype-system / doctype-public (libxslt suite
+ * bug-152, bug-166, bug-175, bug-206, bug-25-). The DOCTYPE leads
+ * the body, right after the declaration; html method honors the
+ * version="5" shorthand and omits the system id when only a public
+ * id is given. */
+TEST(XsltOutput, DoctypePublicAndSystem) {
+    std::string r = body(run(
+        "<xsl:output method='xml' doctype-public='-//X//Y//EN'"
+        " doctype-system='d.dtd'/>"
+        "<xsl:template match='/'><doc/></xsl:template>",
+        "<r/>"));
+    EXPECT_EQ(r, "<!DOCTYPE doc PUBLIC \"-//X//Y//EN\" \"d.dtd\">\n<doc/>");
+}
+
+TEST(XsltOutput, DoctypeSystemOnly) {
+    std::string r = body(run(
+        "<xsl:output method='xml' doctype-system='d.dtd'/>"
+        "<xsl:template match='/'><doc/></xsl:template>",
+        "<r/>"));
+    EXPECT_EQ(r, "<!DOCTYPE doc SYSTEM \"d.dtd\">\n<doc/>");
+}
+
+TEST(XsltOutput, DoctypePublicOnly) {
+    std::string r = body(run(
+        "<xsl:output method='xml' doctype-public='-//X//Y//EN'/>"
+        "<xsl:template match='/'><doc/></xsl:template>",
+        "<r/>"));
+    EXPECT_EQ(r, "<!DOCTYPE doc PUBLIC \"-//X//Y//EN\">\n<doc/>");
+}
+
+TEST(XsltOutput, HtmlVersion5UsesBareDoctype) {
+    std::string r = body(run(
+        "<xsl:output method='html' version='5'/>"
+        "<xsl:template match='/'><html/></xsl:template>",
+        "<r/>"));
+    EXPECT_EQ(r, "<!DOCTYPE html>\n<html></html>");
+}
+
+TEST(XsltOutput, HtmlPublicOnlyOmitsSystemId) {
+    std::string r = body(run(
+        "<xsl:output method='html' version='4.0'"
+        " doctype-public='-//W3C//DTD HTML 4.01//EN'/>"
+        "<xsl:template match='/'><html><body>x</body></html></xsl:template>",
+        "<r/>"));
+    EXPECT_EQ(r.substr(0, 51),
+              "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01//EN\">\n");
+}
+
+/* No doctype attributes → no DOCTYPE (the default contract most
+ * transforms rely on). */
+TEST(XsltOutput, NoDoctypeAttrsMeansNoDoctype) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'><doc/></xsl:template>", "<r/>")),
+        "<doc/>");
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'><html/></xsl:template>", "<r/>")),
+        "<html></html>");
+}
+
+/* §5.2: patterns with position predicates apply per sibling
+ * position — match="text()[2]" fires ONLY for the parent's second
+ * text node (libxslt bug-182). */
+TEST(XsltPatterns, PositionPredicateOnTextNodes) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='node()'/>"
+        "<xsl:template match='text()[2]'>"
+        "[<xsl:value-of select='.'/>]</xsl:template>"
+        "<xsl:template match='/'>"
+        "<body><xsl:apply-templates select='/root/body/node()'/></body>"
+        "</xsl:template>",
+        "<root><body><b>1</b> t1 <b>2</b> t2 </body></root>")),
+        "<body>[ t2 ]</body>");
+}
+
+/* §7.1.1: xsl:element's name is an ATTRIBUTE VALUE TEMPLATE
+ * (libxslt bug-117/179/35-: {local-name()}, {concat('a','b')},
+ * prefix:{...}, {$var}). */
+TEST(XsltElement, NameAvtConcat) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:element name=\"{concat('foo', 'bar')}\">x</xsl:element>"
+        "</xsl:template>", "<r/>")),
+        "<foobar>x</foobar>");
+}
+
+TEST(XsltElement, NameAvtLocalNameWithPrefix) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/*'>"
+        "<xsl:element name='s:{local-name()}' xmlns:s='urn:s'>"
+        "hi</xsl:element>"
+        "</xsl:template>", "<r/>")),
+        "<s:r xmlns:s=\"urn:s\">hi</s:r>");
+}
+
+TEST(XsltElement, NameAvtVariable) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='n' select=\"'out'\"/>"
+        "<xsl:element name=\"{$n}\"/>"
+        "</xsl:template>", "<r/>")),
+        "<out/>");
+}
+
+/* Non-AVT names take the literal path unchanged. */
+TEST(XsltElement, PlainNameStillLiteral) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:element name='plain'>x</xsl:element>"
+        "</xsl:template>", "<r/>")),
+        "<plain>x</plain>");
+}

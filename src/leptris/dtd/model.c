@@ -6,6 +6,8 @@
  */
 
 #include "model.h"
+#include "../leptris_internal.h"   /* full document struct */
+#include "../../include/leptris.h"   /* element/node public API */
 #include "../memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
@@ -491,4 +493,41 @@ DTDNotationDecl* ttdtd_lookup_notation(const LeptrisDTD* dtd, const char* name) 
 
     size_t name_len = strlen(name);
     return (DTDNotationDecl*)leptris_hash_table_get(dtd->tables.notations, name, name_len);
+}
+/* Issue #606: apply ATTLIST default (and #FIXED) values to a parsed
+ * tree. Declared here and in xslt_internal.h (the XSLT boundary is
+ * the only external caller). Plain parse OPTS IN via LEPTRIS_PARSE_DTDATTR (libxml2
+ * XML_PARSE_DTDATTR parity); the XSLT engine applies them at the
+ * transform boundary — libxslt's document loader turns DTDATTR on by
+ * default, so stylesheet processing always sees defaulted attributes. */
+void leptris_dtd_apply_attribute_defaults(struct leptris_document* doc) {
+    if (!doc || !doc->dtd || !doc->new_dom_root) return;
+    const LeptrisDTD* dtd = (const LeptrisDTD*)doc->dtd;
+    if (!dtd->default_decl_count) return;
+    /* Iterative subtree walk (matches direct_parse's post-pass). */
+    LeptrisNodeRef stack[128];
+    int sp = 0;
+    stack[sp++] = leptris_element_as_node((LeptrisElement)doc->new_dom_root);
+    while (sp > 0) {
+        LeptrisNodeRef n = stack[--sp];
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* name = leptris_element_name(e);
+        if (name) {
+            for (size_t i = 0; i < dtd->default_decl_count; i++) {
+                DTDAttributeDecl* ad = dtd->default_decls[i];
+                if (!ad->element_name || strcmp(ad->element_name, name) != 0)
+                    continue;
+                if (leptris_element_attribute(e, ad->attr_name) != NULL)
+                    continue;
+                leptris_element_set_attribute(e, ad->attr_name,
+                                              ad->default_value);
+            }
+        }
+        for (LeptrisNodeRef c = leptris_node_first_child(n);
+             c && sp < 128; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT)
+                stack[sp++] = c;
+        }
+    }
 }

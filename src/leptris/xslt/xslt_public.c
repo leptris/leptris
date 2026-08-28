@@ -377,7 +377,42 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
         const char* end = strstr(first, "?>");
         if (end) decl_len = (size_t)(end - first) + 2;
     }
-    size_t cap = pre_len + (first ? strlen(first) : 0) + 64, total = 0;
+    /* §16.2 doctype-system/doctype-public: `<!DOCTYPE name ...>`
+     * right after the declaration. The html method's version="5"
+     * shorthand is the bare HTML5 doctype; html with only a public
+     * id omits the system id (bug-175). */
+    char doctype[512];
+    size_t doctype_len = 0;
+    doctype[0] = '\0';
+    if (root) {
+        const char* pub = ex->sheet->out_doctype_public;
+        const char* sys = ex->sheet->out_doctype_system;
+        int html5 = html_method && ex->sheet->out_version &&
+                    ex->sheet->out_version[0] == '5';
+        const char* name = leptris_element_name(root);
+        if (!name) name = "doc";
+        if (html5) {
+            doctype_len = (size_t)snprintf(doctype, sizeof doctype,
+                                           "<!DOCTYPE html>\n");
+        } else if (pub && sys) {
+            doctype_len = (size_t)snprintf(
+                doctype, sizeof doctype,
+                "<!DOCTYPE %s PUBLIC \"%s\" \"%s\">\n", name, pub, sys);
+        } else if (pub) {
+            doctype_len = (size_t)snprintf(
+                doctype, sizeof doctype,
+                "<!DOCTYPE %s PUBLIC \"%s\">\n", name, pub);
+        } else if (sys) {
+            doctype_len = (size_t)snprintf(
+                doctype, sizeof doctype,
+                "<!DOCTYPE %s SYSTEM \"%s\">\n", name, sys);
+        } else {
+            doctype_len = 0;
+        }
+        if (doctype_len >= sizeof doctype) doctype_len = sizeof doctype - 1;
+    }
+    size_t cap = doctype_len + pre_len + (first ? strlen(first) : 0) + 64,
+           total = 0;
     char* acc = (char*)malloc(cap);
     if (!acc) {
         free(first_pre);
@@ -389,6 +424,13 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     if (decl_len) {
         memcpy(acc, first, decl_len);
         total = decl_len;
+    }
+    if (doctype_len) {
+        memcpy(acc + total, doctype, doctype_len);
+        total += doctype_len;
+        /* The serializer breaks the line after the declaration; the
+         * doctype carries its own newline — drop the duplicate. */
+        if (first && first[decl_len] == '\n') decl_len++;
     }
     if (pre_len) {
         memcpy(acc + total, first_pre, pre_len);

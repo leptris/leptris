@@ -190,9 +190,17 @@ typedef struct leptris_iterparse* LeptrisIterparse;
  * Pretty-printed documents carry one ws-only node per element;
  * dropping them removes ~6ns of create+wire per element and wins
  * the whitespace-heavy parse shapes outright. */
+/* LEPTRIS_PARSE_DTDATTR applies DTD ATTLIST default (and #FIXED)
+ * attribute values to matching elements at parse time. OPT-IN, the
+ * libxml2 XML_PARSE_DTDATTR default: without it a non-validating
+ * parse leaves defaulted attributes out of the tree (XML 1.0 §5
+ * permits either; the ecosystem compares against libxml2/Nokogiri,
+ * and W3C C14N 1.1 example 3.3's canonical form excludes them —
+ * issue #606). */
 typedef enum {
     LEPTRIS_PARSE_DEFAULT     = 0,
-    LEPTRIS_PARSE_DROP_WS_TEXT = 1u
+    LEPTRIS_PARSE_DROP_WS_TEXT = 1u,
+    LEPTRIS_PARSE_DTDATTR     = 2u
 } LeptrisParseFlags;
 
 typedef struct {

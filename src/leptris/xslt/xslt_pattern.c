@@ -12,12 +12,30 @@
  * special-cased (the evaluator's context is the root element, not a
  * document node, so child::name cannot select the root itself). */
 #include "xslt_internal.h"
+#include "../dom/element.h"   /* LeptrisAttributeNode */
 #include <stdio.h>
+
+/* Node identity for pattern membership. The attribute/namespace
+ * axes mint FRESH synthetic nodes on every evaluation — pointer
+ * equality never holds for them. Attributes are value-objects:
+ * identity is (owner, name). */
+static int same_node(LeptrisNodeRef a, LeptrisNodeRef b) {
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    if (leptris_node_get_type(a) != LEPTRIS_NODE_TYPE_ATTRIBUTE ||
+        leptris_node_get_type(b) != LEPTRIS_NODE_TYPE_ATTRIBUTE)
+        return 0;
+    LeptrisAttributeNode* aa = (LeptrisAttributeNode*)a;
+    LeptrisAttributeNode* ab = (LeptrisAttributeNode*)b;
+    return aa->owner == ab->owner &&
+           aa->name && ab->name && strcmp(aa->name, ab->name) == 0;
+}
 
 static int nodeset_contains(LeptrisXPathResult r, LeptrisElement node) {
     size_t n = leptris_xpath_result_count(r);
     for (size_t i = 0; i < n; i++) {
-        if (leptris_xpath_result_get_node(r, i) == (LeptrisNodeRef)node)
+        if (same_node(leptris_xpath_result_get_node(r, i),
+                      (LeptrisNodeRef)node))
             return 1;
     }
     return 0;
@@ -79,12 +97,32 @@ int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
         for (LeptrisElement ctx = node; ctx; ) {
             if (selects_from(alt->expr, doc, ctx, node, ns)) return 1;
             LeptrisElement up = leptris_node_parent((LeptrisNodeRef)ctx);
+            if (!up &&
+                leptris_node_get_type((LeptrisNodeRef)ctx) ==
+                    LEPTRIS_NODE_TYPE_ATTRIBUTE) {
+                /* Attributes hang off their owner, not the child
+                 * chain — @-pattern rungs evaluate from the owner
+                 * (this hop fires at the node's own rung too: an
+                 * attribute's parent IS its owner). */
+                up = ((LeptrisAttributeNode*)ctx)->owner;
+            }
             if (!up) {
-                if (ctx != root) break;         /* detached: stop */
-                /* root's parent = the document node (final rung) */
                 LeptrisElement dnode = (LeptrisElement)
                     leptris_document_get_node(
                         (struct leptris_document*)doc);
+                if (ctx != root) {
+                    /* Detached subtree — or a document-level node
+                     * (prolog/epilog comment/PI, parentless by
+                     * design since #580). Offer the document rung:
+                     * child-axis patterns (node(),
+                     * processing-instruction()) must still match
+                     * these from the document's child axis. */
+                    if (dnode && dnode != (LeptrisElement)node &&
+                        selects_from(alt->expr, doc, dnode, node, ns))
+                        return 1;
+                    break;
+                }
+                /* root's parent = the document node (final rung) */
                 if (!dnode || dnode == (LeptrisElement)node) break;
                 if (selects_from(alt->expr, doc, dnode, node, ns))
                     return 1;

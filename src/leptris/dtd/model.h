@@ -12,6 +12,15 @@
 #include <stdbool.h>
 #include "../common/types_internal.h"   /* Single source for LeptrisMemoryPool / LeptrisDTD */
 
+struct leptris_document;
+
+/* Issue #606: materialize ATTLIST default (and #FIXED) values on the
+ * document's tree. Plain parse opts in via LEPTRIS_PARSE_DTDATTR
+ * (libxml2 XML_PARSE_DTDATTR parity); the XSLT engine applies at the
+ * transform boundary (libxslt loader default). No-op without a DTD
+ * or default declarations. */
+void leptris_dtd_apply_attribute_defaults(struct leptris_document* doc);
+
 /**
  * DTD content type
  */
