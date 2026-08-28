@@ -368,7 +368,19 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
                  */
             } else {
                 DEBUG_LOG("          NO MATCH, skipping");
-                /* Don't increment write_pos - effectively deletes this node */
+                /* Don't increment write_pos - effectively deletes this
+                 * node. owns_* sets carry heap synthetic nodes: the
+                 * dropped entry's only reference dies HERE (the
+                 * nodeset free only walks surviving entries). */
+                if (nodes->owns_attributes &&
+                    node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ATTRIBUTE)
+                    xpath_nodeset_dispose_node(node);
+                else if (nodes->owns_namespaces &&
+                         node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_NAMESPACE)
+                    xpath_nodeset_dispose_node(node);
+                else if (nodes->owns_synthetic_text &&
+                         node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT)
+                    xpath_nodeset_dispose_node(node);
             }
         }
 

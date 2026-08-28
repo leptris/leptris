@@ -2572,6 +2572,7 @@ void xslt_exec_free(XsltExec* ex) {
     xslt_docs_free(ex);
     xslt_bridge_free(ex);
     xslt_ufn_free(ex);
+    xslt_gids_free(ex);
     if (ex->fn_result) leptris_xpath_result_free(ex->fn_result);
     while (ex->vars) xslt_pop_var(ex, NULL);
     while (ex->frag_nodes) {
@@ -2632,12 +2633,17 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     strip_source_whitespace(ex);
 
     /* Globals — each with its DECLARING element's namespace
-     * context (included sheets bind their own prefixes, bug-36-). */
+     * context (included sheets bind their own prefixes, bug-36-).
+     * §11: the select expression evaluates with the source
+     * DOCUMENT node as context (relative paths resolve against the
+     * source, bug-224). */
+    LeptrisElement globals_ctx = (LeptrisElement)
+        leptris_document_get_node((struct leptris_document*)source);
     for (const XsltInstr* g = sheet->globals; g; g = g->next) {
         if (g->kind == XSLT_INSTR_VARIABLE) {
             LeptrisXPathNsSet saved_gns = ex->current_ns;
             ex->current_ns = g->ns;
-            op_variable(ex, g, NULL);
+            op_variable(ex, g, globals_ctx);
             ex->current_ns = saved_gns;
         }
     }

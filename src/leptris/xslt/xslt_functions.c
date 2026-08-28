@@ -102,6 +102,44 @@ static double arg_number(XPathContext* ctx, XPathASTNode** args,
  * bridge is xslt_fn_current_real (below) — it must read the exec
  * here since user_data wiring happens during registry init. */
 
+/* generate-id numbering (bug-224): libxslt's deterministic
+ * per-transform counter — "id" + 1-based sequence assigned in
+ * first-request order; the same node re-queried returns the same
+ * id. The map is exec-owned (freed with the transform). */
+typedef struct {
+    const void** nodes;
+    size_t n, cap;
+} XsltGidMap;
+
+static size_t gid_for(XsltExec* ex, const void* node) {
+    XsltGidMap* m = (XsltGidMap*)ex->gids;
+    if (!m) {
+        m = (XsltGidMap*)calloc(1, sizeof(*m));
+        if (!m) return 0;
+        ex->gids = m;
+    }
+    for (size_t i = 0; i < m->n; i++)
+        if (m->nodes[i] == node) return i + 1;
+    if (m->n == m->cap) {
+        size_t cap = m->cap ? m->cap * 2 : 16;
+        const void** grown =
+            (const void**)realloc(m->nodes, cap * sizeof(*grown));
+        if (!grown) return 0;
+        m->nodes = grown;
+        m->cap = cap;
+    }
+    m->nodes[m->n++] = node;
+    return m->n;
+}
+
+void xslt_gids_free(XsltExec* ex) {
+    XsltGidMap* m = ex ? (XsltGidMap*)ex->gids : NULL;
+    if (!m) return;
+    free(m->nodes);
+    free(m);
+    ex->gids = NULL;
+}
+
 static struct leptris_xpath_result* xslt_fn_generate_id(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
     XsltExec* ex = exec_from(ctx);
@@ -116,8 +154,8 @@ static struct leptris_xpath_result* xslt_fn_generate_id(
         target = ex ? ex->current_node : NULL;
     }
     char buf[32];
-    if (!target) buf[0] = '\0';
-    else snprintf(buf, sizeof(buf), "n%zx", (size_t)target);
+    if (!target || !ex) buf[0] = '\0';
+    else snprintf(buf, sizeof(buf), "id%zu", gid_for(ex, target));
     return res_string(buf);
 }
 

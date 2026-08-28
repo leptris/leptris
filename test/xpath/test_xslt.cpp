@@ -1400,6 +1400,40 @@ TEST(XsltAttributeSets, ExpandedNameMatchesAcrossPrefixes) {
     EXPECT_NE(r.find("<elem attr=\"value\"/>"), std::string::npos) << r;
 }
 
+/* bug-113: a function-call pattern (id(...)) takes the 0.5
+ * "otherwise" default priority — not the bare-QName 0.0 — so it
+ * beats a QName template on ties. */
+TEST(XsltTemplates, FunctionCallPatternDefaultPriority) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match=\"id('x')\">FUN</xsl:template>"
+        "<xsl:template match='dest'>NAME</xsl:template>",
+        "<r><dest id='x'/></r>")),
+        "FUN");
+}
+
+/* bug-224: generate-id emits libxslt's deterministic sequential
+ * ids — one counter per transform, same node re-queried returns the
+ * same id. */
+TEST(XsltFunctions, GenerateIdSequentialAndStable) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<r><xsl:value-of select='generate-id(//i[1])'/>"
+        "-<xsl:value-of select='generate-id(//i[2])'/>"
+        "-<xsl:value-of select='generate-id(//i[1])'/></r>"
+        "</xsl:template>",
+        "<d><i/><i/></d>")),
+        "<r>id1-id2-id1</r>");
+    /* bug-224 shape: ids computed in GLOBAL variables. */
+    EXPECT_EQ(body(run(
+        "<xsl:variable name='v1' select='generate-id(d/i[1])'/>"
+        "<xsl:variable name='v2' select='generate-id(d/i[2])'/>"
+        "<xsl:template match='/'>"
+        "<r><xsl:value-of select='$v1'/>-<xsl:value-of select='$v2'/></r>"
+        "</xsl:template>",
+        "<d><i/><i/></d>")),
+        "<r>id1-id2</r>");
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */
