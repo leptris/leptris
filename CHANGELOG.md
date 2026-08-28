@@ -1,5 +1,42 @@
 ## [Unreleased]
 
+## [1.9.9] - 2026-08-28
+
+### Added
+
+- `leptris_document_serialize_ext` + `LeptrisSerializeExtOptions`
+  (#129 ask): `indent_text=1` hands ALL whitespace to the formatter
+  — text and mixed content indent (display form). The frozen options
+  struct is untouched.
+- `leptris_document_remove_pi(doc, target|index)` (#612): unlinks a
+  document-level PI by target or index
+
+### Fixed
+
+- parse-created document-level PIs/comments carry document linkage
+  — the setters now work on them (#612, leptris-ruby#92)
+- `leptris_document_set_root` splices the new root into an existing
+  document-child chain; chainless docs fall back to the root in the
+  document node view (leptris-ruby#91)
+- cdata-section runs split `]]>` across node boundaries (bug-132,
+  bug-90); attribute axis expands entities (bug-59); html PIs close
+  SGML-style (bug-11-); top-level variables evaluate with their
+  declaring element's ns context (bug-36-); built-in element rule
+  routes text through template selection (bug-171, bug-73);
+  xsl:decimal-format separators are full UTF-8 strings with
+  pattern-derived grouping size (bug-222)
+
+libxslt suite 144 → 152/205.
+
+### Fixed
+
+- free replaced decimal-format defaults + uri/local (LSan) (xslt)
+- built-in text rule routes through templates; decimal-format UTF-8 separators + pattern grouping size (bug-171, bug-73, bug-222) (xslt)
+- attribute-axis entity expansion, html PI form, global-variable ns context (bug-59, bug-11-, bug-36-) (xslt)
+- cdata-section runs split ']]>' across node boundaries (bug-132) (serialize)
+
+
+
 ## [1.9.8] - 2026-08-28
 
 ### Fixed
