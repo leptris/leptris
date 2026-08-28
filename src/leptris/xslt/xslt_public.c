@@ -118,9 +118,11 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
     return out;
 }
 
-/* One fragment node by kind: element → subtree serialize;
- * comment/PI/text → their literal serialization. */
-static char* serialize_frag_node_text(LeptrisNodeRef n) {
+/* One fragment node by kind: element -> subtree serialize;
+ * comment/PI/text -> their literal serialization. Under method=html
+ * a PI closes SGML-style — `<?target data>`, no `?` (libxml2's
+ * html serializer; libxslt bug-11-). */
+static char* serialize_frag_node_text(LeptrisNodeRef n, int html) {
     int ty = leptris_node_get_type(n);
     if (ty == LEPTRIS_NODE_TYPE_ELEMENT)
         return leptris_element_serialize((LeptrisElement)n, NULL);
@@ -139,9 +141,9 @@ static char* serialize_frag_node_text(LeptrisNodeRef n) {
     char* out = (char*)malloc(cap + 8);
     if (!out) return NULL;
     if (ty == LEPTRIS_NODE_TYPE_PI)
-        snprintf(out, cap + 8, "<?%s%s%s?>",
+        snprintf(out, cap + 8, "<?%s%s%s%s",
                  target ? target : "", body && *body ? " " : "",
-                 body ? body : "");
+                 body ? body : "", html ? ">" : "?>");
     else if (ty == LEPTRIS_NODE_TYPE_COMMENT)
         snprintf(out, cap + 8, "<!--%s-->", body ? body : "");
     else
@@ -296,7 +298,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
         }
         for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
              f = f->next) {
-            char* piece = serialize_frag_node_text(f->node);
+            char* piece = serialize_frag_node_text(f->node, html_method);
             if (!piece) continue;
             size_t pl = strlen(piece);
             while (len + pl + 1 > cap) cap *= 2;
@@ -355,7 +357,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             first_pre[0] = 0;
             for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
                  f = f->next) {
-                char* piece = serialize_frag_node_text(f->node);
+                char* piece = serialize_frag_node_text(f->node, html_method);
                 if (!piece) continue;
                 size_t pl = strlen(piece);
                 while (pre_len + pl + 1 > pc) {
@@ -450,7 +452,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     for (LeptrisNodeRef sib = leptris_node_next_sibling(
              leptris_element_as_node(root));
          sib; sib = leptris_node_next_sibling(sib)) {
-        char* piece = serialize_frag_node_text(sib);
+        char* piece = serialize_frag_node_text(sib, html_method);
         if (piece) {
             size_t pl = strlen(piece);
             while (total + pl + 1 > cap) cap *= 2;

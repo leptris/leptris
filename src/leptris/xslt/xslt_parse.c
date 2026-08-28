@@ -442,6 +442,10 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->name = leptris_strdup(leptris_element_attribute(e, "name"));
         in->select = compile_attr_sp(sp, e, "select");
         in->is_param = (local[0] == 'p');   /* xsl:param (§11.6) */
+        /* §11.1: the select resolves with the DECLARING element's
+         * in-scope bindings — top-level variables of included
+         * sheets carry their own (bug-36-). */
+        in->ns = build_ns_context((LeptrisElement)e);
         in->child = parse_content(sp, e);
         return in;
     }

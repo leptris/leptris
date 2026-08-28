@@ -40,6 +40,7 @@
 #include "functions.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"
+#include "../common/entities.h"
 #include "../dom/element_index.h"
 #include "../dom/text.h"
 #include "../dom/node.h"
@@ -570,9 +571,27 @@ struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM*
                     an->name = NULL;
                 }
 
-                /* Copy value (single representation: from the view) */
+                /* Copy value (single representation: from the view).
+                 * Entity-bearing views decode first — the axis must
+                 * return the same string the accessor returns (the
+                 * raw &#38; bytes double-escaped downstream, bug-59). */
                 LeptrisStringView vv = attr->value_view;
-                if (vv.length > 0 && vv.data) {
+                if (attr_has_entities(attr) && vv.length > 0 && vv.data) {
+                    LeptrisMemoryPool* pool =
+                        leptris_element_get_pool(elem);
+                    char* dec = pool
+                        ? leptris_decode_entities_view(&vv, pool)
+                        : NULL;
+                    if (dec) {
+                        an->value = leptris_strdup(dec);
+                    } else {
+                        an->value = (char*)malloc(vv.length + 1);
+                        if (an->value) {
+                            memcpy(an->value, vv.data, vv.length);
+                            an->value[vv.length] = '\0';
+                        }
+                    }
+                } else if (vv.length > 0 && vv.data) {
                     an->value = (char*)malloc(vv.length + 1);
                     if (an->value) {
                         memcpy(an->value, vv.data, vv.length);

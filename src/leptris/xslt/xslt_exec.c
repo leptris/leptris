@@ -2366,9 +2366,15 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
 
     strip_source_whitespace(ex);
 
-    /* Globals. */
+    /* Globals — each with its DECLARING element's namespace
+     * context (included sheets bind their own prefixes, bug-36-). */
     for (const XsltInstr* g = sheet->globals; g; g = g->next) {
-        if (g->kind == XSLT_INSTR_VARIABLE) op_variable(ex, g, NULL);
+        if (g->kind == XSLT_INSTR_VARIABLE) {
+            LeptrisXPathNsSet saved_gns = ex->current_ns;
+            ex->current_ns = g->ns;
+            op_variable(ex, g, NULL);
+            ex->current_ns = saved_gns;
+        }
     }
     ex->global_vars = ex->vars;   /* §11: the call-template reset point */
     if (!ex->terminated) {
