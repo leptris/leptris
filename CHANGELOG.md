@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.12] - 2026-08-28
+
+### Fixed
+
+- attribute namespaces, strip-space order (xslt)
+- built-in rules for selected text items; apply-imports fallback; xsl:copy scope (xslt)
+- libxslt indent stops below whitespace-mixed results (serialize)
+
+
+
 ## [1.9.11] - 2026-08-28
 
 libxslt general suite: 153 -> 173/205.
