@@ -2,15 +2,42 @@
 
 ## [1.9.11] - 2026-08-28
 
+libxslt general suite: 153 -> 173/205.
+
 ### Fixed
 
-- xsl:element no longer copies in-scope namespaces (xslt)
-- copy-of namespace nodes; raw apostrophes in attrs (xslt,serialize)
-- extension-element fallback; skip redundant element ns decl (xslt)
-- namespace declarations emit in declaration order (serialize,xslt)
-- prefixed attribute node-tests resolve by namespace URI (xpath)
-- function-call pattern priority, generate-id sequence, globals context; ns-node filter leak (xslt)
-- priority attr, count/from patterns, ns numbering, attribute sets (xslt)
+- Template selection parses the `priority` attribute (5.4) and no
+  longer fast-paths child-step patterns onto the root element
+  (libxslt bugs 157, 186, 87)
+- `xsl:number`: count/from patterns evaluate with the variable
+  frame in scope; the default count is node kind + expanded name, so
+  namespace and attribute nodes number within their owner's list and
+  level=any from a namespace node resolves through the owner
+  (bugs 214, 186, 218, 199)
+- Attribute sets (7.1.4/12.1.4): precedence-ordered union with
+  import ranks, own-attributes-first vectors, QName lookup by
+  namespace URI, and a skip-if-exists use-list applied after literal
+  attributes (bugs 131, 189, 190, 217)
+- Function-call patterns take the 0.5 "otherwise" default priority;
+  generate-id() emits libxslt's deterministic sequential ids; global
+  variables evaluate against the source document node (bugs 113, 224)
+- Prefixed attribute node-tests resolve by namespace URI, not
+  prefix spelling (bug 97)
+- Namespace declarations serialize in declaration order: the
+  default is no longer hoisted ahead of prefixed declarations, the
+  literal result element's own prefix binding leads, and the default
+  emits at its declared position (bugs 104, 71, 150, 117)
+- Unknown extension elements run only their `xsl:fallback` children
+  (bug 220); `xsl:element` no longer copies in-scope namespaces and
+  skips declarations the result ancestors already provide
+  (bugs 92, 179)
+- `copy-of` of a namespace node adds the declaration onto the
+  pending parent (prefixed bindings only; xml and duplicates
+  skipped) (bugs 38-, 54); the serializer leaves apostrophes raw in
+  double-quoted attribute values (bug 86)
+- Memory: the in-place predicate filter no longer leaks heap-owned
+  synthetic namespace/attribute/text nodes dropped from owned
+  nodesets (Linux LSan)
 
 
 
