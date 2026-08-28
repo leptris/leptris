@@ -63,6 +63,7 @@ typedef struct SerializeBuffer {
     int indent;        /* Current indentation level (for pretty-printing) */
     int indent_spaces; /* Number of spaces per indent level (0 = compact) */
     int indent_text;   /* #129: formatter also owns text/mixed whitespace */
+    int ws_mixed;       /* XSLT: ws-only text children count as mixed */
     int at_line_start; /* last emitted byte was a newline (dedups
                         * consecutive newlines under indent_text) */
     /* §16.1 cdata-section-elements: QNames whose text children emit
@@ -114,6 +115,9 @@ typedef struct {
     size_t cdata_element_count;
     int html_method;                     /* §16.2 method="html" */
     int indent_text;                     /* #129: indent text/mixed too */
+    int ws_mixed;                         /* XSLT results: ws-only text
+                                              children count as mixed
+                                              (libxslt bug-98) */
 } LeptrisSerializeExtended;
 
 LEPTRIS_API char* leptris_document_serialize_ext(

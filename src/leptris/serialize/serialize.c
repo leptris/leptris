@@ -784,6 +784,17 @@ typedef struct { LeptrisElement e; size_t nl; int mixed; int cd_open;
  * reparse). libxml2 keeps such elements on one line; so do we.
  * Whitespace-only text nodes are formatting artifacts and do NOT
  * count (pretty documents keep indenting). */
+/* XSLT-result variant: WHITESPACE-ONLY text children count —
+ * libxslt's serializer stops formatting below any text node
+ * (bug-98: the copied source whitespace is the visible indent). */
+static int ser_children_have_any_text(LeptrisNode* fc) {
+    for (LeptrisNode* c = fc; c; c = leptris_node_get_next_sibling(c)) {
+        if (c->type == LEPTRIS_NODE_TYPE_CDATA) return 1;
+        if (c->type == LEPTRIS_NODE_TYPE_TEXT) return 1;
+    }
+    return 0;
+}
+
 static int ser_children_have_text(LeptrisNode* fc) {
     for (LeptrisNode* c = fc; c; c = leptris_node_get_next_sibling(c)) {
         if (c->type == LEPTRIS_NODE_TYPE_CDATA) return 1;
@@ -1383,7 +1394,13 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             /* #129 indent_text: the formatter owns ALL whitespace —
              * no element is "mixed" for layout purposes. */
             if (buf->indent_spaces > 0 && !buf->indent_text)
-                mixed = ser_children_have_text(fc);
+                mixed = buf->ws_mixed
+                    ? ser_children_have_any_text(fc)
+                    : ser_children_have_text(fc);
+            /* libxslt: once an element is mixed, formatting stops
+             * for the whole subtree below it (bug-98) — mixed
+             * inherits down the frame stack. */
+            if (!mixed && sp > 0 && st[sp - 1].mixed) mixed = 1;
             if (buf->indent_spaces > 0 && !mixed)
                 buffer_append_newline(buf);
         }
@@ -1446,8 +1463,16 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     if (html_break_after_elem(
                             pe, pn, pnl2, html_elem_flags_ci(pn, pnl2)))
                         buffer_append_newline(buf);
-                } else {
-                    buffer_append_newline(buf);
+                } else if (buf->indent_spaces > 0) {
+                    /* Formatter-owned separator between element
+                     * children — suppressed when the next sibling
+                     * is a TEXT node: under a mixed parent its
+                     * verbatim content already carries the layout
+                     * (libxslt bug-98). */
+                    LeptrisNode* nx = leptris_node_get_next_sibling(
+                        (LeptrisNode*)pe);
+                    if (!nx || nx->type != LEPTRIS_NODE_TYPE_TEXT)
+                        buffer_append_newline(buf);
                 }
             }
             if (sp == 0 && (LeptrisNode*)pe == (LeptrisNode*)root_elem) {
@@ -1637,6 +1662,7 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
          * is a no-op at indent_spaces == 0. */
         buf->html_method = extended->html_method != 0;
         buf->indent_text = extended->indent_text != 0;
+        buf->ws_mixed = extended->ws_mixed != 0;
     }
 
     /* Output UTF-8 BOM if present in original */
