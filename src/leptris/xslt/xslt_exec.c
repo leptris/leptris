@@ -1879,8 +1879,33 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
     char* ns_avt = in->ns_uri && in->ns_uri[0]
                        ? eval_avt(ex, in->ns_uri, node) : NULL;
     if (ns_avt && !ns_avt[0]) { free(ns_avt); ns_avt = NULL; }
+    char* pfx_ns = NULL;
+    if (!ns_avt) {
+        /* A literal-prefixed name binds through the instruction's
+         * ns context (7.1.1) — the declaration follows the element,
+         * not the whole in-scope set (bug-92 vs bug-117/179). */
+        const char* nc = strchr(name, ':');
+        if (nc && nc != name && in->ns) {
+            const char* u = leptris_xpath_ns_lookup(
+                (const struct leptris_xpath_ns_map*)in->ns, name,
+                (size_t)(nc - name));
+            if (u) pfx_ns = leptris_strdup(u);
+        }
+    }
     LeptrisElement e = out_append_elem(ex, ex->pending_parent, name,
-                                       ns_avt);
+                                       ns_avt ? ns_avt : pfx_ns);
+    if (pfx_ns) {
+        const char* en2 = leptris_element_name(e);
+        const char* c2 = en2 ? strchr(en2, ':') : NULL;
+        if (c2) {
+            char p2[80];
+            size_t pl2 = (size_t)(c2 - en2);
+            snprintf(p2, sizeof(p2), "%.*s", (int)pl2, en2);
+            if (!result_ns_in_scope(e, p2, pfx_ns))
+                leptris_element_add_namespace_definition(e, p2, pfx_ns);
+        }
+        free(pfx_ns);
+    }
     free(name);
     if (!e) { free(ns_avt); return -1; }
     if (ns_avt) {
@@ -1900,14 +1925,10 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
             leptris_element_add_namespace_definition(e, dpfx, ns_avt);
         free(ns_avt);
     }
-    /* §7.1: in-scope declarations from the instruction. */
-    for (size_t i = 0; i < in->ns_out_count; i++) {
-        const char* cur = leptris_element_namespace_for_prefix(
-            e, in->ns_out_pfx[i]);
-        if (cur && strcmp(cur, in->ns_out_uri[i]) == 0) continue;
-        leptris_element_add_namespace_definition(e, in->ns_out_pfx[i],
-                                                 in->ns_out_uri[i]);
-    }
+    /* §7.1.1: xsl:element does NOT copy the instruction's
+     * in-scope declarations — only literal result elements do
+     * (libxslt bug-92). The element's own namespace (name prefix
+     * + namespace attribute) is declared above. */
     xslt_apply_attr_sets(ex, in, e, node);
     LeptrisElement saved = ex->pending_parent;
     ex->pending_parent = e;

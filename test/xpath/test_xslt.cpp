@@ -1553,6 +1553,31 @@ TEST(XsltCopyOf, NamespaceNode) {
         "<elem xmlns:foo=\"urn:f\"/>");
 }
 
+/* bug-92: xsl:element does NOT copy the instruction's in-scope
+ * namespace declarations onto the result (only literal result
+ * elements do, 7.1.1). */
+TEST(XsltElement, DoesNotCopyInScopeNamespaces) {
+    std::string sheet =
+        "<xsl:stylesheet version='1.0'"
+        " xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xsl:template match='/'>"
+        "<xsl:element name='toto'>x</xsl:element>"
+        "</xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_EQ(r, "<toto>x</toto>") << r;
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */

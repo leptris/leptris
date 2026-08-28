@@ -26,7 +26,6 @@ bug-65
 bug-82
 bug-89
 bug-90
-bug-92
 bug-95
 bug-98
 bug-99
