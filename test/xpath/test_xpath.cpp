@@ -1526,3 +1526,28 @@ TEST(VarBoundEval, UndefinedVariableBareIsAnError) {
     leptris_xpath_variable_set_free(vs);
     leptris_document_free(d);
 }
+
+/* The attribute AXIS must expand entities/character references in
+ * values — value-of/@attr through XPath sees the same string the
+ * leptris_element_attribute accessor returns (libxslt bug-59:
+ * B&#38;B serialized as B&amp;#38;B). */
+TEST(AttributeAxis, ExpandsCharacterReferences) {
+    const char xml[] = "<foo attribute=\"B&#38;B\" a2=\"x&amp;y\"/>";
+    LeptrisDocument d = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(d, nullptr);
+    struct { const char* q; const char* want; } cases[] = {
+        {"string(//@attribute)", "B&B"},
+        {"string(//@a2)", "x&y"},
+        {"string(/foo/@attribute)", "B&B"},
+        {"concat(//@attribute, '!')", "B&B!"},
+    };
+    for (auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr, c.q);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* sv = leptris_xpath_result_string(r);
+        EXPECT_STREQ(sv ? sv : "", c.want) << c.q;
+        leptris_free_string(sv);
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(d);
+}

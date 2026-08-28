@@ -8,6 +8,8 @@
 #include "../dom/document_node.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
+#include "../common/entities.h"
+#include "../memory/pool.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -107,17 +109,29 @@ static LeptrisAttributeNode* create_attribute_node(struct leptris_attribute* att
         attr_node->name = NULL;
     }
 
-    /* Handle value - copy from the single-representation view */
+    /* Handle value - copy from the single-representation view.
+     * Entity-bearing views decode first — the axis must return the
+     * same string the accessor returns (raw &#38; bytes
+     * double-escaped downstream, libxslt bug-59). */
     if (!leptris_sv_is_empty(&attr->value_view)) {
         size_t len = attr->value_view.length;
-        char* value_copy = LEPTRIS_ALLOC_N(char, len + 1);
-        if (value_copy) {
-            memcpy(value_copy, attr->value_view.data, len);
-            value_copy[len] = '\0';
-            attr_node->value = value_copy;
-        } else {
-            attr_node->value = NULL;
+        char* value_copy = NULL;
+        if (attr_has_entities(attr)) {
+            LeptrisMemoryPool* pool = leptris_element_get_pool(owner);
+            if (pool) {
+                char* dec = leptris_decode_entities_view(
+                    &attr->value_view, pool);
+                if (dec) value_copy = leptris_strdup(dec);
+            }
         }
+        if (!value_copy) {
+            value_copy = LEPTRIS_ALLOC_N(char, len + 1);
+            if (value_copy) {
+                memcpy(value_copy, attr->value_view.data, len);
+                value_copy[len] = '\0';
+            }
+        }
+        attr_node->value = value_copy;
     } else {
         attr_node->value = NULL;
     }

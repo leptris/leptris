@@ -1201,3 +1201,38 @@ TEST(XsltElement, PlainNameStillLiteral) {
         "</xsl:template>", "<r/>")),
         "<plain>x</plain>");
 }
+
+/* §11.1 top-level variables evaluate with the namespace bindings of
+ * the element that declares them — included sheets carry their own
+ * (libxslt bug-36-: $var select="/n:x" resolved without n:). */
+TEST(XsltVariables, GlobalVariableSelectUsesDeclaringNsContext) {
+    EXPECT_EQ(body(run(
+        "<xsl:variable name='v' select='/n:x'/>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='$v'/>]"
+        "</xsl:template>",
+        "<n:x xmlns:n='urn:n'>text</n:x>"))
+        .find("xmlns:xsl"), std::string::npos) << "sanity";
+    /* run() builds the sheet WITHOUT the n: declaration on the
+     * stylesheet element, so prefix resolution must come from the
+     * variable's own context — build it manually instead. */
+    std::string sheet =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:n='urn:n' version='1.0'>"
+        "<xsl:variable name='v' select='/n:x'/>"
+        "<xsl:template match='/'>[<xsl:value-of select='$v'/>]"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char src[] = "<n:x xmlns:n='urn:n'>hello</n:x>";
+    LeptrisDocument d = leptris_parse_string(
+        src, std::strlen(src), nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string s(out);
+    EXPECT_NE(s.find("[hello]"), std::string::npos) << s;
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}

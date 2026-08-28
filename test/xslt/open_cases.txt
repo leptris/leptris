@@ -1,6 +1,5 @@
 bug-100
 bug-104
-bug-11-
 bug-111
 bug-113
 bug-130
@@ -11,7 +10,6 @@ bug-142
 bug-152
 bug-155
 bug-157
-bug-158
 bug-159
 bug-161
 bug-166
@@ -34,14 +32,12 @@ bug-222
 bug-224
 bug-225
 bug-32-
-bug-36-
 bug-38-
 bug-41-
 bug-43-
 bug-5-
 bug-50-
 bug-56
-bug-59
 bug-63
 bug-65
 bug-71
