@@ -1,5 +1,32 @@
 ## [Unreleased]
 
+## [1.9.8] - 2026-08-28
+
+### Fixed
+
+- **DTD ATTLIST default attributes no longer apply on plain parse**
+  (#606): `LEPTRIS_PARSE_DTDATTR` opts in (libxml2 XML_PARSE_DTDATTR
+  parity). W3C C14N 1.1 example 3.3's canonical form now excludes
+  defaulted attributes. The XSLT engine still applies them at the
+  transform boundary — libxslt's document loader default.
+- XPath predicates apply to every node kind — `text()[2]`,
+  `node()[4]` and friends returned empty (non-element candidates
+  were silently skipped)
+- XSLT patterns run the full match ladder for every node kind
+  (position predicates like match="text()[2]" fired for every text
+  node); attribute pattern identity is (owner, name)
+
+### Added
+
+- `xsl:output` doctype-system/doctype-public emission; html
+  version="5" emits the bare HTML5 doctype
+- `xsl:element name="{...}"` AVT evaluation
+
+libxslt suite 144/205 (+6: bug-25-, bug-35-, bug-117, bug-123,
+bug-175, bug-182, bug-197, bug-206).
+
+
+
 ## [1.9.7] - 2026-08-28
 
 ### Added
