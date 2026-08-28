@@ -1016,9 +1016,28 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     }
 
     while (p.pos < p.end) {
-        /* Skip top-level whitespace. */
+        /* Top-level whitespace: a TEXT child of the document node —
+         * chained like prolog comments/PIs so /node() counts it and
+         * identity transforms copy it (#580 chain completion,
+         * bug-195). */
         if (p.depth == 0) {
+            char* ws_start = p.pos;
             dp_skip_ws(&p);
+            size_t wl = (size_t)(p.pos - ws_start);
+            /* libxml2 keeps document-level ws ONLY after a comment
+             * or after the root element (bug-195 vs bug-196: ws
+             * after a prolog PI is dropped); leading ws is prolog
+             * Misc; trailing ws is trimmed after the loop. */
+            if (wl > 0 && p.dc_tail &&
+                (p.dc_tail->type == LEPTRIS_NODE_TYPE_COMMENT ||
+                 (p.root_chained &&
+                  p.dc_tail == (LeptrisNode*)p.root))) {
+                LeptrisTextNode* wtn =
+                    dp_text_create(&p, ws_start, wl);
+                if (!wtn) goto fail;
+                wtn->base.frozen = 1;
+                dp_doc_child(&p, (LeptrisNode*)wtn);
+            }
             if (p.pos >= p.end) break;
         }
 
@@ -1437,6 +1456,24 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         else
             doc->doc_children_head = rn;
         doc->doc_children_tail = rn;
+    }
+    /* Trim trailing whitespace-only TEXT off the chain (AFTER the
+     * root splice): libxml2 drops document-tail whitespace (bug-83
+     * regression guard); inter-markup nodes keep their position
+     * (bug-195). */
+    {
+        LeptrisNode* last_mark = NULL;
+        for (LeptrisNode* c = doc->doc_children_head; c;
+             c = leptris_node_get_next_sibling(c)) {
+            if (c->type != LEPTRIS_NODE_TYPE_TEXT) last_mark = c;
+        }
+        if (last_mark) {
+            leptris_node_set_next_sibling(last_mark, NULL);
+            doc->doc_children_tail = last_mark;
+        } else {
+            doc->doc_children_head = NULL;
+            doc->doc_children_tail = NULL;
+        }
     }
     doc->has_namespaces = p.saw_namespace;
     doc->dtd = p.dtd;  /* NULL when no DOCTYPE internal subset */

@@ -1700,6 +1700,18 @@ TEST(XsltStripSpace, LastMatchingDeclarationWins) {
         "<r><a>  </a><b/></r>");
 }
 
+/* bug-195: TEXT nodes in the document child chain (between a
+ * top-level comment and the root element) serialize — the chain
+ * walks handled only PI/comment. */
+TEST(XsltOutput, TopLevelTextBetweenCommentAndRoot) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='node()|@*'>"
+        "<xsl:copy><xsl:apply-templates select='node()|@*'/></xsl:copy>"
+        "</xsl:template>",
+        "<!--c-->\n<r/>")),
+        "<!--c-->\n<r/>");
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */

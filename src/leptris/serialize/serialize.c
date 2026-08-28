@@ -1759,6 +1759,12 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
             if (indent_spaces > 0) {
                 buffer_append_newline(buf);
             }
+        } else if (c->type == LEPTRIS_NODE_TYPE_TEXT) {
+            /* Top-level text (copied source whitespace between
+             * prolog nodes — bug-195) emits verbatim. */
+            const char* tc =
+                leptris_text_get_content((LeptrisTextNode*)c);
+            if (tc) buffer_append(buf, tc);
         }
     }
 
@@ -1792,6 +1798,10 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
             if (indent_spaces > 0) {
                 buffer_append_newline(buf);
             }
+        } else if (c->type == LEPTRIS_NODE_TYPE_TEXT) {
+            const char* tc =
+                leptris_text_get_content((LeptrisTextNode*)c);
+            if (tc) buffer_append(buf, tc);
         }
     }
     }
