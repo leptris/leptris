@@ -443,7 +443,7 @@ TEST(Xslt, CopyAndCopyOf) {
         "<xsl:template match='/'><xsl:apply-templates select='//item'/>"
         "</xsl:template>",
         "<r><item id='1'>t</item></r>")),
-        "<item id=\"1\" extra=\"e\">t</item>");
+        "<item extra=\"e\">t</item>");
 }
 
 TEST(Xslt, NumberFormats) {
@@ -1609,6 +1609,52 @@ TEST(XsltOutput, IndentStopsBelowWhitespaceMixedResult) {
     EXPECT_EQ(r,
               "<result>\n  <total><type>one</type><a>3</a></total>\n"
               "</result>") << r;
+}
+
+/* bug-161: apply-templates select=node() over a text item applies
+ * the built-in TEXT rule — copy the text itself (the fallback
+ * previously walked the text node's children and dropped it). */
+TEST(XsltApplyTemplates, SelectedTextItemGetsBuiltInTextRule) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='l/p'>"
+        "M<xsl:copy><xsl:apply-templates select='@*|node()'/></xsl:copy>"
+        "</xsl:template>",
+        "<r><l><p>test</p></l></r>")),
+        "M<p>test</p>");
+}
+
+/* bug-193: apply-imports with no imported candidate falls back to
+ * the BUILT-IN rule for the node (libxslt: the built-in element
+ * rule re-enters template selection for the children). */
+TEST(XsltApplyImports, FallsBackToBuiltInWithoutImport) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='root'>"
+        "<r><xsl:apply-imports/></r>"
+        "</xsl:template>"
+        "<xsl:template match='test'>passed</xsl:template>",
+        "<root><test/></root>")),
+        "<r>passed</r>");
+}
+
+/* bug-32-: xsl:copy copies the element and its namespace nodes
+ * but NOT its attributes (7.5) — attributes reach the result only
+ * through apply-templates/@*. libxslt-verified. */
+TEST(XsltCopyOf, AttributeNode) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='*'>"
+        "<xsl:copy><xsl:copy-of select='@*'/><xsl:apply-templates/>"
+        "</xsl:copy></xsl:template>",
+        "<a x='1' y='2'>t</a>")),
+        "<a x=\"1\" y=\"2\">t</a>");
+}
+
+TEST(XsltCopy, DoesNotCopyAttributes) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='*'>"
+        "<xsl:copy><xsl:apply-templates select='node()'/></xsl:copy>"
+        "</xsl:template>",
+        "<a x='1'>t</a>")),
+        "<a>t</a>");
 }
 
 /* bug-186 follow-on: a child-step pattern (star slash star) must
