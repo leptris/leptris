@@ -1288,6 +1288,173 @@ TEST(XsltNumber, DecimalFormatMultiByteSeparators) {
     leptris_xslt_free(x);
 }
 
+/* bug-157: the priority ATTRIBUTE (not just the §5.5 default) must
+ * drive template selection — an explicit -100 loses to a default
+ * 0.5 pattern, and an explicit 10 beats a later-declared 0.5. */
+TEST(XsltTemplates, PriorityAttributeOverridesDefault) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='item' priority='10'>HIGH</xsl:template>"
+        "<xsl:template match='item'>LOW</xsl:template>",
+        "<r><item/></r>")), "HIGH");
+    EXPECT_EQ(body(run(
+        "<xsl:template match=\"r/item[last()=1]\">3</xsl:template>"
+        "<xsl:template match='r/item' priority='-100'>FALLBACK</xsl:template>",
+        "<r><item/></r>")), "3");
+}
+
+/* bug-214: count/from patterns are evaluated with the current
+ * variable frame in scope ($type binds the node being numbered). */
+TEST(XsltNumber, CountPatternWithVariable) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<out><xsl:for-each select='r/n'>"
+        "<xsl:variable name='t' select='@t'/>"
+        "<p><xsl:number count=\"n[@t = $t]\"/></p>"
+        "</xsl:for-each></out>"
+        "</xsl:template>",
+        "<r><n t='a'/><n t='b'/><n t='a'/></r>")),
+        "<out><p>1</p><p>1</p><p>2</p></out>");
+}
+
+/* bug-217: use-attribute-sets semantics - sets apply first, the
+ * use-list order gives later sets precedence, literal result attrs
+ * beat sets, and xsl:attribute children beat everything. Conflicts
+ * update in place (position = first insertion). */
+TEST(XsltAttributeSets, UseListOrderAndOverridePrecedence) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='foo'>"
+        "<bar xsl:use-attribute-sets='as1 as2' a1='element' a2='element'>"
+        "<xsl:attribute name='a1'>attr</xsl:attribute>"
+        "</bar>"
+        "</xsl:template>"
+        "<xsl:attribute-set name='as1'>"
+        "<xsl:attribute name='a1'>as1</xsl:attribute>"
+        "<xsl:attribute name='a2'>as1</xsl:attribute>"
+        "<xsl:attribute name='a3'>as1</xsl:attribute>"
+        "<xsl:attribute name='a4'>as1</xsl:attribute>"
+        "</xsl:attribute-set>"
+        "<xsl:attribute-set name='as2'>"
+        "<xsl:attribute name='a1'>as2</xsl:attribute>"
+        "<xsl:attribute name='a2'>as2</xsl:attribute>"
+        "<xsl:attribute name='a3'>as2</xsl:attribute>"
+        "</xsl:attribute-set>",
+        "<foo/>")),
+        "<bar a1=\"attr\" a2=\"element\" a3=\"as2\" a4=\"as1\"/>");
+}
+
+/* bug-189: same-named attribute-set declarations UNION - later
+ * declarations override values; duplicates within a declaration:
+ * last wins; positions follow first insertion. */
+TEST(XsltAttributeSets, SameNameDeclarationsMerge) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<elem xsl:use-attribute-sets='att1 att2'/>"
+        "<elem xsl:use-attribute-sets='att3'/>"
+        "</xsl:template>"
+        "<xsl:attribute-set name='att1'>"
+        "<xsl:attribute name='att1'>1</xsl:attribute>"
+        "<xsl:attribute name='commonatt'>1</xsl:attribute>"
+        "</xsl:attribute-set>"
+        "<xsl:attribute-set name='att2'>"
+        "<xsl:attribute name='att2'>2</xsl:attribute>"
+        "<xsl:attribute name='commonatt'>2</xsl:attribute>"
+        "</xsl:attribute-set>"
+        "<xsl:attribute-set name='att3'>"
+        "<xsl:attribute name='att3a'>1</xsl:attribute>"
+        "<xsl:attribute name='att3a'>2</xsl:attribute>"
+        "<xsl:attribute name='att3b'>1</xsl:attribute>"
+        "</xsl:attribute-set>"
+        "<xsl:attribute-set name='att3'>"
+        "<xsl:attribute name='att3b'>2</xsl:attribute>"
+        "</xsl:attribute-set>",
+        "<doc/>")),
+        "<elem att1=\"1\" commonatt=\"2\" att2=\"2\"/>"
+        "<elem att3a=\"2\" att3b=\"2\"/>");
+}
+
+/* bug-190: attribute-set names are QNames - a declaration and a
+ * reference that spell different prefixes for the SAME namespace
+ * URI must resolve to the same set. */
+TEST(XsltAttributeSets, ExpandedNameMatchesAcrossPrefixes) {
+    std::string sheet =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:ns1='urn:foo' xmlns:ns2='urn:foo' version='1.0'"
+        " exclude-result-prefixes='ns1 ns2'>"
+        "<xsl:template match='/'>"
+        "<elem xsl:use-attribute-sets='ns1:set'/>"
+        "</xsl:template>"
+        "<xsl:attribute-set name='ns2:set'>"
+        "<xsl:attribute name='attr'>value</xsl:attribute>"
+        "</xsl:attribute-set>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<doc/>", 6, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_NE(r.find("<elem attr=\"value\"/>"), std::string::npos) << r;
+}
+
+/* bug-186 follow-on: a child-step pattern (star slash star) must
+ * NOT match the root element — the root's parent is the document
+ * node. The bare-leaf fast path used to match it anyway. */
+TEST(XsltTemplates, ChildStepPatternDoesNotMatchRoot) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='*/*'><xsl:value-of select='name()'/>"
+        "</xsl:template>",
+        "<top><foo/><bar/></top>")),
+        "foobar");
+}
+
+/* bug-186/218: numbering namespace nodes — the default count is
+ * same-kind + same-prefix; every in-scope prefix is unique, so each
+ * namespace node numbers 1. `from` must evaluate (and not crash)
+ * when it references a function with an empty result. */
+TEST(XsltNumber, OnNamespaceNodes) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/*'>"
+        "<xsl:for-each select='namespace::*'>"
+        "<xsl:number/>"
+        "</xsl:for-each>"
+        "</xsl:template>",
+        "<top xmlns:a='A' xmlns:b='B' xmlns:c='C'/>")),
+        "1111");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='*'>"
+        "<xsl:for-each select='namespace::*[position()=2]'>"
+        "<xsl:number from=\"key('e','f')\"/>"
+        "</xsl:for-each>"
+        "</xsl:template>",
+        "<top xmlns:ns1='foo'/>")),
+        "1");
+}
+
+/* bug-199: level="any" from a namespace node resolves through the
+ * OWNER element (the synthetic ns node is outside the document
+ * order walk). */
+TEST(XsltNumber, AnyLevelFromNamespaceNodeCountsOwner) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='node()|@*'>"
+        "<xsl:copy>"
+        "<xsl:for-each select='namespace::a'>"
+        "<xsl:attribute name='ns'>"
+        "<xsl:value-of select='.'/>"
+        "(<xsl:number count='*' level='any'/>)"
+        "</xsl:attribute>"
+        "</xsl:for-each>"
+        "<xsl:apply-templates select='node()|@*'/>"
+        "</xsl:copy>"
+        "</xsl:template>",
+        "<r xmlns:a='a'><f xmlns:a='b'><b xmlns:a='c'/></f></r>")),
+        "<r xmlns:a=\"a\" ns=\"a(1)\"><f xmlns:a=\"b\" ns=\"b(2)\">"
+        "<b xmlns:a=\"c\" ns=\"c(3)\"/></f></r>");
+}
+
 TEST(XsltNumber, DecimalFormatGroupingSizeFromPattern) {
     /* '#,#0' groups by 2: 12345 → 1,23,45 */
     EXPECT_NE(body(run(

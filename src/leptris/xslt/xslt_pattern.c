@@ -41,13 +41,20 @@ static int nodeset_contains(LeptrisXPathResult r, LeptrisElement node) {
     return 0;
 }
 
-/* Does this alternative select `node` when evaluated from `ctx`? */
+/* Does this alternative select `node` when evaluated from `ctx`?
+ * `hook` (when set) replaces the eval route wholesale — the caller
+ * owns namespace AND variable resolution then. */
 static int selects_from(LeptrisXPathCompiled expr, LeptrisDocument doc,
                         LeptrisElement ctx, LeptrisElement node,
-                        LeptrisXPathNsSet ns) {
-    LeptrisXPathResult r =
-        ns ? leptris_xpath_compiled_eval_ns(expr, doc, ctx, ns)
-           : leptris_xpath_compiled_eval(expr, doc, ctx);
+                        LeptrisXPathNsSet ns,
+                        XsltPatternEvalFn hook, void* ud) {
+    struct leptris_xpath_result* r;
+    if (hook) {
+        r = hook(ud, expr, doc, ctx);
+    } else {
+        r = ns ? leptris_xpath_compiled_eval_ns(expr, doc, ctx, ns)
+               : leptris_xpath_compiled_eval(expr, doc, ctx);
+    }
     if (!r) return 0;
     int hit = nodeset_contains(r, node);
     leptris_xpath_result_free(r);
@@ -65,8 +72,9 @@ static int alt_is_root_pattern(const XsltPattern* alt) {
     return *e == 0;
 }
 
-int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
-                         LeptrisDocument doc, LeptrisXPathNsSet ns) {
+int xslt_pattern_matches_ex(const XsltPattern* p, LeptrisElement node,
+                            LeptrisDocument doc, LeptrisXPathNsSet ns,
+                            XsltPatternEvalFn hook, void* ud) {
     if (!p || !node || !doc) return 0;
 
     LeptrisElement root = leptris_document_root(doc);
@@ -95,7 +103,8 @@ int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
          * with the DOCUMENT node as the final rung so child-axis
          * patterns (node(), NAME, *) reach the root element. */
         for (LeptrisElement ctx = node; ctx; ) {
-            if (selects_from(alt->expr, doc, ctx, node, ns)) return 1;
+            if (selects_from(alt->expr, doc, ctx, node, ns, hook, ud))
+                return 1;
             LeptrisElement up = leptris_node_parent((LeptrisNodeRef)ctx);
             if (!up &&
                 leptris_node_get_type((LeptrisNodeRef)ctx) ==
@@ -118,13 +127,15 @@ int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
                      * processing-instruction()) must still match
                      * these from the document's child axis. */
                     if (dnode && dnode != (LeptrisElement)node &&
-                        selects_from(alt->expr, doc, dnode, node, ns))
+                        selects_from(alt->expr, doc, dnode, node,
+                                     ns, hook, ud))
                         return 1;
                     break;
                 }
                 /* root's parent = the document node (final rung) */
                 if (!dnode || dnode == (LeptrisElement)node) break;
-                if (selects_from(alt->expr, doc, dnode, node, ns))
+                if (selects_from(alt->expr, doc, dnode, node,
+                                 ns, hook, ud))
                     return 1;
                 break;
             }
@@ -132,4 +143,9 @@ int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
         }
     }
     return 0;
+}
+
+int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
+                         LeptrisDocument doc, LeptrisXPathNsSet ns) {
+    return xslt_pattern_matches_ex(p, node, doc, ns, NULL, NULL);
 }

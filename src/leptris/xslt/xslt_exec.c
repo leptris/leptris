@@ -434,40 +434,207 @@ static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
     return out;
 }
 
-/* Apply (in order) the attribute-set names in `in->attr_set_names`,
- * evaluating AVTs against `node`. Existing attributes on the target
- * are NOT overwritten — explicit attrs and later sets win (§7.1.4). */
-/* §7.1.4/§12.1.4: apply every declaration of `name` (head-first =
- * highest import precedence first; first writer wins), each entry's
- * OWN attributes overriding the sets it references (the referenced
- * names apply afterwards, skip-if-exists). */
-static void apply_named_set(XsltExec* ex, const char* name,
-                            LeptrisElement target, LeptrisElement node,
-                            int depth) {
-    if (!ex || !ex->sheet || !name || !target || depth > 8) return;
-    for (XsltAttrSet* s = ex->sheet->attrsets; s; s = s->next) {
-        if (!s->name || strcmp(s->name, name) != 0) continue;
-        for (XsltLAttr* a = s->attrs; a; a = a->next) {
-            if (!a->name) continue;
-            if (leptris_element_attribute(target, a->name)) continue;
-            char* v = eval_avt(ex, a->value, node);
-            if (v) {
-                leptris_element_set_attribute(target, a->name, v);
-                free(v);
-            }
-        }
-        for (size_t u = 0; u < s->use_count; u++)
-            apply_named_set(ex, s->use_names[u], target, node, depth + 1);
+/* §7.1.4 QName match: unprefixed names compare literally; prefixed
+ * names compare (URI, local) so a declaration and a reference may
+ * spell different prefixes for the same namespace (bug-190). */
+static int set_name_matches(const XsltAttrSet* s, const char* uname,
+                            const char* uuri) {
+    if (!s->name || !uname) return 0;
+    const char* sc = strchr(s->name, ':');
+    const char* uc = strchr(uname, ':');
+    if (!sc && !uc) return strcmp(s->name, uname) == 0;
+    const char* sl = sc ? sc + 1 : s->name;
+    const char* ul = uc ? uc + 1 : uname;
+    const char* su = sc ? s->name_uri : NULL;
+    const char* uu = uc ? uuri : NULL;
+    if (su && uu) return strcmp(su, uu) == 0 && strcmp(sl, ul) == 0;
+    if (!su && !uu) return strcmp(sl, ul) == 0;   /* unbound prefixes */
+    return 0;
+}
+
+/* Precedence semantics (§12.1.4, libxslt bug-80/102/188/189/217):
+ * declarations of `name` resolve HIGHEST precedence first —
+ * higher-precedence declarations seed attribute positions and LOCK
+ * their names; lower-precedence declarations only fill gaps. Within
+ * one precedence level, document order applies and later
+ * declarations update values in place. A declaration's OWN attrs
+ * precede (position) and beat (value) the sets it references. The
+ * use-list at the instruction applies with update-in-place: later
+ * entries override (§7.1.4), then literal attrs, then
+ * xsl:attribute children. */
+typedef struct {
+    const XsltAttrSet* s;
+    int rank;
+    size_t seq;         /* position in the prepend list: higher = earlier in doc */
+} AttrSetDecl;
+
+static int attrset_decl_cmp(const void* pa, const void* pb) {
+    const AttrSetDecl* a = (const AttrSetDecl*)pa;
+    const AttrSetDecl* b = (const AttrSetDecl*)pb;
+    if (a->rank != b->rank) return a->rank < b->rank ? -1 : 1;
+    return a->seq > b->seq ? -1 : 1;   /* doc order within a rank */
+}
+
+typedef struct {
+    const char** names;
+    size_t n, cap;
+} NameBag;
+
+/* Resolved attribute vector: the use-list's merged names/values.
+ * Values update in place (later entries override — §7.1.4);
+ * positions follow first insertion. Applied to the target with
+ * skip-if-exists so explicit attributes win. */
+typedef struct {
+    char** names;
+    char** values;
+    size_t n, cap;
+} AttrVec;
+
+static size_t attrvec_find(const AttrVec* v, const char* nm) {
+    for (size_t i = 0; i < v->n; i++)
+        if (strcmp(v->names[i], nm) == 0) return i;
+    return (size_t)-1;
+}
+
+static void attrvec_set(AttrVec* v, const char* nm, char* val) {
+    size_t i = attrvec_find(v, nm);
+    if (i != (size_t)-1) {
+        free(v->values[i]);
+        v->values[i] = val;
+        return;
     }
+    if (v->n == v->cap) {
+        size_t cap = v->cap ? v->cap * 2 : 8;
+        char** gn = (char**)realloc(v->names, cap * sizeof(*gn));
+        char** gv = (char**)realloc(v->values, cap * sizeof(*gv));
+        if (!gn || !gv) {
+            free(gn);
+            free(gv);
+            free(val);
+            return;
+        }
+        v->names = gn;
+        v->values = gv;
+        v->cap = cap;
+    }
+    v->names[v->n] = (char*)nm;   /* borrowed: set-decl lifetime */
+    v->values[v->n] = val;
+    v->n++;
+}
+
+static int name_bag_has(const NameBag* b, const char* nm) {
+    for (size_t i = 0; i < b->n; i++)
+        if (strcmp(b->names[i], nm) == 0) return 1;
+    return 0;
+}
+
+static void name_bag_add(NameBag* b, const char* nm) {
+    if (!nm || name_bag_has(b, nm)) return;
+    if (b->n == b->cap) {
+        size_t cap = b->cap ? b->cap * 2 : 8;
+        const char** grown =
+            (const char**)realloc(b->names, cap * sizeof(*grown));
+        if (!grown) return;
+        b->names = grown;
+        b->cap = cap;
+    }
+    b->names[b->n++] = nm;
+}
+
+static void apply_named_set(XsltExec* ex, const char* name,
+                            const char* uri, AttrVec* vec,
+                            LeptrisElement node, int depth,
+                            const NameBag* pre_locked,
+                            NameBag* written) {
+    if (!ex || !ex->sheet || !name || !vec || depth > 8) return;
+    size_t n = 0;
+    for (XsltAttrSet* s = ex->sheet->attrsets; s; s = s->next)
+        if (set_name_matches(s, name, uri)) n++;
+    if (!n) return;
+    AttrSetDecl* matches = (AttrSetDecl*)malloc(n * sizeof(*matches));
+    if (!matches) return;
+    size_t k = 0, seq = 0;
+    for (XsltAttrSet* s = ex->sheet->attrsets; s; s = s->next, seq++)
+        if (set_name_matches(s, name, uri)) {
+            matches[k].s = s;
+            matches[k].rank = s->import_rank;
+            matches[k].seq = seq;
+            k++;
+        }
+    qsort(matches, n, sizeof(*matches), attrset_decl_cmp);
+    NameBag locked = {NULL, 0, 0};
+    if (pre_locked)
+        for (size_t i = 0; i < pre_locked->n; i++)
+            name_bag_add(&locked, pre_locked->names[i]);
+    /* `written` is CALLER-OWNED: names a declaration's reference
+     * expansions write count as that declaration's contributions
+     * when the rank boundary locks (bug-188). */
+    int cur_rank = matches[0].rank;
+
+    for (size_t i = 0; i < n; i++) {
+        const XsltAttrSet* s = matches[i].s;
+        if (s->import_rank != cur_rank) {
+            /* Rank boundary: everything written so far belongs to a
+             * higher-precedence level and now locks its names. */
+            for (size_t w = 0; w < written->n; w++)
+                name_bag_add(&locked, written->names[w]);
+            cur_rank = s->import_rank;
+        }
+        /* Own attributes, document order (stored newest-first). */
+        NameBag own = {NULL, 0, 0};
+        size_t na = 0;
+        for (XsltLAttr* a = s->attrs; a; a = a->next) na++;
+        const XsltLAttr** rev =
+            (const XsltLAttr**)malloc((na ? na : 1) * sizeof(*rev));
+        if (rev) {
+            size_t j = 0;
+            for (XsltLAttr* a = s->attrs; a; a = a->next) rev[j++] = a;
+            for (j = na; j-- > 0;) {
+                const XsltLAttr* a = rev[j];
+                if (!a->name) continue;
+                name_bag_add(&own, a->name);
+                if (name_bag_has(&locked, a->name)) continue;
+                char* v = eval_avt(ex, a->value, node);
+                if (v) attrvec_set(vec, a->name, v);
+                else free(v);
+                name_bag_add(written, a->name);
+            }
+            free(rev);
+        }
+        /* Referenced sets: part of THIS declaration's vector — they
+         * must not override its own attributes. */
+        for (size_t u = 0; u < s->use_count; u++)
+            if (s->use_names[u])
+                apply_named_set(ex, s->use_names[u],
+                                s->use_uris ? s->use_uris[u] : NULL,
+                                vec, node, depth + 1, &own, written);
+        free(own.names);
+    }
+    free(locked.names);
+    free(matches);
 }
 
 void xslt_apply_attr_sets(XsltExec* ex, const XsltInstr* in,
                           LeptrisElement target, LeptrisElement node) {
     if (!ex || !ex->sheet || !target || !in || in->attr_set_count == 0) return;
+    AttrVec vec = {NULL, NULL, 0, 0};
+    NameBag written = {NULL, 0, 0};
     for (size_t i = 0; i < in->attr_set_count; i++) {
         if (!in->attr_set_names[i]) continue;
-        apply_named_set(ex, in->attr_set_names[i], target, node, 0);
+        apply_named_set(ex, in->attr_set_names[i],
+                        in->attr_set_uris ? in->attr_set_uris[i] : NULL,
+                        &vec, node, 0, NULL, &written);
     }
+    /* Skip-if-exists: explicit attributes on the target (literal
+     * result attrs, xsl:copy's source attrs) win over set values. */
+    for (size_t i = 0; i < vec.n; i++) {
+        if (leptris_element_attribute(target, vec.names[i])) continue;
+        leptris_element_set_attribute(target, vec.names[i], vec.values[i]);
+    }
+    for (size_t i = 0; i < vec.n; i++) free(vec.values[i]);
+    free(vec.names);
+    free(vec.values);
+    free(written.names);
 }
 
 static int op_attr_set_ref(XsltExec* ex, const XsltInstr* in,
@@ -526,9 +693,8 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
         leptris_element_add_namespace_definition(e, "",
                                                  in->ns_out_default);
     }
-    /* Literal attrs FIRST — they win over any defaults coming
-     * from the named attribute-set (§7.1.4 — explicit attrs and
-     * later sets take precedence over earlier sets). */
+    /* §7.1.4: literal attrs first (they win positions and values);
+     * the resolved attribute-set vector then fills missing names. */
     for (XsltLAttr* a = in->attrs; a; a = a->next) {
         char* v = eval_avt(ex, a->value, node);
         if (v) {
@@ -536,7 +702,6 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
             free(v);
         }
     }
-    /* Attribute-value templates on literal result elements. */
     xslt_apply_attr_sets(ex, in, e, node);
     ex->pending_parent = e;
     int rc = xslt_exec_instrs(ex, in->child, node);
@@ -1894,45 +2059,121 @@ LeptrisElement xslt_next_doc_order(LeptrisElement e) {
  * from_matches helpers build a stack-side XsltPattern and reuse the
  * same matcher the template engine uses. */
 
-/* Count predicate: the count pattern, or (default) the same expanded
- * name as the node being numbered. */
+/* Eval hook for count/from patterns: xslt_eval routes through the
+ * exec's variable frame and ns map, so patterns like
+ * count="node()[@type = $type]" resolve their variables (bug-214). */
+static struct leptris_xpath_result* pattern_eval_with_vars(
+        void* ud, LeptrisXPathCompiled c, LeptrisDocument doc,
+        LeptrisElement node) {
+    (void)doc;
+    return xslt_eval((XsltExec*)ud, c, node);
+}
+
+/* §7.7 default count: same node KIND, and where the kind carries an
+ * expanded-name, the same name (element qname, attribute name,
+ * namespace prefix). */
+static int count_matches_default(LeptrisNodeRef cand, LeptrisNodeRef ref) {
+    if (leptris_node_get_type(cand) != leptris_node_get_type(ref))
+        return 0;
+    switch (leptris_node_get_type(ref)) {
+        case LEPTRIS_NODE_TYPE_ELEMENT: {
+            const char* a = leptris_element_get_name((LeptrisElement)cand);
+            const char* b = leptris_element_get_name((LeptrisElement)ref);
+            return a && b && strcmp(a, b) == 0;
+        }
+        case LEPTRIS_NODE_ATTRIBUTE: {
+            const char* a = ((LeptrisAttributeNode*)cand)->name;
+            const char* b = ((LeptrisAttributeNode*)ref)->name;
+            return a && b && strcmp(a, b) == 0;
+        }
+        case LEPTRIS_NODE_NAMESPACE: {
+            const char* a = ((LeptrisNamespaceNode*)cand)->prefix;
+            const char* b = ((LeptrisNamespaceNode*)ref)->prefix;
+            if (!a || !b) return !a && !b;
+            return strcmp(a, b) == 0;
+        }
+        default:
+            return 1;   /* text/comment: kind only (§7.7) */
+    }
+}
+
+/* Count predicate: the count pattern, or (default) the same kind +
+ * expanded name as the node being numbered. */
 static int count_matches(const XsltInstr* in, LeptrisElement cand,
-                         LeptrisElement ref, LeptrisDocument doc) {
+                         LeptrisElement ref, LeptrisDocument doc,
+                         XsltExec* ex) {
     if (in->num_count) {
         XsltPattern pat;
         memset(&pat, 0, sizeof(pat));
         pat.expr = in->num_count;
-        return xslt_pattern_matches(&pat, cand, doc,
-                                    (LeptrisXPathNsSet)in->ns);
+        /* Pattern prefixes AND $vars resolve in the declaring
+         * instruction's context. */
+        LeptrisXPathNsSet saved = ex->current_ns;
+        if (in->ns) ex->current_ns = (LeptrisXPathNsSet)in->ns;
+        int m = xslt_pattern_matches_ex(&pat, cand, doc,
+                                        (LeptrisXPathNsSet)in->ns,
+                                        pattern_eval_with_vars, ex);
+        ex->current_ns = saved;
+        return m;
     }
-    const char* a = leptris_element_get_name(cand);
-    const char* b = leptris_element_get_name(ref);
-    return a && b && strcmp(a, b) == 0;
+    return count_matches_default((LeptrisNodeRef)cand,
+                                 (LeptrisNodeRef)ref);
 }
 
 static int from_matches(const XsltInstr* in, LeptrisElement cand,
-                        LeptrisDocument doc) {
+                        LeptrisDocument doc, XsltExec* ex) {
     if (!in->num_from) return 0;
     XsltPattern pat;
     memset(&pat, 0, sizeof(pat));
     pat.expr = in->num_from;
-    return xslt_pattern_matches(&pat, cand, doc,
-                                (LeptrisXPathNsSet)in->ns);
+    LeptrisXPathNsSet saved = ex->current_ns;
+    if (in->ns) ex->current_ns = (LeptrisXPathNsSet)in->ns;
+    int m = xslt_pattern_matches_ex(&pat, cand, doc,
+                                    (LeptrisXPathNsSet)in->ns,
+                                    pattern_eval_with_vars, ex);
+    ex->current_ns = saved;
+    return m;
 }
 
 /* Position of `target` among preceding siblings matching count. */
 static unsigned long sibling_number(const XsltInstr* in,
                                     LeptrisElement target,
-                                    LeptrisDocument doc) {
+                                    LeptrisDocument doc, XsltExec* ex) {
+    int tty = leptris_node_get_type((LeptrisNodeRef)target);
+    if (tty == LEPTRIS_NODE_ATTRIBUTE) {
+        /* Attributes number within the OWNER's attribute list. The
+         * list holds each name once, so the default count (same
+         * kind + name) numbers by list position. */
+        LeptrisAttributeNode* a = (LeptrisAttributeNode*)target;
+        LeptrisElement owner = (LeptrisElement)a->owner;
+        size_t na = owner ? leptris_element_attribute_count(owner) : 0;
+        for (size_t i = 0; i < na; i++) {
+            const char* cn =
+                leptris_element_attribute_name_at(owner, i);
+            if (cn && a->name && strcmp(cn, a->name) == 0)
+                return (unsigned long)(i + 1);
+        }
+        return 1;
+    }
+    if (tty == LEPTRIS_NODE_NAMESPACE) {
+        /* Namespace nodes have no sibling chain — the in-scope list
+         * dedups prefixes, so the default count (same kind +
+         * prefix) always numbers 1, and XPath 1.0 patterns cannot
+         * name namespace nodes for an explicit count. */
+        return 1;
+    }
     unsigned long pos = 1;
     LeptrisElement parent = leptris_node_parent((LeptrisNodeRef)target);
     for (LeptrisElement c = leptris_element_first_child_any(parent); c;
          c = leptris_element_next_sibling_any(c)) {
         if (c == target) return pos;
-        if (count_matches(in, c, target, doc)) pos++;
+        if (count_matches(in, c, target, doc, ex)) pos++;
     }
     return pos;
 }
+
+static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
+                                LeptrisDocument doc, XsltExec* ex);
 
 /* any: how many matching nodes precede `node` in document order. */
 /* Any-kind document-order walk (comments/PIs count too — §7.7). */
@@ -1949,7 +2190,17 @@ static LeptrisNodeRef next_node_doc_order(LeptrisNodeRef n) {
 }
 
 static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
-                                LeptrisDocument doc) {
+                                LeptrisDocument doc, XsltExec* ex) {
+    /* Namespace nodes are synthetic — outside the document-order
+     * walk. libxslt numbers them through the OWNER element: the
+     * matching nodes before the owner (inclusive) decide the value
+     * (bug-199). */
+    if (leptris_node_get_type((LeptrisNodeRef)node) ==
+        LEPTRIS_NODE_NAMESPACE) {
+        LeptrisElement owner =
+            (LeptrisElement)((LeptrisNamespaceNode*)node)->owner;
+        return owner ? any_number(in, owner, doc, ex) : 0;
+    }
     /* Attributes number within their OWNER's attribute list (the
      * libxslt level=any rule — the tree walk never enters attrs). */
     if (leptris_node_get_type((LeptrisNodeRef)node) ==
@@ -1978,7 +2229,7 @@ static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
         {
             int nty = leptris_node_get_type(n);
             if (nty == LEPTRIS_NODE_TYPE_ELEMENT) {
-                m = count_matches(in, (LeptrisElement)n, node, doc);
+                m = count_matches(in, (LeptrisElement)n, node, doc, ex);
             } else if (in->num_count) {
                 XsltPattern pat;
                 memset(&pat, 0, sizeof(pat));
@@ -2113,7 +2364,7 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
         }
         nv = 1;
     } else if (in->num_level == 2) {
-        values[0] = any_number(in, node, ex->source);
+        values[0] = any_number(in, node, ex->source, ex);
         if (!values[0]) return 0;
         nv = 1;
     } else if (in->num_level == 1) {
@@ -2123,9 +2374,9 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
         int nr = 0;
         for (LeptrisElement a = node; a && nr < 64;
              a = leptris_node_parent((LeptrisNodeRef)a)) {
-            if (count_matches(in, a, node, ex->source))
-                rev[nr++] = sibling_number(in, a, ex->source);
-            if (from_matches(in, a, ex->source)) break;
+            if (count_matches(in, a, node, ex->source, ex))
+                rev[nr++] = sibling_number(in, a, ex->source, ex);
+            if (from_matches(in, a, ex->source, ex)) break;
         }
         for (int i = 0; i < nr; i++) values[i] = rev[nr - 1 - i];
         nv = nr;
@@ -2134,11 +2385,13 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
         LeptrisElement target = NULL;
         for (LeptrisElement a = node; a;
              a = leptris_node_parent((LeptrisNodeRef)a)) {
-            if (count_matches(in, a, node, ex->source)) { target = a; break; }
-            if (from_matches(in, a, ex->source)) break;
+            if (count_matches(in, a, node, ex->source, ex)) {
+                target = a; break;
+            }
+            if (from_matches(in, a, ex->source, ex)) break;
         }
         if (!target) return 0;   /* §7.7: no match → nothing emitted */
-        values[0] = sibling_number(in, target, ex->source);
+        values[0] = sibling_number(in, target, ex->source, ex);
         nv = 1;
     }
 
