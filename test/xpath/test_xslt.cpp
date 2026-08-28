@@ -1542,6 +1542,17 @@ TEST(XsltElement, NamespaceAttrSkipsRedundantDefaultDecl) {
         "<r xmlns=\"urn:d\"><baz>x</baz></r>");
 }
 
+/* bug-38-: copy-of a NAMESPACE node copies the declaration onto
+ * the pending parent (the op previously dropped ns nodes). */
+TEST(XsltCopyOf, NamespaceNode) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/*'>"
+        "<elem><xsl:copy-of select='//n/namespace::foo'/></elem>"
+        "</xsl:template>",
+        "<r><n xmlns:foo='urn:f'/></r>")),
+        "<elem xmlns:foo=\"urn:f\"/>");
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */

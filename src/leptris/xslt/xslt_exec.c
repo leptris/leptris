@@ -1025,6 +1025,28 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
                     const char* tc =
                         leptris_text_get_content((LeptrisTextNode*)cn);
                     if (tc) out_append_text(ex, ex->pending_parent, tc);
+                } else if (cty == LEPTRIS_NODE_NAMESPACE) {
+                    /* §7.5/§12.1: copying a namespace node adds the
+                     * declaration onto the pending parent element
+                     * (libxslt bug-38- — the op dropped ns nodes).
+                     * libxslt's copy: prefixed bindings only — the
+                     * implicit xml namespace and duplicates of
+                     * already-bound prefixes are skipped (bug-54). */
+                    LeptrisNamespaceNode* nn = (LeptrisNamespaceNode*)cn;
+                    LeptrisElement pp = ex->pending_parent;
+                    if (pp && nn->prefix && nn->prefix[0] && nn->uri) {
+                        if (strcmp(nn->prefix, "xml") == 0 &&
+                            strcmp(nn->uri,
+                                   "http://www.w3.org/XML/1998/namespace")
+                                == 0)
+                            continue;
+                        const char* cur =
+                            leptris_element_namespace_for_prefix(
+                                pp, nn->prefix);
+                        if (cur && strcmp(cur, nn->uri) == 0) continue;
+                        leptris_element_add_namespace_definition(
+                            pp, nn->prefix, nn->uri);
+                    }
                 }
             }
         }

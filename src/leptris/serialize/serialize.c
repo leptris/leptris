@@ -232,7 +232,9 @@ static char* emit_escaped_inline(char* out, const char* content,
             } else if (attr_mode && c == '"') {
                 memcpy(out, "&quot;", 6); out += 6;
             } else if (attr_mode && c == '\'') {
-                memcpy(out, "&apos;", 6); out += 6;
+                /* libxml2 leaves apostrophes raw in double-quoted
+                 * attribute values (bug-86). */
+                *out++ = c;
             } else {
                 *out++ = c;
             }
@@ -296,7 +298,7 @@ static char* emit_escaped_inline(char* out, const char* content,
         if (content[i] == '<') { memcpy(out, "&lt;", 4); out += 4; }
         else if (content[i] == '>') { memcpy(out, "&gt;", 4); out += 4; }
         else if (attr_mode && content[i] == '"') { memcpy(out, "&quot;", 6); out += 6; }
-        else { memcpy(out, "&apos;", 6); out += 6; }
+        else { *out++ = content[i]; }   /* apostrophe: raw (libxml2) */
         i++;
     }
     return out;
@@ -1115,7 +1117,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     case '>':  memcpy(nw, "&gt;", 4);   nw += 4; break;
                     case '&':  memcpy(nw, "&amp;", 5);  nw += 5; break;
                     case '"':  memcpy(nw, "&quot;", 6); nw += 6; break;
-                    case '\'': memcpy(nw, "&apos;", 6); nw += 6; break;
+                    case '\'': *nw++ = '\''; break;   /* raw (libxml2) */
                     default:   *nw++ = uri[i]; break;
                 }
             }
@@ -1225,8 +1227,9 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     case '&':  memcpy(out, "&amp;", 5);  out += 5; break;
                     case '"':  memcpy(out, "&quot;", 6); out += 6; break;
                     case '\'':
-                        if (html_escape_raw_quote) { *out++ = '\''; break; }
-                        memcpy(out, "&apos;", 6); out += 6; break;
+                        /* Apostrophes stay raw in double-quoted
+                         * attribute values (libxml2, bug-86). */
+                        *out++ = '\''; break;
                     case '\t': out += sprintf(out, "&#9;");  break;
                     case '\n': out += sprintf(out, "&#10;"); break;
                     case '\r': out += sprintf(out, "&#13;"); break;
