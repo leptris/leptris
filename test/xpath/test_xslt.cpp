@@ -1826,6 +1826,34 @@ TEST(XsltParams, WithParamIgnoredWhenNotDeclared) {
         "SUCCESS");
 }
 
+/* EXSLT date:add: ISO durations add to (possibly year-month)
+ * dates; a result landing on day 1 formats as year-month. */
+TEST(XsltExsltDate, Add) {
+    std::string sheet =
+        "<xsl:stylesheet version='1.0'"
+        " xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns:date='http://exslt.org/dates-and-times'"
+        " exclude-result-prefixes='date'>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"date:add('2001-01','P3D')\"/>]"
+        "[<xsl:value-of select=\"date:add('2001-12','P30D')\"/>]"
+        "[<xsl:value-of select=\"date:add('2001-12','P31D')\"/>]"
+        "[<xsl:value-of select=\"date:add('2001-12','P32D')\"/>]"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_EQ(r, "[2001-01-04][2001-12-31][2002-01][2002-01-02]")
+        << r;
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */

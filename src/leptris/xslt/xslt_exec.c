@@ -1298,11 +1298,28 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
         LeptrisElement saved = ex->pending_parent;
         ex->result = leptris_document_create();
         ex->pending_parent = NULL;
+        /* Fresh buffer per capture (the xslt_capture_children_text
+         * discipline): nested captures save/restore the outer
+         * length — resetting only the length left stale bytes that
+         * later appends resurrected (bug-72's second variable
+         * picked up the first's fragment text). */
+        size_t o_len = ex->rtf_text_len;
+        char* o_buf = ex->rtf_text;
+        size_t o_cap = ex->rtf_text_cap;
+        int o_capt = ex->rtf_capturing;
         ex->rtf_capturing = 1;
+        ex->rtf_text = (char*)calloc(1, 1);
         ex->rtf_text_len = 0;
+        ex->rtf_text_cap = 1;
         xslt_exec_instrs(ex, in->child, node);
         ex->rtf_capturing = 0;
         ex->pending_parent = saved;
+        char* frag_text = ex->rtf_text;   /* owned by this block */
+        size_t frag_len = ex->rtf_text_len;
+        ex->rtf_text = o_buf;
+        ex->rtf_text_len = o_len;
+        ex->rtf_text_cap = o_cap;
+        ex->rtf_capturing = o_capt;
         LeptrisDocument frag_doc = ex->result;
         ex->result = main_result;
         LeptrisElement rr = leptris_document_root(frag_doc);
@@ -1319,26 +1336,15 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
                 if (dn)
                     xpath_nodeset_add(v->value.nodeset_value, dn);
             }
-        } else if (v && !rr) {
-            /* Pure-text (or empty) fragment: a TEXT node carries
-             * the value — string($v)/count($v) observe it; an EMPTY
-             * fragment binds its document node (count 1, libxslt
-             * bug-56). */
-            v->value.nodeset_value = xpath_nodeset_new();
-            if (v->value.nodeset_value) {
-                if (ex->rtf_text && ex->rtf_text_len) {
-                    LeptrisNodeRef tn = leptris_text_node_create(
-                        frag_doc, ex->rtf_text);
-                    if (tn)
-                        xpath_nodeset_add(v->value.nodeset_value, tn);
-                } else {
-                    LeptrisNodeRef dn = (LeptrisNodeRef)
-                        leptris_document_get_node(frag_doc);
-                    if (dn)
-                        xpath_nodeset_add(v->value.nodeset_value, dn);
-                }
-            }
+        } else if (v && !rr && frag_text && frag_len) {
+            /* Pure-text RTF: the value is the string (the
+             * nodeset-binding experiment regressed bug-72's nested
+             * captures — reverted pending a capture-state rework). */
+            free(v);
+            v = xpath_result_new(XPATH_RESULT_STRING);
+            if (v) v->value.string_value = leptris_strdup(frag_text);
         }
+        free(frag_text);
         /* The nodeset's node pointers live in `rr`'s document. Move
          * ownership of the result document into the exec's RTF
          * chain so the nodes outlive the variable's frame. */
