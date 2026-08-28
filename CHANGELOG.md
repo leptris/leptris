@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.7] - 2026-08-28
+
+### Added
+
+- document-level PIs/comments as tree children (#580) (dom)
+
+
+
 ## [1.9.6] - 2026-08-27
 
 ### Performance
