@@ -154,6 +154,8 @@ static void instr_append(XsltInstr** list, XsltInstr* in) {
     t->next = in;
 }
 
+static char* resolve_set_uri(LeptrisElement e, const char* qname);
+
 /* Collect use-attribute-sets into name list (comma-separated,
  * whitespace ignored). Stores copy of each name on the
  * instruction. Returns count. */
@@ -166,19 +168,24 @@ static size_t collect_attr_sets(XsltInstr* in, LeptrisElement e) {
     if (!dup) return 0;
     size_t cap = 0, cnt = 0;
     char** arr = NULL;
+    char** uris = NULL;
     char* save = NULL;
     for (char* tok = xslt_strtok(dup, " \t\n,", &save); tok;
          tok = xslt_strtok(NULL, " \t\n,", &save)) {
         if (cnt == cap) {
             cap = cap ? cap * 2 : 4;
             char** na = (char**)realloc(arr, cap * sizeof(char*));
-            if (!na) break;
-            arr = na;
+            char** nu = (char**)realloc(uris, cap * sizeof(char*));
+            if (!na || !nu) { free(na); free(nu); break; }
+            arr = na; uris = nu;
         }
-        arr[cnt++] = leptris_strdup(tok);
+        arr[cnt] = leptris_strdup(tok);
+        uris[cnt] = resolve_set_uri(e, tok);
+        cnt++;
     }
     free(dup);
     in->attr_set_names = arr;
+    in->attr_set_uris = uris;
     in->attr_set_count = cnt;
     return cnt;
 }
@@ -228,6 +235,22 @@ static LeptrisXPathNsSet build_ns_context(LeptrisElement e) {
         }
     }
     return set;
+}
+
+/* Expanded-name URI for a prefixed attribute-set reference (NULL
+ * when unprefixed or unbound) — declarations and references may
+ * spell different prefixes for the same URI (bug-190). */
+static char* resolve_set_uri(LeptrisElement e, const char* qname) {
+    const char* colon = strchr(qname, ':');
+    if (!colon || colon == qname) return NULL;
+    LeptrisXPathNsSet ns = build_ns_context(e);
+    if (!ns) return NULL;
+    const char* u = leptris_xpath_ns_lookup(
+        (const struct leptris_xpath_ns_map*)ns, qname,
+        (size_t)(colon - qname));
+    char* r = u ? leptris_strdup(u) : NULL;
+    leptris_xpath_ns_set_free(ns);
+    return r;
 }
 
 
@@ -740,6 +763,17 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
     t->ns = build_ns_context(e);   /* §5.3 pattern prefix resolution */
     t->body = parse_content(sp, e);
 
+    /* §5.4: an explicit priority replaces the §5.5 default for
+     * EVERY alternative of the union (bug-157). */
+    double pri_val = 0;
+    int has_priority = 0;
+    const char* pris = leptris_element_attribute(e, "priority");
+    if (pris && *pris) {
+        char* end = NULL;
+        pri_val = strtod(pris, &end);
+        if (end != pris) has_priority = 1;
+    }
+
     if (match) {
         if (!*match) { sp->errors = 1; free(t); return; }
         size_t nalt = 0;
@@ -759,11 +793,15 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
                 free(alts[i]);
                 continue;
             }
-            p->priority = default_priority(trimmed);
-            /* Bare-name fast path for the root element. */
+            p->priority = has_priority ? pri_val
+                                       : default_priority(trimmed);
+            /* Bare-name fast path for the root element — ONLY for
+             * single-step patterns: a child-step pattern (star slash
+             * star, or name slash star) must not match the root,
+             * whose parent is the document node (bug-186). */
             const char* last = strrchr(trimmed, '/');
             const char* leaf = last ? last + 1 : trimmed;
-            int simple = 1;
+            int simple = !last;
             for (const char* q = leaf; *q; q++) {
                 if (*q == '[' || *q == '(' || *q == '@' || *q == ':') simple = 0;
             }
@@ -1107,6 +1145,8 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             XsltAttrSet* s = (XsltAttrSet*)calloc(1, sizeof(*s));
             if (!s) continue;
             s->name = leptris_strdup(nm);
+            s->name_uri = resolve_set_uri(e, nm);
+            s->import_rank = sp->import_rank;
             /* Prepend to the set list so later use-attribute-sets
              * applies later sets FIRST (winning conflicts). */
             s->next = sp->sheet->attrsets;
@@ -1141,6 +1181,13 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                             (s->use_count + 1) * sizeof(char*));
                         if (!grown) break;
                         s->use_names = grown;
+                        char** growu = (char**)realloc(
+                            s->use_uris,
+                            (s->use_count + 1) * sizeof(char*));
+                        if (!growu) break;
+                        s->use_uris = growu;
+                        s->use_uris[s->use_count] =
+                            resolve_set_uri(e, tok);
                         s->use_names[s->use_count++] =
                             leptris_strdup(tok);
                     }
@@ -1186,6 +1233,11 @@ static void free_instr(XsltInstr* in) {
         for (size_t i = 0; i < in->attr_set_count; i++)
             free(in->attr_set_names[i]);
         free(in->attr_set_names);
+    }
+    if (in->attr_set_uris) {
+        for (size_t i = 0; i < in->attr_set_count; i++)
+            free(in->attr_set_uris[i]);
+        free(in->attr_set_uris);
     }
     if (in->ns) leptris_xpath_ns_set_free(in->ns);
     for (size_t i = 0; i < in->ns_out_count; i++) {
@@ -1254,6 +1306,10 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         XsltAttrSet* s = sheet->attrsets;
         sheet->attrsets = s->next;
         free((void*)s->name);
+        free((void*)s->name_uri);
+        for (size_t i = 0; i < s->use_count; i++)
+            free(s->use_uris ? s->use_uris[i] : NULL);
+        free(s->use_uris);
         while (s->attrs) {
             XsltLAttr* a = s->attrs; s->attrs = a->next;
             free((void*)a->name); free((void*)a->value); free(a);

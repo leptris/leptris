@@ -113,6 +113,7 @@ typedef struct xslt_instr {
     /* use-attribute-sets (RESULT_ELEM / ELEMENT / COPY): names
      * applied before the instruction's own attrs (§7.1.4). */
     char** attr_set_names;
+    char** attr_set_uris;       /* parallel to attr_set_names */
     size_t attr_set_count;
 
     /* §4/§5.3: in-scope namespace bindings of the stylesheet
@@ -151,16 +152,22 @@ typedef struct xslt_lattr {
 
 /* Named attribute set (xsl:attribute-set, §7.1.4).
  *
- * Sets with the same expanded name UNION (§12.1.4): the attrsets
- * list is prepend-ordered, so walking it head-first visits the
- * highest-precedence declaration first — with skip-if-exists at
- * the target, higher import precedence wins per attribute.
+ * Sets with the same expanded name UNION (§12.1.4): declarations
+ * apply in document order, later ones overriding values in place
+ * (positions follow first insertion — libxslt bug-189/217). The
+ * attrsets list is prepend-ordered, so the walker reverses it.
  * use-attribute-sets chains expand at USE time (recursively, cycle
- * -guarded), never snapshotted at parse time. */
+ * -guarded), never snapshotted at parse time. Names are QNames:
+ * name_uri holds the expanded-name URI for prefixed sets (the
+ * declaration and references may spell different prefixes). */
 typedef struct xslt_attrset {
     const char* name;
+    const char* name_uri;       /* expanded-name URI (prefixed sets) */
+    int import_rank;            /* precedence level (lower = wins) */
     XsltLAttr* attrs;           /* evaluated AVTs applied at use sites */
     char** use_names;           /* use-attribute-sets (comma-split) */
+    char** use_uris;            /* parallel to use_names (NULL rows
+                                   for unprefixed references) */
     size_t use_count;
     struct xslt_attrset* next;
 } XsltAttrSet;
@@ -416,6 +423,17 @@ void xslt_stylesheet_free(XsltStylesheet* sheet);
  * namespace URI, not prefix spelling (§5.3). */
 int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
                          LeptrisDocument doc, LeptrisXPathNsSet ns);
+
+/* Eval hook: lets the caller supply a richer evaluation route than
+ * the plain ns-aware one — xsl:number count/from patterns evaluate
+ * with the current variable frame (bug-214). NULL = default route. */
+typedef struct leptris_xpath_result* (*XsltPatternEvalFn)(
+    void* ud, LeptrisXPathCompiled expr, LeptrisDocument doc,
+    LeptrisElement ctx);
+
+int xslt_pattern_matches_ex(const XsltPattern* p, LeptrisElement node,
+                            LeptrisDocument doc, LeptrisXPathNsSet ns,
+                            XsltPatternEvalFn hook, void* ud);
 
 /* xslt_exec.c — pattern + execution helpers shared with
  * xslt_functions.c (the document-order walker reused for key-index
