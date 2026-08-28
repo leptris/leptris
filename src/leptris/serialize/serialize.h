@@ -62,6 +62,9 @@ typedef struct SerializeBuffer {
     size_t capacity;   /* Allocated capacity */
     int indent;        /* Current indentation level (for pretty-printing) */
     int indent_spaces; /* Number of spaces per indent level (0 = compact) */
+    int indent_text;   /* #129: formatter also owns text/mixed whitespace */
+    int at_line_start; /* last emitted byte was a newline (dedups
+                        * consecutive newlines under indent_text) */
     /* §16.1 cdata-section-elements: QNames whose text children emit
      * as CDATA. Set by the serialization entry points. */
     const char* const* cdata_names;
@@ -110,7 +113,13 @@ typedef struct {
     const char* const* cdata_elements;   /* §16.1 cdata-section-elements */
     size_t cdata_element_count;
     int html_method;                     /* §16.2 method="html" */
+    int indent_text;                     /* #129: indent text/mixed too */
 } LeptrisSerializeExtended;
+
+LEPTRIS_API char* leptris_document_serialize_ext(
+    struct leptris_document* doc,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext);
 
 char* leptris_document_serialize_ex(struct leptris_document* doc,
                                     const LeptrisSerializeOptions* options,

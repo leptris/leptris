@@ -257,6 +257,13 @@ static inline void dp_wire_child(DParser* p, LeptrisElement parent,
  * epilog capture moves the root element into the chain between the
  * prolog nodes and everything that follows. */
 static inline void dp_doc_child(DParser* p, LeptrisNode* n) {
+    /* #612: document linkage — the #526 setters resolve the owning
+     * document through owner_doc; parse-created doc-level nodes
+     * must carry it exactly like leptris_pi_node_create ones. */
+    if (n && n->type == LEPTRIS_NODE_TYPE_PI)
+        ((LeptrisPINode*)n)->owner_doc = p->doc;
+    else if (n && n->type == LEPTRIS_NODE_TYPE_COMMENT)
+        ((LeptrisCommentNode*)n)->owner_doc = p->doc;
     if (!p->root_chained && p->root) {
         LeptrisNode* rn = (LeptrisNode*)p->root;
         if (p->dc_tail) leptris_node_set_next_sibling(p->dc_tail, rn);

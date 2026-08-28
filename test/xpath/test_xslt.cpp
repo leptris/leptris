@@ -1296,3 +1296,30 @@ TEST(XsltNumber, DecimalFormatGroupingSizeFromPattern) {
         "</xsl:template>", "<r/>"))
         .find("[1,23,45]"), std::string::npos);
 }
+
+/* #129: leptris_document_serialize_ext indent_text — the formatter
+ * also owns TEXT whitespace (display form). Without it, mixed
+ * content stays on one line (#534 round-trip guarantee). */
+TEST(SerializeExt, IndentTextIndentsMixedContent) {
+    const char xml[] = "<r><a>text <b>bold</b> tail</a></r>";
+    LeptrisDocument d = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(d, nullptr);
+
+    LeptrisSerializeOptions o = {2, 0, nullptr};
+    LeptrisSerializeExtOptions ext = {0};
+    char* plain = leptris_document_serialize(d, &o);
+    ASSERT_NE(plain, nullptr);
+    EXPECT_NE(std::string(plain).find("<a>text <b>bold</b> tail</a>"),
+              std::string::npos) << "default keeps mixed on one line";
+    leptris_free_string(plain);
+
+    ext.indent_text = 1;
+    char* it = leptris_document_serialize_ext(d, &o, &ext);
+    ASSERT_NE(it, nullptr);
+    std::string s(it);
+    leptris_free_string(it);
+    /* text on its own indented line, elements indented */
+    EXPECT_NE(s.find("<a>\n    text"), std::string::npos) << s;
+    EXPECT_NE(s.find("<b>\n      bold"), std::string::npos) << s;
+    leptris_document_free(d);
+}
