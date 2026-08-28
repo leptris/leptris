@@ -1075,10 +1075,14 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                 }
             }
             const char* av;
-            if ((av = leptris_element_attribute(e, "decimal-separator")) && *av)
+            if ((av = leptris_element_attribute(e, "decimal-separator")) && *av) {
+                if (df->decimal_sep) free((void*)df->decimal_sep);
                 df->decimal_sep = leptris_strdup(av);
-            if ((av = leptris_element_attribute(e, "grouping-separator")) && *av)
+            }
+            if ((av = leptris_element_attribute(e, "grouping-separator")) && *av) {
+                if (df->grouping_sep) free((void*)df->grouping_sep);
                 df->grouping_sep = leptris_strdup(av);
+            }
             if ((av = leptris_element_attribute(e, "minus-sign")) && *av)
                 df->minus_sign = av[0];
             if ((av = leptris_element_attribute(e, "percent")) && *av)
@@ -1088,11 +1092,11 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             if ((av = leptris_element_attribute(e, "zero-digit")) && *av)
                 df->zero_digit = av[0];
             if ((av = leptris_element_attribute(e, "infinity")) && *av) {
-                free((void*)df->infinity);
+                if (df->infinity) free((void*)df->infinity);
                 df->infinity = leptris_strdup(av);
             }
             if ((av = leptris_element_attribute(e, "NaN")) && *av) {
-                free((void*)df->nan);
+                if (df->nan) free((void*)df->nan);
                 df->nan = leptris_strdup(av);
             }
             continue;
@@ -1285,6 +1289,8 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         XsltDecimalFormat* d = sheet->decformats;
         sheet->decformats = d->next;
         free((void*)d->name);
+        free((void*)d->uri);
+        free((void*)d->local);
         free((void*)d->decimal_sep);
         free((void*)d->grouping_sep);
         free((void*)d->infinity);
