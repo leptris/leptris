@@ -287,9 +287,42 @@ static struct leptris_xpath_result* vm_apply_absolute_type(
      * (it is a child of the document node). The walk covers the
      * root's descendants, so node() needs the root itself added
      * first. The other type tests never match an element, so the
-     * descendant walk already is their complete result. */
-    if (want == 0) xpath_nodeset_add_fast(out, root);
-    vm_absolute_type_walk(out, root, want, pi_target);
+     * descendant walk already is their complete result.
+     * #580: document-level comments/PIs are descendants of the
+     * document too — the chain walks in document order (prolog
+     * nodes, root, subtree, epilog nodes). */
+    {
+        LeptrisNode* start = (LeptrisNode*)ctx->document->doc_children_head;
+        if (!start) start = (LeptrisNode*)root;
+        for (LeptrisNode* c = start; c;
+             c = leptris_node_get_next_sibling(c)) {
+            if (c->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+                if (want == 0) xpath_nodeset_add_fast(out, root);
+                vm_absolute_type_walk(out, root, want, pi_target);
+                continue;
+            }
+            int match = 0;
+            if (want == 1) {
+                match = (c->type == LEPTRIS_NODE_TYPE_TEXT ||
+                         c->type == LEPTRIS_NODE_TYPE_CDATA);
+            } else if (want == 2) {
+                match = (c->type == LEPTRIS_NODE_TYPE_COMMENT);
+            } else if (want == 3 && c->type == LEPTRIS_NODE_TYPE_PI) {
+                if (pi_target) {
+                    LeptrisPINode* pi = (LeptrisPINode*)c;
+                    match = pi->target && strcmp(pi->target, pi_target) == 0;
+                } else {
+                    match = 1;
+                }
+            }
+            if (match) xpath_nodeset_add_fast(out, c);
+        }
+        if (!ctx->document->doc_children_head) {
+            /* No chain (no doc-level nodes): plain subtree walk. */
+            if (want == 0) xpath_nodeset_add_fast(out, root);
+            vm_absolute_type_walk(out, root, want, pi_target);
+        }
+    }
 
     struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
     if (!r) { xpath_nodeset_free(out); return NULL; }
@@ -450,12 +483,16 @@ struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
 
     for (size_t i = 0; i < input->count; i++) {
         LeptrisNode* nd = input->nodes[i];
-        /* Document node: child axis = the root element. */
+        /* Document node: child axis = the document child chain —
+         * prolog nodes, the root element, epilog nodes (#580). */
         if (nd && nd->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
             struct leptris_document* d = ((LeptrisDocumentNode*)nd)->doc;
-            LeptrisNode* root = (LeptrisNode*)d->new_dom_root;
-            if (!root) root = (LeptrisNode*)d->root;
-            for (LeptrisNode* c = root; c;
+            LeptrisNode* start = (LeptrisNode*)d->doc_children_head;
+            if (!start) {
+                start = (LeptrisNode*)d->new_dom_root;
+                if (!start) start = (LeptrisNode*)d->root;
+            }
+            for (LeptrisNode* c = start; c;
                  c = leptris_node_get_next_sibling(c)) {
                 if (wild ||
                     (c->type == LEPTRIS_NODE_TYPE_ELEMENT &&

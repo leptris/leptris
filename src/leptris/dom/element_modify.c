@@ -1822,27 +1822,43 @@ LEPTRIS_API LeptrisDocument leptris_document_copy(LeptrisDocument src) {
     dest->had_declaration = src->had_declaration;
 
     /* Root tree. */
+    LeptrisElement root_copy = NULL;
     if (src->new_dom_root) {
-        LeptrisElement root_copy = leptris_element_copy(
-            (LeptrisElement)src->new_dom_root, dest);
+        root_copy = leptris_element_copy((LeptrisElement)src->new_dom_root,
+                                         dest);
         if (!root_copy) goto fail;
         dest->new_dom_root = root_copy;
     }
 
-    /* Document-level PIs (linked list, heap-strdup target+data). */
-    struct leptris_processing_instruction* pi = src->pis;
-    struct leptris_processing_instruction* tail = NULL;
-    while (pi) {
-        struct leptris_processing_instruction* dup =
-            (struct leptris_processing_instruction*)malloc(sizeof(*dup));
-        if (!dup) goto fail;
-        dup->target = pi->target ? strdup(pi->target) : NULL;
-        dup->data = pi->data ? strdup(pi->data) : NULL;
-        dup->next = NULL;
-        if (tail) tail->next = dup;
-        else dest->pis = dup;
-        tail = dup;
-        pi = pi->next;
+    /* Document children (issue #580): copy each doc-level node and
+     * splice the root copy in at its chain position — the dest chain
+     * mirrors [prolog..., root, epilog...]. */
+    {
+        LeptrisNode* tail = NULL;
+        for (LeptrisNode* c = (LeptrisNode*)src->doc_children_head; c;
+             c = leptris_node_get_next_sibling(c)) {
+            LeptrisNode* dup = NULL;
+            if (c->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+                if ((LeptrisElement)c == (LeptrisElement)src->new_dom_root)
+                    dup = (LeptrisNode*)root_copy;
+                if (!dup) continue;
+            } else if (c->type == LEPTRIS_NODE_TYPE_PI) {
+                LeptrisPINode* pi = (LeptrisPINode*)c;
+                dup = (LeptrisNode*)leptris_pi_node_create(
+                    dest,
+                    pi->target ? pi->target : "",
+                    pi->data ? pi->data : "");
+            } else if (c->type == LEPTRIS_NODE_TYPE_COMMENT) {
+                dup = (LeptrisNode*)leptris_comment_node_create(
+                    dest,
+                    leptris_comment_get_content((LeptrisCommentNode*)c));
+            }
+            if (!dup) goto fail;
+            if (tail) leptris_node_set_next_sibling(tail, dup);
+            else dest->doc_children_head = dup;
+            tail = dup;
+        }
+        dest->doc_children_tail = tail;
     }
 
     return dest;

@@ -148,8 +148,8 @@ static struct leptris_xpath_result* compiled_eval_context(
      * with THIS context, so bindings resolve, and a fused
      * name[attr=$var] predicate runs on the index-backed opcode.
      * The earlier bug-76 divergence was the position-predicate
-     * absolute tail — which never merged; /doc/*[1] stays on the
-     * interpreter path. */
+     * absolute tail — which never merged; position predicates on
+     * absolute paths stay on the interpreter path. */
     struct leptris_xpath_result* result = NULL;
     {
         /* Pinned borrow (the raw get_bc returns an unpinned pointer —

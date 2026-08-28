@@ -68,22 +68,12 @@ typedef enum {
     LEPTRIS_NODE_TEXT = 8         /* synthetic text() result node */
 } LeptrisNodeType;
 
-/* Processing instruction structure */
-struct leptris_processing_instruction {
-    char* target;                /* PI target (e.g., "xml-stylesheet") */
-    char* data;                  /* PI data/content */
-    struct leptris_processing_instruction* next; /* Linked list */
-    int after_root;              /* 1 = follows the root element */
-};
-
-/* Top-level comment (outside the root element), the comment twin of
- * doc->pis: heap-owned, strdup'd content, chained in parse order
- * (#550 sweep fallout — the parser carved these but dropped them). */
-struct leptris_top_comment {
-    char* content;
-    struct leptris_top_comment* next;
-    int after_root;   /* 1 = follows the root element (doc order) */
-};
+/* Document-level nodes (issue #580): real pool comment/PI nodes
+ * chained with the root element as the document node's children —
+ * [prolog..., root, epilog...] in document order (libxml2 model).
+ * Every document-level consumer (serializer, c14n, the #526 flat
+ * accessors, XSLT numbering, the XPath document-node axes) walks
+ * this single chain; the separate side-list store is gone. */
 
 /* Document structure */
 /* Contiguous block of mutation elements (round 18). Chained via
@@ -135,19 +125,16 @@ struct leptris_document {
      * document per mutating thread, per the README model. */
     void* xslt_state;
     char* encoding;                 /* UTF-8 assumed, but store if specified */
-    struct leptris_processing_instruction* pis;  /* Processing instructions */
-    struct leptris_top_comment* top_comments;    /* Comments outside root */
+    /* Issue #580: the document node's child chain (see the comment
+     * above) — LeptrisNodeRef comment/PI nodes + the root element. */
+    void* doc_children_head;
+    void* doc_children_tail;
     size_t ref_count;               /* Reference counting for memory management */
     void* new_dom_root;             /* New DOM tree root (LeptrisElement) for serialization */
     /* Lazy XPath document node (LEPTRIS_NODE_TYPE_DOCUMENT
      * singleton — dom/document_node.h). XSLT's initial context and
      * "/" pattern matching run on it. */
     void* document_node;
-    /* XSLT transform prep: top-level comments/PIs materialized as
-     * real nodes chained BEFORE the root element (document order;
-     * the engine's document model keeps them in side lists
-     * otherwise — invisible to templates and numbering). */
-    void* pre_root_chain;
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */
