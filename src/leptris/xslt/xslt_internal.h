@@ -287,6 +287,11 @@ struct xslt_styles {
      * (strip wins on conflict — last declaration). Default (both
      * NULL): whitespace-only text nodes are stripped per §3.4. */
     char** ws_preserve;
+    /* Combined 3.4 rules in DECLARATION order — the LAST matching
+     * rule for a name decides (libxslt bug-82). */
+    char** ws_rules;
+    unsigned char* ws_rule_preserve;   /* 1 = preserve rule */
+    size_t ws_rule_count;
     char** ws_strip;
 
     /* §7.1.1 xsl:namespace-alias table. */
