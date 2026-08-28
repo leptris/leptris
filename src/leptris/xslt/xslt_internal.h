@@ -128,6 +128,9 @@ typedef struct xslt_instr {
     char** ns_out_uri;
     size_t ns_out_count;
     char* ns_out_default;
+    size_t ns_out_default_pos;  /* index among ns_out entries where
+                                   the default was declared ((size_t)-1
+                                   = after the last entry) */
 
     /* CHOOSE arms are WHEN/OTHERWISE children with test set. */
     int terminate;                  /* MESSAGE terminate */
