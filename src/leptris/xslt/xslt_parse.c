@@ -228,8 +228,12 @@ static LeptrisXPathNsSet build_ns_context(LeptrisElement e) {
         for (int i = 0;; i++) {
             const char* pfx = leptris_element_namespace_decl_prefix(a, i);
             const char* uri = leptris_element_namespace_decl_uri(a, i);
-            if (!pfx || !uri) break;
-            if (!*pfx) continue;
+            /* A NULL PREFIX is the default namespace declaration —
+             * it does NOT end the list (only a missing URI does);
+             * bug-50-: the default on the stylesheet root stopped
+             * the walk before later prefixes (tst) were seen. */
+            if (!uri) break;
+            if (!pfx || !*pfx) continue;
             if (!set) set = leptris_xpath_ns_set_new();
             if (set) leptris_xpath_ns_set_add(set, pfx, uri);
         }

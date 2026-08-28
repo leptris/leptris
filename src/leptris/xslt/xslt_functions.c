@@ -929,6 +929,101 @@ static struct leptris_xpath_result* xslt_fn_date_datetime(
 
 /* §12.4 unparsed-entity-uri(name): the system identifier of the
  * unparsed entity declared in the source document's DTD. */
+/* days-from-civil (Howard Hinnant): days since 1970-01-01. */
+static long date_days_from_civil(long y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (153u * (m + (m > 2 ? -3u : 9u)) + 2u) / 5u + d - 1u;
+    unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return era * 146097L + (long)doe - 719468L;
+}
+
+static void date_civil_from_days(long z, long* y, unsigned* m,
+                                 unsigned* d) {
+    z += 719468L;
+    long era = (z >= 0 ? z : z - 146096L) / 146097L;
+    unsigned doe = (unsigned)(z - era * 146097L);
+    unsigned yoe = (doe - doe / 1460u + doe / 36524u - doe / 146096u) /
+                   365u;
+    long yy = (long)yoe + era * 400L;
+    unsigned doy = doe - (365u * yoe + yoe / 4u - yoe / 100u);
+    unsigned mp = (5u * doy + 2u) / 153u;
+    *d = doy - (153u * mp + 2u) / 5u + 1u;
+    *m = mp + (mp < 10u ? 3u : (unsigned)-9);
+    *y = yy + (*m <= 2);
+}
+
+/* EXSLT date:add(date, duration): supports the date part
+ * ([-]CCYY[-MM[-DD]]) with PnYnMnDnW durations. A result landing
+ * on day 1 formats as year-month (libxslt's observed output). */
+static struct leptris_xpath_result* xslt_fn_date_add(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* ds = arg_string(ctx, args, n, 0);
+    char* dur = arg_string(ctx, args, n, 1);
+    if (!ds || !dur || dur[0] != 'P') {
+        free(ds); free(dur);
+        return res_string("");
+    }
+    long y = 2000; unsigned mo = 1, da = 1;
+    int has_day = 0;
+    {
+        const char* p = ds;
+        int neg = 0;
+        if (*p == '-') { neg = 1; p++; }
+        y = strtol(p, (char**)&p, 10);
+        if (neg) y = -y;
+        if (*p == '-') {
+            mo = (unsigned)strtol(p + 1, (char**)&p, 10);
+            if (*p == '-') {
+                da = (unsigned)strtol(p + 1, (char**)&p, 10);
+                has_day = 1;
+            }
+        }
+    }
+    long months = 0, days = 0;
+    {
+        const char* p = dur + 1;
+        long v;
+        char* e;
+        for (;;) {
+            if (*p == 'T' || !*p) break;
+            v = strtol(p, &e, 10);
+            if (e == p) break;
+            p = e;
+            if (*p == 'Y') { months += v * 12; p++; }
+            else if (*p == 'M') { months += v; p++; }
+            else if (*p == 'W') { days += v * 7; p++; }
+            else if (*p == 'D') { days += v; p++; }
+            else break;
+        }
+    }
+    long total = months * 30 + days;   /* month arithmetic below */
+    (void)total;
+    /* Apply months on the calendar, then days. */
+    long tdays = date_days_from_civil(y, mo, da);
+    tdays += days;
+    if (months) {
+        long ym_total_months = (y * 12L) + (mo - 1) + months;
+        long ny = ym_total_months / 12;
+        long nm = ym_total_months % 12;
+        if (nm < 0) { nm += 12; ny -= 1; }
+        y = ny; mo = (unsigned)nm + 1;
+        tdays = date_days_from_civil(y, mo, da);
+        tdays += days;
+    }
+    long ry; unsigned rm, rd;
+    date_civil_from_days(tdays, &ry, &rm, &rd);
+    char out[64];
+    if (rd == 1 && !has_day)
+        snprintf(out, sizeof(out), "%04ld-%02u", ry, rm);
+    else
+        snprintf(out, sizeof(out), "%04ld-%02u-%02u", ry, rm, rd);
+    free(ds);
+    free(dur);
+    return res_string(out);
+}
+
 static struct leptris_xpath_result* xslt_fn_unparsed_entity_uri(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
     XsltExec* ex = exec_from(ctx);
@@ -1144,6 +1239,7 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
     xslt_register_handler(r, "regexp:match", xslt_fn_regexp_match_v1, 2, 2, exec);
     xslt_register_handler(r, "regexp:replace", xslt_fn_regexp_replace_v1, 3, 3, exec);
     xslt_register_handler(r, "date:date-time", xslt_fn_date_datetime, 0, 0, exec);
+    xslt_register_handler(r, "date:add", xslt_fn_date_add, 2, 2, exec);
     xslt_register_handler(r, "unparsed-entity-uri", xslt_fn_unparsed_entity_uri, 1, 1, exec);
     xslt_register_handler(r, "element-available", xslt_fn_element_available, 1, 1, exec);
     xslt_register_handler(r, "function-available", xslt_fn_function_available, 1, 1, exec);
