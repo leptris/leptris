@@ -4,7 +4,19 @@
 
 ### Added
 
-- document-level PIs/comments as tree children (#580) (dom)
+- document-level PIs/comments are tree children of the document
+  node (#580): one node chain per document —
+  [prolog..., root, epilog...] in document order (the libxml2 model
+  Nokogiri/lxml adapters build on). New leptris_document_node()
+  navigation head; the #526 flat accessors and add_pi read/write
+  the same store; comment/PI interleaving survives round-trips.
+
+### Fixed
+
+- XPath sees document-level nodes: /comment(),
+  /processing-instruction(name), //comment(), //node(); document-
+  order ranks keep mixed unions ordered across prolog/epilog
+- libxslt suite 137 → 138 (bug-196 closes)
 
 
 
