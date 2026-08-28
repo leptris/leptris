@@ -8,8 +8,10 @@
 #include "xslt_internal.h"
 #include "../dom/text.h"
 #include "../dom/pi.h"
-#include "../serialize/serialize.h"   /* LeptrisSerializeExtended (issue #568) */
+#include "../serialize/serialize.h"
+#include "../encoding/encoding.h"   /* LeptrisSerializeExtended (issue #568) */
 #include <stdlib.h>
+#include <strings.h>
 #include <stdio.h>
 #include <ctype.h>
 
@@ -122,10 +124,11 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
  * comment/PI/text -> their literal serialization. Under method=html
  * a PI closes SGML-style — `<?target data>`, no `?` (libxml2's
  * html serializer; libxslt bug-11-). */
-static char* serialize_frag_node_text(LeptrisNodeRef n, int html) {
+static char* serialize_frag_node_text(LeptrisNodeRef n, int html,
+                                      const LeptrisSerializeOptions* opts) {
     int ty = leptris_node_get_type(n);
     if (ty == LEPTRIS_NODE_TYPE_ELEMENT)
-        return leptris_element_serialize((LeptrisElement)n, NULL);
+        return leptris_element_serialize((LeptrisElement)n, opts);
     const char* body = NULL;
     const char* target = NULL;
     if (ty == LEPTRIS_NODE_TYPE_TEXT || ty == LEPTRIS_NODE_TYPE_CDATA)
@@ -296,9 +299,12 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             memcpy(acc, decl, dl + 1);
             len = dl;
         }
+        LeptrisSerializeOptions frag_opts = {0};
+        frag_opts.indent = effective_indent(ex->sheet, html_method) ? 2 : 0;
         for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
              f = f->next) {
-            char* piece = serialize_frag_node_text(f->node, html_method);
+            char* piece = serialize_frag_node_text(f->node, html_method,
+                                                   &frag_opts);
             if (!piece) continue;
             size_t pl = strlen(piece);
             while (len + pl + 1 > cap) cap *= 2;
@@ -329,7 +335,8 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
      * serializer owns every HTML semantic now (layout, voids,
      * raw text, attr escaping, PI form). */
     opts.xml_declaration =
-        (!ex->sheet->out_method_text && !html_method) ? 1 : 0;
+        (!ex->sheet->out_method_text && !html_method &&
+         !ex->sheet->out_omit_decl) ? 1 : 0;
     /* §16.1 indent="yes": 2-space pretty-print via the shared
      * serializer (text-only elements stay inline — libxslt rule).
      * The cdata/html-method settings ride the extended-options
@@ -360,7 +367,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             first_pre[0] = 0;
             for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
                  f = f->next) {
-                char* piece = serialize_frag_node_text(f->node, html_method);
+                char* piece = serialize_frag_node_text(f->node, html_method, &opts);
                 if (!piece) continue;
                 size_t pl = strlen(piece);
                 while (pre_len + pl + 1 > pc) {
@@ -455,7 +462,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     for (LeptrisNodeRef sib = leptris_node_next_sibling(
              leptris_element_as_node(root));
          sib; sib = leptris_node_next_sibling(sib)) {
-        char* piece = serialize_frag_node_text(sib, html_method);
+        char* piece = serialize_frag_node_text(sib, html_method, &opts);
         if (piece) {
             size_t pl = strlen(piece);
             while (total + pl + 1 > cap) cap *= 2;
@@ -488,6 +495,57 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     }
 
     char* final = acc;
+    /* §16.1 output encoding: us-ascii escapes non-ASCII as numeric
+     * character references; single-byte legacy encodings transcode
+     * the UTF-8 result via iconv (libxslt behavior, bugs 159/95). */
+    if (final && ex->sheet->out_encoding && *ex->sheet->out_encoding) {
+        const char* enc = ex->sheet->out_encoding;
+        if (strcasecmp(enc, "us-ascii") == 0 ||
+            strcasecmp(enc, "ascii") == 0) {
+            size_t need = 0;
+            for (const unsigned char* q = (const unsigned char*)final;
+                 *q; q++)
+                need += (*q >= 0x80) ? 8 + 1 : 1;
+            char* esc = (char*)malloc(need + 1);
+            if (esc) {
+                char* w = esc;
+                const unsigned char* q = (const unsigned char*)final;
+                while (*q) {
+                    if (*q < 0x80) {
+                        *w++ = (char)*q++;
+                    } else {
+                        /* Decode one UTF-8 codepoint. */
+                        unsigned cp;
+                        int n;
+                        if ((*q & 0xE0) == 0xC0) {
+                            cp = (*q & 0x1F); n = 1;
+                        } else if ((*q & 0xF0) == 0xE0) {
+                            cp = (*q & 0x0F); n = 2;
+                        } else {
+                            cp = (*q & 0x07); n = 3;
+                        }
+                        q++;
+                        for (int k = 0; k < n && *q; k++, q++)
+                            cp = cp << 6 | (*q & 0x3F);
+                        w += sprintf(w, "&#%u;", cp);
+                    }
+                }
+                *w = 0;
+                free(final);
+                final = esc;
+            }
+        } else if (strcasecmp(enc, "utf-8") != 0 &&
+                   strcasecmp(enc, "utf8") != 0) {
+            size_t outlen = 0;
+            char* conv = leptris_encoding_convert(
+                "UTF-8", enc, final, strlen(final), &outlen);
+            if (conv && outlen) {
+                conv[outlen] = 0;
+                free(final);
+                final = conv;
+            }
+        }
+    }
     free(first_pre);
     leptris_document_free(out);
     xslt_exec_free(ex);

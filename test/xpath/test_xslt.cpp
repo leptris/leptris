@@ -424,6 +424,7 @@ TEST(Xslt, CallTemplateWithParam) {
         "<xsl:with-param name='v' select=\"/r/@k\"/>"
         "</xsl:call-template></xsl:template>"
         "<xsl:template name='emit'>"
+        "<xsl:param name='v'/>"
         "<p><xsl:value-of select='$v'/></p></xsl:template>",
         "<r k='42'/>")), "<p>42</p>");
 }
@@ -1792,6 +1793,37 @@ TEST(XsltKey, MatchesTextNodes) {
     leptris_document_free(d);
     leptris_xslt_free(x);
     EXPECT_EQ(r, "[\n  one\n  two]") << r;
+}
+
+/* bug-41-/43-: a with-param binds ONLY names the callee declares
+ * as xsl:param (11.6) — the callee sees the GLOBAL otherwise. */
+TEST(XsltParams, WithParamIgnoredWhenNotDeclared) {
+    EXPECT_EQ(body(run(
+        "<xsl:variable name='foo' select='\"SUCCESS\"'/>"
+        "<xsl:template name='test'>"
+        "<xsl:value-of select='$foo'/>"
+        "</xsl:template>"
+        "<xsl:template match='/'>"
+        "<xsl:variable name='foo' select='\"FAILURE\"'/>"
+        "<xsl:call-template name='test'>"
+        "<xsl:with-param name='foo' select='\"FAILURE\"'/>"
+        "</xsl:call-template>"
+        "</xsl:template>",
+        "<r/>")),
+        "SUCCESS");
+    EXPECT_EQ(body(run(
+        "<xsl:variable name='foo' select='\"SUCCESS\"'/>"
+        "<xsl:template match='d'>"
+        "<xsl:value-of select='$foo'/>"
+        "</xsl:template>"
+        "<xsl:template match='/'>"
+        "<xsl:variable name='foo' select='\"FAILURE\"'/>"
+        "<xsl:apply-templates>"
+        "<xsl:with-param name='foo' select='\"FAILURE\"'/>"
+        "</xsl:apply-templates>"
+        "</xsl:template>",
+        "<d/>")),
+        "SUCCESS");
 }
 
 /* bug-186 follow-on: a child-step pattern (star slash star) must

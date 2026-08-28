@@ -1306,13 +1306,6 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
         LeptrisDocument frag_doc = ex->result;
         ex->result = main_result;
         LeptrisElement rr = leptris_document_root(frag_doc);
-        if (!rr && ex->rtf_text && ex->rtf_text_len) {
-            /* Pure-text RTF: the value is the string. */
-            v = xpath_result_new(XPATH_RESULT_STRING);
-            if (v) v->value.string_value = leptris_strdup(ex->rtf_text);
-            xslt_push_var(ex, in->name, v);
-            return 0;
-        }
         v = xpath_result_new(XPATH_RESULT_NODESET);
         if (v && rr) {
             v->value.nodeset_value = xpath_nodeset_new();
@@ -1325,6 +1318,25 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
                     leptris_document_get_node(frag_doc);
                 if (dn)
                     xpath_nodeset_add(v->value.nodeset_value, dn);
+            }
+        } else if (v && !rr) {
+            /* Pure-text (or empty) fragment: a TEXT node carries
+             * the value — string($v)/count($v) observe it; an EMPTY
+             * fragment binds its document node (count 1, libxslt
+             * bug-56). */
+            v->value.nodeset_value = xpath_nodeset_new();
+            if (v->value.nodeset_value) {
+                if (ex->rtf_text && ex->rtf_text_len) {
+                    LeptrisNodeRef tn = leptris_text_node_create(
+                        frag_doc, ex->rtf_text);
+                    if (tn)
+                        xpath_nodeset_add(v->value.nodeset_value, tn);
+                } else {
+                    LeptrisNodeRef dn = (LeptrisNodeRef)
+                        leptris_document_get_node(frag_doc);
+                    if (dn)
+                        xpath_nodeset_add(v->value.nodeset_value, dn);
+                }
             }
         }
         /* The nodeset's node pointers live in `rr`'s document. Move
@@ -1638,8 +1650,20 @@ static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
     struct leptris_xpath_result* vals[16];
     const char* names[16];
     size_t nv = 0;
+    /* §11.6: a with-param binds only names the callee DECLARES as
+     * xsl:param (leading is_param children) — others are ignored
+     * and the callee sees the global (libxslt bugs 41-/43-). */
     for (const XsltInstr* wp = with_params; wp && nv < 16; wp = wp->next) {
         if (wp->kind != XSLT_INSTR_WITH_PARAM || !wp->name) continue;
+        int declared = 0;
+        for (const XsltInstr* b = t->body; b; b = b->next) {
+            if (b->kind != XSLT_INSTR_VARIABLE || !b->is_param) break;
+            if (b->name && strcmp(b->name, wp->name) == 0) {
+                declared = 1;
+                break;
+            }
+        }
+        if (!declared) continue;
         vals[nv] = wp->select ? xslt_eval(ex, wp->select, node) : NULL;
         names[nv] = wp->name;
         nv++;
