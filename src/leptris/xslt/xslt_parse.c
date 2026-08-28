@@ -589,6 +589,9 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         XsltInstr* in = instr_new(XSLT_INSTR_ATTRIBUTE);
         if (!in) return NULL;
         in->name = leptris_strdup(leptris_element_attribute(e, "name"));
+        /* §7.1.3: the namespace attribute (an AVT at exec time). */
+        in->ns_uri = leptris_strdup(
+            leptris_element_attribute(e, "namespace"));
         in->child = parse_content(sp, e);
         return in;
     }
@@ -1073,6 +1076,27 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                     free(tmp);
                     arr = (char**)realloc(arr, (cnt + 1) * sizeof(char*));
                     arr[cnt] = NULL;
+                    /* Record into the ORDERED rules list (3.4: the
+                     * last matching declaration wins). */
+                    int is_pres = !node_is_xsl(e, "strip-space");
+                    for (size_t k = 0; k < cnt; k++) {
+                        char** gr = (char**)realloc(
+                            sp->sheet->ws_rules,
+                            (sp->sheet->ws_rule_count + 1) *
+                                sizeof(char*));
+                        unsigned char* gp = (unsigned char*)realloc(
+                            sp->sheet->ws_rule_preserve,
+                            (sp->sheet->ws_rule_count + 1) * 1);
+                        if (!gr || !gp) { free(gr); free(gp); break; }
+                        sp->sheet->ws_rules = gr;
+                        sp->sheet->ws_rule_preserve = gp;
+                        sp->sheet->ws_rules[sp->sheet->ws_rule_count] =
+                            arr[k];
+                        sp->sheet->ws_rule_preserve[
+                            sp->sheet->ws_rule_count] =
+                            (unsigned char)is_pres;
+                        sp->sheet->ws_rule_count++;
+                    }
                     if (node_is_xsl(e, "strip-space")) {
                         sp->sheet->ws_strip = arr;
                     } else {
@@ -1370,6 +1394,10 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
             free(sheet->ws_preserve[i]);
         free(sheet->ws_preserve);
     }
+    /* ws_rules entries alias ws_strip/ws_preserve strings — the
+     * containers alone are freed here. */
+    free(sheet->ws_rules);
+    free(sheet->ws_rule_preserve);
     while (sheet->ns_alias) {
         XsltNsAlias* na = sheet->ns_alias;
         sheet->ns_alias = na->next;

@@ -1434,24 +1434,14 @@ static void strip_source_whitespace(XsltExec* ex) {
         const char* name = leptris_element_name(e);
         if (!name) continue;
         const char* euri = leptris_element_get_namespace_uri(e);
+        /* §3.4: the LAST matching declaration wins (bug-82:
+         * preserve * then strip child strips child). */
         int strip = 0;
-        for (size_t i = 0; ex->sheet->ws_strip[i]; i++) {
-            if (strip_entry_matches(ex->sheet->ws_strip,
-                                    ex->sheet->ws_strip[i], name,
+        for (size_t i = 0; i < ex->sheet->ws_rule_count; i++) {
+            if (strip_entry_matches(ex->sheet->ws_rules,
+                                    ex->sheet->ws_rules[i], name,
                                     euri, sheet_root)) {
-                strip = 1;
-                break;
-            }
-        }
-        if (strip) {
-            for (size_t i = 0; ex->sheet->ws_preserve &&
-                              ex->sheet->ws_preserve[i]; i++) {
-                if (strip_entry_matches(ex->sheet->ws_preserve,
-                                        ex->sheet->ws_preserve[i],
-                                        name, euri, sheet_root)) {
-                    strip = 0;
-                    break;
-                }
+                strip = !ex->sheet->ws_rule_preserve[i];
             }
         }
         if (!strip || ancestor_xml_space_preserve(e)) continue;
@@ -1982,9 +1972,62 @@ static int op_attribute(XsltExec* ex, const XsltInstr* in,
     char* nm = strchr(in->name, '{')
                    ? eval_avt(ex, in->name, node)
                    : leptris_strdup(in->name);
+    /* §7.1.3 namespace attribute: an AVT naming the attribute's
+     * namespace. The XML namespace maps to the reserved xml:
+     * prefix (bug-177); any OTHER namespace on an unprefixed name
+     * mints a generated ns_N prefix — attributes never take the
+     * default namespace (libxslt bug-99). */
+    char* ans_uri = in->ns_uri && in->ns_uri[0]
+                        ? eval_avt(ex, in->ns_uri, node) : NULL;
+    if (ans_uri && !ans_uri[0]) { free(ans_uri); ans_uri = NULL; }
+    char* final_nm = nm;
+    if (nm && ans_uri) {
+        const char* nc = strchr(nm, ':');
+        if (!nc) {
+            if (strcmp(ans_uri,
+                       "http://www.w3.org/XML/1998/namespace") == 0) {
+                size_t l = strlen(nm);
+                final_nm = (char*)malloc(l + 5);
+                if (final_nm) snprintf(final_nm, l + 5, "xml:%s", nm);
+            } else {
+                int n = 1;
+                char pbuf[32];
+                for (;;) {
+                    snprintf(pbuf, sizeof(pbuf), "ns_%d", n);
+                    const char* cur =
+                        leptris_element_namespace_for_prefix(
+                            ex->pending_parent, pbuf);
+                    if (!cur) break;
+                    if (++n > 999) break;
+                }
+                size_t l = strlen(nm);
+                final_nm = (char*)malloc(l + strlen(pbuf) + 2);
+                if (final_nm)
+                    snprintf(final_nm, l + strlen(pbuf) + 2,
+                             "%s:%s", pbuf, nm);
+                if (final_nm)
+                    leptris_element_add_namespace_definition(
+                        ex->pending_parent, pbuf, ans_uri);
+            }
+        } else {
+            /* Prefixed name + namespace attribute: the declaration
+             * follows the given URI (rebinding the prefix). */
+            size_t pl = (size_t)(nc - nm);
+            char pbuf[80];
+            if (pl < sizeof(pbuf)) {
+                memcpy(pbuf, nm, pl);
+                pbuf[pl] = 0;
+                leptris_element_add_namespace_definition(
+                    ex->pending_parent, pbuf, ans_uri);
+            }
+        }
+    }
     char* acc = xslt_capture_children_text(ex, in->child, node);
-    if (nm && acc)
-        leptris_element_set_attribute(ex->pending_parent, nm, acc);
+    if (final_nm && acc)
+        leptris_element_set_attribute(ex->pending_parent, final_nm,
+                                      acc);
+    if (final_nm != nm) free(final_nm);
+    free(ans_uri);
     free(nm);
     free(acc);
     return 0;

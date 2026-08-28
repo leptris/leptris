@@ -1657,6 +1657,49 @@ TEST(XsltCopy, DoesNotCopyAttributes) {
         "<a>t</a>");
 }
 
+/* bug-177: an attribute created in the XML namespace serializes
+ * with the reserved xml: prefix. */
+TEST(XsltAttribute, XmlNamespaceBecomesXmlPrefix) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/*'>"
+        "<xsl:copy>"
+        "<xsl:attribute name='id'"
+        " namespace='http://www.w3.org/XML/1998/namespace'>etc"
+        "</xsl:attribute>"
+        "</xsl:copy>"
+        "</xsl:template>",
+        "<doc/>")),
+        "<doc xml:id=\"etc\"/>");
+}
+
+/* bug-99: an UNPREFIXED attribute created with a namespace gets a
+ * generated ns_1 prefix — attributes never take the default
+ * namespace (libxslt mints ns_N). */
+TEST(XsltAttribute, NamespacedUnprefixedAttrMintsPrefix) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:element name='doc' namespace='ns1'>"
+        "<xsl:attribute name='attr' namespace='ns1'>foo!</xsl:attribute>"
+        "</xsl:element>"
+        "</xsl:template>",
+        "<r/>")),
+        "<doc xmlns=\"ns1\" xmlns:ns_1=\"ns1\" ns_1:attr=\"foo!\"/>");
+}
+
+/* bug-82: §3.4 — when both strip-space and preserve-space match an
+ * element, the LAST DECLARED rule wins (preserve * followed by
+ * strip child strips child's whitespace-only text). */
+TEST(XsltStripSpace, LastMatchingDeclarationWins) {
+    EXPECT_EQ(body(run(
+        "<xsl:preserve-space elements='*'/>"
+        "<xsl:strip-space elements='b'/>"
+        "<xsl:template match='node()|@*'>"
+        "<xsl:copy><xsl:apply-templates select='node()|@*'/></xsl:copy>"
+        "</xsl:template>",
+        "<r><a>  </a><b>  </b></r>")),
+        "<r><a>  </a><b/></r>");
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */
