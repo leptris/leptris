@@ -289,22 +289,25 @@ static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    LeptrisElement parent = leptris_element_get_parent(node);
+    /* Any-kind links (text/comment contexts position correctly —
+     * bug-133). */
+    LeptrisElement parent =
+        (LeptrisElement)leptris_node_parent((LeptrisNodeRef)node);
     if (!parent) return result;
 
     int found = 0;
 
-    /* Iterate through siblings using compact accessor functions */
-    LeptrisElement sibling = leptris_element_get_first_child(parent);
+    LeptrisNodeRef sibling =
+        leptris_node_first_child(leptris_element_as_node(parent));
     while (sibling) {
-        if (sibling == node) {
+        if (sibling == (LeptrisNodeRef)node) {
             found = 1;
         } else if (found) {
             if (matches_node_test(ctx, (LeptrisNode*)sibling, test)) {
                 xpath_nodeset_add(result, sibling);
             }
         }
-        sibling = leptris_element_get_next_sibling(sibling);
+        sibling = leptris_node_next_sibling(sibling);
     }
 
     return result;
@@ -317,16 +320,21 @@ static XPathNodeSet* axis_preceding_sibling(XPathContext* ctx,
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    LeptrisElement parent = leptris_element_get_parent(node);
+    /* Any-kind parent + child links: the context may be a
+     * text/comment node (key use expressions, bug-133) whose
+     * position among the parent's children the element-typed
+     * accessors cannot see. */
+    LeptrisElement parent =
+        (LeptrisElement)leptris_node_parent((LeptrisNodeRef)node);
     if (!parent) return result;
 
-    /* Collect all preceding siblings in forward order using compact accessor functions */
-    LeptrisElement sibling = leptris_element_get_first_child(parent);
-    while (sibling && sibling != node) {
+    LeptrisNodeRef sibling =
+        leptris_node_first_child(leptris_element_as_node(parent));
+    while (sibling && sibling != (LeptrisNodeRef)node) {
         if (matches_node_test(ctx, (LeptrisNode*)sibling, test)) {
             xpath_nodeset_add(result, sibling);
         }
-        sibling = leptris_element_get_next_sibling(sibling);
+        sibling = leptris_node_next_sibling(sibling);
     }
 
     /* Reverse the nodeset to match XPath spec (reverse document order) */
@@ -698,11 +706,12 @@ XPathNodeSet* apply_axis(XPathContext* ctx, LeptrisNode* node,
         return axis_child(ctx, node, test);
     }
 
-    /* Most axes require an element context. */
+    /* Descendant/following/preceding axes need an element context;
+     * the SIBLING axes also accept text/comment/PI contexts (their
+     * walkers use the any-kind node links — key use expressions
+     * evaluated from text nodes, bug-133). */
     element_only = (axis_id == XPATH_AXIS_DESCENDANT ||
                     axis_id == XPATH_AXIS_DESCENDANT_OR_SELF ||
-                    axis_id == XPATH_AXIS_FOLLOWING_SIBLING ||
-                    axis_id == XPATH_AXIS_PRECEDING_SIBLING ||
                     axis_id == XPATH_AXIS_FOLLOWING ||
                     axis_id == XPATH_AXIS_PRECEDING);
 

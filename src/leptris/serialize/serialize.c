@@ -1241,8 +1241,15 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                         /* Apostrophes stay raw in double-quoted
                          * attribute values (libxml2, bug-86). */
                         *out++ = '\''; break;
-                    case '\t': out += sprintf(out, "&#9;");  break;
-                    case '\n': out += sprintf(out, "&#10;"); break;
+                    case '\t':
+                    case '\n':
+                        /* libxml2's HTML serializer leaves tabs and
+                         * newlines RAW in attribute values (bug-5-:
+                         * <tr class="\nPROD\n">). XML keeps the
+                         * char-ref escapes for round-trip fidelity. */
+                        if (buf->html_method) { *out++ = val[i]; break; }
+                        out += sprintf(out, val[i] == '\t' ? "&#9;" : "&#10;");
+                        break;
                     case '\r': out += sprintf(out, "&#13;"); break;
                     default:   *out++ = val[i]; break;
                 }

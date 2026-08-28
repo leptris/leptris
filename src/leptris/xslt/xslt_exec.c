@@ -394,8 +394,25 @@ static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
             if (len + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
             out[len++] = '}';
         } else if (*p == '{') {
-            /* Find the matching close brace (no nesting in AVTs). */
-            const char* close = strchr(p + 1, '}');
+            /* Find the close brace OUTSIDE string literals — a
+             * brace inside '...'/"..." belongs to the expression
+             * (bug-168: concat('{',...)). No nesting in AVTs. */
+            const char* close = NULL;
+            {
+                const char* q = p + 1;
+                char lit = 0;
+                while (*q) {
+                    if (lit) {
+                        if (*q == lit) lit = 0;
+                    } else if (*q == '\'' || *q == '"') {
+                        lit = *q;
+                    } else if (*q == '}') {
+                        close = q;
+                        break;
+                    }
+                    q++;
+                }
+            }
             if (!close) {
                 if (len + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
                 out[len++] = *p++;
@@ -1398,8 +1415,12 @@ static int strip_entry_matches(char** list, const char* entry,
     if (!entry || !local) return 0;
     const char* colon = strchr(entry, ':');
     if (!colon) {
-        /* Unprefixed: "*" wildcard or a no-namespace exact name. */
-        return strcmp(entry, "*") == 0 || strcmp(entry, local) == 0;
+        /* Unprefixed: "*" matches every element; a plain name
+         * matches NO-NAMESPACE elements only (bug-82: a same-local
+         * element in a namespace is not stripped). */
+        if (strcmp(entry, "*") == 0) return 1;
+        if (elem_uri && *elem_uri) return 0;
+        return strcmp(entry, local) == 0;
     }
     if (!sheet_root) return 0;
     size_t plen = (size_t)(colon - entry);
@@ -2423,6 +2444,67 @@ static void emit_number_chunk(unsigned long v, char spec,
     }
 }
 
+/* Non-ASCII decimal-digit (Nd) tokens in format strings — the
+ * numbering uses the token's script digits, zero-padded to the
+ * token length (bug-219's Arabic-Indic ٠١). Returns the digit VALUE
+ * (0-9) for a codepoint, or -1 when it is not a covered Nd digit. */
+static int nd_digit_value(unsigned cp) {
+    static const struct { unsigned lo, hi; } k_nd[] = {
+        {0x0660, 0x0669}, {0x06F0, 0x06F9}, {0x0966, 0x096F},
+        {0x09E6, 0x09EF}, {0x0A66, 0x0A6F}, {0x0AE6, 0x0AEF},
+        {0x0B66, 0x0B6F}, {0x0C66, 0x0C6F}, {0x0CE6, 0x0CEF},
+        {0x0D66, 0x0D6F}, {0x0E50, 0x0E59}, {0x0ED0, 0x0ED9},
+        {0x0F20, 0x0F29}, {0xFF10, 0xFF19},
+    };
+    for (size_t i = 0; i < sizeof(k_nd) / sizeof(k_nd[0]); i++)
+        if (cp >= k_nd[i].lo && cp <= k_nd[i].hi)
+            return (int)(cp - k_nd[i].lo);
+    return -1;
+}
+
+/* Decode one UTF-8 codepoint at *pp; advances. */
+static unsigned utf8_next(const char** pp) {
+    const unsigned char* q = (const unsigned char*)*pp;
+    unsigned cp;
+    if (q[0] < 0x80) { cp = q[0]; *pp += 1; }
+    else if ((q[0] & 0xE0) == 0xC0) {
+        cp = (unsigned)(q[0] & 0x1F) << 6 | (q[1] & 0x3F);
+        *pp += 2;
+    } else if ((q[0] & 0xF0) == 0xE0) {
+        cp = (unsigned)(q[0] & 0x0F) << 12 | (q[1] & 0x3F) << 6 |
+             (q[2] & 0x3F);
+        *pp += 3;
+    } else {
+        cp = (unsigned)(q[0] & 0x07) << 18 | (q[1] & 0x3F) << 12 |
+             (q[2] & 0x3F) << 6 | (q[3] & 0x3F);
+        *pp += 4;
+    }
+    return cp;
+}
+
+static size_t utf8_encode(unsigned cp, char* buf) {
+    if (cp < 0x80) { buf[0] = (char)cp; return 1; }
+    if (cp < 0x800) {
+        buf[0] = (char)(0xC0 | cp >> 6);
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    buf[0] = (char)(0xE0 | cp >> 12);
+    buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    buf[2] = (char)(0x80 | (cp & 0x3F));
+    return 3;
+}
+
+static int fmt_char_is_token(unsigned char c, const char* p) {
+    if (c == '1' || c == 'a' || c == 'A' || c == 'i' || c == 'I')
+        return 1;
+    if (c >= 0x80) {
+        const char* q = p;
+        return nd_digit_value(utf8_next(&q)) >= 0;
+    }
+    return 0;
+}
+
 /* §7.7.1: number tokens in the format string map to numbers in
  * order — the LAST token repeats for extra numbers; literal runs are
  * the prefix (before the first token), separators (between tokens),
@@ -2438,20 +2520,44 @@ static void emit_formatted_numbers(const unsigned long* values, int nv,
     int ns = 0;
     const char* p = fmt;
 
-    while (*p && !(*p == '1' || *p == 'a' || *p == 'A' ||
-                   *p == 'i' || *p == 'I')) {
+    while (*p && !fmt_char_is_token((unsigned char)*p, p)) {
         if (prefix_len + 1 < sizeof(prefixbuf))
             prefixbuf[prefix_len++] = *p;
         p++;
     }
     prefixbuf[prefix_len] = 0;
 
+    unsigned nd_zero[32];
+    int nd_width[32];
     while (*p && ns < 32) {
-        specs[ns++] = *p++;
+        if ((unsigned char)*p >= 0x80 &&
+            nd_digit_value(0) >= 0 /* unreachable guard */) {}
+        if ((unsigned char)*p >= 0x80) {
+            /* Nd digit run: one token, script digits, width = run
+             * length (bug-219). */
+            const char* q = p;
+            unsigned first_cp = utf8_next(&q);
+            int v = nd_digit_value(first_cp);
+            unsigned zero_cp = first_cp - (unsigned)v;
+            int width = 1;
+            p = q;
+            while ((unsigned char)*p >= 0x80) {
+                const char* q2 = p;
+                unsigned cp = utf8_next(&q2);
+                if (nd_digit_value(cp) < 0) break;
+                width++;
+                p = q2;
+            }
+            specs[ns] = 'D';
+            nd_zero[ns] = zero_cp;
+            nd_width[ns] = width;
+            ns++;
+        } else {
+            specs[ns++] = *p++;
+        }
         size_t sl = 0;
         while (*p && sl + 1 < sizeof(sepbuf[0]) &&
-               !(*p == '1' || *p == 'a' || *p == 'A' ||
-                 *p == 'i' || *p == 'I')) {
+               !fmt_char_is_token((unsigned char)*p, p)) {
             sepbuf[ns - 1][sl++] = *p++;
         }
         sepbuf[ns - 1][sl] = 0;
@@ -2476,7 +2582,23 @@ static void emit_formatted_numbers(const unsigned long* values, int nv,
         }
         char chunk[128];
         char spec = specs[i < ns ? i : ns - 1];
-        if (values[i] == 0 &&
+        if (spec == 'D') {
+            /* Nd token: decimal digits in the token's script,
+             * zero-padded to the token width. */
+            unsigned zcp = nd_zero[i < ns ? i : ns - 1];
+            int wdt = nd_width[i < ns ? i : ns - 1];
+            char dec[48];
+            snprintf(dec, sizeof(dec), "%lu", values[i]);
+            size_t dl = strlen(dec);
+            size_t pad = (dl < (size_t)wdt) ? (size_t)wdt - dl : 0;
+            size_t co = 0;
+            for (size_t z = 0; z < pad && co + 4 < sizeof(chunk); z++)
+                co += utf8_encode(zcp, chunk + co);
+            for (size_t z = 0; z < dl && co + 4 < sizeof(chunk); z++)
+                co += utf8_encode(zcp + (unsigned)(dec[z] - '0'),
+                                  chunk + co);
+            chunk[co] = 0;
+        } else if (values[i] == 0 &&
             (spec == 'a' || spec == 'A' || spec == 'i' || spec == 'I')) {
             snprintf(chunk, sizeof(chunk), "0");   /* no zeroth letter */
         } else {
@@ -2555,8 +2677,15 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
     /* §7.7 letter-value disambiguator: with an alphabetic token
      * that could mean either, "alphabetic" forces a/A; the default
      * heuristic keeps format-driven behavior. */
+    char* fmt_avt = in->num_format && strchr(in->num_format, '{')
+        ? eval_avt(ex, in->num_format, node) : NULL;
     char fmtbuf[128];
-    const char* fmt_use = in->num_format ? in->num_format : "1";
+    const char* fmt_use = fmt_avt ? fmt_avt
+                       : (in->num_format ? in->num_format : "1");
+    if (fmt_avt && strlen(fmt_avt) < sizeof(fmtbuf)) {
+        snprintf(fmtbuf, sizeof(fmtbuf), "%s", fmt_avt);
+        fmt_use = fmtbuf;
+    }
     if (in->letter_value &&
         strcmp(in->letter_value, "alphabetic") == 0 &&
         strchr(fmt_use, 'i')) {
@@ -2570,6 +2699,7 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
     }
     char out[512];
     emit_formatted_numbers(values, nv, fmt_use, in, out, sizeof(out));
+    free(fmt_avt);
     op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT, .text = out }, node);
     return 0;
 }

@@ -1712,6 +1712,88 @@ TEST(XsltOutput, TopLevelTextBetweenCommentAndRoot) {
         "<!--c-->\n<r/>");
 }
 
+/* bug-168: braces inside string literals in an AVT expression do
+ * not terminate the expression — the scanner tracks quotes. */
+TEST(XsltAvt, BracesInsideStringLiterals) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/*'>"
+        "<A a=\"{concat('{',local-name(),'}')}\">x</A>"
+        "</xsl:template>",
+        "<r/>")),
+        "<A a=\"{r}\">x</A>");
+}
+
+/* bug-219: xsl:number's format attribute is an AVT (libxslt), and
+ * digit tokens in other scripts format with that script's digits
+ * (zero-padded to the token length). */
+TEST(XsltNumber, FormatAvtWithUnicodeDigits) {
+    std::string xml = "<t><f>";
+    xml += "\xd9\xa0";   /* Arabic-Indic zero */
+    xml += "\xd9\xa1";   /* Arabic-Indic one */
+    xml += "</f></t>";
+    std::string want = "<r>";
+    want += "\xd9\xa0";
+    want += "\xd9\xa0";
+    want += "</r>";
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='f' select='/t/f'/>"
+        "<r><xsl:number value='0' format='{$f}'/></r>"
+        "</xsl:template>",
+        xml.c_str())),
+        want);
+}
+
+TEST(XsltStripSpace, UnprefixedNameNeverMatchesNamespacedElement) {
+    EXPECT_EQ(body(run(
+        "<xsl:preserve-space elements='*'/>"
+        "<xsl:strip-space elements='c'/>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='/r/c'/>]["
+        "<xsl:value-of select='/r/e:n'/>]"
+        "</xsl:template>",
+        "<r xmlns:e='urn:x'><c>  </c><e:n>  </e:n></r>")),
+        "[][  ]");
+}
+
+/* bug-5-: the HTML serializer leaves newlines raw in attribute
+ * values (libxml2 htmlAttrDumpOutput). */
+TEST(XsltHtml, AttributeNewlineStaysRaw) {
+    EXPECT_NE(body(run(
+        "<xsl:output method='html'/>"
+        "<xsl:template match='/'>"
+        "<tr class=\"{concat('a', '&#10;', 'b')}\"/>"
+        "</xsl:template>",
+        "<r/>"))
+        .find("<tr class=\"a\nb\">"), std::string::npos);
+}
+
+/* bug-133: key() indexes EVERY node kind — match="node()" must
+ * retrieve text nodes between elements (the walker was
+ * elements-only). */
+TEST(XsltKey, MatchesTextNodes) {
+    std::string sheet =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " version='1.0'>"
+        "<xsl:key name='k' match='text()' use='\"txt\"'/>"
+        "<xsl:template match='/r'>"
+        "[<xsl:copy-of select=\"key('k','txt')\"/>]"
+        "</xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char xml[] = "<r><a/>\n  one<b/>\n  two</r>";
+    LeptrisDocument d = leptris_parse_string(xml, sizeof(xml) - 1, nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    std::string r = body(out);
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    EXPECT_EQ(r, "[\n  one\n  two]") << r;
+}
+
 /* bug-186 follow-on: a child-step pattern (star slash star) must
  * NOT match the root element — the root's parent is the document
  * node. The bare-leaf fast path used to match it anyway. */

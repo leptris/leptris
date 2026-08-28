@@ -261,6 +261,17 @@ static void key_index_free(XsltKeyIndex* k) {
     free(k->buckets); free(k->name); free(k);
 }
 
+static LeptrisNodeRef xslt_any_next_doc_order(LeptrisNodeRef n) {
+    LeptrisNodeRef c = leptris_node_first_child(n);
+    if (c) return c;
+    while (n) {
+        LeptrisNodeRef s = leptris_node_next_sibling(n);
+        if (s) return s;
+        n = leptris_node_parent(n);
+    }
+    return NULL;
+}
+
 static int xslt_keys_build(XsltExec* ex, const char* name) {
     if (!ex || !ex->sheet || !ex->source) return -1;
     int any = 0;
@@ -275,8 +286,15 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
     while (*tail) tail = &(*tail)->next;
     *tail = idx;
 
-    LeptrisNodeRef root = (LeptrisNodeRef)leptris_document_root(ex->source);
-    for (LeptrisNodeRef e = root; e; e = (LeptrisNodeRef)xslt_next_doc_order((LeptrisElement)e)) {
+    /* Every node KIND in document order — match="node()" /
+     * match="text()" must index text and comment nodes too (the
+     * elements-only walker dropped them, bug-133). */
+    struct leptris_document* sdoc = (struct leptris_document*)ex->source;
+    LeptrisNodeRef start =
+        (LeptrisNodeRef)sdoc->doc_children_head;
+    if (!start)
+        start = (LeptrisNodeRef)leptris_document_root(ex->source);
+    for (LeptrisNodeRef e = start; e; e = xslt_any_next_doc_order(e)) {
         for (XsltKeyDef* kd = ex->sheet->keys; kd; kd = kd->next) {
             if (!kd->name || strcmp(kd->name, name) != 0) continue;
             XsltPattern pat; memset(&pat, 0, sizeof(pat));
