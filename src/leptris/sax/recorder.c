@@ -215,6 +215,20 @@ LEPTRIS_API int leptris_sax_recorder_feed(LeptrisSaxRecorder r,
     return leptris_sax_parser_feed(r->parser, xml, len, is_final);
 }
 
+LEPTRIS_API int leptris_sax_recorder_reset(LeptrisSaxRecorder r) {
+    if (!r) return -1;
+    /* #594: one recorder across documents — a fresh parser state,
+     * the record/arena buffers RETAINED (their capacity amortizes
+     * across documents; new/free churn was the fresh-per-doc tax). */
+    leptris_sax_parser_free(r->parser);
+    r->parser = leptris_sax_parser_create(&r->handler, r);
+    if (!r->parser) return -1;
+    leptris_sax_parser_set_streaming(r->parser, 1);
+    r->rec_count = 0;
+    r->arena_len = 0;
+    return 0;
+}
+
 LEPTRIS_API const LeptrisSaxEventRecord* leptris_sax_recorder_records(
         LeptrisSaxRecorder r, size_t* count) {
     if (!r) { if (count) *count = 0; return NULL; }

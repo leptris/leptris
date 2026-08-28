@@ -446,6 +446,19 @@ LEPTRIS_API int leptris_sax_recorder_feed(LeptrisSaxRecorder r,
                                           int is_final);
 
 /**
+ * Reset a finished recorder for the next document (issue #594)
+ *
+ * After a feed(is_final=1) the parser cannot restart — this swaps
+ * in a fresh parser state while RETAINING the record and arena
+ * buffers, so one recorder serves a one-document-per-parse loop
+ * without new/free churn. Records/arena restart empty.
+ *
+ * @param recorder Recorder handle
+ * @return 0 on success, -1 on failure
+ */
+LEPTRIS_API int leptris_sax_recorder_reset(LeptrisSaxRecorder recorder);
+
+/**
  * Read the current chunk's buffered event records
  *
  * The pointer is valid until the next feed/free. Records reference
