@@ -2,9 +2,17 @@
 
 ## [1.9.13] - 2026-08-28
 
+libxslt general suite: 180 -> 181/205.
+
 ### Fixed
 
-- document-level whitespace text nodes (parse,serialize,xpath)
+- Document-level whitespace chains as TEXT children of the document
+  node with libxml2's exact rule (xsltproc-probed): kept after a
+  comment or the root element, dropped after a prolog PI, leading
+  prolog whitespace dropped, trailing tail whitespace trimmed after
+  the root splice. /node() counts the text and identity transforms
+  copy it (bug-195); the serializer's document-chain walks emit TEXT
+  nodes; the VM's absolute node() walk matches every chain kind
 
 
 
