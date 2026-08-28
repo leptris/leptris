@@ -250,17 +250,15 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
                                        XPathASTNode* predicate,
                                        size_t proximity_position,
                                        size_t context_size) {
-    /* For predicates, we need element context - attributes predicate on their owner */
-    LeptrisElement context_elem = node_as_element(node);
-    if (!context_elem) {
+    /* Predicates apply to ANY node kind (XPath 1.0 §2.4): element,
+     * text, comment, PI. Attributes predicate on their OWNER as
+     * context. The old guard skipped every non-element candidate
+     * outright — text()[2] and node()[4] silently returned empty
+     * (libxslt bug-182). */
+    if (!node) return 0;
+    if (!node_as_element(node)) {
         LeptrisAttributeNode* attr_node = node_as_attribute(node);
-        if (attr_node) {
-            context_elem = attr_node->owner;
-        }
-    }
-
-    if (!context_elem) {
-        return 0; /* Skip if no valid context */
+        if (attr_node && !attr_node->owner) return 0;
     }
 
     /* Save context */

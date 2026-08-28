@@ -10,6 +10,7 @@
  * Output grows in exec->result through the public mutation API;
  * text-method output accumulates string-values only. */
 #include "xslt_internal.h"
+#include "../dtd/model.h"   /* leptris_dtd_apply_attribute_defaults (#606) */
 #include "../dom/text.h"
 #include "../dom/cdata.h"
 #include <stdlib.h>
@@ -1296,22 +1297,13 @@ static int pattern_matches_nodekind(const XsltPattern* p,
     return 0;
 }
 
-/* Node-kind-aware pattern match: elements and document nodes run
- * the full ladder; text/comment/PI/attribute/namespace nodes match
- * kind tests (and @-patterns for attributes). */
+/* §5.2: every node kind matches through the FULL pattern ladder —
+ * position predicates included. The old kind-only shortcut made
+ * match="text()[2]" fire for every text node (libxslt bug-182). */
 static int xslt_template_matches_node(const XsltTemplate* t,
                                       LeptrisElement node,
                                       const XsltExec* ex) {
-    int nty = leptris_node_get_type((LeptrisNodeRef)node);
-    if (nty == LEPTRIS_NODE_TYPE_ELEMENT ||
-        nty == LEPTRIS_NODE_TYPE_DOCUMENT)
-        return xslt_pattern_matches(t->matches, node, ex->source,
-                                   t->ns);
-    return pattern_matches_nodekind(
-        t->matches, nty,
-        (nty == LEPTRIS_NODE_ATTRIBUTE)
-            ? ((LeptrisAttributeNode*)node)->name
-            : NULL);
+    return xslt_pattern_matches(t->matches, node, ex->source, t->ns);
 }
 
 static const XsltTemplate* xslt_select_template(
@@ -1645,7 +1637,11 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
         if (r) name = leptris_xpath_result_string(r);
         if (r) leptris_xpath_result_free(r);
     } else if (in->name) {
-        name = leptris_strdup(in->name);
+        /* §7.1.1: the name is an AVT — {local-name()},
+         * {concat('a','b')}, prefix:{...}, {$var} (bug-117/179/35-). */
+        name = strchr(in->name, '{')
+                   ? eval_avt(ex, in->name, node)
+                   : leptris_strdup(in->name);
     }
     if (!name) return 0;
     /* §7.1.1 namespace attribute: an AVT; non-empty binds the
@@ -2362,6 +2358,12 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
 
 
     /* §3.4: strip source whitespace before any template sees it. */
+    /* Issue #606: libxslt's document loader applies ATTLIST defaults
+     * (XML_PARSE_DTDATTR is on by default there), so stylesheet
+     * processing always sees defaulted attributes — apply them at
+     * the transform boundary regardless of how the caller parsed. */
+    leptris_dtd_apply_attribute_defaults((struct leptris_document*)source);
+
     strip_source_whitespace(ex);
 
     /* Globals. */

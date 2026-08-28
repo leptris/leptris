@@ -1476,6 +1476,34 @@ TEST(VarBoundEval, AttrEqVarNumberStringifies) {
     leptris_document_free(d);
 }
 
+/* XPath 1.0: predicates apply to ANY node kind — text(), comment(),
+ * PI, node() steps. The predicate evaluator used to bail out for
+ * non-element candidates (text nodes silently never matched), so
+ * text()[2] and node()[4] returned empty (libxslt bug-182). */
+TEST(PredicatesOnNonElements, PositionSelectsTextAndMixedNodes) {
+    const char xml[] =
+        "<root><body><b> b 1 </b> text 1 <b> b 2 </b> text 2 </body></root>";
+    LeptrisDocument d = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(d, nullptr);
+
+    struct { const char* q; const char* want; } cases[] = {
+        {"string(/root/body/text()[1])", " text 1 "},
+        {"string(/root/body/text()[2])", " text 2 "},
+        {"string(/root/body/node()[4])", " text 2 "},
+        {"string(/root/body/node()[1])", " b 1 "},
+        {"string(/root/body/text()[position()=2])", " text 2 "},
+        {"string(/root/body/text()[last()])", " text 2 "},
+        {"count(/root/body/text()[2])", "1"},
+    };
+    for (auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr, c.q);
+        ASSERT_NE(r, nullptr) << c.q;
+        EXPECT_STREQ(leptris_xpath_result_string(r), c.want) << c.q;
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(d);
+}
+
 TEST(VarBoundEval, UndefinedVariableBareIsAnError) {
     const char xml[] = "<r><e n='1'/></r>";
     LeptrisDocument d = leptris_parse_string(xml, std::strlen(xml), nullptr);

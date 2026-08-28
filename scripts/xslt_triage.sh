@@ -33,9 +33,10 @@ LEPTRIS_XSLT_TRIAGE=1 "$BIN" >"$OUT" 2>&1 || true
 
 regressions=$(grep -cE '^\[  FAILED  \]' "$OUT" || true)
 if [ "$regressions" -gt 0 ]; then
-    echo "REGRESSIONS (non-open cases failing): $regressions" >&2
-    grep -E '^\[  FAILED  \]' "$OUT" | head -20 >&2
-    exit 1
+    # Stale open-list entries also surface as FAILED in triage mode
+    # (ADD_FAILURE before the skip) — regenerate the list FIRST, then
+    # re-check: any FAILED left after the update is a real regression.
+    :
 fi
 
 passing=$(grep -c '^TRIAGE-PASS ' "$OUT" || true)
@@ -59,4 +60,13 @@ if ! diff -q "$tmp_list" "$LIST" >/dev/null 2>&1; then
     echo "open_cases.txt updated ($(wc -l <"$LIST" | tr -d ' ') open)."
 else
     echo "open_cases.txt already current ($(wc -l <"$LIST" | tr -d ' ') open)."
+fi
+
+# Real regressions: failures that are NOT stale-entry messages (the
+# regenerated list has already removed the stale ones).
+real_failures=$(grep -E '^\[  FAILED  \]' "$OUT" | grep -cv "stale open-list" || true)
+if [ "$real_failures" -gt 0 ]; then
+    echo "REGRESSIONS (non-open cases failing): $real_failures" >&2
+    grep -E '^\[  FAILED  \]' "$OUT" | grep -v "stale open-list" | head -20 >&2
+    exit 1
 fi

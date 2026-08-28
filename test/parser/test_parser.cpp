@@ -253,6 +253,36 @@ TEST(ParseOptions, FlagsPassthrough) {
     leptris_document_free(doc);
 }
 
+/* Issue #606: DTD ATTLIST default attributes apply ONLY under
+ * LEPTRIS_PARSE_DTDATTR (libxml2 XML_PARSE_DTDATTR opt-in parity —
+ * W3C C14N ex 3.3's canonical form excludes them). */
+TEST(ParseDtdAttr, DefaultsOptIn) {
+    const char xml[] =
+        "<!DOCTYPE doc [<!ATTLIST e9 attr CDATA \"default\">]>"
+        "<doc><e9/></doc>";
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement e9 = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(root));
+    ASSERT_NE(e9, nullptr);
+    EXPECT_EQ(leptris_element_attribute(e9, "attr"), nullptr)
+        << "plain parse must not apply ATTLIST defaults";
+    leptris_document_free(doc);
+
+    doc = leptris_parse_string_flags(xml, std::strlen(xml),
+                                     LEPTRIS_PARSE_DTDATTR, &st);
+    ASSERT_NE(doc, nullptr);
+    root = leptris_document_root(doc);
+    e9 = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(root));
+    ASSERT_NE(e9, nullptr);
+    EXPECT_STREQ(leptris_element_attribute(e9, "attr"), "default");
+    leptris_document_free(doc);
+}
+
 /* Issue #576: attribute-value normalization (XML 1.0 §3.3.3). For a
  * CDATA attribute, each literal #x20/#xD/#xA/#x9 in the value is
  * replaced by a single #x20. Character references to whitespace
