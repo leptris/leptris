@@ -1174,7 +1174,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             int html_uri_attr = 0;
             if (buf->html_method && anl &&
                 ((anl == 4 && memcmp(name_c, "href", 4) == 0) ||
-                 (anl == 3 && memcmp(name_c, "src", 3) == 0)))
+                 (anl == 3 && memcmp(name_c, "src", 3) == 0) ||
+                 /* libxml2 also URI-encodes name attributes (the
+                  * .out for bug-159: name="%D1%91"). */
+                 (anl == 4 && memcmp(name_c, "name", 4) == 0)))
                 html_uri_attr = 1;
             int html_escape_raw_quote = buf->html_method;
             if (html_uri_attr) {
