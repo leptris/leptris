@@ -1,5 +1,31 @@
 ## [Unreleased]
 
+## [1.9.12] - 2026-08-28
+
+libxslt general suite: 174 -> 180/205.
+
+### Fixed
+
+- Indent semantics under indent="yes": libxslt's serializer stops
+  formatting at any text node — whitespace-only children included —
+  and the stop propagates down the subtree; whitespace text copied
+  from the source is the visible indent (bug-98)
+- apply-templates over a selected text item applies the built-in
+  TEXT rule instead of dropping it (bug-161); apply-imports with no
+  imported candidate applies the built-in rule for the node
+  (bug-193)
+- xsl:copy copies the element and namespace nodes but NOT
+  attributes (7.5) — attributes reach the result only through
+  apply-templates/@* (bug-32-); copy-of of an attribute node adds
+  name/value to the pending parent (bug-3-)
+- xsl:attribute's namespace attribute: XML namespace maps to the
+  xml: prefix (bug-177); other namespaces on unprefixed names mint
+  generated ns_N prefixes (bug-99); prefixed names rebind
+- xsl:strip-space/preserve-space: the last matching declaration
+  wins (3.4) (bug-82)
+
+
+
 ## [1.9.11] - 2026-08-28
 
 libxslt general suite: 153 -> 173/205.
