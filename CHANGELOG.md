@@ -2,23 +2,48 @@
 
 ## [1.9.15] - 2026-08-29
 
-### Added
-
-- public compiled eval with namespaces AND variables (xpath)
-- node_children_ex batches each child's kind (issue 617) (dom)
+Correctness round for the binding-reported issues, plus two API
+additions the bindings were waiting on.
 
 ### Fixed
 
-- no-iconv with_encoding converts declared Latin-1 to UTF-8 (encoding)
-- full-document iterparse reports success on clean drains (sax)
-- relative descendant paths with prefixed names select again (xpath)
-- built-in rules keep the mode; libxslt extension namespace (xslt)
+- **#630** (and the #557 reopen family): relative `.//ns:x` and
+  `descendant::ns:x` from ELEMENT context returned empty - the
+  element index keys buckets by LOCAL name and the VM's relative
+  descendant paths looked up the raw qualified string, missing every
+  bucket. Both index paths now resolve the local bucket and filter
+  matches namespace-aware; specs pin every context depth plus
+  URI-equivalent prefixes.
+- **#592**: full-document iterparse reported a spurious "truncated
+  XML document" after cleanly draining well-formed input - the
+  top-level-mode subtree release reset depth to 1 after the ROOT
+  yield, so END_DOCUMENT saw an open element. The subtree lifecycle
+  is gated to top-level mode.
+- **#613**: `leptris_parse_string_with_encoding` on declared
+  ISO-8859-1 delivered raw latin-1 bytes as text on no-iconv builds
+  (the fallback assumed UTF-8). Latin-1 converts natively there now;
+  `leptris_encoding_parse_declaration` moved to the always-compiled
+  wrapper.
+- XSLT 5.8: built-in template rules apply-templates in the SAME
+  mode (the synthesized fallbacks dropped it); libxslt's own
+  extension namespace (`libxslt:node-set()`) resolves under any
+  bound prefix.
+
+### Added
+
+- **#608**: `leptris_xpath_compiled_eval_ns_vars` - prefixed name
+  tests and $var references in one compiled call; bindings stop
+  falling back to uncompiled evaluation for the combination.
+- **#617**: `leptris_node_children_ex(parent, out_nodes, out_kinds,
+  max)` - each child's kind rides the batch, so a binding's
+  cold full-tree walk skips the per-node get_type dispatch.
 
 ### Performance
 
-- use the parser's split QName in node tests; fast-path literal position predicates (xpath)
-
-
+- **#617** (scalar half): the node-test matcher now uses the
+  parser's pre-split QName instead of a strchr per node, and a bare
+  NUMBER-literal predicate ([1]) compares the position directly -
+  together ~4 percent on the 350k-node string(//item[1]) profile.
 
 ## [1.9.14] - 2026-08-29
 
