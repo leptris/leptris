@@ -25,9 +25,10 @@
                               * fallback (c >= 0xC0 for start, c >= 0x80
                               * for continuation). */
 
-/* The shared table. Defined once in chartype.c. Non-const so the
- * constructor can set CT_UTF8 on bytes >= 0x80 at load time. */
-extern uint8_t leptris_chartype_table[256];
+/* The shared table. Defined once in chartype.c — fully static and
+ * const, including the CT_UTF8 entries for bytes >= 0x80 (no
+ * load-time initializer; issue #626). */
+extern const uint8_t leptris_chartype_table[256];
 
 /* Test a character against one or more flags. Returns 1 or 0. */
 #define IS_CHARTYPE(c, flags) \

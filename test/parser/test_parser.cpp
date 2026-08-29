@@ -51,6 +51,23 @@ TEST(ParserBasics, PreservesUtf8MultibyteContent) {
     leptris_document_free(doc);
 }
 
+/* Issue #626: non-ASCII ELEMENT NAMES must parse everywhere — the
+ * chartype table carries UTF-8 statically, with no load-time
+ * initializer that fails to run under some linkers (MSVC CI). */
+TEST(ParserBasics, AcceptsUtf8ElementAndAttributeNames) {
+    const char xml[] =
+        "<!-- café -->\n<?target données?>\n"
+        "<nom-élément attr=\"é\">crème<![CDATA[données]]></nom-élément>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr) << "status: " << (int)st;
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "nom-élément");
+    EXPECT_STREQ(leptris_element_attribute(root, "attr"), "é");
+    leptris_document_free(doc);
+}
+
 TEST(ParserBasics, ParsesAllNodeTypes) {
     const char xml[] =
         "<?xml version='1.0'?>"
