@@ -47,6 +47,39 @@ TEST(XPathFunctions, CountReturnsNodeSetSize) {
     leptris_document_free(doc);
 }
 
+/* XPath 1.0 §4.3 lang(): the NEAREST xml:lang declaration decides —
+ * a closer non-matching declaration is not walked past (libxslt
+ * bug-142: a ja span inside a fr root must not match lang('fr') via
+ * the root's declaration). */
+TEST(XPathFunctions, LangNearestDeclarationWins) {
+    const char xml[] =
+        "<r xml:lang='fr'><a xml:lang='ja'><b/></a></r>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+
+    struct {
+        const char* expr;   /* count of selected nodes */
+        double want;
+    } cases[] = {
+        {"count(/r/a/b[lang('ja')])", 1},   /* nearest: a */
+        {"count(/r/a/b[lang('fr')])", 0},   /* must NOT reach r */
+        {"count(/r/a[lang('ja')])", 1},     /* own attr */
+        {"count(/r/a[lang('fr')])", 0},
+        {"count(/r[lang('fr')])", 1},
+        {"count(/r[lang('ja')])", 0},
+        {"count(/r[false()])", 0},  /* root-step predicate applies */
+    };
+    for (const auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
+        ASSERT_NE(r, nullptr) << c.expr;
+        EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_NUMBER)
+            << c.expr;
+        EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r), c.want) << c.expr;
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
 TEST(XPathFunctions, StringFunctionExpandsEntities) {
     LeptrisStatus st = LEPTRIS_OK;
     const char xml[] = "<r>hello &amp; world</r>";
@@ -76,6 +109,41 @@ TEST(XPathPredicates, LastSelectsFinalChild) {
     EXPECT_EQ(leptris_xpath_result_count(r), 1u);
 
     leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+/* libxslt bug-142: a prefixed ATTRIBUTE test (@xml:lang) in a
+ * predicate or after a descendant step must fall back to the literal
+ * qualified-name compare when the prefix is not in the binding set
+ * — vm_apply_axis_attribute already does; axis_attribute did not,
+ * so [@xml:lang] and //@xml:lang silently matched nothing. */
+TEST(XPathPredicates, XmlLangAttributeTestMatchesUnboundPrefix) {
+    const char xml[] =
+        "<posts xml:lang='fr'><post xml:lang='ja' id='4'>"
+        "<content><para><span>x</span></para></content></post></posts>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+
+    struct {
+        const char* expr;
+        double want;
+    } cases[] = {
+        {"count(//post[@xml:lang])", 1},
+        {"count(//post[@xml:lang='ja'])", 1},
+        {"count(//span[ancestor::*[@xml:lang='ja']])", 1},
+        {"count(//span[ancestor::*[@xml:lang='fr']])", 1},  /* posts */
+        {"count(//span[ancestor::*[@xml:lang='en']])", 0},
+        {"count(//@xml:lang)", 2},
+        {"count(//post/@xml:lang)", 1},
+    };
+    for (const auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
+        ASSERT_NE(r, nullptr) << c.expr;
+        EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_NUMBER)
+            << c.expr;
+        EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r), c.want) << c.expr;
+        leptris_xpath_result_free(r);
+    }
     leptris_document_free(doc);
 }
 

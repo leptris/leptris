@@ -1008,6 +1008,7 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
          * Since we don't have a document node, check if root matches and use it */
         int is_root_match = 0;
         LeptrisElement root = (LeptrisElement)ctx->document->new_dom_root;
+        XPathASTNode* first_step = NULL;
 
         DEBUG_LOG("  Checking for special case: child_count=%zu, root=%p",
                  (size_t)path->child_count, (void*)root);
@@ -1025,7 +1026,6 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
                      first_child->type, XPATH_AST_RELATIVE_PATH, XPATH_AST_STEP);
 
             /* The first child might be RELATIVE_PATH containing steps, or a direct STEP */
-            XPathASTNode* first_step = NULL;
             if (first_child->type == XPATH_AST_RELATIVE_PATH && first_child->child_count > 0) {
                 first_step = first_child->children[0];
                 DEBUG_LOG("  Found RELATIVE_PATH, extracting first step");
@@ -1104,6 +1104,14 @@ normal_absolute_path:
             /* Root matches - add it and process remaining steps */
             xpath_nodeset_add(current, root);
             DEBUG_LOG("  Added root to nodeset, processing remaining steps");
+
+            /* The skipped first step can carry predicates — "/r[pred]"
+             * must still filter the matched root (count(/r[false()])
+             * is 0; lang() correctness, libxslt bug-142). */
+            if (first_step && first_step->child_count > 1)
+                apply_predicates(ctx, current,
+                                 &first_step->children[1],
+                                 first_step->child_count - 1);
 
             /* Get the RELATIVE_PATH (first child of ABSOLUTE_PATH) */
             XPathASTNode* rel_path = path->children[0];

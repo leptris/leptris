@@ -1845,9 +1845,13 @@ static struct leptris_xpath_result* xpath_func_lang(XPathContext* context,
             attr = leptris_attr_next(attr);
         }
 
-        /* Check if we found xml:lang attribute */
+        /* Check if we found xml:lang attribute — §4.3: the NEAREST
+         * declaration decides. A closer non-matching declaration
+         * ends the search; do not walk past it to outer ancestors
+         * (libxslt bug-142: ja span inside an fr root). */
         if (lang_attr && lang_attr[0] != '\0') {
             match = _tb_is_sublanguage(language, lang_attr);
+            break;
         }
 
         /* Move to parent if no match */
