@@ -2324,6 +2324,20 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
     LeptrisElement context, LeptrisXPathVariableSet variables);
 
 /**
+ * Evaluate a compiled expression with namespaces AND variables
+ *
+ * The combined form (issue #608): prefixed name tests resolve
+ * through the binding set and $var references through the variable
+ * set in one compiled call — bindings no longer fall back to
+ * uncompiled evaluation for expressions like count(//x:b[@id=$id]).
+ * Either argument may be NULL for the single-set behavior.
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_ns_vars(
+    LeptrisXPathCompiled compiled, LeptrisDocument doc,
+    LeptrisElement context, LeptrisXPathNsSet ns,
+    LeptrisXPathVariableSet variables);
+
+/**
  * Compile an XSLT 1.0 stylesheet (TODO.transform)
  *
  * The stylesheet is compiled ONCE into an immutable instruction

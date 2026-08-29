@@ -87,13 +87,8 @@ struct leptris_xpath_result* leptris_xpath_vm_run_bc(struct LeptrisXPathBytecode
 struct leptris_xpath_result* leptris_xpath_compiled_eval_in(
     LeptrisXPathCompiled compiled, XPathContext* ctx);
 
-/* Combined ns + vars eval (xslt_exec.c uses this for §4-prefixed
- * tests inside variable-carrying transforms). */
-struct leptris_xpath_ns_map;
-struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
-    LeptrisXPathCompiled compiled, LeptrisDocument doc,
-    LeptrisElement context, struct leptris_xpath_ns_map* ns,
-    XPathVariableSet* vars);
+/* Combined ns + vars eval is PUBLIC now (issue 608):
+ * leptris_xpath_compiled_eval_ns_vars in leptris.h. */
 
 /* Full-context eval (xslt_eval): VM fast path when neither ns nor
  * vars are bound; pos is the caller's in-flight node-list position
