@@ -1621,3 +1621,76 @@ TEST(AttributeAxis, ExpandsCharacterReferences) {
     }
     leptris_document_free(d);
 }
+
+/* Issue #630: relative .//ns:x from ELEMENT context returned empty —
+ * the element index keys buckets by local name and the VM's relative
+ * descendant paths looked up the raw qualified string, missing every
+ * bucket. The local bucket + namespace-aware filter fix must hold
+ * for every context depth. */
+TEST(XPathAxes, RelativeDescendantPrefixedFromElementContext) {
+    const char xml[] =
+        "<r xmlns:x='urn:x'>"
+        "<a><x:b id='1'/><c><x:b id='2'/></c></a>"
+        "<x:b id='3'/>"
+        "</r>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+
+    struct {
+        const char* ctx;
+        const char* expr;
+        size_t want;
+    } cases[] = {
+        {"/r", ".//x:b", 3},
+        {"/r", "descendant::x:b", 3},
+        {"/r", "descendant-or-self::x:b", 3},
+        {"/r/a", ".//x:b", 2},
+        {"/r/a", "descendant::x:b", 2},
+        {"/r/a/c", ".//x:b", 1},
+        {"/r/a/c", "child::x:b", 1},
+        {"/r/a/x:b", ".//x:b", 0},   /* leaf: no x:b below */
+        {"/r/x:b", ".//x:b", 0},
+        {"/r", "//x:b", 3},          /* absolute control */
+        {"/r", ".//a", 1},           /* unprefixed control */
+    };
+    for (const auto& c : cases) {
+        LeptrisXPathResult cr = leptris_xpath_eval(doc, nullptr, c.ctx);
+        ASSERT_NE(cr, nullptr) << c.ctx;
+        LeptrisElement ctx = leptris_xpath_result_get(cr, 0);
+        ASSERT_NE(ctx, nullptr) << c.ctx;
+        LeptrisXPathResult r = leptris_xpath_eval(doc, ctx, c.expr);
+        ASSERT_NE(r, nullptr) << c.ctx << " " << c.expr;
+        EXPECT_EQ(leptris_xpath_result_count(r), c.want)
+            << c.ctx << " " << c.expr;
+        leptris_xpath_result_free(r);
+        leptris_xpath_result_free(cr);
+    }
+    leptris_document_free(doc);
+}
+
+/* Same fix through an EXTERNAL binding: z resolves to the same URI
+ * the document spells x, so .//z:b matches x:b elements. */
+TEST(XPathAxes, RelativeDescendantPrefixedResolvesByUri) {
+    const char xml[] =
+        "<r xmlns:x='urn:x'><a><x:b id='1'/><c><x:b id='2'/></c></a></r>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    ASSERT_EQ(leptris_xpath_ns_set_add(ns, "z", "urn:x"), LEPTRIS_OK);
+
+    LeptrisXPathResult cr = leptris_xpath_eval(doc, nullptr, "/r/a");
+    ASSERT_NE(cr, nullptr);
+    LeptrisElement a = leptris_xpath_result_get(cr, 0);
+    ASSERT_NE(a, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval_ns(doc, a, ".//z:b", ns);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 2u);
+
+    leptris_xpath_result_free(r);
+    leptris_xpath_result_free(cr);
+    leptris_xpath_ns_set_free(ns);
+    leptris_document_free(doc);
+}
