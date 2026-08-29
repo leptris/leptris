@@ -88,6 +88,13 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
             c, ex->source, node,
             (struct leptris_xpath_ns_map*)ex->current_ns,
             NULL, ex->current_pos, ex->current_size);
+        if (!r && !ex->eval_error) {
+            ex->eval_error = 1;
+            const char* expr = leptris_xpath_compiled_text(c);
+            snprintf(ex->error, sizeof(ex->error),
+                     "XPath evaluation returned no result%s%s",
+                     expr ? ": " : "", expr ? expr : "");
+        }
         ex->current_node = saved_cur;
         return r;
     }
@@ -192,6 +199,18 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
         c, ex->source, node,
         (struct leptris_xpath_ns_map*)ex->current_ns, ex->varset,
         ex->current_pos, ex->current_size);
+
+    /* Issue 627: NULL means the evaluation FAILED (unknown function,
+     * unbound variable, arity mismatch) — record it; the dispatcher
+     * unwinds and the public entry returns no result, matching
+     * libxslt's runtime abort instead of a silent empty value. */
+    if (!r && !ex->eval_error) {
+        ex->eval_error = 1;
+        const char* expr = leptris_xpath_compiled_text(c);
+        snprintf(ex->error, sizeof(ex->error),
+                 "XPath evaluation returned no result%s%s",
+                 expr ? ": " : "", expr ? expr : "");
+    }
 
     ex->current_node = saved_cur;
     return r;
@@ -2844,6 +2863,7 @@ static int op_func_result(XsltExec* ex, const XsltInstr* in,
 int xslt_exec_instrs(XsltExec* ex, const XsltInstr* list,
                      LeptrisElement node) {
     if (ex->terminated) return -1;
+    if (ex->eval_error) return -1;
     /* §11 block scope: variables pushed while executing this
      * sequence pop when the sequence ends. Re-entrancy: nested
      * sequences snapshot their own mark. */
@@ -2851,6 +2871,7 @@ int xslt_exec_instrs(XsltExec* ex, const XsltInstr* list,
     int rc = 0;
     for (const XsltInstr* in = list; in; in = in->next) {
         if (ex->fn_yield) break;   /* func:result unwinds to the call */
+        if (ex->eval_error) { rc = -1; break; }
         /* §11.6: xsl:param declarations are consumed by the invoker
          * (with-param binding or default evaluation) — not executed
          * as ordinary variables on the walk. */
@@ -2983,6 +3004,12 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
             ex->current_ns = g->ns;
             op_variable(ex, g, globals_ctx);
             ex->current_ns = saved_gns;
+            /* §11: a named template invoked while later globals are
+             * still evaluating (bug-192: $template-value calls
+             * get-dummy mid-loop) must see the globals bound so far —
+             * keep the call-template reset point current instead of
+             * leaving it NULL until the loop ends. */
+            ex->global_vars = ex->vars;
         }
     }
     ex->global_vars = ex->vars;   /* §11: the call-template reset point */

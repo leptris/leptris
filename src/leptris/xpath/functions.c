@@ -1738,13 +1738,10 @@ static struct leptris_xpath_result* xpath_func_lang(XPathContext* context,
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
-    if (arg_result->type != XPATH_RESULT_STRING) {
-        snprintf(context->error_msg, sizeof(context->error_msg),
-                "lang() argument must be a string");
-        xpath_result_free(arg_result);
-        return NULL;
-    }
-
+    /* §3.2 argument coercion: any type converts via string() —
+     * libxslt stylesheets call lang(ja) with an element-name
+     * argument (empty nodeset -> ""), which is false, not an error
+     * (libxslt bug-142 surfaced this through issue 627's raise). */
     char* language = result_to_string(arg_result);
     xpath_result_free(arg_result);
 
