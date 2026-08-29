@@ -48,6 +48,12 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->html_method = 0;
     buf->indent_text = 0;
     buf->at_line_start = 0;
+    /* Leave the xhtml mode OFF until a caller with extended options
+     * enables it — an unset flag here otherwise serializes empties as
+     * <x></x> wherever the malloc garbage is nonzero (Linux ASAN). */
+    buf->xhtml = 0;
+    buf->xhtml_encoding = NULL;
+    buf->ws_mixed = 0;
     buf->cdata_names = NULL;   /* callers with cdata-section-elements
                                 * install theirs; every other buffer
                                 * must read "none", not heap garbage */
