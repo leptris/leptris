@@ -121,7 +121,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
 static struct leptris_xpath_result* compiled_eval_context(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, struct leptris_xpath_ns_map* ns,
-        XPathVariableSet* vars, size_t pos) {
+        XPathVariableSet* vars, size_t pos, size_t size) {
     if (!compiled || !doc) return NULL;
 
     LeptrisElement context_elem =
@@ -136,6 +136,7 @@ static struct leptris_xpath_result* compiled_eval_context(
     xpath_ctx->ns_set = ns;
     xpath_ctx->variable_set = vars;
     xpath_ctx->context_position = pos;
+    xpath_ctx->context_size = size ? size : 1;
 
     /* VM fast path first (issue #564): the VM's name matcher is
      * namespace-aware and the absolute folds lower prefixed tests
@@ -187,7 +188,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_ns(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, LeptrisXPathNsSet ns) {
     return compiled_eval_context(compiled, doc, context,
-                                 (struct leptris_xpath_ns_map*)ns, NULL, 1);
+                                 (struct leptris_xpath_ns_map*)ns, NULL, 1, 1);
 }
 
 /* Combined ns + vars entry — the XSLT engine's §4 prefixed tests
@@ -196,7 +197,7 @@ struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, struct leptris_xpath_ns_map* ns,
         XPathVariableSet* vars) {
-    return compiled_eval_context(compiled, doc, context, ns, vars, 1);
+    return compiled_eval_context(compiled, doc, context, ns, vars, 1, 1);
 }
 
 /* Full-context eval for the XSLT engine: the VM fast path when
@@ -208,10 +209,11 @@ struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
 struct leptris_xpath_result* leptris_xpath_compiled_eval_ctx(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, struct leptris_xpath_ns_map* ns,
-        XPathVariableSet* vars, size_t pos) {
+        XPathVariableSet* vars, size_t pos, size_t size) {
     if (!compiled || !doc) return NULL;
     if (ns || vars)
-        return compiled_eval_context(compiled, doc, context, ns, vars, pos);
+        return compiled_eval_context(compiled, doc, context, ns, vars,
+                                     pos, size);
 
     LeptrisElement context_elem =
         context ? context : leptris_document_root(doc);
@@ -222,6 +224,7 @@ struct leptris_xpath_result* leptris_xpath_compiled_eval_ctx(
     xpath_context_init(xpath_ctx, doc, context_elem);
     if (!xpath_ctx->document) return NULL;
     xpath_ctx->context_position = pos;
+    xpath_ctx->context_size = size ? size : 1;
 
     struct leptris_xpath_result* result =
         leptris_xpath_compiled_eval_in(compiled, xpath_ctx);
@@ -234,7 +237,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_vars(
         LeptrisXPathCompiled compiled, LeptrisDocument doc,
         LeptrisElement context, LeptrisXPathVariableSet variables) {
     return compiled_eval_context(compiled, doc, context, NULL,
-                                 (XPathVariableSet*)variables, 1);
+                                 (XPathVariableSet*)variables, 1, 1);
 }
 
 LEPTRIS_API const char* leptris_xpath_compiled_text(LeptrisXPathCompiled compiled) {

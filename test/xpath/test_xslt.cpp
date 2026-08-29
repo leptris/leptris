@@ -2005,3 +2005,46 @@ TEST(SerializeExt, IndentTextIndentsMixedContent) {
     EXPECT_NE(s.find("<b>\n      bold"), std::string::npos) << s;
     leptris_document_free(d);
 }
+
+/* Issue #628: last() inside xsl:for-each must reflect the selection
+ * size — the exec threaded only the in-flight position; last() fell
+ * back to the default context size 1, silently breaking
+ * position()=last() branching. */
+TEST(XsltForEach, LastReflectsSelectionSize) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='/r/i'>"
+        "<xsl:if test='position()=last()'>[<xsl:value-of select='.'/>]"
+        "</xsl:if>"
+        "</xsl:for-each>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "[c]");
+}
+
+TEST(XsltForEach, LastValueIsSelectionSize) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='/r/i'>"
+        "<xsl:value-of select='last()'/>"
+        "</xsl:for-each>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "333");
+}
+
+/* Same contract through apply-templates: last() sees the selected
+ * node-list size, and position()/last() pair correctly in the final
+ * iteration. */
+TEST(XsltForEach, LastThroughApplyTemplates) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/r'>"
+        "<xsl:apply-templates select='i'/>"
+        "</xsl:template>"
+        "<xsl:template match='i'>"
+        "<xsl:if test='position()=last()'>last=<xsl:value-of select='.'/>"
+        "</xsl:if>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "last=c");
+}

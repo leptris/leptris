@@ -887,7 +887,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_nodeset(
     xpath_context_cleanup(ctx);
 
     struct leptris_xpath_result* out =
-        xpath_result_new(LEPTRIS_XPATH_NODESET);
+        xpath_result_new(XPATH_RESULT_NODESET);
     if (!out) { xpath_nodeset_free(merged); return NULL; }
     out->value.nodeset_value = merged;
     return out;
