@@ -125,6 +125,11 @@ typedef struct {
                                               children count as mixed
                                               (libxslt bug-98) */
     int xhtml;                            /* libxml2 XML_SAVE_XHTML */
+    /* Emit an explicitly requested options->encoding verbatim in the
+     * XML declaration. Only for callers that own making the BODY
+     * match (the XSLT layer transcodes to the output encoding) —
+     * the plain serialize API stays truthful (TODO.bindings/06). */
+    int decl_encoding_verbatim;
 } LeptrisSerializeExtended;
 
 LEPTRIS_API char* leptris_document_serialize_ext(

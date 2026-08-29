@@ -1835,12 +1835,13 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
         const char* enc = encoding ? encoding : doc->encoding;
         if (enc) {
             buffer_append(buf, " encoding=\"");
-            if ((options && options->encoding) ||
+            if ((extended && extended->decl_encoding_verbatim &&
+                 options && options->encoding) ||
                 (enc[0] == 'U' || enc[0] == 'u')) {
-                /* An EXPLICITLY requested encoding is emitted
-                 * verbatim — xsl:output encoding names it and the
-                 * XSLT layer transcodes the body to match (bug-140).
-                 * The parse-echo fallback below only applies to
+                /* Verbatim: either a UTF-8-spelled name, or an
+                 * explicit request from a caller that transcodes the
+                 * body to match (the XSLT layer, bug-140). The
+                 * parse-echo fallback below only applies to
                  * encodings inherited from a parsed document. */
                 buffer_append(buf, enc);
 #ifdef LEPTRIS_HAS_ICONV
