@@ -111,20 +111,34 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
 
     switch (test->type) {
         case XPATH_AST_NODE_TEST_NAME: {
-            /* Match specific name - namespace-aware */
+            /* Match specific name - namespace-aware. The parser
+             * pre-splits the test QName (prefix/local_name); deriving
+             * the split here per NODE cost a strchr on every element
+             * of every walked axis (#617's scalar profile). */
             const char* node_name = leptris_element_get_name(elem);
             if (!test->value || !node_name) return 0;
 
-            /* Fast path: No colon means no namespace prefix */
-            const char* colon = strchr(test->value, ':');
+            const char* test_prefix = test->prefix;
+            const char* test_local = test->local_name;
+            if (!test_local) {
+                /* Legacy un-split test: derive once per call. */
+                const char* colon = strchr(test->value, ':');
+                if (colon) {
+                    test_prefix = test->value;
+                    test_local = colon + 1;
+                } else {
+                    test_prefix = NULL;
+                    test_local = test->value;
+                }
+            }
 
-            if (!colon) {
+            if (!test_prefix) {
                 /* Simple name match - no prefix in test */
                 /* Issue #525 (XPath 1.0 §2.3): an unprefixed test
                  * matches only NO-namespace elements. A prefix-less
                  * element under a default xmlns IS namespaced —
                  * "no prefix" is the wrong proxy. */
-                if (strcmp(node_name, test->value) != 0) return 0;
+                if (strcmp(node_name, test_local) != 0) return 0;
                 if (!ctx || !ctx->document || !ctx->document->has_namespaces)
                     return 1;   /* namespace-free document: no gate */
                 const char* uri = leptris_element_get_namespace_uri(elem);
@@ -132,8 +146,7 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
             }
 
             /* Has prefix - need namespace-aware matching */
-            size_t prefix_len = colon - test->value;
-            const char* test_local = colon + 1;
+            size_t prefix_len = strlen(test_prefix);
 
             /* URI-aware matching when the external bindings carry
              * the test prefix (XPointer xmlns()): p:e matches any e
@@ -144,7 +157,7 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
             const char* test_uri = ctx
                 ? leptris_xpath_ns_lookup(
                       (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                      test->value, prefix_len)
+                      test_prefix, prefix_len)
                 : NULL;
             if (test_uri) {
                 const char* node_uri = leptris_element_get_namespace_uri(elem);
@@ -157,7 +170,7 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
             if (!node_prefix) return 0;  /* Test has prefix, node doesn't */
 
             /* Match prefix (compare up to prefix_len) */
-            if (strncmp(test->value, node_prefix, prefix_len) != 0 ||
+            if (strncmp(test_prefix, node_prefix, prefix_len) != 0 ||
                 node_prefix[prefix_len] != '\0') {
                 return 0;  /* Prefix mismatch or node prefix longer */
             }
@@ -267,6 +280,14 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
     size_t old_pos = ctx->context_position;
     size_t old_size = ctx->context_size;
     void* old_predicate_node = ctx->current_predicate_node;
+
+    /* #617 scalar profile: a bare NUMBER literal predicate ([1],
+     * [2], ...) is the hottest shape in select-heavy documents — it
+     * needs no context and no result object, just the position
+     * compare. Everything else falls through to the full evaluator. */
+    if (predicate->type == XPATH_AST_NUMBER) {
+        return predicate->number_value == (double)proximity_position;
+    }
 
     /* Set context ONCE for this evaluation
      * IMPORTANT: context_node should be the actual node being tested (element or attribute)
