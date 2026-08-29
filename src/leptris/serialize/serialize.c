@@ -1845,10 +1845,14 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
                  * encodings inherited from a parsed document. */
                 buffer_append(buf, enc);
 #ifdef LEPTRIS_HAS_ICONV
-            } else {
+            } else if (enc[0]) {
                 buffer_append(buf, "UTF-8");
             }
 #else
+            } else {
+                /* No iconv: bytes pass through unchanged at parse —
+                 * echoing the source encoding stays truthful. */
+                buffer_append(buf, enc);
             }
 #endif
             buffer_append_char(buf, '"');
