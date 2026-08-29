@@ -178,6 +178,30 @@ LEPTRIS_API size_t leptris_node_children(LeptrisNodeRef parent,
                                          size_t max_count);
 
 /**
+ * Batch child handles WITH each child's kind (issue #617)
+ *
+ * leptris_node_children's shape plus out_kinds: the kind rides the
+ * batch, so a binding's child walk skips the per-node get_type
+ * dispatch entirely (the same shape as the XPath batch accessors).
+ *
+ * @param parent Parent node (any type that can hold children)
+ * @param out_nodes Output array of child node handles, or NULL for
+ *                  a count-only query
+ * @param out_kinds Output array receiving each child's LeptrisNodeKind
+ *                  in lockstep with out_nodes; NULL to skip
+ * @param max_count Capacity of out_nodes/out_kinds
+ * @return Identical contract to leptris_node_children: with
+ *         out_nodes NULL the total child count; otherwise the number
+ *         copied, min(total, max_count).
+ *
+ * Memory: Nodes are owned by the document. Do not free separately.
+ */
+LEPTRIS_API size_t leptris_node_children_ex(LeptrisNodeRef parent,
+                                            LeptrisNodeRef* out_nodes,
+                                            LeptrisNodeKind* out_kinds,
+                                            size_t max_count);
+
+/**
  * Cast node to element (if node is an element)
  *
  * @param node Node handle
