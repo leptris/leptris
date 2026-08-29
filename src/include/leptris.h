@@ -200,6 +200,31 @@ LEPTRIS_API size_t leptris_node_children_ex(LeptrisNodeRef parent,
                                             LeptrisNodeRef* out_nodes,
                                             LeptrisNodeKind* out_kinds,
                                             size_t max_count);
+/**
+ * Raw attribute view including xmlns declarations, source order
+ * (issue #635)
+ *
+ * The attribute chain and the namespace-declaration accessors store
+ * the two separately; this returns the MIXED qname-ordered list the
+ * streaming transports deliver - declarations interleaved among the
+ * attributes at their byte positions. Names and values are as
+ * written (qnames like "xmlns" / "xmlns:prefix" / "a:attr").
+ *
+ * @param elem Element (any; elements without attributes or
+ *             declarations report 0)
+ * @param out_qnames Output array of qualified-name strings, or NULL
+ *                   for a count-only query
+ * @param out_values Output array of value strings (parallel), or
+ *                   NULL for a count-only query
+ * @param max_count Capacity of the output arrays
+ * @return With both outputs NULL: the total entry count. Otherwise
+ *         the number copied, min(total, max_count).
+ *
+ * Memory: Strings are owned by the element. Do not free separately.
+ */
+LEPTRIS_API size_t leptris_element_attributes_raw(
+    LeptrisElement elem, const char** out_qnames, const char** out_values,
+    size_t max_count);
 
 /**
  * Cast node to element (if node is an element)
