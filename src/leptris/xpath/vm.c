@@ -803,6 +803,13 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
     XPathNodeSet* input = vm_detach_input_nodeset(vm);
     if (!input) return NULL;
 
+    /* The element index keys buckets on LOCAL names; a prefixed test
+     * (issue #630: .//ns:x from element context) resolves the local
+     * bucket and filters each match namespace-aware — the raw
+     * qualified lookup missed every bucket and returned empty. */
+    const char* name_colon = (!wild && name) ? strchr(name, ':') : NULL;
+    const char* bucket_key = name_colon ? name_colon + 1 : name;
+
     XPathNodeSet* out = xpath_nodeset_new();
     if (!out) { xpath_nodeset_free(input); return NULL; }
 
@@ -851,8 +858,19 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
                 }
             } else {
                 const LeptrisElementIndexBucket* bucket =
-                    leptris_element_index_lookup(idx, name);
-                if (bucket) {
+                    leptris_element_index_lookup(idx, bucket_key);
+                if (name_colon) {
+                    /* Prefixed test: filter the local bucket's matches
+                     * namespace-aware (issue #630). */
+                    if (bucket) {
+                        for (size_t i = 0; i < bucket->count; i++) {
+                            LeptrisElement m = bucket->matches[i];
+                            if (!include_self && m == doc_root) continue;
+                            if (vm_unprefixed_name_matches(ctx, m, name))
+                                xpath_nodeset_add_fast(out, m);
+                        }
+                    }
+                } else if (bucket) {
                     if (include_self) {
                         /* all matches including root */
                         if (bucket->count > 0) {
@@ -921,7 +939,7 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
         }
         if (idx && idx->subtree_end) {
             const LeptrisElementIndexBucket* bucket =
-                leptris_element_index_lookup(idx, name);
+                leptris_element_index_lookup(idx, bucket_key);
             /* No bucket / empty bucket: the name does not occur in
              * this document, so every subtree yields empty — but a
              * partially-built index without positions must fall back. */
@@ -979,6 +997,13 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
                                      j++) {
                                     if (!include_self &&
                                         bucket->match_positions[j] == lo2) {
+                                        continue;
+                                    }
+                                    if (name_colon &&
+                                        !vm_unprefixed_name_matches(
+                                            ctx,
+                                            (LeptrisElement)bucket->matches[j],
+                                            name)) {
                                         continue;
                                     }
                                     xpath_nodeset_add_fast(
