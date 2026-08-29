@@ -4,7 +4,13 @@
 
 ### Added
 
-- raw attribute view with xmlns declarations in source order (dom)
+- **#635**: `leptris_element_attributes_raw` — the mixed
+  qname-ordered attribute list the streaming transports deliver,
+  xmlns declarations interleaved among the attributes at their
+  source byte positions (names and values as written). A DOM-to-SAX
+  bridge can now match the streaming contract exactly. Recorded at
+  parse on the lazily-created ns cache; cache-less elements pay
+  nothing.
 
 
 
