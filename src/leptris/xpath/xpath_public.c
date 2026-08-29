@@ -388,6 +388,15 @@ LEPTRIS_API char* leptris_xpath_result_string(LeptrisXPathResult result) {
             if (result->value.nodeset_value &&
                 result->value.nodeset_value->count > 0) {
                 void* first = result->value.nodeset_value->nodes[0];
+                /* Document node (RTF variables/params, bug-56): the
+                 * string-value is ALL text in the fragment, doc-level
+                 * children before the root element's subtree. Shared
+                 * walker lives in evaluator_types.c. */
+                if ((int)XPATH_NODE_TYPE(first) == LEPTRIS_NODE_TYPE_DOCUMENT) {
+                    extern char* get_node_text(void* node);
+                    char* dsv = get_node_text(first);
+                    return dsv ? dsv : leptris_strdup("");
+                }
                 /* First-node string-value by KIND (issue #514
                  * fallout): attributes use their value; text/CDATA
                  * and comments their content; elements their

@@ -1375,19 +1375,48 @@ static struct leptris_xpath_result* xslt_capture_content(
             if (dn)
                 xpath_nodeset_add(v->value.nodeset_value, dn);
         }
-    } else if (v && !rr && frag_text && frag_len) {
-        /* Pure-text RTF: the value is the string (the nodeset-
-         * binding experiment regressed bug-72's nested captures —
-         * reverted pending a capture-state rework). */
-        free(v);
-        v = xpath_result_new(XPATH_RESULT_STRING);
-        if (v) v->value.string_value = leptris_strdup(frag_text);
+    } else if (v && !rr) {
+        /* Pure-text RTF (bug-56): bind as the fragment's document
+         * node — an EMPTY one too, which libxslt counts as 1 (the
+         * node exists; its string-value is just ""). Non-empty
+         * fragments get ONE text child spliced into the document's
+         * chain so string($rtf) is the text. The earlier
+         * string-binding regressed bug-72 via stale capture state;
+         * the fresh-buffer capture discipline above is what makes
+         * the nodeset binding safe now. */
+        if (frag_text && frag_len) {
+            LeptrisNodeRef tn =
+                leptris_text_node_create(frag_doc, frag_text);
+            if (tn) {
+                struct leptris_document* fd =
+                    (struct leptris_document*)frag_doc;
+                if (!fd->doc_children_head) {
+                    fd->doc_children_head = tn;
+                    fd->doc_children_tail = tn;
+                } else {
+                    leptris_node_set_next_sibling(
+                        (LeptrisNodeRef)fd->doc_children_tail, tn);
+                    fd->doc_children_tail = tn;
+                }
+            }
+        }
+        /* Bind the document node — same shape as the element
+         * fragment above. */
+        v->value.nodeset_value = xpath_nodeset_new();
+        if (v->value.nodeset_value) {
+            LeptrisNodeRef dn = (LeptrisNodeRef)
+                leptris_document_get_node(frag_doc);
+            if (dn)
+                xpath_nodeset_add(v->value.nodeset_value, dn);
+        }
     }
     free(frag_text);
     /* The nodeset's node pointers live in the fragment document.
      * Move ownership into the exec's RTF chain so the nodes outlive
-     * the variable's frame. */
-    if (rr) {
+     * the variable's frame — for BOTH shapes: element-rooted
+     * fragments and pure-text ones (their nodeset points at the
+     * document node whose child is the text). */
+    if (rr || (v && v->type == XPATH_RESULT_NODESET)) {
         struct xslt_rtf_entry* ent =
             (struct xslt_rtf_entry*)malloc(sizeof(*ent));
         if (ent) {

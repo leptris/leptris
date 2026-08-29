@@ -2130,3 +2130,18 @@ TEST(XsltParams, CapturedRtfTextIsLogical) {
         "<r><t>a&amp;b</t></r>")),
         "<![CDATA[a&b]]>");
 }
+
+/* libxslt RTF semantics (bug-56): a content-bound variable is a
+ * nodeset holding the fragment's document node — count() is 1 and
+ * string() yields the fragment's logical text via the shared
+ * document-node string-value walker. */
+TEST(XsltParams, RtfVariableStringAndCount) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='t'>hello</xsl:variable>"
+        "[<xsl:value-of select='string($t)'/>]"
+        "[<xsl:value-of select='count($t)'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[hello][1]");
+}
