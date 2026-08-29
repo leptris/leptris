@@ -135,20 +135,34 @@ static void sxs_carry_reset(LeptrisSAXParser* p) { p->carry_len = 0; }
  * Scratch arena (persisted across feed() for element names + attrs)
  * ============================================================================ */
 
+/* Append-only block chain. Issue #625: this buffer previously grew by
+ * realloc, which silently invalidated every pointer already handed
+ * out — pending_attr_name, the pairs stored in ancestor frames' attr
+ * arrays, and names referenced by the recorder/pull layers — whenever
+ * nested attr-carrying elements pushed usage across a growth boundary
+ * mid-element. Blocks here are allocated once and never moved, so
+ * handed-out pointers stay valid for the parser's lifetime. */
 static const char* sxs_scratch_append(LeptrisSAXParser* p,
                                       const char* src, size_t n) {
-    if (p->scratch_len + n + 1 > p->scratch_cap) {
-        size_t new_cap = p->scratch_cap ? p->scratch_cap : 256;
-        while (new_cap < p->scratch_len + n + 1) new_cap *= 2;
-        char* grown = (char*)realloc(p->scratch, new_cap);
-        if (!grown) return NULL;
-        p->scratch = grown;
-        p->scratch_cap = new_cap;
+    SaxScratchBlock* b = p->scratch_tail;
+    if (!b || b->len + n + 1 > b->cap) {
+        size_t cap = b ? b->cap * 2 : 256;
+        while (cap < n + 1) cap *= 2;
+        SaxScratchBlock* nb =
+            (SaxScratchBlock*)malloc(sizeof(SaxScratchBlock) + cap);
+        if (!nb) return NULL;
+        nb->next = NULL;
+        nb->cap = cap;
+        nb->len = 0;
+        if (b) b->next = nb;
+        else p->scratch = nb;
+        p->scratch_tail = nb;
+        b = nb;
     }
-    if (n) memcpy(p->scratch + p->scratch_len, src, n);
-    p->scratch[p->scratch_len + n] = '\0';
-    const char* result = p->scratch + p->scratch_len;
-    p->scratch_len += n + 1;
+    if (n) memcpy(b->data + b->len, src, n);
+    b->data[b->len + n] = '\0';
+    const char* result = b->data + b->len;
+    b->len += n + 1;
     return result;
 }
 
