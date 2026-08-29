@@ -374,8 +374,10 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
         ext.xhtml = xhtml_doctype(ex->sheet->out_doctype_public,
                                   ex->sheet->out_doctype_system);
     /* §16.1: xsl:output encoding names the output declaration's
-     * encoding (bug-132). */
+     * encoding (bug-132) — verbatim, because this layer transcodes
+     * the body to the same encoding after serialization (bug-140). */
     opts.encoding = ex->sheet->out_encoding;
+    ext.decl_encoding_verbatim = 1;
     /* musl GCC rejects the qualified-pointer store (#582). */
     ext.cdata_elements = (const char* const*)ex->sheet->out_cdata;
     ext.cdata_element_count = ex->sheet->out_cdata_count;
