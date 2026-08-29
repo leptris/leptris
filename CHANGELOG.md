@@ -2,10 +2,25 @@
 
 ## [1.9.17] - 2026-08-29
 
+XSLT engine-semantics round; the libxslt suite holds 197/205 with
+two crashers (bug-166, bug-5-) converted to ordinary diffs.
+
 ### Fixed
 
-- with-param CONTENT binds its RTF; captured RTF text is logical (xslt)
-- absolute paths root at the context node's document (xpath)
+- Absolute paths (`//name`, `/name`) root at the CONTEXT NODE'S
+  document, matching libxslt: evaluation inside document() output or
+  an RTF fragment no longer sees the transform source tree (the
+  bug-65 family). The context can be a text/comment/PI node during
+  pattern matching, so the document lookup walks any-kind parent
+  links to the nearest element first - the naive element-layout read
+  crashed 19 suite cases.
+- A with-param with CONTENT (no select) bound NULL - named-template
+  parameters arrived empty (bug-90's wrap-cdata template). The RTF
+  capture is a shared helper used by variables and with-params.
+- The RTF capture stored pre-escaped text; string($rtf) is
+  unescaped, so re-emitting a captured fragment with
+  disable-output-escaping produced double-escaped ampersands.
+  Capture keeps the logical text.
 
 
 
