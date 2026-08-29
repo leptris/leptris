@@ -32,6 +32,29 @@
  * Forward Declarations
  * ============================================================================ */
 
+/* The engine's extension-function compatibility contract. libxslt
+ * resolves extension calls by NAMESPACE URI + local name, so a
+ * stylesheet may bind any of these under ANY prefix (xmlns:z=EXSLT
+ * common then z:node-set() must work). The registry keys handlers
+ * under canonical prefixes (exslt:node-set); function resolution
+ * falls back to the local name when the prefix resolves to one of
+ * THESE namespaces — and only these, so a user my:count never
+ * silently hits the built-in count(). Adding extension support =
+ * adding the URI here plus the handler registration. */
+static const char* const k_extension_ns_uris[] = {
+    "http://exslt.org/common",
+    "http://exslt.org/sets",
+    "http://exslt.org/strings",
+    "http://exslt.org/math",
+    "http://exslt.org/date",
+    "http://exslt.org/regexp",
+    "http://exslt.org/dynamic",
+    "http://www.w3.org/1999/XSL/Transform",
+    /* libxslt's OWN extension namespace: stylesheets bind it under
+     * any prefix and call libxslt:node-set() (bug-65). */
+    "http://xmlsoft.org/XSLT/namespace",
+    NULL };
+
 /* Namespace support functions (v0.8.0) */
 static void xpath_context_register_namespace(XPathContext* context,
                                              const char* prefix,
@@ -795,20 +818,13 @@ static struct leptris_xpath_result* evaluate_function_call_impl(XPathContext* ct
             const char* uri = leptris_xpath_ns_lookup(
                 (const struct leptris_xpath_ns_map*)ctx->ns_set,
                 func_name, (size_t)(colon - func_name));
-            static const char* k_ext[] = {
-                "http://exslt.org/common",
-                "http://exslt.org/sets",
-                "http://exslt.org/strings",
-                "http://exslt.org/math",
-                "http://exslt.org/date",
-                "http://exslt.org/regexp",
-                "http://exslt.org/dynamic",
-                "http://www.w3.org/1999/XSL/Transform",
-                NULL };
             int ext = 0;
             if (uri) {
-                for (int i = 0; k_ext[i]; i++)
-                    if (strcmp(uri, k_ext[i]) == 0) { ext = 1; break; }
+                for (int i = 0; k_extension_ns_uris[i]; i++)
+                    if (strcmp(uri, k_extension_ns_uris[i]) == 0) {
+                        ext = 1;
+                        break;
+                    }
             }
             if (ext) {
                 char local[128];
