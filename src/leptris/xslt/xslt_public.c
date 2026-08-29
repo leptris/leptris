@@ -183,6 +183,27 @@ static int effective_indent(const XsltStylesheet* sheet, int html) {
     return html;
 }
 
+/* libxml2 xmlIsXHTML: EXACT matches against the XHTML 1.0 DTD ids
+ * switch the xml-method serializer to XHTML mode (meta injection +
+ * HTML-style minimized empty elements). */
+static int xhtml_doctype(const char* pub, const char* sys) {
+    static const char* const pubs[] = {
+        "-//W3C//DTD XHTML 1.0 Strict//EN",
+        "-//W3C//DTD XHTML 1.0 Transitional//EN",
+        "-//W3C//DTD XHTML 1.0 Frameset//EN",
+    };
+    static const char* const syss[] = {
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd",
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd",
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd",
+    };
+    for (int i = 0; i < 3; i++) {
+        if (pub && strcmp(pub, pubs[i]) == 0) return 1;
+        if (sys && strcmp(sys, syss[i]) == 0) return 1;
+    }
+    return 0;
+}
+
 /* §16.2 meta charset injection (libxslt htmlSetMetaEncoding
  * parity): a head with no encoding-bearing meta gets
  * <meta charset="ENC"> prepended as its first child — at the DOM
@@ -347,6 +368,11 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     /* libxslt serialize semantics: ws-only text children count as
      * mixed (the formatter stops below them, bug-98). */
     if (!html_method && opts.indent) ext.ws_mixed = 1;
+    /* libxml2 xmlIsXHTML: the doctype ids select XHTML serialization
+     * for the xml output method. */
+    if (!html_method && !ex->sheet->out_method_text)
+        ext.xhtml = xhtml_doctype(ex->sheet->out_doctype_public,
+                                  ex->sheet->out_doctype_system);
     /* §16.1: xsl:output encoding names the output declaration's
      * encoding (bug-132). */
     opts.encoding = ex->sheet->out_encoding;
