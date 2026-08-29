@@ -133,3 +133,39 @@ TEST(CompiledXPath, EvalWithVariables) {
     leptris_xpath_variable_set_free(vars);
     leptris_document_free(doc);
 }
+
+/* Issue #608: combined namespaces + variables on a compiled handle —
+ * count(//x:book[@id=$id]) needs BOTH bound; the public surface only
+ * had _ns and _vars separately, forcing bindings back to uncompiled
+ * evaluation for the combination. */
+TEST(CompiledXPath, EvalNsVarsCombined) {
+    const char* xml =
+        "<lib xmlns:x='urn:x'>"
+        "<x:book id='7'>A</x:book><x:book id='8'>B</x:book>"
+        "<book id='7'>C</book>"
+        "</lib>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXPathCompiled c = leptris_xpath_compile("count(//x:book[@id=$id])");
+    ASSERT_NE(c, nullptr);
+
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    ASSERT_EQ(leptris_xpath_ns_set_add(ns, "x", "urn:x"), LEPTRIS_OK);
+    LeptrisXPathVariableSet vars = leptris_xpath_variable_set_new();
+    ASSERT_NE(vars, nullptr);
+    ASSERT_EQ(leptris_xpath_variable_set_string(vars, "id", "7"), LEPTRIS_OK);
+
+    LeptrisXPathResult r = leptris_xpath_compiled_eval_ns_vars(
+        c, doc, nullptr, ns, vars);
+    ASSERT_NE(r, nullptr);
+    /* The prefixed test excludes the no-namespace book; $id=7 leaves
+     * exactly one x:book. */
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+
+    leptris_xpath_variable_set_free(vars);
+    leptris_xpath_ns_set_free(ns);
+    leptris_xpath_compiled_free(c);
+    leptris_document_free(doc);
+}
