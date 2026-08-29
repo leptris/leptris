@@ -234,6 +234,36 @@ TEST(DomBasics, ElementPrefixAndNamespaceAccess) {
     leptris_document_free(doc);
 }
 
+/* leptris-ruby#99: a DOM-backed SAX dispatch must be able to emit
+ * xmlns declarations as events. The parser strips them from the
+ * attribute list (by design, issue #542) — the declaration
+ * enumeration API (issue #171) is the engine-side source of truth
+ * and must keep working. */
+TEST(DomBasics, NamespaceDeclarationsEnumerable) {
+    const char xml[] = "<r xmlns='urn:a' xmlns:x='urn:x' a='1'><x:b/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    ASSERT_EQ(leptris_element_namespace_count(root), 2u);
+    EXPECT_EQ(leptris_element_namespace_decl_prefix(root, 0), nullptr);
+    EXPECT_STREQ(leptris_element_namespace_decl_uri(root, 0), "urn:a");
+    EXPECT_STREQ(leptris_element_namespace_decl_prefix(root, 1), "x");
+    EXPECT_STREQ(leptris_element_namespace_decl_uri(root, 1), "urn:x");
+
+    /* Attributes never carry the declarations — the two namespaces
+     * are disjoint surfaces. */
+    ASSERT_EQ(leptris_element_attribute_count(root), 1u);
+    EXPECT_STREQ(leptris_element_attribute_name_at(root, 0), "a");
+
+    /* Child declares nothing of its own. */
+    LeptrisElement b = leptris_element_first_child_any(root);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_element_namespace_count(b), 0u);
+
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, MultipleNamespacesPerElementAreAllReachable) {
     /* Regression for TODO 159 Phase G: parser-local last-ns cache
      * must wire every xmlns into the list. We verify by parsing an

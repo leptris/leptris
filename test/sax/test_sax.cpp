@@ -615,3 +615,24 @@ TEST(SaxPull, PullAttrsSurviveScratchGrowth) {
     EXPECT_EQ(saw_image, 1);
     leptris_pull_free(p);
 }
+
+/* leptris-ruby#99: the streaming transports deliver xmlns
+ * declarations — both as attrs pairs and as prefix-mapping events.
+ * A DOM-backed dispatch (which walks the attribute list, where the
+ * parser deliberately keeps them out) must reproduce this shape via
+ * leptris_element_namespace_count / _decl_prefix / _decl_uri. */
+TEST_F(SaxParser, XmlnsDeclarationsDeliveredInEvents) {
+    const char xml[] =
+        "<r xmlns=\"urn:a\" xmlns:x=\"urn:x\" a=\"1\"/>";
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log), 0);
+    /* EventLog does not record prefix mappings; assert the attrs
+     * pairs carry the declarations alongside the real attribute. */
+    bool saw = false;
+    for (const std::string& e : log.events) {
+        if (e.rfind("start:r", 0) == 0) {
+            saw = true;
+            EXPECT_EQ(e, "start:r xmlns=urn:a xmlns:x=urn:x a=1");
+        }
+    }
+    EXPECT_TRUE(saw);
+}
