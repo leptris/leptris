@@ -1568,3 +1568,35 @@ TEST(DetachedInserts, BuildBeforeAttach) {
     leptris_free_string(x);
     leptris_document_free(doc);
 }
+
+/* Issue #617: node_children_ex rides each child's KIND on the batch
+ * (out_kinds) so bindings skip the per-node get_type dispatch on
+ * cold full-tree walks. Kinds must align with the node handles. */
+TEST(DomBasics, NodeChildrenExCarriesKinds) {
+    const char xml[] =
+        "<r>text<!--c--><a/><?pi x?></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisNodeRef root =
+        (LeptrisNodeRef)leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    size_t total = leptris_node_children_ex(root, nullptr, nullptr, 0);
+    ASSERT_EQ(total, 4u);
+
+    LeptrisNodeRef nodes[8];
+    LeptrisNodeKind kinds[8];
+    size_t n = leptris_node_children_ex(root, nodes, kinds, 8);
+    ASSERT_EQ(n, 4u);
+    EXPECT_EQ(kinds[0], LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_EQ(kinds[1], LEPTRIS_NODE_TYPE_COMMENT);
+    EXPECT_EQ(kinds[2], LEPTRIS_NODE_TYPE_ELEMENT);
+    EXPECT_EQ(kinds[3], LEPTRIS_NODE_TYPE_PI);
+    for (size_t i = 0; i < n; i++)
+        EXPECT_EQ(leptris_node_get_type(nodes[i]), kinds[i]) << i;
+
+    /* Truncation mirrors leptris_node_children. */
+    EXPECT_EQ(leptris_node_children_ex(root, nodes, kinds, 2), 2u);
+
+    leptris_document_free(doc);
+}
