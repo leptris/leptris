@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.14] - 2026-08-29
+
+### Fixed
+
+- MSVC strcasecmp mapping; zero-init serializer xhtml flag (build)
+- failed expression evaluation aborts the transform (xslt,xpath)
+- last() reflects the in-flight node-list size (xslt)
+- no-iconv builds - guard iconv transcode; built-in latin-1; truthful decl echo (xslt,serialize)
+- lang() nearest declaration; root-step predicates; xml-prefixed attr fallback (xpath)
+- declaration stays truthful for the plain API; XSLT opts in (serialize)
+- scratch arena is a stable block chain - attr pointers never move (sax)
+- chartype table is fully static - drop the load-time UTF-8 fill (parser)
+- XHTML serialization for xml-method results with XHTML doctypes (xslt)
+- xmlns entity refs expand via DTD; emit explicit output encoding verbatim (parse,serialize)
+- default-ns declaration walk; EXSLT date:add (xslt)
+- with-param scoping, RTF fragment values, output encodings (xslt)
+- AVT braces, number format AVT+Unicode digits, text-context axes (xslt,xpath)
+
+
+
 ## [1.9.13] - 2026-08-28
 
 libxslt general suite: 180 -> 181/205.
