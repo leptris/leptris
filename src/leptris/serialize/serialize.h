@@ -73,6 +73,12 @@ typedef struct SerializeBuffer {
     /* §16.2 method="html": newline-per-block-element layout governed
      * by the HTML element table (html_elem_flags). */
     int html_method;
+    /* libxml2 XHTML serialization (xmlsave.c xhtmlNodeDumpOutput
+     * parity): an xml-method result whose doctype ids match an XHTML
+     * DTD injects the Content-Type meta into the root html/head and
+     * minimizes the 13 HTML empty names as <x />. */
+    int xhtml;
+    const char* xhtml_encoding;   /* charset name for the injected meta */
     int alloc_failed;  /* Sticky realloc-failure flag (TODO 08) */
 } SerializeBuffer;
 
@@ -118,6 +124,7 @@ typedef struct {
     int ws_mixed;                         /* XSLT results: ws-only text
                                               children count as mixed
                                               (libxslt bug-98) */
+    int xhtml;                            /* libxml2 XML_SAVE_XHTML */
 } LeptrisSerializeExtended;
 
 LEPTRIS_API char* leptris_document_serialize_ext(

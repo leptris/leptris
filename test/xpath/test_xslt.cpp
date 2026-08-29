@@ -1150,6 +1150,67 @@ TEST(XsltOutput, NoDoctypeAttrsMeansNoDoctype) {
         "<html></html>");
 }
 
+/* libxml2 xmlIsXHTML (bug-152): an xml-method result whose doctype
+ * ids EXACTLY match an XHTML 1.0 DTD serializes in XHTML mode — the
+ * Content-Type meta is injected into the root html/head, the 13 HTML
+ * empty names minimize as <x />, every other empty element expands. */
+TEST(XsltXhtml, InjectsMetaAndExpandsEmptyElements) {
+    std::string r = run(
+        "<xsl:output method='xml' indent='yes'"
+        " doctype-public='-//W3C//DTD XHTML 1.0 Strict//EN'"
+        " doctype-system='http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'/>"
+        "<xsl:template match='/'><html xmlns='http://www.w3.org/1999/xhtml'>"
+        "<head><title>t</title></head>"
+        "<body><br/><div/><img src='x'/></body></html></xsl:template>",
+        "<r/>");
+    EXPECT_NE(r.find("<meta http-equiv=\"Content-Type\" "
+                     "content=\"text/html; charset=UTF-8\" />"),
+              std::string::npos);
+    EXPECT_NE(r.find("<br />"), std::string::npos);
+    EXPECT_NE(r.find("<img src=\"x\" />"), std::string::npos);
+    EXPECT_NE(r.find("<div></div>"), std::string::npos);
+}
+
+/* An author-provided http-equiv=Content-Type meta wins — none is
+ * injected (xmlGetProp + xmlStrcasecmp parity). */
+TEST(XsltXhtml, AuthorMetaWins) {
+    std::string r = run(
+        "<xsl:output method='xml' indent='yes'"
+        " doctype-public='-//W3C//DTD XHTML 1.0 Strict//EN'/>"
+        "<xsl:template match='/'><html xmlns='http://www.w3.org/1999/xhtml'>"
+        "<head><meta http-equiv='Content-Type'"
+        " content='text/html; charset=EUC-JP'/></head></html>"
+        "</xsl:template>",
+        "<r/>");
+    EXPECT_EQ(r.find("charset=UTF-8"), std::string::npos);
+    EXPECT_NE(r.find("charset=EUC-JP"), std::string::npos);
+}
+
+/* The id match is EXACT — a public id merely containing "XHTML"
+ * keeps the plain xml serializer (no meta, collapsed empties). */
+TEST(XsltXhtml, NonExactPublicIdStaysPlainXml) {
+    std::string r = run(
+        "<xsl:output method='xml' indent='yes'"
+        " doctype-public='-//W3C//DTD foo xhtml //EN'/>"
+        "<xsl:template match='/'><html xmlns='http://www.w3.org/1999/xhtml'>"
+        "<head><title>t</title></head><body/></html></xsl:template>",
+        "<r/>");
+    EXPECT_EQ(r.find("http-equiv"), std::string::npos);
+    EXPECT_NE(r.find("<body/>"), std::string::npos);
+}
+
+/* libxml2 3.1.1: an <html> in no namespace with no local ns
+ * declarations gains xmlns="http://www.w3.org/1999/xhtml". */
+TEST(XsltXhtml, BareHtmlRootGainsDefaultNamespace) {
+    std::string r = run(
+        "<xsl:output method='xml' indent='no'"
+        " doctype-public='-//W3C//DTD XHTML 1.0 Strict//EN'/>"
+        "<xsl:template match='/'><html><head/></html></xsl:template>",
+        "<r/>");
+    EXPECT_NE(r.find("<html xmlns=\"http://www.w3.org/1999/xhtml\">"),
+              std::string::npos);
+}
+
 /* §5.2: patterns with position predicates apply per sibling
  * position — match="text()[2]" fires ONLY for the parent's second
  * text node (libxslt bug-182). */

@@ -434,6 +434,72 @@ static int html_elem_flags_ci(const char* name, size_t len) {
     return html_elem_flags(lower, len);
 }
 
+/* ---- libxml2 XHTML serialization (xmlsave.c xhtmlNodeDumpOutput) ---- */
+
+#define LEPTRIS_XHTML_NS "http://www.w3.org/1999/xhtml"
+
+/* xhtmlIsEmpty: exactly these 13 names may minimize as <x /> —
+ * deliberately NOT the html-method void table, which carries extra
+ * HTML5 names libxml2's XHTML path does not know. */
+static int xhtml_is_empty_name(const char* name, size_t len) {
+    static const char k[] = "area\0base\0basefont\0br\0col\0frame\0hr\0"
+                            "img\0input\0isindex\0link\0meta\0param";
+    const char* p = k;
+    const char* end = k + sizeof(k) - 1;
+    while (p < end) {
+        size_t l = (size_t)(end - p);
+        const char* z = memchr(p, '\0', l);
+        size_t wl = z ? (size_t)(z - p) : l;
+        if (wl == len && memcmp(p, name, len) == 0) return 1;
+        p += wl + 1;
+    }
+    return 0;
+}
+
+/* libxml2 C.2/C.3: the empty-name rule applies only to no-namespace
+ * (or XHTML-namespace) elements. */
+static int xhtml_is_empty_elem(LeptrisElement e, const char* name,
+                               size_t nl) {
+    if (!xhtml_is_empty_name(name, nl)) return 0;
+    const char* u = leptris_element_get_namespace_uri(e);
+    return u == NULL || strcmp(u, LEPTRIS_XHTML_NS) == 0;
+}
+
+static int ser_case_eq(const char* a, const char* b) {
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+            return 0;
+        a++; b++;
+    }
+    return *a == *b;
+}
+
+/* head injects the Content-Type meta unless a child meta already
+ * carries http-equiv="Content-Type" (xmlStrcasecmp parity). */
+static int xhtml_head_wants_meta(LeptrisElement head) {
+    for (LeptrisNode* m = leptris_node_first_child_internal(
+             (LeptrisNode*)head);
+         m; m = leptris_node_get_next_sibling(m)) {
+        if (m->type != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        LeptrisElement me = (LeptrisElement)m;
+        const char* mn = me->name;
+        size_t mnl = (me->name_len != 0xFF)
+            ? (size_t)me->name_len : (mn ? strlen(mn) : 0);
+        if (!mn || mnl != 4 || memcmp(mn, "meta", 4) != 0) continue;
+        const char* he = leptris_element_attribute(me, "http-equiv");
+        if (he && ser_case_eq(he, "Content-Type")) return 0;
+    }
+    return 1;
+}
+
+static void emit_xhtml_meta(SerializeBuffer* buf) {
+    buffer_append(buf, "<meta http-equiv=\"Content-Type\" "
+                       "content=\"text/html; charset=");
+    buffer_append(buf, buf->xhtml_encoding ? buf->xhtml_encoding
+                                           : "UTF-8");
+    buffer_append(buf, "\" />");
+}
+
 /* §16.2 newline sites (libxml2 htmlNodeDumpInternal parity). The
  * p/pre/param first-byte rule gates the PARENT-side sites only — a
  * block child named p* still takes its after-close newline when its
@@ -993,13 +1059,27 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         const char* epfx = leptris_element_get_prefix(e);
         size_t epl = (epfx && epfx[0]) ? strlen(epfx) + 1 : 0;
 
+        /* libxml2 addmeta: a head directly under the root html
+         * element injects the Content-Type meta at serialization
+         * time (case-sensitive head/html names, xmlStrEqual). */
+        int addmeta = 0;
+        if (buf->xhtml && sp == 1 && st[0].e &&
+            nl == 4 && memcmp(name, "head", 4) == 0) {
+            const char* rn = st[0].e->name;
+            size_t rnl = (st[0].e->name_len != 0xFF)
+                ? (size_t)st[0].e->name_len
+                : (rn ? strlen(rn) : 0);
+            if (rn && rnl == 4 && memcmp(rn, "html", 4) == 0)
+                addmeta = xhtml_head_wants_meta(e);
+        }
+
         /* --- total-fusion fast path (TODO 194f): a compact-mode leaf
          * element with no attributes and no namespaces emits its ENTIRE
          * `<name>text</name>` from one reservation — the dominant shape
          * in text-heavy documents paid two reservations + finalize.
          * RAW parents (html script/style) escape the fusion: their
          * text is verbatim. */
-        if (buf->indent_text == 0 &&
+        if (buf->indent_text == 0 && !addmeta &&
             leptris_element_get_first_attribute(e) == NULL &&
             leptris_elem_namespaces(e) == NULL &&
             !(buf->html_method &&
@@ -1138,6 +1218,13 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         }
         }
 
+        /* libxml2 3.1.1: an <html> in no namespace with no local ns
+         * declarations gets the XHTML namespace injected. */
+        if (buf->xhtml && !epl && leptris_elem_namespaces(e) == NULL &&
+            leptris_element_get_namespace_uri(e) == NULL &&
+            nl == 4 && memcmp(name, "html", 4) == 0)
+            buffer_append(buf, " xmlns=\"" LEPTRIS_XHTML_NS "\"");
+
         /* --- namespaces (identical emission) --- */
         for (struct leptris_attribute* attr = leptris_element_get_first_attribute(e); attr; attr = leptris_attr_next(attr)) {
             const char* val;
@@ -1179,7 +1266,6 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                   * .out for bug-159: name="%D1%91"). */
                  (anl == 4 && memcmp(name_c, "name", 4) == 0)))
                 html_uri_attr = 1;
-            int html_escape_raw_quote = buf->html_method;
             if (html_uri_attr) {
                 buffer_ensure_capacity(
                     buf, 1 + apl + anl + 2 + 3 * vlen + 2 + 1);
@@ -1267,6 +1353,33 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         if (!fc) {
             /* §16.2 html method: void elements end at '>'; every
              * other element closes explicitly (never `<x/>`). */
+            if (buf->xhtml) {
+                if (addmeta) {
+                    buffer_append_char(buf, '>');
+                    if (buf->indent_spaces > 0) {
+                        buffer_append_newline(buf);
+                        buf->indent++;
+                        buffer_append_indent(buf);
+                        buf->indent--;
+                    }
+                    emit_xhtml_meta(buf);
+                    if (buf->indent_spaces > 0)
+                        buffer_append_newline(buf);
+                    buffer_append(buf, "</");
+                    append_qualified_name(buf, epfx, name, nl);
+                    buffer_append_char(buf, '>');
+                } else if (!epl && xhtml_is_empty_elem(e, name, nl)) {
+                    buffer_append(buf, " />");
+                } else {
+                    buffer_append(buf, "></");
+                    append_qualified_name(buf, epfx, name, nl);
+                    buffer_append_char(buf, '>');
+                }
+                if (!is_root_cur && buf->indent_spaces > 0 &&
+                    !parent_mixed)
+                    buffer_append_newline(buf);
+                goto advance;
+            }
             if (buf->html_method) {
                 int hf = html_elem_flags_ci(name, nl);
                 if (hf & HTML_F_EMPTY) {
@@ -1287,7 +1400,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append_newline(buf);
             goto advance;
         }
-        if (buf->indent_text == 0 &&
+        if (buf->indent_text == 0 && !addmeta &&
             fc->type == LEPTRIS_NODE_TYPE_TEXT &&
             leptris_node_get_next_sibling(fc) == NULL) {
             /* text-only element */
@@ -1413,6 +1526,19 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             if (!mixed && sp > 0 && st[sp - 1].mixed) mixed = 1;
             if (buf->indent_spaces > 0 && !mixed)
                 buffer_append_newline(buf);
+        }
+        if (addmeta) {
+            /* libxml2: the meta leads head's children — indented on
+             * its own line when formatting, inline when not. */
+            if (buf->indent_spaces > 0 && !mixed) {
+                buf->indent++;
+                buffer_append_indent(buf);
+                buf->indent--;
+                emit_xhtml_meta(buf);
+                buffer_append_newline(buf);
+            } else {
+                emit_xhtml_meta(buf);
+            }
         }
         st[sp].e = e;
         st[sp].nl = nl;
@@ -1673,6 +1799,8 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
         buf->html_method = extended->html_method != 0;
         buf->indent_text = extended->indent_text != 0;
         buf->ws_mixed = extended->ws_mixed != 0;
+        buf->xhtml = extended->xhtml != 0;
+        buf->xhtml_encoding = encoding ? encoding : "UTF-8";
     }
 
     /* Output UTF-8 BOM if present in original */
