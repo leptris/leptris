@@ -265,10 +265,23 @@ static inline LeptrisStringView attr_get_namespace_uri_view(struct leptris_attri
  * Most elements have no namespace activity → ns_cache is NULL,
  * zero overhead. Elements that declare namespaces OR have a prefix
  * pay one 16-byte pool allocation for the cache struct. */
+/* One raw attribute view entry (issue #635): qname + value as
+ * written, xmlns declarations included, source order preserved. */
+struct leptris_raw_attr {
+    const char* qname;
+    const char* value;
+    struct leptris_raw_attr* next;
+};
+
 struct leptris_ns_cache {
     char* prefix;                       /* This element's prefix (from `<p:loc>`) */
     char* namespace_uri;                /* Resolved URI for this element's prefix */
     struct leptris_namespace* declarations;  /* xmlns:* declared on this element */
+    /* Raw attribute view (issue #635): every attr AND xmlns decl in
+     * SOURCE order — the mixed qname-ordered list the streaming
+     * transports deliver. Lazily built at parse; pool-allocated
+     * entries with borrowed (parse zero-copy) strings. */
+    struct leptris_raw_attr* raw_attrs;
     /* Document-owned chain (issue: LSan leak): HEAP strings on a
      * POOL-allocated cache need an explicit document_free walk. The
      * flags mark exactly which pointers are heap-owned — the cache
@@ -420,7 +433,7 @@ static inline struct leptris_namespace* leptris_elem_namespaces(const LeptrisEle
 /* Ensure ns_cache exists (allocating if needed) and return a
  * writable pointer to the declarations head. Used by mutation
  * paths that append xmlns:* declarations. */
-static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
+static inline struct leptris_ns_cache** leptris_elem_cache_ptr(
     LeptrisElement e, LeptrisMemoryPool* pool) {
     if (!e) return NULL;
     if (!e->ns_cache) {
@@ -431,8 +444,15 @@ static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
         e->ns_cache->prefix = NULL;
         e->ns_cache->namespace_uri = NULL;
         e->ns_cache->declarations = NULL;
+        e->ns_cache->raw_attrs = NULL;
     }
-    return &e->ns_cache->declarations;
+    return &e->ns_cache;
+}
+
+static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
+    LeptrisElement e, LeptrisMemoryPool* pool) {
+    struct leptris_ns_cache** c = leptris_elem_cache_ptr(e, pool);
+    return c ? &(*c)->declarations : NULL;
 }
 
 

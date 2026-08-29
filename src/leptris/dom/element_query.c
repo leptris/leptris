@@ -1351,3 +1351,29 @@ LEPTRIS_API LeptrisStatus leptris_element_remove_namespace_definition(
     }
     return LEPTRIS_ERROR_NOT_FOUND;
 }
+
+LEPTRIS_API size_t leptris_element_attributes_raw(
+    LeptrisElement elem, const char** out_qnames, const char** out_values,
+    size_t max_count) {
+    if (!elem) return 0;
+    if (!elem->ns_cache || !elem->ns_cache->raw_attrs) return 0;
+
+    /* Count-only query. */
+    if (!out_qnames && !out_values) {
+        size_t n = 0;
+        for (struct leptris_raw_attr* r = elem->ns_cache->raw_attrs; r;
+             r = r->next)
+            n++;
+        return n;
+    }
+
+    size_t written = 0;
+    for (struct leptris_raw_attr* r = elem->ns_cache->raw_attrs; r;
+         r = r->next) {
+        if (written >= max_count) break;
+        if (out_qnames) out_qnames[written] = r->qname;
+        if (out_values) out_values[written] = r->value;
+        written++;
+    }
+    return written;
+}

@@ -1600,3 +1600,33 @@ TEST(DomBasics, NodeChildrenExCarriesKinds) {
 
     leptris_document_free(doc);
 }
+
+/* Issue #635: the raw attribute view carries xmlns declarations
+ * interleaved among the attributes in SOURCE order — the mixed
+ * qname-ordered list the streaming transports deliver, which the
+ * separate attribute/namespace chains cannot reconstruct. */
+TEST(DomBasics, RawAttributesIncludeXmlnsInSourceOrder) {
+    const char xml[] =
+        "<e xmlns:b='urn:b' id='1' xmlns='urn:d' x='2' a:attr='v' "
+        "xmlns:a='urn:a'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_document_root(doc);
+
+    EXPECT_EQ(leptris_element_attributes_raw(e, nullptr, nullptr, 0), 6u);
+
+    const char* q[8];
+    const char* v[8];
+    ASSERT_EQ(leptris_element_attributes_raw(e, q, v, 8), 6u);
+    EXPECT_STREQ(q[0], "xmlns:b");  EXPECT_STREQ(v[0], "urn:b");
+    EXPECT_STREQ(q[1], "id");       EXPECT_STREQ(v[1], "1");
+    EXPECT_STREQ(q[2], "xmlns");    EXPECT_STREQ(v[2], "urn:d");
+    EXPECT_STREQ(q[3], "x");        EXPECT_STREQ(v[3], "2");
+    EXPECT_STREQ(q[4], "a:attr");   EXPECT_STREQ(v[4], "v");
+    EXPECT_STREQ(q[5], "xmlns:a");  EXPECT_STREQ(v[5], "urn:a");
+
+    /* Truncation mirrors the batch accessors. */
+    EXPECT_EQ(leptris_element_attributes_raw(e, q, v, 2), 2u);
+
+    leptris_document_free(doc);
+}

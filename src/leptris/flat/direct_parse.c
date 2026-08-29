@@ -591,6 +591,9 @@ static void dp_stamp_attr_owners(DParser* p, LeptrisElement elem) {
     }
 }
 
+static int dp_raw_attr(DParser* p, LeptrisElement elem,
+                       const char* qname, const char* value);
+
 static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
     /* Reset the per-element caches so dp_add_attr_inline and the
      * xmlns wiring below can both run in O(1) per attr. */
@@ -749,6 +752,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             }
             p->current_elem_last_ns = ns;
             p->saw_namespace = 1;
+            if (dp_raw_attr(p, elem, name_start, ns->uri) != 0) return -1;
             continue;
         }
 
@@ -756,11 +760,36 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         if (dp_add_attr_inline(p, elem, name_start, name_len,
                                 val_start, val_len, has_amp, has_ws) != 0)
             return -1;
+        if (dp_raw_attr(p, elem, name_start, val_start) != 0) return -1;
     }
     /* for (;;): every exit is a return inside the loop (0 = tag
      * closed, 1 = self-closing, -1 = error) — there is no
      * fallthrough path, so no trailing statement. */
 }
+/* Issue #635: append one raw attribute-view entry (attrs AND xmlns
+ * declarations, source order) to the element's cache chain. */
+static int dp_raw_attr(DParser* p, LeptrisElement elem,
+                       const char* qname, const char* value) {
+    struct leptris_ns_cache** cache_ptr =
+        leptris_elem_cache_ptr(elem, p->pool);
+    if (!cache_ptr || !*cache_ptr) return 0;
+    struct leptris_raw_attr* ra =
+        (struct leptris_raw_attr*)leptris_pool_alloc(
+            p->pool, sizeof(struct leptris_raw_attr));
+    if (!ra) return -1;
+    ra->qname = qname;
+    ra->value = value;
+    ra->next = NULL;
+    if (!(*cache_ptr)->raw_attrs) {
+        (*cache_ptr)->raw_attrs = ra;
+    } else {
+        struct leptris_raw_attr* t = (*cache_ptr)->raw_attrs;
+        while (t->next) t = t->next;
+        t->next = ra;
+    }
+    return 0;
+}
+
 
 /* Inline borrowed-text creation from the bulk block (round 8): the
  * same stores leptris_text_create_borrowed performs, minus the
