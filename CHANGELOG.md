@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.16] - 2026-08-29
+
+### Fixed
+
+- libxml2 pretty-print parity - child PI/comment lines, root newline, DOCTYPE subset, indent unit (serialize)
+
+
+
 ## [1.9.15] - 2026-08-29
 
 Correctness round for the binding-reported issues, plus two API
