@@ -67,6 +67,8 @@ TEST(XPathFunctions, LangNearestDeclarationWins) {
         {"count(/r/a[lang('fr')])", 0},
         {"count(/r[lang('fr')])", 1},
         {"count(/r[lang('ja')])", 0},
+        {"count(/r[lang(ja)])", 0},  /* unquoted: empty nodeset coerces
+                                        to "" — false, never an error */
         {"count(/r[false()])", 0},  /* root-step predicate applies */
     };
     for (const auto& c : cases) {

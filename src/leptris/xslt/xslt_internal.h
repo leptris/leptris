@@ -358,6 +358,11 @@ typedef struct xslt_exec {
     struct leptris_xpath_result* pending; /* with-params of the
                                              in-flight call */
     int terminated;                /* xsl:message terminate */
+    int eval_error;                /* expression evaluation failed —
+                                    * abort (issue 627: unknown
+                                    * functions raise like plain XPath,
+                                    * never silently empty) */
+    char error[192];
     char* message;                 /* collected message text */
     LeptrisElement pending_parent;/* current output insertion point */
     void* frag_nodes;             /* pre-root fragment nodes */

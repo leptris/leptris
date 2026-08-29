@@ -2048,3 +2048,25 @@ TEST(XsltForEach, LastThroughApplyTemplates) {
         "<r><i>a</i><i>b</i><i>c</i></r>")),
         "last=c");
 }
+
+/* Issue #627: an unknown unprefixed function must RAISE like plain
+ * XPath does — libxslt aborts the transform at runtime ("Unregistered
+ * function", "no result"); silently evaluating to empty masked
+ * typos. */
+TEST(XsltErrors, UnknownFunctionAbortsTransform) {
+    EXPECT_EQ(run(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='foo(1)'/>]"
+        "</xsl:template>",
+        "<r/>"), "(null)");
+}
+
+/* The abort must not leak partial output: the whole apply fails. */
+TEST(XsltErrors, UnknownFunctionAbortsAfterPartialOutput) {
+    EXPECT_EQ(run(
+        "<xsl:template match='/'>"
+        "<xsl:text>before</xsl:text>"
+        "<xsl:value-of select='bar(2)'/>"
+        "</xsl:template>",
+        "<r/>"), "(null)");
+}

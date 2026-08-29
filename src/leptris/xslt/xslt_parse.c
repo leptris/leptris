@@ -360,6 +360,10 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             XsltInstr* in = instr_new(XSLT_INSTR_FUNC_RESULT);
             if (!in) return NULL;
             in->select = compile_attr_sp(sp, e, "select");
+            /* The select resolves with the ENCLOSING function's
+             * in-scope bindings (bug-225: exsl:node-set's prefix
+             * otherwise has no ns_set at eval time). */
+            in->ns = build_ns_context((LeptrisElement)e);
             in->child = parse_content(sp, e);
             return in;
         }
@@ -372,6 +376,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             const char* pn = leptris_element_attribute(e, "name");
             in->name = leptris_strdup(pn);
             in->select = compile_attr_sp(sp, e, "select");
+            in->ns = build_ns_context((LeptrisElement)e);
             in->is_param = 1;
             return in;
         }
