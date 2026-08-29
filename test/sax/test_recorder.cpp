@@ -200,3 +200,39 @@ TEST(Recorder, MatchesCallbackSaxEventStream) {
 }
 
 }  // namespace
+
+/* Issue #594: one recorder across documents — a finalized recorder
+ * cannot feed again, but reset gives a fresh parser state with the
+ * record/arena capacity RETAINED (the amortization story for
+ * one-document-per-parse hosts). */
+TEST(Recorder, ResetRestartsAcrossDocuments) {
+    LeptrisSaxRecorder r = leptris_sax_recorder_new();
+    ASSERT_NE(r, nullptr);
+
+    leptris_sax_recorder_feed(r, "<a x='1'>t</a>", 15, 1);
+    size_t n1 = 0;
+    const LeptrisSaxEventRecord* recs1 = leptris_sax_recorder_records(r, &n1);
+    ASSERT_GT(n1, 0u);
+    EXPECT_EQ(recs1[0].kind, LEPTRIS_SAX_EVENT_START_DOCUMENT);
+
+    EXPECT_EQ(leptris_sax_recorder_reset(r), 0);
+    leptris_sax_recorder_feed(r, "<b/>", 4, 1);
+    size_t n2 = 0;
+    leptris_sax_recorder_records(r, &n2);
+    /* Fresh document: full event set again, starting over. */
+    EXPECT_GT(n2, 0u);
+    size_t starts = 0, ends = 0;
+    const LeptrisSaxEventRecord* recs2 = leptris_sax_recorder_records(r, &n2);
+    const char* arena = leptris_sax_recorder_arena(r, nullptr);
+    for (size_t i = 0; i < n2; i++) {
+        if (recs2[i].kind == LEPTRIS_SAX_EVENT_START_ELEMENT) {
+            starts++;
+            EXPECT_EQ(name_of(&recs2[i], arena), "b");
+        }
+        if (recs2[i].kind == LEPTRIS_SAX_EVENT_END_DOCUMENT) ends++;
+    }
+    EXPECT_EQ(starts, 1u);
+    EXPECT_EQ(ends, 1u);
+
+    leptris_sax_recorder_free(r);
+}
