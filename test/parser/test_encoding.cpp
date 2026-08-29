@@ -258,3 +258,25 @@ TEST(EncodingEdgeCases, EmptyXmlElementRoundTrips) {
 }
 
 }  // namespace
+
+/* Issue #613: with_encoding on declared ISO-8859-1 must deliver
+ * UTF-8 content — every binding decodes text as UTF-8. The iconv
+ * path did; the no-iconv fallback assumed UTF-8 and left the raw
+ * latin-1 byte behind. */
+TEST(EncodingLatin1, WithEncodingConvertsToUtf8) {
+    const char xml[] =
+        "<?xml version='1.0' encoding='ISO-8859-1'?><r>caf\xe9</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string_with_encoding(
+        xml, sizeof(xml) - 1, &st);
+    ASSERT_NE(doc, nullptr) << "status " << (int)st;
+    LeptrisElement r = leptris_document_root(doc);
+    ASSERT_NE(r, nullptr);
+    const char* text = leptris_element_text(r);
+    ASSERT_NE(text, nullptr);
+    /* "café" as UTF-8: 63 61 66 C3 A9 */
+    EXPECT_EQ(strlen(text), 5u);
+    EXPECT_EQ((unsigned char)text[3], 0xC3);
+    EXPECT_EQ((unsigned char)text[4], 0xA9);
+    leptris_document_free(doc);
+}
