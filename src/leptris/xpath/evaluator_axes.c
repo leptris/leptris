@@ -495,7 +495,12 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, LeptrisElement node,
                     }
                 }
             }
-            if (!name_matches && !tcolon &&
+            /* Literal fallback also serves PREFIXED tests whose prefix
+             * is not in the binding set (xml: is prebound by the spec
+             * but absent from ns maps) — vm_apply_axis_attribute
+             * parity; without it [@xml:lang] matched nothing
+             * (libxslt bug-142). */
+            if (!name_matches &&
                 !leptris_sv_is_empty(&attr->name_view)) {
                 name_matches = leptris_sv_equals_cstr(&attr->name_view, test->value);
             }
