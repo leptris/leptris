@@ -2,9 +2,25 @@
 
 ## [1.9.16] - 2026-08-29
 
+Serializer parity round for the moxml/canon pretty-printer
+(issue #633 - the last blocker for byte-identical to_xml(indent: N)).
+
 ### Fixed
 
-- libxml2 pretty-print parity - child PI/comment lines, root newline, DOCTYPE subset, indent unit (serialize)
+- Comments and PIs under a non-mixed parent get their own indented
+  line, matching libxml2 xmlIndentTreeOutput; mixed-content parents
+  keep them inline so a PI between text nodes never moves.
+- The stray trailing newline after a text-only ROOT element: not a
+  non-ASCII issue - the open-tag path (elements WITH attributes)
+  lacked the is-root guard the fusion fast path already had.
+- DOCTYPE internal subsets lay out one declaration per line with the
+  bracket on its own line; empty subsets drop the brackets entirely.
+
+### Added
+
+- LeptrisSerializeExtOptions.indent_unit: one string copy per depth
+  level (libxml2 xmlTreeIndentString / Nokogiri indent_text), NULL
+  keeps the legacy spaces-per-level.
 
 
 
