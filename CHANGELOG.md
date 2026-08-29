@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.15] - 2026-08-29
+
+### Added
+
+- public compiled eval with namespaces AND variables (xpath)
+- node_children_ex batches each child's kind (issue 617) (dom)
+
+### Fixed
+
+- no-iconv with_encoding converts declared Latin-1 to UTF-8 (encoding)
+- full-document iterparse reports success on clean drains (sax)
+- relative descendant paths with prefixed names select again (xpath)
+- built-in rules keep the mode; libxslt extension namespace (xslt)
+
+### Performance
+
+- use the parser's split QName in node tests; fast-path literal position predicates (xpath)
+
+
+
 ## [1.9.14] - 2026-08-29
 
 libxslt general suite: 191 -> 197/205 (bug-140, bug-142, bug-152
