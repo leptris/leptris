@@ -535,3 +535,83 @@ TEST(SaxIncremental, SingleByteChunksWork) {
     }
     leptris_sax_parser_free(parser);
 }
+
+/* Issue #625: the streaming path parked attribute name/value
+ * pointers in one realloc-growing scratch arena. Nested attr-carrying
+ * ancestors accumulate arena bytes until a growth lands mid-element —
+ * invalidating pending_attr_name and the pairs already stored for the
+ * element being parsed (first pairs came back empty-named or holding
+ * uninitialized bytes). */
+TEST_F(SaxParser, AttrsSurviveScratchGrowthUnderAttrCarryingAncestors) {
+    /* Ancestor levels each carrying attributes accumulate ~200B in
+     * the shared scratch arena before <image>; its ~110B attribute
+     * block then always spans the arena's first growth boundary. */
+    std::string xml =
+        "<preface xmlns=\"urn:doc\" id=\"p1\">"
+        "<foreword id=\"fw1\" role=\"intro\" lang=\"en\">"
+        "<docstatus status=\"draft-for-review-purposes-only\" "
+        "owner=\"editorial-board-committee\" rev=\"42\">"
+        "<figure id=\"f1\" n=\"1\" class=\"fig\">"
+        "<figure id=\"f2\">"
+        "<image src=\"image-001.png\" alt=\"A figure caption text\" "
+        "width=\"640\" height=\"480\" dpi=\"300\" format=\"png\" "
+        "colorspace=\"srgb\"/>"
+        "</figure></figure></docstatus></foreword></preface>";
+
+    EXPECT_EQ(leptris_sax_parse(xml.c_str(), xml.size(), &handler, &log), 0);
+    ASSERT_GE(log.events.size(), 1u);
+    /* The attribute-heavy descendant must deliver every pair intact. */
+    std::string want =
+        "start:image src=image-001.png alt=A figure caption text "
+        "width=640 height=480 dpi=300 format=png colorspace=srgb";
+    bool found = false;
+    for (const std::string& e : log.events) {
+        if (e.rfind("start:image", 0) == 0) {
+            found = true;
+            EXPECT_EQ(e, want);
+        }
+    }
+    EXPECT_TRUE(found) << "start:image event missing";
+}
+
+/* Same corruption through the pull cursor (leptris_pull_attrs shares
+ * the streaming attribute buffer). */
+TEST(SaxPull, PullAttrsSurviveScratchGrowth) {
+    const char xml[] =
+        "<preface xmlns=\"urn:doc\" id=\"p1\">"
+        "<foreword id=\"fw1\" role=\"intro\" lang=\"en\">"
+        "<docstatus status=\"draft-for-review-purposes-only\" "
+        "owner=\"editorial-board-committee\" rev=\"42\">"
+        "<figure id=\"f1\" n=\"1\" class=\"fig\">"
+        "<figure id=\"f2\">"
+        "<image src=\"image-001.png\" alt=\"A figure caption text\" "
+        "width=\"640\" height=\"480\" dpi=\"300\" format=\"png\" "
+        "colorspace=\"srgb\"/>"
+        "</figure></figure></docstatus></foreword></preface>";
+
+    LeptrisPullParser p = leptris_pull_new(xml, strlen(xml));
+    ASSERT_NE(p, nullptr);
+    const LeptrisPullEvent* ev;
+    int saw_image = 0;
+    while ((ev = leptris_pull_next(p)) != nullptr) {
+        if (ev->type == LEPTRIS_PULL_START_ELEMENT &&
+            strcmp(ev->name, "image") == 0) {
+            saw_image = 1;
+            ASSERT_EQ(leptris_pull_attr_count(p), 7u);
+            static const char* const names[7] = {
+                "src", "alt", "width", "height", "dpi", "format",
+                "colorspace"};
+            static const char* const vals[7] = {
+                "image-001.png", "A figure caption text", "640", "480",
+                "300", "png", "srgb"};
+            for (int i = 0; i < 7; i++) {
+                EXPECT_STREQ(leptris_pull_attr_name(p, (size_t)i),
+                             names[i]) << "pair " << i;
+                EXPECT_STREQ(leptris_pull_attr_value(p, (size_t)i),
+                             vals[i]) << "pair " << i;
+            }
+        }
+    }
+    EXPECT_EQ(saw_image, 1);
+    leptris_pull_free(p);
+}

@@ -64,8 +64,7 @@ LEPTRIS_API LeptrisSAXParser* leptris_sax_parser_create(LeptrisSAXHandler* handl
     parser->has_error = 0;
     parser->error_message[0] = '\0';
     parser->scratch = NULL;
-    parser->scratch_len = 0;
-    parser->scratch_cap = 0;
+    parser->scratch_tail = NULL;
     parser->input_buf = NULL;
     parser->input_len = 0;
     parser->input_cap = 0;
@@ -95,7 +94,12 @@ LEPTRIS_API void leptris_sax_parser_free(LeptrisSAXParser* parser) {
     if (parser) {
         leptris_sax_streaming_reset(parser);
         free(parser->input_buf);
-        free(parser->scratch);
+        while (parser->scratch) {
+            SaxScratchBlock* nb = parser->scratch->next;
+            free(parser->scratch);
+            parser->scratch = nb;
+        }
+        parser->scratch_tail = NULL;
         free(parser);
     }
 }

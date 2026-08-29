@@ -22,6 +22,16 @@
 #define LEPTRIS_SAX_MAX_DEPTH 256
 #endif
 
+/* One block of the scratch arena. Individually malloc'd, chained, and
+ * never resized — handed-out pointers stay valid for the parser's
+ * lifetime (issue #625). */
+typedef struct SaxScratchBlock {
+    struct SaxScratchBlock* next;
+    size_t cap;
+    size_t len;
+    char data[];
+} SaxScratchBlock;
+
 /* One element frame on the explicit nesting stack (TODO 116). */
 #define SAX_NAME_INLINE 48u   /* names <= 47 bytes: no allocation */
 #define SAX_ATTRS_INLINE 12u  /* up to 6 attributes inline */
@@ -86,13 +96,16 @@ struct LeptrisSAXParser {
     int has_error;
     char error_message[256];
 
-    /* Scratch arena (TODO 102).  Growable; reset at the start of
-     * legacy one-shot, persisted across feed() calls in the
-     * streaming path so element-name pointers remain valid until
-     * the matching end tag. */
-    char*  scratch;
-    size_t scratch_len;
-    size_t scratch_cap;
+    /* Scratch arena (TODO 102). Block chain: every string handed to
+     * callbacks (element/attr names, attr values, comments, PI data)
+     * lives until parser free. Blocks are appended as needed and
+     * NEVER moved or reallocated — a single realloc-growing buffer
+     * invalidated the attr pointers parked in element frames and
+     * pending_attr_name (issue #625). Persisted across feed() calls
+     * so element-name pointers remain valid until the matching end
+     * tag. */
+    SaxScratchBlock* scratch;
+    SaxScratchBlock* scratch_tail;
 
     /* Legacy incremental buffering (TODO 89).  When streaming == 0,
      * feed() accumulates here and parses once is_final is set. */
