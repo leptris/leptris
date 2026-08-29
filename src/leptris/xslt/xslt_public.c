@@ -244,6 +244,54 @@ static void inject_html_meta(LeptrisDocument out, const char* enc) {
     leptris_node_prepend_child((LeptrisNodeRef)head, (LeptrisNodeRef)m);
 }
 
+#ifndef LEPTRIS_HAS_ICONV
+/* Minimal UTF-8 -> ISO-8859-1 transcoder for builds without iconv
+ * (CI runs LEPTRIS_ENABLE_ICONV=OFF): the Latin-1 subset needs no
+ * conversion table — every codepoint <= U+00FF maps 1:1 — so Western
+ * output encodings stay byte-faithful. Returns NULL for any other
+ * encoding name (unknown encodings pass the body through). */
+static char* latin1_from_utf8(const char* enc, const char* s,
+                              size_t* out_len) {
+    if (strcasecmp(enc, "ISO-8859-1") != 0 &&
+        strcasecmp(enc, "ISO8859-1") != 0 &&
+        strcasecmp(enc, "LATIN1") != 0 &&
+        strcasecmp(enc, "LATIN-1") != 0)
+        return NULL;
+    size_t n = strlen(s);
+    char* out = (char*)malloc(n + 1);
+    if (!out) return NULL;
+    size_t w = 0;
+    for (size_t i = 0; i < n;) {
+        unsigned char c = (unsigned char)s[i];
+        unsigned cp = c;
+        size_t len = 1;
+        if (c >= 0xC2 && c <= 0xDF) len = 2;
+        else if (c >= 0xE0 && c <= 0xEF) len = 3;
+        else if (c >= 0xF0 && c <= 0xF4) len = 4;
+        if (len > 1) {
+            int ok = 1;
+            cp = c & (unsigned)(0x7Fu >> len);
+            for (size_t k = 1; k < len; k++) {
+                if (i + k >= n ||
+                    ((unsigned char)s[i + k] & 0xC0) != 0x80) {
+                    ok = 0;
+                    break;
+                }
+                cp = (cp << 6) | ((unsigned char)s[i + k] & 0x3Fu);
+            }
+            /* Stray high byte (latin-1 source parsed byte-passthrough
+             * on no-iconv builds): emit it unchanged. */
+            if (!ok) { cp = c; len = 1; }
+        }
+        i += len;
+        out[w++] = (cp <= 0xFF) ? (char)cp : '?';
+    }
+    out[w] = 0;
+    *out_len = w;
+    return out;
+}
+#endif
+
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                                             LeptrisDocument source) {
     if (!xslt || !source) return NULL;
@@ -564,9 +612,14 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             }
         } else if (strcasecmp(enc, "utf-8") != 0 &&
                    strcasecmp(enc, "utf8") != 0) {
+            char* conv = NULL;
             size_t outlen = 0;
-            char* conv = leptris_encoding_convert(
+#ifdef LEPTRIS_HAS_ICONV
+            conv = leptris_encoding_convert(
                 "UTF-8", enc, final, strlen(final), &outlen);
+#else
+            conv = latin1_from_utf8(enc, final, &outlen);
+#endif
             if (conv && outlen) {
                 conv[outlen] = 0;
                 free(final);
