@@ -2070,3 +2070,30 @@ TEST(XsltErrors, UnknownFunctionAbortsAfterPartialOutput) {
         "</xsl:template>",
         "<r/>"), "(null)");
 }
+
+/* libxslt's OWN extension namespace resolves like EXSLT: stylesheets
+ * in the wild bind xmlns:libxslt='http://xmlsoft.org/XSLT/namespace'
+ * and call libxslt:node-set() (bug-65); the prefix->local fallback
+ * must recognize the namespace. */
+TEST(XsltExslt, LibxsltNodeSetResolves) {
+    /* run() cannot carry extra namespace declarations on the
+     * stylesheet element, so build the sheet explicitly. */
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+        " xmlns:libxslt='http://xmlsoft.org/XSLT/namespace' version='1.0'>"
+        "<xsl:variable name='one'>"
+        "<xsl:copy-of select='/eins/content'/></xsl:variable>"
+        "<xsl:template match='/'>"
+        "[<xsl:copy-of select=\"libxslt:node-set($one)\"/>]"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char* xml = "<eins><content>content of one</content></eins>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    EXPECT_NE(out, nullptr);
+    if (out) EXPECT_EQ(body(std::string(out)),
+                      "[<content>content of one</content>]");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}

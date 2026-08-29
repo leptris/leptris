@@ -1833,7 +1833,8 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                     : op_apply_templates(
                           ex,
                           &(XsltInstr){
-                              .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                              .kind = XSLT_INSTR_APPLY_TEMPLATES,
+                              .name = in->name },
                           doc_root);
             }
             if (root_rc) return root_rc;
@@ -1930,7 +1931,8 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 } else {
                     rc = op_apply_templates(
                         ex,
-                        &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                        &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES,
+                                      .name = in->name },
                         item);
                 }
             }
@@ -1964,7 +1966,8 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
              * elements; text copied for text; nothing otherwise. */
             rc = op_apply_templates(
                 ex,
-                &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES },
+                &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES,
+                              .name = in->name },
                 items[i]);
         }
     }
