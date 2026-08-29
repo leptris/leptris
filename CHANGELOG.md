@@ -2,23 +2,69 @@
 
 ## [1.9.14] - 2026-08-29
 
+libxslt general suite: 191 -> 197/205 (bug-140, bug-142, bug-152
+closed; XHTML serialization, lang() correctness, xmlns entity
+expansion, output encodings).
+
 ### Fixed
 
-- MSVC strcasecmp mapping; zero-init serializer xhtml flag (build)
-- failed expression evaluation aborts the transform (xslt,xpath)
-- last() reflects the in-flight node-list size (xslt)
-- no-iconv builds - guard iconv transcode; built-in latin-1; truthful decl echo (xslt,serialize)
-- lang() nearest declaration; root-step predicates; xml-prefixed attr fallback (xpath)
-- declaration stays truthful for the plain API; XSLT opts in (serialize)
-- scratch arena is a stable block chain - attr pointers never move (sax)
-- chartype table is fully static - drop the load-time UTF-8 fill (parser)
-- XHTML serialization for xml-method results with XHTML doctypes (xslt)
-- xmlns entity refs expand via DTD; emit explicit output encoding verbatim (parse,serialize)
-- default-ns declaration walk; EXSLT date:add (xslt)
-- with-param scoping, RTF fragment values, output encodings (xslt)
-- AVT braces, number format AVT+Unicode digits, text-context axes (xslt,xpath)
-
-
+- **#625**: the streaming SAX scratch arena grew by realloc, which
+  invalidated attribute name/value pointers parked in element frames
+  and pending_attr_name whenever nested attr-carrying elements
+  crossed a growth boundary mid-element - the first attribute pairs
+  came back empty-named or holding uninitialized bytes through the
+  callbacks, recorder, and pull transports alike (ASAN:
+  heap-use-after-free). The arena is now a stable block chain;
+  handed-out pointers never move for the parser's lifetime.
+- **#626**: non-ASCII element names were rejected on MSVC builds
+  because the chartype table's UTF-8 bits were OR'd in by a
+  .CRT$XCU initializer that does not run in every link shape. The
+  table is fully static and const now - no initializer, no failure
+  mode. Comments/PI data and the streaming paths were unaffected.
+- **#627**: unknown unprefixed functions (and unbound variables)
+  evaluated to empty inside stylesheets while plain XPath raised.
+  A failed expression evaluation now aborts the transform and the
+  public apply entries return NULL, matching libxslt's runtime
+  behavior. Surfaced and fixed two latent bugs silent-empty had
+  masked: lang() now coerces its argument per XPath 3.2
+  (lang(ja) with an element-name argument is false, not an error),
+  and a named template invoked while later globals were still
+  evaluating saw a NULL call-template reset point (bug-192),
+  func:result/func:param now carry their enclosing function's
+  namespace context (bug-225).
+- **#628**: last() inside for-each/apply-templates returned 1 - the
+  exec threaded only the iteration position. The in-flight
+  node-list size now rides the eval context; all three iteration
+  loops set it.
+- bug-152: xml-method results whose doctype ids exactly match an
+  XHTML 1.0 DTD serialize in XHTML mode (libxml2 xmlIsXHTML parity):
+  Content-Type meta injected into the root html/head, the 13 HTML
+  empty names minimized as <x />, and a bare html root gains the
+  XHTML default namespace.
+- bug-142: three XPath engine defects - lang() walked past a
+  non-matching xml:lang to outer ancestors (the nearest declaration
+  decides); the /root fast path skipped the first step's predicates
+  (/r[false()] selected the root); a prefixed attribute test whose
+  prefix is absent from the binding set (@xml:lang) matched nothing
+  in predicates and after descendant steps.
+- bug-140: xmlns values containing entity references expand through
+  the internal subset at parse time; xsl:output's encoding is
+  emitted verbatim in the XML declaration (the XSLT layer transcodes
+  the body to match - the plain serialize API keeps the truthful
+  declaration).
+- Section 5.8 built-in template rules apply-templates in the SAME
+  mode (the synthesized fallbacks dropped it); libxslt's own
+  extension namespace resolves under any bound prefix
+  (libxslt:node-set()).
+- no-iconv builds: the iconv transcoding call is guarded, with a
+  built-in UTF-8 -> ISO-8859-1 fallback (codepoints <= U+00FF map
+  1:1, stray high bytes pass through) so Western encodings stay
+  byte-faithful; the declaration echoes the source encoding instead
+  of emitting an empty attribute; MSVC maps strcasecmp/_stricmp.
+- leptris-ruby#99: every SAX transport delivers xmlns declarations
+  (attrs pairs + prefix-mapping events; DOM declaration enumeration
+  via leptris_element_namespace_count/_decl_prefix/_decl_uri) -
+  specs pin the contracts for DOM-backed dispatch.
 
 ## [1.9.13] - 2026-08-28
 
