@@ -848,9 +848,14 @@ static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
         return 0;
     }
     /* Fragment-level: accumulate verbatim-safe — escape unless DOE
-     * or method=text (§16.3 never escapes). */
+     * or method=text (§16.3 never escapes). RTF capture stores the
+     * LOGICAL text: a pure-text fragment binds as a string, and
+     * string($rtf) is unescaped — pre-escaping here leaked &amp;
+     * into param values (bug-90). */
     char* v = in->text ? escape_fragment_text(
-                   in->text, in->doe || ex->sheet->out_method_text) : NULL;
+                   in->text,
+                   in->doe || ex->sheet->out_method_text ||
+                       ex->rtf_capturing) : NULL;
     if (v) {
         out_append_text(ex, NULL, v);
         if (v != in->text) free(v);
@@ -1304,6 +1309,9 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
     return 0;
 }
 
+static struct leptris_xpath_result* xslt_capture_content(
+    XsltExec* ex, const XsltInstr* child, LeptrisElement node);
+
 static int op_variable(XsltExec* ex, const XsltInstr* in,
                        LeptrisElement node) {
     if (!in->name) return 0;
@@ -1311,81 +1319,88 @@ static int op_variable(XsltExec* ex, const XsltInstr* in,
     if (in->select) {
         v = xslt_eval(ex, in->select, node);
     } else if (in->child) {
-        /* RTF: build into a FRESH scratch document (§11.1) — never
-         * into the result tree, which may carry a partially built
-         * element the variable sits inside (a variable mid-template
-         * used to steal the whole result). The variable holds a
-         * nodeset of the fragment's top-level nodes. */
-        LeptrisDocument main_result = ex->result;
-        LeptrisElement saved = ex->pending_parent;
-        ex->result = leptris_document_create();
-        ex->pending_parent = NULL;
-        /* Fresh buffer per capture (the xslt_capture_children_text
-         * discipline): nested captures save/restore the outer
-         * length — resetting only the length left stale bytes that
-         * later appends resurrected (bug-72's second variable
-         * picked up the first's fragment text). */
-        size_t o_len = ex->rtf_text_len;
-        char* o_buf = ex->rtf_text;
-        size_t o_cap = ex->rtf_text_cap;
-        int o_capt = ex->rtf_capturing;
-        ex->rtf_capturing = 1;
-        ex->rtf_text = (char*)calloc(1, 1);
-        ex->rtf_text_len = 0;
-        ex->rtf_text_cap = 1;
-        xslt_exec_instrs(ex, in->child, node);
-        ex->rtf_capturing = 0;
-        ex->pending_parent = saved;
-        char* frag_text = ex->rtf_text;   /* owned by this block */
-        size_t frag_len = ex->rtf_text_len;
-        ex->rtf_text = o_buf;
-        ex->rtf_text_len = o_len;
-        ex->rtf_text_cap = o_cap;
-        ex->rtf_capturing = o_capt;
-        LeptrisDocument frag_doc = ex->result;
-        ex->result = main_result;
-        LeptrisElement rr = leptris_document_root(frag_doc);
-        v = xpath_result_new(XPATH_RESULT_NODESET);
-        if (v && rr) {
-            v->value.nodeset_value = xpath_nodeset_new();
-            if (v->value.nodeset_value) {
-                /* §11.1: the variable's value is the result tree
-                 * FRAGMENT — bound as its root (document) node.
-                 * Relative paths ($v/row/cell) and exsl:node-set()
-                 * then see the fragment as a tree. */
-                LeptrisNodeRef dn = (LeptrisNodeRef)
-                    leptris_document_get_node(frag_doc);
-                if (dn)
-                    xpath_nodeset_add(v->value.nodeset_value, dn);
-            }
-        } else if (v && !rr && frag_text && frag_len) {
-            /* Pure-text RTF: the value is the string (the
-             * nodeset-binding experiment regressed bug-72's nested
-             * captures — reverted pending a capture-state rework). */
-            free(v);
-            v = xpath_result_new(XPATH_RESULT_STRING);
-            if (v) v->value.string_value = leptris_strdup(frag_text);
-        }
-        free(frag_text);
-        /* The nodeset's node pointers live in `rr`'s document. Move
-         * ownership of the result document into the exec's RTF
-         * chain so the nodes outlive the variable's frame. */
-        if (rr) {
-            struct xslt_rtf_entry* ent =
-                (struct xslt_rtf_entry*)malloc(sizeof(*ent));
-            if (ent) {
-                ent->doc = frag_doc;
-                ent->next = (struct xslt_rtf_entry*)ex->rtf_chain;
-                ex->rtf_chain = ent;
-            } else {
-                leptris_document_free(frag_doc);
-            }
-        } else {
-            leptris_document_free(frag_doc);
-        }
+        v = xslt_capture_content(ex, in->child, node);
     }
     xslt_push_var(ex, in->name, v);
     return 0;
+}
+
+/* §11.1 RTF capture: build a with-param/variable CONTENT subtree
+ * into a FRESH scratch document — never into the result tree, which
+ * may carry a partially built element the instruction sits inside.
+ * Returns the fragment as a nodeset (its document node) or, for
+ * pure-text fragments, a string. */
+static struct leptris_xpath_result* xslt_capture_content(
+        XsltExec* ex, const XsltInstr* child, LeptrisElement node) {
+    struct leptris_xpath_result* v = NULL;
+    LeptrisDocument main_result = ex->result;
+    LeptrisElement saved = ex->pending_parent;
+    ex->result = leptris_document_create();
+    ex->pending_parent = NULL;
+    /* Fresh buffer per capture (the xslt_capture_children_text
+     * discipline): nested captures save/restore the outer length —
+     * resetting only the length left stale bytes that later appends
+     * resurrected (bug-72's second variable picked up the first's
+     * fragment text). */
+    size_t o_len = ex->rtf_text_len;
+    char* o_buf = ex->rtf_text;
+    size_t o_cap = ex->rtf_text_cap;
+    int o_capt = ex->rtf_capturing;
+    ex->rtf_capturing = 1;
+    ex->rtf_text = (char*)calloc(1, 1);
+    ex->rtf_text_len = 0;
+    ex->rtf_text_cap = 1;
+    xslt_exec_instrs(ex, child, node);
+    ex->rtf_capturing = 0;
+    ex->pending_parent = saved;
+    char* frag_text = ex->rtf_text;   /* owned by this block */
+    size_t frag_len = ex->rtf_text_len;
+    ex->rtf_text = o_buf;
+    ex->rtf_text_len = o_len;
+    ex->rtf_text_cap = o_cap;
+    ex->rtf_capturing = o_capt;
+    LeptrisDocument frag_doc = ex->result;
+    ex->result = main_result;
+    LeptrisElement rr = leptris_document_root(frag_doc);
+    v = xpath_result_new(XPATH_RESULT_NODESET);
+    if (v && rr) {
+        v->value.nodeset_value = xpath_nodeset_new();
+        if (v->value.nodeset_value) {
+            /* §11.1: the value is the result tree FRAGMENT — bound
+             * as its root (document) node. Relative paths
+             * ($v/row/cell) and exsl:node-set() then see the
+             * fragment as a tree. */
+            LeptrisNodeRef dn = (LeptrisNodeRef)
+                leptris_document_get_node(frag_doc);
+            if (dn)
+                xpath_nodeset_add(v->value.nodeset_value, dn);
+        }
+    } else if (v && !rr && frag_text && frag_len) {
+        /* Pure-text RTF: the value is the string (the nodeset-
+         * binding experiment regressed bug-72's nested captures —
+         * reverted pending a capture-state rework). */
+        free(v);
+        v = xpath_result_new(XPATH_RESULT_STRING);
+        if (v) v->value.string_value = leptris_strdup(frag_text);
+    }
+    free(frag_text);
+    /* The nodeset's node pointers live in the fragment document.
+     * Move ownership into the exec's RTF chain so the nodes outlive
+     * the variable's frame. */
+    if (rr) {
+        struct xslt_rtf_entry* ent =
+            (struct xslt_rtf_entry*)malloc(sizeof(*ent));
+        if (ent) {
+            ent->doc = frag_doc;
+            ent->next = (struct xslt_rtf_entry*)ex->rtf_chain;
+            ex->rtf_chain = ent;
+        } else {
+            leptris_document_free(frag_doc);
+        }
+    } else {
+        leptris_document_free(frag_doc);
+    }
+    return v;
 }
 
 static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
@@ -1692,7 +1707,11 @@ static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
             }
         }
         if (!declared) continue;
-        vals[nv] = wp->select ? xslt_eval(ex, wp->select, node) : NULL;
+        vals[nv] = wp->select
+                      ? xslt_eval(ex, wp->select, node)
+                      : (wp->child
+                             ? xslt_capture_content(ex, wp->child, node)
+                             : NULL);
         names[nv] = wp->name;
         nv++;
     }

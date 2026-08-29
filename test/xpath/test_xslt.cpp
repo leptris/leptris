@@ -2097,3 +2097,36 @@ TEST(XsltExslt, LibxsltNodeSetResolves) {
     leptris_document_free(d);
     leptris_xslt_free(x);
 }
+
+/* §11.6: a with-param with CONTENT (no select) binds the content
+ * RTF — the caller's binding ran only select expressions, so
+ * content params arrived empty (bug-90's wrap-cdata template). */
+TEST(XsltParams, WithParamContentBindsFragment) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:call-template name='w'>"
+        "<xsl:with-param name='content'>PRE "
+        "<xsl:value-of select='/r/x'/> POST</xsl:with-param>"
+        "</xsl:call-template></xsl:template>"
+        "<xsl:template name='w'>"
+        "<xsl:param name='content'/>"
+        "[<xsl:value-of select='$content'/>]"
+        "</xsl:template>",
+        "<r><x>VAL</x></r>")),
+        "[PRE VAL POST]");
+}
+
+/* bug-90: the RTF capture buffer stores LOGICAL text — string($rtf)
+ * is unescaped, so pre-escaping fragment text leaked &amp; into
+ * param values re-emitted with disable-output-escaping. */
+TEST(XsltParams, CapturedRtfTextIsLogical) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='v'><xsl:value-of select='/r/t'/></xsl:variable>"
+        "<xsl:text disable-output-escaping='yes'>&lt;![CDATA[</xsl:text>"
+        "<xsl:value-of select='$v' disable-output-escaping='yes'/>"
+        "<xsl:text disable-output-escaping='yes'>]]&gt;</xsl:text>"
+        "</xsl:template>",
+        "<r><t>a&amp;b</t></r>")),
+        "<![CDATA[a&b]]>");
+}
