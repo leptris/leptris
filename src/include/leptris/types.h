@@ -251,6 +251,11 @@ typedef struct {
      * guarantee byte-exact round-trips — #534). Display-oriented:
      * output is NOT guaranteed to round-trip. */
     int indent_text;
+    /* Indent unit string — one copy per depth level, replacing the
+     * default spaces (issue #633; libxml2 xmlTreeIndentString /
+     * Nokogiri indent_text). NULL = options->indent spaces per
+     * level. Requires options->indent > 0. */
+    const char* indent_unit;
 } LeptrisSerializeExtOptions;
 
 /* ============================================================================
