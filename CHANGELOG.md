@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.18] - 2026-08-29
+
+### Added
+
+- raw attribute view with xmlns declarations in source order (dom)
+
+
+
 ## [1.9.17] - 2026-08-29
 
 XSLT engine-semantics round; the libxslt suite holds 197/205 with
