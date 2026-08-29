@@ -52,6 +52,37 @@ char* get_node_text(void* node) {
         case LEPTRIS_NODE_TYPE_DOCUMENT: {
             struct leptris_document* d =
                 ((LeptrisDocumentNode*)node)->doc;
+            /* XPath string-value of a document node: ALL text
+             * descendants concatenated — the doc-children chain
+             * (comments/PIs/text before-after the root) walks first
+             * so pure-text RTF fragments (issue #56) string to their
+             * text; the root element's subtree follows. */
+            size_t cap = 64, len = 0;
+            char* acc = (char*)malloc(cap);
+            if (!acc) return leptris_strdup("");
+            acc[0] = '\0';
+            int any_text = 0;
+            for (LeptrisNodeRef c = (LeptrisNodeRef)d->doc_children_head;
+                 c; c = leptris_node_get_next_sibling(c)) {
+                int ty = leptris_node_get_type(c);
+                if (ty == LEPTRIS_NODE_TYPE_TEXT ||
+                    ty == LEPTRIS_NODE_TYPE_CDATA) {
+                    const char* t =
+                        leptris_text_get_content((LeptrisTextNode*)c);
+                    if (t && *t) {
+                        any_text = 1;
+                        size_t tl = strlen(t);
+                        while (len + tl + 1 > cap) cap *= 2;
+                        char* grown = (char*)realloc(acc, cap);
+                        if (!grown) { free(acc); return leptris_strdup(""); }
+                        acc = grown;
+                        memcpy(acc + len, t, tl + 1);
+                        len += tl;
+                    }
+                }
+            }
+            if (any_text) return acc;
+            free(acc);
             LeptrisElement root = (LeptrisElement)d->new_dom_root;
             if (!root) root = d->root;
             if (!root) return leptris_strdup("");
