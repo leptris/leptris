@@ -233,6 +233,23 @@ static void vm_absolute_type_walk(XPathNodeSet* out, LeptrisElement elem,
  * elements in NO namespace — a default-xmlns element is in a
  * namespace even though it has no prefix. Documents without any
  * namespace declaration skip the check (zero-cost common case). */
+static struct leptris_document* xpath_context_document(
+        XPathContext* ctx) {
+    if (!ctx || !ctx->context_node) return ctx ? ctx->document : NULL;
+    LeptrisNode* cn = (LeptrisNode*)ctx->context_node;
+    /* Non-element contexts (pattern matching on text()/comment()/PI)
+     * walk any-kind parent links up to the nearest ELEMENT first -
+     * leptris_element_get_document would misread their layout. */
+    if (cn->type != LEPTRIS_NODE_TYPE_ELEMENT) {
+        LeptrisElement e = leptris_node_parent((LeptrisNodeRef)cn);
+        if (!e) return ctx->document;
+        cn = (LeptrisNode*)e;
+    }
+    struct leptris_document* nd =
+        leptris_element_get_document((LeptrisElement)cn);
+    return nd ? nd : ctx->document;
+}
+
 static inline int vm_unprefixed_name_matches(XPathContext* ctx,
                                              LeptrisElement e,
                                              const char* name) {
@@ -356,7 +373,11 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
                                                       int wild,
                                                       int mode) {
     if (!ctx || !ctx->document) return NULL;
-    LeptrisElement root = (LeptrisElement)ctx->document->new_dom_root;
+    /* Absolute paths root at the CONTEXT NODE'S document (libxslt
+     * semantics): document() output and RTF fragments must not see
+     * the transform source tree. */
+    struct leptris_document* ctx_doc = xpath_context_document(ctx);
+    LeptrisElement root = (LeptrisElement)ctx_doc->new_dom_root;
     if (!root) return NULL;
 
     /* Mode 0 (root match only) — short-circuit, no descendant walk. */
@@ -388,13 +409,13 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
      *   - all_elements[0] = root (preorder starts at root)
      *   - name_bucket.matches: all elements with that name in preorder
      */
-    struct leptris_element_index* idx = ctx->document->element_index;
+    struct leptris_element_index* idx = ctx_doc->element_index;
     /* TODO 190: build on the SECOND axis query. The build costs
      * two tree walks + per-name bucket allocations; a document
      * that sees one query pays less walking directly. */
-    if (!idx && ++ctx->document->axis_query_count >= 2) {
-        idx = leptris_element_index_build(ctx->document);
-        ctx->document->element_index = idx;
+    if (!idx && ++ctx_doc->axis_query_count >= 2) {
+        idx = leptris_element_index_build(ctx_doc);
+        ctx_doc->element_index = idx;
     }
 
     XPathNodeSet* out = xpath_nodeset_new();

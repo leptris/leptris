@@ -82,6 +82,23 @@ static void parse_node_test_name(const char* test_name,
     }
 }
 
+static struct leptris_document* xpath_context_document(
+        XPathContext* ctx) {
+    if (!ctx || !ctx->context_node) return ctx ? ctx->document : NULL;
+    LeptrisNode* cn = (LeptrisNode*)ctx->context_node;
+    /* Non-element contexts (pattern matching on text()/comment()/PI)
+     * walk any-kind parent links up to the nearest ELEMENT first -
+     * leptris_element_get_document would misread their layout. */
+    if (cn->type != LEPTRIS_NODE_TYPE_ELEMENT) {
+        LeptrisElement e = leptris_node_parent((LeptrisNodeRef)cn);
+        if (!e) return ctx->document;
+        cn = (LeptrisNode*)e;
+    }
+    struct leptris_document* nd =
+        leptris_element_get_document((LeptrisElement)cn);
+    return nd ? nd : ctx->document;
+}
+
 int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) {
     if (!node || !test) return 1;  /* No test means match all */
 
@@ -1024,11 +1041,16 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
 
     /* Starting nodeset */
     if (path->type == XPATH_AST_ABSOLUTE_PATH) {
+        /* An absolute path roots at the CONTEXT NODE'S document
+         * (libxslt semantics): a context inside document() output or
+         * an RTF fragment must not see the transform source tree
+         * (bug-65). */
+        struct leptris_document* ctx_doc = xpath_context_document(ctx);
         /* Special case: Absolute path with element name as first step
          * XPath "/root" means "child of document node named root"
          * Since we don't have a document node, check if root matches and use it */
         int is_root_match = 0;
-        LeptrisElement root = (LeptrisElement)ctx->document->new_dom_root;
+        LeptrisElement root = (LeptrisElement)ctx_doc->new_dom_root;
         XPathASTNode* first_step = NULL;
 
         DEBUG_LOG("  Checking for special case: child_count=%zu, root=%p",
@@ -1190,7 +1212,7 @@ normal_absolute_path:
              * must offer the root element itself. The doc-branch in
              * apply_axis handles every axis from this node type. */
             xpath_nodeset_add(current,
-                (LeptrisElement)leptris_document_get_node(ctx->document));
+                (LeptrisElement)leptris_document_get_node(ctx_doc));
             DEBUG_LOG("  Nodeset count after adding document node: %zu",
                       xpath_nodeset_count(current));
 
