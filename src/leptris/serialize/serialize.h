@@ -62,6 +62,8 @@ typedef struct SerializeBuffer {
     size_t capacity;   /* Allocated capacity */
     int indent;        /* Current indentation level (for pretty-printing) */
     int indent_spaces; /* Number of spaces per indent level (0 = compact) */
+    const char* indent_unit; /* #633: unit string per level; NULL =
+                              * indent_spaces spaces per level */
     int indent_text;   /* #129: formatter also owns text/mixed whitespace */
     int ws_mixed;       /* XSLT: ws-only text children count as mixed */
     int at_line_start; /* last emitted byte was a newline (dedups
@@ -130,6 +132,9 @@ typedef struct {
      * match (the XSLT layer transcodes to the output encoding) —
      * the plain serialize API stays truthful (TODO.bindings/06). */
     int decl_encoding_verbatim;
+    /* Indent unit string (#633): one copy per depth level; NULL =
+     * indent_spaces spaces per level. */
+    const char* indent_unit;
 } LeptrisSerializeExtended;
 
 LEPTRIS_API char* leptris_document_serialize_ext(

@@ -45,6 +45,7 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->data[0] = '\0';
     buf->indent = 0;
     buf->indent_spaces = indent_spaces;
+    buf->indent_unit = NULL;   /* #633: callers opt in per unit string */
     buf->html_method = 0;
     buf->indent_text = 0;
     buf->at_line_start = 0;
@@ -135,6 +136,18 @@ void buffer_append_indent(SerializeBuffer* buf) {
     /* §16.2 html method: newline-only layout — libxml2's HTML dump
      * never nests with spaces. */
     if (buf->html_method) return;
+
+    if (buf->indent_unit && buf->indent_unit[0]) {
+        size_t ul = strlen(buf->indent_unit);
+        int levels = buf->indent;
+        buffer_ensure_capacity(buf, levels * ul + 1);
+        for (int i = 0; i < levels; i++) {
+            memcpy(buf->data + buf->size, buf->indent_unit, ul);
+            buf->size += ul;
+        }
+        buf->data[buf->size] = '\0';
+        return;
+    }
 
     int spaces = buf->indent * buf->indent_spaces;
     buffer_ensure_capacity(buf, spaces + 1);
@@ -769,9 +782,30 @@ void serialize_doctype_internal(LeptrisDoctypeNode* doctype, SerializeBuffer* bu
 
     /* Output internal subset if present */
     if (doctype->internal_subset) {
-        buffer_append(buf, " [");
-        buffer_append(buf, doctype->internal_subset);
-        buffer_append_char(buf, ']');
+        /* Trim the source's bracket whitespace, then lay the
+         * declarations out libxml2-style: each on its own line
+         * (issue #633). Declarations open with '<!' and close with
+         * '>', so '><' is the boundary. */
+        const char* s = doctype->internal_subset;
+        size_t sl = strlen(s);
+        while (sl && (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' ||
+                      s[0] == '\r')) { s++; sl--; }
+        while (sl && (s[sl-1] == ' ' || s[sl-1] == '\t' ||
+                      s[sl-1] == '\n' || s[sl-1] == '\r')) sl--;
+        if (sl) {
+            buffer_append(buf, " [\n");
+            for (size_t i = 0; i < sl; i++) {
+                if (i + 1 < sl && s[i] == '>' && s[i + 1] == '<') {
+                    buffer_append_char(buf, '>');
+                    buffer_append_char(buf, '\n');
+                    i++;
+                } else {
+                    buffer_append_char(buf, s[i]);
+                }
+            }
+            buffer_append(buf, "\n]");
+        }
+        /* Empty subset: no brackets at all (libxml2). */
     }
 
     buffer_append_char(buf, '>');
@@ -1052,6 +1086,19 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             }
             if (sp > 0 && st[sp - 1].cd_open)
                 ser_frame_cd_flush(buf, &st[sp - 1]);
+            /* libxml2 xmlIndentTreeOutput (issue #633): comments and
+             * PIs under a NON-mixed parent get their own indented
+             * line, like element siblings. Mixed-content parents
+             * keep them inline — a PI between text must not move. */
+            if (buf->indent_spaces > 0 && sp > 0 && !st[sp - 1].mixed &&
+                !buf->html_method &&
+                (cur->type == LEPTRIS_NODE_TYPE_COMMENT ||
+                 cur->type == LEPTRIS_NODE_TYPE_PI)) {
+                buffer_append_indent(buf);
+                serialize_node_internal(cur, buf);
+                buffer_append_newline(buf);
+                goto advance;
+            }
             serialize_node_internal(cur, buf);
             goto advance;
         }
@@ -1480,7 +1527,11 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     if (html_break_after_elem(e, name, nl,
                                               html_elem_flags_ci(name, nl)))
                         buffer_append_newline(buf);
-                } else if (!parent_mixed) {
+                } else if (!is_root_cur && !parent_mixed) {
+                    /* is_root guard (#633): the document's last line
+                     * carries no trailing newline — the fusion path
+                     * already had the guard; this open-tag path (any
+                     * element with attributes) did not. */
                     buffer_append_newline(buf);
                 }
             }
@@ -1757,7 +1808,10 @@ LEPTRIS_API char* leptris_document_serialize_ext(
     const LeptrisSerializeExtOptions* ext) {
     LeptrisSerializeExtended internal;
     memset(&internal, 0, sizeof(internal));
-    if (ext) internal.indent_text = ext->indent_text;
+    if (ext) {
+        internal.indent_text = ext->indent_text;
+        internal.indent_unit = ext->indent_unit;
+    }
     return leptris_document_serialize_ex(doc, options, &internal);
 }
 
@@ -1804,6 +1858,7 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
          * is a no-op at indent_spaces == 0. */
         buf->html_method = extended->html_method != 0;
         buf->indent_text = extended->indent_text != 0;
+        buf->indent_unit = extended->indent_unit;
         buf->ws_mixed = extended->ws_mixed != 0;
         buf->xhtml = extended->xhtml != 0;
         buf->xhtml_encoding = encoding ? encoding : "UTF-8";

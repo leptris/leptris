@@ -643,3 +643,80 @@ TEST(RawApiProbe, ImmediateSerializeAfterParse) {
 
     leptris_document_free(doc);
 }
+
+/* Issue #633: libxml2 xmlIndentTreeOutput parity — three residual
+ * pretty-print divergences. */
+TEST(SerializeOptions, PrettyChildCommentAndPiGetOwnLines) {
+    const char xml[] = "<r><?pi data?><!--c--><e/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* s = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s),
+              "<r>\n  <?pi data?>\n  <!--c-->\n  <e/>\n</r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+TEST(SerializeOptions, PrettyRootTextOnlyWithAttributesNoTrailingNewline) {
+    /* The reporter's non-ASCII repro carried an attribute — that is
+     * what dodged the fusion fast path (no-attrs) and hit the open-
+     * tag path, whose text-only close lacked the is-root guard. */
+    const char xml[] = "<r a=\"1\">ascii</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* s = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s), "<r a=\"1\">ascii</r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+TEST(SerializeOptions, PrettyDoctypeSubsetLayout) {
+    const char xml[] =
+        "<!DOCTYPE r [<!ELEMENT r (#PCDATA)>]><r>t</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* s = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s),
+              "<!DOCTYPE r [\n<!ELEMENT r (#PCDATA)>\n]>\n<r>t</r>");
+    leptris_free_string(s);
+    /* Empty subsets drop the brackets entirely (libxml2). */
+    const char xml2[] = "<!DOCTYPE r []><r/>";
+    LeptrisDocument d2 = leptris_parse_string(xml2, std::strlen(xml2), &st);
+    ASSERT_NE(d2, nullptr);
+    char* s2 = leptris_document_serialize(d2, &opts);
+    ASSERT_NE(s2, nullptr);
+    EXPECT_EQ(std::string(s2), "<!DOCTYPE r>\n<r/>");
+    leptris_free_string(s2);
+    leptris_document_free(d2);
+    leptris_document_free(doc);
+}
+
+/* Issue #633 third ask: an indent unit string per level —
+ * libxml2's xmlTreeIndentString / Nokogiri's indent_text ("\t"). */
+TEST(SerializeOptions, IndentUnitStringPerLevel) {
+    const char xml[] = "<r><a><b/></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;   /* any > 0 enables pretty layout */
+    LeptrisSerializeExtOptions ext = {0};
+    ext.indent_unit = "\t";
+    char* s = leptris_document_serialize_ext(doc, &opts, &ext);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s), "<r>\n\t<a>\n\t\t<b/>\n\t</a>\n</r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
