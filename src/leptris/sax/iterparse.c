@@ -17,6 +17,7 @@
 #include "../dom/element.h"   /* leptris_element_set_prefix (internal) */
 #include "../memory/arena.h"  /* subtree arena reuse (#563) */
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 extern struct leptris_document* leptris_document_create_on_arena(
@@ -205,7 +206,13 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file_ex(
  * bounded-memory contract: peak = largest top-level subtree. */
 static void release_done(struct leptris_iterparse* it) {
     if (!it->done) return;
-    if (it->done_depth <= 2) {
+    /* Top-level mode's subtree lifecycle: the yielded subtree owns
+     * its document, so releasing frees it and resets depth under the
+     * root. Issue #592: this must NOT run in full-document mode —
+     * releasing the root's own yield reset depth 0 -> 1 and
+     * END_DOCUMENT then reported a spurious truncation (and the
+     * whole tree must stay alive there, never freed per-subtree). */
+    if (it->mode == LEPTRIS_ITERPARSE_TOP_LEVEL && it->done_depth <= 2) {
         it->done = NULL;
         if (it->doc) {
             leptris_document_free(it->doc);
