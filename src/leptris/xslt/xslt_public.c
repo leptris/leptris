@@ -11,7 +11,13 @@
 #include "../serialize/serialize.h"
 #include "../encoding/encoding.h"   /* LeptrisSerializeExtended (issue #568) */
 #include <stdlib.h>
+#ifdef _MSC_VER
+#include <string.h>   /* _stricmp/_strnicmp (no strings.h on MSVC) */
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#else
 #include <strings.h>
+#endif
 #include <stdio.h>
 #include <ctype.h>
 
@@ -114,6 +120,7 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
     XsltExec* ex = xslt_transform_doc(xslt->compiled,
                                      xslt->sheet_doc, source);
     if (!ex) return NULL;
+    if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
     LeptrisDocument out = ex->result;
     ex->result = NULL;    /* ownership moved */
     xslt_exec_free(ex);
@@ -298,6 +305,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     XsltExec* ex = xslt_transform_doc(xslt->compiled,
                                      xslt->sheet_doc, source);
     if (!ex) return NULL;
+    if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
     LeptrisDocument out = ex->result;
     ex->result = NULL;
 
