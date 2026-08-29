@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.17] - 2026-08-29
+
+### Fixed
+
+- with-param CONTENT binds its RTF; captured RTF text is logical (xslt)
+- absolute paths root at the context node's document (xpath)
+
+
+
 ## [1.9.16] - 2026-08-29
 
 Serializer parity round for the moxml/canon pretty-printer
