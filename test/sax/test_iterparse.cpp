@@ -145,6 +145,39 @@ TEST(IterparseV2, WellFormedInputHasNoError) {
     leptris_iterparse_free(it);
 }
 
+/* Issue #592: full-document mode reported a spurious "truncated XML
+ * document" after cleanly draining well-formed input — the
+ * top-level-mode subtree release reset depth to 1 after the ROOT
+ * yield, so END_DOCUMENT saw an open element. */
+TEST(IterparseV2, FullDocumentWellFormedHasNoError) {
+    const char* docs[] = {
+        "<r><a><b/></a><c/></r>",
+        "<r><a/></r>\n",   /* trailing whitespace */
+        "<r/>",
+    };
+    for (const char* xml : docs) {
+        LeptrisIterparse it = leptris_iterparse_new_ex(
+            xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+        ASSERT_NE(it, nullptr) << xml;
+        while (leptris_iterparse_next(it)) {}
+        EXPECT_EQ(leptris_iterparse_error(it), nullptr) << xml;
+        leptris_iterparse_free(it);
+    }
+}
+
+/* Truncated input must STILL report in full-document mode. */
+TEST(IterparseV2, FullDocumentTruncatedReportsError) {
+    const char xml[] = "<root><child>text";
+    LeptrisIterparse it = leptris_iterparse_new_ex(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    while (leptris_iterparse_next(it)) {}
+    const char* err = leptris_iterparse_error(it);
+    ASSERT_NE(err, nullptr);
+    EXPECT_GT(strlen(err), 0u);
+    leptris_iterparse_free(it);
+}
+
 TEST(IterparseV2, FileVariantSupportsFullMode) {
     /* gtest's TempDir is portable (no unistd.h/mkstemp on Win32). */
     std::string path = std::string(testing::TempDir()) +
