@@ -87,7 +87,7 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
         struct leptris_xpath_result* r = leptris_xpath_compiled_eval_ctx(
             c, ex->source, node,
             (struct leptris_xpath_ns_map*)ex->current_ns,
-            NULL, ex->current_pos);
+            NULL, ex->current_pos, ex->current_size);
         ex->current_node = saved_cur;
         return r;
     }
@@ -191,7 +191,7 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
     struct leptris_xpath_result* r = leptris_xpath_compiled_eval_ctx(
         c, ex->source, node,
         (struct leptris_xpath_ns_map*)ex->current_ns, ex->varset,
-        ex->current_pos);
+        ex->current_pos, ex->current_size);
 
     ex->current_node = saved_cur;
     return r;
@@ -953,11 +953,14 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
     if (in->sorts) xslt_sort_items(ex, in, items, n);
     int rc = 0;
     size_t saved_pos = ex->current_pos;
+    size_t saved_size = ex->current_size;
+    ex->current_size = n;
     for (size_t i = 0; i < n && rc == 0; i++) {
         ex->current_pos = i + 1;
         rc = xslt_exec_instrs(ex, in->child, items[i]);
     }
     ex->current_pos = saved_pos;
+    ex->current_size = saved_size;
     free(items);
     leptris_xpath_result_free(r);
     return rc;
@@ -1837,7 +1840,20 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
          * A zero-length text child is a stripped §3.4 node (parse
          * never creates empty text nodes) — it is gone. */
         size_t saved_cpos = ex->current_pos;
+        size_t saved_csize = ex->current_size;
         size_t cpos = 0;
+        /* last() needs the SAME node-list position() counts — every
+         * non-stripped child, all kinds (issue 628). */
+        for (LeptrisNodeRef pc =
+                 leptris_node_first_child(leptris_element_as_node(node));
+             pc; pc = leptris_node_next_sibling(pc)) {
+            if (pc->type == LEPTRIS_NODE_TYPE_TEXT &&
+                leptris_text_node_get_content(pc)[0] == '\0')
+                continue;
+            cpos++;
+        }
+        ex->current_size = cpos;
+        cpos = 0;
         for (LeptrisNodeRef c =
                  leptris_node_first_child(leptris_element_as_node(node));
              c && rc == 0; c = leptris_node_next_sibling(c)) {
@@ -1901,6 +1917,7 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
             }
         }
         ex->current_pos = saved_cpos;
+        ex->current_size = saved_csize;
     }
     if (!items) {
         /* Early exit must not strand the selection (Linux LSan —
@@ -1915,6 +1932,8 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
     /* with-params bind per invocation (xslt_invoke_template). */
     const char* mode = in->name;   /* mode attr parsed into ->name */
     size_t saved_pos = ex->current_pos;
+    size_t saved_size2 = ex->current_size;
+    ex->current_size = n;
     for (size_t i = 0; i < n && rc == 0; i++) {
         ex->current_pos = i + 1;
         const XsltTemplate* best =
@@ -1931,6 +1950,7 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         }
     }
     ex->current_pos = saved_pos;
+    ex->current_size = saved_size2;
     free(items);
     if (r) leptris_xpath_result_free(r);
     return rc;
@@ -2923,6 +2943,7 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     ex->sheet_doc = sheet_doc;   /* set BEFORE the body: document('') */
     ex->source = source;
     ex->current_pos = 1;   /* §12.4: position() default context position */
+    ex->current_size = 1;  /* last() default context size */
     ex->result = leptris_document_create();
     if (!ex->result) { xslt_exec_free(ex); return NULL; }
 

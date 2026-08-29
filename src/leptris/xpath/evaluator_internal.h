@@ -101,7 +101,7 @@ struct leptris_xpath_result* leptris_xpath_compiled_eval_ns_vars(
 struct leptris_xpath_result* leptris_xpath_compiled_eval_ctx(
     LeptrisXPathCompiled compiled, LeptrisDocument doc,
     LeptrisElement context, struct leptris_xpath_ns_map* ns,
-    XPathVariableSet* vars, size_t pos);
+    XPathVariableSet* vars, size_t pos, size_t size);
 
 /* Namespace support (in evaluator.c) */
 const char* xpath_context_resolve_prefix(XPathContext* context,

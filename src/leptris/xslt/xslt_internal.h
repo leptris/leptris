@@ -379,6 +379,7 @@ typedef struct xslt_exec {
      * iteration). Set by the iterating ops; 1 outside them (the
      * XPath default). */
     size_t current_pos;
+    size_t current_size;   /* last() (issue 628: pairs with pos) */
 
     /* The template rule currently executing (§5.6 apply-imports
      * resolves candidates against THIS rule's import rank). */
