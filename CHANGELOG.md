@@ -1,15 +1,16 @@
 ## [Unreleased]
 
-## [1.9.22] - 2026-08-30
+## [1.9.22] - 2026-08-31
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
-
-
+- **#653** ground truth pinned in specs: the report's well-formed
+  self-closing-then-text shapes parse on every release since 1.9.18
+  (fresh-build verified); its minimal repro carries a stray `</y>`
+  after a self-closed `<y/>` and is ill-formed — strict rejection
+  matches libxml2's tag-mismatch error, and the recover path keeps
+  the documented #647/#547 contract (empty document, failure
+  recorded). Spec-only release: no functional change.
 ## [1.9.21] - 2026-08-31
 
 ### Fixed
