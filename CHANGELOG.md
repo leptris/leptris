@@ -2,17 +2,41 @@
 
 ## [1.9.19] - 2026-08-30
 
+The libxslt general suite is **205/205** — the open-worklist is empty.
+Eight suite closures plus three downstream-reported fixes.
+
 ### Fixed
 
-- GCC-14 pointer-type error; sized ext-serialize entry; saw_namespace init (build/api)
-- libxslt test extension element; no-ns element under default-ns ancestor (bug-100, bug-130) (xslt)
-- sibling axes see top-level document children (bug-166) (xpath)
-- fragment elements keep extended serialization; doc-level layout parity (bug-90) (xslt)
-- match patterns in foreign documents; §3.4 any-pair equality; libxml2 number formatting (xslt/xpath)
-- bind pure-text RTFs as document nodes (bug-56) (xslt)
-
-
-
+- **#643**: GCC 14 (musl/Alpine) builds — the element-typed
+  `leptris_node_parent` return assigned to a node reference is an
+  error under GCC 14's `-Wincompatible-pointer-types` default.
+- **#644**: `leptris_document_serialize_ext` read `ext->indent_unit`
+  past FFI callers' shorter ext structs (the MSVC display-form
+  segfault in leptris-ruby). New
+  `leptris_document_serialize_ext_sized(doc, options, ext, ext_size)`
+  reads each field only when the caller's allocation covers it;
+  `direct_parse`'s `saw_namespace` no longer rides the stack (the
+  C4701 was real).
+- **libxslt suite** (bug-56, bug-5-, bug-65, bug-90, bug-111,
+  bug-130, bug-166):
+  - pure-text/empty RTFs bind as the fragment's document node
+    (`count($rtf)` = 1, `string($rtf)` = the fragment text);
+  - match patterns match inside foreign documents (RTF fragments,
+    `document()` results) — the matcher derives the node's own
+    document;
+  - §3.4 any-pair nodeset equality on the interpreter path, and
+    number→string now mirrors libxml2's `xmlXPathFormatNumber`
+    (15 significant digits; `10695.23` no longer prints `10695.2`);
+  - result-fragment elements keep cdata-section-elements after the
+    first, the declaration's newline stays with the declaration, and
+    indented outputs end with one final newline (libxslt layout
+    parity);
+  - `preceding-sibling::`/`following-sibling::` see top-level
+    document children (multi-root fragments);
+  - libxslt's own `<test/>` test extension element executes;
+  - an unprefixed literal from an imported module under a
+    default-namespaced ancestor resets with `xmlns=""`.
+- **bug-100**: same (the libxslt test extension element).
 ## [1.9.18] - 2026-08-29
 
 ### Added
