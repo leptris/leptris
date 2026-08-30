@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.23] - 2026-08-30
+
+### Added
+
+- XSLT 3.0 expression core — if/then/else, for-return, ranges (xpath)
+
+
+
 ## [1.9.22] - 2026-08-31
 
 ### Fixed
