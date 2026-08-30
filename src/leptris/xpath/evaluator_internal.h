@@ -19,6 +19,7 @@ int xpath_to_boolean(struct leptris_xpath_result* result);
 double xpath_to_number(struct leptris_xpath_result* result);
 char* xpath_to_string(struct leptris_xpath_result* result);
 char* get_node_text(void* node);
+char* xpath_number_to_string(double number);
 
 /* Fast inline nodeset_add (TODO 135). Internal-only; callers must
  * guarantee well-formed nodeset. See evaluator.c for the contract. */

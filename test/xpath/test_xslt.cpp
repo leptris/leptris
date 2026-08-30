@@ -2145,3 +2145,81 @@ TEST(XsltParams, RtfVariableStringAndCount) {
         "<r/>")),
         "[hello][1]");
 }
+
+/* bug-65: apply-templates select="node-set($rtf)" dispatches through
+ * the fragment's document node — the built-in root rule applies its
+ * children — so the matching template fires ONCE per node-set, not
+ * once per (document node, root element). */
+TEST(XsltExslt, ApplyTemplatesOnNodeSetFiresOnce) {
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+        " xmlns:libxslt='http://xmlsoft.org/XSLT/namespace' version='1.0'>"
+        "<xsl:variable name='one'><xsl:copy-of select='.'/></xsl:variable>"
+        "<xsl:template match='/'>"
+        "<xsl:apply-templates select='libxslt:node-set($one)' mode='one'/>"
+        "<xsl:text>|</xsl:text>"
+        "</xsl:template>"
+        "<xsl:template match='*' mode='one'>"
+        "[<xsl:copy-of select='.'/>]"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char* xml = "<eins><content>content of one</content></eins>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    EXPECT_NE(out, nullptr);
+    if (out) EXPECT_EQ(body(std::string(out)),
+                      "[<eins><content>content of one</content></eins>]|");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
+/* bug-5-: the distinct-values predicate
+ * //G[@t='R' and not(@name=preceding::G[@t='R']/@name)] keeps only
+ * the FIRST node per name — an over-broad equality (or a preceding::
+ * that sees the node itself) leaves duplicates, which the report
+ * grid renders as extra empty cells. */
+TEST(XsltApply, PrecedingAxisDistinctValues) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='count(//G[@t=\"R\" and "
+        "not(@name=preceding::G[@t=\"R\"]/@name)])'/>]"
+        "[<xsl:for-each select='//G[@t=\"R\" and "
+        "not(@name=preceding::G[@t=\"R\"]/@name)]'>"
+        "<xsl:value-of select='@name'/>|</xsl:for-each>]"
+        "</xsl:template>",
+        "<r><G t='R' name='nr'/><G t='R' name='nr'/>"
+        "<G t='R' name='rc'/><G t='R' name='rc'/>"
+        "<G t='X' name='skip'/></r>")),
+        "[2][nr|rc|]");
+}
+
+/* Number→string per libxml2's xmlXPathFormatNumber (the suite's
+ * ground truth): int32-integral values print bare, other values in
+ * [1e-5, 1e9] print decimal with 15 significant digits and trailing
+ * zeros trimmed, everything else scientific %.14e trimmed. The old
+ * "%g" cut to 6 significant digits (bug-5-: 10695.23 → 10695.2). */
+TEST(XsltNumberFormat, MatchesLibxml2) {
+    EXPECT_EQ(body(run(
+        "<xsl:output method='text'/>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='10695.23'/>]"
+        "[<xsl:value-of select='1 div 3'/>]"
+        "[<xsl:value-of select='1000000'/>]"
+        "[<xsl:value-of select='1000000.5'/>]"
+        "[<xsl:value-of select='9999999.9999'/>]"
+        "[<xsl:value-of select='1234567890'/>]"
+        "[<xsl:value-of select='1234567890.5'/>]"
+        "[<xsl:value-of select='10000000000'/>]"
+        "[<xsl:value-of select='1234567890123456'/>]"
+        "[<xsl:value-of select='0.00001'/>]"
+        "[<xsl:value-of select='0.000001'/>]"
+        "[<xsl:value-of select='0.1 + 0.2'/>]"
+        "[<xsl:value-of select='-7 div 2'/>]"
+        "[<xsl:value-of select='2 - 3'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[10695.23][0.333333333333333][1000000][1000000.5]"
+        "[9999999.9999][1234567890][1.2345678905e+09][1e+10]"
+        "[1.23456789012346e+15][0.00001][1e-06][0.3][-3.5][-1]");
+}

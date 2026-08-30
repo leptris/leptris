@@ -1855,12 +1855,13 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
             if (!doc_root && nd) doc_root = nd->root;
             if (!doc_root) return 0;
             /* Document children in order: the document child chain
-             * (prolog top comments/PIs), then the root element. */
-            struct leptris_document* sd =
-                (struct leptris_document*)ex->source;
+             * (prolog top comments/PIs), then the root element — of
+             * THIS node's document (nd), never ex->source: a foreign
+             * doc node (document(), RTF) walking the source's chain
+             * applied templates to the SOURCE's nodes (bug-65). */
             int rc = 0;
             LeptrisNodeRef rootn = leptris_element_as_node(doc_root);
-            for (LeptrisNodeRef n = (LeptrisNodeRef)sd->doc_children_head;
+            for (LeptrisNodeRef n = (LeptrisNodeRef)nd->doc_children_head;
                  n && n != rootn && rc == 0;
                  n = leptris_node_next_sibling(n)) {
                 const XsltTemplate* best =

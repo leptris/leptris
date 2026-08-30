@@ -76,6 +76,40 @@ int xslt_pattern_matches_ex(const XsltPattern* p, LeptrisElement node,
                             XsltPatternEvalFn hook, void* ud) {
     if (!p || !node || !doc) return 0;
 
+    /* A pattern matches within the tree the NODE lives in. The
+     * caller passes the source document; for foreign nodes —
+     * document() results, RTF fragments via exsl:node-set — the
+     * source's root and document rung select nothing, so templates
+     * silently never matched fragment roots (bug-65). Derive the
+     * node's own document when it differs. */
+    {
+        int nty = leptris_node_get_type((LeptrisNodeRef)node);
+        if (nty != LEPTRIS_NODE_TYPE_DOCUMENT) {
+            struct leptris_document* own = NULL;
+            LeptrisNodeRef top = (LeptrisNodeRef)node;
+            if (nty == LEPTRIS_NODE_ATTRIBUTE)
+                top = (LeptrisNodeRef)((LeptrisAttributeNode*)node)->owner;
+            if (top) {
+                for (;;) {
+                    LeptrisElement up = leptris_node_parent(top);
+                    if (!up) break;
+                    top = (LeptrisNodeRef)up;
+                }
+                if (leptris_node_get_type(top) ==
+                    LEPTRIS_NODE_TYPE_DOCUMENT)
+                    own = ((LeptrisDocumentNode*)top)->doc;
+            }
+            /* Doc-level nodes are parentless by design (#580) and
+             * result-tree elements link no doc back-pointer through
+             * the climb — elements resolve their owner document. */
+            if (!own && nty == LEPTRIS_NODE_ELEMENT)
+                own = (struct leptris_document*)
+                    leptris_element_get_document(node);
+            if (own && own != (struct leptris_document*)doc)
+                doc = (LeptrisDocument)own;
+        }
+    }
+
     LeptrisElement root = leptris_document_root(doc);
     int node_is_doc = leptris_node_get_type((LeptrisNodeRef)node) ==
                       LEPTRIS_NODE_TYPE_DOCUMENT;
