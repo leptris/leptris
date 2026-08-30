@@ -1,13 +1,22 @@
 ## [Unreleased]
 
-## [1.9.23] - 2026-08-30
+## [1.9.23] - 2026-08-31
 
 ### Added
 
-- XSLT 3.0 expression core — if/then/else, for-return, ranges (xpath)
-
-
-
+- **XSLT 3.0 program, first increment — the XPath 2.0+ expression
+  core** every 3.0 feature stands on:
+  - `if (cond) then A else B` — lazy conditional; `then`/`else`
+    are value-matched so NCName name tests parse unchanged;
+  - `for $v in DOMAIN return EXPR` — nodeset iteration with
+    per-iteration variable binding; results join space-separated
+    (the sequence's string form);
+  - `A to B` — integer ranges as synthetic-text nodesets:
+    predicates and numeric comparisons see each member
+    (`(1 to 5)[. mod 2 = 1]` selects 1, 3, 5).
+  Lazy semantics ride the AST interpreter via BC_FALLBACK_EVAL
+  (VM opcodes are the follow-up). W3C 1.0 conformance and the
+  libxslt suite unchanged (1148/1148).
 ## [1.9.22] - 2026-08-31
 
 ### Fixed
