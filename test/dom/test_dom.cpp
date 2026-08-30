@@ -1572,6 +1572,65 @@ TEST(DetachedInserts, BuildBeforeAttach) {
 /* Issue #617: node_children_ex rides each child's KIND on the batch
  * (out_kinds) so bindings skip the per-node get_type dispatch on
  * cold full-tree walks. Kinds must align with the node handles. */
+/* #645a: wrap-free visitation — one C call walks a subtree, handing
+ * the host every node pointer with enter/leave + depth so bindings
+ * can wrap lazily without per-level NodeSet/Array churn. */
+namespace {
+struct VisitLog {
+    std::vector<std::string> events;
+    static void visit(void* ud, LeptrisNodeRef n, int entering,
+                      int depth) {
+        VisitLog* l = static_cast<VisitLog*>(ud);
+        char buf[128];
+        const char* name = "";
+        switch (leptris_node_get_type(n)) {
+            case LEPTRIS_NODE_TYPE_ELEMENT:
+                name = leptris_element_name((LeptrisElement)n);
+                snprintf(buf, sizeof buf, "%s%s:%d",
+                         entering ? "E" : "L", name ? name : "?", depth);
+                break;
+            case LEPTRIS_NODE_TYPE_TEXT:
+            case LEPTRIS_NODE_TYPE_CDATA:
+                snprintf(buf, sizeof buf, "T:%d", depth);
+                break;
+            default:
+                snprintf(buf, sizeof buf, "O:%d", depth);
+                break;
+        }
+        l->events.push_back(buf);
+    }
+};
+}  // namespace
+
+TEST(DomBasics, NodeVisitWalksSubtreeEnterLeave) {
+    const char xml[] = "<r><a>t1</a><b><!--c--></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    VisitLog log;
+    leptris_node_visit((LeptrisNodeRef)root, &VisitLog::visit, &log);
+    ASSERT_EQ(log.events.size(), 8u);
+    EXPECT_EQ(log.events[0], "Er:0");
+    EXPECT_EQ(log.events[1], "Ea:1");
+    EXPECT_EQ(log.events[2], "T:2");
+    EXPECT_EQ(log.events[3], "La:1");
+    EXPECT_EQ(log.events[4], "Eb:1");
+    EXPECT_EQ(log.events[5], "O:2");   /* comment */
+    EXPECT_EQ(log.events[6], "Lb:1");
+    EXPECT_EQ(log.events[7], "Lr:0");
+
+    /* From the document node: same walk one level up. */
+    VisitLog dlog;
+    leptris_node_visit(leptris_document_node(doc), &VisitLog::visit,
+                       &dlog);
+    ASSERT_EQ(dlog.events.size(), 8u);
+    EXPECT_EQ(dlog.events[0], "Er:0");   /* doc node itself skipped */
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, NodeChildrenExCarriesKinds) {
     const char xml[] =
         "<r>text<!--c--><a/><?pi x?></r>";

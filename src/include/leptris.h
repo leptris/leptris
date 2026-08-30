@@ -768,6 +768,41 @@ LEPTRIS_API LeptrisDoctype leptris_document_internal_subset(LeptrisDocument doc)
 LEPTRIS_API LeptrisNodeRef leptris_document_node(LeptrisDocument doc);
 
 /**
+ * Visit callback for leptris_node_visit (issue #645a): node pointer
+ * with enter/leave (elements) and depth from the walk's root.
+ */
+typedef void (*LeptrisNodeVisitor)(void* user_data, LeptrisNodeRef node,
+                                   int entering, int depth);
+
+/**
+ * Wrap-free subtree visitation (issue #645a)
+ *
+ * Walks a subtree in document order with ONE C call, handing the
+ * host every node pointer through a callback — bindings wrap nodes
+ * lazily instead of materializing per-level NodeSet/Array
+ * allocations (the per-node allocation floor of the walk).
+ *
+ * Elements are visited TWICE: entering=1 before their children,
+ * entering=0 after the subtree completes. Every other node kind
+ * (text, CDATA, comment, PI) is visited once with entering=1.
+ * `depth` is 0 at the walk's root and increments per element level.
+ *
+ * Passing the DOCUMENT node walks the document child chain (the
+ * root element and any document-level nodes); the document node
+ * itself is the container, not a visited node.
+ *
+ * The walk is read-only; mutating the tree from the callback
+ * (unlinking, moving) is not supported.
+ *
+ * @param root Subtree root (any node kind, or a document node)
+ * @param visitor Callback per node (may be NULL — no-op)
+ * @param user_data Opaque context for the callback
+ */
+LEPTRIS_API void leptris_node_visit(LeptrisNodeRef root,
+                                    LeptrisNodeVisitor visitor,
+                                    void* user_data);
+
+/**
  * Count the document's top-level processing instructions
  *
  * Parsed `<?target data?>` items outside the root element (and ones
