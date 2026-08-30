@@ -634,7 +634,15 @@ typedef enum {
     XPATH_OP_DIV,
     XPATH_OP_MOD,
     XPATH_OP_UNION,
-    XPATH_OP_NEGATION
+    XPATH_OP_NEGATION,
+    /* XSLT 3.0 expression extensions (XPath 2.0+ forms), carried on
+     * operator nodes: XPATH_OP_IF has 3 children (cond, then,
+     * else); XPATH_OP_FOR has 2 children (bindings AST + return
+     * expr) with ->value naming the loop variables in order;
+     * XPATH_OP_RANGE has 2 children (from, to). */
+    XPATH_OP_IF,
+    XPATH_OP_FOR,
+    XPATH_OP_RANGE
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope

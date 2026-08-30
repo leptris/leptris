@@ -35,6 +35,138 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
 
     XPathOperatorType op = (XPathOperatorType)ast->number_value;
 
+    /* XSLT 3.0 conditional (XPath 2.0+): lazy — evaluate the
+     * condition, then only the chosen branch. */
+    if (op == XPATH_OP_IF) {
+        if (ast->child_count < 3) return NULL;
+        struct leptris_xpath_result* cond = evaluate_expr(ctx, ast->children[0]);
+        if (!cond) return NULL;
+        int truth = xpath_to_boolean(cond);
+        xpath_result_free(cond);
+        return evaluate_expr(ctx, truth ? ast->children[1]
+                                        : ast->children[2]);
+    }
+
+    /* XSLT 3.0 `for $v in DOMAIN return EXPR` (XPath 2.0+): iterate
+     * the domain, bind $v per iteration, evaluate EXPR; the results
+     * join space-separated (the sequence's string form). */
+    if (op == XPATH_OP_FOR) {
+        if (ast->child_count < 2 || !ast->value) return NULL;
+        /* A bare eval context carries no variable set — own a
+         * scratch one for the loop binding. */
+        XPathVariableSet* scratch = NULL;
+        if (!ctx->variable_set) {
+            scratch = xpath_variable_set_new();
+            if (!scratch) return NULL;
+            ctx->variable_set = scratch;
+        }
+        struct leptris_xpath_result* domain =
+            evaluate_expr(ctx, ast->children[0]);
+        if (!domain) return NULL;
+
+        char* acc = (char*)malloc(1);
+        size_t len = 0, cap = 1;
+        if (!acc) { xpath_result_free(domain); return NULL; }
+        acc[0] = 0;
+
+        XPathNodeSet* ns =
+            (domain->type == XPATH_RESULT_NODESET)
+                ? domain->value.nodeset_value : NULL;
+        size_t n = ns ? ns->count : 1;
+        for (size_t i = 0; i < n; i++) {
+            XPathVariable* var = xpath_variable_set_add(
+                ctx->variable_set, ast->value, XPATH_VAR_TYPE_NODE_SET);
+            if (!var) break;
+            XPathNodeSet* one = xpath_nodeset_new();
+            if (!one) break;
+            if (ns) {
+                xpath_nodeset_add(one, ns->nodes[i]);
+            } else {
+                /* Scalar domain: one iteration with the value. */
+                char* sv = xpath_to_string(domain);
+                /* Represent as a synthetic single text node. */
+                XPathTextNode* tn =
+                    (XPathTextNode*)calloc(1, sizeof(*tn));
+                if (tn) {
+                    tn->node_type = LEPTRIS_NODE_TEXT;
+                    tn->content = sv ? sv : (char*)calloc(1, 1);
+                    one->owns_synthetic_text = 1;
+                    xpath_nodeset_add(one, tn);
+                }
+            }
+            xpath_variable_set_nodeset(var, one);
+
+            struct leptris_xpath_result* item =
+                evaluate_expr(ctx, ast->children[1]);
+            if (item) {
+                char* piece = xpath_to_string(item);
+                xpath_result_free(item);
+                if (piece && piece[0]) {
+                    size_t pl = strlen(piece);
+                    int need_sep = (len > 0);
+                    while (len + pl + 2 > cap) cap *= 2;
+                    char* grown = (char*)realloc(acc, cap);
+                    if (grown) {
+                        acc = grown;
+                        if (need_sep) acc[len++] = ' ';
+                        memcpy(acc + len, piece, pl + 1);
+                        len += pl;
+                    }
+                }
+                free(piece);
+            }
+            /* The variable OWNS the nodeset after set_nodeset —
+             * remove frees it; do not double-free. */
+            xpath_variable_set_remove(ctx->variable_set, ast->value);
+        }
+        xpath_result_free(domain);
+        if (scratch) ctx->variable_set = NULL;
+        xpath_variable_set_free(scratch);
+
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (!result) { free(acc); return NULL; }
+        result->value.string_value = acc;
+        return result;
+    }
+
+    /* XSLT 3.0 range `A to B` (XPath 2.0+): integer sequence as a
+     * nodeset of synthetic text nodes — predicates and numeric
+     * comparisons then see each member. */
+    if (op == XPATH_OP_RANGE) {
+        if (ast->child_count < 2) return NULL;
+        struct leptris_xpath_result* lo_r =
+            evaluate_expr(ctx, ast->children[0]);
+        if (!lo_r) return NULL;
+        struct leptris_xpath_result* hi_r =
+            evaluate_expr(ctx, ast->children[1]);
+        if (!hi_r) { xpath_result_free(lo_r); return NULL; }
+        long lo = (long)xpath_to_number(lo_r);
+        long hi = (long)xpath_to_number(hi_r);
+        xpath_result_free(lo_r);
+        xpath_result_free(hi_r);
+
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) return NULL;
+        out->owns_synthetic_text = 1;
+        for (long v = lo; v <= hi && v - lo < 100000; v++) {
+            char buf[24];
+            int l = snprintf(buf, sizeof buf, "%ld", v);
+            XPathTextNode* tn = (XPathTextNode*)calloc(1, sizeof(*tn));
+            char* content = (char*)malloc((size_t)l + 1);
+            if (!tn || !content) { free(tn); free(content); break; }
+            memcpy(content, buf, (size_t)l + 1);
+            tn->node_type = LEPTRIS_NODE_TEXT;
+            tn->content = content;
+            xpath_nodeset_add(out, tn);
+        }
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!result) { xpath_nodeset_free(out); return NULL; }
+        result->value.nodeset_value = out;
+        return result;
+    }
+
     /* Unary negation */
     if (op == XPATH_OP_NEGATION) {
         struct leptris_xpath_result* operand = evaluate_expr(ctx, ast->children[0]);
@@ -219,6 +351,9 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             result->value.boolean_value = (op == XPATH_OP_AND) ? (lbool && rbool) : (lbool || rbool);
         }
     }
+    /* XSLT 3.0 conditional (XPath 2.0+): the children were already
+     * evaluated above (they are lazy in the real semantics — see the
+     * dedicated branch at the top of this function). */
     /* Union operator */
     else if (op == XPATH_OP_UNION) {
         if (left->type != XPATH_RESULT_NODESET || right->type != XPATH_RESULT_NODESET) {
