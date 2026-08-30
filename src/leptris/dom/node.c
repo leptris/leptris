@@ -373,3 +373,42 @@ void leptris_node_set_next_sibling(LeptrisNode* node, LeptrisNode* sibling) {
             break;
     }
 }
+
+/* ============================================================================
+ * Wrap-free visitation (issue #645a)
+ * ============================================================================ */
+
+/* Pre-order walk with enter/leave: elements visit twice (children in
+ * between), other nodes once. One C call per SUBTREE — bindings wrap
+ * lazily from the callback instead of materializing per-level
+ * NodeSet/Array allocations. */
+static void node_visit_rec(LeptrisNode* n, int depth,
+                           LeptrisNodeVisitor visitor, void* user_data) {
+    int is_elem = (n->type == LEPTRIS_NODE_TYPE_ELEMENT);
+    visitor(user_data, (LeptrisNodeRef)n, 1, depth);
+    if (!is_elem) return;
+    for (LeptrisNode* c = leptris_elem_first_child((LeptrisElement)n); c;
+         c = leptris_node_get_next_sibling(c))
+        node_visit_rec(c, depth + 1, visitor, user_data);
+    visitor(user_data, (LeptrisNodeRef)n, 0, depth);
+}
+
+void leptris_node_visit(LeptrisNodeRef root, LeptrisNodeVisitor visitor,
+                        void* user_data) {
+    if (!root || !visitor) return;
+    if (root->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+        /* Document root: children = the document child chain (#580),
+         * root element included — the document node itself is the
+         * walk's container, not a visited node. */
+        struct leptris_document* d =
+            ((LeptrisDocumentNode*)root)->doc;
+        LeptrisNode* start = (LeptrisNode*)d->doc_children_head;
+        if (!start) start = (LeptrisNode*)d->new_dom_root;
+        if (!start) start = (LeptrisNode*)d->root;
+        for (LeptrisNode* c = start; c;
+             c = leptris_node_get_next_sibling(c))
+            node_visit_rec(c, 0, visitor, user_data);
+        return;
+    }
+    node_visit_rec((LeptrisNode*)root, 0, visitor, user_data);
+}
