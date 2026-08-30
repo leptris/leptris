@@ -146,6 +146,13 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
                                     const LeptrisSerializeOptions* options,
                                     const LeptrisSerializeExtended* extended);
 
+/* Serialize one element subtree with the full extended settings —
+ * the entry the XSLT layer uses for a result fragment's top-level
+ * elements (bug-90: they must keep cdata-section-elements). */
+char* leptris_element_serialize_ex(LeptrisElement elem,
+                                   const LeptrisSerializeOptions* options,
+                                   const LeptrisSerializeExtended* extended);
+
 void serialize_node_internal(LeptrisNode* node, SerializeBuffer* buf);
 void serialize_element_internal(LeptrisElement elem, SerializeBuffer* buf, int is_root);
 void serialize_text_internal(LeptrisTextNode* text, SerializeBuffer* buf);

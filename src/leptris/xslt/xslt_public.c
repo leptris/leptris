@@ -130,12 +130,19 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
 /* One fragment node by kind: element -> subtree serialize;
  * comment/PI/text -> their literal serialization. Under method=html
  * a PI closes SGML-style — `<?target data>`, no `?` (libxml2's
- * html serializer; libxslt bug-11-). */
-static char* serialize_frag_node_text(LeptrisNodeRef n, int html,
-                                      const LeptrisSerializeOptions* opts) {
+ * html serializer; libxslt bug-11-). Elements serialize through the
+ * EXTENDED entry — fragment top-level elements must keep
+ * cdata-section-elements and html/xhtml semantics (bug-90: every
+ * element after the first lost the CDATA wrap). */
+static char* serialize_frag_node_text(
+        LeptrisNodeRef n, int html,
+        const LeptrisSerializeOptions* opts,
+        const LeptrisSerializeExtended* ext) {
     int ty = leptris_node_get_type(n);
     if (ty == LEPTRIS_NODE_TYPE_ELEMENT)
-        return leptris_element_serialize((LeptrisElement)n, opts);
+        return ext ? leptris_element_serialize_ex((LeptrisElement)n,
+                                                  opts, ext)
+                   : leptris_element_serialize((LeptrisElement)n, opts);
     const char* body = NULL;
     const char* target = NULL;
     if (ty == LEPTRIS_NODE_TYPE_TEXT || ty == LEPTRIS_NODE_TYPE_CDATA)
@@ -381,7 +388,7 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
         for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
              f = f->next) {
             char* piece = serialize_frag_node_text(f->node, html_method,
-                                                   &frag_opts);
+                                                   &frag_opts, NULL);
             if (!piece) continue;
             size_t pl = strlen(piece);
             while (len + pl + 1 > cap) cap *= 2;
@@ -451,7 +458,8 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
             first_pre[0] = 0;
             for (XsltFragNode* f = (XsltFragNode*)ex->frag_nodes; f;
                  f = f->next) {
-                char* piece = serialize_frag_node_text(f->node, html_method, &opts);
+                char* piece = serialize_frag_node_text(f->node, html_method,
+                                                       &opts, &ext);
                 if (!piece) continue;
                 size_t pl = strlen(piece);
                 while (pre_len + pl + 1 > pc) {
@@ -529,6 +537,15 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
         if (first && first[decl_len] == '\n') decl_len++;
     }
     if (pre_len) {
+        /* The serializer's post-declaration newline belongs to the
+         * DECLARATION — libxslt writes decl+\n as a unit, then the
+         * pre-root nodes. Splicing the pre-root text between them
+         * turned the first element's line into "  \n<elem>" instead
+         * of "\n  <elem>" (bug-90). */
+        if (first && decl_len && first[decl_len] == '\n') {
+            acc[total++] = '\n';
+            decl_len++;
+        }
         memcpy(acc + total, first_pre, pre_len);
         total += pre_len;
     }
@@ -546,7 +563,8 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     for (LeptrisNodeRef sib = leptris_node_next_sibling(
              leptris_element_as_node(root));
          sib; sib = leptris_node_next_sibling(sib)) {
-        char* piece = serialize_frag_node_text(sib, html_method, &opts);
+        char* piece = serialize_frag_node_text(sib, html_method,
+                                               &opts, &ext);
         if (piece) {
             size_t pl = strlen(piece);
             while (total + pl + 1 > cap) cap *= 2;
@@ -556,6 +574,19 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                 total += pl;
             }
             leptris_free_string(piece);
+        }
+    }
+
+    /* libxslt writes ONE final newline after the last top-level node
+     * when the output indents (xsltSaveResultTo's closing write). */
+    if (acc && opts.indent) {
+        while (total + 2 > cap) {
+            cap *= 2;
+            acc = (char*)realloc(acc, cap);
+        }
+        if (acc) {
+            acc[total++] = '\n';
+            acc[total] = '\0';
         }
     }
 

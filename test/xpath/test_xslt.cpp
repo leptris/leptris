@@ -726,7 +726,7 @@ TEST(XsltBridge, HtmlAttributeAposDecoded) {
         "<xsl:output method='html'/>"
         "<xsl:template match='/'>"
         "<x><input value=\"&quot;'&quot;\"/></x>"
-        "</xsl:template>", "<r/>")), "<x><input value=\"&quot;'&quot;\"></x>");
+        "</xsl:template>", "<r/>")), "<x><input value=\"&quot;'&quot;\"></x>\n");
 }
 
 /* §16.2 HTML output: inject <meta charset="..."> into <head> when no
@@ -766,7 +766,7 @@ TEST(XsltHtml, IndentBlockParentNewlinesNoSpaces) {
         "<p>one</p>\n"
         "<p>two</p>\n"
         "</div></body>\n"
-        "</html>");
+        "</html>\n");
 }
 
 TEST(XsltHtml, IndentSingleChildParentInline) {
@@ -777,7 +777,7 @@ TEST(XsltHtml, IndentSingleChildParentInline) {
         "<xsl:template match='/'>"
         "<html><body><p>only</p></body></html>"
         "</xsl:template>", "<r/>")),
-        "<html><body><p>only</p></body></html>");
+        "<html><body><p>only</p></body></html>\n");
 }
 
 TEST(XsltHtml, IndentInlineParentNeverBreaks) {
@@ -788,13 +788,13 @@ TEST(XsltHtml, IndentInlineParentNeverBreaks) {
         "<xsl:template match='/'>"
         "<html><body><span><em>a</em><em>b</em></span></body></html>"
         "</xsl:template>", "<r/>")),
-        "<html><body><span><em>a</em><em>b</em></span></body></html>");
+        "<html><body><span><em>a</em><em>b</em></span></body></html>\n");
     EXPECT_EQ(body(run(
         "<xsl:output method='html'/>"
         "<xsl:template match='/'>"
         "<html><body><p><div>a</div><div>b</div></p></body></html>"
         "</xsl:template>", "<r/>")),
-        "<html><body><p><div>a</div><div>b</div></p></body></html>");
+        "<html><body><p><div>a</div><div>b</div></p></body></html>\n");
 }
 
 TEST(XsltHtml, IndentUnknownElementNeverBreaks) {
@@ -803,7 +803,7 @@ TEST(XsltHtml, IndentUnknownElementNeverBreaks) {
         "<xsl:template match='/'>"
         "<html><body><foo><f1>a</f1><f2>b</f2></foo></body></html>"
         "</xsl:template>", "<r/>")),
-        "<html><body><foo><f1>a</f1><f2>b</f2></foo></body></html>");
+        "<html><body><foo><f1>a</f1><f2>b</f2></foo></body></html>\n");
 }
 
 TEST(XsltHtml, IndentInlineSiblingsCluster) {
@@ -818,7 +818,7 @@ TEST(XsltHtml, IndentInlineSiblingsCluster) {
         "<html><body><div>\n"
         "<span>a</span><p>p1</p>\n"
         "<span>b</span>\n"
-        "</div></body></html>");
+        "</div></body></html>\n");
 }
 
 TEST(XsltHtml, MetaCharsetRespectsEncoding) {
@@ -942,7 +942,7 @@ TEST(XsltHtml, ScriptContentRaw) {
         "<html><head><script>if (a &lt; b) alert();</script></head></html>"
         "</xsl:template>", "<r/>")),
         "<html><head>\n<meta charset=\"UTF-8\">\n"
-        "<script>if (a < b) alert();</script>\n</head></html>");
+        "<script>if (a < b) alert();</script>\n</head></html>\n");
 }
 
 /* §16.2 HTML PIs have no trailing '?': <?php ... > (libxml2
@@ -1125,7 +1125,7 @@ TEST(XsltOutput, HtmlVersion5UsesBareDoctype) {
         "<xsl:output method='html' version='5'/>"
         "<xsl:template match='/'><html/></xsl:template>",
         "<r/>"));
-    EXPECT_EQ(r, "<!DOCTYPE html>\n<html></html>");
+    EXPECT_EQ(r, "<!DOCTYPE html>\n<html></html>\n");
 }
 
 TEST(XsltOutput, HtmlPublicOnlyOmitsSystemId) {
@@ -1147,7 +1147,7 @@ TEST(XsltOutput, NoDoctypeAttrsMeansNoDoctype) {
     EXPECT_EQ(body(run(
         "<xsl:output method='html'/>"
         "<xsl:template match='/'><html/></xsl:template>", "<r/>")),
-        "<html></html>");
+        "<html></html>\n");
 }
 
 /* libxml2 xmlIsXHTML (bug-152): an xml-method result whose doctype
@@ -1670,7 +1670,7 @@ TEST(XsltOutput, IndentStopsBelowWhitespaceMixedResult) {
     leptris_xslt_free(x);
     EXPECT_EQ(r,
               "<result>\n  <total><type>one</type><a>3</a></total>\n"
-              "</result>") << r;
+              "</result>\n") << r;
 }
 
 /* bug-161: apply-templates select=node() over a text item applies
@@ -2223,3 +2223,27 @@ TEST(XsltNumberFormat, MatchesLibxml2) {
         "[9999999.9999][1234567890][1.2345678905e+09][1e+10]"
         "[1.23456789012346e+15][0.00001][1e-06][0.3][-3.5][-1]");
 }
+
+/* bug-90: cdata-section-elements wraps text children of listed
+ * elements UNCONDITIONALLY (pears' &-free text wrapped like apples'),
+ * and the doc-level layout comes from the built-in text rule's copied
+ * source whitespace: verbatim "\n  " separators around the top-level
+ * element pairs, with ONE final newline after the last node. */
+TEST(XsltCdata, CdataSectionElementsAndDocLevelWs) {
+    EXPECT_EQ(body(run(
+        "<xsl:output method='xml' cdata-section-elements='nf1' indent='yes'/>"
+        "<xsl:template match='fs/f'>"
+        "<nf1 type='{@t}'>\n      The site is at\n      "
+        "<xsl:value-of select='./s'/>\n    </nf1>"
+        "<nf2 type='{@t}'>\n      <xsl:value-of select='./s'/>\n    </nf2>"
+        "</xsl:template>",
+        "<fs>\n  <f t='apples'><s><![CDATA[http://a.com/x&y]]>\n"
+        "    </s></f>\n  <f t='pears'><s>http://p.com/i&amp;j</s></f>\n</fs>")),
+        "\n  <nf1 type=\"apples\"><![CDATA[\n      The site is at\n"
+        "      http://a.com/x&y\n    ]]></nf1>"
+        "<nf2 type=\"apples\">http://a.com/x&amp;y\n    </nf2>\n"
+        "  <nf1 type=\"pears\"><![CDATA[\n      The site is at\n"
+        "      http://p.com/i&j]]></nf1>"
+        "<nf2 type=\"pears\">http://p.com/i&amp;j</nf2>\n\n");
+}
+
