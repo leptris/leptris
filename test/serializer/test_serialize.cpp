@@ -752,3 +752,25 @@ TEST(SerializeOptions, ExtSizedRespectsCallerLayout) {
     leptris_free_string(want);
     leptris_document_free(doc);
 }
+
+/* Fresh-parse contract (python team, #550 re-verify): a document
+ * straight out of leptris_parse_string serializes and evaluates
+ * XPath with NO intermediate call — no "promote touch" may be
+ * required by the caller. */
+TEST(SerializeOptions, FreshDocumentNeedsNoPromoteTouch) {
+    const char xml[] = "<r><a x='1'>t</a><b/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* s = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s), "<r><a x=\"1\">t</a><b/></r>");
+    leptris_free_string(s);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "/r/a/@x");
+    ASSERT_NE(r, nullptr);
+    char* v = leptris_xpath_result_string(r);
+    EXPECT_EQ(std::string(v ? v : ""), "1");
+    leptris_free_string(v);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
