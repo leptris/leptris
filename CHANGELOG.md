@@ -2,20 +2,43 @@
 
 ## [1.9.20] - 2026-08-30
 
+Closes every open upstream issue (#645, #610, #624, #647).
+
 ### Added
 
-- leptris_node_visit — wrap-free subtree visitation (issue #645a) (dom)
+- **`leptris_node_visit`** — wrap-free subtree visitation (#645a):
+  one C call walks a subtree in document order (enter/leave + depth);
+  bindings wrap nodes lazily instead of materializing per-level
+  NodeSet/Array allocations — the cold walk's per-node allocation
+  floor. The document node walks the document child chain.
 
 ### Fixed
 
-- duplicate attributes report a recoverable error event (issue #647) (sax)
+- **#647**: duplicate attributes report a recoverable SAX error —
+  `Attribute NAME redefined` (libxml2's message) with position,
+  through the callback error channel AND the recorder's ERROR
+  record; the parse continues with every attribute in the event
+  (libxml2 --recover semantics).
+- Position plumbing for attribute diagnostics: line/column advance
+  across the tag region ('<', element names, separators, attribute
+  names and values).
 
 ### Performance
 
-- fused child::NAME[k] + specialized expanded //name[pred] (issues #645b, #624, #610) (xpath)
-
-
-
+- **#645b**: scalar XPath evaluation — `string(//item[1])` fell
+  back wholesale to the AST interpreter whenever an absolute path's
+  step carried a position/operator predicate (4.6 ms CPU per eval
+  on a 20k-item catalog). New fused `child::NAME[k]` opcode
+  (per-context count-and-stop) plus specialized expanded
+  `//name[pred]` compilation: **~500 µs/eval — 9× faster, and ~8×
+  ahead of libxml2** (4350 µs) on the same fixture.
+- **#624**: the `//book[@price>100]` select-heavy transform shape
+  rides the same specialized path: 369 → ~350 µs on the fixture
+  (fully recovered from the 1.9.13 regression; suite 205/205).
+- **#610**: compiled vs string eval at parity on the parent axis
+  (0.76 vs 0.78 µs) — closed with in-tree twin benchmarks
+  (`bench_scalar_eval`, `bench_scalar_eval_libxml2`,
+  `bench_xslt_transform`).
 ## [1.9.19] - 2026-08-30
 
 The libxslt general suite is **205/205** — the open-worklist is empty.
