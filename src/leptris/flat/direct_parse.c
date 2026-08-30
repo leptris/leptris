@@ -1046,6 +1046,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.probe_slack = owns_buffer == 1 && buf_is_owned_copy;
     p.drop_ws_text = drop_ws_text;
     p.dtd = NULL;
+    /* Only ever set to 1 in the loop; without the zero here the
+     * field rides the stack (MSVC C4701) and doc->has_namespaces
+     * gets garbage on namespace-less documents. */
+    p.saw_namespace = 0;
     p.line_offsets_ok = len < 0x7FFFFFFFu;
 
     /* Skip BOM. */

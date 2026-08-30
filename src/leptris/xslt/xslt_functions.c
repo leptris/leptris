@@ -267,7 +267,9 @@ static LeptrisNodeRef xslt_any_next_doc_order(LeptrisNodeRef n) {
     while (n) {
         LeptrisNodeRef s = leptris_node_next_sibling(n);
         if (s) return s;
-        n = leptris_node_parent(n);
+        /* node_parent returns the element-typed accessor; the bare
+         * assignment is an error under GCC 14 (issue #643). */
+        n = (LeptrisNodeRef)leptris_node_parent(n);
     }
     return NULL;
 }

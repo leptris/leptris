@@ -720,3 +720,35 @@ TEST(SerializeOptions, IndentUnitStringPerLevel) {
     leptris_free_string(s);
     leptris_document_free(doc);
 }
+
+/* Issue #644: FFI callers allocate only the fields they know — the
+ * sized entry must not read past their buffer. The Ruby binding's
+ * layout is exactly one int (indent_text): a 4-byte ext with garbage
+ * beyond it behaves as indent_unit=NULL. */
+TEST(SerializeOptions, ExtSizedRespectsCallerLayout) {
+    const char xml[] = "<r><a>t</a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    /* One int only — the binding's allocation shape. Fill 16 bytes
+     * so any out-of-bounds read picks up non-NULL garbage. */
+    int raw[4] = {1, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A};
+    LeptrisSerializeExtOptions* short_ext =
+        (LeptrisSerializeExtOptions*)raw;
+    char* s = leptris_document_serialize_ext_sized(
+        doc, &opts, short_ext, sizeof(int));
+    ASSERT_NE(s, nullptr);
+    /* indent_text=1, indent_unit untouched (spaces, not garbage). */
+    LeptrisSerializeOptions plain = {0};
+    plain.indent = 2;
+    LeptrisSerializeExtOptions full = {0};
+    full.indent_text = 1;
+    char* want = leptris_document_serialize_ext(doc, &plain, &full);
+    ASSERT_NE(want, nullptr);
+    EXPECT_EQ(std::string(s), std::string(want));
+    leptris_free_string(s);
+    leptris_free_string(want);
+    leptris_document_free(doc);
+}

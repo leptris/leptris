@@ -1921,6 +1921,26 @@ LEPTRIS_API char* leptris_document_serialize_ext(LeptrisDocument doc,
     const LeptrisSerializeOptions* options,
     const LeptrisSerializeExtOptions* ext);
 
+/**
+ * Size-aware leptris_document_serialize_ext (issue #644): the ext
+ * struct may GROW, and FFI/binding callers allocate only the fields
+ * they know. Pass your compile-time sizeof(LeptrisSerializeExtOptions)
+ * — every field beyond your buffer stays at its zero default instead
+ * of being read out of bounds. leptris_document_serialize_ext is
+ * this entry with the full size.
+ *
+ * @param doc Document
+ * @param options Serialization options, or NULL for defaults
+ * @param ext Extended options, or NULL
+ * @param ext_size sizeof of the caller's ext-struct allocation
+ * @return Serialized XML string (caller frees with
+ *         leptris_free_string), or NULL
+ */
+LEPTRIS_API char* leptris_document_serialize_ext_sized(LeptrisDocument doc,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext,
+    size_t ext_size);
+
 LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
                                                    char* buf,
                                                    size_t capacity,
