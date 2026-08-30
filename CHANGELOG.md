@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.19] - 2026-08-30
+
+### Fixed
+
+- GCC-14 pointer-type error; sized ext-serialize entry; saw_namespace init (build/api)
+- libxslt test extension element; no-ns element under default-ns ancestor (bug-100, bug-130) (xslt)
+- sibling axes see top-level document children (bug-166) (xpath)
+- fragment elements keep extended serialization; doc-level layout parity (bug-90) (xslt)
+- match patterns in foreign documents; §3.4 any-pair equality; libxml2 number formatting (xslt/xpath)
+- bind pure-text RTFs as document nodes (bug-56) (xslt)
+
+
+
 ## [1.9.18] - 2026-08-29
 
 ### Added
