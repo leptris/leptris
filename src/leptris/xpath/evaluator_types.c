@@ -16,10 +16,64 @@
 #include <math.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 
 /* ============================================================================
  * Type Conversions (XPath 1.0 Spec Section 4)
  * ============================================================================ */
+
+/* Number→string, libxml2 xmlXPathFormatNumber parity (the libxslt
+ * suite's ground truth): int32-integral values print bare; other
+ * values with magnitude in [1e-5, 1e9] print decimal with 15
+ * significant digits, trailing zeros trimmed; everything else
+ * prints scientific (%.14e, mantissa zeros trimmed, exponent kept).
+ * Returns a malloc'd string. */
+char* xpath_number_to_string(double number) {
+    if (isnan(number)) return leptris_strdup("NaN");
+    if (isinf(number))
+        return leptris_strdup(number > 0 ? "Infinity" : "-Infinity");
+    if (number == 0.0) return leptris_strdup("0");
+    if (number > (double)INT_MIN && number < (double)INT_MAX &&
+        number == (double)(int)number) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", (int)number);
+        return leptris_strdup(buf);
+    }
+
+    char work[64];
+    int size;
+    double absolute_value = fabs(number);
+    if (absolute_value > 1e9 || absolute_value < 1e-5) {
+        /* Scientific: %21.14e (the width only pads; spaces stripped
+         * below), then size stops AT the 'e' so the trim keeps it. */
+        size = (int)snprintf(work, sizeof(work), "%21.14e", number);
+        while (size > 0 && work[size] != 'e') size--;
+    } else {
+        /* Decimal: 15 significant digits — the fraction precision
+         * spends the budget left after the integer digits. */
+        int integer_place, fraction_place;
+        if (absolute_value > 0.0) {
+            integer_place = (int)log10(absolute_value);
+            fraction_place = integer_place > 0 ? 15 - integer_place - 1
+                                               : 15 - integer_place;
+        } else {
+            fraction_place = 1;
+        }
+        size = (int)snprintf(work, sizeof(work), "%0.*f",
+                             fraction_place, number);
+    }
+
+    char* start = work;
+    while (*start == ' ') start++;
+    /* Trim trailing fraction zeros: for the decimal form the tail is
+     * just the NUL; for the scientific form it is the exponent. */
+    char* after = work + size;
+    char* ptr = after;
+    while (ptr > start && *(--ptr) == '0') { }
+    if (*ptr != '.') ptr++;
+    memmove(ptr, after, strlen(after) + 1);
+    return leptris_strdup(start);
+}
 
 /* Get the XPath string-value of a node (all node kinds). Returns a
  * malloc'd string the caller owns. */
@@ -210,16 +264,7 @@ char* xpath_to_string(struct leptris_xpath_result* result) {
             return leptris_strdup(result->value.string_value ?
                                result->value.string_value : "");
         case XPATH_RESULT_NUMBER: {
-            char buf[64];
-            double num = result->value.number_value;
-            if (isnan(num)) {
-                return leptris_strdup("NaN");
-            } else if (isinf(num)) {
-                return leptris_strdup(num > 0 ? "Infinity" : "-Infinity");
-            } else {
-                snprintf(buf, sizeof(buf), "%g", num);
-                return leptris_strdup(buf);
-            }
+            return xpath_number_to_string(result->value.number_value);
         }
         case XPATH_RESULT_BOOLEAN:
             return leptris_strdup(result->value.boolean_value ? "true" : "false");

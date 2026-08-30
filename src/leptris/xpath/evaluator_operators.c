@@ -10,10 +10,24 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+extern char* get_node_text(void* node);
 
 /* ============================================================================
  * Operator Evaluation
  * ============================================================================ */
+
+/* §3.4 relational compare over a double pair. */
+static int op_relational_cmp(XPathOperatorType op, double a, double b) {
+    switch (op) {
+        case XPATH_OP_LESS:          return a <  b;
+        case XPATH_OP_LESS_EQUAL:    return a <= b;
+        case XPATH_OP_GREATER:       return a >  b;
+        case XPATH_OP_GREATER_EQUAL: return a >= b;
+        default: return 0;
+    }
+}
 
 struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                               XPathASTNode* ast) {
@@ -92,37 +106,74 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
              */
             int is_equality_op = (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL);
 
-            /* Handle nodeset comparisons */
-            if (left->type == XPATH_RESULT_NODESET || right->type == XPATH_RESULT_NODESET) {
-                /* For nodesets, convert to string and compare */
-                char* lstr = xpath_to_string(left);
-                char* rstr = xpath_to_string(right);
+            /* Handle nodeset comparisons (§3.4): a nodeset NEVER
+             * collapses to its first node — nodeset op nodeset is
+             * ANY-PAIR, nodeset op scalar is ANY-NODE. The old
+             * to_string shortcut compared first nodes only and broke
+             * the distinct-values idiom
+             * @name = preceding::G/@name (bug-5-, VM path is the
+             * twin in vm.c's comparison op). */
+            if (left->type == XPATH_RESULT_NODESET ||
+                right->type == XPATH_RESULT_NODESET) {
+                int negate = (op == XPATH_OP_NOT_EQUAL);
+                struct leptris_xpath_result* other =
+                    (left->type == XPATH_RESULT_NODESET) ? right : left;
+                XPathNodeSet* ns = (left->type == XPATH_RESULT_NODESET)
+                                       ? left->value.nodeset_value
+                                       : right->value.nodeset_value;
+                int matches = 0;
 
-                if (is_equality_op) {
-                    /* String comparison for equality ops */
-                    const char* ls = lstr ? lstr : "";
-                    const char* rs = rstr ? rstr : "";
-                    int cmp = strcmp(ls, rs);
-                    switch (op) {
-                        case XPATH_OP_EQUAL: result->value.boolean_value = (cmp == 0); break;
-                        case XPATH_OP_NOT_EQUAL: result->value.boolean_value = (cmp != 0); break;
-                        default: break;
+                if (other->type == XPATH_RESULT_BOOLEAN && is_equality_op) {
+                    /* boolean vs nodeset: boolean() both sides. */
+                    int lb = xpath_to_boolean(left);
+                    int rb = xpath_to_boolean(right);
+                    result->value.boolean_value =
+                        negate ? (lb != rb) : (lb == rb);
+                } else if (other->type == XPATH_RESULT_NODESET) {
+                    /* nodeset vs nodeset: any-pair. */
+                    XPathNodeSet* on = other->value.nodeset_value;
+                    for (size_t i = 0; !matches && ns && i < ns->count; i++) {
+                        char* a = get_node_text(ns->nodes[i]);
+                        if (!a) continue;
+                        for (size_t j = 0; !matches && on && j < on->count; j++) {
+                            char* b = get_node_text(on->nodes[j]);
+                            if (!b) continue;
+                            if (is_equality_op) {
+                                matches = negate ? (strcmp(a, b) != 0)
+                                                 : (strcmp(a, b) == 0);
+                            } else {
+                                matches = op_relational_cmp(
+                                    op, atof(a), atof(b));
+                            }
+                            LEPTRIS_FREE(b);
+                        }
+                        LEPTRIS_FREE(a);
                     }
+                    result->value.boolean_value = matches;
+                } else if (is_equality_op) {
+                    /* nodeset vs scalar: any-node string compare. */
+                    char* scalar = xpath_to_string(other);
+                    for (size_t i = 0; !matches && ns && scalar &&
+                             i < ns->count; i++) {
+                        char* a = get_node_text(ns->nodes[i]);
+                        if (!a) continue;
+                        matches = negate ? (strcmp(a, scalar) != 0)
+                                         : (strcmp(a, scalar) == 0);
+                        LEPTRIS_FREE(a);
+                    }
+                    if (scalar) LEPTRIS_FREE(scalar);
+                    result->value.boolean_value = matches;
                 } else {
-                    /* Numeric comparison for relational ops */
-                    double lval = xpath_to_number(left);
-                    double rval = xpath_to_number(right);
-                    switch (op) {
-                        case XPATH_OP_LESS: result->value.boolean_value = (lval < rval); break;
-                        case XPATH_OP_LESS_EQUAL: result->value.boolean_value = (lval <= rval); break;
-                        case XPATH_OP_GREATER: result->value.boolean_value = (lval > rval); break;
-                        case XPATH_OP_GREATER_EQUAL: result->value.boolean_value = (lval >= rval); break;
-                        default: break;
+                    /* nodeset vs scalar: any-node numeric compare. */
+                    double scalar = xpath_to_number(other);
+                    for (size_t i = 0; !matches && ns && i < ns->count; i++) {
+                        char* a = get_node_text(ns->nodes[i]);
+                        if (!a) continue;
+                        matches = op_relational_cmp(op, atof(a), scalar);
+                        LEPTRIS_FREE(a);
                     }
+                    result->value.boolean_value = matches;
                 }
-
-                if (lstr) LEPTRIS_FREE(lstr);
-                if (rstr) LEPTRIS_FREE(rstr);
             }
             /* String comparison for equality operators when both are strings */
             else if (is_equality_op &&

@@ -369,21 +369,7 @@ LEPTRIS_API char* leptris_xpath_result_string(LeptrisXPathResult result) {
         case XPATH_RESULT_BOOLEAN:
             return leptris_strdup(result->value.boolean_value ? "true" : "false");
         case XPATH_RESULT_NUMBER:
-            {
-                char buffer[64];
-                double num = result->value.number_value;
-
-                if (isnan(num)) {
-                    return leptris_strdup("NaN");
-                } else if (isinf(num)) {
-                    return leptris_strdup(num > 0 ? "Infinity" : "-Infinity");
-                } else if (num == (long)num) {
-                    snprintf(buffer, sizeof(buffer), "%ld", (long)num);
-                } else {
-                    snprintf(buffer, sizeof(buffer), "%g", num);
-                }
-                return leptris_strdup(buffer);
-            }
+            return xpath_number_to_string(result->value.number_value);
         case XPATH_RESULT_NODESET:
             if (result->value.nodeset_value &&
                 result->value.nodeset_value->count > 0) {
