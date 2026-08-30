@@ -1815,6 +1815,35 @@ LEPTRIS_API char* leptris_document_serialize_ext(
     return leptris_document_serialize_ex(doc, options, &internal);
 }
 
+/* Element-level twin of leptris_document_serialize_ex: the XSLT
+ * layer serializes a result FRAGMENT's top-level elements one by
+ * one (bug-90) — without this entry they lost cdata-section-elements,
+ * html and xhtml semantics, which the public options struct cannot
+ * carry (#568). */
+char* leptris_element_serialize_ex(LeptrisElement elem,
+                                   const LeptrisSerializeOptions* options,
+                                   const LeptrisSerializeExtended* extended) {
+    if (!elem) return NULL;
+    int indent_spaces = options ? options->indent : 0;
+    SerializeBuffer* buf = buffer_create(indent_spaces);
+    if (!buf) return NULL;
+    if (extended) {
+        buf->cdata_names = extended->cdata_elements;
+        buf->cdata_count = extended->cdata_element_count;
+        buf->html_method = extended->html_method != 0;
+        buf->indent_text = extended->indent_text != 0;
+        buf->indent_unit = extended->indent_unit;
+        buf->ws_mixed = extended->ws_mixed != 0;
+        buf->xhtml = extended->xhtml != 0;
+        buf->xhtml_encoding = options && options->encoding
+                                  ? options->encoding : "UTF-8";
+    }
+    serialize_element_internal(elem, buf, 1);
+    char* result = buffer_to_string(buf);
+    buffer_free(buf);
+    return result;
+}
+
 char* leptris_document_serialize_ex(struct leptris_document* doc,
                                     const LeptrisSerializeOptions* options,
                                     const LeptrisSerializeExtended* extended) {
