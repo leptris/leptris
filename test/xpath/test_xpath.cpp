@@ -655,6 +655,52 @@ TEST(XPathSubtreeIndex, PredicatedChainedAcrossSections) {
  * a root element named NAME counts (it is the document's first
  * NAME child). These pin the semantics the fused child::NAME[k]
  * opcode must preserve. */
+
+/* XPath 2.0+ if/then/else — XSLT 3.0 expressions. */
+TEST(XPath30, IfThenElse) {
+    const char xml[] = "<r><i>a</i><i>b</i><i>c</i></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    auto eval = [&](const char* e) -> std::string {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, e);
+        if (!r) return "(error)";
+        char* v = leptris_xpath_result_string(r);
+        std::string out = v ? v : "";
+        leptris_free_string(v);
+        leptris_xpath_result_free(r);
+        return out;
+    };
+    EXPECT_EQ(eval("if (count(//i) > 2) then 'many' else 'few'"), "many");
+    EXPECT_EQ(eval("if (count(//i) > 9) then 'many' else 'few'"), "few");
+    leptris_document_free(doc);
+}
+
+TEST(XPath30, ForReturnAndRange) {
+    const char xml[] = "<r><i>a</i><i>b</i><i>c</i></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    auto eval = [&](const char* e) -> std::string {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, e);
+        if (!r) return "(error)";
+        char* v = leptris_xpath_result_string(r);
+        std::string out = v ? v : "";
+        leptris_free_string(v);
+        leptris_xpath_result_free(r);
+        return out;
+    };
+    /* for: sequence string form joins with spaces. */
+    SCOPED_TRACE("for-return");
+    EXPECT_EQ(eval("for $x in //i return string($x)"), "a b c");
+    /* Range + predicate: the members that survive; assert count and
+     * membership (the 1.0-frozen result_string prints one node). */
+    LeptrisXPathResult r = leptris_xpath_eval(
+        doc, nullptr, "(1 to 5)[. mod 2 = 1]");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 3u);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
 TEST(XPathSubtreeIndex, AbsolutePositionPredicatePerParent) {
     const char xml[] =
         "<catalog><item id='a1'/><item id='a2'/>"

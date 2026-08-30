@@ -1353,6 +1353,16 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
         case XPATH_AST_OPERATOR: {
             XPathOperatorType op = (XPathOperatorType)node->number_value;
 
+            /* XSLT 3.0 expression extensions (XPath 2.0+ forms):
+             * lazy semantics need the AST interpreter — fall back
+             * wholesale. Correctness first; VM opcodes later. */
+            if (op == XPATH_OP_IF || op == XPATH_OP_FOR ||
+                op == XPATH_OP_RANGE) {
+                emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
+                            add_const_ast(st, node));
+                break;
+            }
+
             /* Comparison operators with a nodeset operand require
              * XPath's any-pair semantics, which the inline VM handler
              * does not implement. Fall back to evaluate_expr so the

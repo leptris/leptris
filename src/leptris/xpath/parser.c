@@ -33,6 +33,8 @@ static XPathASTNode* parse_union_expr(XPathParser* parser);
 static XPathASTNode* parse_path_expr(XPathParser* parser);
 static XPathASTNode* parse_filter_expr(XPathParser* parser);
 static XPathASTNode* parse_primary_expr(XPathParser* parser);
+static XPathASTNode* parse_if_expr(XPathParser* parser);
+static XPathASTNode* parse_for_expr(XPathParser* parser);
 static XPathASTNode* parse_location_path(XPathParser* parser);
 static XPathASTNode* parse_relative_location_path(XPathParser* parser);
 static XPathASTNode* parse_step(XPathParser* parser);
@@ -320,8 +322,28 @@ static XPathASTNode* create_operator_node(XPathOperatorType op_type,
  * Main Parser Entry Point
  * ============================================================================ */
 
+static int ncname_is(XPathToken* t, const char* kw, size_t kwlen) {
+    return t && t->type == TOK_NCNAME && t->value_len == kwlen &&
+           memcmp(t->value, kw, kwlen) == 0;
+}
+
 static XPathASTNode* parse_expr(XPathParser* parser) {
-    return parse_or_expr(parser);
+    XPathASTNode* e = parse_or_expr(parser);
+    if (!e) return NULL;
+    /* XPath 2.0+ range `A to B` (XSLT 3.0): `to` between two
+     * expressions. Value-matched so name tests stay intact. */
+    if (ncname_is(current_token(parser), "to", 2)) {
+        advance_token(parser);
+        XPathASTNode* hi = parse_or_expr(parser);
+        if (!hi) { ast_node_free(e); return NULL; }
+        XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+        if (!node) { ast_node_free(e); ast_node_free(hi); return NULL; }
+        node->number_value = (double)XPATH_OP_RANGE;
+        ast_node_add_child(node, e);
+        ast_node_add_child(node, hi);
+        return node;
+    }
+    return e;
 }
 
 XPathASTNode* xpath_parse(XPathParser* parser) {
@@ -616,8 +638,17 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
     if (current_token_is(parser, TOK_NCNAME) || current_token_is(parser, TOK_QNAME)) {
         XPathToken* next = peek_token(parser, 1);
 
+        /* `for $v ...` (XSLT 3.0) — fall through to the primary's
+         * for-hook before the location-path dispatch eats `for` as
+         * a name test. */
+        if (current_token(parser)->type == TOK_NCNAME &&
+            current_token(parser)->value_len == 3 &&
+            memcmp(current_token(parser)->value, "for", 3) == 0 &&
+            next && next->type == TOK_DOLLAR) {
+            /* Fall through to filter expression */
+        }
         /* If followed by '(', it's a function call - fall through to filter expression */
-        if (next && next->type == TOK_LPAREN) {
+        else if (next && next->type == TOK_LPAREN) {
             /* Fall through to filter expression */
         }
         /* Otherwise (including operators, path operators, or EOF/end markers), it's a location path */
@@ -699,6 +730,148 @@ static XPathASTNode* parse_filter_expr(XPathParser* parser) {
 }
 
 /* Parse primary expressions: NUMBER | STRING | FunctionCall | '(' Expr ')' */
+/* XPath 2.0+ conditional (XSLT 3.0 expressions):
+ * `if (cond) then expr else expr`. `then`/`else` are matched by
+ * token VALUE at the expected position — they stay NCNames
+ * everywhere else (name tests, paths) keep parsing. */
+static XPathASTNode* parse_if_expr(XPathParser* parser) {
+    /* current token is `if`; the ( follows. */
+    advance_token(parser);   /* consume `if` */
+    XPathToken* lp = current_token(parser);
+    if (!lp || lp->type != TOK_LPAREN) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected '(' after if");
+        return NULL;
+    }
+    advance_token(parser);
+
+    XPathASTNode* cond = parse_expr(parser);
+    if (!cond) return NULL;
+
+    /* The parens wrap ONLY the condition:
+     * if ( cond ) then expr else expr. */
+    XPathToken* rp0 = current_token(parser);
+    if (!rp0 || rp0->type != TOK_RPAREN) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected ')' after if condition");
+        ast_node_free(cond);
+        return NULL;
+    }
+    advance_token(parser);
+
+    XPathToken* t = current_token(parser);
+    if (!t || t->type != TOK_NCNAME || t->value_len != 4 ||
+        memcmp(t->value, "then", 4) != 0) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected 'then' in if expression");
+        ast_node_free(cond);
+        return NULL;
+    }
+    advance_token(parser);
+
+    XPathASTNode* then_e = parse_expr(parser);
+    if (!then_e) { ast_node_free(cond); return NULL; }
+
+    t = current_token(parser);
+    if (!t || t->type != TOK_NCNAME || t->value_len != 4 ||
+        memcmp(t->value, "else", 4) != 0) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected 'else' in if expression");
+        ast_node_free(cond);
+        ast_node_free(then_e);
+        return NULL;
+    }
+    advance_token(parser);
+
+    XPathASTNode* else_e = parse_expr(parser);
+    if (!else_e) {
+        ast_node_free(cond);
+        ast_node_free(then_e);
+        return NULL;
+    }
+
+    XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+    if (!node) {
+        ast_node_free(cond);
+        ast_node_free(then_e);
+        ast_node_free(else_e);
+        return NULL;
+    }
+    node->number_value = (double)XPATH_OP_IF;
+    ast_node_add_child(node, cond);
+    ast_node_add_child(node, then_e);
+    ast_node_add_child(node, else_e);
+    return node;
+}
+
+/* XPath 2.0+ `for $v1 in E1, $v2 in E2 ... return R` (XSLT 3.0).
+ * Single-variable form first; the operator node carries [0]=the
+ * binding (an XPATH_AST_ARGUMENT-shaped pair), [1]=return expr. */
+static XPathASTNode* parse_for_expr(XPathParser* parser) {
+    advance_token(parser);   /* consume `for` */
+
+    XPathToken* d = current_token(parser);
+    if (!d || d->type != TOK_DOLLAR) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected '$' variable after for");
+        return NULL;
+    }
+    advance_token(parser);
+    XPathToken* vt = current_token(parser);
+    if (!vt || (vt->type != TOK_NCNAME && vt->type != TOK_QNAME)) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected variable name in for");
+        return NULL;
+    }
+    char* var_name = token_to_string(vt);
+    if (!var_name) return NULL;
+    advance_token(parser);
+
+    XPathToken* it = current_token(parser);
+    if (!it || it->type != TOK_NCNAME || it->value_len != 2 ||
+        memcmp(it->value, "in", 2) != 0) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected 'in' in for expression");
+        free(var_name);
+        return NULL;
+    }
+    advance_token(parser);
+
+    XPathASTNode* domain = parse_expr(parser);
+    if (!domain) { free(var_name); return NULL; }
+
+    XPathToken* rt = current_token(parser);
+    if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
+        memcmp(rt->value, "return", 6) != 0) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected 'return' in for expression");
+        ast_node_free(domain);
+        free(var_name);
+        return NULL;
+    }
+    advance_token(parser);
+
+    XPathASTNode* ret = parse_expr(parser);
+    if (!ret) {
+        ast_node_free(domain);
+        free(var_name);
+        return NULL;
+    }
+
+    XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+    if (!node) {
+        ast_node_free(domain);
+        ast_node_free(ret);
+        free(var_name);
+        return NULL;
+    }
+    node->number_value = (double)XPATH_OP_FOR;
+    node->value = var_name;   /* the loop variable name */
+    ast_node_add_child(node, domain);
+    ast_node_add_child(node, ret);
+    return node;
+}
+
 static XPathASTNode* parse_primary_expr(XPathParser* parser) {
     XPathToken* tok = current_token(parser);
     if (!tok) {
@@ -790,12 +963,29 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         }
     }
 
+    /* `for $v in EXPR return EXPR` — token after `for` is `$`;
+     * value-matched keyword keeps name tests intact. */
+    if (tok->type == TOK_NCNAME && tok->value_len == 3 &&
+        memcmp(tok->value, "for", 3) == 0) {
+        XPathToken* fn = peek_token(parser, 1);
+        if (fn && fn->type == TOK_DOLLAR)
+            return parse_for_expr(parser);
+    }
+
     /* Function call with NCName/QName */
     if (tok->type == TOK_NCNAME || tok->type == TOK_QNAME) {
         XPathToken name_token = *tok;
         XPathToken* next = peek_token(parser, 1);
 
         if (next && next->type == TOK_LPAREN) {
+            /* XPath 2.0+ `if (cond) then A else B`: `if` followed by
+             * `(` is the conditional form — XSLT 3.0 expressions.
+             * `then`/`else` are matched by VALUE at the expected
+             * position so NCName name tests keep working. */
+            if (tok->type == TOK_NCNAME && tok->value_len == 2 &&
+                memcmp(tok->value, "if", 2) == 0) {
+                return parse_if_expr(parser);
+            }
             advance_token(parser);
             return parse_function_call(parser, name_token.value, name_token.value_len);
         }

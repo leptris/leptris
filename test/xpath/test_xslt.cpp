@@ -2335,6 +2335,19 @@ TEST(XsltImport, NoNsElementUnderDefaultNsAncestorResets) {
 #endif
 }
 
+/* XSLT 3.0 baseline survey: what the current engine does with the
+ * 3.0 feature shapes (if/then/else, for-return, sequences). Pinned
+ * BEFORE the 3.0 work so each feature landing shows here. */
+TEST(Xslt30, IfThenElse) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='if (count(//i) &gt; 2) then "
+        "\"many\" else \"few\"'/>]"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "[many]");
+}
+
 /* Minimal bug-130 shape: xml method, default-ns root, no-ns child
  * via copy-of — the child must serialize with xmlns="". */
 TEST(XsltImport, NoNsChildUnderDefaultNsXmlMethod) {
