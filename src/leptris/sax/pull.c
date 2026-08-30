@@ -39,12 +39,16 @@ struct leptris_pull_parser {
     pull_event* queue;
     size_t head, tail, cap;   /* ring buffer; head==tail = empty */
     pull_event current;       /* the event handed out by _next */
-    /* Staged batch (#589): drained events live here — strings in one
-     * arena, valid until the next batch/_next/free call. current may
-     * point into the arena (current_staged=1) — queue_reset_event
-     * must not free arena pointers. */
-    char* stage_arena;
-    size_t stage_arena_len, stage_arena_cap;
+    /* Staged batch (#589): drained events live here — strings in a
+     * BLOCK CHAIN, valid until the next batch/_next/free call.
+     * current may point into the chain (current_staged=1) —
+     * queue_reset_event must not free arena pointers.
+     * #648: the chain NEVER moves — the single-buffer arena realloc
+     * dangled every previously staged string (earlier records'
+     * names, the attr mirror) the moment one long attribute value
+     * pushed the total past the block boundary. */
+    struct stage_block* stage_head;
+    struct stage_block* stage_tail;
     int current_staged;
     char** stage_last_attrs;      /* most recent START's mirror */
     size_t stage_last_attr_count;
@@ -321,34 +325,53 @@ LEPTRIS_API const char* leptris_pull_attr_value(LeptrisPullParser pull,
 /* ---- Batched delivery (#589) ---- */
 
 
+typedef struct stage_block {
+    struct stage_block* next;
+    size_t cap, len;
+    char bytes[];
+} stage_block;
+
+#define STAGE_BLOCK_MIN 256
+
 static char* stage_put(struct leptris_pull_parser* p, const char* s,
                        size_t len) {
-    if (p->stage_arena_len + len + 1 > p->stage_arena_cap) {
-        size_t want = p->stage_arena_cap ? p->stage_arena_cap * 2 : 256;
-        while (want < p->stage_arena_len + len + 1) want *= 2;
-        char* grown = (char*)realloc(p->stage_arena, want);
-        if (!grown) return NULL;
-        p->stage_arena = grown;
-        p->stage_arena_cap = want;
+    /* Fit in the tail block, else append a new one — a returned
+     * pointer never moves (#648). Oversized strings get their own
+     * block. */
+    stage_block* b = p->stage_tail;
+    if (!b || b->len + len + 1 > b->cap) {
+        size_t cap = STAGE_BLOCK_MIN;
+        while (cap < len + 1) cap *= 2;
+        stage_block* nb = (stage_block*)malloc(sizeof(*nb) + cap);
+        if (!nb) return NULL;
+        nb->next = NULL;
+        nb->cap = cap;
+        nb->len = 0;
+        if (p->stage_tail) p->stage_tail->next = nb;
+        else p->stage_head = nb;
+        p->stage_tail = nb;
+        b = nb;
     }
+    char* at = b->bytes + b->len;
     if (!s || len == 0) {
-        p->stage_arena[p->stage_arena_len] = '\0';
-        return p->stage_arena + p->stage_arena_len++;
+        at[0] = '\0';
+        b->len += 1;
+    } else {
+        memcpy(at, s, len);
+        at[len] = '\0';
+        b->len += len + 1;
     }
-    memcpy(p->stage_arena + p->stage_arena_len, s, len);
-    char* at = p->stage_arena + p->stage_arena_len;
-    p->stage_arena_len += len;
-    p->stage_arena[p->stage_arena_len++] = '\0';
     return at;
 }
 
 static void stage_reset(struct leptris_pull_parser* p) {
     if (p->current_staged) {
-        /* current points into the arena — clear without freeing. */
+        /* current points into the chain — clear without freeing. */
         memset(&p->current, 0, sizeof(p->current));
         p->current_staged = 0;
     }
-    p->stage_arena_len = 0;
+    /* Reuse the blocks across batches — cheap reset, no churn. */
+    for (stage_block* b = p->stage_head; b; b = b->next) b->len = 0;
 }
 
 LEPTRIS_API size_t leptris_pull_next_batch(LeptrisPullParser pull,
@@ -450,7 +473,11 @@ LEPTRIS_API void leptris_pull_free(LeptrisPullParser pull) {
     if (pull->file) fclose(pull->file);
     if (pull->sax) leptris_sax_parser_free(pull->sax);
     if (!pull->current_staged) queue_reset_event(&pull->current);
-    free(pull->stage_arena);
+    while (pull->stage_head) {
+        stage_block* nb = pull->stage_head->next;
+        free(pull->stage_head);
+        pull->stage_head = nb;
+    }
     free(pull->mirror_attrs);
     for (size_t i = pull->head; i != pull->tail; i = (i + 1) % pull->cap)
         queue_reset_event(&pull->queue[i]);

@@ -23,6 +23,42 @@ static const char kDoc[] =
     "<?xml version=\"1.0\"?><lib><book id='1' lang='en'>A<title>T</title>"
     "</book><book id='2'>B</book></lib>";
 
+/* #648: one long attribute value pushes the staged byte total past
+ * the first arena block — every previously staged string (earlier
+ * records' names, the attr mirror) must stay valid. A single-buffer
+ * arena realloc dangled them all. */
+TEST(PullBatch, LongAttrValueKeepsEarlierStagedStringsValid) {
+    std::string val(300, 'v');
+    std::string xml = "<r xmlns=\"urn:i\"><a id=\"1\"><b id=\"2\">"
+                      "<image src=\"" + val + "\" a=\"1\"/>"
+                      "</b></a></r>";
+    LeptrisPullParser p = leptris_pull_new(xml.c_str(), xml.size());
+    ASSERT_NE(p, nullptr);
+    std::vector<LeptrisPullEvent> evs(64);
+    size_t n = leptris_pull_next_batch(p, evs.data(), evs.size());
+    /* r, a, b, image, /image, /b, /a, /r, END_DOCUMENT — plus the
+     * xmlns namespace events the pull stream reports (start_ns r,
+     * end_ns r): 11. */
+    ASSERT_EQ(n, 11u);
+    /* ns(r), r, a, b, image, /image, /b, /a, /r, end-ns, END_DOC. */
+    EXPECT_EQ(evs[1].type, LEPTRIS_PULL_START_ELEMENT);
+    EXPECT_STREQ(evs[1].name, "r");
+    EXPECT_STREQ(evs[2].name, "a");
+    EXPECT_STREQ(evs[3].name, "b");
+    EXPECT_EQ(evs[4].type, LEPTRIS_PULL_START_ELEMENT);
+    EXPECT_STREQ(evs[4].name, "image");
+    EXPECT_EQ(evs[5].type, LEPTRIS_PULL_END_ELEMENT);
+    EXPECT_STREQ(evs[5].name, "image");
+    EXPECT_EQ(evs[10].type, LEPTRIS_PULL_END_DOCUMENT);
+    /* Attr mirror of the last START (image): long value intact. */
+    ASSERT_EQ(leptris_pull_attr_count(p), 2u);
+    EXPECT_STREQ(leptris_pull_attr_name(p, 0), "src");
+    ASSERT_EQ(strlen(leptris_pull_attr_value(p, 0)), 300u);
+    EXPECT_STREQ(leptris_pull_attr_name(p, 1), "a");
+    EXPECT_STREQ(leptris_pull_attr_value(p, 1), "1");
+    leptris_pull_free(p);
+}
+
 TEST(PullBatch, DrainsWholeDocumentInOneCall) {
     LeptrisPullParser p = leptris_pull_new(kDoc, strlen(kDoc));
     ASSERT_NE(p, nullptr);
