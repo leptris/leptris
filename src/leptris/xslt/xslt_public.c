@@ -250,6 +250,12 @@ static void inject_html_meta(LeptrisDocument out, const char* enc) {
     }
     LeptrisElement m = leptris_element_create(out, "meta");
     if (!m) return;
+    /* libxslt's injected meta rides the html tree's namespace — a
+     * namespace-less element under a default-namespaced root would
+     * serialize with a spurious xmlns="" (bug-130). */
+    const char* root_ns = leptris_element_get_namespace_uri(root);
+    if (root_ns && *root_ns)
+        leptris_element_set_namespace_uri(m, root_ns);
     if (leptris_element_set_attribute(m, "charset", enc) != LEPTRIS_OK) {
         /* The pool owns m; a failed attr leaves it detached and
          * document-free — safe to leak-free via the doc. */
