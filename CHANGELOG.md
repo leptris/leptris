@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [1.9.20] - 2026-08-30
+
+### Added
+
+- leptris_node_visit — wrap-free subtree visitation (issue #645a) (dom)
+
+### Fixed
+
+- duplicate attributes report a recoverable error event (issue #647) (sax)
+
+### Performance
+
+- fused child::NAME[k] + specialized expanded //name[pred] (issues #645b, #624, #610) (xpath)
+
+
+
 ## [1.9.19] - 2026-08-30
 
 The libxslt general suite is **205/205** — the open-worklist is empty.
