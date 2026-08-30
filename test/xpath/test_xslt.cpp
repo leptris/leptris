@@ -2224,6 +2224,45 @@ TEST(XsltNumberFormat, MatchesLibxml2) {
         "[1.23456789012346e+15][0.00001][1e-06][0.3][-3.5][-1]");
 }
 
+/* bug-166: Muenchian group output sorts packagereqs by
+ * type-position (count of preceding siblings of the type-matching
+ * child in an RTF order table) then by uppercased name. Distilled:
+ * two-level xsl:sort with count(key)/current() keys. */
+TEST(XsltSort, TypeOrderThenNameKeys) {
+    /* run() carries no exsl declaration — build the sheet. */
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+        " xmlns:exsl='http://exslt.org/common' version='1.0'>"
+        "<xsl:variable name='order'>"
+        "<mandatory/><default/><optional/>"
+        "</xsl:variable>"
+        "<xsl:variable name='lc'>abcdefghijklmnopqrstuvwxyz</xsl:variable>"
+        "<xsl:variable name='uc'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</xsl:variable>"
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//req'>"
+        "<xsl:sort select='count(exsl:node-set($order)/*"
+        "[name() = current()/@type]/preceding-sibling::*)'"
+        " data-type='number'/>"
+        "<xsl:sort select='translate(text(),$lc,$uc)'/>"
+        "[<xsl:value-of select='.'/>]"
+        "</xsl:for-each>"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    const char* xml =
+        "<r><req type='default'>pirut</req>"
+        "<req type='optional'>cacti</req>"
+        "<req type='default'>authconfig</req>"
+        "<req type='mandatory'>core</req></r>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(body(std::string(out)), "[core][authconfig][pirut][cacti]");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
 /* bug-90: cdata-section-elements wraps text children of listed
  * elements UNCONDITIONALLY (pears' &-free text wrapped like apples'),
  * and the doc-level layout comes from the built-in text rule's copied

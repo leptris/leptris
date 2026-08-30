@@ -283,6 +283,27 @@ static XPathNodeSet* axis_self(XPathContext* ctx, LeptrisElement node,
 }
 
 /* following-sibling:: axis */
+/* Parentless elements still have siblings: a top-level child of a
+ * document (result-fragment roots chained as the root's siblings;
+ * #580 doc-level nodes on the doc_children chain) derives its
+ * sibling chain from its OWN document. Returns the chain head when
+ * node is on it, NULL otherwise. */
+static LeptrisNodeRef top_level_chain_head(LeptrisNodeRef node) {
+    if (leptris_node_get_type(node) != LEPTRIS_NODE_TYPE_ELEMENT)
+        return NULL;
+    struct leptris_document* d =
+        (struct leptris_document*)leptris_element_get_document(
+            (LeptrisElement)node);
+    if (!d) return NULL;
+    LeptrisNodeRef head = (LeptrisNodeRef)d->doc_children_head;
+    if (!head) head = (LeptrisNodeRef)d->new_dom_root;
+    if (!head) head = (LeptrisNodeRef)d->root;
+    if (!head) return NULL;
+    for (LeptrisNodeRef c = head; c; c = leptris_node_get_next_sibling(c))
+        if (c == node) return head;
+    return NULL;
+}
+
 static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
                                            LeptrisElement node,
                                            XPathASTNode* test) {
@@ -293,12 +314,17 @@ static XPathNodeSet* axis_following_sibling(XPathContext* ctx,
      * bug-133). */
     LeptrisElement parent =
         (LeptrisElement)leptris_node_parent((LeptrisNodeRef)node);
-    if (!parent) return result;
+    LeptrisNodeRef start;
+    if (parent) {
+        start = leptris_node_first_child(leptris_element_as_node(parent));
+    } else {
+        start = top_level_chain_head((LeptrisNodeRef)node);
+    }
+    if (!start) return result;
 
     int found = 0;
 
-    LeptrisNodeRef sibling =
-        leptris_node_first_child(leptris_element_as_node(parent));
+    LeptrisNodeRef sibling = start;
     while (sibling) {
         if (sibling == (LeptrisNodeRef)node) {
             found = 1;
@@ -326,10 +352,15 @@ static XPathNodeSet* axis_preceding_sibling(XPathContext* ctx,
      * accessors cannot see. */
     LeptrisElement parent =
         (LeptrisElement)leptris_node_parent((LeptrisNodeRef)node);
-    if (!parent) return result;
+    LeptrisNodeRef start;
+    if (parent) {
+        start = leptris_node_first_child(leptris_element_as_node(parent));
+    } else {
+        start = top_level_chain_head((LeptrisNodeRef)node);
+    }
+    if (!start) return result;
 
-    LeptrisNodeRef sibling =
-        leptris_node_first_child(leptris_element_as_node(parent));
+    LeptrisNodeRef sibling = start;
     while (sibling && sibling != (LeptrisNodeRef)node) {
         if (matches_node_test(ctx, (LeptrisNode*)sibling, test)) {
             xpath_nodeset_add(result, sibling);
