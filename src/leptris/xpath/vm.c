@@ -547,6 +547,62 @@ struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
     return r;
 }
 
+/* Fused child::NAME[k] (issue #645): the k-th child matching NAME
+ * of EACH input context node. A forward axis's step position is
+ * per-context by definition — count matching children and stop at
+ * k, no intermediate nodeset, no predicate frame. Document-node
+ * inputs walk the doc child chain like vm_apply_axis_child. */
+static struct leptris_xpath_result* vm_apply_axis_child_name_pos(
+        XPathContext* ctx, XPathVM* vm, const char* name, uint16_t pos) {
+    XPathNodeSet* input = vm_detach_input_nodeset(vm);
+    if (!input) return NULL;
+
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { xpath_nodeset_free(input); return NULL; }
+
+    for (size_t i = 0; i < input->count; i++) {
+        LeptrisNode* nd = input->nodes[i];
+        if (nd && nd->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+            struct leptris_document* d = ((LeptrisDocumentNode*)nd)->doc;
+            LeptrisNode* start = (LeptrisNode*)d->doc_children_head;
+            if (!start) {
+                start = (LeptrisNode*)d->new_dom_root;
+                if (!start) start = (LeptrisNode*)d->root;
+            }
+            unsigned count = 0;
+            for (LeptrisNode* c = start; c;
+                 c = leptris_node_get_next_sibling(c)) {
+                if (c->type == LEPTRIS_NODE_TYPE_ELEMENT &&
+                    vm_unprefixed_name_matches(ctx, (LeptrisElement)c,
+                                               name) &&
+                    ++count == pos) {
+                    xpath_nodeset_add_fast(out, c);
+                    break;
+                }
+            }
+            continue;
+        }
+        if (!node_is_element(nd)) continue;
+        LeptrisElement elem = (LeptrisElement)nd;
+        LeptrisElement child = leptris_element_get_first_child(elem);
+        unsigned count = 0;
+        while (child) {
+            if (vm_unprefixed_name_matches(ctx, child, name) &&
+                ++count == pos) {
+                xpath_nodeset_add_fast(out, child);
+                break;
+            }
+            child = leptris_element_get_next_sibling(child);
+        }
+    }
+
+    xpath_nodeset_free(input);
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
 struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM* vm,
                                                      const char* name, int wild) {
     XPathNodeSet* input = vm_detach_input_nodeset(vm);
@@ -815,6 +871,17 @@ static void descendant_walk(XPathContext* ctx, XPathNodeSet* out, LeptrisElement
             cur = leptris_element_get_parent(cur);
         }
         if (cur == elem) break;  /* exhausted subtree */
+    }
+}
+
+/* Pre-order all-nodes walk: n itself, then (for elements) each
+ * subtree. Matches descendant_walk's recursion risk profile. */
+static void all_nodes_preorder(XPathNodeSet* out, LeptrisNode* n) {
+    xpath_nodeset_add_fast(out, n);
+    if (n->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+        for (LeptrisNode* c = leptris_elem_first_child((LeptrisElement)n); c;
+             c = leptris_node_get_next_sibling(c))
+            all_nodes_preorder(out, c);
     }
 }
 
@@ -1570,6 +1637,20 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                 break;
             }
 
+            case XPATH_BC_AXIS_CHILD_NAME_POS: {
+                uint16_t name_idx = read_u16(&pc);
+                uint16_t pos = read_u16(&pc);
+                const char* name =
+                    (name_idx < bc->const_count &&
+                     bc->constants[name_idx].type == XPATH_CONST_STRING)
+                        ? bc->constants[name_idx].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_axis_child_name_pos(ctx, &vm, name, pos);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
             case XPATH_BC_AXIS_ATTRIBUTE_NAME: {
                 uint16_t idx = read_u16(&pc);
                 const char* name = (idx < bc->const_count &&
@@ -2246,6 +2327,67 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                 struct leptris_xpath_result* r =
                     vm_apply_absolute(ctx, NULL, 1, 2);
                 if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_ELEMENTS_AND_DOC: {
+                /* Doc node + every element (root first) — the exact
+                 * context set for //NAME[...] (#645). */
+                struct leptris_xpath_result* els =
+                    vm_apply_absolute(ctx, NULL, 1, 2);
+                if (!els || !els->value.nodeset_value) {
+                    if (els) leptris_xpath_result_free(els);
+                    vm.error = 1;
+                    break;
+                }
+                XPathNodeSet* src = els->value.nodeset_value;
+                XPathNodeSet* out = xpath_nodeset_new_with_capacity(
+                    src->count + 1);
+                if (!out) {
+                    leptris_xpath_result_free(els);
+                    vm.error = 1;
+                    break;
+                }
+                LeptrisNodeRef dn = (LeptrisNodeRef)
+                    leptris_document_get_node(ctx->document);
+                if (dn) xpath_nodeset_add_fast(out, (LeptrisNode*)dn);
+                for (size_t i = 0; i < src->count; i++)
+                    xpath_nodeset_add_fast(out, src->nodes[i]);
+                leptris_xpath_result_free(els);
+                struct leptris_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(out); vm.error = 1; break; }
+                r->value.nodeset_value = out;
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_DOS_ALL_NODES: {
+                /* Exact /descendant-or-self::node(): the doc node,
+                 * then every node in document order (#645). */
+                XPathNodeSet* out = xpath_nodeset_new();
+                if (!out) { vm.error = 1; break; }
+                LeptrisNodeRef dn = (LeptrisNodeRef)
+                    leptris_document_get_node(ctx->document);
+                if (dn) {
+                    xpath_nodeset_add_fast(out, (LeptrisNode*)dn);
+                    /* Doc-node children = the document child chain
+                     * (#580), root included. */
+                    struct leptris_document* d = ctx->document;
+                    LeptrisNode* start = (LeptrisNode*)d->doc_children_head;
+                    if (!start) start = (LeptrisNode*)d->new_dom_root;
+                    for (LeptrisNode* c = start; c;
+                         c = leptris_node_get_next_sibling(c))
+                        all_nodes_preorder(out, c);
+                } else if (ctx->document->new_dom_root) {
+                    all_nodes_preorder(
+                        out, (LeptrisNode*)ctx->document->new_dom_root);
+                }
+                struct leptris_xpath_result* r =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (!r) { xpath_nodeset_free(out); vm.error = 1; break; }
+                r->value.nodeset_value = out;
                 vm_push(&vm, r);
                 break;
             }

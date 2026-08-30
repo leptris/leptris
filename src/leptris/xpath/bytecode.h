@@ -51,6 +51,25 @@ typedef enum {
      * matches_node_test. */
     XPATH_BC_AXIS_CHILD_NAME,       /* u16 operand: const-pool string */
     XPATH_BC_AXIS_CHILD_WILD,       /* no operand */
+    /* Fused per-context positional step (issue #645):
+     * child::NAME[k] with a literal k. Two u16 operands: name
+     * const-pool index, 1-based position. The k-th matching child
+     * of EACH input context node — a forward axis makes the
+     * position per-context by definition, so the VM counts and
+     * stops with no intermediate nodeset. */
+    XPATH_BC_AXIS_CHILD_NAME_POS,   /* u16 name idx + u16 position */
+    /* Exact `descendant-or-self::node()` from the document — the doc
+     * node plus EVERY node in document order (elements, text, CDATA,
+     * comments, PIs). The context set for expanded `//step[pred]`
+     * forms whose predicate kept the absolute fusion off (#645):
+     * text/comment/doc contexts can matter to generic steps. */
+    XPATH_BC_ABSOLUTE_DOS_ALL_NODES, /* no operand */
+    /* The document node plus every element (root first) — the
+     * exact context set for `//NAME[...]`: element contexts plus the
+     * document context (whose child::NAME selects the root when it
+     * is named NAME). Text/comment contexts cannot match a NAME
+     * step. Cheaper than the all-nodes expansion. */
+    XPATH_BC_ABSOLUTE_ELEMENTS_AND_DOC, /* no operand */
     XPATH_BC_AXIS_ATTRIBUTE_NAME,   /* u16 operand: const-pool string */
     XPATH_BC_AXIS_ATTRIBUTE_WILD,   /* no operand */
     XPATH_BC_AXIS_SELF_NAME,        /* u16 operand: const-pool string */

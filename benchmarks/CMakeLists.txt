@@ -129,7 +129,10 @@ if(LIBXML2_AVAILABLE)
         "bench_xpath_axes_leptris|xpath/bench_axes.c"
         "bench_xpath_axes_libxml2|xpath/bench_axes_libxml2.c"
         "bench_xpath_functions_leptris|xpath/bench_functions.c"
-        "bench_xpath_functions_libxml2|xpath/bench_functions_libxml2.c")
+        "bench_xpath_functions_libxml2|xpath/bench_functions_libxml2.c"
+        "bench_scalar_eval|xpath/bench_scalar_eval.c"
+        "bench_scalar_eval_libxml2|xpath/bench_scalar_eval_libxml2.c"
+        "bench_xslt_transform|xpath/bench_xslt_transform.c")
     foreach(pair ${_xpath_pairs})
         string(REPLACE "|" ";" kv "${pair}")
         list(GET kv 0 tgt)

@@ -535,6 +535,33 @@ static int try_compile_specialized_axis(CompilerState* st, XPathASTNode* step) {
      * matches_node_test does. */
     if (has_name && !test->value) return 0;
 
+    /* Fused per-context positional step (issue #645):
+     * child::NAME[k] with a literal k. The step's position on a
+     * forward axis is per input context BY DEFINITION, so the VM
+     * counts matching children and stops at k — no intermediate
+     * nodeset, no predicate frame. Position predicates on other
+     * axis shapes still fall back below. */
+    if (step->axis_id == XPATH_AXIS_CHILD && has_name && !test->prefix &&
+        step->child_count == 2) {
+        const char *fa, *fv;
+        long fp;
+        if (classify_predicate(step->children[1], &fa, &fv, &fp, NULL) ==
+                PRED_KIND_POSITION &&
+            fp >= 1 && fp <= 0xFFFF) {
+            uint16_t name_idx = add_const_string(st, test->value);
+            uint16_t pos = (uint16_t)fp;
+            if (reserve_code(st, 5) == 0) {
+                st->bc->code[st->bc->code_len++] =
+                    (unsigned char)XPATH_BC_AXIS_CHILD_NAME_POS;
+                st->bc->code[st->bc->code_len++] = (name_idx >> 8) & 0xFF;
+                st->bc->code[st->bc->code_len++] = name_idx & 0xFF;
+                st->bc->code[st->bc->code_len++] = (pos >> 8) & 0xFF;
+                st->bc->code[st->bc->code_len++] = pos & 0xFF;
+            }
+            return 1;
+        }
+    }
+
     /* Predicates: child_count==1 means no predicates. >1 means
      * there are predicates; check each is simple.
      *
@@ -1179,6 +1206,64 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                     }
                 }
             }
+        }
+    }
+
+    /* `//step[pred]` whose predicate kept the absolute fusion off
+     * (position predicates are per-parent, #645): compile the
+     * EXPANDED form with specialized opcodes — all elements as
+     * contexts, then the per-context specialized child step —
+     * instead of wholesale BC_FALLBACK_EVAL (the interpreter route
+     * that made //name[k] the slowest scalar shape). Text/comment
+     * contexts cannot yield child::NAME matches, and the doc-node
+     * context's contribution (the root element when named NAME) is
+     * covered by including the root in the context set. */
+    if (first_step && first_step->type == XPATH_AST_STEP &&
+        first_step->axis_id == XPATH_AXIS_DESCENDANT_OR_SELF &&
+        first_step->child_count == 1) {
+        XPathASTNode* dstest = first_step->children[0];
+        int ds_ok2 = (dstest &&
+                      (dstest->type == XPATH_AST_NODE_TEST_ALL ||
+                       (dstest->type == XPATH_AST_NODE_TEST_TYPE &&
+                        dstest->value &&
+                        strcmp(dstest->value, "node") == 0)));
+        /* `//*` parses as a BARE descendant-or-self::* step (no
+         * second child step): all elements including the root —
+         * the existing fused opcode serves it exactly. */
+        if (ds_ok2 && dstest->type == XPATH_AST_NODE_TEST_ALL &&
+            !second_step && rest_count == 0) {
+            emit_op(st, XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD);
+            return;
+        }
+        if (ds_ok2 && second_step && second_step->type == XPATH_AST_STEP &&
+            second_step->child_count >= 1) {
+            /* Context set: a NAME-tested child step can only match
+             * from element or document contexts, and the single
+             * document context's contribution (the root element)
+             * is covered by including the root — so all ELEMENTS
+             * suffice (the cheaper set). Wild/type-tested steps
+             * (//node()[1], //text()[1]) need text/comment contexts
+             * too — the exact all-nodes expansion. */
+            XPathASTNode* ctest2 = second_step->children[0];
+            int name_tested =
+                (ctest2 && ctest2->type == XPATH_AST_NODE_TEST_NAME);
+            emit_op(st, name_tested
+                           ? XPATH_BC_ABSOLUTE_ELEMENTS_AND_DOC
+                           : XPATH_BC_ABSOLUTE_DOS_ALL_NODES);
+            if (!try_compile_specialized_axis(st, second_step)) {
+                emit_op_u16(st, XPATH_BC_AXIS_STEP,
+                            add_const_ast(st, second_step));
+            }
+            for (size_t i = 0; i < rest_count; i++) {
+                XPathASTNode* s = rest[i];
+                if (s && s->type == XPATH_AST_STEP) {
+                    if (!try_compile_specialized_axis(st, s)) {
+                        emit_op_u16(st, XPATH_BC_AXIS_STEP,
+                                    add_const_ast(st, s));
+                    }
+                }
+            }
+            return;
         }
     }
 

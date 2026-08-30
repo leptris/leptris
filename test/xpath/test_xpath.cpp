@@ -650,6 +650,48 @@ TEST(XPathSubtreeIndex, PredicatedChainedAcrossSections) {
     leptris_document_free(doc);
 }
 
+/* Absolute `//name[k]` (#645 fused VM path): the position is
+ * PER PARENT — one node per parent with k matching children — and
+ * a root element named NAME counts (it is the document's first
+ * NAME child). These pin the semantics the fused child::NAME[k]
+ * opcode must preserve. */
+TEST(XPathSubtreeIndex, AbsolutePositionPredicatePerParent) {
+    const char xml[] =
+        "<catalog><item id='a1'/><item id='a2'/>"
+        "<wrap><item id='b1'/><item id='b2'/></wrap>"
+        "</catalog>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//item[1]");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 2u);   /* a1 + b1 */
+    LeptrisXPathResult r2 = leptris_xpath_eval(doc, nullptr, "//item[2]");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r2), 2u);  /* a2 + b2 */
+    LeptrisXPathResult r3 = leptris_xpath_eval(doc, nullptr, "//item[3]");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r3), 0u);
+    leptris_xpath_result_free(r);
+    leptris_xpath_result_free(r2);
+    leptris_xpath_result_free(r3);
+    leptris_document_free(doc);
+}
+
+TEST(XPathSubtreeIndex, AbsolutePositionPredicateRootNamed) {
+    const char xml[] = "<item><item id='inner'/></item>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    /* The root IS the document's first item child; the inner item is
+     * the root's first item child — both are //item[1]. */
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//item[1]");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 2u);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
 TEST(XPathSubtreeIndex, PositionPredicateKeepsExpandedSemantics) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(kSubtreeAttr, std::strlen(kSubtreeAttr), &st);
