@@ -1,13 +1,16 @@
 ## [Unreleased]
 
-## [1.9.21] - 2026-08-30
+## [1.9.21] - 2026-08-31
 
 ### Fixed
 
-- pull-batch staging is a never-moving block chain (issue #648) (sax)
-
-
-
+- **#648**: `leptris_pull_next_batch` staged record strings into a
+  single reallocating arena — once a batch crossed the initial
+  256-byte block (one attribute value ~190 bytes in the reported
+  shape), the realloc dangled every previously staged pointer
+  (empty/garbage record names, unknown first type code). The
+  staging arena is now a never-moving BLOCK CHAIN (the #585
+  recorder's discipline); batches reset and reuse the blocks.
 ## [1.9.20] - 2026-08-30
 
 Closes every open upstream issue (#645, #610, #624, #647).
