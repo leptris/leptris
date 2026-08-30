@@ -709,10 +709,52 @@ static const char* apply_ns_alias(const XsltStylesheet* sheet,
 
 static int op_result_elem(XsltExec* ex, const XsltInstr* in,
                           LeptrisElement node) {
+    /* libxslt's own test extension element (bug-100): <test/> in
+     * http://xmlsoft.org/XSLT/ is registered by libxslt's engine —
+     * it never serializes; it emits its marker comment. */
+    if (in->ns_uri && strcmp(in->ns_uri, "http://xmlsoft.org/XSLT/") == 0) {
+        const char* nm = in->name ? in->name : "";
+        const char* loc = strchr(nm, ':');
+        loc = loc ? loc + 1 : nm;
+        if (strcmp(loc, "test") == 0) {
+            LeptrisNodeRef cm = leptris_comment_node_create(
+                ex->result, "libxslt:test element test worked");
+            if (cm) {
+                if (ex->pending_parent)
+                    leptris_element_append_child_internal(
+                        ex->pending_parent, (LeptrisNode*)cm);
+                else
+                    xslt_append_fragment_node(ex, cm);
+            }
+            return 0;
+        }
+    }
     LeptrisElement parent = ex->pending_parent;
     const char* out_name = apply_ns_alias(ex->sheet, in->name);
     LeptrisElement e = out_append_elem(ex, parent, out_name, in->ns_uri);
     if (!e) return -1;
+    /* libxslt namespace fixup: an unprefixed literal with NO
+     * namespace of its own, constructed under a result ancestor
+     * binding the default prefix non-empty, must UNBIND it — the
+     * nearest ancestor declaration decides (bug-130's
+     * imported-module <div> under a default-namespaced <html>). */
+    if (!strchr(out_name ? out_name : "", ':') &&
+        (!in->ns_uri || !in->ns_uri[0])) {
+        for (LeptrisElement a = leptris_node_parent((LeptrisNodeRef)e);
+             a; a = leptris_node_parent((LeptrisNodeRef)a)) {
+            int decided = 0;
+            for (struct leptris_namespace* ns = leptris_elem_namespaces(a);
+                 ns; ns = ns->next) {
+                if (!ns->prefix || !ns->prefix[0]) {
+                    if (ns->uri && ns->uri[0])
+                        leptris_element_add_namespace_definition(e, "", "");
+                    decided = 1;
+                    break;
+                }
+            }
+            if (decided) break;
+        }
+    }
     /* §7.1.1: copy in-scope namespace declarations. Skip any
      * binding already present on a RESULT ancestor (full chain,
      * not just the immediate parent — a literal-result-element

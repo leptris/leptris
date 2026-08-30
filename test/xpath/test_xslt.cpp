@@ -2,6 +2,7 @@
  * the stylesheet once, apply, compare the serialized result. */
 #include <gtest/gtest.h>
 extern "C" {
+#include <unistd.h>
 #include "leptris.h"
 }
 #include <cstring>
@@ -2261,6 +2262,96 @@ TEST(XsltSort, TypeOrderThenNameKeys) {
     leptris_free_string(out);
     leptris_document_free(d);
     leptris_xslt_free(x);
+}
+
+/* bug-100: libxslt's own test extension element — <test/> in the
+ * http://xmlsoft.org/XSLT/ namespace (an extension-element-prefix)
+ * executes instead of serializing: it emits its marker comment. */
+TEST(XsltExslt, LibxsltTestExtensionElement) {
+    const char* sheet =
+        "<?xml version='1.0'?>"
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " xmlns='http://xmlsoft.org/XSLT/'"
+        " extension-element-prefixes='#default' version='1.0'>"
+        "<xsl:template match='/'><test/></xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet, strlen(sheet));
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<doc/>", strlen("<doc/>"),
+                                             nullptr);
+    ASSERT_NE(d, nullptr);
+    char* out = leptris_xslt_apply_string(x, d);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(body(std::string(out)),
+              "<!--libxslt:test element test worked-->");
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
+/* bug-130: the LAST delta — a literal result element from an
+ * imported module (own namespace scope: no default ns) serialized
+ * inside a default-namespaced ancestor must reset the default with
+ * xmlns="" (libxml2 xmlsave rule). Runs the suite fixture with the
+ * suite dir as CWD so the xsl:import hrefs resolve. */
+TEST(XsltImport, NoNsElementUnderDefaultNsAncestorResets) {
+    std::string here = __FILE__;
+    std::string dir = here.substr(0, here.rfind("/xpath/")) +
+                      "/xslt/libxslt_suite_general";
+    FILE* fx = fopen((dir + "/bug-130.xsl").c_str(), "rb");
+    FILE* fm = fopen((dir + "/bug-130.xml").c_str(), "rb");
+    FILE* fo = fopen((dir + "/bug-130.out").c_str(), "rb");
+    ASSERT_TRUE(fx && fm && fo);
+    std::string x, m, w;
+    char b[8192];
+    size_t n;
+    while ((n = fread(b, 1, sizeof b, fx)) > 0) x.append(b, n);
+    while ((n = fread(b, 1, sizeof b, fm)) > 0) m.append(b, n);
+    while ((n = fread(b, 1, sizeof b, fo)) > 0) w.append(b, n);
+    fclose(fx); fclose(fm); fclose(fo);
+    if (w.size() && w.back() == '\n') w.pop_back();
+    char saved_cwd[4096];
+    ASSERT_NE(getcwd(saved_cwd, sizeof saved_cwd), nullptr);
+    ASSERT_EQ(chdir(dir.c_str()), 0);
+    LeptrisXslt s = leptris_xslt_parse(x.c_str(), x.size());
+    if (s) {
+        LeptrisDocument d = leptris_parse_string(m.c_str(), m.size(),
+                                                 nullptr);
+        ASSERT_NE(d, nullptr);
+        char* out = leptris_xslt_apply_string(s, d);
+        ASSERT_NE(out, nullptr);
+        EXPECT_EQ(std::string(out), w);
+        leptris_free_string(out);
+        leptris_document_free(d);
+        leptris_xslt_free(s);
+    }
+    ASSERT_EQ(chdir(saved_cwd), 0);
+    if (!s) FAIL() << "stylesheet failed to compile";
+}
+
+/* Minimal bug-130 shape: xml method, default-ns root, no-ns child
+ * via copy-of — the child must serialize with xmlns="". */
+TEST(XsltImport, NoNsChildUnderDefaultNsXmlMethod) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<html xmlns='urn:h'><body>"
+        "<xsl:copy-of select='/r/d'/>"
+        "</body></html></xsl:template>",
+        "<r><d>text</d></r>")),
+        "<html xmlns=\"urn:h\"><body><d xmlns=\"\">text</d></body></html>");
+}
+
+/* Same shape under method=html (bug-130's actual method); indent=no
+ * adds no final newline. */
+TEST(XsltImport, NoNsChildUnderDefaultNsHtmlMethod) {
+    EXPECT_EQ(body(run(
+        "<xsl:output method='html' indent='no'/>"
+        "<xsl:template match='/'>"
+        "<html xmlns='urn:h'><body>"
+        "<xsl:copy-of select='/r/d'/>"
+        "</body></html></xsl:template>",
+        "<r><d>text</d></r>")),
+        "<html xmlns=\"urn:h\"><body><d xmlns=\"\">text</d></body></html>");
 }
 
 /* bug-90: cdata-section-elements wraps text children of listed

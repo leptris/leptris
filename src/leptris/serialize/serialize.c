@@ -1271,6 +1271,43 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         }
         }
 
+        /* libxml2 xmlsave: an element in NO namespace whose nearest
+         * default-ns DECLARATION on the ancestor chain binds non-empty
+         * must reset it with xmlns="" or the element would inherit
+         * that namespace (bug-130's imported-module <div> under a
+         * default-namespaced <html>). Parsed documents resolve
+         * inherited namespaces onto the element, so only
+         * namespace-less result elements reach this. */
+        if (!epl) {
+            const char* ens = leptris_element_get_namespace_uri(e);
+            if (!ens || !ens[0]) {
+            int own_default = 0;
+            for (struct leptris_namespace* ns = leptris_elem_namespaces(e);
+                 ns; ns = ns->next)
+                if (!ns->prefix || !ns->prefix[0]) { own_default = 1; break; }
+            if (!own_default) {
+                int reset_needed = 0;
+                for (int f = (int)sp - 1; f >= 0; f--) {
+                    LeptrisElement ae = st[f].e;
+                    if (!ae) continue;
+                    int decided = 0;
+                    for (struct leptris_namespace* ns =
+                             leptris_elem_namespaces(ae);
+                         ns; ns = ns->next) {
+                        if (!ns->prefix || !ns->prefix[0]) {
+                            reset_needed = ns->uri && ns->uri[0];
+                            decided = 1;
+                            break;
+                        }
+                    }
+                    if (decided) break;
+                }
+                if (reset_needed)
+                    buffer_append(buf, " xmlns=\"\"");
+            }
+            }
+        }
+
         /* libxml2 3.1.1: an <html> in no namespace with no local ns
          * declarations gets the XHTML namespace injected. */
         if (buf->xhtml && !epl && leptris_elem_namespaces(e) == NULL &&
