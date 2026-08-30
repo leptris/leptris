@@ -2,7 +2,9 @@
  * the stylesheet once, apply, compare the serialized result. */
 #include <gtest/gtest.h>
 extern "C" {
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include "leptris.h"
 }
 #include <cstring>
@@ -2295,6 +2297,9 @@ TEST(XsltExslt, LibxsltTestExtensionElement) {
  * xmlns="" (libxml2 xmlsave rule). Runs the suite fixture with the
  * suite dir as CWD so the xsl:import hrefs resolve. */
 TEST(XsltImport, NoNsElementUnderDefaultNsAncestorResets) {
+#ifdef _WIN32
+    GTEST_SKIP() << "POSIX chdir fixture (the suite runner covers Win32)";
+#else
     std::string here = __FILE__;
     std::string dir = here.substr(0, here.rfind("/xpath/")) +
                       "/xslt/libxslt_suite_general";
@@ -2327,6 +2332,7 @@ TEST(XsltImport, NoNsElementUnderDefaultNsAncestorResets) {
     }
     ASSERT_EQ(chdir(saved_cwd), 0);
     if (!s) FAIL() << "stylesheet failed to compile";
+#endif
 }
 
 /* Minimal bug-130 shape: xml method, default-ns root, no-ns child
