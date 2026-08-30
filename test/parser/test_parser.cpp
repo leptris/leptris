@@ -12,6 +12,46 @@ namespace {
 
 constexpr char kBasic[] = "<root><child>hello</child></root>";
 
+/* #653: the WELL-FORMED shapes of the report all parse — a
+ * self-closing element followed by text inside a nested parent is
+ * fine. (The report's minimal repro adds a stray </y> after the
+ * self-closed <y/> and is ill-formed — see the next spec.) */
+TEST(ParseRegression, SelfClosingThenTextNested) {
+    const char* cases[] = {
+        "<r><y/>t</r>",
+        "<r><a><x/></a><b/></r>",
+        "<r><a/><b>t</b></r>",
+        "<div><p><br/>hello</p></div>",
+    };
+    for (const char* xml : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+        EXPECT_NE(d, nullptr) << xml;
+        if (d) leptris_document_free(d);
+    }
+}
+
+/* #653 ground truth: <r><b><y/>t</y></b></r> is ILL-FORMED (the
+ * self-closed <y/> leaves the trailing </y> unmatched) — libxml2
+ * rejects it as a tag mismatch; so must we, in strict AND recover
+ * (libxml2 --recover accepts and rc=0). */
+TEST(ParseRegression, StrayCloseAfterSelfClosing) {
+    const char xml[] = "<r><b><y/>t</y></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    EXPECT_EQ(d, nullptr);
+    if (d) leptris_document_free(d);
+
+    /* Recover must tolerate it like libxml2 --recover. */
+    LeptrisParseOptions opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.recover = 1;
+    LeptrisDocument r = leptris_parse_string_ex(
+        xml, strlen(xml), &opts, &st);
+    EXPECT_NE(r, nullptr);
+    if (r) leptris_document_free(r);
+}
+
 TEST(ParserBasics, RejectsUnclosedRoot) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string("<a>unclosed", 11, &st);
