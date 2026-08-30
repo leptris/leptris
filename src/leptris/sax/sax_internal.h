@@ -144,6 +144,11 @@ struct LeptrisSAXParser {
      * Scratch-owned pointer; valid only while state == ATTR_EQ or
      * ATTR_VALUE. */
     const char* pending_attr_name;
+    /* Position of the pending attribute's NAME — the diagnostic
+     * point for recoverable errors (issue #647, libxml2 points at
+     * the duplicate). */
+    int pending_attr_line;
+    int pending_attr_column;
 
     /* Feature flag: 0 = legacy buffering (default), 1 = streaming
      * state machine. */
