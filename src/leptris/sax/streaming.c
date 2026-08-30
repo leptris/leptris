@@ -45,6 +45,8 @@
 #include "../common/string_view.h"
 #include "../common/entities.h"
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -90,6 +92,14 @@ static inline int sxs_is_quote(char c)     { return (sxs_chartype[(unsigned char
 
 /* Forward decl — defined below; many helpers call it on OOM. */
 static void sxs_set_error(LeptrisSAXParser* p, const char* msg);
+
+/* Position tracking for attribute diagnostics (issue #647): the
+ * attribute scans advance line/column per consumed byte; other
+ * states leave the counters where the last attribute ended. */
+static inline void sxs_pos_putc(LeptrisSAXParser* p, char c) {
+    if (c == '\n') { p->line++; p->column = 1; }
+    else p->column++;
+}
 
 static void sxs_set_error(LeptrisSAXParser* p, const char* msg) {
     snprintf(p->error_message, sizeof(p->error_message), "%s", msg);
@@ -384,7 +394,7 @@ static int sxs_step_top(LeptrisSAXParser* p, int is_final) {
     /* Element: '<' + name-start. */
     if (kind != '?' && kind != '!') {
         if (avail >= 2 && sxs_is_name_start(kind)) {
-            p->pos++;  /* consume '<' */
+            sxs_pos_putc(p, *p->pos); p->pos++;  /* consume '<' */
             p->state = SAX_ST_ELEM_OPEN_NAME;
             sxs_carry_reset(p);
             return SAX_STEP_OK;
@@ -552,7 +562,7 @@ static int sxs_step_top(LeptrisSAXParser* p, int is_final) {
     }
 
     /* Otherwise: it's an element.  Fall through to ELEM_OPEN_NAME. */
-    p->pos++;  /* consume '<' */
+    sxs_pos_putc(p, *p->pos); p->pos++;  /* consume '<' */
     p->state = SAX_ST_ELEM_OPEN_NAME;
     sxs_carry_reset(p);
     return SAX_STEP_OK;
@@ -578,6 +588,7 @@ static int sxs_step_elem_open_name(LeptrisSAXParser* p, int is_final) {
             sxs_set_error(p, "out of memory");
             return SAX_STEP_ERR;
         }
+        sxs_pos_putc(p, *p->pos);
         p->pos++;
     }
 
@@ -587,6 +598,7 @@ static int sxs_step_elem_open_name(LeptrisSAXParser* p, int is_final) {
             sxs_set_error(p, "out of memory");
             return SAX_STEP_ERR;
         }
+        sxs_pos_putc(p, *p->pos);
         p->pos++;
     }
 
@@ -617,7 +629,10 @@ static int sxs_step_elem_open_name(LeptrisSAXParser* p, int is_final) {
 
 static int sxs_step_attr_list(LeptrisSAXParser* p, int is_final) {
     /* Skip whitespace. */
-    while (p->pos < p->end && sxs_is_ws(*p->pos)) p->pos++;
+    while (p->pos < p->end && sxs_is_ws(*p->pos)) {
+        sxs_pos_putc(p, *p->pos);
+        p->pos++;
+    }
     if (p->pos >= p->end) {
         return is_final ? (sxs_set_error(p, "Unterminated opening tag"), SAX_STEP_ERR)
                         : SAX_STEP_NEED_MORE;
@@ -676,6 +691,14 @@ static int sxs_step_attr_list(LeptrisSAXParser* p, int is_final) {
  * ============================================================================ */
 
 static int sxs_step_attr_name(LeptrisSAXParser* p, int is_final) {
+    /* Diagnostic point for recoverable errors: the name's start
+     * (issue #647) — captured before any byte of the name is
+     * consumed, including across chunk-boundary resumes (the first
+     * call to reach here with an empty carry). */
+    if (p->carry_len == 0) {
+        p->pending_attr_line = p->line;
+        p->pending_attr_column = p->column;
+    }
     if (p->carry_len == 0) {
         if (p->pos >= p->end) {
             return is_final ? (sxs_set_error(p, "Expected attribute name"), SAX_STEP_ERR)
@@ -689,6 +712,7 @@ static int sxs_step_attr_name(LeptrisSAXParser* p, int is_final) {
             sxs_set_error(p, "out of memory");
             return SAX_STEP_ERR;
         }
+        sxs_pos_putc(p, *p->pos);
         p->pos++;
     }
     while (p->pos < p->end && sxs_is_name_char(*p->pos)) {
@@ -696,6 +720,7 @@ static int sxs_step_attr_name(LeptrisSAXParser* p, int is_final) {
             sxs_set_error(p, "out of memory");
             return SAX_STEP_ERR;
         }
+        sxs_pos_putc(p, *p->pos);
         p->pos++;
     }
     if (p->pos >= p->end) {
@@ -717,7 +742,10 @@ static int sxs_step_attr_name(LeptrisSAXParser* p, int is_final) {
  * ============================================================================ */
 
 static int sxs_step_attr_eq(LeptrisSAXParser* p, int is_final) {
-    while (p->pos < p->end && sxs_is_ws(*p->pos)) p->pos++;
+    while (p->pos < p->end && sxs_is_ws(*p->pos)) {
+        sxs_pos_putc(p, *p->pos);
+        p->pos++;
+    }
     if (p->pos >= p->end) {
         return is_final ? (sxs_set_error(p, "Expected '=' after attribute name"), SAX_STEP_ERR)
                         : SAX_STEP_NEED_MORE;
@@ -737,7 +765,10 @@ static int sxs_step_attr_eq(LeptrisSAXParser* p, int is_final) {
  * ============================================================================ */
 
 static int sxs_step_attr_value_quote(LeptrisSAXParser* p, int is_final) {
-    while (p->pos < p->end && sxs_is_ws(*p->pos)) p->pos++;
+    while (p->pos < p->end && sxs_is_ws(*p->pos)) {
+        sxs_pos_putc(p, *p->pos);
+        p->pos++;
+    }
     if (p->pos >= p->end) {
         return is_final ? (sxs_set_error(p, "Expected attribute value"), SAX_STEP_ERR)
                         : SAX_STEP_NEED_MORE;
@@ -752,6 +783,7 @@ static int sxs_step_attr_value_quote(LeptrisSAXParser* p, int is_final) {
         sxs_set_error(p, "out of memory");
         return SAX_STEP_ERR;
     }
+    sxs_pos_putc(p, *p->pos);
     p->pos++;
     p->state = SAX_ST_ATTR_VALUE;
     return SAX_STEP_OK;
@@ -770,6 +802,7 @@ static int sxs_step_attr_value(LeptrisSAXParser* p, int is_final) {
             sxs_set_error(p, "out of memory");
             return SAX_STEP_ERR;
         }
+        sxs_pos_putc(p, *p->pos);
         p->pos++;
     }
     if (p->pos >= p->end) {
@@ -778,6 +811,7 @@ static int sxs_step_attr_value(LeptrisSAXParser* p, int is_final) {
         return SAX_STEP_ERR;
     }
     /* p->pos points at closing quote. */
+    sxs_pos_putc(p, *p->pos);
     p->pos++;
     /* Build value: skip carry[0] (quote), copy carry[1..].
      *
@@ -801,6 +835,28 @@ static int sxs_step_attr_value(LeptrisSAXParser* p, int is_final) {
         value = sxs_scratch_append(p, raw, raw_len);
     }
     if (!value) { sxs_set_error(p, "out of memory"); return SAX_STEP_ERR; }
+
+    /* Recoverable well-formedness error (issue #647): a duplicate
+     * attribute reports through the error channel with libxml2's
+     * message, and the parse CONTINUES — libxml2 --recover keeps
+     * every attribute in the event. */
+    {
+        SaxElementFrame* f = sxs_elem_top(p);
+        if (f) {
+            for (size_t i = 0; i < f->attr_count; i++) {
+                if (strcmp(f->attrs[i * 2], p->pending_attr_name) == 0) {
+                    char msg[192];
+                    snprintf(msg, sizeof(msg), "Attribute %s redefined",
+                             p->pending_attr_name);
+                    if (p->handler && p->handler->error)
+                        p->handler->error(p->user_data, msg,
+                                          p->pending_attr_line,
+                                          p->pending_attr_column);
+                    break;
+                }
+            }
+        }
+    }
 
     /* Pair pending_attr_name with value, append to top frame's attrs. */
     if (sxs_elem_add_attr(p, p->pending_attr_name, value) < 0) {
@@ -895,7 +951,7 @@ static int sxs_step_elem_content(LeptrisSAXParser* p, int is_final) {
             return SAX_STEP_OK;
         }
         /* Child element. */
-        p->pos++;  /* consume '<' */
+        sxs_pos_putc(p, *p->pos); p->pos++;  /* consume '<' */
         p->state = SAX_ST_ELEM_OPEN_NAME;
         sxs_carry_reset(p);
         return SAX_STEP_OK;

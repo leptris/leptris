@@ -31,6 +31,33 @@ static std::string text_of(const LeptrisSaxEventRecord* r, const char* a) {
     return sl(r, a, r->text_off, r->text_len);
 }
 
+/* #647: recoverable errors ride the recorder stream — a duplicate
+ * attribute produces an ERROR record with libxml2's message and the
+ * duplicate's position, and the parse continues (the element still
+ * records with both attributes). */
+TEST(Recorder, RecoverableErrorRecorded) {
+    const char xml[] = "<r><a xml:lang=\"en\" xml:lang=\"fr\"/></r>";
+    LeptrisSaxRecorder rec = leptris_sax_recorder_new();
+    ASSERT_NE(rec, nullptr);
+    ASSERT_EQ(leptris_sax_recorder_feed(rec, xml, strlen(xml), 1), 0);
+
+    size_t n = 0, alen = 0;
+    const LeptrisSaxEventRecord* rs = leptris_sax_recorder_records(rec, &n);
+    const char* arena = leptris_sax_recorder_arena(rec, &alen);
+    ASSERT_NE(rs, nullptr);
+    ASSERT_NE(arena, nullptr);
+
+    ASSERT_EQ(n, 7u);
+    EXPECT_EQ(rs[2].kind, LEPTRIS_SAX_EVENT_ERROR);
+    EXPECT_EQ(text_of(&rs[2], arena), "Attribute xml:lang redefined");
+    EXPECT_EQ(rs[2].line, 1u);
+    EXPECT_GT(rs[2].column, 0u);
+    /* Recover: the element still starts, with BOTH attributes. */
+    EXPECT_EQ(rs[3].kind, LEPTRIS_SAX_EVENT_START_ELEMENT);
+    EXPECT_EQ(name_of(&rs[3], arena), "a");
+    leptris_sax_recorder_free(rec);
+}
+
 TEST(Recorder, RecordsEveryEventKindInOrder) {
     const char xml[] =
         "<r a=\"1\" b=\"two\">t"

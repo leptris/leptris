@@ -71,6 +71,13 @@ struct EventLog {
         e += data ? data : "";
         static_cast<EventLog*>(ud)->events.push_back(e);
     }
+    static void on_error(void* ud, const char* message, int line,
+                         int column) {
+        char buf[320];
+        snprintf(buf, sizeof buf, "error:%d:%d:%s", line, column,
+                 message ? message : "");
+        static_cast<EventLog*>(ud)->events.push_back(buf);
+    }
 };
 
 class SaxParser : public ::testing::Test {
@@ -89,8 +96,28 @@ protected:
         handler.comment             = &EventLog::on_comment;
         handler.cdata               = &EventLog::on_cdata;
         handler.processing_instruction = &EventLog::on_pi;
+        handler.error                  = &EventLog::on_error;
     }
 };
+
+/* #647: recoverable well-formedness errors reach the error channel.
+ * A duplicate attribute reports "Attribute NAME redefined"
+ * (libxml2's message) with position, and the parse CONTINUES —
+ * libxml2 --recover semantics: the element still fires with both
+ * attributes. */
+TEST_F(SaxParser, DuplicateAttributeReportsRecoverableError) {
+    const char xml[] = "<r><a xml:lang=\"en\" xml:lang=\"fr\"/></r>";
+    EXPECT_EQ(leptris_sax_parse(xml, std::strlen(xml), &handler, &log),
+              0);   /* recoverable — not a fatal stop */
+    ASSERT_EQ(log.events.size(), 7u);
+    EXPECT_EQ(log.events[0], "start_document");
+    EXPECT_EQ(log.events[1], "start:r");
+    EXPECT_EQ(log.events[2], "error:1:19:Attribute xml:lang redefined");
+    EXPECT_EQ(log.events[3], "start:a xml:lang=en xml:lang=fr");
+    EXPECT_EQ(log.events[4], "end:a");
+    EXPECT_EQ(log.events[5], "end:r");
+    EXPECT_EQ(log.events[6], "end_document");
+}
 
 TEST_F(SaxParser, FiresStartAndEndDocument) {
     const char xml[] = "<r/>";
