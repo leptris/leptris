@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <ctype.h>
 
 /* Initial buffer capacity */
@@ -1843,11 +1844,29 @@ LEPTRIS_API char* leptris_document_serialize_ext(
     struct leptris_document* doc,
     const LeptrisSerializeOptions* options,
     const LeptrisSerializeExtOptions* ext) {
+    return leptris_document_serialize_ext_sized(
+        doc, options, ext, ext ? sizeof(*ext) : 0);
+}
+
+/* Size-aware entry (issue #644): the ext struct MAY grow, and FFI
+ * callers allocate only the fields they know — reading past their
+ * buffer picked up heap garbage as indent_unit (an MSVC crash in
+ * leptris-ruby). Each field is read only when the caller's buffer
+ * actually covers it. */
+LEPTRIS_API char* leptris_document_serialize_ext_sized(
+    struct leptris_document* doc,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext,
+    size_t ext_size) {
     LeptrisSerializeExtended internal;
     memset(&internal, 0, sizeof(internal));
     if (ext) {
-        internal.indent_text = ext->indent_text;
-        internal.indent_unit = ext->indent_unit;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, indent_text) +
+                            sizeof(int))
+            internal.indent_text = ext->indent_text;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, indent_unit) +
+                            sizeof(const char*))
+            internal.indent_unit = ext->indent_unit;
     }
     return leptris_document_serialize_ex(doc, options, &internal);
 }

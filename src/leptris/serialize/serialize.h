@@ -142,6 +142,14 @@ LEPTRIS_API char* leptris_document_serialize_ext(
     const LeptrisSerializeOptions* options,
     const LeptrisSerializeExtOptions* ext);
 
+/* Issue #644: size-aware twin — fields beyond the caller's
+ * allocation stay zeroed instead of being read out of bounds. */
+LEPTRIS_API char* leptris_document_serialize_ext_sized(
+    struct leptris_document* doc,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext,
+    size_t ext_size);
+
 char* leptris_document_serialize_ex(struct leptris_document* doc,
                                     const LeptrisSerializeOptions* options,
                                     const LeptrisSerializeExtended* extended);
