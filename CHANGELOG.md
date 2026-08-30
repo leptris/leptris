@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.21] - 2026-08-30
+
+### Fixed
+
+- pull-batch staging is a never-moving block chain (issue #648) (sax)
+
+
+
 ## [1.9.20] - 2026-08-30
 
 Closes every open upstream issue (#645, #610, #624, #647).
