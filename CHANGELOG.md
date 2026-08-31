@@ -4,7 +4,15 @@
 
 ### Added
 
-- xsl:try/xsl:catch with the error() raiser (17) (xslt30)
+- **XSLT 3.0 program, fourth increment — `xsl:try` / `xsl:catch`
+  (17)**: the try body is the children before the first xsl:catch; a
+  dynamic error runs the catch content with `$err:description` bound
+  to the message, clears the error channel, and the transform
+  continues. No error restores the outer channel state verbatim.
+- **`error($description)`** raises a catchable dynamic error from
+  XPath — the Saxon-HE 12.7 shape with the description carried into
+  the catch. Static errors (undeclared variables, unknown functions)
+  still fail stylesheet compilation, matching Saxon (XPST0008).
 
 
 
