@@ -21,7 +21,7 @@ extern char* get_node_text(void* node);
 /* Synthetic sequence member (XSLT 3.0): a text node carrying one
  * member's string form. Freed via the nodeset's
  * owns_synthetic_text. */
-static XPathTextNode* synth_text(const char* content, size_t len) {
+XPathTextNode* xpath_synth_text(const char* content, size_t len) {
     XPathTextNode* tn = (XPathTextNode*)calloc(1, sizeof(*tn));
     if (!tn) return NULL;
     char* copy = (char*)malloc(len + 1);
@@ -31,6 +31,36 @@ static XPathTextNode* synth_text(const char* content, size_t len) {
     tn->node_type = LEPTRIS_NODE_TEXT;
     tn->content = copy;
     return tn;
+}
+#define synth_text xpath_synth_text
+
+/* Full-lifetime copy of a nodeset: pointers are shared for document
+ * nodes, but synthetic text members are DEEP-copied when the source
+ * owns them — the copy outlives the source's storage (let bindings
+ * are unwound while results referencing them still live). */
+XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src) {
+    if (!src) return NULL;
+    XPathNodeSet* dst = xpath_nodeset_new_with_capacity(src->count);
+    if (!dst) return NULL;
+    if (!src->owns_synthetic_text) {
+        for (size_t i = 0; i < src->count; i++)
+            xpath_nodeset_add(dst, src->nodes[i]);
+        return dst;
+    }
+    dst->owns_synthetic_text = 1;
+    for (size_t i = 0; i < src->count; i++) {
+        void* n = src->nodes[i];
+        if (n && XPATH_NODE_TYPE(n) == LEPTRIS_NODE_TEXT) {
+            char* txt = get_node_text(n);
+            size_t len = txt ? strlen(txt) : 0;
+            XPathTextNode* tn = xpath_synth_text(txt ? txt : "", len);
+            free(txt);
+            if (tn) xpath_nodeset_add(dst, tn);
+        } else {
+            xpath_nodeset_add(dst, n);
+        }
+    }
+    return dst;
 }
 
 /* §3.4 relational compare over a double pair. */
@@ -137,6 +167,190 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         if (!result) { xpath_nodeset_free(out); return NULL; }
         result->value.nodeset_value = out;
         return result;
+    }
+
+    /* XPath 3.1 `let $x := E1, $y := E2 ... return B`: bind each
+     * value (each binding sees the earlier ones AND the outer
+     * scope), evaluate the body, then restore. Bindings remove and
+     * re-add their set entry so a type change rebinds cleanly;
+     * snapshots are deep (remove() frees the original). */
+    if (op == XPATH_OP_LET) {
+        if (ast->child_count < 2 || !ast->value) return NULL;
+        size_t nbind = ast->child_count - 1;
+
+        XPathVariableSet* scratch = NULL;
+        if (!ctx->variable_set) {
+            scratch = xpath_variable_set_new();
+            if (!scratch) return NULL;
+            ctx->variable_set = scratch;
+        }
+        XPathVariableSet* set = (XPathVariableSet*)ctx->variable_set;
+
+        /* Split the space-joined names. */
+        char** names = (char**)calloc(nbind, sizeof(char*));
+        size_t* name_lens = (size_t*)calloc(nbind, sizeof(size_t));
+        if (!names || !name_lens) {
+            free(names); free(name_lens);
+            if (scratch) { ctx->variable_set = NULL;
+                           xpath_variable_set_free(scratch); }
+            return NULL;
+        }
+        const char* p = ast->value;
+        for (size_t i = 0; i < nbind; i++) {
+            names[i] = (char*)p;
+            while (*p && *p != ' ') p++;
+            name_lens[i] = (size_t)(p - names[i]);
+            if (*p == ' ') p++;
+        }
+
+        typedef struct {
+            int had;
+            XPathVariableType type;
+            double num;
+            int b;
+            char* str;             /* owned strdup */
+            XPathNodeSet* ns;      /* owned deep copy */
+        } LetSave;
+        LetSave* saves = (LetSave*)calloc(nbind, sizeof(LetSave));
+        if (!saves) {
+            free(names); free(name_lens);
+            if (scratch) { ctx->variable_set = NULL;
+                           xpath_variable_set_free(scratch); }
+            return NULL;
+        }
+
+        size_t bound = 0;
+        int failed = 0;
+        struct leptris_xpath_result* body = NULL;
+
+        for (; bound < nbind; bound++) {
+            /* Null-terminate the name over a stack copy. */
+            char name[128];
+            if (name_lens[bound] >= sizeof(name)) { failed = 1; break; }
+            memcpy(name, names[bound], name_lens[bound]);
+            name[name_lens[bound]] = '\0';
+
+            struct leptris_xpath_result* v =
+                evaluate_expr(ctx, ast->children[bound]);
+            if (!v) { failed = 1; break; }
+
+            /* Snapshot the shadowed binding (deep: remove frees). */
+            XPathVariable* old = xpath_variable_set_get(set, name);
+            if (old) {
+                saves[bound].had = 1;
+                saves[bound].type = old->value.type;
+                switch (old->value.type) {
+                    case XPATH_VAR_TYPE_NUMBER:
+                        saves[bound].num = old->value.v.number_value;
+                        break;
+                    case XPATH_VAR_TYPE_BOOLEAN:
+                        saves[bound].b = old->value.v.boolean_value;
+                        break;
+                    case XPATH_VAR_TYPE_STRING:
+                        saves[bound].str = leptris_strdup(
+                            old->value.v.string_value
+                                ? old->value.v.string_value : "");
+                        if (!saves[bound].str) failed = 1;
+                        break;
+                    case XPATH_VAR_TYPE_NODE_SET:
+                        saves[bound].ns = xpath_nodeset_deep_copy(
+                            old->value.v.nodeset_value);
+                        if (old->value.v.nodeset_value &&
+                            !saves[bound].ns)
+                            failed = 1;
+                        break;
+                    default: break;
+                }
+            }
+            if (failed) { xpath_result_free(v); break; }
+
+            xpath_variable_set_remove(set, name);
+
+            XPathVariableType vt;
+            switch (v->type) {
+                case XPATH_RESULT_BOOLEAN: vt = XPATH_VAR_TYPE_BOOLEAN; break;
+                case XPATH_RESULT_NUMBER:  vt = XPATH_VAR_TYPE_NUMBER;  break;
+                case XPATH_RESULT_NODESET: vt = XPATH_VAR_TYPE_NODE_SET; break;
+                default:                   vt = XPATH_VAR_TYPE_STRING;   break;
+            }
+            XPathVariable* var = xpath_variable_set_add(set, name, vt);
+            if (!var) { bound++; failed = 1; break; }
+            int ok = 0;
+            switch (vt) {
+                case XPATH_VAR_TYPE_BOOLEAN:
+                    ok = xpath_variable_set_boolean(
+                        var, v->value.boolean_value);
+                    break;
+                case XPATH_VAR_TYPE_NUMBER:
+                    ok = xpath_variable_set_number(
+                        var, v->value.number_value);
+                    break;
+                case XPATH_VAR_TYPE_NODE_SET:
+                    ok = xpath_variable_set_nodeset(
+                        var, v->value.nodeset_value);
+                    if (ok) v->value.nodeset_value = NULL;  /* moved */
+                    break;
+                default:
+                    ok = xpath_variable_set_string(
+                        var, v->value.string_value
+                                 ? v->value.string_value : "");
+                    break;
+            }
+            xpath_result_free(v);
+            if (!ok) { bound++; failed = 1; break; }
+        }
+
+        if (!failed) {
+            body = evaluate_expr(ctx, ast->children[nbind]);
+            if (!body) failed = 1;
+        }
+
+        /* Unwind in reverse: drop our entry, restore the snapshot. */
+        for (size_t j = bound; j-- > 0;) {
+            char name[128];
+            if (name_lens[j] >= sizeof(name)) continue;
+            memcpy(name, names[j], name_lens[j]);
+            name[name_lens[j]] = '\0';
+            xpath_variable_set_remove(set, name);
+            if (!saves[j].had) continue;
+            XPathVariable* var =
+                xpath_variable_set_add(set, name, saves[j].type);
+            if (!var) continue;
+            switch (saves[j].type) {
+                case XPATH_VAR_TYPE_NUMBER:
+                    xpath_variable_set_number(var, saves[j].num);
+                    break;
+                case XPATH_VAR_TYPE_BOOLEAN:
+                    xpath_variable_set_boolean(var, saves[j].b);
+                    break;
+                case XPATH_VAR_TYPE_STRING:
+                    xpath_variable_set_string(var,
+                        saves[j].str ? saves[j].str : "");
+                    break;
+                case XPATH_VAR_TYPE_NODE_SET:
+                    xpath_variable_set_nodeset(var, saves[j].ns);
+                    saves[j].ns = NULL;   /* transferred */
+                    break;
+                default: break;
+            }
+        }
+        for (size_t j = 0; j < nbind; j++) {
+            if (saves[j].str) free(saves[j].str);
+            if (saves[j].ns) xpath_nodeset_free(saves[j].ns);
+        }
+        free(saves);
+        free(names);
+        free(name_lens);
+
+        if (scratch) {
+            ctx->variable_set = NULL;
+            xpath_variable_set_free(scratch);
+        }
+        if (failed && body) {
+            xpath_result_free(body);
+            body = NULL;
+        }
+        return body;
     }
 
 

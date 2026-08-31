@@ -1004,6 +1004,16 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
                      * within a single eval call). */
                     XPathNodeSet* var_ns = xpath_variable_get_nodeset(var);
                     if (var_ns && var_ns->count > 0) {
+                        /* Synthetic members must be deep-copied: the
+                         * variable's storage can be freed while the
+                         * result lives (let bindings unwind). */
+                        if (var_ns->owns_synthetic_text) {
+                            XPathNodeSet* copy =
+                                xpath_nodeset_deep_copy(var_ns);
+                            if (!copy) return NULL;
+                            result->value.nodeset_value = copy;
+                            return result;
+                        }
                         result->value.nodeset_value = xpath_nodeset_new_with_capacity(var_ns->count);
                         if (!result->value.nodeset_value) return NULL;
                         for (size_t i = 0; i < var_ns->count; i++) {

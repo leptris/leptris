@@ -647,6 +647,11 @@ typedef enum {
     XPATH_OP_IF,
     XPATH_OP_FOR,
     XPATH_OP_RANGE,
+    /* XPath 3.1 `let $x := E1, $y := E2 ... return B`: children
+     * [0..n-1] are the binding value exprs, [n] is the body;
+     * ->value carries the variable names space-joined, in order.
+     * Each binding sees the earlier ones; inner lets shadow. */
+    XPATH_OP_LET,
     /* Parenthesized item sequence `('a','b',expr)`: N children, one
      * per member — evaluates to the sequence (synthetic-text
      * nodeset). */

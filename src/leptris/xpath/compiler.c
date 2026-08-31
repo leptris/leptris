@@ -1227,9 +1227,10 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
                        (dstest->type == XPATH_AST_NODE_TEST_TYPE &&
                         dstest->value &&
                         strcmp(dstest->value, "node") == 0)));
-        /* `//*` parses as a BARE descendant-or-self::* step (no
-         * second child step): all elements including the root —
-         * the existing fused opcode serves it exactly. */
+        /* A double-slash + star sequence parses as a BARE
+         * descendant-or-self::* step (no second child step): all
+         * elements including the root — the existing fused opcode
+         * serves it exactly. */
         if (ds_ok2 && dstest->type == XPATH_AST_NODE_TEST_ALL &&
             !second_step && rest_count == 0) {
             emit_op(st, XPATH_BC_ABSOLUTE_DESCENDANT_OR_SELF_WILD);
@@ -1357,7 +1358,8 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
              * lazy semantics need the AST interpreter — fall back
              * wholesale. Correctness first; VM opcodes later. */
             if (op == XPATH_OP_IF || op == XPATH_OP_FOR ||
-                op == XPATH_OP_RANGE || op == XPATH_OP_SEQUENCE) {
+                op == XPATH_OP_RANGE || op == XPATH_OP_SEQUENCE ||
+                op == XPATH_OP_LET) {
                 emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
                             add_const_ast(st, node));
                 break;

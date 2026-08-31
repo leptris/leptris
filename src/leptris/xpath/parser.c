@@ -35,6 +35,7 @@ static XPathASTNode* parse_filter_expr(XPathParser* parser);
 static XPathASTNode* parse_primary_expr(XPathParser* parser);
 static XPathASTNode* parse_if_expr(XPathParser* parser);
 static XPathASTNode* parse_for_expr(XPathParser* parser);
+static XPathASTNode* parse_let_expr(XPathParser* parser);
 static XPathASTNode* parse_location_path(XPathParser* parser);
 static XPathASTNode* parse_relative_location_path(XPathParser* parser);
 static XPathASTNode* parse_step(XPathParser* parser);
@@ -638,12 +639,14 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
     if (current_token_is(parser, TOK_NCNAME) || current_token_is(parser, TOK_QNAME)) {
         XPathToken* next = peek_token(parser, 1);
 
-        /* `for $v ...` (XSLT 3.0) — fall through to the primary's
-         * for-hook before the location-path dispatch eats `for` as
-         * a name test. */
+        /* `for $v ...` / `let $v := ...` (XSLT 3.0 / XPath 3.1) —
+         * fall through to the primary's hooks before the
+         * location-path dispatch eats the keyword as a name test. */
         if (current_token(parser)->type == TOK_NCNAME &&
-            current_token(parser)->value_len == 3 &&
-            memcmp(current_token(parser)->value, "for", 3) == 0 &&
+            ((current_token(parser)->value_len == 3 &&
+              memcmp(current_token(parser)->value, "for", 3) == 0) ||
+             (current_token(parser)->value_len == 3 &&
+              memcmp(current_token(parser)->value, "let", 3) == 0)) &&
             next && next->type == TOK_DOLLAR) {
             /* Fall through to filter expression */
         }
@@ -872,6 +875,95 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
     return node;
 }
 
+/* XPath 3.1 `let $x := E1, $y := E2 ... return B`. Bindings are
+ * comma-separated (a top-level comma never belongs to the binding
+ * expression — sequences are parenthesized); each binding may
+ * reference the earlier ones. The operator node carries [0..n-1]
+ * = binding values, [n] = body; ->value space-joins the names. */
+static XPathASTNode* parse_let_expr(XPathParser* parser) {
+    advance_token(parser);   /* consume `let` */
+
+    XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+    if (!node) return NULL;
+    node->number_value = (double)XPATH_OP_LET;
+
+    char* names = NULL;
+    size_t names_len = 0, names_cap = 0;
+
+    for (;;) {
+        XPathToken* d = current_token(parser);
+        if (!d || d->type != TOK_DOLLAR) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected '$' variable in let binding");
+            goto fail;
+        }
+        advance_token(parser);
+        XPathToken* vt = current_token(parser);
+        if (!vt || (vt->type != TOK_NCNAME && vt->type != TOK_QNAME)) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected variable name in let");
+            goto fail;
+        }
+        char* var_name = token_to_string(vt);
+        if (!var_name) goto fail;
+        advance_token(parser);
+
+        if (!consume_token(parser, TOK_ASSIGN,
+                           "Expected ':=' in let binding")) {
+            free(var_name);
+            goto fail;
+        }
+
+        XPathASTNode* val = parse_expr(parser);
+        if (!val) { free(var_name); goto fail; }
+
+        /* Space-join the binding names (names contain no spaces). */
+        size_t need = names_len + strlen(var_name) + 2;
+        if (need > names_cap) {
+            size_t cap = names_cap ? names_cap * 2 : 32;
+            while (cap < need) cap *= 2;
+            char* grown = (char*)realloc(names, cap);
+            if (!grown) { free(var_name); ast_node_free(val); goto fail; }
+            names = grown;
+            names_cap = cap;
+        }
+        if (names_len) names[names_len++] = ' ';
+        size_t vl = strlen(var_name);
+        memcpy(names + names_len, var_name, vl);
+        names_len += vl;
+        names[names_len] = '\0';
+        free(var_name);
+
+        ast_node_add_child(node, val);
+
+        if (current_token_is(parser, TOK_COMMA)) {
+            advance_token(parser);
+            continue;
+        }
+        break;
+    }
+
+    XPathToken* rt = current_token(parser);
+    if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
+        memcmp(rt->value, "return", 6) != 0) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected 'return' in let expression");
+        goto fail;
+    }
+    advance_token(parser);
+
+    XPathASTNode* body = parse_expr(parser);
+    if (!body) goto fail;
+    ast_node_add_child(node, body);
+    node->value = names;
+    return node;
+
+fail:
+    free(names);
+    ast_node_free(node);
+    return NULL;
+}
+
 static XPathASTNode* parse_primary_expr(XPathParser* parser) {
     XPathToken* tok = current_token(parser);
     if (!tok) {
@@ -994,6 +1086,14 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         XPathToken* fn = peek_token(parser, 1);
         if (fn && fn->type == TOK_DOLLAR)
             return parse_for_expr(parser);
+    }
+
+    /* XPath 3.1 `let $x := E return B` — same $-lookahead guard. */
+    if (tok->type == TOK_NCNAME && tok->value_len == 3 &&
+        memcmp(tok->value, "let", 3) == 0) {
+        XPathToken* fn = peek_token(parser, 1);
+        if (fn && fn->type == TOK_DOLLAR)
+            return parse_let_expr(parser);
     }
 
     /* Function call with NCName/QName */
