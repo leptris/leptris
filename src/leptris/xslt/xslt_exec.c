@@ -910,11 +910,15 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
     struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
     if (!r) return 0;
     char* sv = NULL;
-    /* XSLT 3.0 item sequence (for/range/sequence): display form joins
-     * the members with the default separator " ". A plain nodeset
-     * keeps the 1.0 first-member rule. */
+    /* XSLT 3.0 display form: an item sequence (for/range/sequence)
+     * joins members with the default separator " ", and a 2.0+
+     * stylesheet selects a sequence from ANY expression — every item
+     * prints. A 1.0 stylesheet's plain nodeset keeps the 1.0
+     * first-member rule. */
     if (r->type == XPATH_RESULT_NODESET &&
-        r->value.nodeset_value && r->value.nodeset_value->is_sequence) {
+        r->value.nodeset_value &&
+        (r->value.nodeset_value->is_sequence ||
+         (ex->sheet && ex->sheet->version_major >= 2))) {
         XPathNodeSet* ns = r->value.nodeset_value;
         size_t total = 1;   /* NUL; + separators below */
         for (size_t i = 0; i < ns->count; i++) {
@@ -1056,6 +1060,169 @@ static int op_for_each(XsltExec* ex, const XsltInstr* in,
     free(items);
     leptris_xpath_result_free(r);
     return rc;
+}
+
+/* xsl:iterate (3.0 §12.5): params chain free helper. */
+static struct leptris_xpath_result* xslt_capture_content(
+        XsltExec* ex, const XsltInstr* child, LeptrisElement node);
+
+static void iter_params_free(XsltVar* p) {
+    while (p) {
+        XsltVar* prev = p->prev;
+        if (p->value) leptris_xpath_result_free(p->value);
+        free(p);
+        p = prev;
+    }
+}
+
+/* Per-iteration param binding: a clone whose nodeset BORROWS the
+ * source's node pointers (the initial values outlive every pass —
+ * they are freed only after the loop ends). */
+static struct leptris_xpath_result* result_clone_borrowed(
+        const struct leptris_xpath_result* src) {
+    if (!src) return NULL;
+    struct leptris_xpath_result* out =
+        xpath_result_new((XPathResultType)src->type);
+    if (!out) return NULL;
+    switch (src->type) {
+        case XPATH_RESULT_STRING:
+            out->value.string_value =
+                leptris_strdup(src->value.string_value
+                                   ? src->value.string_value : "");
+            break;
+        case XPATH_RESULT_NUMBER:
+            out->value.number_value = src->value.number_value;
+            break;
+        case XPATH_RESULT_BOOLEAN:
+            out->value.boolean_value = src->value.boolean_value;
+            break;
+        case XPATH_RESULT_NODESET: {
+            XPathNodeSet* sn = src->value.nodeset_value;
+            XPathNodeSet* dn = xpath_nodeset_new();
+            if (!dn) break;
+            for (size_t i = 0; sn && i < sn->count; i++)
+                xpath_nodeset_add(dn, sn->nodes[i]);
+            out->value.nodeset_value = dn;
+            break;
+        }
+        default: break;
+    }
+    return out;
+}
+
+static int op_iterate(XsltExec* ex, const XsltInstr* in,
+                      LeptrisElement node) {
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    size_t n = leptris_xpath_result_count(r);
+    LeptrisElement* items = (n > 0)
+        ? (LeptrisElement*)calloc(n, sizeof(LeptrisElement)) : NULL;
+    if (items) {
+        for (size_t i = 0; i < n; i++)
+            items[i] = (LeptrisElement)leptris_xpath_result_get_node(r, i);
+    }
+    if (!items) { leptris_xpath_result_free(r); return n ? -1 : 0; }
+
+    /* Initial param values evaluate ONCE, in the caller's scope
+     * (§12.5: outside the iteration). */
+    XsltVar* params = NULL;
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind != XSLT_INSTR_VARIABLE || !c->is_param) break;
+        struct leptris_xpath_result* v = NULL;
+        if (c->select) v = xslt_eval(ex, c->select, node);
+        else if (c->child) v = xslt_capture_content(ex, c->child, node);
+        XsltVar* pv = (XsltVar*)calloc(1, sizeof(*pv));
+        if (!pv) { if (v) leptris_xpath_result_free(v); break; }
+        pv->name = c->name;
+        pv->value = v;
+        pv->prev = params;
+        params = pv;
+    }
+
+    int rc = 0;
+    size_t saved_pos = ex->current_pos;
+    size_t saved_size = ex->current_size;
+    ex->current_size = n;
+    ex->iterate_depth++;
+    for (size_t i = 0; i < n; i++) {
+        ex->current_pos = i + 1;
+        XsltVar* scope_mark = ex->vars;
+        size_t nparams = 0;
+        for (XsltVar* pv = params; pv; pv = pv->prev) {
+            xslt_push_var(ex, pv->name, result_clone_borrowed(pv->value));
+            nparams++;
+        }
+        ex->iterate_signal = 0;
+        rc = xslt_exec_instrs(ex, in->child, items[i]);
+        int sig = ex->iterate_signal;
+        ex->iterate_signal = 0;
+
+        if (sig == 1) {
+            /* Merge the with-param rebindings over the current
+             * values; names not supplied keep their value. */
+            XsltVar* np = ex->iter_params;
+            while (np) {
+                XsltVar* nx = np->prev;
+                XsltVar* found = NULL;
+                for (XsltVar* pv = params; pv && !found; pv = pv->prev)
+                    if (strcmp(pv->name, np->name) == 0) found = pv;
+                if (found) {
+                    if (found->value)
+                        leptris_xpath_result_free(found->value);
+                    found->value = np->value;
+                    free(np);
+                } else {
+                    np->prev = params;
+                    params = np;
+                }
+                np = nx;
+            }
+            ex->iter_params = NULL;
+        }
+        xslt_pop_vars_to(ex, scope_mark);
+        if (nparams && ex->vars == scope_mark) { /* balanced */ }
+        if (sig == 2) break;
+        if (rc) break;
+    }
+    ex->iterate_depth--;
+    ex->iterate_signal = 0;
+    iter_params_free(ex->iter_params);
+    ex->iter_params = NULL;
+    iter_params_free(params);
+    ex->current_pos = saved_pos;
+    ex->current_size = saved_size;
+    free(items);
+    leptris_xpath_result_free(r);
+    return rc;
+}
+
+static int op_next_iteration(XsltExec* ex, const XsltInstr* in,
+                             LeptrisElement node) {
+    if (ex->iterate_depth <= 0) return 0;   /* no enclosing iterate */
+    iter_params_free(ex->iter_params);
+    ex->iter_params = NULL;
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind != XSLT_INSTR_WITH_PARAM || !c->name) continue;
+        struct leptris_xpath_result* v = NULL;
+        if (c->select) v = xslt_eval(ex, c->select, node);
+        else if (c->child) v = xslt_capture_content(ex, c->child, node);
+        XsltVar* pv = (XsltVar*)calloc(1, sizeof(*pv));
+        if (!pv) { if (v) leptris_xpath_result_free(v); continue; }
+        pv->name = c->name;
+        pv->value = v;
+        pv->prev = ex->iter_params;
+        ex->iter_params = pv;
+    }
+    ex->iterate_signal = 1;
+    return 0;
+}
+
+static int op_break(XsltExec* ex, const XsltInstr* in,
+                    LeptrisElement node) {
+    if (ex->iterate_depth <= 0) return 0;
+    if (in->child) xslt_exec_instrs(ex, in->child, node);
+    ex->iterate_signal = 2;
+    return 0;
 }
 
 static int op_if(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
@@ -2991,6 +3158,8 @@ int xslt_exec_instrs(XsltExec* ex, const XsltInstr* list,
     int rc = 0;
     for (const XsltInstr* in = list; in; in = in->next) {
         if (ex->fn_yield) break;   /* func:result unwinds to the call */
+        if (ex->iterate_signal) break;   /* next-iteration/break unwind
+                                          * to the enclosing iterate */
         if (ex->eval_error) { rc = -1; break; }
         /* §11.6: xsl:param declarations are consumed by the invoker
          * (with-param binding or default evaluation) — not executed
@@ -3024,6 +3193,9 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_TEXT] = op_text;
     g_ops[XSLT_INSTR_VALUE_OF] = op_value_of;
     g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
+    g_ops[XSLT_INSTR_ITERATE] = op_iterate;
+    g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;
+    g_ops[XSLT_INSTR_BREAK] = op_break;
     g_ops[XSLT_INSTR_IF] = op_if;
     g_ops[XSLT_INSTR_APPLY_TEMPLATES] = op_apply_templates;
     g_ops[XSLT_INSTR_CALL_TEMPLATE] = op_call_template;
