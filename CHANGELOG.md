@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.32] - 2026-08-31
+
+### Performance
+
+- O(1) pattern doc resolution + armed key patterns (xslt)
+
+
+
 ## [1.9.31] - 2026-09-01
 
 ### Performance
