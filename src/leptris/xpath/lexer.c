@@ -318,10 +318,19 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         return token;
     }
 
-    /* Colon (for :: and QNames) */
+    /* Colon (for ::, :=, and QNames) */
     if (c == ':') {
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == ':') {
             token.type = TOK_DOUBLE_COLON;
+            token.value = lexer->pos;
+            token.value_len = 2;
+            lexer->pos += 2;
+            lexer->column += 2;
+            return token;
+        }
+        /* XPath 3.1 let binding separator `:=`. */
+        if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '=') {
+            token.type = TOK_ASSIGN;
             token.value = lexer->pos;
             token.value_len = 2;
             lexer->pos += 2;

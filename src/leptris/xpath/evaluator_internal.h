@@ -21,6 +21,11 @@ char* xpath_to_string(struct leptris_xpath_result* result);
 char* get_node_text(void* node);
 char* xpath_number_to_string(double number);
 
+/* From evaluator_operators.c — synthetic sequence members and the
+ * storage-independent nodeset copy (let unwind safety). */
+XPathTextNode* xpath_synth_text(const char* content, size_t len);
+XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src);
+
 /* Fast inline nodeset_add (TODO 135). Internal-only; callers must
  * guarantee well-formed nodeset. See evaluator.c for the contract. */
 void xpath_nodeset_add_fast(struct xpath_nodeset* nodeset, void* node);

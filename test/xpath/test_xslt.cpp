@@ -2872,3 +2872,48 @@ TEST(Xslt30, Accumulator) {
         "(null)");
 }
 
+/* XPath 3.1 `let $x := E1, $y := E2 ... return B` (Saxon-HE 12.7
+ * ground truth): bindings see EARLIER bindings; values are full
+ * sequences; inner bindings shadow outer ones. */
+TEST(Xslt30, LetExpression) {
+    /* Sequence value: sum over a bound node-set. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='let $x := //item/@n return sum($x)'/>]"
+        "</xsl:template>",
+        "<r><item n='1'>a</item><item n='2'>b</item></r>")),
+        "[3]");
+    /* Multiple bindings, comma-separated, each seeing the previous. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='let $p := position(), $q := 2 "
+        "return $p + $q'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[3]");
+    /* Shadowing: the inner binding wins inside its body. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='let $x := 5 return "
+        "let $x := $x + 1 return $x'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[6]");
+    /* String binding feeding a function call. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"let $s := string(//item[1]) return "
+        "concat('[', $s, ']')\"/>]"
+        "</xsl:template>",
+        "<r><item n='1'>a</item><item n='2'>b</item></r>")),
+        "[[a]]");
+    /* Outer template variables remain visible inside the let body. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='v' select='2'/>"
+        "[<xsl:value-of select='let $x := 1 return $x + $v'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[3]");
+}
+
