@@ -4,7 +4,24 @@
 
 ### Added
 
-- xsl:accumulator — before/after folds over the tree event stream (xslt)
+- **XSLT 3.0 program, sixth increment — `xsl:accumulator`
+  (18.2)**: declarations compile to ordered rules (`@match`,
+  `@phase` start/end, `@select`, `@initial-value`).
+  `accumulator-before(name)` / `accumulator-after(name)` fold
+  lazily once per (accumulator, tree) from the document node
+  through every node's start/end events — per event the last
+  matching rule of that phase fires — and both endpoints are
+  snapshotted into per-node maps cached for the transform.
+  `$value` is bound through the exec frame chain, so rules also
+  see user and global variables; temporary trees evaluate with
+  the source swapped so absolute paths resolve.
+  `xsl:mode use-accumulators` gates applicability on the
+  principal document (XTDE3362); XTDE3340 (undeclared name),
+  XTTE3360 (attribute context), and XTDE3400 (re-entrant fold)
+  are raised. Semantics decoded from Saxon-HE 12.7 and the W3C
+  REC before implementation; the spec asserts Saxon's exact
+  outputs (counter, @n sum, phase="end" over nested containers,
+  and the applicability gate).
 
 
 
