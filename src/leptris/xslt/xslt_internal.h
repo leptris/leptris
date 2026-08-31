@@ -244,8 +244,31 @@ typedef struct xslt_pattern {
      * bare name test or "*" (see xslt_pattern.c). */
     char expr_name[64];
     int expr_name_only;
+    /* Compiled step ladder (pattern-compiler fast path): the
+     * alternative is a child-axis name/kind ladder with an
+     * optional predicate on the LAST step. Matching then costs
+     * one predicate eval plus a parent-chain walk — never the
+     * ancestor-rung downward scans of the general ladder. Any
+     * other shape (prefixed tests, //, ::, function patterns,
+     * non-final predicates) leaves steps_valid = 0 and keeps the
+     * general matcher. */
+    struct xslt_pat_step* steps;
+    int n_steps;
+    int steps_valid;
+    int steps_absolute;   /* leading '/' — chain anchors at the
+                             document node's child axis */
     struct xslt_pattern* next;
 } XsltPattern;
+
+/* One step of the compiled pattern ladder. kind: 0 = name test
+ * (name NULL = *), 1 = node(), 2 = text(), 3 = comment(),
+ * 4 = processing-instruction(). */
+typedef struct xslt_pat_step {
+    char* name;
+    int is_attr;
+    int kind;
+    LeptrisXPathCompiled pred;   /* optional [pred] on this step */
+} XsltPatStep;
 
 typedef struct xslt_template {
     XsltPattern* matches;           /* NULL for named-only */
@@ -564,6 +587,13 @@ void xslt_stylesheet_free(XsltStylesheet* sheet);
  * namespace URI, not prefix spelling (§5.3). */
 int xslt_pattern_matches(const XsltPattern* p, LeptrisElement node,
                          LeptrisDocument doc, LeptrisXPathNsSet ns);
+
+/* Pattern-compiler fast path (xslt_pattern.c): compile a
+ * child-axis ladder alternative into per-step name/kind tests
+ * with an optional last-step predicate; free with
+ * xslt_pattern_steps_free at stylesheet teardown. */
+void xslt_pattern_compile_steps(XsltPattern* p, const char* src);
+void xslt_pattern_steps_free(XsltPattern* p);
 
 /* Eval hook: lets the caller supply a richer evaluation route than
  * the plain ns-aware one — xsl:number count/from patterns evaluate

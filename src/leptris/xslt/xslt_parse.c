@@ -515,6 +515,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
             if (p) {
                 p->expr = leptris_xpath_compile(src);
                 if (p->expr) {
+                    xslt_pattern_compile_steps(p, src);
                     if (pi == 0) in->group_starting = p;
                     else in->group_ending = p;
                 } else {
@@ -961,6 +962,7 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
                 free(alts[i]);
                 continue;
             }
+            xslt_pattern_compile_steps(p, trimmed);
             p->priority = has_priority ? pri_val
                                        : default_priority(trimmed);
             /* Bare-name fast path for the root element — ONLY for
@@ -1461,10 +1463,12 @@ static void free_instr(XsltInstr* in) {
     if (in->context_item) leptris_xpath_compiled_free(in->context_item);
     if (in->group_starting) {
         leptris_xpath_compiled_free(in->group_starting->expr);
+        xslt_pattern_steps_free(in->group_starting);
         free(in->group_starting);
     }
     if (in->group_ending) {
         leptris_xpath_compiled_free(in->group_ending->expr);
+        xslt_pattern_steps_free(in->group_ending);
         free(in->group_ending);
     }
     if (in->num_value) leptris_xpath_compiled_free(in->num_value);
@@ -1528,6 +1532,7 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         while (p) {
             XsltPattern* pn = p->next;
             if (p->expr) leptris_xpath_compiled_free(p->expr);
+            xslt_pattern_steps_free(p);
             free(p);
             p = pn;
         }

@@ -276,4 +276,66 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
         << large << " us vs 25-child sweep " << small << " us";
 }
 
+/* Template dispatch must scale with the CANDIDATE'S subtree, not
+ * the parent's child count: the pre-pattern-compiler matcher
+ * evaluated every ancestor rung as a full downward XPath and
+ * membership-scanned the result — match="book[title]" cost
+ * O(siblings) per candidate (5.5 s for a 2000-book dispatch sheet
+ * that libxslt runs in ~10 ms). Fixed-shape sheet, N and 4N books:
+ * linear work ⇒ ratio ≈ 4; the pathology measures ≈ 16. */
+static double DispatchSheetMs(int books) {
+    std::string xml = "<catalog>";
+    for (int i = 0; i < books; i++) {
+        xml += "<book id='" + std::to_string(i) + "'><title>t</title>"
+               "<author>a</author></book>";
+    }
+    xml += "</catalog>";
+    static const char XSL[] =
+        "<xsl:stylesheet xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " version='1.0'>"
+        "<xsl:template match='/'><out>"
+        "<xsl:apply-templates select='//book'/></out></xsl:template>"
+        "<xsl:template match='book[title]'><b id='{@id}'>"
+        "<xsl:apply-templates select='*'/></b></xsl:template>"
+        "<xsl:template match='title'><t><xsl:value-of select='.'/></t>"
+        "</xsl:template>"
+        "<xsl:template match='author'><a><xsl:value-of select='.'/></a>"
+        "</xsl:template>"
+        "</xsl:stylesheet>";
+    LeptrisDocument d = leptris_parse_string(xml.data(), xml.size(), NULL);
+    LeptrisXslt x = leptris_xslt_parse(XSL, sizeof(XSL) - 1);
+    if (!d || !x) { if (d) leptris_document_free(d);
+                    if (x) leptris_xslt_free(x); return -1.0; }
+    auto start = clock_type::now();
+    char* out = leptris_xslt_apply_string(x, d);
+    double ms = ElapsedUs(start) / 1000.0;
+    leptris_free_string(out);
+    leptris_xslt_free(x);
+    leptris_document_free(d);
+    return ms;
+}
+
+TEST(PerfRegression, TemplateDispatchScalesLinearly) {
+    double small = 1e18, large = 1e18;
+    for (int rep = 0; rep < 3; rep++) {
+        double s = DispatchSheetMs(300);
+        double l = DispatchSheetMs(1200);
+        if (s < small) small = s;
+        if (l < large) large = l;
+    }
+    ASSERT_GT(small, 0.0);
+    /* 4x the books, pattern matching linear in the candidate's own
+     * context: budget 10x leaves headroom for output-building
+     * variance; the sibling-scan pathology measures ~16x. */
+    EXPECT_LT(large, 10.0 * small)
+        << "Template dispatch complexity regression: 1200-book sheet "
+        << large << " ms vs 300-book " << small << " ms";
+#if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
+    /* Generous absolute cap (healthy: a few ms) — the pathology
+     * measured ~2.2 s at 1200 books. */
+    EXPECT_LT(large, 500.0)
+        << "Template dispatch absolute regression: " << large << " ms";
+#endif
+}
+
 }  // namespace
