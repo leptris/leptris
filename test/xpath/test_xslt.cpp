@@ -2526,6 +2526,36 @@ TEST(Xslt30, TextValueTemplates) {
         "2");
 }
 
+/* XSLT 3.0 xsl:evaluate (§26): compile and run an expression taken
+ * from a string at transform time. @xpath evaluates to a string;
+ * the dynamic expression runs with the @context-item (the current
+ * node via "."), or with an absent context when omitted (Saxon-HE
+ * 12.7: absent context is the spec default). */
+TEST(Xslt30, Evaluate) {
+    /* Expression from a variable, current node as context. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='e' select=\"'count(//i)'\"/>"
+        "[<xsl:evaluate xpath='$e' context-item='.'/>]"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i></r>")),
+        "[2]");
+    /* Literal expression string. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:evaluate xpath=\"'count(//i) + 1'\" context-item='.'/>]"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i></r>")),
+        "[3]");
+    /* context-item retargets: expression sees the chosen node. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:evaluate xpath=\"'string(.)'\" context-item='//i[2]'/>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i></r>")),
+        "b");
+}
+
 /* Minimal bug-130 shape: xml method, default-ns root, no-ns child
  * via copy-of — the child must serialize with xmlns="". */
 TEST(XsltImport, NoNsChildUnderDefaultNsXmlMethod) {
