@@ -4,16 +4,46 @@
 
 ### Added
 
-- xsl:evaluate - dynamic expression from a string (26) (xslt30)
-- text value templates (expand-text="yes", 10.4.2) (xslt30)
-- xsl:for-each-group with group-by and group-starting-with (xslt30)
-- xsl:iterate with param chaining (XSLT 3.0 12.5) (xslt30)
-- item sequences — for/range/paren yield sequences, string-join/upper-case/lower-case, value-of display form (xslt30)
+- **XSLT 3.0 program, second increment — sequences and the core 3.0
+  instruction set**, every feature spec'd first and verified against
+  Saxon-HE 12.7 ground truth:
+  - **Item sequences** (XPath 2.0+): `for ... return`, `A to B`
+    ranges, and parenthesized sequences produce true sequences
+    instead of pre-joined strings; `string-join`, `upper-case`,
+    `lower-case` consume them; `xsl:value-of` prints sequences
+    space-joined (3.0 default separator) while plain nodesets keep
+    the 1.0 first-member rule. A `version="2.0"+` stylesheet's
+    value-of prints every selected item (version tracked from
+    `xsl:stylesheet/@version`).
+  - **`xsl:iterate`** (12.5): sequential mapping with `xsl:param`
+    iteration state, `xsl:next-iteration` rebinds, `xsl:break` —
+    both unwind nested instruction sequences through a walker
+    signal mirroring `func:result`.
+  - **`xsl:for-each-group`** (14): `group-by` (first-key-appearance
+    order) and `group-starting-with` (single-alternative pattern);
+    `current-group()` / `current-grouping-key()`.
+  - **Text value templates** (10.4.2, `expand-text="yes"`): `{expr}`
+    in literal text — `xsl:text` content included (Saxon-verified) —
+    through the AVT evaluator; 1.0 sheets unaffected.
+  - **`xsl:evaluate`** (26): `@xpath` evaluates to the string to
+    compile and run; `@context-item` picks the context node
+    (omitted = absent context, anchored on the document node).
 
 ### Fixed
 
-- indent unit on the fused-leaf fast path (#658) (serialize)
-- free for-each-group/evaluate compiled expressions (xslt30)
+- **Serializer**: the fused-leaf fast path (text-bearing leaves)
+  computed `indent * indent_spaces` directly, losing the #633 indent
+  unit on every mixed-content leaf — it now emits the configured
+  unit per level (#658; leptris-ruby#109 residual, moxml#153
+  family).
+- Free the for-each-group/evaluate compiled expressions and the
+  group-starting pattern on stylesheet teardown (caught by Linux
+  ASAN leak detection).
+
+### Performance
+
+- XSLT transform benchmark at 333.6 µs (lxml reference 499 µs); all
+  1.0 conformance unchanged (W3C 438/438, libxslt suite 205/205).
 
 
 
