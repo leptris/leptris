@@ -553,6 +553,18 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         return in;
     }
     if (strcmp(local, "try") == 0 || strcmp(local, "catch") == 0) {
+        /* §17: xsl:catch is only valid as a CHILD of xsl:try. A
+         * misplaced catch is a static error (Saxon: XTSE0010) —
+         * silently skipping it turned a catchable error into an
+         * unexplained NULL transform (issue #669). */
+        if (local[0] == 'c') {
+            LeptrisElement parent =
+                leptris_node_parent((LeptrisNodeRef)e);
+            if (!parent || !node_is_xsl(parent, "try")) {
+                sp->errors = 1;
+                return NULL;
+            }
+        }
         XsltInstr* in = instr_new(
             local[0] == 't' ? XSLT_INSTR_TRY : XSLT_INSTR_CATCH);
         if (!in) return NULL;

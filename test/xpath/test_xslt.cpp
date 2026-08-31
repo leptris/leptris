@@ -2974,3 +2974,38 @@ TEST(Xslt30, BangArrowConcat) {
         "[xyz]");
 }
 
+/* xsl:try/xsl:catch (§17) through value-of/@select — error() IS
+ * catchable in the canonical form (issue #669's repro had the
+ * catch as a SIBLING of try, which Saxon rejects at compile
+ * time). Our error($msg) takes the description as the first
+ * argument (documented pragmatic arity). */
+TEST(Xslt30, TryCatchErrorVariants) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'><o>"
+        "<xsl:try><xsl:value-of select=\"error('boom')\"/>"
+        "<xsl:catch><caught>"
+        "<xsl:value-of select='$err:description'/></caught>"
+        "</xsl:catch></xsl:try>"
+        "<xsl:try><xsl:value-of select=\"error(concat('b','oom'))\"/>"
+        "<xsl:catch><c2>"
+        "<xsl:value-of select='$err:description'/></c2>"
+        "</xsl:catch></xsl:try>"
+        "<xsl:variable name='m' select=\"'varmsg'\"/>"
+        "<xsl:try><xsl:value-of select='error($m)'/>"
+        "<xsl:catch><c3>"
+        "<xsl:value-of select='$err:description'/></c3>"
+        "</xsl:catch></xsl:try>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "<o><caught>boom</caught><c2>boom</c2><c3>varmsg</c3></o>");
+    /* A misplaced xsl:catch (sibling of try, not a child) is a
+     * compile error — Saxon: XTSE0010; never a silent NULL. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'><o>"
+        "<xsl:try><xsl:value-of select=\"error('boom')\"/></xsl:try>"
+        "<xsl:catch><caught/></xsl:catch>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "(compile-failed)");
+}
+
