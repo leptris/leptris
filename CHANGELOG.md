@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.26] - 2026-08-31
+
+### Added
+
+- xsl:try/xsl:catch with the error() raiser (17) (xslt30)
+
+
+
 ## [1.9.25] - 2026-08-31
 
 ### Added
