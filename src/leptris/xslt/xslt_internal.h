@@ -63,6 +63,8 @@ typedef enum {
                                      abandon the rest of the body */
     XSLT_INSTR_BREAK,            /* xsl:break: end the enclosing iterate */
     XSLT_INSTR_FOR_EACH_GROUP,   /* xsl:for-each-group (3.0 §14) */
+    XSLT_INSTR_EVALUATE,         /* xsl:evaluate (3.0 §26): dynamic
+                                     expression from a string */
     XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
                                       its xsl:fallback children (§15) */
 } XsltInstrKind;
@@ -121,6 +123,11 @@ typedef struct xslt_instr {
      * pattern (a match opens a new group). At most one is set. */
     LeptrisXPathCompiled group_by;
     struct xslt_pattern* group_starting;
+
+    /* EVALUATE (3.0 §26): @xpath expression yields the STRING to
+     * compile+run; context_item selects its context node (absent →
+     * the document node anchors absolute paths). */
+    LeptrisXPathCompiled context_item;
 
     /* use-attribute-sets (RESULT_ELEM / ELEMENT / COPY): names
      * applied before the instruction's own attrs (§7.1.4). */

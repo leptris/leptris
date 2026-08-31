@@ -513,6 +513,13 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "evaluate") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_EVALUATE);
+        if (!in) return NULL;
+        in->select = compile_attr_sp(sp, e, "xpath");
+        in->context_item = compile_attr_sp(sp, e, "context-item");
+        return in;
+    }
     if (strcmp(local, "next-iteration") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_NEXT_ITERATION);
         if (!in) return NULL;

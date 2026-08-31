@@ -912,18 +912,13 @@ static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     return 0;
 }
 
-static int op_value_of(XsltExec* ex, const XsltInstr* in,
-                       LeptrisElement node) {
-    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
-    if (!r) return 0;
-    char* sv = NULL;
-    /* XSLT 3.0 display form: an item sequence (for/range/sequence)
-     * joins members with the default separator " ", and a 2.0+
-     * stylesheet selects a sequence from ANY expression — every item
-     * prints. A 1.0 stylesheet's plain nodeset keeps the 1.0
-     * first-member rule. */
-    if (r->type == XPATH_RESULT_NODESET &&
-        r->value.nodeset_value &&
+/* value-of display semantics: an item sequence (for/range/sequence)
+ * joins members with the default separator " "; a 2.0+ stylesheet
+ * selects a sequence from ANY expression — every item prints. A 1.0
+ * stylesheet's plain nodeset keeps the 1.0 first-member rule. */
+static char* value_of_string(XsltExec* ex,
+                             const struct leptris_xpath_result* r) {
+    if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
         (r->value.nodeset_value->is_sequence ||
          (ex->sheet && ex->sheet->version_major >= 2))) {
         XPathNodeSet* ns = r->value.nodeset_value;
@@ -934,7 +929,7 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
             if (t) { total += strlen(t); free(t); }
             if (i + 1 < ns->count) total += 1;   /* " " */
         }
-        sv = (char*)malloc(total);
+        char* sv = (char*)malloc(total);
         if (sv) {
             char* w = sv;
             for (size_t i = 0; i < ns->count; i++) {
@@ -944,13 +939,62 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
             }
             *w = '\0';
         }
-    } else {
-        sv = leptris_xpath_result_string(r);
+        return sv;
     }
+    return leptris_xpath_result_string(
+        (struct leptris_xpath_result*)r);
+}
+
+static int op_value_of(XsltExec* ex, const XsltInstr* in,
+                       LeptrisElement node) {
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    char* sv = value_of_string(ex, r);
     leptris_xpath_result_free(r);
     if (sv) {
         op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT, .text = sv,
                                   .doe = in->doe },
+                node);
+        leptris_free_string(sv);
+    }
+    return 0;
+}
+
+/* xsl:evaluate (3.0 §26): @xpath evaluates to a STRING — the XPath
+ * to compile and run now; @context-item picks its context node
+ * (omitted or empty = absent context: the source document node
+ * anchors absolute paths, Saxon-verified default). */
+static int op_evaluate(XsltExec* ex, const XsltInstr* in,
+                       LeptrisElement node) {
+    struct leptris_xpath_result* xr = xslt_eval(ex, in->select, node);
+    if (!xr) return 0;
+    char* expr = leptris_xpath_result_string(xr);
+    leptris_xpath_result_free(xr);
+    if (!expr) return 0;
+    LeptrisXPathCompiled c = leptris_xpath_compile(expr);
+    free(expr);
+    if (!c) return 0;
+    LeptrisElement ctx = NULL;
+    if (in->context_item) {
+        struct leptris_xpath_result* cr =
+            xslt_eval(ex, in->context_item, node);
+        if (cr && cr->type == XPATH_RESULT_NODESET &&
+            cr->value.nodeset_value && cr->value.nodeset_value->count)
+            ctx = (LeptrisElement)cr->value.nodeset_value->nodes[0];
+        if (cr) leptris_xpath_result_free(cr);
+    }
+    if (!ctx) {
+        LeptrisNodeRef dn =
+            (LeptrisNodeRef)leptris_document_get_node(ex->source);
+        ctx = (LeptrisElement)dn;
+    }
+    struct leptris_xpath_result* r = ctx ? xslt_eval(ex, c, ctx) : NULL;
+    leptris_xpath_compiled_free(c);
+    if (!r) return 0;
+    char* sv = value_of_string(ex, r);
+    leptris_xpath_result_free(r);
+    if (sv) {
+        op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT, .text = sv },
                 node);
         leptris_free_string(sv);
     }
@@ -3319,6 +3363,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;
     g_ops[XSLT_INSTR_BREAK] = op_break;
     g_ops[XSLT_INSTR_FOR_EACH_GROUP] = op_for_each_group;
+    g_ops[XSLT_INSTR_EVALUATE] = op_evaluate;
     g_ops[XSLT_INSTR_IF] = op_if;
     g_ops[XSLT_INSTR_APPLY_TEMPLATES] = op_apply_templates;
     g_ops[XSLT_INSTR_CALL_TEMPLATE] = op_call_template;
