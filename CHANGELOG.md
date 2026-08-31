@@ -1,10 +1,26 @@
 ## [Unreleased]
 
-## [1.9.31] - 2026-08-31
+## [1.9.31] - 2026-09-01
 
 ### Performance
 
-- compiled pattern ladders — O(depth) template matching (xslt)
+- **XSLT template matching is O(depth), not O(siblings)** — the
+  pattern compiler. Child-axis match alternatives
+  (`book[title]`, `a/b/c`) now compile to per-step name/kind tests
+  with an optional last-step predicate: the candidate node is
+  tested directly and the earlier steps are name checks up the
+  parent chain. Previously every ancestor rung evaluated the
+  pattern as a full downward XPath and membership-scanned the
+  result — a dispatch-heavy 2000-book transform ran 5.56 s where
+  libxslt completes in ~10 ms wall. Measured on the same fixture:
+  dispatch 5558 → 228 ms (24×), select-heavy for-each 18.4 →
+  3.1 ms (libxslt parity). Everything the fast path does not
+  model (prefixed tests, `//`, `::`, function patterns, non-final
+  or positional predicates) keeps the general matcher; the
+  libxslt suite stays 205/205. New
+  `PerfRegression.TemplateDispatchScalesLinearly` pins the
+  complexity (the pathology measured a 24× time ratio for 4× the
+  books; healthy runs stay under 10×).
 
 
 
