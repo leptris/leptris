@@ -354,7 +354,7 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
     if (!ex || !ex->sheet || !ex->source) return -1;
     int any = 0;
     for (XsltKeyDef* kd = ex->sheet->keys; kd; kd = kd->next)
-        if (kd->name && kd->match && kd->use &&
+        if (kd->name && kd->pat.expr && kd->use &&
             strcmp(kd->name, name) == 0) any = 1;
     if (!any) return 0;
     XsltKeyIndex* idx = key_index_new(name);
@@ -366,7 +366,9 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
 
     /* Every node KIND in document order — match="node()" /
      * match="text()" must index text and comment nodes too (the
-     * elements-only walker dropped them, bug-133). */
+     * elements-only walker dropped them, bug-133). The keydef's
+     * pattern carries the compiled step ladder (armed at parse),
+     * so per-node matching is O(depth). */
     struct leptris_document* sdoc = (struct leptris_document*)ex->source;
     LeptrisNodeRef start =
         (LeptrisNodeRef)sdoc->doc_children_head;
@@ -375,17 +377,16 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
     for (LeptrisNodeRef e = start; e; e = xslt_any_next_doc_order(e)) {
         for (XsltKeyDef* kd = ex->sheet->keys; kd; kd = kd->next) {
             if (!kd->name || strcmp(kd->name, name) != 0) continue;
-            XsltPattern pat; memset(&pat, 0, sizeof(pat));
-            pat.expr = kd->match;
-            int m = xslt_pattern_matches(&pat, (LeptrisElement)e, ex->source,
-                                       NULL);
+            int m = xslt_pattern_matches(&kd->pat, (LeptrisElement)e,
+                                         ex->source, NULL);
             if (!m) continue;
-            LeptrisElement saved_cur = ex->current_node;
-            ex->current_node = (LeptrisElement)e;
+            /* xslt_eval routes through the exec's CACHED eval
+             * environment (registry + varset mirror) — the raw
+             * compiled-eval call rebuilt a fresh function registry
+             * per node and profiled as the entire Muenchian cost
+             * (~100 µs per use-expression evaluation). */
             struct leptris_xpath_result* r =
-                leptris_xpath_compiled_eval(kd->use, ex->source,
-                                            (LeptrisElement)e);
-            ex->current_node = saved_cur;
+                xslt_eval(ex, kd->use, (LeptrisElement)e);
             if (!r) continue;
             char* sv = leptris_xpath_result_string(r);
             leptris_xpath_result_free(r);

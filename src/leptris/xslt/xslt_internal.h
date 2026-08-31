@@ -297,7 +297,10 @@ typedef struct xslt_userfunc {
 /* Key definition (xsl:key). */
 typedef struct xslt_keydef {
     const char* name;
-    LeptrisXPathCompiled match;
+    XsltPattern pat;            /* compiled @match (expr + step
+                                   ladder) — the index build
+                                   matches every document node with
+                                   it. */
     LeptrisXPathCompiled use;
     struct xslt_keydef* next;
 } XsltKeyDef;

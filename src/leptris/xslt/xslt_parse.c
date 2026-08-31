@@ -1093,8 +1093,11 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             XsltKeyDef* k = (XsltKeyDef*)calloc(1, sizeof(*k));
             if (!k) continue;
             k->name = leptris_strdup(leptris_element_attribute(e, "name"));
-            k->match = compile_attr_sp(sp, e, "match");
+            k->pat.expr = compile_attr_sp(sp, e, "match");
             k->use = compile_attr_sp(sp, e, "use");
+            const char* mt = leptris_element_attribute(e, "match");
+            if (mt && *mt && k->pat.expr)
+                xslt_pattern_compile_steps(&k->pat, mt);
             XsltKeyDef** tail = &sp->sheet->keys;
             while (*tail) tail = &(*tail)->next;
             *tail = k;
@@ -1546,7 +1549,8 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
     while (sheet->keys) {
         XsltKeyDef* k = sheet->keys;
         sheet->keys = k->next;
-        if (k->match) leptris_xpath_compiled_free(k->match);
+        if (k->pat.expr) leptris_xpath_compiled_free(k->pat.expr);
+        xslt_pattern_steps_free(&k->pat);
         if (k->use) leptris_xpath_compiled_free(k->use);
         free((void*)k->name);
         free(k);

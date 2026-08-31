@@ -341,10 +341,20 @@ int xslt_pattern_matches_ex(const XsltPattern* p, LeptrisElement node,
             }
             /* Doc-level nodes are parentless by design (#580) and
              * result-tree elements link no doc back-pointer through
-             * the climb — elements resolve their owner document. */
-            if (!own && nty == LEPTRIS_NODE_ELEMENT)
-                own = (struct leptris_document*)
-                    leptris_element_get_document(node);
+             * the climb — elements resolve their owner document.
+             * The climb stops at the tree ROOT element (its parent
+             * is NULL, not the document node), so first compare
+             * against the caller's own root — one O(1) field read
+             * versus leptris_element_get_document's full climb +
+             * root-map probe, which profiled as 56% of a dispatch
+             * transform (one resolution per pattern evaluation). */
+            if (!own && nty == LEPTRIS_NODE_ELEMENT) {
+                if (top == (LeptrisNodeRef)leptris_document_root(doc))
+                    own = (struct leptris_document*)doc;
+                else
+                    own = (struct leptris_document*)
+                        leptris_element_get_document(node);
+            }
             if (own && own != (struct leptris_document*)doc)
                 doc = (LeptrisDocument)own;
         }
