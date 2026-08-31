@@ -2532,6 +2532,40 @@ TEST(Xslt30, ForEachGroupVariants) {
         "[3][2][2]");
 }
 
+/* XSLT 3.0 xsl:try/xsl:catch (§17): a dynamic error in the try body
+ * runs the catch content with $err:description bound to the error
+ * message; no error means the catch never runs. error($msg) raises
+ * one from XPath (Saxon-HE 12.7 shape: description carried over). */
+TEST(Xslt30, TryCatch) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:try>"
+        "<xsl:value-of select='error(\"boom\")'/>"
+        "<xsl:catch>caught:<xsl:value-of "
+        "select=\"$err:description\"/></xsl:catch>"
+        "</xsl:try>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[caught:boom]");
+    /* No error: catch never runs. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:try>ok<xsl:catch>nope</xsl:catch></xsl:try>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[ok]");
+    /* Output before the failing instruction stays. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:try>"
+        "a<xsl:value-of select='error(\"x\")'/>b"
+        "<xsl:catch>!</xsl:catch>"
+        "</xsl:try>"
+        "</xsl:template>",
+        "<r/>")),
+        "a!");
+}
+
 /* XSLT 3.0 xsl:analyze-string (§18): regex-scan the selected string;
  * matching-substring runs with "." = the matched substring and
  * regex-group(n) reading captures; non-matching-substring covers the

@@ -212,6 +212,22 @@ static struct leptris_xpath_result* xslt_fn_current_grouping_key(
 /* regex-group(n) (3.0 §18): the nth capture of the analyze-string
  * match in flight — offsets are POSIX regmatch values relative to
  * as_src + as_pos. */
+static struct leptris_xpath_result* xslt_fn_error(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    /* 3.0 §17 error raiser, pragmatic arity: error($description).
+     * Trips the exec error channel; xsl:try catches it, anything
+     * else aborts the transform. Returns NULL = eval failure. */
+    XsltExec* ex = exec_from(ctx);
+    char* msg = (n >= 1) ? arg_string(ctx, args, n, 0) : NULL;
+    if (ex) {
+        ex->eval_error = 1;
+        snprintf(ex->error, sizeof(ex->error), "%s",
+                 msg ? msg : "error() called");
+    }
+    free(msg);
+    return NULL;
+}
+
 static struct leptris_xpath_result* xslt_fn_regex_group(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
     XsltExec* ex = exec_from(ctx);
@@ -1295,6 +1311,7 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
                           xslt_fn_current_grouping_key, 0, 0, exec);
     xslt_register_handler(r, "regex-group", xslt_fn_regex_group,
                           1, 1, exec);
+    xslt_register_handler(r, "error", xslt_fn_error, 0, 1, exec);
     xslt_register_handler(r, "generate-id", xslt_fn_generate_id, 0, 1, exec);
     xslt_register_handler(r, "system-property", xslt_fn_system_property, 1, 1, exec);
     xslt_register_handler(r, "key", xslt_fn_key, 2, 2, exec);

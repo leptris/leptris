@@ -68,6 +68,10 @@ typedef enum {
     XSLT_INSTR_ANALYZE_STRING,   /* xsl:analyze-string (3.0 §18) */
     XSLT_INSTR_MATCHING_SUBSTRING,
     XSLT_INSTR_NONMATCHING_SUBSTRING,
+    XSLT_INSTR_TRY,              /* xsl:try (3.0 §17): body until the
+                                     first xsl:catch child */
+    XSLT_INSTR_CATCH,            /* xsl:catch: runs on a dynamic error
+                                     with $err:description bound */
     XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
                                       its xsl:fallback children (§15) */
 } XsltInstrKind;

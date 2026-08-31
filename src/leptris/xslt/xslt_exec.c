@@ -1107,6 +1107,57 @@ static int op_analyze_string(XsltExec* ex, const XsltInstr* in,
     return rc;
 }
 
+/* xsl:try/xsl:catch (3.0 §17): the body is the children before the
+ * first xsl:catch. A dynamic error (eval_error channel — raised by
+ * failing evaluations or the error() bridge) runs the catch content
+ * with $err:description bound to the message; the channel clears so
+ * the transform continues. */
+static int op_try(XsltExec* ex, const XsltInstr* in,
+                  LeptrisElement node) {
+    XsltInstr* catch_at = NULL;
+    XsltInstr** link = NULL;
+    for (XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind == XSLT_INSTR_CATCH) {
+            catch_at = c;
+            for (link = (XsltInstr**)&in->child;
+                 link && *link != catch_at; link = &(*link)->next) {}
+            break;
+        }
+    }
+    if (link) *link = NULL;   /* body ends before the catch */
+
+    int saved_err = ex->eval_error;
+    char saved_msg[sizeof(ex->error)];
+    memcpy(saved_msg, ex->error, sizeof(saved_msg));
+    ex->eval_error = 0;
+
+    int rc = xslt_exec_instrs(ex, in->child, node);
+
+    if (ex->eval_error) {
+        char msg[sizeof(ex->error)];
+        memcpy(msg, ex->error, sizeof(msg));
+        if (catch_at) {
+            ex->eval_error = 0;
+            ex->error[0] = '\0';
+            XsltVar* scope = ex->vars;
+            struct leptris_xpath_result* dv =
+                xpath_result_new(XPATH_RESULT_STRING);
+            if (dv) {
+                dv->value.string_value = leptris_strdup(msg);
+                xslt_push_var(ex, "err:description", dv);
+            }
+            rc = xslt_exec_instrs(ex, catch_at->child, node);
+            xslt_pop_vars_to(ex, scope);
+        }
+    } else {
+        ex->eval_error = saved_err;
+        memcpy(ex->error, saved_msg, sizeof(saved_msg));
+    }
+
+    if (link) *link = catch_at;
+    return rc;
+}
+
 /* §10 stable sort by string/number key — shared by for-each and
  * apply-templates (single-key v1: the first xsl:sort). */
 /* §10 stable multi-key comparator. */
@@ -3496,6 +3547,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_FOR_EACH_GROUP] = op_for_each_group;
     g_ops[XSLT_INSTR_EVALUATE] = op_evaluate;
     g_ops[XSLT_INSTR_ANALYZE_STRING] = op_analyze_string;
+    g_ops[XSLT_INSTR_TRY] = op_try;
     g_ops[XSLT_INSTR_IF] = op_if;
     g_ops[XSLT_INSTR_APPLY_TEMPLATES] = op_apply_templates;
     g_ops[XSLT_INSTR_CALL_TEMPLATE] = op_call_template;
