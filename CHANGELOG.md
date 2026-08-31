@@ -4,8 +4,20 @@
 
 ### Added
 
-- simple map !, arrow =>, string concat || (xpath)
-- let expressions — XPath 3.1 Lane 0, increment 7 (xpath)
+- **XSLT 3.0 program, increments 7–8 — the XPath 3.1 composition
+  core**: `let $x := E1, $y := E2 ... return B` binds each value
+  through the context variable set (each binding sees the earlier
+  ones and the outer scope; shadowed bindings deep-restore on
+  unwind), `L ! R` maps the right side over every item of the left
+  with per-item context item/position/last(), `E => f(a)` passes
+  the accumulated left side as the first argument of a function
+  call (so every core and XSLT-bridge function serves it), and
+  `A || B` string-concatenates. Verified against Saxon-HE 12.7,
+  including the combined form
+  `let $x := 5 return ($x to 7) ! (. * 2) => sum()` = 36.
+  Variable references now deep-copy synthetic sequence members —
+  a let binding's storage is freed while results referencing it
+  still live.
 
 
 
