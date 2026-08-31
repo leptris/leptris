@@ -2752,3 +2752,123 @@ TEST(XsltCdata, CdataSectionElementsAndDocLevelWs) {
         "<nf2 type=\"pears\">http://p.com/i&amp;j</nf2>\n\n");
 }
 
+/* xsl:accumulator (XSLT 3.0 §18): per-document event-stream fold.
+ * Ground truth captured from Saxon-HE 12.7. accumulator-before(N)
+ * folds through N's own start event (start-phase rules of N fire);
+ * accumulator-after(N) folds through N's end event (descendants plus
+ * N's end-phase rules). Per event only the last matching rule of that
+ * phase fires. */
+TEST(Xslt30, Accumulator) {
+    /* Pure counter: before == after on a leaf, increments per item. */
+    EXPECT_EQ(body(run30(
+        "<xsl:mode use-accumulators='c'/>"
+        "<xsl:accumulator name='c' initial-value='0'>"
+        "<xsl:accumulator-rule match='i' select='$value + 1'/>"
+        "</xsl:accumulator>"
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//i'>"
+        "[<xsl:value-of select='position()'/>:b="
+        "<xsl:value-of select=\"accumulator-before('c')\"/>:a="
+        "<xsl:value-of select=\"accumulator-after('c')\"/>]"
+        "</xsl:for-each>"
+        "</xsl:template>",
+        "<r><i/><i/><i/></r>")),
+        "[1:b=1:a=1][2:b=2:a=2][3:b=3:a=3]");
+
+    /* Sum over @n: before(N) includes N's own contribution. */
+    EXPECT_EQ(body(run30(
+        "<xsl:mode use-accumulators='sum'/>"
+        "<xsl:accumulator name='sum' initial-value='0'>"
+        "<xsl:accumulator-rule match='item' select='$value + number(@n)'/>"
+        "</xsl:accumulator>"
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//item'>"
+        "[<xsl:value-of select='@n'/>:b="
+        "<xsl:value-of select=\"accumulator-before('sum')\"/>:a="
+        "<xsl:value-of select=\"accumulator-after('sum')\"/>]"
+        "</xsl:for-each>"
+        "</xsl:template>",
+        "<r><item n='1'/><item n='2'/><item n='4'/></r>")),
+        "[1:b=1:a=1][2:b=3:a=3][4:b=7:a=7]");
+
+    /* Two accumulators, phase='end' rule, nested containers: before/
+     * after differ on containers, and end-phase sums land only after
+     * the subtree completes. */
+    EXPECT_EQ(body(run30(
+        "<xsl:mode use-accumulators='s e'/>"
+        "<xsl:accumulator name='s' initial-value='0'>"
+        "<xsl:accumulator-rule match='g' select='$value + number(@n)'/>"
+        "<xsl:accumulator-rule match='i' select='$value + 10'/>"
+        "</xsl:accumulator>"
+        "<xsl:accumulator name='e' initial-value='0'>"
+        "<xsl:accumulator-rule match='g' phase='end' "
+        "select='$value + number(@n)'/>"
+        "</xsl:accumulator>"
+        "<xsl:template match='/'>"
+        "<xsl:text>doc b=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('s')\"/>"
+        "<xsl:text> a=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('s')\"/>"
+        "<xsl:text> eb=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('e')\"/>"
+        "<xsl:text> ea=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('e')\"/>"
+        "<xsl:apply-templates select='*'/>"
+        "<xsl:text>;doc-end a=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('s')\"/>"
+        "<xsl:text> ea=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('e')\"/>"
+        "</xsl:template>"
+        "<xsl:template match='r'>"
+        "<xsl:text>;r b=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('s')\"/>"
+        "<xsl:text> a=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('s')\"/>"
+        "<xsl:text> eb=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('e')\"/>"
+        "<xsl:text> ea=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('e')\"/>"
+        "<xsl:apply-templates select='*'/>"
+        "</xsl:template>"
+        "<xsl:template match='g'>"
+        "<xsl:text>;g</xsl:text><xsl:value-of select='@n'/>"
+        "<xsl:text> b=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('s')\"/>"
+        "<xsl:text> a=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('s')\"/>"
+        "<xsl:text> eb=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('e')\"/>"
+        "<xsl:text> ea=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('e')\"/>"
+        "<xsl:apply-templates select='*'/>"
+        "</xsl:template>"
+        "<xsl:template match='i'>"
+        "<xsl:text>;i b=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('s')\"/>"
+        "<xsl:text> a=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('s')\"/>"
+        "<xsl:text> eb=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-before('e')\"/>"
+        "<xsl:text> ea=</xsl:text>"
+        "<xsl:value-of select=\"accumulator-after('e')\"/>"
+        "</xsl:template>",
+        "<r><g n='1'><i/></g><g n='2'><i/></g></r>")),
+        "doc b=0 a=23 eb=0 ea=3;r b=0 a=23 eb=0 ea=3;"
+        "g1 b=1 a=11 eb=0 ea=1;i b=11 a=11 eb=0 ea=0;"
+        "g2 b=13 a=23 eb=1 ea=3;i b=23 a=23 eb=1 ea=1;"
+        "doc-end a=23 ea=3");
+
+    /* Applicability gate (§18.2.2): with no use-accumulators mode
+     * declaration the accumulator is not applicable — Saxon raises
+     * XTDE3362; the transform must not succeed. */
+    EXPECT_EQ(body(run30(
+        "<xsl:accumulator name='sum' initial-value='0'>"
+        "<xsl:accumulator-rule match='item' select='$value + number(@n)'/>"
+        "</xsl:accumulator>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"accumulator-before('sum')\"/>]"
+        "</xsl:template>",
+        "<r><item n='1'/></r>")),
+        "(null)");
+}
+

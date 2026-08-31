@@ -279,6 +279,27 @@ typedef struct xslt_keydef {
     struct xslt_keydef* next;
 } XsltKeyDef;
 
+/* xsl:accumulator (3.0 §18.2): a per-tree state machine folded over
+ * the document-order event stream (a start and an end event for
+ * every non-attribute, non-namespace node). Per event only the LAST
+ * rule in declaration order whose @match matches and whose @phase
+ * equals the event phase fires; no matching rule leaves the value
+ * unchanged. accumulator-before(N) folds through N's own start
+ * event, accumulator-after(N) through N's end event. */
+typedef struct xslt_acc_rule {
+    LeptrisXPathCompiled match;
+    LeptrisXPathCompiled select;    /* NULL = empty sequence */
+    int phase_end;                  /* 0 = "start" (default), 1 = "end" */
+    struct xslt_acc_rule* next;
+} XsltAccRule;
+
+typedef struct xslt_accumulator {
+    const char* name;
+    LeptrisXPathCompiled initial;   /* NULL = empty sequence */
+    XsltAccRule* rules;
+    struct xslt_accumulator* next;
+} XsltAccumulator;
+
 /* Namespace alias (§7.1.1 xsl:namespace-alias): stylesheet-prefix
  * → result-prefix; "#default" maps to/from the default namespace. */
 typedef struct xslt_ns_alias {
@@ -296,6 +317,19 @@ struct xslt_styles {
     /* Named template lookup: linear over the same array (stylesheets
      * rarely have many named templates; revisit at scale). */
     XsltKeyDef* keys;
+
+    /* xsl:accumulator declarations (3.0 §18.2). */
+    XsltAccumulator* accs;
+
+    /* xsl:mode use-accumulators of the UNNAMED mode (3.0 §18.2.2
+     * applicability gate): accumulator names applicable to the
+     * principal source document, or #all. Empty = none applicable —
+     * every accumulator-* call on the source doc is XTDE3362.
+     * Named modes are not captured yet (mode dispatch is
+     * string-based; on-no-match etc. land with full xsl:mode). */
+    char** mode_acc_names;
+    size_t mode_acc_count;
+    int mode_acc_all;
 
     /* Global variables (executed once per transform, before the
      * body: XSLT §11.4 top-level xsl:variable). */
@@ -456,6 +490,9 @@ typedef struct xslt_exec {
      * (§12.2), and the document() cache. */
     void* bridge;
     void* keys;
+    /* xslt_functions.c: per-(accumulator, tree) computed value maps
+     * (3.0 §18.2) — see XsltAccMap. */
+    void* accs;
     void* docs;
 
     /* EXSLT func:function in flight: func:result stores the return
@@ -579,6 +616,7 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec);
 XPathFunctionRegistry* xslt_bridge_registry(XsltExec* ex);
 void xslt_bridge_free(XsltExec* ex);
 void xslt_keys_free(XsltExec* ex);
+void xslt_accs_free(XsltExec* ex);
 void xslt_docs_free(XsltExec* ex);
 void xslt_ufn_free(XsltExec* ex);
 void xslt_gids_free(XsltExec* ex);
