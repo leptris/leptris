@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.28] - 2026-08-31
+
+### Added
+
+- xsl:accumulator — before/after folds over the tree event stream (xslt)
+
+
+
 ## [1.9.27] - 2026-08-31
 
 ### Added
