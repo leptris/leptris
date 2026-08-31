@@ -4,7 +4,13 @@
 
 ### Added
 
-- xsl:on-empty (26.4) (xslt30)
+- **XSLT 3.0 program, fifth increment — `xsl:on-empty` (26.4)**: a
+  child of a literal result element whose content sequence comes back
+  empty (no child nodes built, text included) gets the on-empty
+  content evaluated into it instead; the walker skips the
+  instruction itself. The emptiness check reads the raw first-child
+  link — the element-only accessors skip text nodes, which made
+  text-only content look empty. Saxon-HE 12.7 verified.
 
 
 
