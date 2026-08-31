@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.24] - 2026-08-31
+
+### Added
+
+- xsl:evaluate - dynamic expression from a string (26) (xslt30)
+- text value templates (expand-text="yes", 10.4.2) (xslt30)
+- xsl:for-each-group with group-by and group-starting-with (xslt30)
+- xsl:iterate with param chaining (XSLT 3.0 12.5) (xslt30)
+- item sequences — for/range/paren yield sequences, string-join/upper-case/lower-case, value-of display form (xslt30)
+
+### Fixed
+
+- indent unit on the fused-leaf fast path (#658) (serialize)
+- free for-each-group/evaluate compiled expressions (xslt30)
+
+
+
 ## [1.9.23] - 2026-08-31
 
 ### Added
