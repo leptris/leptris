@@ -2457,6 +2457,46 @@ TEST(Xslt30, Iterate) {
         "123");
 }
 
+/* XSLT 3.0 xsl:for-each-group (§14): group-by (string key per item,
+ * groups in first-key-appearance order) and group-starting-with
+ * (pattern match starts a new group). current-group() and
+ * current-grouping-key() expose the group in flight; the context
+ * item is the group's first member, position()/last() run over the
+ * sequence of groups. */
+TEST(Xslt30, ForEachGroup) {
+    /* group-by: key + member count per group. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:for-each-group select='//item' group-by='@cat'>"
+        "[<xsl:value-of select='current-grouping-key()'/>:"
+        "<xsl:value-of select='count(current-group())'/>]"
+        "</xsl:for-each-group>"
+        "</xsl:template>",
+        "<r><item cat='a'/><item cat='b'/><item cat='a'/></r>")),
+        "[a:2][b:1]");
+    /* group-by: iterate the members via current-group(). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:for-each-group select='//x' group-by='@c'>"
+        "<xsl:for-each select='current-group()'>"
+        "<xsl:value-of select='@n'/>"
+        "</xsl:for-each>"
+        "</xsl:for-each-group>"
+        "</xsl:template>",
+        "<r><x n='1' c='a'/><x n='2' c='b'/><x n='3' c='a'/></r>")),
+        "132");
+    /* group-starting-with: a match starts a new group; leading
+     * non-matching items form their own first group. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:for-each-group select='/*/*' group-starting-with='h'>"
+        "<xsl:value-of select='count(current-group())'/>"
+        "</xsl:for-each-group>"
+        "</xsl:template>",
+        "<doc><p/><h/><p/><p/><h/><p/></doc>")),
+        "132");
+}
+
 /* Minimal bug-130 shape: xml method, default-ns root, no-ns child
  * via copy-of — the child must serialize with xmlns="". */
 TEST(XsltImport, NoNsChildUnderDefaultNsXmlMethod) {

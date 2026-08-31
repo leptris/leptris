@@ -1225,6 +1225,121 @@ static int op_break(XsltExec* ex, const XsltInstr* in,
     return 0;
 }
 
+/* xsl:for-each-group (3.0 §14). Groups in first-appearance order;
+ * each group owns its member array (borrowed pointers out of the
+ * select's result, which stays alive for the whole loop). */
+typedef struct xslt_feg_group {
+    char* key;                  /* owned; NULL for pattern groups */
+    LeptrisElement* items;
+    size_t n, cap;
+} XsltFegGroup;
+
+static int feg_group_push(XsltFegGroup* g, LeptrisElement it) {
+    if (g->n == g->cap) {
+        size_t cap = g->cap ? g->cap * 2 : 4;
+        LeptrisElement* grown =
+            (LeptrisElement*)realloc(g->items, cap * sizeof(*grown));
+        if (!grown) return -1;
+        g->items = grown;
+        g->cap = cap;
+    }
+    g->items[g->n++] = it;
+    return 0;
+}
+
+static int op_for_each_group(XsltExec* ex, const XsltInstr* in,
+                             LeptrisElement node) {
+    if (!in->group_by && !in->group_starting) return 0;
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    size_t n = leptris_xpath_result_count(r);
+    LeptrisElement* items = (n > 0)
+        ? (LeptrisElement*)calloc(n, sizeof(LeptrisElement)) : NULL;
+    if (items) {
+        for (size_t i = 0; i < n; i++)
+            items[i] = (LeptrisElement)leptris_xpath_result_get_node(r, i);
+    }
+    if (!items) { leptris_xpath_result_free(r); return n ? -1 : 0; }
+
+    XsltFegGroup* groups = (n > 0)
+        ? (XsltFegGroup*)calloc(n, sizeof(XsltFegGroup)) : NULL;
+    size_t ngroups = 0;
+    int rc = 0;
+    if (!groups) { rc = -1; goto done; }
+
+    for (size_t i = 0; i < n; i++) {
+        XsltFegGroup* g = NULL;
+        if (in->group_by) {
+            char* key = NULL;
+            struct leptris_xpath_result* kv =
+                xslt_eval(ex, in->group_by, items[i]);
+            if (kv) {
+                key = leptris_xpath_result_string(kv);
+                leptris_xpath_result_free(kv);
+            }
+            for (size_t j = 0; j < ngroups; j++) {
+                const char* a = groups[j].key ? groups[j].key : "";
+                const char* b = key ? key : "";
+                if (strcmp(a, b) == 0) { g = &groups[j]; break; }
+            }
+            if (!g) {
+                g = &groups[ngroups++];
+                g->key = key;
+            } else {
+                free(key);
+            }
+        } else {
+            /* group-starting-with: a match opens a new group; the
+             * implicit first group collects leading non-matches. */
+            if (ngroups == 0 || xslt_pattern_matches(
+                    in->group_starting, items[i], ex->source, in->ns))
+                g = &groups[ngroups++];
+            else
+                g = &groups[ngroups - 1];
+        }
+        if (feg_group_push(g, items[i])) { rc = -1; break; }
+    }
+
+    {
+        size_t saved_pos = ex->current_pos;
+        size_t saved_size = ex->current_size;
+        XPathNodeSet* saved_group = ex->cur_group;
+        char* saved_key = ex->cur_group_key;
+        ex->current_size = ngroups;
+        for (size_t gi = 0; gi < ngroups && rc == 0; gi++) {
+            if (groups[gi].n == 0) continue;
+            ex->cur_group = xpath_nodeset_new();
+            if (!ex->cur_group) { rc = -1; break; }
+            for (size_t m = 0; m < groups[gi].n; m++)
+                xpath_nodeset_add(ex->cur_group, groups[gi].items[m]);
+            ex->cur_group_key =
+                groups[gi].key ? leptris_strdup(groups[gi].key) : NULL;
+            ex->current_pos = gi + 1;
+            rc = xslt_exec_instrs(ex, in->child, groups[gi].items[0]);
+            xpath_nodeset_free(ex->cur_group);
+            free(ex->cur_group_key);
+            ex->cur_group = NULL;
+            ex->cur_group_key = NULL;
+        }
+        ex->cur_group = saved_group;
+        ex->cur_group_key = saved_key;
+        ex->current_pos = saved_pos;
+        ex->current_size = saved_size;
+    }
+
+done:
+    if (groups) {
+        for (size_t j = 0; j < ngroups; j++) {
+            free(groups[j].key);
+            free(groups[j].items);
+        }
+        free(groups);
+    }
+    free(items);
+    leptris_xpath_result_free(r);
+    return rc;
+}
+
 static int op_if(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     struct leptris_xpath_result* r = xslt_eval(ex, in->test, node);
     int truth = r ? leptris_xpath_result_boolean(r) : 0;
@@ -3196,6 +3311,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_ITERATE] = op_iterate;
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;
     g_ops[XSLT_INSTR_BREAK] = op_break;
+    g_ops[XSLT_INSTR_FOR_EACH_GROUP] = op_for_each_group;
     g_ops[XSLT_INSTR_IF] = op_if;
     g_ops[XSLT_INSTR_APPLY_TEMPLATES] = op_apply_templates;
     g_ops[XSLT_INSTR_CALL_TEMPLATE] = op_call_template;

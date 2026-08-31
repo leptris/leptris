@@ -62,6 +62,7 @@ typedef enum {
     XSLT_INSTR_NEXT_ITERATION,   /* xsl:next-iteration: rebind params,
                                      abandon the rest of the body */
     XSLT_INSTR_BREAK,            /* xsl:break: end the enclosing iterate */
+    XSLT_INSTR_FOR_EACH_GROUP,   /* xsl:for-each-group (3.0 §14) */
     XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
                                       its xsl:fallback children (§15) */
 } XsltInstrKind;
@@ -114,6 +115,12 @@ typedef struct xslt_instr {
 
     /* Sorts (FOR_EACH / APPLY_TEMPLATES). */
     XsltSort* sorts;
+
+    /* FOR_EACH_GROUP (3.0 §14): group-by is an expression (string
+     * key per item); group_starting is a single-alternative match
+     * pattern (a match opens a new group). At most one is set. */
+    LeptrisXPathCompiled group_by;
+    struct xslt_pattern* group_starting;
 
     /* use-attribute-sets (RESULT_ELEM / ELEMENT / COPY): names
      * applied before the instruction's own attrs (§7.1.4). */
@@ -428,6 +435,13 @@ typedef struct xslt_exec {
     int iterate_signal;
     int iterate_depth;
     XsltVar* iter_params;
+
+    /* xsl:for-each-group (3.0 §14): the group in flight — an OWNED
+     * nodeset of borrowed member pointers plus the string grouping
+     * key, served by current-group() / current-grouping-key() through
+     * the bridge. NULL outside a for-each-group body. */
+    XPathNodeSet* cur_group;
+    char* cur_group_key;
 
     /* xslt_functions.c: exec-owned func:function registry bindings
      * (see XsltUfnBinding). */

@@ -186,6 +186,29 @@ static struct leptris_xpath_result* xslt_fn_current_real(
     return r;
 }
 
+/* current-group()/current-grouping-key() (3.0 §14): the group in
+ * flight inside xsl:for-each-group — read from the exec; the
+ * members are borrowed pointers (owned by op_for_each_group). */
+static struct leptris_xpath_result* xslt_fn_current_group(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)args; (void)n;
+    XsltExec* ex = exec_from(ctx);
+    struct leptris_xpath_result* r = res_empty_ns();
+    if (ex && ex->cur_group && r) {
+        for (size_t i = 0; i < ex->cur_group->count; i++)
+            xpath_nodeset_add(r->value.nodeset_value,
+                              ex->cur_group->nodes[i]);
+    }
+    return r;
+}
+
+static struct leptris_xpath_result* xslt_fn_current_grouping_key(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)args; (void)n;
+    XsltExec* ex = exec_from(ctx);
+    return res_string(ex && ex->cur_group_key ? ex->cur_group_key : "");
+}
+
 /* ============================================================
  * xsl:key + key() (§12.2) — lazy per-(name) index
  * ============================================================ */
@@ -1230,6 +1253,10 @@ static void xslt_register_handler(XPathFunctionRegistry* r, const char* name,
 void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
     if (!r) return;
     xslt_register_handler(r, "current", xslt_fn_current_real, 0, 0, exec);
+    xslt_register_handler(r, "current-group", xslt_fn_current_group,
+                          0, 0, exec);
+    xslt_register_handler(r, "current-grouping-key",
+                          xslt_fn_current_grouping_key, 0, 0, exec);
     xslt_register_handler(r, "generate-id", xslt_fn_generate_id, 0, 1, exec);
     xslt_register_handler(r, "system-property", xslt_fn_system_property, 1, 1, exec);
     xslt_register_handler(r, "key", xslt_fn_key, 2, 2, exec);
