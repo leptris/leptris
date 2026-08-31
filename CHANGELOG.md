@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.31] - 2026-08-31
+
+### Performance
+
+- compiled pattern ladders — O(depth) template matching (xslt)
+
+
+
 ## [1.9.30] - 2026-08-31
 
 ### Fixed
