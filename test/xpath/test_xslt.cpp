@@ -30,11 +30,11 @@ std::string run(const char* sheet_body, const char* xml) {
 }
 
 /* Same, pinned to version='3.0' — XSLT 3.0 semantics (sequence
- * display forms, versioned value-of). */
+ * display forms, versioned value-of, expand-text). */
 std::string run30(const char* sheet_body, const char* xml) {
     std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
-                        " version='3.0'>" + sheet_body +
-                        "</xsl:stylesheet>";
+                        " version='3.0' expand-text='yes'>" +
+                        sheet_body + "</xsl:stylesheet>";
     LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
     if (!x) return "(compile-failed)";
     LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
@@ -2495,6 +2495,35 @@ TEST(Xslt30, ForEachGroup) {
         "</xsl:template>",
         "<doc><p/><h/><p/><p/><h/><p/></doc>")),
         "132");
+}
+
+/* XSLT 3.0 text value templates (§10.4.2, expand-text="yes"):
+ * {expr} in literal TEXT expands — including inside xsl:text
+ * (ground truth: Saxon-HE 12.7 expands there too); {{ and }} are
+ * literal braces. */
+TEST(Xslt30, TextValueTemplates) {
+    /* Bare template text in the template body. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "1 + 1 = {1 + 1}"
+        "</xsl:template>",
+        "<r/>")),
+        "1 + 1 = 2");
+    /* Inside a literal result element, with node context. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/r'>"
+        "<p>{count(//i)} items, first={string(//i[1])}, "
+        "brace={{literal}}</p>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i></r>")),
+        "<p>2 items, first=a, brace={literal}</p>");
+    /* xsl:text content is a text node too — expanded. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:text>{1 + 1}</xsl:text>"
+        "</xsl:template>",
+        "<r/>")),
+        "2");
 }
 
 /* Minimal bug-130 shape: xml method, default-ns root, no-ns child

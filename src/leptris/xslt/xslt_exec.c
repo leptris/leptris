@@ -872,21 +872,27 @@ static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n) {
 }
 
 static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    /* 3.0 §10.4.2: expand {expr} value templates first (xsl:text
+     * content included — Saxon-verified). */
+    char* tvt = in->tvt && in->text ? eval_avt(ex, in->text, node) : NULL;
+    const char* text = tvt ? tvt : in->text;
     LeptrisElement parent = ex->pending_parent;
     if (parent) {
-        if (in->doe && in->text) {
+        if (in->doe && text) {
             /* §16.4 disable-output-escaping: raw flag — the
              * serializer emits the string verbatim. */
-            LeptrisNodeRef t = leptris_text_node_create(ex->result, in->text);
+            LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
             if (t) {
                 ((LeptrisTextNode*)t)->base.raw = 1;
                 leptris_element_append_child(parent, (LeptrisElement)t);
             }
+            free(tvt);
             return 0;
         }
         /* Non-DOE: out_append_text (carries the cdata-section-
          * elements conversion for listed parents). */
-        out_append_text(ex, parent, in->text);
+        out_append_text(ex, parent, text);
+        free(tvt);
         return 0;
     }
     /* Fragment-level: accumulate verbatim-safe — escape unless DOE
@@ -894,14 +900,15 @@ static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
      * LOGICAL text: a pure-text fragment binds as a string, and
      * string($rtf) is unescaped — pre-escaping here leaked &amp;
      * into param values (bug-90). */
-    char* v = in->text ? escape_fragment_text(
-                   in->text,
+    char* v = text ? escape_fragment_text(
+                   text,
                    in->doe || ex->sheet->out_method_text ||
                        ex->rtf_capturing) : NULL;
     if (v) {
         out_append_text(ex, NULL, v);
-        if (v != in->text) free(v);
+        if (v != text) free(v);
     }
+    free(tvt);
     return 0;
 }
 

@@ -462,6 +462,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         if (!in) return NULL;
         const char* t = leptris_element_child_value(e);
         in->text = leptris_strdup(t ? t : "");
+        in->tvt = sp->sheet->expand_text && strchr(in->text, '{') != NULL;
         const char* doe = leptris_element_attribute(e, "disable-output-escaping");
         in->doe = doe && strcmp(doe, "yes") == 0;
         return in;
@@ -751,7 +752,11 @@ static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
                 }
             }
             XsltInstr* in = instr_new(XSLT_INSTR_TEXT);
-            if (in) in->text = leptris_strdup(t);
+            if (in) {
+                in->text = leptris_strdup(t);
+                in->tvt = sp->sheet->expand_text &&
+                          strchr(in->text, '{') != NULL;
+            }
             instr_append(&out, in);
         } else if (type == LEPTRIS_NODE_TYPE_ELEMENT) {
             XsltInstr* in = parse_instruction(sp, (LeptrisElement)n);
@@ -1513,6 +1518,12 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
         for (const char* p = ver; *p >= '0' && *p <= '9'; p++)
             maj = maj * 10 + (*p - '0');
         if (maj > 0) sheet->version_major = maj;
+    }
+    /* 3.0 §10.4.2: text value templates on literal text. */
+    {
+        const char* et = leptris_element_attribute(root, "expand-text");
+        if (et && strcmp(et, "yes") == 0 && sheet->version_major >= 3)
+            sheet->expand_text = 1;
     }
     /* Any namespace declaration in the sheet (beyond xsl) means
      * expressions may use prefixed tests — parse-time ns contexts. */
