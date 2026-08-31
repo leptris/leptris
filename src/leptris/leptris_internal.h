@@ -652,6 +652,14 @@ typedef enum {
      * ->value carries the variable names space-joined, in order.
      * Each binding sees the earlier ones; inner lets shadow. */
     XPATH_OP_LET,
+    /* XPath 3.0 `L ! R` (simple map): R evaluates once per item of
+     * L with the context item/position/size set to that item's
+     * slot; results concatenate in order. Arrow `=>` reuses the
+     * function-call node (left side prepended as the first
+     * argument). */
+    XPATH_OP_MAP,
+    /* XPath 3.0 `A || B`: string() both sides, concatenate. */
+    XPATH_OP_CONCAT,
     /* Parenthesized item sequence `('a','b',expr)`: N children, one
      * per member — evaluates to the sequence (synthetic-text
      * nodeset). */

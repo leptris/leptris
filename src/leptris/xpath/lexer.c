@@ -259,6 +259,15 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             return token;
 
         case '|':
+            /* XPath 3.0 string concat `||` before the union pipe. */
+            if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '|') {
+                token.type = TOK_CONCAT;
+                token.value = lexer->pos;
+                token.value_len = 2;
+                lexer->pos += 2;
+                lexer->column += 2;
+                return token;
+            }
             token.type = TOK_PIPE;
             token.value = lexer->pos;
             token.value_len = 1;
@@ -362,6 +371,15 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
 
     /* Comparison operators */
     if (c == '=') {
+        /* XPath 3.1 arrow `=>` before plain equality. */
+        if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '>') {
+            token.type = TOK_ARROW;
+            token.value = lexer->pos;
+            token.value_len = 2;
+            lexer->pos += 2;
+            lexer->column += 2;
+            return token;
+        }
         token.type = TOK_EQUALS;
         token.value = lexer->pos;
         token.value_len = 1;
@@ -379,25 +397,12 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->column += 2;
             return token;
         }
-        if (lexer->input && lexer->pos >= lexer->input) {
-            size_t byte_offset = lexer->pos - lexer->input;
-
-            leptris_set_error_with_context(
-                LEPTRIS_ERROR_XPATH_SYNTAX,
-                "Unexpected '!' character (did you mean '!='?)",
-                lexer->input,
-                byte_offset,
-                lexer->line,
-                lexer->column
-            );
-        }
-
-        snprintf(lexer->error_msg, sizeof(lexer->error_msg),
-                "Unexpected character '!' at line %d, column %d",
-                lexer->line, lexer->column);
-        token.type = TOK_EOF;  /* Error token */
+        /* XPath 3.0 simple map `!`. */
+        token.type = TOK_BANG;
         token.value = lexer->pos;
-        token.value_len = 0;
+        token.value_len = 1;
+        lexer->pos++;
+        lexer->column++;
         return token;
     }
 

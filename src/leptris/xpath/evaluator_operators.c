@@ -353,6 +353,95 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return body;
     }
 
+    /* XPath 3.0 simple map `L ! R`: R runs once per item of L with
+     * the context item/position/size set to that item's slot;
+     * results concatenate in order (members stringify, like the
+     * for-expression form). */
+    if (op == XPATH_OP_MAP) {
+        if (ast->child_count < 2) return NULL;
+        struct leptris_xpath_result* left =
+            evaluate_expr(ctx, ast->children[0]);
+        if (!left) return NULL;
+
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) { xpath_result_free(left); return NULL; }
+        out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
+
+        XPathNodeSet* ns = (left->type == XPATH_RESULT_NODESET)
+                               ? left->value.nodeset_value : NULL;
+        size_t n = ns ? ns->count : 1;
+
+        struct leptris_element* saved_node = ctx->context_node;
+        size_t saved_pos = ctx->context_position;
+        size_t saved_size = ctx->context_size;
+
+        for (size_t i = 0; i < n; i++) {
+            ctx->context_node = ns ? (struct leptris_element*)ns->nodes[i]
+                                   : ctx->context_node;
+            ctx->context_position = i + 1;
+            ctx->context_size = n;
+            struct leptris_xpath_result* item =
+                evaluate_expr(ctx, ast->children[1]);
+            if (item) {
+                char* piece = xpath_to_string(item);
+                xpath_result_free(item);
+                XPathTextNode* tn =
+                    synth_text(piece ? piece : "", piece ? strlen(piece) : 0);
+                free(piece);
+                if (tn) xpath_nodeset_add(out, tn);
+            } else {
+                ctx->context_node = saved_node;
+                ctx->context_position = saved_pos;
+                ctx->context_size = saved_size;
+                xpath_result_free(left);
+                xpath_nodeset_free(out);
+                return NULL;
+            }
+        }
+        ctx->context_node = saved_node;
+        ctx->context_position = saved_pos;
+        ctx->context_size = saved_size;
+
+        xpath_result_free(left);
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!result) { xpath_nodeset_free(out); return NULL; }
+        result->value.nodeset_value = out;
+        return result;
+    }
+
+    /* XPath 3.0 string concat `A || B`: string() both, join. */
+    if (op == XPATH_OP_CONCAT) {
+        if (ast->child_count < 2) return NULL;
+        struct leptris_xpath_result* l =
+            evaluate_expr(ctx, ast->children[0]);
+        if (!l) return NULL;
+        char* ls = xpath_to_string(l);
+        xpath_result_free(l);
+        struct leptris_xpath_result* r =
+            evaluate_expr(ctx, ast->children[1]);
+        if (!r) { free(ls); return NULL; }
+        char* rs = xpath_to_string(r);
+        xpath_result_free(r);
+
+        size_t ll = ls ? strlen(ls) : 0;
+        size_t rl = rs ? strlen(rs) : 0;
+        char* joined = (char*)malloc(ll + rl + 1);
+        if (!joined) { free(ls); free(rs); return NULL; }
+        if (ll) memcpy(joined, ls, ll);
+        if (rl) memcpy(joined + ll, rs, rl);
+        joined[ll + rl] = '\0';
+        free(ls);
+        free(rs);
+
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (!result) { free(joined); return NULL; }
+        result->value.string_value = joined;
+        return result;
+    }
+
 
     /* XSLT 3.0 range `A to B` (XPath 2.0+): integer sequence as a
      * nodeset of synthetic text nodes — predicates and numeric

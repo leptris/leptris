@@ -2917,3 +2917,60 @@ TEST(Xslt30, LetExpression) {
         "[3]");
 }
 
+/* XPath 3.0/3.1 `!` (simple map), `=>` (arrow), `||` (string
+ * concat) — Saxon-HE 12.7 ground truth. `!` evaluates the right
+ * side once per item with . = item and position()/last() = the
+ * item's slot in the left sequence; `=>` passes the left side as
+ * the FIRST argument; `||` stringifies and concatenates. */
+TEST(Xslt30, BangArrowConcat) {
+    /* Simple map over nodes: one @n per item. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='//item ! @n'/>]"
+        "</xsl:template>",
+        "<r><item n='1'>a</item><item n='2'>b</item></r>")),
+        "[1 2]");
+    /* Map over a range with a computed value. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='(1 to 4) ! (. * 2)'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[2 4 6 8]");
+    /* position() inside the mapped expression is per-item. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"//item ! (position() || ':' || "
+        "string(.))\"/>]"
+        "</xsl:template>",
+        "<r><item n='1'>a</item><item n='2'>b</item></r>")),
+        "[1:a 2:b]");
+    /* Arrow: the left side is the first argument. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='//item/@n => sum()'/>]"
+        "</xsl:template>",
+        "<r><item n='1'/><item n='2'/></r>")),
+        "[3]");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"'b' => concat('a')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[ba]");
+    /* Arrow binds tighter than addition. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='//item/@n => sum() + 1'/>]"
+        "</xsl:template>",
+        "<r><item n='1'/><item n='2'/></r>")),
+        "[4]");
+    /* String concatenation chains. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"'x' || 'y' || 'z'\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[xyz]");
+}
+

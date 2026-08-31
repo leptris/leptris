@@ -28,6 +28,7 @@ static XPathASTNode* parse_additive_expr(XPathParser* parser);
 static XPathASTNode* parse_multiplicative_expr(XPathParser* parser);
 static XPathASTNode* parse_unary_expr(XPathParser* parser);
 static XPathASTNode* parse_union_expr(XPathParser* parser);
+static XPathASTNode* parse_arrow_expr(XPathParser* parser);
 
 /* Path parsers */
 static XPathASTNode* parse_path_expr(XPathParser* parser);
@@ -468,8 +469,25 @@ static XPathASTNode* parse_equality_expr(XPathParser* parser) {
 }
 
 /* Parse relational expressions: AdditiveExpr ( ('<' | '>' | '<=' | '>=') AdditiveExpr )* */
-static XPathASTNode* parse_relational_expr(XPathParser* parser) {
+/* XPath 3.0 StringConcatExpr: AdditiveExpr ('||' AdditiveExpr)* —
+ * sits between comparison and addition (XQuery/XPath 3.x
+ * grammar). */
+static XPathASTNode* parse_string_concat_expr(XPathParser* parser) {
     XPathASTNode* left = parse_additive_expr(parser);
+    if (!left) return NULL;
+
+    while (current_token_is(parser, TOK_CONCAT)) {
+        advance_token(parser);
+        XPathASTNode* right = parse_additive_expr(parser);
+        if (!right) { ast_node_free(left); return NULL; }
+        left = create_operator_node(XPATH_OP_CONCAT, left, right);
+        if (!left) return NULL;
+    }
+    return left;
+}
+
+static XPathASTNode* parse_relational_expr(XPathParser* parser) {
+    XPathASTNode* left = parse_string_concat_expr(parser);
     if (!left) return NULL;
 
     while (1) {
@@ -488,7 +506,7 @@ static XPathASTNode* parse_relational_expr(XPathParser* parser) {
         }
 
         advance_token(parser);
-        XPathASTNode* right = parse_additive_expr(parser);
+        XPathASTNode* right = parse_string_concat_expr(parser);
         if (!right) {
             ast_node_free(left);
             return NULL;
@@ -581,17 +599,37 @@ static XPathASTNode* parse_unary_expr(XPathParser* parser) {
         return node;
     }
 
-    return parse_union_expr(parser);
+    return parse_arrow_expr(parser);
 }
 
-/* Parse union expressions: PathExpr ( '|' PathExpr )* */
-static XPathASTNode* parse_union_expr(XPathParser* parser) {
+/* Parse union expressions: PathExpr ( '|' PathExpr )* — with the
+ * XPath 3.0 simple map binding tighter than '|':
+ * SimpleMapExpr := PathExpr ('!' PathExpr)*. */
+static XPathASTNode* parse_simple_map_expr(XPathParser* parser) {
     XPathASTNode* left = parse_path_expr(parser);
+    if (!left) return NULL;
+
+    while (current_token_is(parser, TOK_BANG)) {
+        advance_token(parser);
+        XPathASTNode* right = parse_path_expr(parser);
+        if (!right) { ast_node_free(left); return NULL; }
+        XPathASTNode* map = ast_node_new(XPATH_AST_OPERATOR);
+        if (!map) { ast_node_free(left); ast_node_free(right); return NULL; }
+        map->number_value = (double)XPATH_OP_MAP;
+        ast_node_add_child(map, left);
+        ast_node_add_child(map, right);
+        left = map;
+    }
+    return left;
+}
+
+static XPathASTNode* parse_union_expr(XPathParser* parser) {
+    XPathASTNode* left = parse_simple_map_expr(parser);
     if (!left) return NULL;
 
     while (current_token_is(parser, TOK_PIPE)) {
         advance_token(parser);
-        XPathASTNode* right = parse_path_expr(parser);
+        XPathASTNode* right = parse_simple_map_expr(parser);
         if (!right) {
             ast_node_free(left);
             return NULL;
@@ -601,6 +639,54 @@ static XPathASTNode* parse_union_expr(XPathParser* parser) {
         if (!left) return NULL;
     }
 
+    return left;
+}
+
+/* XPath 3.1 ArrowExpr: UnionExpr ( '=>' Name '(' args ')' )* — the
+ * accumulated left side becomes the FIRST argument of each call,
+ * so `E => f(a) => g(b)` nests g(f(E, a), b). Arrow binds looser
+ * than '|' and '!'. */
+static XPathASTNode* parse_arrow_expr(XPathParser* parser) {
+    XPathASTNode* left = parse_union_expr(parser);
+    if (!left) return NULL;
+
+    while (current_token_is(parser, TOK_ARROW)) {
+        advance_token(parser);
+        XPathToken* nt = current_token(parser);
+        if (!nt || (nt->type != TOK_NCNAME && nt->type != TOK_QNAME)) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected function name after '=>'");
+            ast_node_free(left);
+            return NULL;
+        }
+        char* fname = token_to_string(nt);
+        if (!fname) { ast_node_free(left); return NULL; }
+        advance_token(parser);
+
+        XPathASTNode* call = ast_node_new(XPATH_AST_FUNCTION_CALL);
+        if (!call) { free(fname); ast_node_free(left); return NULL; }
+        call->value = fname;
+        ast_node_add_child(call, left);   /* the arrow's first argument */
+
+        if (!consume_token(parser, TOK_LPAREN,
+                           "Expected '(' after arrow function name")) {
+            ast_node_free(call);
+            return NULL;
+        }
+        if (!current_token_is(parser, TOK_RPAREN)) {
+            do {
+                XPathASTNode* arg = parse_expr(parser);
+                if (!arg) { ast_node_free(call); return NULL; }
+                ast_node_add_child(call, arg);
+            } while (match_token(parser, TOK_COMMA));
+        }
+        if (!consume_token(parser, TOK_RPAREN,
+                           "Expected ')' after arrow arguments")) {
+            ast_node_free(call);
+            return NULL;
+        }
+        left = call;
+    }
     return left;
 }
 
