@@ -57,6 +57,11 @@ typedef enum {
     XSLT_INSTR_APPLY_IMPORTS,     /* xsl:apply-imports (§5.6) */
     XSLT_INSTR_FUNC_RESULT,      /* EXSLT func:result — yields the
                                      user function's return value */
+    XSLT_INSTR_ITERATE,          /* xsl:iterate (3.0 §12.5): sequential
+                                     mapping with param chaining */
+    XSLT_INSTR_NEXT_ITERATION,   /* xsl:next-iteration: rebind params,
+                                     abandon the rest of the body */
+    XSLT_INSTR_BREAK,            /* xsl:break: end the enclosing iterate */
     XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
                                       its xsl:fallback children (§15) */
 } XsltInstrKind;
@@ -302,6 +307,11 @@ struct xslt_styles {
      * erroring; unknown instructions fall back per §15. */
     int forwards_compat;
 
+    /* xsl:stylesheet/@version major (default 1). 2.0+ changes
+     * versioned behaviors — e.g. xsl:value-of selects a SEQUENCE and
+     * prints every item, not just the first node. */
+    int version_major;
+
     /* Any non-xsl namespace declared on the stylesheet root — gates
      * per-instruction ns-context building (§4 prefixed tests). */
     int sheet_has_ns;
@@ -409,6 +419,15 @@ typedef struct xslt_exec {
      * value here and flags the walker to unwind. */
     struct leptris_xpath_result* fn_result;
     int fn_yield;
+
+    /* xsl:iterate (3.0 §12.5): the signal unwinds nested instruction
+     * sequences up to the innermost enclosing op_iterate — 1 = next
+     * (with ex->iter_params rebindings), 2 = break. iter_params is
+     * owned by the producing op_next_iteration and consumed (or
+     * freed) by the enclosing op_iterate each pass. */
+    int iterate_signal;
+    int iterate_depth;
+    XsltVar* iter_params;
 
     /* xslt_functions.c: exec-owned func:function registry bindings
      * (see XsltUfnBinding). */

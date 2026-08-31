@@ -482,6 +482,28 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "iterate") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_ITERATE);
+        if (!in) return NULL;
+        in->select = compile_attr_sp(sp, e, "select");
+        /* Leading xsl:param children are the iteration state; the
+         * walker skips is_param VARIABLEs, so the body plays straight
+         * from in->child. */
+        in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "next-iteration") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_NEXT_ITERATION);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);   /* xsl:with-param rebinds */
+        return in;
+    }
+    if (strcmp(local, "break") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_BREAK);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);   /* processed, then loop ends */
+        return in;
+    }
     if (strcmp(local, "if") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_IF);
         if (!in) return NULL;
@@ -1465,6 +1487,13 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
      * instructions fall back per §15). */
     const char* ver = leptris_element_attribute(root, "version");
     if (ver && strcmp(ver, "1.0") != 0) sheet->forwards_compat = 1;
+    sheet->version_major = 1;
+    if (ver) {
+        int maj = 0;
+        for (const char* p = ver; *p >= '0' && *p <= '9'; p++)
+            maj = maj * 10 + (*p - '0');
+        if (maj > 0) sheet->version_major = maj;
+    }
     /* Any namespace declaration in the sheet (beyond xsl) means
      * expressions may use prefixed tests — parse-time ns contexts. */
     if (leptris_element_namespace_decl_prefix(root, 0))

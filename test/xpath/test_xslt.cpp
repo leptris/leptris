@@ -29,6 +29,24 @@ std::string run(const char* sheet_body, const char* xml) {
     return r;
 }
 
+/* Same, pinned to version='3.0' — XSLT 3.0 semantics (sequence
+ * display forms, versioned value-of). */
+std::string run30(const char* sheet_body, const char* xml) {
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+                        " version='3.0'>" + sheet_body +
+                        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    if (!x) return "(compile-failed)";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    if (!d) { leptris_xslt_free(x); return "(parse-failed)"; }
+    char* out = leptris_xslt_apply_string(x, d);
+    std::string r = out ? out : "(null)";
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    return r;
+}
+
 /* Strip the declaration the API adds for comparison. */
 std::string body(const std::string& s) {
     const char* decl = "<?xml version=\"1.0\"?>";
@@ -2371,6 +2389,72 @@ TEST(Xslt30, SequenceValueOf) {
         "</xsl:template>",
         "<r><i>a</i><i>b</i></r>")),
         "[a]");
+    /* A version='3.0' stylesheet: value-of joins EVERY multi-item
+     * result (ground truth: Saxon-HE 12.7 prints [a b c]). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='//i'/>]"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "[a b c]");
+}
+
+/* XSLT 3.0 xsl:iterate (§12.5): sequential mapping with param
+ * chaining — xsl:param declares iteration state (initial values
+ * evaluated once before the loop), xsl:next-iteration rebinds it for
+ * the next pass and abandons the rest of the body, xsl:break ends
+ * the loop. Context item/position/size match for-each. */
+TEST(Xslt30, Iterate) {
+    /* Without params: plain mapping, like for-each. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:iterate select='//i'>"
+        "<xsl:value-of select='.'/>"
+        "</xsl:iterate>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "abc");
+    /* Param chaining: running sum, printed before each update.
+     * Ground truth: Saxon-HE 12.7 prints 013. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:iterate select='//i'>"
+        "<xsl:param name='sum' select='0'/>"
+        "<xsl:value-of select='$sum'/>"
+        "<xsl:next-iteration>"
+        "<xsl:with-param name='sum' select='$sum + number(.)'/>"
+        "</xsl:next-iteration>"
+        "</xsl:iterate>"
+        "</xsl:template>",
+        "<r><i>1</i><i>2</i><i>4</i></r>")),
+        "013");
+    /* xsl:break: abandon the loop mid-pass; later items never run.
+     * Saxon XTSE3120 requires break as the last loop instruction —
+     * the legal early-exit shape wraps it in a trailing choose. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:iterate select='//i'>"
+        "<xsl:choose>"
+        "<xsl:when test='. = &quot;b&quot;'>"
+        "<xsl:break/>"
+        "</xsl:when>"
+        "<xsl:otherwise>"
+        "<xsl:value-of select='.'/>"
+        "</xsl:otherwise>"
+        "</xsl:choose>"
+        "</xsl:iterate>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "a");
+    /* position() reflects the iterate position. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:iterate select='//i'>"
+        "<xsl:value-of select='position()'/>"
+        "</xsl:iterate>"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "123");
 }
 
 /* Minimal bug-130 shape: xml method, default-ns root, no-ns child
