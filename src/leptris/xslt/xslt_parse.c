@@ -498,16 +498,28 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         if (!in) return NULL;
         in->select = compile_attr_sp(sp, e, "select");
         in->group_by = compile_attr_sp(sp, e, "group-by");
+        if (!in->group_by) {
+            in->group_by = compile_attr_sp(sp, e, "group-adjacent");
+            in->group_adjacent = (in->group_by != NULL);
+        }
+        /* Single-alternative patterns; the standard matcher does the
+         * per-item match. */
         const char* gsw =
             leptris_element_attribute(e, "group-starting-with");
-        if (gsw && *gsw) {
-            /* Single-alternative pattern; the standard matcher does
-             * the per-item match. */
+        const char* gew =
+            leptris_element_attribute(e, "group-ending-with");
+        for (int pi = 0; pi < 2; pi++) {
+            const char* src = pi == 0 ? gsw : gew;
+            if (!src || !*src) continue;
             XsltPattern* p = (XsltPattern*)calloc(1, sizeof(*p));
             if (p) {
-                p->expr = leptris_xpath_compile(gsw);
-                if (p->expr) in->group_starting = p;
-                else free(p);
+                p->expr = leptris_xpath_compile(src);
+                if (p->expr) {
+                    if (pi == 0) in->group_starting = p;
+                    else in->group_ending = p;
+                } else {
+                    free(p);
+                }
             }
         }
         in->child = parse_content(sp, e);
@@ -518,6 +530,26 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         if (!in) return NULL;
         in->select = compile_attr_sp(sp, e, "xpath");
         in->context_item = compile_attr_sp(sp, e, "context-item");
+        return in;
+    }
+    if (strcmp(local, "analyze-string") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_ANALYZE_STRING);
+        if (!in) return NULL;
+        in->select = compile_attr_sp(sp, e, "select");
+        const char* rx = leptris_element_attribute(e, "regex");
+        if (rx) in->regex = leptris_strdup(rx);
+        const char* rf = leptris_element_attribute(e, "regex-flags");
+        if (rf) in->regex_flags = leptris_strdup(rf);
+        in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "matching-substring") == 0 ||
+        strcmp(local, "non-matching-substring") == 0) {
+        XsltInstr* in = instr_new(
+            local[0] == 'm' ? XSLT_INSTR_MATCHING_SUBSTRING
+                            : XSLT_INSTR_NONMATCHING_SUBSTRING);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
         return in;
     }
     if (strcmp(local, "next-iteration") == 0) {
@@ -1346,6 +1378,10 @@ static void free_instr(XsltInstr* in) {
         leptris_xpath_compiled_free(in->group_starting->expr);
         free(in->group_starting);
     }
+    if (in->group_ending) {
+        leptris_xpath_compiled_free(in->group_ending->expr);
+        free(in->group_ending);
+    }
     if (in->num_value) leptris_xpath_compiled_free(in->num_value);
     if (in->num_count) leptris_xpath_compiled_free(in->num_count);
     if (in->num_from) leptris_xpath_compiled_free(in->num_from);
@@ -1354,6 +1390,8 @@ static void free_instr(XsltInstr* in) {
     free((void*)in->text);
     free((void*)in->num_format);
     free((void*)in->letter_value);
+    free((void*)in->regex);
+    free((void*)in->regex_flags);
     while (in->sorts) {
         XsltSort* s = in->sorts;
         in->sorts = s->next;

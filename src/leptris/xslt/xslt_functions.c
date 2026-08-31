@@ -209,6 +209,42 @@ static struct leptris_xpath_result* xslt_fn_current_grouping_key(
     return res_string(ex && ex->cur_group_key ? ex->cur_group_key : "");
 }
 
+/* regex-group(n) (3.0 §18): the nth capture of the analyze-string
+ * match in flight — offsets are POSIX regmatch values relative to
+ * as_src + as_pos. */
+static struct leptris_xpath_result* xslt_fn_regex_group(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    XsltExec* ex = exec_from(ctx);
+    if (!ex || !ex->as_src || !ex->as_pmatch || n < 1) return res_string("");
+    double gi = arg_number(ctx, args, n, 0);
+    size_t g = (size_t)gi;
+    if ((double)g != gi || g >= ex->as_nmatch) return res_string("");
+#ifndef _WIN32
+    regmatch_t* pm = (regmatch_t*)ex->as_pmatch;
+    regmatch_t* m = &pm[g];
+    if (m->rm_so < 0 || m->rm_eo < m->rm_so)
+        return res_string("");
+    size_t base = ex->as_pos;
+    size_t so = base + (size_t)m->rm_so;
+    size_t len = (size_t)(m->rm_eo - m->rm_so);
+    char buf[512];
+    if (len < sizeof buf) {
+        memcpy(buf, ex->as_src + so, len);
+        buf[len] = '\0';
+        return res_string(buf);
+    }
+    char* heap = (char*)malloc(len + 1);
+    if (!heap) return res_string("");
+    memcpy(heap, ex->as_src + so, len);
+    heap[len] = '\0';
+    struct leptris_xpath_result* r = res_string(heap);
+    free(heap);
+    return r;
+#else
+    return res_string("");
+#endif
+}
+
 /* ============================================================
  * xsl:key + key() (§12.2) — lazy per-(name) index
  * ============================================================ */
@@ -1257,6 +1293,8 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
                           0, 0, exec);
     xslt_register_handler(r, "current-grouping-key",
                           xslt_fn_current_grouping_key, 0, 0, exec);
+    xslt_register_handler(r, "regex-group", xslt_fn_regex_group,
+                          1, 1, exec);
     xslt_register_handler(r, "generate-id", xslt_fn_generate_id, 0, 1, exec);
     xslt_register_handler(r, "system-property", xslt_fn_system_property, 1, 1, exec);
     xslt_register_handler(r, "key", xslt_fn_key, 2, 2, exec);
