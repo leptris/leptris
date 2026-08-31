@@ -492,6 +492,26 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "for-each-group") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_FOR_EACH_GROUP);
+        if (!in) return NULL;
+        in->select = compile_attr_sp(sp, e, "select");
+        in->group_by = compile_attr_sp(sp, e, "group-by");
+        const char* gsw =
+            leptris_element_attribute(e, "group-starting-with");
+        if (gsw && *gsw) {
+            /* Single-alternative pattern; the standard matcher does
+             * the per-item match. */
+            XsltPattern* p = (XsltPattern*)calloc(1, sizeof(*p));
+            if (p) {
+                p->expr = leptris_xpath_compile(gsw);
+                if (p->expr) in->group_starting = p;
+                else free(p);
+            }
+        }
+        in->child = parse_content(sp, e);
+        return in;
+    }
     if (strcmp(local, "next-iteration") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_NEXT_ITERATION);
         if (!in) return NULL;
