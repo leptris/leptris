@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.29] - 2026-08-31
+
+### Added
+
+- simple map !, arrow =>, string concat || (xpath)
+- let expressions — XPath 3.1 Lane 0, increment 7 (xpath)
+
+
+
 ## [1.9.28] - 2026-08-31
 
 ### Added
