@@ -4,7 +4,21 @@
 
 ### Fixed
 
-- misplaced xsl:catch is a compile error (#669) (xslt)
+- **XSLT: a misplaced `xsl:catch` (anywhere but a child of
+  `xsl:try`) is now a compile error** (#669) — matching Saxon's
+  XTSE0010. Previously the instruction was silently skipped, so a
+  correctly-raised error had no catch attached and the transform
+  returned an unexplained NULL. The canonical form already caught
+  every `error()` variant (`error('msg')`, `error(concat(...))`,
+  `error($var)`); now spec-pinned. Issue #669's repro placed the
+  catch as a sibling of try — a stylesheet Saxon rejects at
+  compile time — verified by direct Saxon-HE 12.7 runs. En route,
+  both stale rows of the quoted status board were disproven by
+  measurement: a fresh Release A/B against the real v1.9.19 tag
+  shows current main faster on every DOM benchmark row (parse+root
+  7.00 vs 7.90 µs, peak RSS 1360 vs 1584 KB), and scalar XPath
+  measures 535–720 µs vs libxml2's 2081 µs (~3–4× ahead, not
+  1.64× behind).
 
 
 
