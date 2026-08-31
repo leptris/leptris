@@ -1,10 +1,25 @@
 ## [Unreleased]
 
-## [1.9.32] - 2026-08-31
+## [1.9.32] - 2026-09-01
 
 ### Performance
 
-- O(1) pattern doc resolution + armed key patterns (xslt)
+- **Two profiled follow-ups to the pattern compiler, closing the
+  remaining dispatch and key() gaps.** (1) Pattern evaluation
+  resolved the candidate's owning document on every call through a
+  full parent climb plus root-map probe — 56% of a dispatch
+  transform's samples; the climb already stops at the tree root
+  element, so comparing it against the caller's own root is one
+  O(1) read (foreign-tree nodes keep the full resolution). (2) The
+  key() index build matched every document node with an unarmed
+  pattern — one lookup cost 200 ms on the 2000-book fixture;
+  key definitions now embed a compiled pattern (step ladder armed
+  at parse) and use-expressions evaluate through the cached
+  registry. Measured warm: dispatch 228 → 13.5 ms, Muenchian key
+  232 → 3.1 ms, select-heavy for-each 2.9 ms — every reference
+  sheet now runs at libxslt engine-side pace (xsltproc's ~10 ms
+  wall includes process start, parse and serialization;
+  Saxon-HE ~0.9–1.15 s with JVM boot).
 
 
 
