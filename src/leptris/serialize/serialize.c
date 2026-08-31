@@ -1189,16 +1189,35 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                               html_break_after_elem(
                                   e, name, nl,
                                   html_elem_flags_ci(name, nl));
-                int lead = (!is_root_cur && pretty0)
-                    ? buf->indent * buf->indent_spaces : 0;
+                /* #658: honor the indent unit here too — computing
+                 * indent*indent_spaces directly lost the unit on
+                 * every fused leaf (buffer_append_indent's #633
+                 * branch never ran). */
+                const char* iunit =
+                    (buf->indent_unit && buf->indent_unit[0])
+                        ? buf->indent_unit : NULL;
+                size_t iul = iunit ? strlen(iunit) : 0;
+                int ilevels = (!is_root_cur && pretty0)
+                    ? buf->indent : 0;
+                int lead = ilevels
+                    ? (iunit ? (int)(ilevels * iul)
+                             : buf->indent * buf->indent_spaces)
+                    : 0;
                 int trail = htrail0 ||
                             (pretty0 && !is_root_cur);
                 buffer_ensure_capacity(
                     buf, (size_t)(lead + trail) + 2 * (epl + nl) + 6 * tl0 + 6);
                 char* q = buf->data + buf->size;
                 if (lead) {
-                    memset(q, ' ', (size_t)lead);
-                    q += lead;
+                    if (iunit) {
+                        for (int i = 0; i < ilevels; i++) {
+                            memcpy(q, iunit, iul);
+                            q += iul;
+                        }
+                    } else {
+                        memset(q, ' ', (size_t)lead);
+                        q += lead;
+                    }
                 }
                 *q++ = '<';
                 if (epl) {
