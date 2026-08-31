@@ -72,6 +72,10 @@ typedef enum {
                                      first xsl:catch child */
     XSLT_INSTR_CATCH,            /* xsl:catch: runs on a dynamic error
                                      with $err:description bound */
+    XSLT_INSTR_ON_EMPTY,         /* xsl:on-empty (3.0 §26.4): consumed
+                                     by the enclosing result element —
+                                     content runs only when the
+                                     element's content came back empty */
     XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
                                       its xsl:fallback children (§15) */
 } XsltInstrKind;

@@ -2532,6 +2532,46 @@ TEST(Xslt30, ForEachGroupVariants) {
         "[3][2][2]");
 }
 
+/* XSLT 3.0 xsl:on-empty (§26.4): a child of a literal result
+ * element; when the element's content comes back empty, the
+ * on-empty content is evaluated into it instead. Ground truth:
+ * Saxon-HE 12.7. */
+TEST(Xslt30, OnEmpty) {
+    /* Empty content: on-empty fires. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<a><xsl:value-of select='//missing'/>"
+        "<xsl:on-empty>EMPTY</xsl:on-empty></a>"
+        "</xsl:template>",
+        "<r/>")),
+        "<a>EMPTY</a>");
+    /* Non-empty content: on-empty never runs. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<a><xsl:value-of select='//i[1]'/>"
+        "<xsl:on-empty>EMPTY</xsl:on-empty></a>"
+        "</xsl:template>",
+        "<r><i>x</i></r>")),
+        "<a>x</a>");
+    /* Element child also counts as content. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<a><xsl:if test='1=1'><b/></xsl:if>"
+        "<xsl:on-empty>EMPTY</xsl:on-empty></a>"
+        "</xsl:template>",
+        "<r/>")),
+        "<a><b/></a>");
+    /* on-empty content can be instructions, not just text. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<a><xsl:value-of select='//missing'/>"
+        "<xsl:on-empty><c><xsl:value-of "
+        "select=\"'z'\"/></c></xsl:on-empty></a>"
+        "</xsl:template>",
+        "<r/>")),
+        "<a><c>z</c></a>");
+}
+
 /* XSLT 3.0 xsl:try/xsl:catch (§17): a dynamic error in the try body
  * runs the catch content with $err:description bound to the error
  * message; no error means the catch never runs. error($msg) raises

@@ -814,6 +814,19 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
     xslt_apply_attr_sets(ex, in, e, node);
     ex->pending_parent = e;
     int rc = xslt_exec_instrs(ex, in->child, node);
+    /* 3.0 §26.4 xsl:on-empty: content came back empty (no child
+     * nodes built) — run the on-empty child's content into the
+     * element. The walker skips ON_EMPTY (no registered op). Raw
+     * first-child: text nodes count as content (the *_any accessor
+     * skips them). */
+    if (rc == 0 && !leptris_elem_first_child(e)) {
+        for (const XsltInstr* c = in->child; c; c = c->next) {
+            if (c->kind != XSLT_INSTR_ON_EMPTY) continue;
+            ex->pending_parent = e;
+            rc = xslt_exec_instrs(ex, c->child, node);
+            break;
+        }
+    }
     ex->pending_parent = parent;
     return rc;
 }
