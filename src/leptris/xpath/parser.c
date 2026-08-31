@@ -932,6 +932,30 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         XPathASTNode* expr = parse_expr(parser);
         if (!expr) return NULL;
 
+        /* XPath 2.0+ item sequence `('a','b',expr)`: comma after
+         * the first member (XSLT 3.0). */
+        if (current_token_is(parser, TOK_COMMA)) {
+            XPathASTNode* seq = ast_node_new(XPATH_AST_OPERATOR);
+            if (!seq) { ast_node_free(expr); return NULL; }
+            seq->number_value = (double)XPATH_OP_SEQUENCE;
+            ast_node_add_child(seq, expr);
+            while (current_token_is(parser, TOK_COMMA)) {
+                advance_token(parser);
+                XPathASTNode* member = parse_expr(parser);
+                if (!member) {
+                    ast_node_free(seq);
+                    return NULL;
+                }
+                ast_node_add_child(seq, member);
+            }
+            if (!consume_token(parser, TOK_RPAREN,
+                               "Expected ')' after sequence")) {
+                ast_node_free(seq);
+                return NULL;
+            }
+            return seq;
+        }
+
         if (!consume_token(parser, TOK_RPAREN, "Expected ')' after expression")) {
             ast_node_free(expr);
             return NULL;

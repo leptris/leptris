@@ -526,6 +526,10 @@ typedef struct xpath_nodeset {
     int owns_synthetic_text;     /* If true, free synthetic XPathTextNode
                                   * entries on nodeset_free (EXSLT
                                   * str:tokenize/split results) */
+    /* XSLT 3.0 item sequence (for/range/sequence results): members are
+     * one-item synthetic text nodes, and string-value consumers join
+     * them with spaces instead of taking the first member. */
+    int is_sequence;
     void* inline_data[XPATH_NODESET_INLINE_CAPACITY];
 } XPathNodeSet;
 
@@ -642,7 +646,11 @@ typedef enum {
      * XPATH_OP_RANGE has 2 children (from, to). */
     XPATH_OP_IF,
     XPATH_OP_FOR,
-    XPATH_OP_RANGE
+    XPATH_OP_RANGE,
+    /* Parenthesized item sequence `('a','b',expr)`: N children, one
+     * per member — evaluates to the sequence (synthetic-text
+     * nodeset). */
+    XPATH_OP_SEQUENCE
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope

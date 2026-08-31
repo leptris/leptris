@@ -688,9 +688,14 @@ TEST(XPath30, ForReturnAndRange) {
         leptris_xpath_result_free(r);
         return out;
     };
-    /* for: sequence string form joins with spaces. */
+    /* for yields a SEQUENCE (3.0): one member per input item. The
+     * 1.0-frozen result_string prints one node — assert the members
+     * through string-join and count. */
     SCOPED_TRACE("for-return");
-    EXPECT_EQ(eval("for $x in //i return string($x)"), "a b c");
+    EXPECT_EQ(eval("string-join(for $x in //i return string($x), ' ')"),
+              "a b c");
+    EXPECT_EQ(eval("string-join(for $x in //i return upper-case(string($x)), '|')"),
+              "A|B|C");
     /* Range + predicate: the members that survive; assert count and
      * membership (the 1.0-frozen result_string prints one node). */
     LeptrisXPathResult r = leptris_xpath_eval(
@@ -698,6 +703,29 @@ TEST(XPath30, ForReturnAndRange) {
     ASSERT_NE(r, nullptr);
     EXPECT_EQ(leptris_xpath_result_count(r), 3u);
     leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPath30, StringFunctions) {
+    const char xml[] = "<r><i>a</i><i>b</i><i>c</i></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    auto eval = [&](const char* e) -> std::string {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, e);
+        if (!r) return "(error)";
+        char* v = leptris_xpath_result_string(r);
+        std::string out = v ? v : "";
+        leptris_free_string(v);
+        leptris_xpath_result_free(r);
+        return out;
+    };
+    EXPECT_EQ(eval("upper-case('abc')"), "ABC");
+    EXPECT_EQ(eval("lower-case('ABC')"), "abc");
+    EXPECT_EQ(eval("string-join(('a','b','c'), ',')"), "a,b,c");
+    EXPECT_EQ(eval("string-join(for $x in //i return string($x), '+')"),
+              "a+b+c");
+    EXPECT_EQ(eval("substring-before('key=val', '=')"), "key");
+    EXPECT_EQ(eval("normalize-space('  a  b  ')"), "a b");
     leptris_document_free(doc);
 }
 
