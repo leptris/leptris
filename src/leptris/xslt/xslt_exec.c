@@ -909,7 +909,33 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
                        LeptrisElement node) {
     struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
     if (!r) return 0;
-    char* sv = leptris_xpath_result_string(r);
+    char* sv = NULL;
+    /* XSLT 3.0 item sequence (for/range/sequence): display form joins
+     * the members with the default separator " ". A plain nodeset
+     * keeps the 1.0 first-member rule. */
+    if (r->type == XPATH_RESULT_NODESET &&
+        r->value.nodeset_value && r->value.nodeset_value->is_sequence) {
+        XPathNodeSet* ns = r->value.nodeset_value;
+        size_t total = 1;   /* NUL; + separators below */
+        for (size_t i = 0; i < ns->count; i++) {
+            extern char* get_node_text(void* n);
+            char* t = get_node_text(ns->nodes[i]);
+            if (t) { total += strlen(t); free(t); }
+            if (i + 1 < ns->count) total += 1;   /* " " */
+        }
+        sv = (char*)malloc(total);
+        if (sv) {
+            char* w = sv;
+            for (size_t i = 0; i < ns->count; i++) {
+                char* t = get_node_text(ns->nodes[i]);
+                if (t) { size_t l = strlen(t); memcpy(w, t, l); w += l; free(t); }
+                if (i + 1 < ns->count) *w++ = ' ';
+            }
+            *w = '\0';
+        }
+    } else {
+        sv = leptris_xpath_result_string(r);
+    }
     leptris_xpath_result_free(r);
     if (sv) {
         op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT, .text = sv,

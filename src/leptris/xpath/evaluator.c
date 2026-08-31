@@ -474,6 +474,7 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
     nodeset->owns_attributes = 0;
     nodeset->owns_synthetic_text = 0;
     nodeset->owns_namespaces = 0;
+    nodeset->is_sequence = 0;
 
     /* TODO 113 Phase 2: small-buffer optimization. For capacity ≤ the
      * inline buffer size, point `nodes` at the inline array. This
@@ -578,6 +579,7 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
         nodeset->capacity = 0;
         nodeset->owns_attributes = 0;
         nodeset->owns_namespaces = 0;
+        nodeset->is_sequence = 0;
         nodeset->nodes = NULL;
         nodeset->inline_data[0] = (void*)xpath_nodeset_free_list;
         xpath_nodeset_free_list = nodeset;

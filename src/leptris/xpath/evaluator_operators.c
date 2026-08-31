@@ -18,6 +18,21 @@ extern char* get_node_text(void* node);
  * Operator Evaluation
  * ============================================================================ */
 
+/* Synthetic sequence member (XSLT 3.0): a text node carrying one
+ * member's string form. Freed via the nodeset's
+ * owns_synthetic_text. */
+static XPathTextNode* synth_text(const char* content, size_t len) {
+    XPathTextNode* tn = (XPathTextNode*)calloc(1, sizeof(*tn));
+    if (!tn) return NULL;
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) { free(tn); return NULL; }
+    memcpy(copy, content, len);
+    copy[len] = 0;
+    tn->node_type = LEPTRIS_NODE_TEXT;
+    tn->content = copy;
+    return tn;
+}
+
 /* §3.4 relational compare over a double pair. */
 static int op_relational_cmp(XPathOperatorType op, double a, double b) {
     switch (op) {
@@ -62,12 +77,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         }
         struct leptris_xpath_result* domain =
             evaluate_expr(ctx, ast->children[0]);
-        if (!domain) return NULL;
+        if (!domain) {
+            if (scratch) ctx->variable_set = NULL;
+            xpath_variable_set_free(scratch);
+            return NULL;
+        }
 
-        char* acc = (char*)malloc(1);
-        size_t len = 0, cap = 1;
-        if (!acc) { xpath_result_free(domain); return NULL; }
-        acc[0] = 0;
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) {
+            xpath_result_free(domain);
+            if (scratch) ctx->variable_set = NULL;
+            xpath_variable_set_free(scratch);
+            return NULL;
+        }
+        out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
 
         XPathNodeSet* ns =
             (domain->type == XPATH_RESULT_NODESET)
@@ -82,17 +106,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (ns) {
                 xpath_nodeset_add(one, ns->nodes[i]);
             } else {
-                /* Scalar domain: one iteration with the value. */
                 char* sv = xpath_to_string(domain);
-                /* Represent as a synthetic single text node. */
                 XPathTextNode* tn =
-                    (XPathTextNode*)calloc(1, sizeof(*tn));
-                if (tn) {
-                    tn->node_type = LEPTRIS_NODE_TEXT;
-                    tn->content = sv ? sv : (char*)calloc(1, 1);
-                    one->owns_synthetic_text = 1;
-                    xpath_nodeset_add(one, tn);
-                }
+                    synth_text(sv ? sv : "", sv ? strlen(sv) : 0);
+                free(sv);
+                if (tn) xpath_nodeset_add(one, tn);
             }
             xpath_variable_set_nodeset(var, one);
 
@@ -101,19 +119,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (item) {
                 char* piece = xpath_to_string(item);
                 xpath_result_free(item);
-                if (piece && piece[0]) {
-                    size_t pl = strlen(piece);
-                    int need_sep = (len > 0);
-                    while (len + pl + 2 > cap) cap *= 2;
-                    char* grown = (char*)realloc(acc, cap);
-                    if (grown) {
-                        acc = grown;
-                        if (need_sep) acc[len++] = ' ';
-                        memcpy(acc + len, piece, pl + 1);
-                        len += pl;
-                    }
-                }
+                XPathTextNode* tn = synth_text(piece ? piece : "",
+                                               piece ? strlen(piece) : 0);
                 free(piece);
+                if (tn) xpath_nodeset_add(out, tn);
             }
             /* The variable OWNS the nodeset after set_nodeset —
              * remove frees it; do not double-free. */
@@ -124,11 +133,12 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         xpath_variable_set_free(scratch);
 
         struct leptris_xpath_result* result =
-            xpath_result_new(XPATH_RESULT_STRING);
-        if (!result) { free(acc); return NULL; }
-        result->value.string_value = acc;
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!result) { xpath_nodeset_free(out); return NULL; }
+        result->value.nodeset_value = out;
         return result;
     }
+
 
     /* XSLT 3.0 range `A to B` (XPath 2.0+): integer sequence as a
      * nodeset of synthetic text nodes — predicates and numeric
@@ -149,16 +159,46 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         XPathNodeSet* out = xpath_nodeset_new();
         if (!out) return NULL;
         out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
         for (long v = lo; v <= hi && v - lo < 100000; v++) {
             char buf[24];
             int l = snprintf(buf, sizeof buf, "%ld", v);
-            XPathTextNode* tn = (XPathTextNode*)calloc(1, sizeof(*tn));
-            char* content = (char*)malloc((size_t)l + 1);
-            if (!tn || !content) { free(tn); free(content); break; }
-            memcpy(content, buf, (size_t)l + 1);
-            tn->node_type = LEPTRIS_NODE_TEXT;
-            tn->content = content;
+            XPathTextNode* tn = synth_text(buf, (size_t)l);
+            if (!tn) break;
             xpath_nodeset_add(out, tn);
+        }
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!result) { xpath_nodeset_free(out); return NULL; }
+        result->value.nodeset_value = out;
+        return result;
+    }
+
+    /* XSLT 3.0 parenthesized item sequence: each child evaluates to
+     * one member (nodeset children contribute their nodes in
+     * order). */
+    if (op == XPATH_OP_SEQUENCE) {
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) return NULL;
+        out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
+        for (size_t i = 0; i < ast->child_count; i++) {
+            struct leptris_xpath_result* item =
+                evaluate_expr(ctx, ast->children[i]);
+            if (!item) { xpath_nodeset_free(out); return NULL; }
+            if (item->type == XPATH_RESULT_NODESET &&
+                item->value.nodeset_value) {
+                XPathNodeSet* is = item->value.nodeset_value;
+                for (size_t j = 0; j < is->count; j++)
+                    xpath_nodeset_add(out, is->nodes[j]);
+            } else {
+                char* piece = xpath_to_string(item);
+                XPathTextNode* tn = synth_text(piece ? piece : "",
+                                               piece ? strlen(piece) : 0);
+                free(piece);
+                if (tn) xpath_nodeset_add(out, tn);
+            }
+            xpath_result_free(item);
         }
         struct leptris_xpath_result* result =
             xpath_result_new(XPATH_RESULT_NODESET);

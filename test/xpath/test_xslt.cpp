@@ -2348,6 +2348,31 @@ TEST(Xslt30, IfThenElse) {
         "[many]");
 }
 
+/* XSLT 3.0 xsl:value-of over an item sequence: the display form is
+ * the members space-joined (3.0 default separator " "), not the
+ * first member (the 1.0 nodeset rule). */
+TEST(Xslt30, SequenceValueOf) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='for $x in //i return string($x)'/>]"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i><i>c</i></r>")),
+        "[a b c]");
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='1 to 3'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[1 2 3]");
+    /* A plain nodeset is NOT a sequence — first member still wins. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='//i'/>]"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i></r>")),
+        "[a]");
+}
+
 /* Minimal bug-130 shape: xml method, default-ns root, no-ns child
  * via copy-of — the child must serialize with xmlns="". */
 TEST(XsltImport, NoNsChildUnderDefaultNsXmlMethod) {

@@ -1860,6 +1860,122 @@ static struct leptris_xpath_result* xpath_func_lang(XPathContext* context,
     return result;
 }
 
+/* ---- XPath 2.0+ string functions (XSLT 3.0) ---- */
+
+/* upper-case(string) */
+static struct leptris_xpath_result* xpath_func_upper_case(
+    XPathContext* context, XPathASTNode** args, size_t arg_count
+) {
+    struct leptris_xpath_result* arg = xpath_evaluate(context, args[0]);
+    if (!arg) return NULL;
+    char* src = result_to_string(arg);
+    xpath_result_free(arg);
+    if (!src) return NULL;
+    size_t n = strlen(src);
+    char* out = LEPTRIS_ALLOC_N(char, n + 1);
+    if (!out) { LEPTRIS_FREE(src); return NULL; }
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)src[i];
+        out[i] = (char)((c >= 'a' && c <= 'z') ? c - 32 : c);
+    }
+    out[n] = 0;
+    LEPTRIS_FREE(src);
+    struct leptris_xpath_result* result =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!result) { LEPTRIS_FREE(out); return NULL; }
+    result->value.string_value = out;
+    return result;
+}
+
+/* lower-case(string) */
+static struct leptris_xpath_result* xpath_func_lower_case(
+    XPathContext* context, XPathASTNode** args, size_t arg_count
+) {
+    struct leptris_xpath_result* arg = xpath_evaluate(context, args[0]);
+    if (!arg) return NULL;
+    char* src = result_to_string(arg);
+    xpath_result_free(arg);
+    if (!src) return NULL;
+    size_t n = strlen(src);
+    char* out = LEPTRIS_ALLOC_N(char, n + 1);
+    if (!out) { LEPTRIS_FREE(src); return NULL; }
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)src[i];
+        out[i] = (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
+    }
+    out[n] = 0;
+    LEPTRIS_FREE(src);
+    struct leptris_xpath_result* result =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!result) { LEPTRIS_FREE(out); return NULL; }
+    result->value.string_value = out;
+    return result;
+}
+
+/* string-join(sequence, separator): joins each member's string form.
+ * A nodeset joins per-node (the sequence's members); a scalar is a
+ * one-member sequence. */
+static struct leptris_xpath_result* xpath_func_string_join(
+    XPathContext* context, XPathASTNode** args, size_t arg_count
+) {
+    struct leptris_xpath_result* seq = xpath_evaluate(context, args[0]);
+    if (!seq) return NULL;
+    struct leptris_xpath_result* sep_r = xpath_evaluate(context, args[1]);
+    if (!sep_r) { xpath_result_free(seq); return NULL; }
+    char* sep = result_to_string(sep_r);
+    xpath_result_free(sep_r);
+    if (!sep) { xpath_result_free(seq); return NULL; }
+    size_t sep_len = strlen(sep);
+
+    size_t cap = 64, len = 0;
+    char* acc = (char*)LEPTRIS_ALLOC_N(char, cap);
+    if (!acc) { LEPTRIS_FREE(sep); xpath_result_free(seq); return NULL; }
+    acc[0] = 0;
+
+    size_t n = 1;
+    XPathNodeSet* ns = NULL;
+    if (seq->type == XPATH_RESULT_NODESET &&
+        seq->value.nodeset_value) {
+        ns = seq->value.nodeset_value;
+        n = ns->count;
+    }
+    for (size_t i = 0; i < n; i++) {
+        char* piece;
+        if (ns) {
+            piece = get_node_text(ns->nodes[i]);
+        } else {
+            piece = result_to_string(seq);
+        }
+        if (!piece) piece = (char*)calloc(1, 1);
+        size_t pl = strlen(piece);
+        if (i > 0 && sep_len) {
+            while (len + sep_len + pl + 1 > cap) cap *= 2;
+            char* grown = (char*)realloc(acc, cap);
+            if (!grown) { free(piece); break; }
+            acc = grown;
+            memcpy(acc + len, sep, sep_len);
+            len += sep_len;
+        } else {
+            while (len + pl + 1 > cap) cap *= 2;
+            char* grown = (char*)realloc(acc, cap);
+            if (!grown) { free(piece); break; }
+            acc = grown;
+        }
+        memcpy(acc + len, piece, pl + 1);
+        len += pl;
+        free(piece);
+        if (!ns) break;   /* scalar sequence: one member */
+    }
+    LEPTRIS_FREE(sep);
+    xpath_result_free(seq);
+
+    struct leptris_xpath_result* result =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!result) { free(acc); return NULL; }
+    result->value.string_value = acc;
+    return result;
+}
+
 /* ============================================================================
  * XPath 1.0 Functions Initialization
  * ============================================================================ */
@@ -1880,6 +1996,10 @@ static const char* g_supported_functions[] = {
     "string-length",
     "normalize-space",
     "translate",
+    /* XPath 2.0+ (XSLT 3.0) */
+    "upper-case",
+    "lower-case",
+    "string-join",
     /* Boolean */
     "boolean",
     "not",
@@ -1948,6 +2068,11 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "string-length", xpath_func_string_length, 0, 1);
     xpath_function_registry_register(registry, "normalize-space", xpath_func_normalize_space, 0, 1);
     xpath_function_registry_register(registry, "translate", xpath_func_translate, 3, 3);
+
+    /* XPath 2.0+ string functions (XSLT 3.0) */
+    xpath_function_registry_register(registry, "upper-case", xpath_func_upper_case, 1, 1);
+    xpath_function_registry_register(registry, "lower-case", xpath_func_lower_case, 1, 1);
+    xpath_function_registry_register(registry, "string-join", xpath_func_string_join, 2, 2);
 
     /* Boolean functions (5) */
     xpath_function_registry_register(registry, "boolean", xpath_func_boolean, 1, 1);
