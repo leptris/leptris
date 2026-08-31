@@ -4,7 +4,20 @@
 
 ### Added
 
-- for-each-group variants + xsl:analyze-string (xslt30)
+- **XSLT 3.0 program, third increment — the full grouping set and
+  regex string processing** (Saxon-HE 12.7 verified):
+  - **`group-adjacent`** (14): only adjacent equal keys share a
+    group; the grouping key rides along for
+    `current-grouping-key()`.
+  - **`group-ending-with`** (14): a pattern match closes the group;
+    trailing non-matches form the final group.
+  - **`xsl:analyze-string`** (18): POSIX ERE scan of the selected
+    string; `matching-substring` / `non-matching-substring` bodies
+    run per segment with `.` = the segment; `regex-group(n)` reads
+    the captures of the match in flight. `i` flag = case-fold;
+    zero-length matches advance one character. MSVC builds no-op
+    the engine (same documented limitation as the EXSLT regexp
+    handlers).
 
 
 
