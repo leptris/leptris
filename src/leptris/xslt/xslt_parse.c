@@ -1340,6 +1340,12 @@ static void free_instr(XsltInstr* in) {
     free_instr_list(in->child);
     if (in->test) leptris_xpath_compiled_free(in->test);
     if (in->select) leptris_xpath_compiled_free(in->select);
+    if (in->group_by) leptris_xpath_compiled_free(in->group_by);
+    if (in->context_item) leptris_xpath_compiled_free(in->context_item);
+    if (in->group_starting) {
+        leptris_xpath_compiled_free(in->group_starting->expr);
+        free(in->group_starting);
+    }
     if (in->num_value) leptris_xpath_compiled_free(in->num_value);
     if (in->num_count) leptris_xpath_compiled_free(in->num_count);
     if (in->num_from) leptris_xpath_compiled_free(in->num_from);
