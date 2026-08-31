@@ -150,6 +150,10 @@ typedef struct xslt_instr {
                                        template-parameter semantics
                                        (§11.6): default applies only when
                                        no with-param binds the name. */
+
+    /* TEXT (3.0 §10.4.2): the text carries {expr} value templates —
+     * expand at execution (sheet-level expand-text="yes"). */
+    int tvt;
     int doe;                        /* TEXT / VALUE_OF
                                        disable-output-escaping="yes" */
     const char* letter_value;      /* NUMBER: "alphabetic"|"traditional"
@@ -318,6 +322,10 @@ struct xslt_styles {
      * versioned behaviors — e.g. xsl:value-of selects a SEQUENCE and
      * prints every item, not just the first node. */
     int version_major;
+
+    /* 3.0 §10.4.2 expand-text="yes": text value templates {expr}
+     * expand in literal text (xsl:text content included). */
+    int expand_text;
 
     /* Any non-xsl namespace declared on the stylesheet root — gates
      * per-instruction ns-context building (§4 prefixed tests). */
