@@ -559,6 +559,12 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "on-empty") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_ON_EMPTY);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
+        return in;
+    }
     if (strcmp(local, "next-iteration") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_NEXT_ITERATION);
         if (!in) return NULL;
