@@ -721,6 +721,25 @@ TEST(SerializeOptions, IndentUnitStringPerLevel) {
     leptris_document_free(doc);
 }
 
+/* Issue #658: the fused-leaf fast path (text-bearing leaves) must
+ * honor the indent unit too — it computed indent*indent_spaces
+ * directly, bypassing the #633 unit branch. */
+TEST(SerializeOptions, IndentUnitOnTextBearingLeaves) {
+    const char xml[] = "<r><a><b/></a><c>x</c></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    LeptrisSerializeExtOptions ext = {0};
+    ext.indent_unit = "\t";
+    char* s = leptris_document_serialize_ext(doc, &opts, &ext);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s), "<r>\n\t<a>\n\t\t<b/>\n\t</a>\n\t<c>x</c>\n</r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
 /* Issue #644: FFI callers allocate only the fields they know — the
  * sized entry must not read past their buffer. The Ruby binding's
  * layout is exactly one int (indent_text): a 4-byte ext with garbage
