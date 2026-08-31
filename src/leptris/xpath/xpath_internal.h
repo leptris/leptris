@@ -59,6 +59,9 @@ typedef enum {
     TOK_NODE,
     TOK_DOLLAR,  /* For variable references: $var */
     TOK_ASSIGN,  /* := — XPath 3.1 let bindings */
+    TOK_BANG,   /* ! — XPath 3.0 simple map */
+    TOK_ARROW,  /* => — XPath 3.1 arrow operator */
+    TOK_CONCAT, /* || — XPath 3.0 string concatenation */
     TOK_VARIABLE_REFERENCE  /* Variable name after $ */
 } XPathTokenType;
 

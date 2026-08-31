@@ -1359,7 +1359,8 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
              * wholesale. Correctness first; VM opcodes later. */
             if (op == XPATH_OP_IF || op == XPATH_OP_FOR ||
                 op == XPATH_OP_RANGE || op == XPATH_OP_SEQUENCE ||
-                op == XPATH_OP_LET) {
+                op == XPATH_OP_LET || op == XPATH_OP_MAP ||
+                op == XPATH_OP_CONCAT) {
                 emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
                             add_const_ast(st, node));
                 break;
