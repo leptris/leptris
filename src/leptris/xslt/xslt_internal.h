@@ -65,6 +65,9 @@ typedef enum {
     XSLT_INSTR_FOR_EACH_GROUP,   /* xsl:for-each-group (3.0 §14) */
     XSLT_INSTR_EVALUATE,         /* xsl:evaluate (3.0 §26): dynamic
                                      expression from a string */
+    XSLT_INSTR_ANALYZE_STRING,   /* xsl:analyze-string (3.0 §18) */
+    XSLT_INSTR_MATCHING_SUBSTRING,
+    XSLT_INSTR_NONMATCHING_SUBSTRING,
     XSLT_INSTR_UNKNOWN_XSL        /* forwards-compat container: executes
                                       its xsl:fallback children (§15) */
 } XsltInstrKind;
@@ -118,16 +121,26 @@ typedef struct xslt_instr {
     /* Sorts (FOR_EACH / APPLY_TEMPLATES). */
     XsltSort* sorts;
 
-    /* FOR_EACH_GROUP (3.0 §14): group-by is an expression (string
-     * key per item); group_starting is a single-alternative match
-     * pattern (a match opens a new group). At most one is set. */
+    /* FOR_EACH_GROUP (3.0 §14): group_by is an expression (string key
+     * per item; group_adjacent only joins ADJACENT equal keys);
+     * group_starting is a single-alternative match pattern (a match
+     * OPENS a group); group_ending closes one (trailing non-matches
+     * form the last group). At most one grouping control is set. */
     LeptrisXPathCompiled group_by;
+    int group_adjacent;
     struct xslt_pattern* group_starting;
+    struct xslt_pattern* group_ending;
 
     /* EVALUATE (3.0 §26): @xpath expression yields the STRING to
      * compile+run; context_item selects its context node (absent →
      * the document node anchors absolute paths). */
     LeptrisXPathCompiled context_item;
+
+    /* ANALYZE_STRING (3.0 §18): regex/regex-flags raw strings (v1:
+     * literal, no AVT); the exec regex-scans the selected string and
+     * runs MATCHING/NONMATCHING_SUBSTRING children per segment. */
+    const char* regex;
+    const char* regex_flags;
 
     /* use-attribute-sets (RESULT_ELEM / ELEMENT / COPY): names
      * applied before the instruction's own attrs (§7.1.4). */
@@ -457,6 +470,16 @@ typedef struct xslt_exec {
      * the bridge. NULL outside a for-each-group body. */
     XPathNodeSet* cur_group;
     char* cur_group_key;
+
+    /* xsl:analyze-string (3.0 §18): the match in flight — the source
+     * string (owned for the duration of the matching-substring body)
+     * and POSIX regmatch captures into it; regex-group(n) reads these.
+     * NULL outside analyze-string. Captures are relative to
+     * as_src + as_pos (regexec runs on the unscanned tail). */
+    char* as_src;
+    void* as_pmatch;             /* regmatch_t[as_nmatch] */
+    size_t as_nmatch;
+    size_t as_pos;
 
     /* xslt_functions.c: exec-owned func:function registry bindings
      * (see XsltUfnBinding). */

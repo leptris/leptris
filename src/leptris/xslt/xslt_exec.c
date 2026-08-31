@@ -1001,6 +1001,112 @@ static int op_evaluate(XsltExec* ex, const XsltInstr* in,
     return 0;
 }
 
+/* xsl:analyze-string (3.0 §18): regex-scan the selected string;
+ * matching/non-matching segments run their sub-instruction bodies
+ * with a synthetic text node carrying the segment (string(.) reads
+ * it). POSIX ERE on POSIX platforms; MSVC builds no-op (same
+ * limitation as the EXSLT regexp handlers). */
+#ifndef _WIN32
+#include <regex.h>
+#endif
+
+static XPathTextNode* as_segment_node(const char* s, size_t len) {
+    XPathTextNode* tn = (XPathTextNode*)calloc(1, sizeof(*tn));
+    if (!tn) return NULL;
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) { free(tn); return NULL; }
+    memcpy(copy, s, len);
+    copy[len] = '\0';
+    tn->node_type = LEPTRIS_NODE_TEXT;
+    tn->content = copy;
+    return tn;
+}
+
+static void as_segment_free(XPathTextNode* tn) {
+    if (!tn) return;
+    free(tn->content);
+    free(tn);
+}
+
+static int op_analyze_string(XsltExec* ex, const XsltInstr* in,
+                             LeptrisElement node) {
+    if (!in->select || !in->regex) return 0;
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    char* src = leptris_xpath_result_string(r);
+    leptris_xpath_result_free(r);
+    if (!src) return 0;
+    int rc = 0;
+#ifndef _WIN32
+    regex_t rx;
+    int cflags = REG_EXTENDED;
+    if (in->regex_flags && strchr(in->regex_flags, 'i'))
+        cflags |= REG_ICASE;
+    if (regcomp(&rx, in->regex, cflags) != 0) { free(src); return 0; }
+    size_t nmatch = rx.re_nsub + 1;
+    regmatch_t* pm = (regmatch_t*)calloc(nmatch, sizeof(*pm));
+    if (!pm) { regfree(&rx); free(src); return 0; }
+
+    const XsltInstr* match_body = NULL;
+    const XsltInstr* nonmatch_body = NULL;
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind == XSLT_INSTR_MATCHING_SUBSTRING)
+            match_body = c->child;
+        else if (c->kind == XSLT_INSTR_NONMATCHING_SUBSTRING)
+            nonmatch_body = c->child;
+    }
+
+    char* saved_src = ex->as_src;
+    void* saved_pm = ex->as_pmatch;
+    size_t saved_nmatch = ex->as_nmatch;
+    size_t saved_pos = ex->as_pos;
+
+    size_t pos = 0;
+    while (src[pos] && rc == 0) {
+        if (regexec(&rx, src + pos, nmatch, pm, 0) != 0) break;
+        size_t so = pos + (size_t)(pm[0].rm_so > 0 ? pm[0].rm_so : 0);
+        size_t eo = pos + (size_t)pm[0].rm_eo;
+        if (nonmatch_body && so > pos) {
+            XPathTextNode* tn = as_segment_node(src + pos, so - pos);
+            if (tn) {
+                rc = xslt_exec_instrs(ex, nonmatch_body,
+                                      (LeptrisElement)tn);
+                as_segment_free(tn);
+            }
+        }
+        if (match_body && rc == 0) {
+            ex->as_src = src;
+            ex->as_pmatch = pm;
+            ex->as_nmatch = nmatch;
+            ex->as_pos = pos;
+            XPathTextNode* tn = as_segment_node(src + so, eo - so);
+            if (tn) {
+                rc = xslt_exec_instrs(ex, match_body,
+                                      (LeptrisElement)tn);
+                as_segment_free(tn);
+            }
+            ex->as_src = saved_src;
+            ex->as_pmatch = saved_pm;
+            ex->as_nmatch = saved_nmatch;
+            ex->as_pos = saved_pos;
+        }
+        /* Zero-length match: advance one char so the scan terminates. */
+        pos = (eo == so) ? so + 1 : eo;
+    }
+    if (rc == 0 && nonmatch_body && src[pos]) {
+        XPathTextNode* tn = as_segment_node(src + pos, strlen(src) - pos);
+        if (tn) {
+            rc = xslt_exec_instrs(ex, nonmatch_body, (LeptrisElement)tn);
+            as_segment_free(tn);
+        }
+    }
+    regfree(&rx);
+    free(pm);
+#endif
+    free(src);
+    return rc;
+}
+
 /* §10 stable sort by string/number key — shared by for-each and
  * apply-templates (single-key v1: the first xsl:sort). */
 /* §10 stable multi-key comparator. */
@@ -1300,7 +1406,8 @@ static int feg_group_push(XsltFegGroup* g, LeptrisElement it) {
 
 static int op_for_each_group(XsltExec* ex, const XsltInstr* in,
                              LeptrisElement node) {
-    if (!in->group_by && !in->group_starting) return 0;
+    if (!in->group_by && !in->group_starting && !in->group_ending)
+        return 0;
     struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
     if (!r) return 0;
     size_t n = leptris_xpath_result_count(r);
@@ -1315,6 +1422,7 @@ static int op_for_each_group(XsltExec* ex, const XsltInstr* in,
     XsltFegGroup* groups = (n > 0)
         ? (XsltFegGroup*)calloc(n, sizeof(XsltFegGroup)) : NULL;
     size_t ngroups = 0;
+    int cur_group_closed = 0;   /* group-ending-with state */
     int rc = 0;
     if (!groups) { rc = -1; goto done; }
 
@@ -1328,10 +1436,21 @@ static int op_for_each_group(XsltExec* ex, const XsltInstr* in,
                 key = leptris_xpath_result_string(kv);
                 leptris_xpath_result_free(kv);
             }
-            for (size_t j = 0; j < ngroups; j++) {
-                const char* a = groups[j].key ? groups[j].key : "";
-                const char* b = key ? key : "";
-                if (strcmp(a, b) == 0) { g = &groups[j]; break; }
+            if (in->group_adjacent) {
+                /* group-adjacent: only the LAST group can absorb the
+                 * item; an equal earlier key does not re-open. */
+                if (ngroups) {
+                    const char* a =
+                        groups[ngroups - 1].key ? groups[ngroups - 1].key : "";
+                    const char* b = key ? key : "";
+                    if (strcmp(a, b) == 0) g = &groups[ngroups - 1];
+                }
+            } else {
+                for (size_t j = 0; j < ngroups; j++) {
+                    const char* a = groups[j].key ? groups[j].key : "";
+                    const char* b = key ? key : "";
+                    if (strcmp(a, b) == 0) { g = &groups[j]; break; }
+                }
             }
             if (!g) {
                 g = &groups[ngroups++];
@@ -1339,6 +1458,15 @@ static int op_for_each_group(XsltExec* ex, const XsltInstr* in,
             } else {
                 free(key);
             }
+        } else if (in->group_ending) {
+            /* group-ending-with: items accumulate into the open
+             * group; a match CLOSES it (the next item opens a fresh
+             * one). Trailing non-matches form the final group. */
+            if (cur_group_closed || ngroups == 0)
+                g = &groups[ngroups++];
+            else
+                g = &groups[ngroups - 1];
+            cur_group_closed = 0;
         } else {
             /* group-starting-with: a match opens a new group; the
              * implicit first group collects leading non-matches. */
@@ -1349,6 +1477,9 @@ static int op_for_each_group(XsltExec* ex, const XsltInstr* in,
                 g = &groups[ngroups - 1];
         }
         if (feg_group_push(g, items[i])) { rc = -1; break; }
+        if (in->group_ending && xslt_pattern_matches(
+                in->group_ending, items[i], ex->source, in->ns))
+            cur_group_closed = 1;
     }
 
     {
@@ -3364,6 +3495,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_BREAK] = op_break;
     g_ops[XSLT_INSTR_FOR_EACH_GROUP] = op_for_each_group;
     g_ops[XSLT_INSTR_EVALUATE] = op_evaluate;
+    g_ops[XSLT_INSTR_ANALYZE_STRING] = op_analyze_string;
     g_ops[XSLT_INSTR_IF] = op_if;
     g_ops[XSLT_INSTR_APPLY_TEMPLATES] = op_apply_templates;
     g_ops[XSLT_INSTR_CALL_TEMPLATE] = op_call_template;

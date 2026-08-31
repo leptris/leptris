@@ -2497,6 +2497,75 @@ TEST(Xslt30, ForEachGroup) {
         "132");
 }
 
+/* XSLT 3.0 xsl:for-each-group variants (§14): group-adjacent (an
+ * adjacency-key value change starts a new group) and
+ * group-ending-with (a pattern match ENDS the group; trailing
+ * non-matches form the final group). Ground truth: Saxon-HE 12.7. */
+TEST(Xslt30, ForEachGroupVariants) {
+    /* group-adjacent: only ADJACENT equal keys group. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:for-each-group select='/*/*' group-adjacent='@t'>"
+        "[<xsl:value-of select='count(current-group())'/>]"
+        "</xsl:for-each-group>"
+        "</xsl:template>",
+        "<d><x t='a'/><y t='a'/><z t='b'/><w t='a'/></d>")),
+        "[2][1][1]");
+    /* group-adjacent: grouping key rides along. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:for-each-group select='/*/*' group-adjacent='@t'>"
+        "<xsl:value-of select='current-grouping-key()'/>"
+        "</xsl:for-each-group>"
+        "</xsl:template>",
+        "<d><x t='a'/><y t='a'/><z t='b'/><w t='a'/></d>")),
+        "aba");
+    /* group-ending-with: the match closes its group; items after the
+     * last match form the final group. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:for-each-group select='/*/*' group-ending-with='e'>"
+        "[<xsl:value-of select='count(current-group())'/>]"
+        "</xsl:for-each-group>"
+        "</xsl:template>",
+        "<d><a/><b/><e/><c/><e/><f/><g/></d>")),
+        "[3][2][2]");
+}
+
+/* XSLT 3.0 xsl:analyze-string (§18): regex-scan the selected string;
+ * matching-substring runs with "." = the matched substring and
+ * regex-group(n) reading captures; non-matching-substring covers the
+ * gaps. Ground truth: Saxon-HE 12.7. */
+TEST(Xslt30, AnalyzeString) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='s' select=\"'ab12cd345ef'\"/>"
+        "<xsl:analyze-string select='$s' regex='[0-9]+'>"
+        "<xsl:matching-substring>"
+        "[<xsl:value-of select='.'/>]"
+        "</xsl:matching-substring>"
+        "<xsl:non-matching-substring>"
+        "{<xsl:value-of select='.'/>}"
+        "</xsl:non-matching-substring>"
+        "</xsl:analyze-string>"
+        "</xsl:template>",
+        "<r/>")),
+        "{ab}[12]{cd}[345]{ef}");
+    /* Capture groups via regex-group(n). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:analyze-string select=\"'k1:v1, k2:v2'\" "
+        "regex='([a-z0-9]+):([a-z0-9]+)'>"
+        "<xsl:matching-substring>"
+        "[<xsl:value-of select='regex-group(1)'/>="
+        "<xsl:value-of select='regex-group(2)'/>]"
+        "</xsl:matching-substring>"
+        "</xsl:analyze-string>"
+        "</xsl:template>",
+        "<r/>")),
+        "[k1=v1][k2=v2]");
+}
+
 /* XSLT 3.0 text value templates (§10.4.2, expand-text="yes"):
  * {expr} in literal TEXT expands — including inside xsl:text
  * (ground truth: Saxon-HE 12.7 expands there too); {{ and }} are
