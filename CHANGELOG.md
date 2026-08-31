@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.30] - 2026-08-31
+
+### Fixed
+
+- misplaced xsl:catch is a compile error (#669) (xslt)
+
+
+
 ## [1.9.29] - 2026-08-31
 
 ### Added
