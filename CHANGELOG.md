@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.25] - 2026-08-31
+
+### Added
+
+- for-each-group variants + xsl:analyze-string (xslt30)
+
+
+
 ## [1.9.24] - 2026-08-31
 
 ### Added
