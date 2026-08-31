@@ -3584,6 +3584,7 @@ static void register_ops(void) {
 void xslt_exec_free(XsltExec* ex) {
     if (!ex) return;
     xslt_keys_free(ex);
+    xslt_accs_free(ex);
     xslt_docs_free(ex);
     xslt_bridge_free(ex);
     xslt_ufn_free(ex);

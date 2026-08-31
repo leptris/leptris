@@ -1086,6 +1086,66 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             *tail = k;
             continue;
         }
+        /* xsl:accumulator (3.0 §18.2): declaration + ordered rules.
+         * initial-value/@select attributes only — sequence-constructor
+         * bodies (both attributes and rules) are not compiled yet. */
+        if (node_is_xsl(e, "accumulator")) {
+            const char* an = leptris_element_attribute(e, "name");
+            if (!an || !*an) continue;
+            XsltAccumulator* a = (XsltAccumulator*)calloc(1, sizeof(*a));
+            if (!a) continue;
+            a->name = leptris_strdup(an);
+            a->initial = compile_attr_sp(sp, e, "initial-value");
+            XsltAccRule** tail = &a->rules;
+            for (LeptrisElement c = leptris_element_first_child_any(e); c;
+                 c = leptris_element_next_sibling_any(c)) {
+                if (!node_is_xsl(c, "accumulator-rule")) continue;
+                XsltAccRule* r = (XsltAccRule*)calloc(1, sizeof(*r));
+                if (!r) continue;
+                r->match = compile_attr_sp(sp, c, "match");
+                r->select = compile_attr_sp(sp, c, "select");
+                const char* ph = leptris_element_attribute(c, "phase");
+                r->phase_end = ph && strcmp(ph, "end") == 0;
+                *tail = r;
+                tail = &r->next;
+            }
+            XsltAccumulator** at = &sp->sheet->accs;
+            while (*at) at = &(*at)->next;
+            *at = a;
+            continue;
+        }
+        /* xsl:mode (3.0 §10): only the unnamed mode's
+         * use-accumulators is captured (§18.2.2 applicability gate).
+         * The other attributes (on-no-match, warning/on-no-match,
+         * typed, visibility) land with full xsl:mode support. */
+        if (node_is_xsl(e, "mode")) {
+            const char* mn = leptris_element_attribute(e, "name");
+            const char* ua = leptris_element_attribute(e, "use-accumulators");
+            if ((!mn || !*mn) && ua && *ua) {
+                if (strcmp(ua, "#all") == 0) {
+                    sp->sheet->mode_acc_all = 1;
+                } else {
+                    char* dup = leptris_strdup(ua);
+                    if (dup) {
+                        char* save = NULL;
+                        for (char* tok = xslt_strtok(dup, " \t\n,", &save);
+                             tok; tok = xslt_strtok(NULL, " \t\n,", &save)) {
+                            char** grown = (char**)realloc(
+                                sp->sheet->mode_acc_names,
+                                (sp->sheet->mode_acc_count + 1) *
+                                    sizeof(char*));
+                            if (!grown) break;
+                            sp->sheet->mode_acc_names = grown;
+                            sp->sheet->mode_acc_names[
+                                sp->sheet->mode_acc_count++] =
+                                leptris_strdup(tok);
+                        }
+                        free(dup);
+                    }
+                }
+            }
+            continue;
+        }
         if (node_is_xsl(e, "output")) {
             const char* m = leptris_element_attribute(e, "method");
             sp->sheet->out_method_text = m && strcmp(m, "text") == 0;
@@ -1473,6 +1533,25 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
         if (k->use) leptris_xpath_compiled_free(k->use);
         free((void*)k->name);
         free(k);
+    }
+    while (sheet->accs) {
+        XsltAccumulator* a = sheet->accs;
+        sheet->accs = a->next;
+        while (a->rules) {
+            XsltAccRule* r = a->rules;
+            a->rules = r->next;
+            if (r->match) leptris_xpath_compiled_free(r->match);
+            if (r->select) leptris_xpath_compiled_free(r->select);
+            free(r);
+        }
+        if (a->initial) leptris_xpath_compiled_free(a->initial);
+        free((void*)a->name);
+        free(a);
+    }
+    if (sheet->mode_acc_names) {
+        for (size_t i = 0; i < sheet->mode_acc_count; i++)
+            free(sheet->mode_acc_names[i]);
+        free(sheet->mode_acc_names);
     }
     while (sheet->funcs) {
         XsltUserFunc* f = sheet->funcs;

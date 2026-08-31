@@ -23,6 +23,7 @@
 #include "../xpath/evaluator_internal.h"
 #include "../xpath/functions.h"
 #include "../dom/element.h"
+#include "../dom/document_node.h"
 #include "../dtd/model.h"
 #include <stdio.h>
 #include <time.h>
@@ -459,6 +460,381 @@ void xslt_keys_free(XsltExec* ex) {
     XsltKeyIndex* k = (XsltKeyIndex*)ex->keys;
     while (k) { XsltKeyIndex* nx = k->next; key_index_free(k); k = nx; }
     ex->keys = NULL;
+}
+
+/* ============================================================
+ * xsl:accumulator (3.0 §18.2) — per-(accumulator, tree) value map
+ *
+ * The fold runs lazily on the first accumulator-before/after call
+ * for an (accumulator, tree) pair and is cached for the transform:
+ * source trees are immutable once folded (§18.2.1 pre-order pass).
+ * Trees are identified by document; the principal source document
+ * folds every document-level node in order, foreign trees (RTFs,
+ * document() results) fold from the context node's top node.
+ * ============================================================ */
+
+typedef struct xslt_acc_val {
+    const void* node;
+    struct leptris_xpath_result* before;   /* owned snapshot */
+    struct leptris_xpath_result* after;    /* owned snapshot */
+} XsltAccVal;
+
+typedef struct xslt_acc_map {
+    const XsltAccumulator* acc;
+    LeptrisDocument doc;          /* tree identity */
+    XsltAccVal* vals;
+    size_t n, cap;
+    size_t* index;                /* open-addressed node -> slot+1 */
+    size_t index_cap;             /* power of two */
+    int computing;                /* re-entry guard (XTDE3400) */
+    struct xslt_acc_map* next;
+} XsltAccMap;
+
+static struct leptris_xpath_result* acc_result_copy(
+        const struct leptris_xpath_result* r) {
+    if (!r) return NULL;
+    struct leptris_xpath_result* c = xpath_result_new(r->type);
+    if (!c) return NULL;
+    switch (r->type) {
+        case XPATH_RESULT_BOOLEAN:
+            c->value.boolean_value = r->value.boolean_value;
+            break;
+        case XPATH_RESULT_NUMBER:
+            c->value.number_value = r->value.number_value;
+            break;
+        case XPATH_RESULT_STRING:
+            c->value.string_value = leptris_strdup(
+                r->value.string_value ? r->value.string_value : "");
+            if (!c->value.string_value) {
+                leptris_xpath_result_free(c);
+                return NULL;
+            }
+            break;
+        case XPATH_RESULT_NODESET: {
+            c->value.nodeset_value = xpath_nodeset_new();
+            if (!c->value.nodeset_value) {
+                leptris_xpath_result_free(c);
+                return NULL;
+            }
+            if (r->value.nodeset_value)
+                for (size_t i = 0; i < r->value.nodeset_value->count; i++)
+                    xpath_nodeset_add(c->value.nodeset_value,
+                                      r->value.nodeset_value->nodes[i]);
+            break;
+        }
+        default: break;
+    }
+    return c;
+}
+
+static size_t acc_ptr_hash(const void* p) {
+    uintptr_t h = (uintptr_t)p;
+    h ^= h >> 33;
+    h *= (uintptr_t)0x9E3779B97F4A7C15ULL;
+    h ^= h >> 29;
+    return (size_t)h;
+}
+
+static void acc_map_free(XsltAccMap* m) {
+    if (!m) return;
+    for (size_t i = 0; i < m->n; i++) {
+        if (m->vals[i].before) leptris_xpath_result_free(m->vals[i].before);
+        if (m->vals[i].after) leptris_xpath_result_free(m->vals[i].after);
+    }
+    free(m->vals);
+    free(m->index);
+    free(m);
+}
+
+static void acc_index_build(XsltAccMap* m) {
+    size_t cap = 16;
+    while (cap < m->n * 2) cap <<= 1;
+    free(m->index);
+    m->index = (size_t*)calloc(cap, sizeof(size_t));
+    m->index_cap = m->index ? cap : 0;
+    if (!m->index) return;
+    for (size_t i = 0; i < m->n; i++) {
+        size_t s = acc_ptr_hash(m->vals[i].node) & (cap - 1);
+        while (m->index[s]) s = (s + 1) & (cap - 1);
+        m->index[s] = i + 1;
+    }
+}
+
+static XsltAccVal* acc_val_for(const XsltAccMap* m, const void* node) {
+    if (!m->index) return NULL;
+    size_t s = acc_ptr_hash(node) & (m->index_cap - 1);
+    while (m->index[s]) {
+        if (m->vals[m->index[s] - 1].node == node)
+            return &m->vals[m->index[s] - 1];
+        s = (s + 1) & (m->index_cap - 1);
+    }
+    return NULL;
+}
+
+typedef struct xslt_acc_fold {
+    XsltExec* ex;
+    XsltAccMap* m;
+    LeptrisDocument doc;
+    struct leptris_xpath_result* cur;   /* running value (owned) */
+    int failed;
+} XsltAccFold;
+
+static size_t acc_val_new(XsltAccFold* fc, LeptrisNodeRef n) {
+    XsltAccMap* m = fc->m;
+    if (m->n == m->cap) {
+        size_t cap = m->cap ? m->cap * 2 : 64;
+        XsltAccVal* grown =
+            (XsltAccVal*)realloc(m->vals, cap * sizeof(*grown));
+        if (!grown) { fc->failed = 1; return (size_t)-1; }
+        m->vals = grown;
+        m->cap = cap;
+    }
+    XsltAccVal* v = &m->vals[m->n];
+    memset(v, 0, sizeof(*v));
+    v->node = n;
+    return m->n++;
+}
+
+/* §18.2.3: per event the LAST rule in declaration order whose
+ * pattern matches and whose phase equals the event phase fires. */
+static const XsltAccRule* acc_rule_for(const XsltAccumulator* a,
+                                       LeptrisNodeRef n,
+                                       LeptrisDocument doc,
+                                       int phase_end) {
+    const XsltAccRule* fire = NULL;
+    for (const XsltAccRule* r = a->rules; r; r = r->next) {
+        if (r->phase_end != phase_end || !r->match) continue;
+        XsltPattern pat;
+        memset(&pat, 0, sizeof(pat));
+        pat.expr = r->match;
+        if (xslt_pattern_matches(&pat, (LeptrisElement)n, doc, NULL))
+            fire = r;
+    }
+    return fire;
+}
+
+/* Rule evaluation: singleton focus on the matched node, $value
+ * bound to the pre-event value (§18.2.4). Foreign trees evaluate
+ * through the frame-chain route with ex->source swapped so
+ * absolute paths resolve against the folded tree. */
+static void acc_fire(XsltAccFold* fc, const XsltAccRule* r,
+                     LeptrisNodeRef n) {
+    XsltExec* ex = fc->ex;
+    LeptrisElement saved_cur = ex->current_node;
+    LeptrisDocument saved_src = ex->source;
+    ex->current_node = (LeptrisElement)n;
+    if (fc->doc != ex->source) ex->source = fc->doc;
+    xslt_push_var(ex, "value", acc_result_copy(fc->cur));
+    struct leptris_xpath_result* v = NULL;
+    if (r->select) {
+        v = xslt_eval(ex, r->select, (LeptrisElement)n);
+    } else {
+        /* No @select: the new value is an empty sequence. */
+        v = res_empty_ns();
+    }
+    xslt_pop_var(ex, "value");
+    ex->source = saved_src;
+    ex->current_node = saved_cur;
+    if (!v) { fc->failed = 1; return; }   /* xslt_eval flagged it */
+    leptris_xpath_result_free(fc->cur);
+    fc->cur = v;
+}
+
+static void acc_fold_node(XsltAccFold* fc, LeptrisNodeRef n) {
+    size_t idx = acc_val_new(fc, n);
+    if (idx == (size_t)-1) return;
+    const XsltAccRule* r = acc_rule_for(fc->m->acc, n, fc->doc, 0);
+    if (r) acc_fire(fc, r, n);
+    if (fc->failed) return;
+    fc->m->vals[idx].before = acc_result_copy(fc->cur);
+    for (LeptrisNodeRef c = leptris_node_first_child(n); c;
+         c = leptris_node_next_sibling(c))
+        acc_fold_node(fc, c);
+    r = acc_rule_for(fc->m->acc, n, fc->doc, 1);
+    if (r) acc_fire(fc, r, n);
+    if (fc->failed) return;
+    fc->m->vals[idx].after = acc_result_copy(fc->cur);
+}
+
+static void acc_map_unlink(XsltExec* ex, XsltAccMap* m) {
+    XsltAccMap** pp = (XsltAccMap**)&ex->accs;
+    while (*pp && *pp != m) pp = &(*pp)->next;
+    if (*pp) *pp = m->next;
+}
+
+static const void* acc_tree_top(LeptrisNodeRef n) {
+    for (;;) {
+        LeptrisNodeRef p = (LeptrisNodeRef)leptris_node_parent(n);
+        if (!p) return n;
+        n = p;
+    }
+}
+
+static XsltAccMap* acc_map_build(XsltExec* ex, const XsltAccumulator* a,
+                                 LeptrisDocument doc) {
+    XsltAccMap* m = (XsltAccMap*)calloc(1, sizeof(*m));
+    if (!m) return NULL;
+    m->acc = a;
+    m->doc = doc;
+    m->computing = 1;
+    /* Link first so re-entrant lookups find it (XTDE3400 cycle
+     * detection reads the computing flag). */
+    XsltAccMap** tail = (XsltAccMap**)&ex->accs;
+    while (*tail) tail = &(*tail)->next;
+    *tail = m;
+
+    XsltAccFold fc;
+    memset(&fc, 0, sizeof(fc));
+    fc.ex = ex;
+    fc.m = m;
+    fc.doc = doc;
+
+    /* The event stream starts at the document node itself — it gets
+     * start/end events too (§18.2.3), so match="/" rules fire — and
+     * its child axis is the document-level node chain (#580). */
+    LeptrisNodeRef start =
+        (LeptrisNodeRef)leptris_document_get_node(
+            (struct leptris_document*)doc);
+    if (!start) { fc.failed = 1; fc.cur = NULL; }
+    else if (a->initial) {
+        /* initial-value: singleton focus on the root of the tree. */
+        LeptrisElement saved_cur = ex->current_node;
+        LeptrisDocument saved_src = ex->source;
+        ex->current_node = (LeptrisElement)start;
+        if (doc != ex->source) ex->source = doc;
+        fc.cur = xslt_eval(ex, a->initial, (LeptrisElement)start);
+        ex->source = saved_src;
+        ex->current_node = saved_cur;
+        if (!fc.cur) fc.failed = 1;
+    } else {
+        fc.cur = res_empty_ns();   /* default: empty sequence */
+    }
+
+    if (!fc.failed) acc_fold_node(&fc, start);
+    m->computing = 0;
+    if (fc.cur) leptris_xpath_result_free(fc.cur);
+    if (fc.failed) {
+        acc_map_unlink(ex, m);
+        acc_map_free(m);
+        return NULL;
+    }
+    acc_index_build(m);
+    return m;
+}
+
+/* §18.2.2 applicability: on the principal source document an
+ * accumulator must be named in the (unnamed) mode's
+ * use-accumulators (or #all); every other tree inherits it. */
+static int acc_applicable(XsltExec* ex, const XsltAccumulator* a,
+                          LeptrisDocument doc) {
+    if (doc != ex->source) return 1;
+    const XsltStylesheet* s = ex->sheet;
+    if (!s) return 0;
+    if (s->mode_acc_all) return 1;
+    for (size_t i = 0; i < s->mode_acc_count; i++)
+        if (s->mode_acc_names[i] && a->name &&
+            strcmp(s->mode_acc_names[i], a->name) == 0)
+            return 1;
+    return 0;
+}
+
+static XsltAccMap* acc_map_for(XsltExec* ex, const XsltAccumulator* a,
+                               LeptrisNodeRef ctx_node,
+                               LeptrisDocument* doc_out) {
+    LeptrisDocument doc = NULL;
+    if (ctx_node) {
+        if (ctx_node->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+            doc = ((LeptrisDocumentNode*)ctx_node)->doc;
+        } else {
+            const void* top = acc_tree_top(ctx_node);
+            doc = leptris_element_get_document((LeptrisElement)top);
+        }
+    }
+    if (!doc) doc = ex->source;
+    if (doc_out) *doc_out = doc;
+    for (XsltAccMap* m = (XsltAccMap*)ex->accs; m; m = m->next)
+        if (m->acc == a && m->doc == doc) return m;
+    return acc_map_build(ex, a, doc);
+}
+
+static struct leptris_xpath_result* xslt_fn_accumulator(
+        XPathContext* ctx, XPathASTNode** args, size_t n, int after) {
+    XsltExec* ex = exec_from(ctx);
+    if (!ex || n < 1) return NULL;
+    LeptrisNodeRef cn = (LeptrisNodeRef)ctx->context_node;
+    if (!cn) {
+        ex->eval_error = 1;
+        snprintf(ex->error, sizeof(ex->error),
+                 "XTDE3350: accumulator-%s: no context item",
+                 after ? "after" : "before");
+        return NULL;
+    }
+    /* §18.2: attribute (and namespace) nodes are outside the event
+     * stream — before/after on them is a type error. */
+    if (cn->type == LEPTRIS_NODE_TYPE_ATTRIBUTE) {
+        ex->eval_error = 1;
+        snprintf(ex->error, sizeof(ex->error),
+                 "XTTE3360: accumulator-%s: the context item is an "
+                 "attribute node",
+                 after ? "after" : "before");
+        return NULL;
+    }
+    char* name = arg_string(ctx, args, n, 0);
+    const XsltAccumulator* a = NULL;
+    if (name && ex->sheet)
+        for (const XsltAccumulator* p = ex->sheet->accs; p; p = p->next)
+            if (p->name && strcmp(p->name, name) == 0) { a = p; break; }
+    if (!a) {
+        ex->eval_error = 1;
+        snprintf(ex->error, sizeof(ex->error),
+                 "XTDE3340: accumulator '%s' is not declared",
+                 name ? name : "");
+        free(name);
+        return NULL;
+    }
+    free(name);
+    LeptrisDocument doc = ex->source;
+    XsltAccMap* m = acc_map_for(ex, a, cn, &doc);
+    if (!m) return NULL;   /* build failed — eval_error already set */
+    if (m->computing) {
+        ex->eval_error = 1;
+        snprintf(ex->error, sizeof(ex->error),
+                 "XTDE3400: accumulator '%s' refers to itself",
+                 a->name ? a->name : "");
+        return NULL;
+    }
+    if (!acc_applicable(ex, a, doc)) {
+        ex->eval_error = 1;
+        snprintf(ex->error, sizeof(ex->error),
+                 "XTDE3362: accumulator '%s' is not applicable to the "
+                 "current document (use-accumulators)",
+                 a->name ? a->name : "");
+        return NULL;
+    }
+    XsltAccVal* v = acc_val_for(m, cn);
+    if (!v) return NULL;
+    return acc_result_copy(after ? v->after : v->before);
+}
+
+static struct leptris_xpath_result* xslt_fn_accumulator_before(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    return xslt_fn_accumulator(ctx, args, n, 0);
+}
+
+static struct leptris_xpath_result* xslt_fn_accumulator_after(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    return xslt_fn_accumulator(ctx, args, n, 1);
+}
+
+void xslt_accs_free(XsltExec* ex) {
+    if (!ex || !ex->accs) return;
+    XsltAccMap* m = (XsltAccMap*)ex->accs;
+    while (m) {
+        XsltAccMap* nx = m->next;
+        acc_map_free(m);
+        m = nx;
+    }
+    ex->accs = NULL;
 }
 
 /* ============================================================
@@ -1159,6 +1535,7 @@ static struct leptris_xpath_result* xslt_fn_function_available(
         if (!avail) {
             static const char* kXslt[] = {
                 "current", "generate-id", "system-property", "key",
+                "accumulator-before", "accumulator-after",
                 "format-number", "document", "unparsed-entity-uri",
                 "element-available", "function-available",
                 "exslt:node-set", "node-set", "regexp:test",
@@ -1315,6 +1692,10 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
     xslt_register_handler(r, "generate-id", xslt_fn_generate_id, 0, 1, exec);
     xslt_register_handler(r, "system-property", xslt_fn_system_property, 1, 1, exec);
     xslt_register_handler(r, "key", xslt_fn_key, 2, 2, exec);
+    xslt_register_handler(r, "accumulator-before",
+                          xslt_fn_accumulator_before, 1, 1, exec);
+    xslt_register_handler(r, "accumulator-after",
+                          xslt_fn_accumulator_after, 1, 1, exec);
     xslt_register_handler(r, "format-number", xslt_fn_format_number, 2, 3, exec);
     xslt_register_handler(r, "document", xslt_fn_document, 1, 2, exec);
     xslt_register_handler(r, "exslt:node-set", xslt_fn_node_set, 1, 1, exec);
