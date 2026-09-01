@@ -3228,6 +3228,30 @@ TEST(Xslt30, SequenceSingleAtomicAndRegexNodes) {
 #endif
 }
 
+TEST(Xslt30, FnDates) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/05, first slice:
+     * constructors + component extractors). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"xs:date('2026-09-02'), "
+        "xs:dateTime('2026-09-02T10:30:00'), "
+        "xs:time('10:30:00'), xs:duration('P1D')\"/>]"
+        "[<xsl:value-of select=\"year-from-dateTime("
+        "xs:dateTime('2026-09-02T10:30:00')), "
+        "month-from-dateTime(xs:dateTime('2026-09-02T10:30:00')), "
+        "day-from-dateTime(xs:dateTime('2026-09-02T10:30:00')), "
+        "hours-from-time(xs:time('10:30:45')), "
+        "minutes-from-time(xs:time('10:30:45')), "
+        "seconds-from-time(xs:time('10:30:45'))\"/>]"
+        "[<xsl:value-of select=\"days-from-duration("
+        "xs:duration('P2DT3H')), hours-from-duration("
+        "xs:duration('P2DT3H'))\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[2026-09-02 2026-09-02T10:30:00 10:30:00 P1D]"
+        "[2026 9 2 10 30 45][2 3]");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
