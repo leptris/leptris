@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.33] - 2026-09-01
+
+### Added
+
+- xsl:mode on-no-match — all six dispositions (xslt)
+
+
+
 ## [1.9.32] - 2026-09-01
 
 ### Performance
