@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.40] - 2026-09-01
+
+### Added
+
+- fn-catalog date slice (#691-E first slice) (xpath)
+
+
+
 ## [1.9.39] - 2026-09-02
 
 ### Fixed
