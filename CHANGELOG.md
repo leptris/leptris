@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.37] - 2026-09-01
+
+### Added
+
+- tunnel parameters (11.7) (xslt)
+
+
+
 ## [1.9.36] - 2026-09-01
 
 ### Added
