@@ -4,14 +4,16 @@
 
 ### Added
 
-- fn-catalog strings/QName/URI slice (#691-D) (xpath)
-
-### Fixed
-
-- contains-token without strtok_r (MSVC CRT lacks it)
-- MSVC TLS spelling for the QName URI channel (__declspec)
-
-
+- **The fn: catalog grows (#691)**: the strings/QNames/URIs
+  slice — fn:format-integer (decimal, 0-padding, a/A bijective
+  base-26, i/I roman numerals, w/W English words),
+  fn:contains-token, string-to-codepoints / codepoints-to-string
+  (full UTF-8 both directions), encode-for-uri / iri-to-uri /
+  escape-html-uri, the QName constructor family (value-level;
+  the namespace URI rides the constructor's thread-local channel
+  until structured values land with function items), and
+  node-name. Saxon-HE 12.7 probed; two implementation bugs
+  caught by the spec itself.
 
 ## [1.9.35] - 2026-09-01
 
