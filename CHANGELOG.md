@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.41] - 2026-09-01
+
+### Added
+
+- switch machinery + Saxon-parity rejection in expressions (xpath)
+
+
+
 ## [1.9.40] - 2026-09-02
 
 ### Added
