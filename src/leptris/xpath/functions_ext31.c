@@ -457,6 +457,7 @@ static struct leptris_xpath_result* fn_round_half_even(XPathContext* ctx,
 
 /* ---- regex trio ---- */
 
+#ifdef LEPTRIS_HAVE_POSIX_RE
 static int re_flags(const char* flags) {
     int cflags = REG_EXTENDED;
     for (const char* p = flags ? flags : ""; *p; p++) {
@@ -467,6 +468,7 @@ static int re_flags(const char* flags) {
     }
     return cflags;
 }
+#endif
 
 /* Compile an XPath-flavor pattern to POSIX ERE: translate the
  * shortcut escapes (\d \D \w \W \s \S) to bracket expressions
