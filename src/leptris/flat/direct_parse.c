@@ -1085,17 +1085,24 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         }
 
         if (*p.pos != '<') {
-            /* DROP_WS_TEXT fast path (pugixml-parity semantics):
-             * whitespace directly after markup is eaten in the
-             * cheapest possible loop BEFORE the text machinery —
-             * ws-only runs between tags never enter the text path
-             * at all, and mixed runs start their text node at the
-             * first non-ws byte (pugixml's observable behavior).
-             * Default mode is untouched: every byte still reaches
-             * the text path. */
-            if (p.drop_ws_text) {
-                dp_skip_ws(&p);
-                if (*p.pos == '<' || p.pos >= p.end) continue;
+            /* DROP_WS_TEXT (issue #677): drop whitespace-ONLY runs —
+             * the boundary whitespace of NON-blank text is data
+             * (libxml2 XML_PARSE_NOBLANKS parity). The run is
+             * dropped only when every byte up to the next markup
+             * delimiter is whitespace; otherwise the text path sees
+             * the leading whitespace untouched. */
+            if (p.drop_ws_text &&
+                (*p.pos == ' ' || *p.pos == '\t' || *p.pos == '\n' ||
+                 *p.pos == '\r')) {
+                char* q = p.pos + 1;
+                while (q < p.end && *q != '<') {
+                    if (*q != ' ' && *q != '\t' && *q != '\n' &&
+                        *q != '\r')
+                        break;
+                    q++;
+                }
+                if (q >= p.end) break;
+                if (*q == '<') { p.pos = q; continue; }
             }
             /* Text content — FUSED scan (TODO 184): one inline loop
              * finds '<' AND counts '\n' (issue #223 line tracking),

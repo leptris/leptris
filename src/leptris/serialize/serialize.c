@@ -797,9 +797,12 @@ void serialize_doctype_internal(LeptrisDoctypeNode* doctype, SerializeBuffer* bu
             buffer_append(buf, " [\n");
             for (size_t i = 0; i < sl; i++) {
                 if (i + 1 < sl && s[i] == '>' && s[i + 1] == '<') {
+                    /* Declaration boundary: line-break after '>';
+                     * the next '<' prints on the following pass —
+                     * skipping it dropped every later declaration's
+                     * opening byte (issue #687). */
                     buffer_append_char(buf, '>');
                     buffer_append_char(buf, '\n');
-                    i++;
                 } else {
                     buffer_append_char(buf, s[i]);
                 }
