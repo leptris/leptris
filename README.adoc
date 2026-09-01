@@ -77,10 +77,13 @@ memory handling matter.
 |You need full XML Schema 1.1 validation.
 
 |You parse documents that may not fit in memory (SAX streaming).
-|You need XSLT 1.0 / 2.0 transformation.
+|You need schema-aware, streaming or packaged XSLT 3.0.
+
+|You need XSLT transformation — 1.0 complete, the 3.0 core ships (see <<xslt>>).
+|You need XQuery 1.0 (XPath only here).
 
 |You need deterministic memory usage and zero leaks in normal operation.
-|You need XQuery 1.0 (XPath only here).
+|You need a schema-validated or event-correlated read model.
 
 |You want to embed XML processing in another language via FFI.
 |You're already on a platform with libxml2 + bindings you trust.
@@ -471,6 +474,55 @@ semantics are identical to the callback API — the recorder is a
 handler on the same streaming state machine. Callback count becomes
 O(chunks), not O(events): 20 host calls for a 41,806-event document
 (64 KB chunks).
+
+[#xslt]
+=== XSLT transformation
+
+[source,c]
+----
+LeptrisXslt xslt = leptris_xslt_parse(sheet, strlen(sheet));
+char* out = leptris_xslt_apply_string(xslt, doc);   /* owned */
+leptris_free_string(out);
+leptris_xslt_free(xslt);
+----
+
+XSLT 1.0 is complete — every case of the libxslt regression suite
+(205/205) matches byte-for-byte, including attribute sets,
+`xsl:number` formats, keys, namespaces, decimal formats and DTD
+attribute defaults. The XSLT 3.0 core ships and grows release by
+release, each feature verified against Saxon-HE 12.7 before landing:
+
+[cols="2,3",options="header"]
+|===
+|Area |Supported
+
+|Sequences
+|`xsl:value-of` over sequences, `xsl:sequence`-style item lists, ranges `A to B`
+
+|Control
+|`if/then/else`, `for $x in ... return`, `xsl:iterate` (params, `xsl:next-iteration`, `xsl:break`), `xsl:try`/`xsl:catch` with `$err:description`
+
+|Grouping
+|`xsl:for-each-group`: `group-by`, `group-adjacent`, `group-starting-with`, `group-ending-with`, with `current-group()`/`current-grouping-key()`
+
+|Strings
+|`xsl:analyze-string` with `regex-group(n)`, `xsl:on-empty`, text value templates (`expand-text`)
+
+|Dynamic evaluation
+|`xsl:evaluate`, `error($msg)`
+
+|Modes
+|`xsl:mode` with `use-accumulators` and all six `on-no-match` dispositions (`deep-copy`, `shallow-copy` — the 3.0 default, `shallow-skip`, `deep-skip`, `text-only-copy`, `fail`); 1.0 sheets keep the classic built-in rules
+
+|Accumulators (§18.2)
+|`xsl:accumulator` with `phase="start|end"` rules, `accumulator-before()`/`accumulator-after()`, applicability gating and the XTDE33xx error family
+|===
+
+The XPath engine inside carries the 3.1 composition core: `let`
+bindings, the `!` simple map with per-item focus, the `=>` arrow
+(every core and extension function serves it), and `||` string
+concatenation, alongside `current()`, `key()`, `document()`,
+`format-number()`, `generate-id()` and the EXSLT packs.
 
 [#serialize]
 === Serialization

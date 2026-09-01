@@ -2359,6 +2359,111 @@ static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
 static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                               LeptrisElement node);
 
+/* §6.7 on-no-match of the unnamed mode, for a node NO template
+ * matched. Returns -1 to defer to the legacy 1.0 built-in walk
+ * (unspecified 1.0 sheets and text-only-copy — the existing
+ * behavior); otherwise the walker rc. Only the unnamed mode has a
+ * captured declaration (named modes are not parsed yet). */
+static int builtin_no_match(XsltExec* ex, const char* mode,
+                            LeptrisElement node) {
+    if (mode && *mode) return -1;
+    int v = ex->sheet->mode_on_no_match;
+    if (!v) {
+        if (ex->sheet->version_major >= 3) v = 3;   /* shallow-copy */
+        else return -1;   /* 1.0: the text built-ins */
+    }
+    if (v == 6) return -1;                 /* text-only-copy: legacy */
+    if (v == 5) return 0;                  /* deep-skip: nothing */
+    if (v == 7) {                          /* fail: XTDE0500 */
+        const char* nn =
+            leptris_node_get_type((LeptrisNodeRef)node) ==
+                    LEPTRIS_NODE_TYPE_ELEMENT
+                ? leptris_element_get_name(node) : "node";
+        ex->eval_error = 1;
+        snprintf(ex->error, sizeof(ex->error),
+                 "XTDE0500: no template rule matches %s in the "
+                 "unnamed mode (on-no-match=fail)",
+                 nn ? nn : "node");
+        return 1;
+    }
+    if (leptris_node_get_type((LeptrisNodeRef)node) !=
+        LEPTRIS_NODE_TYPE_ELEMENT)
+        return -1;
+    if (v == 2) {                          /* deep-copy: verbatim */
+        copy_node_deep(ex, node, ex->pending_parent);
+        return 0;
+    }
+    /* shallow-copy: copy the element, dispatch attributes (they
+     * are NOT copied raw — a matching rule runs), then children
+     * via the standard no-select walk. shallow-skip: no copy,
+     * dispatch attributes and ELEMENT children only (text skipped
+     * — Saxon ground truth). */
+    LeptrisElement e = NULL;
+    LeptrisElement saved_parent = NULL;
+    int rc = 0;
+    if (v == 3) {
+        const char* nn = leptris_element_get_name(node);
+        saved_parent = ex->pending_parent;
+        e = nn ? out_append_elem(ex, ex->pending_parent, nn, NULL) : NULL;
+        if (!e) { return 0; }
+        ex->pending_parent = e;
+    }
+    if (!e) saved_parent = ex->pending_parent;
+    /* Attributes dispatch through the XPath attribute AXIS — its
+     * synthetic nodes are what pattern identity (owner, name) and
+     * the attribute templates operate on; the element's raw
+     * attribute records do not share that layout. */
+    {
+        LeptrisXPathCompiled at = leptris_xpath_compile("@*");
+        if (at) {
+            struct leptris_xpath_result* ar = xslt_eval(ex, at, node);
+            size_t an = ar ? leptris_xpath_result_count(ar) : 0;
+            for (size_t ai = 0; ai < an && rc == 0; ai++) {
+                LeptrisElement a = (LeptrisElement)
+                    leptris_xpath_result_get_node(ar, ai);
+                const XsltTemplate* best =
+                    xslt_select_template(ex, a, mode, 0);
+                if (best)
+                    rc = xslt_invoke_template(ex, best, a, NULL);
+            }
+            if (ar) leptris_xpath_result_free(ar);
+            leptris_xpath_compiled_free(at);
+        }
+    }
+    if (rc) return rc;
+    if (v == 4) {
+        /* shallow-skip: element children, recursive skip. */
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(node));
+             c && rc == 0; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            const XsltTemplate* best =
+                xslt_select_template(ex, (LeptrisElement)c, mode, 0);
+            if (best) {
+                rc = xslt_invoke_template(ex, best, (LeptrisElement)c, NULL);
+            } else {
+                int br = builtin_no_match(ex, mode, (LeptrisElement)c);
+                if (br >= 0) rc = br;
+                else
+                    rc = op_apply_templates(
+                        ex,
+                        &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES,
+                                      .name = mode },
+                        (LeptrisElement)c);
+            }
+        }
+        return rc;
+    }
+    /* shallow-copy: children through the standard walk under e. */
+    rc = op_apply_templates(
+        ex,
+        &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES, .name = mode },
+        node);
+    ex->pending_parent = saved_parent;
+    return rc;
+}
+
 static int op_apply_imports(XsltExec* ex, const XsltInstr* in,
                             LeptrisElement node) {
     (void)in;
@@ -2475,12 +2580,14 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                     xslt_select_template(ex, doc_root, in->name, 0);
                 root_rc = best
                     ? xslt_invoke_template(ex, best, doc_root, in->child)
-                    : op_apply_templates(
-                          ex,
-                          &(XsltInstr){
-                              .kind = XSLT_INSTR_APPLY_TEMPLATES,
-                              .name = in->name },
-                          doc_root);
+                    : (builtin_no_match(ex, in->name, doc_root) >= 0
+                           ? 0
+                           : op_apply_templates(
+                                 ex,
+                                 &(XsltInstr){
+                                     .kind = XSLT_INSTR_APPLY_TEMPLATES,
+                                     .name = in->name },
+                                 doc_root));
             }
             if (root_rc) return root_rc;
             /* The after-root chain (top comments/PIs following the
@@ -2574,11 +2681,16 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                 if (best) {
                     rc = xslt_invoke_template(ex, best, item, in->child);
                 } else {
-                    rc = op_apply_templates(
-                        ex,
-                        &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES,
-                                      .name = in->name },
-                        item);
+                    int br = builtin_no_match(ex, in->name, item);
+                    if (br >= 0)
+                        rc = br;
+                    else
+                        rc = op_apply_templates(
+                            ex,
+                            &(XsltInstr){ .kind =
+                                              XSLT_INSTR_APPLY_TEMPLATES,
+                                          .name = in->name },
+                            item);
                 }
             }
         }
@@ -2607,13 +2719,17 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         if (best) {
             rc = xslt_invoke_template(ex, best, items[i], in->child);
         } else {
-            /* Built-in template rules (§5.8): apply-templates for
-             * elements; text copied for text; nothing otherwise. */
-            rc = op_apply_templates(
-                ex,
-                &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES,
-                              .name = in->name },
-                items[i]);
+            /* Built-in template rules (§5.8/§6.7): on-no-match
+             * variants first, then the 1.0 walk. */
+            int br = builtin_no_match(ex, mode, items[i]);
+            if (br >= 0)
+                rc = br;
+            else
+                rc = op_apply_templates(
+                    ex,
+                    &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES,
+                                  .name = in->name },
+                    items[i]);
         }
     }
     ex->current_pos = saved_pos;

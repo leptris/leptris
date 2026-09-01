@@ -1161,6 +1161,29 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                     }
                 }
             }
+            /* §6.7 on-no-match for the unnamed mode: 1 unspecified
+             * (runtime resolves by version — 3.0 default is
+             * shallow-copy, 1.0 keeps the text built-in), 2
+             * deep-copy, 3 shallow-copy, 4 shallow-skip, 5
+             * deep-skip, 6 text-only-copy, 7 fail. */
+            if (!mn || !*mn) {
+                const char* onm =
+                    leptris_element_attribute(e, "on-no-match");
+                if (onm && *onm) {
+                    if (strcmp(onm, "deep-copy") == 0)
+                        sp->sheet->mode_on_no_match = 2;
+                    else if (strcmp(onm, "shallow-copy") == 0)
+                        sp->sheet->mode_on_no_match = 3;
+                    else if (strcmp(onm, "shallow-skip") == 0)
+                        sp->sheet->mode_on_no_match = 4;
+                    else if (strcmp(onm, "deep-skip") == 0)
+                        sp->sheet->mode_on_no_match = 5;
+                    else if (strcmp(onm, "text-only-copy") == 0)
+                        sp->sheet->mode_on_no_match = 6;
+                    else if (strcmp(onm, "fail") == 0)
+                        sp->sheet->mode_on_no_match = 7;
+                }
+            }
             continue;
         }
         if (node_is_xsl(e, "output")) {

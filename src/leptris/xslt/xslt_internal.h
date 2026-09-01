@@ -356,6 +356,10 @@ struct xslt_styles {
     char** mode_acc_names;
     size_t mode_acc_count;
     int mode_acc_all;
+    /* §6.7 on-no-match of the unnamed mode: 1 unspecified (runtime
+     * resolves by version), 2 deep-copy, 3 shallow-copy,
+     * 4 shallow-skip, 5 deep-skip, 6 text-only-copy, 7 fail. */
+    int mode_on_no_match;
 
     /* Global variables (executed once per transform, before the
      * body: XSLT §11.4 top-level xsl:variable). */
