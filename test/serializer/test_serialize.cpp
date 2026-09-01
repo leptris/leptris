@@ -700,6 +700,26 @@ TEST(SerializeOptions, PrettyDoctypeSubsetLayout) {
     EXPECT_EQ(std::string(s2), "<!DOCTYPE r>\n<r/>");
     leptris_free_string(s2);
     leptris_document_free(d2);
+}
+
+/* Issue #687: every declaration after the first kept serialization
+ * whole — the '><' boundary split dropped the next declaration's
+ * opening '<'. libxml2 emits each declaration intact. */
+TEST(SerializeOptions, PrettyDoctypeMultiDeclarationSubset) {
+    const char xml[] =
+        "<!DOCTYPE r [<!ELEMENT r (#PCDATA)>"
+        "<!ATTLIST e a CDATA \"d\">]><r><e/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* s = leptris_document_serialize(doc, &opts);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s),
+              "<!DOCTYPE r [\n<!ELEMENT r (#PCDATA)>\n"
+              "<!ATTLIST e a CDATA \"d\">\n]>\n<r>\n  <e/>\n</r>");
+    leptris_free_string(s);
     leptris_document_free(doc);
 }
 

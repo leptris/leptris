@@ -310,6 +310,34 @@ TEST(ParseOptions, FlagsPassthrough) {
     leptris_document_free(doc);
 }
 
+/* Issue #677: NOBLANKS drops whitespace-ONLY text nodes — the
+ * boundary whitespace of NON-blank text is data and must survive
+ * in the tree (libxml2 XML_PARSE_NOBLANKS parity). */
+TEST(ParseOptions, DropWsKeepsNonBlankBoundaries) {
+    LeptrisParseOptions o = {LEPTRIS_PARSE_DEFAULT, -1, 0};
+    o.flags = LEPTRIS_PARSE_DROP_WS_TEXT;
+
+    const char one[] = "<p> leading</p>";
+    LeptrisDocument doc =
+        leptris_parse_string_ex(one, std::strlen(one), &o, nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef t = leptris_node_first_child(leptris_element_as_node(root));
+    ASSERT_NE(t, nullptr);
+    EXPECT_STREQ(leptris_text_node_get_content(t), " leading");
+    leptris_document_free(doc);
+
+    const char two[] = "<p><b>b</b> after</p>";
+    doc = leptris_parse_string_ex(two, std::strlen(two), &o, nullptr);
+    ASSERT_NE(doc, nullptr);
+    root = leptris_document_root(doc);
+    LeptrisNodeRef b = leptris_node_first_child(leptris_element_as_node(root));
+    LeptrisNodeRef after = leptris_node_next_sibling(b);
+    ASSERT_NE(after, nullptr);
+    EXPECT_STREQ(leptris_text_node_get_content(after), " after");
+    leptris_document_free(doc);
+}
+
 /* Issue #606: DTD ATTLIST default attributes apply ONLY under
  * LEPTRIS_PARSE_DTDATTR (libxml2 XML_PARSE_DTDATTR opt-in parity —
  * W3C C14N ex 3.3's canonical form excludes them). */

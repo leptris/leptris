@@ -1115,9 +1115,22 @@ static int op_analyze_string(XsltExec* ex, const XsltInstr* in,
     }
     regfree(&rx);
     free(pm);
+#else
+    /* MSVC has no POSIX <regex.h>: raise a loud, CATCHABLE dynamic
+     * error (xsl:try) instead of silently emitting empty output
+     * (issue #686). A portable regex engine is the full fix. */
+    (void)rc;
+    ex->eval_error = 1;
+    snprintf(ex->error, sizeof(ex->error),
+             "xsl:analyze-string unavailable in this platform build "
+             "(no regex engine) — issue #686");
+    free(src);
+    return 1;
 #endif
+#ifndef _WIN32
     free(src);
     return rc;
+#endif
 }
 
 /* xsl:try/xsl:catch (3.0 §17): the body is the children before the
