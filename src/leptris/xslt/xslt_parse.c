@@ -107,18 +107,23 @@ static LeptrisXPathCompiled compile_attr_sp(SheetParser* sp,
                                              const char* attr) {
     const char* v = leptris_element_attribute(e, attr);
     if (!v || !v[0]) return NULL;
-    /* Expression attributes are never attribute-value templates:
-     * XPath has no braces anywhere. A '{' here is XQuery-only
-     * syntax (try/catch expressions, map constructors) that must
-     * fail compilation loudly — some brace shapes slipped through
-     * the compiler and evaluated to silent EMPTY output
-     * (issue #692; Saxon: XPST0003). */
-    if (strchr(v, '{') || strchr(v, '}')) {
+    /* XQuery-only brace syntax must fail loudly (#692: some brace
+     * shapes phantom-compiled to silent empty). The compiler runs
+     * FIRST so the XPath 3.1 switch(...) grammar can accept its own
+     * braces; a compile failure on brace-bearing text raises. */
+    LeptrisXPathCompiled c = leptris_xpath_compile(v);
+    if (!c) {
         if (sp) sp->errors = 1;
         return NULL;
     }
-    LeptrisXPathCompiled c = leptris_xpath_compile(v);
-    if (!c && sp) sp->errors = 1;
+    if ((strchr(v, '{') || strchr(v, '}')) &&
+        strstr(v, "switch") != v) {
+        /* Phantom-compile backstop: reject brace shapes the
+         * compiler accepted but cannot mean (Saxon: XPST0003). */
+        leptris_xpath_compiled_free(c);
+        if (sp) sp->errors = 1;
+        return NULL;
+    }
     return c;
 }
 

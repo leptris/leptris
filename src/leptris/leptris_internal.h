@@ -660,6 +660,11 @@ typedef enum {
     XPATH_OP_MAP,
     /* XPath 3.0 `A || B`: string() both sides, concatenate. */
     XPATH_OP_CONCAT,
+    /* XPath 3.1 `switch (E) { case T1 return R1 ... default return
+     * RD }`: children = [operand, test1, res1, test2, res2, ...,
+     * default]; the first eq-match wins (empty default = no
+     * children pair). */
+    XPATH_OP_SWITCH,
     /* Parenthesized item sequence `('a','b',expr)`: N children, one
      * per member — evaluates to the sequence (synthetic-text
      * nodeset). */

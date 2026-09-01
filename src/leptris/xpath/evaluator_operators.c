@@ -411,6 +411,51 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return result;
     }
 
+    /* XPath 3.1 switch (3.0 §3.9-style): first eq-matching case
+     * result, else the default (last child when the
+     * __switch_default sentinel is set), else empty. */
+    if (op == XPATH_OP_SWITCH) {
+        if (ast->child_count < 1) return NULL;
+        struct leptris_xpath_result* operand =
+            evaluate_expr(ctx, ast->children[0]);
+        if (!operand) return NULL;
+        char* ov = leptris_xpath_result_string(operand);
+        double on = leptris_xpath_result_number(operand);
+        leptris_xpath_result_free(operand);
+        int has_default = ast->value &&
+            strcmp(ast->value, "__switch_default") == 0;
+        size_t pair_end = ast->child_count - (has_default ? 1 : 0);
+        struct leptris_xpath_result* out = NULL;
+        for (size_t i = 1; i + 1 < pair_end && !out; i += 2) {
+            struct leptris_xpath_result* test =
+                evaluate_expr(ctx, ast->children[i]);
+            if (!test) { free(ov); return NULL; }
+            char* tv = leptris_xpath_result_string(test);
+            double tn = leptris_xpath_result_number(test);
+            int hit = (ov && tv && strcmp(ov, tv) == 0) ||
+                      (!ov && !tv) || (on == tn && ov && tv &&
+                                       strcmp(ov, "NaN") != 0);
+            leptris_xpath_result_free(test);
+            free(tv);
+            if (hit)
+                out = evaluate_expr(ctx, ast->children[i + 1]);
+        }
+        if (!out && has_default)
+            out = evaluate_expr(
+                ctx, ast->children[ast->child_count - 1]);
+        free(ov);
+        if (!out) {
+            struct leptris_xpath_result* empty =
+                xpath_result_new(XPATH_RESULT_NODESET);
+            if (empty) {
+                empty->value.nodeset_value = xpath_nodeset_new();
+                empty->value.nodeset_value->is_sequence = 1;
+            }
+            return empty;
+        }
+        return out;
+    }
+
     /* XPath 3.0 string concat `A || B`: string() both, join. */
     if (op == XPATH_OP_CONCAT) {
         if (ast->child_count < 2) return NULL;

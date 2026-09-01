@@ -62,6 +62,8 @@ typedef enum {
     TOK_BANG,   /* ! — XPath 3.0 simple map */
     TOK_ARROW,  /* => — XPath 3.1 arrow operator */
     TOK_CONCAT, /* || — XPath 3.0 string concatenation */
+    TOK_LBRACE, /* { — XPath 3.1 switch bodies */
+    TOK_RBRACE, /* } */
     TOK_VARIABLE_REFERENCE  /* Variable name after $ */
 } XPathTokenType;
 

@@ -543,6 +543,17 @@ parse_number:
         return token;
     }
 
+    /* XPath 3.1 switch bodies: '{' and '}' (only the switch
+     * parser consumes them; anything else errors downstream). */
+    if (c == '{' || c == '}') {
+        token.type = c == '{' ? TOK_LBRACE : TOK_RBRACE;
+        token.value = lexer->pos;
+        token.value_len = 1;
+        lexer->pos++;
+        lexer->column++;
+        return token;
+    }
+
     /* Invalid character */
     if (lexer->input && lexer->pos >= lexer->input) {
         size_t byte_offset = lexer->pos - lexer->input;

@@ -37,6 +37,12 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser);
 static XPathASTNode* parse_if_expr(XPathParser* parser);
 static XPathASTNode* parse_for_expr(XPathParser* parser);
 static XPathASTNode* parse_let_expr(XPathParser* parser);
+/* Saxon-HE rejects switch in XPath EXPRESSIONS (XPST0003 — the
+ * syntax is XSLT 3.0 PATTERN-only). parse_switch_expr lands with
+ * pattern support (TODO.xslt-full/06). */
+#if 0
+static XPathASTNode* parse_switch_expr(XPathParser* parser);
+#endif
 static XPathASTNode* parse_location_path(XPathParser* parser);
 static XPathASTNode* parse_relative_location_path(XPathParser* parser);
 static XPathASTNode* parse_step(XPathParser* parser);
@@ -1065,6 +1071,106 @@ fail:
     ast_node_free(node);
     return NULL;
 }
+
+/* XPath 3.1 switch: `switch (E) { case T return R ... default
+ * return D }`. Value-matched keywords keep name tests intact. */
+#if 0
+static XPathASTNode* parse_switch_expr(XPathParser* parser) {
+    advance_token(parser);   /* consume `switch` */
+    if (!consume_token(parser, TOK_LPAREN,
+                       "Expected '(' after switch"))
+        return NULL;
+    XPathASTNode* operand = parse_expr(parser);
+    if (!operand) return NULL;
+    if (!consume_token(parser, TOK_RPAREN,
+                       "Expected ')' after switch operand")) {
+        ast_node_free(operand);
+        return NULL;
+    }
+    if (!consume_token(parser, TOK_LBRACE,
+                       "Expected '{' to open the switch body")) {
+        ast_node_free(operand);
+        return NULL;
+    }
+    XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+    if (!node) { ast_node_free(operand); return NULL; }
+    node->number_value = (double)XPATH_OP_SWITCH;
+    ast_node_add_child(node, operand);
+
+    int have_default = 0;
+    for (;;) {
+        XPathToken* kw = current_token(parser);
+        if (!kw || kw->type != TOK_NCNAME) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected 'case' or 'default' in switch body");
+            ast_node_free(node);
+            return NULL;
+        }
+        int is_default = kw->value_len == 7 &&
+                         memcmp(kw->value, "default", 7) == 0;
+        int is_case = kw->value_len == 4 &&
+                      memcmp(kw->value, "case", 4) == 0;
+        if (!is_default && !is_case) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected 'case' or 'default' in switch body");
+            ast_node_free(node);
+            return NULL;
+        }
+        advance_token(parser);
+        if (is_case) {
+            XPathASTNode* test = parse_expr(parser);
+            if (!test) { ast_node_free(node); return NULL; }
+            XPathToken* rt = current_token(parser);
+            if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
+                memcmp(rt->value, "return", 6) != 0) {
+                snprintf(parser->error_msg, sizeof(parser->error_msg),
+                         "Expected 'return' after switch case");
+                ast_node_free(test);
+                ast_node_free(node);
+                return NULL;
+            }
+            advance_token(parser);
+            XPathASTNode* res = parse_expr(parser);
+            if (!res) { ast_node_free(node); return NULL; }
+            ast_node_add_child(node, test);
+            ast_node_add_child(node, res);
+        } else {
+            if (have_default) {
+                snprintf(parser->error_msg, sizeof(parser->error_msg),
+                         "Duplicate default clause in switch");
+                ast_node_free(node);
+                return NULL;
+            }
+            have_default = 1;
+            XPathToken* rt = current_token(parser);
+            if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
+                memcmp(rt->value, "return", 6) != 0) {
+                snprintf(parser->error_msg, sizeof(parser->error_msg),
+                         "Expected 'return' after switch default");
+                ast_node_free(node);
+                return NULL;
+            }
+            advance_token(parser);
+            XPathASTNode* res = parse_expr(parser);
+            if (!res) { ast_node_free(node); return NULL; }
+            node->value = leptris_strdup("__switch_default");
+            node->number_value = (double)XPATH_OP_SWITCH;
+            /* default result rides as the LAST child; marked by the
+             * node->value sentinel. */
+            ast_node_add_child(node, res);
+            break;
+        }
+        if (current_token_is(parser, TOK_RBRACE)) break;
+    }
+    if (!consume_token(parser, TOK_RBRACE,
+                       "Expected '}' to close the switch body")) {
+        ast_node_free(node);
+        return NULL;
+    }
+    return node;
+}
+#endif
+
 
 static XPathASTNode* parse_primary_expr(XPathParser* parser) {
     XPathToken* tok = current_token(parser);
