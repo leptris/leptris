@@ -529,7 +529,12 @@ static char* re_pattern_for(const char* pat, const char* flags) {
 static char* re_str_arg(XPathContext* ctx, XPathASTNode** args, size_t i) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
     if (!r) return NULL;
-    char* s = scalar_str(r);
+    /* Node arguments atomize to their string value (#691 comment:
+     * matches(//item[1], ...) — the scalar path returned NULL for
+     * nodesets). */
+    char* s = (r->type == XPATH_RESULT_NODESET)
+                  ? leptris_xpath_result_string(r)
+                  : scalar_str(r);
     leptris_xpath_result_free(r);
     return s;
 }

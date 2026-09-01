@@ -3182,6 +3182,50 @@ TEST(Xslt30, TunnelParams) {
         "<r><t>[X]</t><u>X</u></r>");
 }
 
+TEST(Xslt30, ModeOnNoMatchDescentRegression) {
+    /* Issue #705 shapes, re-verified against Saxon-HE 12.7 on
+     * current main: both dispositions descend and match Saxon
+     * byte-for-byte (the 1.9.36 report predates fixes landing).
+     * Note shallow-skip does NOT extract text — Saxon emits empty
+     * for the no-template case. */
+    EXPECT_EQ(body(run30(
+        "<xsl:mode on-no-match='shallow-skip'/>"
+        "<xsl:template match='/r/a[2]'><hit/></xsl:template>",
+        "<r><a>3</a><a>1</a><a>2</a></r>")),
+        "<hit/>");
+    EXPECT_EQ(body(run30(
+        "<xsl:mode on-no-match='shallow-skip'/>",
+        "<r><a>3</a><a>1</a><a>2</a></r>")),
+        "");
+    EXPECT_EQ(body(run30(
+        "<xsl:mode on-no-match='text-only-copy'/>"
+        "<xsl:template match='/r/a[2]'><hit/></xsl:template>",
+        "<r><a>3</a><a>1</a><a>2</a></r>")),
+        "3<hit/>2");
+    EXPECT_EQ(body(run30(
+        "<xsl:mode on-no-match='text-only-copy'/>",
+        "<r><a>3</a><a>1</a><a>2</a></r>")),
+        "312");
+}
+
+TEST(Xslt30, SequenceSingleAtomicAndRegexNodes) {
+    /* #685 remainder: a single-item atomic xsl:sequence is a
+     * scalar result (count 0) — it serialized as nothing. #691
+     * comment: the regex trio atomizes NODE arguments. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<s><xsl:sequence select=\"'solo'\"/></s>"
+        "</xsl:template>",
+        "<r/>")),
+        "<s>solo</s>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"matches(//item[1], 'a\\d')\"/>]"
+        "</xsl:template>",
+        "<r><item>a1</item></r>")),
+        "[true]");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
