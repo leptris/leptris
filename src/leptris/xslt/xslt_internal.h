@@ -36,6 +36,8 @@ typedef enum {
     XSLT_INSTR_RESULT_ELEM = 0,   /* literal result element */
     XSLT_INSTR_TEXT,              /* literal text / xsl:text */
     XSLT_INSTR_VALUE_OF,          /* xsl:value-of select */
+    XSLT_INSTR_SEQUENCE,          /* xsl:sequence / xsl:perform-sort
+                                     (select + optional sorts) */
     XSLT_INSTR_FOR_EACH,          /* xsl:for-each + sorts */
     XSLT_INSTR_IF,
     XSLT_INSTR_CHOOSE,            /* children: WHEN (test) ... ELSE */

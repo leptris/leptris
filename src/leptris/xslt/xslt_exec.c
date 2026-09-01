@@ -958,6 +958,55 @@ static char* value_of_string(XsltExec* ex,
         (struct leptris_xpath_result*)r);
 }
 
+static void xslt_sort_items(XsltExec* ex, const XsltInstr* in,
+                            LeptrisElement* items, size_t n);
+static int copy_node_deep(XsltExec* ex, LeptrisElement node,
+                          LeptrisElement parent);
+
+/* xsl:sequence / xsl:perform-sort (3.0): atomic items serialize
+ * space-joined into the output; node items are copied in order
+ * (Saxon ground truth). perform-sort applies the xsl:sort
+ * children to the item list first. */
+static int op_sequence(XsltExec* ex, const XsltInstr* in,
+                       LeptrisElement node) {
+    if (!in->select) return 0;
+    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+    if (!r) return 0;
+    size_t n = leptris_xpath_result_count(r);
+    LeptrisElement* items = NULL;
+    if (n) {
+        items = (LeptrisElement*)calloc(n, sizeof(LeptrisElement));
+        if (!items) { leptris_xpath_result_free(r); return -1; }
+        for (size_t i = 0; i < n; i++)
+            items[i] = (LeptrisElement)leptris_xpath_result_get_node(r, i);
+        if (in->sorts) xslt_sort_items(ex, in, items, n);
+    }
+    int rc = 0;
+    for (size_t i = 0; i < n && rc == 0; i++) {
+        LeptrisNodeRef it = (LeptrisNodeRef)items[i];
+        int ty = it ? leptris_node_get_type(it) : 0;
+        if (ty == LEPTRIS_NODE_TYPE_ELEMENT ||
+            ty == LEPTRIS_NODE_TYPE_COMMENT ||
+            ty == LEPTRIS_NODE_TYPE_PI ||
+            ty == LEPTRIS_NODE_TYPE_CDATA) {
+            copy_node_deep(ex, (LeptrisElement)it, ex->pending_parent);
+            (void)0;
+        } else {
+            /* Atomic/textual item: space-joined text. */
+            extern char* get_node_text(void* n);
+            char* piece = get_node_text(it);
+            if (i && piece && piece[0]) out_append_text(ex, ex->pending_parent, " ");
+            if (piece) {
+                out_append_text(ex, ex->pending_parent, piece);
+                free(piece);
+            }
+        }
+    }
+    free(items);
+    leptris_xpath_result_free(r);
+    return rc;
+}
+
 static int op_value_of(XsltExec* ex, const XsltInstr* in,
                        LeptrisElement node) {
     struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
@@ -1215,7 +1264,12 @@ static void xslt_sort_items(XsltExec* ex, const XsltInstr* in,
                     leptris_xpath_result_free(r);
                 }
             } else {
-                kp = string_value_deep(items[i]);
+                /* Synthetic sequence items carry no deep value —
+                 * their text IS the sort key (perform-sort on
+                 * atomic sequences). */
+                extern char* get_node_text(void* n);
+                kp = get_node_text(items[i]);
+                if (!kp) kp = string_value_deep(items[i]);
             }
             keys[k * n + i] = kp;
         }
@@ -3682,6 +3736,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_RESULT_ELEM] = op_result_elem;
     g_ops[XSLT_INSTR_TEXT] = op_text;
     g_ops[XSLT_INSTR_VALUE_OF] = op_value_of;
+    g_ops[XSLT_INSTR_SEQUENCE] = op_sequence;
     g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
     g_ops[XSLT_INSTR_ITERATE] = op_iterate;
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;
