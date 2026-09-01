@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.34] - 2026-09-01
+
+### Fixed
+
+- expression attributes reject brace syntax loudly (#692 silent-wrong) (xslt)
+
+
+
 ## [1.9.33] - 2026-09-01
 
 ### Added
