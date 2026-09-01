@@ -3053,3 +3053,23 @@ TEST(Xslt30, ModeOnNoMatch) {
         "(null)");
 }
 
+/* Issue #692 silent-wrong: XQuery-only syntax (try/catch
+ * EXPRESSIONS, map constructors) in an XPath expression attribute
+ * compiled on some brace shapes and evaluated to silent EMPTY
+ * output. Saxon: XPST0003 - compile error. Expression attributes
+ * are never AVTs; XPath has no braces. */
+TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"try { 1 + 2 } catch * { 'no' }\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "(compile-failed)");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"map { 'a': 1 }\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "(compile-failed)");
+}
+
