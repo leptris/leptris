@@ -3096,6 +3096,10 @@ TEST(Xslt30, FnMath) {
 }
 
 TEST(Xslt30, FnRegex) {
+#ifdef _WIN32
+    GTEST_SKIP() << "POSIX regex engine unavailable on MSVC (issue "
+                     "#686 family) — functions raise loudly there";
+#else
     /* Saxon-HE 12.7 ground truth (TODO.xslt-full/02). */
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
@@ -3110,6 +3114,7 @@ TEST(Xslt30, FnRegex) {
         "</xsl:template>",
         "<r/>")),
         "[true false true][a#b#c][smith john][a b  c][ one two three ]");
+#endif
 }
 
 TEST(Xslt30, SequenceAndPerformSort) {
