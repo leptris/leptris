@@ -1689,3 +1689,23 @@ TEST(DomBasics, RawAttributesIncludeXmlnsInSourceOrder) {
 
     leptris_document_free(doc);
 }
+
+
+/* Issue #696: element copies dropped COMMENT and PI children at
+ * every level — text/CDATA/elements survived, the other two kinds
+ * silently vanished. */
+TEST(ElementCopy, KeepsCommentAndPiChildren) {
+    const char xml[] =
+        "<r>a<!-- c -->b<![CDATA[x]]><?pi p?><b><!-- deep --></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement copy = leptris_element_copy(root, doc);
+    ASSERT_NE(copy, nullptr);
+    char* ser = leptris_element_serialize(copy, NULL);
+    ASSERT_NE(ser, nullptr);
+    EXPECT_STREQ(ser, xml);
+    leptris_free_string(ser);
+    leptris_document_free(doc);
+}
