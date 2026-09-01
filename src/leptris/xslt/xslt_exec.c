@@ -972,6 +972,16 @@ static int op_sequence(XsltExec* ex, const XsltInstr* in,
     if (!in->select) return 0;
     struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
     if (!r) return 0;
+    /* A single ATOMIC item is a scalar result — count() is 0 for
+     * those, so string-join it directly (#685 remainder: single-
+     * item sequences silently dropped their content). */
+    if (r->type != XPATH_RESULT_NODESET) {
+        char* p = leptris_xpath_result_string(r);
+        out_append_text(ex, ex->pending_parent, p ? p : "");
+        free(p);
+        leptris_xpath_result_free(r);
+        return 0;
+    }
     size_t n = leptris_xpath_result_count(r);
     LeptrisElement* items = NULL;
     if (n) {
