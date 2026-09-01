@@ -3112,6 +3112,25 @@ TEST(Xslt30, FnRegex) {
         "[true false true][a#b#c][smith john][a b  c][ one two three ]");
 }
 
+TEST(Xslt30, SequenceAndPerformSort) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09): atomic
+     * sequences serialize space-joined; node sequences copy in
+     * (sorted) order. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'><o>"
+        "<seq><xsl:sequence select=\"'a','b'\"/></seq>"
+        "<ps><xsl:perform-sort select='(3,1,2)'>"
+        "<xsl:sort data-type='number'/></xsl:perform-sort></ps>"
+        "<ps2><xsl:perform-sort select='//i'>"
+        "<xsl:sort select='@n' data-type='number' order='descending'/>"
+        "</xsl:perform-sort></ps2>"
+        "</o></xsl:template>",
+        "<r><i n='2'>b</i><i n='1'>a</i><i n='3'>c</i></r>")),
+        "<o><seq>a b</seq><ps>1 2 3</ps>"
+        "<ps2><i n=\"3\">c</i><i n=\"2\">b</i><i n=\"1\">a</i>"
+        "</ps2></o>");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"

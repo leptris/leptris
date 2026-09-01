@@ -477,6 +477,16 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->doe = doe && strcmp(doe, "yes") == 0;
         return in;
     }
+    if (strcmp(local, "sequence") == 0 ||
+        strcmp(local, "perform-sort") == 0) {
+        /* 3.0 §12.7/§14: one instruction — perform-sort is the
+         * sequence with xsl:sort children applied. */
+        XsltInstr* in = instr_new(XSLT_INSTR_SEQUENCE);
+        if (!in) return NULL;
+        in->select = compile_attr_sp(sp, e, "select");
+        in->sorts = parse_sorts(sp, e);
+        return in;
+    }
     if (strcmp(local, "value-of") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_VALUE_OF);
         if (!in) return NULL;
