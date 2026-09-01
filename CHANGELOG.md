@@ -1,12 +1,19 @@
 ## [Unreleased]
 
-## [1.9.41] - 2026-09-01
+## [1.9.41] - 2026-09-02
 
 ### Added
 
-- switch machinery + Saxon-parity rejection in expressions (xpath)
-
-
+- **switch grammar groundwork, Saxon-parity verified** (#692/06):
+  Saxon-HE 12.7 rejects `switch` in XPath expressions (XPST0003 —
+  the syntax is XSLT 3.0 pattern-only), verified live; we reject
+  it too, with brace tokens lexing so the failure is a clear
+  parse error. The complete switch grammar (case clauses, default,
+  lazy eq-compare evaluation) is implemented behind `#if 0` and
+  lands with pattern support. The #692 expression-attribute brace
+  guard now runs the compiler first — future brace-bearing grammar
+  can accept its own forms while the phantom-compile backstop
+  stays.
 
 ## [1.9.40] - 2026-09-02
 
