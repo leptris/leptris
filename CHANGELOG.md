@@ -4,7 +4,15 @@
 
 ### Fixed
 
-- expression attributes reject brace syntax loudly (#692 silent-wrong) (xslt)
+- **#692 (the silent-wrong)**: XQuery-only syntax in XPath
+  expression attributes — `try { ... } catch * { ... }`
+  expressions, map constructors — compiled on some brace shapes
+  and evaluated to silent EMPTY output. Saxon-HE 12.7 rejects
+  both at compile time (XPST0003, verified live); expression
+  attributes are never attribute-value templates and the XPath
+  grammar has no braces, so any brace now fails the stylesheet
+  loudly. The grammar-completion lane itself (switch, function
+  items, maps/arrays, partial application) remains open.
 
 
 
