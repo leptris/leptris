@@ -4,9 +4,14 @@
 
 ### Added
 
-- tunnel parameters (11.7) (xslt)
-
-
+- **Tunnel parameters (§11.7)**: `xsl:with-param tunnel="yes"`
+  rides a transform-level frame chain that persists for the whole
+  subtree — pushed both on template invocation and on the
+  unmatched-node path (processing continues through the built-in
+  rules); `xsl:param tunnel="yes"` binds from the chain into the
+  regular frame, falling back to its declared default when the
+  name is absent. Saxon-HE 12.7 probed: the value reaches every
+  template the subtree processes without re-passing.
 
 ## [1.9.36] - 2026-09-01
 
