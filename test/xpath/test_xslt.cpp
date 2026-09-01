@@ -3162,6 +3162,26 @@ TEST(Xslt30, FnStringsQNameUri) {
         "[p:l l p u][i]");
 }
 
+TEST(Xslt30, TunnelParams) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/10): the tunnel
+     * value flows into EVERY template the subtree reaches, without
+     * re-passing; declared defaults apply when absent. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:apply-templates select='*'>"
+        "<xsl:with-param name='mode' select=\"'X'\" tunnel='yes'/>"
+        "</xsl:apply-templates></xsl:template>"
+        "<xsl:template match='g'>"
+        "<xsl:param name='mode' tunnel='yes' select='default'/>"
+        "<t>[<xsl:value-of select='$mode'/>]</t>"
+        "<xsl:apply-templates select='*'/></xsl:template>"
+        "<xsl:template match='i'>"
+        "<xsl:param name='mode' tunnel='yes'/>"
+        "<u><xsl:value-of select='$mode'/></u></xsl:template>",
+        "<r><g><i/></g></r>")),
+        "<r><t>[X]</t><u>X</u></r>");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"

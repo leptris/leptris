@@ -176,6 +176,7 @@ typedef struct xslt_instr {
 
     /* CHOOSE arms are WHEN/OTHERWISE children with test set. */
     int terminate;                  /* MESSAGE terminate */
+    int tunnel;                     /* with-param/param: tunnel="yes" */
     int is_param;                   /* VARIABLE came from xsl:param —
                                        template-parameter semantics
                                        (§11.6): default applies only when
@@ -540,6 +541,12 @@ typedef struct xslt_exec {
     int iterate_signal;
     int iterate_depth;
     XsltVar* iter_params;
+
+    /* §11.7 tunnel parameters: xsl:with-param tunnel="yes" pushes
+     * here (never popped by the call — flows to every template the
+     * subtree processing reaches); xsl:param tunnel="yes" binds
+     * from this chain into the regular frame for the body. */
+    XsltVar* tunnel_vars;
 
     /* xsl:for-each-group (3.0 §14): the group in flight — an OWNED
      * nodeset of borrowed member pointers plus the string grouping

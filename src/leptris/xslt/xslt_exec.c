@@ -2323,6 +2323,65 @@ static const XsltTemplate* xslt_select_template(
 /* §11.6: evaluate xsl:param defaults for names the caller did not
  * bind (leading is_param children of the template body). Returns
  * the number of frames pushed. */
+/* Deep result copy (frame-bindable): scalars duplicate; nodesets
+ * copy the array (synthetic members are duplicated so the copy
+ * outlives the source's storage). */
+static struct leptris_xpath_result* tunnel_result_copy(
+        const struct leptris_xpath_result* r) {
+    if (!r) return NULL;
+    struct leptris_xpath_result* c = xpath_result_new(r->type);
+    if (!c) return NULL;
+    switch (r->type) {
+        case XPATH_RESULT_BOOLEAN:
+            c->value.boolean_value = r->value.boolean_value; break;
+        case XPATH_RESULT_NUMBER:
+            c->value.number_value = r->value.number_value; break;
+        case XPATH_RESULT_STRING:
+            c->value.string_value = leptris_strdup(
+                r->value.string_value ? r->value.string_value : "");
+            if (!c->value.string_value) {
+                leptris_xpath_result_free(c); return NULL; }
+            break;
+        case XPATH_RESULT_NODESET: {
+            XPathNodeSet* src = r->value.nodeset_value;
+            c->value.nodeset_value = xpath_nodeset_new();
+            if (!c->value.nodeset_value) {
+                leptris_xpath_result_free(c); return NULL; }
+            if (src) {
+                if (src->owns_synthetic_text)
+                    c->value.nodeset_value->owns_synthetic_text = 1;
+                c->value.nodeset_value->is_sequence = src->is_sequence;
+                for (size_t i = 0; i < src->count; i++) {
+                    void* n = src->nodes[i];
+                    if (src->owns_synthetic_text && n &&
+                        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
+                        char* t = get_node_text(n);
+                        size_t tl = t ? strlen(t) : 0;
+                        XPathNodeSet* one = xpath_nodeset_new();
+                        if (one) {
+                            xpath_nodeset_add(one, n);
+                            /* synth via evaluator export */
+                            extern XPathTextNode* xpath_synth_text(
+                                const char*, size_t);
+                            XPathTextNode* tn =
+                                xpath_synth_text(t ? t : "", tl);
+                            free(t);
+                            xpath_nodeset_free(one);
+                            if (tn) xpath_nodeset_add(
+                                c->value.nodeset_value, tn);
+                        }
+                    } else {
+                        xpath_nodeset_add(c->value.nodeset_value, n);
+                    }
+                }
+            }
+            break;
+        }
+        default: break;
+    }
+    return c;
+}
+
 static int xslt_bind_param_defaults(XsltExec* ex, const XsltInstr* body,
                                     LeptrisElement node) {
     int pushed = 0;
@@ -2334,6 +2393,24 @@ static int xslt_bind_param_defaults(XsltExec* ex, const XsltInstr* body,
             if (v->name && strcmp(v->name, p->name) == 0) { bound = 1; break; }
         }
         if (bound) continue;
+        if (p->tunnel) {
+            /* §11.7: bind from the tunnel chain (innermost wins);
+             * absent names fall through to the declared default. */
+            int hit = 0;
+            for (XsltVar* tv = ex->tunnel_vars; tv; tv = tv->prev) {
+                if (tv->name && strcmp(tv->name, p->name) == 0) {
+                    struct leptris_xpath_result* v =
+                        tunnel_result_copy(tv->value);
+                    if (v) {
+                        xslt_push_var(ex, p->name, v);
+                        pushed++;
+                    }
+                    hit = 1;
+                    break;
+                }
+            }
+            if (hit) continue;
+        }
         struct leptris_xpath_result* v = NULL;
         if (p->select) {
             v = xslt_eval(ex, p->select, node);
@@ -2390,6 +2467,26 @@ static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
      * and the callee sees the global (libxslt bugs 41-/43-). */
     for (const XsltInstr* wp = with_params; wp && nv < 16; wp = wp->next) {
         if (wp->kind != XSLT_INSTR_WITH_PARAM || !wp->name) continue;
+        if (wp->tunnel) {
+            /* §11.7: tunnel with-params ride the exec chain for the
+             * whole subtree, independent of the callee's
+             * declarations. */
+            struct leptris_xpath_result* tv = NULL;
+            if (wp->select) tv = xslt_eval(ex, wp->select, node);
+            else if (wp->child) tv = xslt_capture_content(ex, wp->child, node);
+            if (tv) {
+                XsltVar* pv = (XsltVar*)calloc(1, sizeof(*pv));
+                if (pv) {
+                    pv->name = wp->name;
+                    pv->value = tv;
+                    pv->prev = ex->tunnel_vars;
+                    ex->tunnel_vars = pv;
+                } else {
+                    leptris_xpath_result_free(tv);
+                }
+            }
+            continue;
+        }
         int declared = 0;
         for (const XsltInstr* b = t->body; b; b = b->next) {
             if (b->kind != XSLT_INSTR_VARIABLE || !b->is_param) break;
@@ -2786,6 +2883,24 @@ static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
         if (best) {
             rc = xslt_invoke_template(ex, best, items[i], in->child);
         } else {
+            /* Unmatched node: tunnel with-params of THIS apply still
+             * flow (§11.7 — processing continues down the tree). */
+            for (const XsltInstr* wp = in->child; wp; wp = wp->next) {
+                if (wp->kind != XSLT_INSTR_WITH_PARAM || !wp->name ||
+                    !wp->tunnel)
+                    continue;
+                struct leptris_xpath_result* tv =
+                    wp->select ? xslt_eval(ex, wp->select, items[i]) : NULL;
+                XsltVar* pv = (XsltVar*)calloc(1, sizeof(*pv));
+                if (pv) {
+                    pv->name = wp->name;
+                    pv->value = tv;
+                    pv->prev = ex->tunnel_vars;
+                    ex->tunnel_vars = pv;
+                } else if (tv) {
+                    leptris_xpath_result_free(tv);
+                }
+            }
             /* Built-in template rules (§5.8/§6.7): on-no-match
              * variants first, then the 1.0 walk. */
             int br = builtin_no_match(ex, mode, items[i]);
@@ -3775,6 +3890,12 @@ void xslt_exec_free(XsltExec* ex) {
     xslt_gids_free(ex);
     if (ex->fn_result) leptris_xpath_result_free(ex->fn_result);
     while (ex->vars) xslt_pop_var(ex, NULL);
+    while (ex->tunnel_vars) {
+        XsltVar* t = ex->tunnel_vars;
+        ex->tunnel_vars = t->prev;
+        if (t->value) leptris_xpath_result_free(t->value);
+        free(t);
+    }
     while (ex->frag_nodes) {
         XsltFragNode* f = (XsltFragNode*)ex->frag_nodes;
         ex->frag_nodes = f->next;
