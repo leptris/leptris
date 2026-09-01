@@ -642,6 +642,8 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->name = leptris_strdup(leptris_element_attribute(e, "name"));
         in->select = compile_attr_sp(sp, e, "select");
         in->is_param = (local[0] == 'p');   /* xsl:param (§11.6) */
+        const char* tu = leptris_element_attribute(e, "tunnel");
+        in->tunnel = in->is_param && tu && strcmp(tu, "yes") == 0;
         /* §11.1: the select resolves with the DECLARING element's
          * in-scope bindings — top-level variables of included
          * sheets carry their own (bug-36-). */
@@ -657,6 +659,8 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         if (!in) return NULL;
         in->name = leptris_strdup(leptris_element_attribute(e, "name"));
         in->select = compile_attr_sp(sp, e, "select");
+        const char* tu = leptris_element_attribute(e, "tunnel");
+        in->tunnel = tu && strcmp(tu, "yes") == 0;
         in->child = parse_content(sp, e);
         return in;
     }
