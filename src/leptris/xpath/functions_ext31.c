@@ -1008,7 +1008,12 @@ static struct leptris_xpath_result* fn_escape_html_uri(XPathContext* ctx,
  * The namespace URI rides a thread-local side channel set by the
  * QName() constructor (a structured QName value lands with
  * TODO.xslt-full/07 function items). */
-static __thread char last_qname_uri[512];
+#ifdef _WIN32
+#define LEPTRIS_TLS __declspec(thread)
+#else
+#define LEPTRIS_TLS __thread
+#endif
+static LEPTRIS_TLS char last_qname_uri[512];
 static struct leptris_xpath_result* fn_qname(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* uri = re_str_arg(ctx, args, 0);
