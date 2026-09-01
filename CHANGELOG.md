@@ -4,11 +4,30 @@
 
 ### Added
 
-- xsl:mode on-no-match — all six dispositions (xslt)
+- **XSLT 3.0 increment 9 — `xsl:mode on-no-match` (6.7), all six
+  dispositions**: deep-copy (verbatim subtree), shallow-copy — the
+  3.0 default, a fix on its own since our previous default was
+  only the 1.0 text-only-copy built-in —, shallow-skip (attributes
+  and element children dispatch, text skipped), deep-skip,
+  text-only-copy, and fail (XTDE0500). 1.0 sheets keep the classic
+  built-in rules (the libxslt suite pins them at 205/205).
+  Attribute dispatch routes through the XPath attribute axis —
+  pattern identity lives on its synthetic nodes. README.adoc gains
+  a full XSLT section (1.0-complete statement + the entire 3.0
+  surface shipped to date).
 
 ### Fixed
 
-- #677 NOBLANKS boundary data loss, #687 DOCTYPE subset mangle, #686 loud Windows analyze-string error
+- **#677**: `LEPTRIS_PARSE_DROP_WS_TEXT` ate the leading whitespace
+  of NON-blank text runs — parse-time data loss. The drop now
+  applies only to whitespace-only runs (libxml2
+  XML_PARSE_NOBLANKS parity).
+- **#687**: DOCTYPE internal-subset serialization dropped the
+  opening byte of every declaration after the first (`!ATTLIST`).
+- **#686**: the Windows/MSVC build silently produced empty output
+  for `xsl:analyze-string`; it now raises a loud, `xsl:try`-
+  catchable dynamic error (portable regex engine tracked in the
+  issue).
 
 
 
