@@ -1360,7 +1360,7 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
             if (op == XPATH_OP_IF || op == XPATH_OP_FOR ||
                 op == XPATH_OP_RANGE || op == XPATH_OP_SEQUENCE ||
                 op == XPATH_OP_LET || op == XPATH_OP_MAP ||
-                op == XPATH_OP_CONCAT) {
+                op == XPATH_OP_CONCAT || op == XPATH_OP_SWITCH) {
                 emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
                             add_const_ast(st, node));
                 break;
