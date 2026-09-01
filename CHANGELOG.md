@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.35] - 2026-09-01
+
+### Added
+
+- xsl:sequence + xsl:perform-sort; fix MSVC build of functions_ext31 (xslt)
+- fn-catalog slices — sequences, math:, regex trio (+ top-level comma sequences) (xpath)
+
+
+
 ## [1.9.34] - 2026-09-01
 
 ### Fixed
