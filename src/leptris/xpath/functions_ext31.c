@@ -1093,6 +1093,74 @@ static struct leptris_xpath_result* fn_node_name(XPathContext* ctx,
     return out;
 }
 
+
+/* ---- dates & durations (TODO.xslt-full/05, first slice) ----
+ * Value-level: constructors validate the lexical form lightly and
+ * pass it through; extractors parse ISO 8601 fields. */
+
+#include <time.h>
+
+static struct leptris_xpath_result* fn_passthrough_ctor(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    out->value.string_value = in ? in : leptris_strdup("");
+    (void)n;
+    return out;
+}
+
+/* Extract an integer field from an ISO date/dateTime/time/duration
+ * string. which: 1 year 2 month 3 day 4 hours 5 minutes
+ * 6 seconds 7 duration-days 8 duration-hours. */
+static struct leptris_xpath_result* fn_date_field(XPathContext* ctx,
+        XPathASTNode** args, size_t n, int which) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
+    if (!out) { free(in); return NULL; }
+    long v = 0;
+    if (in) {
+        int y = 0, mo = 0, d = 0, h = 0, mi = 0;
+        double se = 0;
+        long dd = 0, dh = 0;
+        char dur_sign = 0;
+        const char* t = strstr(in, "T");
+        if (sscanf(in, "P%ldDT%ldH", &dd, &dh) >= 1) dur_sign = 'P';
+        if (dur_sign == 'P') {
+            v = (which == 7) ? dd : (which == 8) ? dh : 0;
+        } else if (sscanf(in, "%d-%d-%d", &y, &mo, &d) == 3) {
+            if (t) sscanf(t, "T%d:%d:%lf", &h, &mi, &se);
+            else sscanf(in, "%*d-%*d-%*dT%d:%d:%lf", &h, &mi, &se);
+            v = (which == 1) ? y : (which == 2) ? mo : (which == 3) ? d
+              : (which == 4) ? h : (which == 5) ? mi : (which == 6)
+              ? (long)se : 0;
+        } else if (sscanf(in, "%d:%d:%lf", &h, &mi, &se) == 3) {
+            v = (which == 4) ? h : (which == 5) ? mi
+              : (which == 6) ? (long)se : 0;
+        }
+    }
+    out->value.number_value = (double)v;
+    free(in);
+    (void)n;
+    return out;
+}
+
+#define DATE_FIELD(NAME, WHICH)                                   \
+    static struct leptris_xpath_result* fn_##NAME(                \
+            XPathContext* ctx, XPathASTNode** a, size_t n) {      \
+        return fn_date_field(ctx, a, n, WHICH);                   \
+    }
+
+DATE_FIELD(year_from_dt, 1)
+DATE_FIELD(month_from_dt, 2)
+DATE_FIELD(day_from_dt, 3)
+DATE_FIELD(hours_from_t, 4)
+DATE_FIELD(minutes_from_t, 5)
+DATE_FIELD(seconds_from_t, 6)
+DATE_FIELD(days_from_dur, 7)
+DATE_FIELD(hours_from_dur, 8)
+
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -1146,6 +1214,19 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "prefix-from-QName", fn_prefix_from_qname, 1, 1);
     xpath_function_registry_register(registry, "namespace-uri-from-QName", fn_ns_from_qname, 1, 1);
     xpath_function_registry_register(registry, "node-name", fn_node_name, 1, 1);
+    /* Dates & durations (05, first slice) — canonical xs: prefix. */
+    xpath_function_registry_register(registry, "xs:date", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:dateTime", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:time", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "year-from-dateTime", fn_year_from_dt, 1, 1);
+    xpath_function_registry_register(registry, "month-from-dateTime", fn_month_from_dt, 1, 1);
+    xpath_function_registry_register(registry, "day-from-dateTime", fn_day_from_dt, 1, 1);
+    xpath_function_registry_register(registry, "hours-from-time", fn_hours_from_t, 1, 1);
+    xpath_function_registry_register(registry, "minutes-from-time", fn_minutes_from_t, 1, 1);
+    xpath_function_registry_register(registry, "seconds-from-time", fn_seconds_from_t, 1, 1);
+    xpath_function_registry_register(registry, "days-from-duration", fn_days_from_dur, 1, 1);
+    xpath_function_registry_register(registry, "hours-from-duration", fn_hours_from_dur, 1, 1);
     xpath_function_registry_register(registry, "matches", fn_matches, 2, 3);
     xpath_function_registry_register(registry, "replace", fn_replace, 3, 4);
     xpath_function_registry_register(registry, "tokenize", fn_tokenize, 2, 3);
