@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.39] - 2026-09-01
+
+### Fixed
+
+- element copies keep COMMENT and PI children (#696) (dom)
+
+
+
 ## [1.9.38] - 2026-09-02
 
 ### Fixed
