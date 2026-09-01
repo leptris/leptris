@@ -880,10 +880,19 @@ static struct leptris_xpath_result* fn_contains_token(XPathContext* ctx,
         return out;
     }
     out->value.boolean_value = 0;
-    char* save = NULL;
-    for (char* t = strtok_r(in, " \t\n\r", &save); t;
-         t = strtok_r(NULL, " \t\n\r", &save))
-        if (strcmp(t, tok) == 0) { out->value.boolean_value = 1; break; }
+    const char* p = in;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        if (!*p) break;
+        const char* st = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        if ((size_t)(p - st) == strlen(tok) &&
+            strncmp(st, tok, (size_t)(p - st)) == 0) {
+            out->value.boolean_value = 1;
+            break;
+        }
+    }
     free(in); free(tok);
     (void)n;
     return out;
