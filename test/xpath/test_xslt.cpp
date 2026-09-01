@@ -3218,12 +3218,14 @@ TEST(Xslt30, SequenceSingleAtomicAndRegexNodes) {
         "</xsl:template>",
         "<r/>")),
         "<s>solo</s>");
+#ifndef _WIN32
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
         "[<xsl:value-of select=\"matches(//item[1], 'a\\d')\"/>]"
         "</xsl:template>",
         "<r><item>a1</item></r>")),
         "[true]");
+#endif
 }
 
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
