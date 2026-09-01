@@ -1,12 +1,15 @@
 ## [Unreleased]
 
-## [1.9.39] - 2026-09-01
+## [1.9.39] - 2026-09-02
 
 ### Fixed
 
-- element copies keep COMMENT and PI children (#696) (dom)
-
-
+- **Element copies keep COMMENT and PI children** (#696): the
+  child-copy loop in `leptris_element_copy` skipped comment and
+  processing-instruction children entirely — `Node#dup` and
+  document copies silently lost them at every level. Both kinds
+  now copy like text/CDATA/elements; the mixed-content shape
+  round-trips byte-for-byte.
 
 ## [1.9.38] - 2026-09-02
 
