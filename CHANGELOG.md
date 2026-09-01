@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.38] - 2026-09-01
+
+### Fixed
+
+- regex node-arg atomization, single-atomic xsl:sequence; pin #705 ground truth
+
+
+
 ## [1.9.37] - 2026-09-01
 
 ### Added
