@@ -1,12 +1,15 @@
 ## [Unreleased]
 
-## [1.9.40] - 2026-09-01
+## [1.9.40] - 2026-09-02
 
 ### Added
 
-- fn-catalog date slice (#691-E first slice) (xpath)
-
-
+- **The fn: catalog date slice** (#691-E): `xs:date` /
+  `xs:dateTime` / `xs:time` / `xs:duration` constructors (canonical
+  `xs:` prefix, lexical passthrough) and the component extractors
+  `year/month/day-from-dateTime`, `hours/minutes/seconds-from-time`,
+  `days/hours-from-duration` — ISO 8601 field parsing over the
+  value-level string model. Saxon-HE 12.7 probed.
 
 ## [1.9.39] - 2026-09-02
 
