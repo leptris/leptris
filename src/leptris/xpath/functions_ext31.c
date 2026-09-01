@@ -15,10 +15,12 @@
 #include "evaluator.h"
 #include "evaluator_internal.h"
 #include "../include/leptris.h"
+#include "../dom/element.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <ctype.h>
 
 #ifndef _WIN32
 #include <regex.h>
@@ -82,12 +84,11 @@ static char** collect_items(XPathContext* ctx, XPathASTNode** args,
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
     if (!r) return NULL;
     char** items = NULL;
-    size_t cnt = 0, cap = 0;
+    size_t cnt = 0;
     if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
         XPathNodeSet* ns = r->value.nodeset_value;
         items = (char**)malloc((ns->count ? ns->count : 1) * sizeof(char*));
         if (!items) { xpath_result_free(r); return NULL; }
-        cap = ns->count ? ns->count : 1;
         for (size_t k = 0; k < ns->count; k++) {
             char* t = get_node_text(ns->nodes[k]);
             items[cnt++] = t ? t : leptris_strdup("");
@@ -95,7 +96,6 @@ static char** collect_items(XPathContext* ctx, XPathASTNode** args,
     } else {
         items = (char**)malloc(sizeof(char*));
         if (!items) { xpath_result_free(r); return NULL; }
-        cap = 1;
         items[cnt++] = scalar_str(r);
     }
     xpath_result_free(r);
@@ -759,6 +759,321 @@ static struct leptris_xpath_result* re_unavailable(XPathContext* ctx,
 
 #endif
 
+
+/* ---- strings / QNames / URIs (TODO.xslt-full/04) ---- */
+
+static const char* k_words_units[] = {
+    "zero","one","two","three","four","five","six","seven","eight",
+    "nine","ten","eleven","twelve","thirteen","fourteen","fifteen",
+    "sixteen","seventeen","eighteen","nineteen"};
+static const char* k_words_tens[] = {
+    "","","twenty","thirty","forty","fifty","sixty","seventy",
+    "eighty","ninety"};
+
+static size_t words999(char* buf, size_t len, long n) {
+    if (n >= 100) {
+        len += (size_t)snprintf(buf + len, 32, "%s hundred",
+                                k_words_units[n / 100]);
+        n %= 100;
+        if (n) len += (size_t)snprintf(buf + len, 8, " ");
+    }
+    if (n >= 20) {
+        len += (size_t)snprintf(buf + len, 32, "%s", k_words_tens[n / 10]);
+        n %= 10;
+        if (n) len += (size_t)snprintf(buf + len, 8, "-");
+    }
+    if (n > 0)
+        len += (size_t)snprintf(buf + len, 32, "%s", k_words_units[n]);
+    return len;
+}
+
+/* fn:format-integer — decimal, 0-pad, a/A, i/I, w/W pictures. */
+static struct leptris_xpath_result* fn_format_integer(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* v = xpath_evaluate(ctx, args[0]);
+    char* pic = re_str_arg(ctx, args, 1);
+    long x = v ? (long)leptris_xpath_result_number(v) : 0;
+    if (v) leptris_xpath_result_free(v);
+    (void)n;
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out || !pic) {
+        if (out) out->value.string_value = leptris_strdup("");
+        free(pic);
+        return out;
+    }
+    char buf[256];
+    size_t len = 0;
+    char p0 = pic[0] ? pic[0] : '0';
+    int neg = x < 0;
+    long ax = neg ? -x : x;
+    if (strchr(pic, 'w') || strchr(pic, 'W')) {
+        char wbuf[256] = {0}; size_t wl = 0;
+        if (ax == 0) wl = (size_t)snprintf(wbuf, sizeof wbuf, "zero");
+        if (ax >= 1000000) {
+            wl += (size_t)snprintf(wbuf + wl, 16, "over");
+        } else if (ax >= 1000) {
+            wl = words999(wbuf, wl, ax / 1000);
+            wl += (size_t)snprintf(wbuf + wl, 16, " thousand");
+            if (ax % 1000) wl += (size_t)snprintf(wbuf + wl, 8, " ");
+            wl = words999(wbuf, wl, ax % 1000);
+        } else {
+            wl = words999(wbuf, wl, ax);
+        }
+        if (p0 == 'W') { for (size_t i = 0; i < wl; i++) wbuf[i] = (char)toupper((unsigned char)wbuf[i]); }
+        len = (size_t)snprintf(buf, sizeof buf, "%s%s%s",
+                               neg ? "minus " : "", wbuf, "");
+    } else if (p0 == 'a' || p0 == 'A' || p0 == 'i' || p0 == 'I' ||
+               p0 == '0' || p0 == '1' || p0 == '#') {
+        if (p0 == 'a' || p0 == 'A') {
+            /* bijective base-26 */
+            char t[32]; size_t tl = 0;
+            long a = ax;
+            if (a == 0) t[tl++] = 'a';
+            while (a > 0) { a--; t[tl++] = (char)('a' + a % 26); a /= 26; }
+            if (neg) buf[len++] = '-';
+            while (tl) buf[len++] = t[--tl];
+            buf[len] = 0;
+            if (p0 == 'A')
+                for (size_t i = neg ? 1 : 0; i < len; i++)
+                    buf[i] = (char)toupper((unsigned char)buf[i]);
+        } else if (p0 == 'i' || p0 == 'I') {
+            static const char* rom[] = {"m","cm","d","cd","c","xc","l",
+                                        "xl","x","ix","v","iv","i"};
+            static const long rv[] = {1000,900,500,400,100,90,50,40,10,9,5,4,1};
+            if (neg) buf[len++] = '-';
+            long a = ax;
+            for (int k = 0; k < 13; k++)
+                while (a >= rv[k]) {
+                    len += (size_t)snprintf(buf + len, 8, "%s", rom[k]);
+                    a -= rv[k];
+                }
+            buf[len] = 0;
+            if (p0 == 'I')
+                for (size_t i = neg ? 1 : 0; i < len; i++)
+                    buf[i] = (char)toupper((unsigned char)buf[i]);
+        } else {
+            /* decimal; 0-picture pads to the digit count */
+            char num[32];
+            int nl = snprintf(num, sizeof num, "%ld", ax);
+            size_t zeros = 0;
+            for (const char* q = pic; *q == '0'; q++) zeros++;
+            len = (size_t)snprintf(buf, sizeof buf, "%s%0*ld",
+                                   neg ? "-" : "",
+                                   zeros > (size_t)nl ? (int)zeros : nl, ax);
+        }
+    } else {
+        len = (size_t)snprintf(buf, sizeof buf, "%ld", x);
+    }
+    out->value.string_value = leptris_strdup(buf);
+    free(pic);
+    return out;
+}
+
+static struct leptris_xpath_result* fn_contains_token(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    char* tok = re_str_arg(ctx, args, 1);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!out || !in || !tok) {
+        if (out) out->value.boolean_value = 0;
+        free(in); free(tok);
+        return out;
+    }
+    out->value.boolean_value = 0;
+    char* save = NULL;
+    for (char* t = strtok_r(in, " \t\n\r", &save); t;
+         t = strtok_r(NULL, " \t\n\r", &save))
+        if (strcmp(t, tok) == 0) { out->value.boolean_value = 1; break; }
+    free(in); free(tok);
+    (void)n;
+    return out;
+}
+
+/* Minimal UTF-8 decode/encode (codepoints are UCS). */
+static struct leptris_xpath_result* fn_string_to_codepoints(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = seq_new();
+    if (!out || !in) { free(in); return out; }
+    const unsigned char* p = (const unsigned char*)in;
+    while (*p) {
+        unsigned cp;
+        if (*p < 0x80) { cp = *p++; }
+        else if ((*p & 0xE0) == 0xC0) { cp = (*p++ & 0x1F) << 6; cp |= (*p++ & 0x3F); }
+        else if ((*p & 0xF0) == 0xE0) { cp = (*p++ & 0x0F) << 12; cp |= (*p++ & 0x3F) << 6; cp |= (*p++ & 0x3F); }
+        else { cp = (*p++ & 0x07) << 18; cp |= (*p++ & 0x3F) << 12; cp |= (*p++ & 0x3F) << 6; cp |= (*p++ & 0x3F); }
+        seq_push_num(out, (double)cp);
+    }
+    free(in);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_codepoints_to_string(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    size_t cnt;
+    char** items = collect_items(ctx, args, n, 0, &cnt);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free_items(items, cnt); return NULL; }
+    out->value.string_value = (char*)calloc(cnt * 5 + 1, 1);
+    size_t o = 0;
+    if (items)
+        for (size_t k = 0; k < cnt; k++) {
+            unsigned cp = (unsigned)strtoul(items[k], NULL, 10);
+            if (cp < 0x80) out->value.string_value[o++] = (char)cp;
+            else if (cp < 0x800) {
+                out->value.string_value[o++] = (char)(0xC0 | cp >> 6);
+                out->value.string_value[o++] = (char)(0x80 | (cp & 0x3F));
+            } else if (cp < 0x10000) {
+                out->value.string_value[o++] = (char)(0xE0 | cp >> 12);
+                out->value.string_value[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                out->value.string_value[o++] = (char)(0x80 | (cp & 0x3F));
+            } else {
+                out->value.string_value[o++] = (char)(0xF0 | cp >> 18);
+                out->value.string_value[o++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                out->value.string_value[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                out->value.string_value[o++] = (char)(0x80 | (cp & 0x3F));
+            }
+        }
+    free_items(items, cnt);
+    return out;
+}
+
+static int uri_escape(char* dst, const char* s, int keep_delims) {
+    static const char* hex = "0123456789ABCDEF";
+    size_t o = 0;
+    for (const unsigned char* p = (const unsigned char*)s; *p; p++) {
+        unsigned char c = *p;
+        int unres = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '-' || c == '.' ||
+                    c == '_' || c == '~';
+        int extra = keep_delims && (strchr(";/?:@&=+$,[]-._~!'()*%", c) != NULL);
+        if (unres || extra) {
+            dst[o++] = (char)c;
+        } else {
+            dst[o++] = '%';
+            dst[o++] = hex[c >> 4];
+            dst[o++] = hex[c & 15];
+        }
+    }
+    dst[o] = 0;
+    return (int)o;
+}
+
+static struct leptris_xpath_result* fn_uri_escape(XPathContext* ctx,
+        XPathASTNode** args, size_t n, int keep) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    out->value.string_value = (char*)calloc(strlen(in ? in : "") * 3 + 1, 1);
+    if (in) uri_escape(out->value.string_value, in, keep);
+    free(in);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_encode_for_uri(XPathContext* c,
+        XPathASTNode** a, size_t n) { return fn_uri_escape(c, a, n, 0); }
+static struct leptris_xpath_result* fn_iri_to_uri(XPathContext* c,
+        XPathASTNode** a, size_t n) { return fn_uri_escape(c, a, n, 1); }
+
+static struct leptris_xpath_result* fn_escape_html_uri(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    size_t cap = (in ? strlen(in) : 0) * 6 + 1;
+    out->value.string_value = (char*)calloc(cap, 1);
+    size_t o = 0;
+    if (in)
+        for (const char* p = in; *p; p++) {
+            unsigned char c = (unsigned char)*p;
+            if (c < 0x80 && !isalnum(c) && !strchr("-_.~", c)) {
+                const char* ent = c == '<' ? "&lt;" : c == '>' ? "&gt;" :
+                                  c == '&' ? "&amp;" : c == '"' ? "&quot;" :
+                                  c == '\'' ? "&apos;" : NULL;
+                if (ent) { strcpy(out->value.string_value + o, ent); o += strlen(ent); continue; }
+            }
+            if (c < 0x80 && (isalnum(c) || strchr("-_.~", c)))
+                out->value.string_value[o++] = (char)c;
+            else
+                out->value.string_value[o++] = (char)c;  /* non-ASCII kept */
+        }
+    free(in);
+    (void)n;
+    return out;
+}
+
+/* QName family — value-level string representation ("prefix:local").
+ * The namespace URI rides a thread-local side channel set by the
+ * QName() constructor (a structured QName value lands with
+ * TODO.xslt-full/07 function items). */
+static __thread char last_qname_uri[512];
+static struct leptris_xpath_result* fn_qname(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* uri = re_str_arg(ctx, args, 0);
+    char* qn = re_str_arg(ctx, args, 1);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(uri); free(qn); return NULL; }
+    out->value.string_value = leptris_strdup(qn ? qn : "");
+    snprintf(last_qname_uri, sizeof(last_qname_uri), "%s", uri ? uri : "");
+    free(uri); free(qn);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_qname_part(XPathContext* ctx,
+        XPathASTNode** args, size_t n, int which) {
+    char* qn = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(qn); return NULL; }
+    const char* colon = qn ? strchr(qn, ':') : NULL;
+    if (which == 1)      /* local */
+        out->value.string_value = leptris_strdup(colon ? colon + 1 : (qn ? qn : ""));
+    else if (which == 2) {  /* prefix */
+        if (colon) {
+            size_t pl = (size_t)(colon - qn);
+            char* p = (char*)malloc(pl + 1);
+            memcpy(p, qn, pl); p[pl] = 0;
+            out->value.string_value = p;
+        } else
+            out->value.string_value = leptris_strdup("");
+    } else               /* namespace uri — from the 2-arg form only */
+        out->value.string_value = leptris_strdup(last_qname_uri);
+    free(qn);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_local_from_qname(XPathContext* c,
+        XPathASTNode** a, size_t n) { return fn_qname_part(c, a, n, 1); }
+static struct leptris_xpath_result* fn_prefix_from_qname(XPathContext* c,
+        XPathASTNode** a, size_t n) { return fn_qname_part(c, a, n, 2); }
+static struct leptris_xpath_result* fn_ns_from_qname(XPathContext* c,
+        XPathASTNode** a, size_t n) { return fn_qname_part(c, a, n, 3); }
+
+static struct leptris_xpath_result* fn_node_name(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { if (r) leptris_xpath_result_free(r); return NULL; }
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+        r->value.nodeset_value->count) {
+        void* nd = r->value.nodeset_value->nodes[0];
+        if (leptris_node_get_type(nd) == LEPTRIS_NODE_TYPE_ELEMENT) {
+            const char* nm = leptris_element_get_name((LeptrisElement)nd);
+            out->value.string_value = leptris_strdup(nm ? nm : "");
+        } else {
+            out->value.string_value = leptris_strdup("");
+        }
+    } else {
+        out->value.string_value = leptris_strdup("");
+    }
+    if (r) leptris_xpath_result_free(r);
+    (void)n;
+    return out;
+}
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -800,6 +1115,18 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "abs", fn_abs, 1, 1);
     xpath_function_registry_register(registry, "round-half-to-even", fn_round_half_even, 1, 2);
 
+    xpath_function_registry_register(registry, "format-integer", fn_format_integer, 2, 2);
+    xpath_function_registry_register(registry, "contains-token", fn_contains_token, 2, 2);
+    xpath_function_registry_register(registry, "string-to-codepoints", fn_string_to_codepoints, 1, 1);
+    xpath_function_registry_register(registry, "codepoints-to-string", fn_codepoints_to_string, 1, 1);
+    xpath_function_registry_register(registry, "encode-for-uri", fn_encode_for_uri, 1, 1);
+    xpath_function_registry_register(registry, "iri-to-uri", fn_iri_to_uri, 1, 1);
+    xpath_function_registry_register(registry, "escape-html-uri", fn_escape_html_uri, 1, 1);
+    xpath_function_registry_register(registry, "QName", fn_qname, 2, 2);
+    xpath_function_registry_register(registry, "local-name-from-QName", fn_local_from_qname, 1, 1);
+    xpath_function_registry_register(registry, "prefix-from-QName", fn_prefix_from_qname, 1, 1);
+    xpath_function_registry_register(registry, "namespace-uri-from-QName", fn_ns_from_qname, 1, 1);
+    xpath_function_registry_register(registry, "node-name", fn_node_name, 1, 1);
     xpath_function_registry_register(registry, "matches", fn_matches, 2, 3);
     xpath_function_registry_register(registry, "replace", fn_replace, 3, 4);
     xpath_function_registry_register(registry, "tokenize", fn_tokenize, 2, 3);
