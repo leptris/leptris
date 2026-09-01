@@ -3009,3 +3009,47 @@ TEST(Xslt30, TryCatchErrorVariants) {
         "(compile-failed)");
 }
 
+/* xsl:mode on-no-match (3.0 §6.7) — Saxon-HE 12.7 ground truth on
+ * <r><g n="1"><i>x</i></g>tail</r> with match="g/@n" -> <hit/>.
+ * The 3.0 DEFAULT is shallow-copy (copy the node, process its
+ * children); 1.0 sheets keep the text-only-copy built-in. */
+TEST(Xslt30, ModeOnNoMatch) {
+    const char* b30 =
+        "<xsl:template match='g/@n'><hit/></xsl:template>"
+        "<xsl:template match='/'><out>"
+        "<xsl:apply-templates select='*'/></out></xsl:template>";
+    const char* doc = "<r><g n='1'><i>x</i></g>tail</r>";
+    /* Explicit deep-copy: subtree verbatim, no dispatch inside. */
+    EXPECT_EQ(body(run30(
+        (std::string("<xsl:mode on-no-match='deep-copy'/>") + b30).c_str(), doc)),
+        "<out><r><g n=\"1\"><i>x</i></g>tail</r></out>");
+    /* 3.0 default (no xsl:mode at all) = shallow-copy. */
+    EXPECT_EQ(body(run30(
+        (std::string(b30) + "<xsl:template match='never[x]'/>").c_str(), doc)),
+        "<out><r><g><hit/><i>x</i></g>tail</r></out>");
+    /* Explicit shallow-copy: copy the node, children dispatch. */
+    EXPECT_EQ(body(run30(
+        (std::string("<xsl:mode on-no-match='shallow-copy'/>") + b30).c_str(),
+        doc)),
+        "<out><r><g><hit/><i>x</i></g>tail</r></out>");
+    /* shallow-skip: no copy; element/attribute children still
+     * dispatch, text skipped. */
+    EXPECT_EQ(body(run30(
+        (std::string("<xsl:mode on-no-match='shallow-skip'/>") + b30).c_str(),
+        doc)),
+        "<out><hit/></out>");
+    /* deep-skip: nothing at all. */
+    EXPECT_EQ(body(run30(
+        (std::string("<xsl:mode on-no-match='deep-skip'/>") + b30).c_str(), doc)),
+        "<out/>");
+    /* text-only-copy: the 1.0 built-in. */
+    EXPECT_EQ(body(run30(
+        (std::string("<xsl:mode on-no-match='text-only-copy'/>") + b30).c_str(),
+        doc)),
+        "<out>xtail</out>");
+    /* fail: dynamic error, transform aborts. */
+    EXPECT_EQ(body(run30(
+        (std::string("<xsl:mode on-no-match='fail'/>") + b30).c_str(), doc)),
+        "(null)");
+}
+
