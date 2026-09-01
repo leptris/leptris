@@ -72,6 +72,7 @@ set(LEPTRIS_SOURCES
     leptris/xpath/evaluator_operators.c
     leptris/xpath/evaluator_path.c
     leptris/xpath/functions.c
+    leptris/xpath/functions_ext31.c
     leptris/xpath/functions_exslt.c
     leptris/xpath/xpath_variables.c
     leptris/xpath/xpath_public.c

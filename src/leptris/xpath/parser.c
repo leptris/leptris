@@ -352,6 +352,22 @@ XPathASTNode* xpath_parse(XPathParser* parser) {
     if (!parser) return NULL;
 
     XPathASTNode* ast = parse_expr(parser);
+    /* XPath 3.1 top-level sequence: Expr ::= ExprSingle ("," ExprSingle)*.
+     * One member parses as itself; a comma list builds the sequence
+     * node (synthetic-text items) the parenthesized form uses. */
+    if (ast && current_token_is(parser, TOK_COMMA)) {
+        XPathASTNode* seq = ast_node_new(XPATH_AST_OPERATOR);
+        if (!seq) { ast_node_free(ast); return NULL; }
+        seq->number_value = (double)XPATH_OP_SEQUENCE;
+        ast_node_add_child(seq, ast);
+        while (current_token_is(parser, TOK_COMMA)) {
+            advance_token(parser);
+            XPathASTNode* member = parse_expr(parser);
+            if (!member) { ast_node_free(seq); return NULL; }
+            ast_node_add_child(seq, member);
+        }
+        ast = seq;
+    }
 
     if (ast && !current_token_is(parser, TOK_EOF)) {
         XPathToken* tok = current_token(parser);

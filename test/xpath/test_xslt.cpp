@@ -3058,6 +3058,60 @@ TEST(Xslt30, ModeOnNoMatch) {
  * compiled on some brace shapes and evaluated to silent EMPTY
  * output. Saxon: XPST0003 - compile error. Expression attributes
  * are never AVTs; XPath has no braces. */
+TEST(Xslt30, FnSequences) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/01). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select='exists(//i), empty(//i), "
+        "exists(//nope), empty(//nope)'/>]"
+        "[<xsl:value-of select='head((1 to 5))'/>]"
+        "[<xsl:value-of select='tail((1 to 5))'/>]"
+        "[<xsl:value-of select='reverse(1 to 4)'/>]"
+        "[<xsl:value-of select='subsequence((10,20,30,40,50), 2, 2)'/>]"
+        "[<xsl:value-of select='remove((1,2,3,4), 2)'/>]"
+        "[<xsl:value-of select=\"insert-before((1,2,3), 2, 'x')\"/>]"
+        "[<xsl:value-of select='index-of((10,20,30,20), 20)'/>]"
+        "[<xsl:value-of select='distinct-values((1,2,2,3,1))'/>]"
+        "[<xsl:value-of select='avg(1 to 4), min((3,1,2)), "
+        "max((3,1,2))'/>]"
+        "[<xsl:value-of select='unordered((1,2,3))'/>]"
+        "</xsl:template>",
+        "<r><i>a</i><i>b</i></r>")),
+        "[true false false true][1][2 3 4 5][4 3 2 1][20 30]"
+        "[1 3 4][1 x 2 3][2 4][1 2 3][2.5 1 3][1 2 3]");
+}
+
+TEST(Xslt30, FnMath) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/03). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/' "
+        "xmlns:math='http://www.w3.org/2005/xpath-functions/math'>"
+        "[<xsl:value-of select='math:sqrt(9), math:pow(2,10), "
+        "math:pi()'/>]"
+        "[<xsl:value-of select='round(2.5), round-half-to-even(2.5), "
+        "abs(-3)'/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[3 1024 3.141592653589793][3 2 3]");
+}
+
+TEST(Xslt30, FnRegex) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/02). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"matches('hello world', 'wor.d'), "
+        "matches('X', 'x'), matches('X', 'x', 'i')\"/>]"
+        "[<xsl:value-of select=\"replace('a1b22c', '\\d+', '#')\"/>]"
+        "[<xsl:value-of select=\"replace('john smith', '(\\w+) "
+        "(\\w+)', '$2 $1')\"/>]"
+        "[<xsl:value-of select=\"tokenize('a,b,,c', ',')\"/>]"
+        "[<xsl:value-of select=\"tokenize('  one two  three  ', "
+        "'\\s+')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[true false true][a#b#c][smith john][a b  c][ one two three ]");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
