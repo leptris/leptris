@@ -1,12 +1,22 @@
 ## [Unreleased]
 
-## [1.9.38] - 2026-09-01
+## [1.9.38] - 2026-09-02
 
 ### Fixed
 
-- regex node-arg atomization, single-atomic xsl:sequence; pin #705 ground truth
-
-
+- **The regex trio atomizes node arguments** (#691 comment):
+  `matches(//item[1], …)` returned false — the string-argument
+  helper returned NULL for nodeset results.
+- **Single-item atomic `xsl:sequence` serializes its content**
+  (#685 remainder): a scalar result has count 0, so the item loop
+  never ran and the value vanished.
+- **#705 verified and pinned**: `shallow-skip` / `text-only-copy`
+  descend and match Saxon-HE 12.7 byte-for-byte on every reported
+  shape on current main (the 1.9.36 behavior was fixed by the
+  1.9.37 on-no-match work). Note: Saxon emits EMPTY for the
+  no-template shallow-skip case — the report's `312` expectation
+  for that disposition contradicts Saxon. All four shapes pinned
+  as regression specs.
 
 ## [1.9.37] - 2026-09-01
 
