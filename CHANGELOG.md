@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.36] - 2026-09-01
+
+### Added
+
+- fn-catalog strings/QName/URI slice (#691-D) (xpath)
+
+### Fixed
+
+- contains-token without strtok_r (MSVC CRT lacks it)
+- MSVC TLS spelling for the QName URI channel (__declspec)
+
+
+
 ## [1.9.35] - 2026-09-01
 
 ### Added
