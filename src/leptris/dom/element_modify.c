@@ -1128,7 +1128,31 @@ LeptrisElement leptris_element_append_copy(LeptrisElement parent, LeptrisElement
                 }
             }
         }
-        /* Skip COMMENT and PI nodes for now - they're less common */
+        /* COMMENT and PI children copy too (issue #696 — the copy
+         * loop used to drop them silently at every level). */
+        else if (child_node->type == LEPTRIS_NODE_TYPE_COMMENT) {
+            LeptrisCommentNode* cm = (LeptrisCommentNode*)child;
+            if ((uintptr_t)cm > 0x1000 && cm->content) {
+                LeptrisCommentNode* cc = leptris_comment_create(
+                    cm->content, strlen(cm->content),
+                    leptris_element_get_pool(copy));
+                if (cc)
+                    leptris_element_append_child_internal(copy,
+                                                          (LeptrisNode*)cc);
+            }
+        } else if (child_node->type == LEPTRIS_NODE_TYPE_PI) {
+            LeptrisPINode* pi = (LeptrisPINode*)child;
+            if ((uintptr_t)pi > 0x1000) {
+                LeptrisPINode* pc = leptris_pi_create(
+                    pi->target, pi->target ? strlen(pi->target) : 0,
+                    pi->data ? pi->data : "",
+                    pi->data ? strlen(pi->data) : 0,
+                    leptris_element_get_pool(copy));
+                if (pc)
+                    leptris_element_append_child_internal(copy,
+                                                          (LeptrisNode*)pc);
+            }
+        }
 
         /* CRITICAL FIX: Get next sibling using generic accessor
          * The child variable is declared as LeptrisElement but might actually
