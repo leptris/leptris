@@ -3136,6 +3136,32 @@ TEST(Xslt30, SequenceAndPerformSort) {
         "</ps2></o>");
 }
 
+TEST(Xslt30, FnStringsQNameUri) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/04). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"format-integer(3, '000'), "
+        "format-integer(42, 'a'), format-integer(7, 'I'), "
+        "format-integer(0, 'w')\"/>]"
+        "[<xsl:value-of select=\"contains-token('a b c', 'b'), "
+        "contains-token('a b c', 'B')\"/>]"
+        "[<xsl:value-of select=\"string-join(for $c in "
+        "string-to-codepoints('AB') return "
+        "codepoints-to-string($c), '')\"/>]"
+        "[<xsl:value-of select=\"encode-for-uri('a b&amp;c'), "
+        "iri-to-uri('a b'), escape-html-uri('&lt;a&gt;')\"/>]"
+        "[<xsl:value-of select=\"QName('u', 'p:l'), "
+        "local-name-from-QName(QName('u','p:l')), "
+        "prefix-from-QName(QName('u','p:l')), "
+        "namespace-uri-from-QName(QName('u','p:l'))\"/>]"
+        "[<xsl:value-of select='node-name(//i[1])'/>]"
+        "</xsl:template>",
+        "<r><i a='x'>t</i></r>")),
+        "[003 ap VII zero][true false][AB]"
+        "[a%20b%26c a%20b &amp;lt;a&amp;gt;]"
+        "[p:l l p u][i]");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
