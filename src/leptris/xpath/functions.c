@@ -2091,6 +2091,11 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     /* Node-set functions (5 implemented) */
     xpath_function_registry_register(registry, "count", xpath_func_count, 1, 1);
     xpath_function_registry_register(registry, "id", xpath_func_id, 1, 1);
+
+    /* XPath 2.0/3.1 extension families (TODO.xslt-full 01/02/03):
+     * sequences, math:, the regex trio. */
+    extern void xpath_register_fn31(XPathFunctionRegistry*);
+    xpath_register_fn31(registry);
     xpath_function_registry_register(registry, "local-name", xpath_func_local_name, 0, 1);
     xpath_function_registry_register(registry, "namespace-uri", xpath_func_namespace_uri, 0, 1);
     xpath_function_registry_register(registry, "name", xpath_func_name, 0, 1);
