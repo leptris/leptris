@@ -3402,6 +3402,77 @@ TEST(Xslt30, NamedFunctionReferenceDispatch) {
         "<o>xy</o>");
 }
 
+TEST(Xslt30, FunctionItemMetadataAndHofs) {
+    /* Lane 07B: fn:function-lookup/name/arity, fn:for-each/filter/
+     * fold-left/fold-right, and ? partial application.
+     * Saxon-HE 12.7 ground truth (/tmp/probe9/l07b/{t1,t2}.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $f := function-lookup('concat', 2)"
+        " return $f('a','b')\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>ab</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"if (empty(function-lookup('no-such-fn', 1)))"
+        " then 'EMPTY' else 'GOT'\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>EMPTY</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"function-name(concat#2)\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>fn:concat</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $f := function($x){$x+1}"
+        " return if (empty(function-name($f))) then 'EMPTY' else 'GOT'\""
+        "/></o></xsl:template>",
+        "<r/>")),
+        "<o>EMPTY</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"function-arity(concat#2)\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>2</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"function-arity(function($x,$y){$x})\""
+        "/></o></xsl:template>",
+        "<r/>")),
+        "<o>2</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"for-each(('a','b'),"
+        " function($s){ upper-case($s) })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>A B</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"filter((1 to 6),"
+        " function($n){ $n mod 2 = 0 })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>2 4 6</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"fold-left(1 to 4, 0,"
+        " function($a,$b){ $a + $b })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>10</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"fold-right(1 to 4, 0,"
+        " function($a,$b){ $a - $b })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>-2</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $g := concat('x', ?, 'z')"
+        " return $g('y')\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>xyz</o>");
+}
+
 TEST(Xslt30, InlineFunctionItemsAndCalls) {
     /* Lane 07 first slice: inline function items, dynamic calls,
      * and named function references. Saxon-HE 12.7 ground truth

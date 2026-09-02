@@ -2110,6 +2110,262 @@ static struct leptris_xpath_result* fn_serialize(XPathContext* ctx,
     return out;
 }
 
+/* ---- function items: metadata + HOF combiners (TODO 07B) ---- */
+
+/* Shared call seam (evaluator_operators.c): dispatch a closure
+ * content string with string arguments. */
+extern struct leptris_xpath_result* xpath_call_function_item(
+    XPathContext* ctx, const char* cc, char** argv, size_t argc);
+
+/* Closure content of a function-item argument (first sequence
+ * member's text), or NULL. Caller frees. */
+static char* fn_item_content(XPathContext* ctx, XPathASTNode** args,
+                             size_t i) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
+    if (!r) return NULL;
+    char* out = NULL;
+    if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+        r->value.nodeset_value->count > 0) {
+        out = get_node_text(r->value.nodeset_value->nodes[0]);
+    }
+    xpath_result_free(r);
+    return out;
+}
+
+static int fn_result_truthy(const struct leptris_xpath_result* r) {
+    if (!r) return 0;
+    switch (r->type) {
+        case XPATH_RESULT_BOOLEAN:
+            return r->value.boolean_value;
+        case XPATH_RESULT_NUMBER:
+            return r->value.number_value != 0.0 &&
+                   !isnan(r->value.number_value);
+        case XPATH_RESULT_STRING:
+            return r->value.string_value && r->value.string_value[0];
+        case XPATH_RESULT_NODESET:
+            return r->value.nodeset_value &&
+                   r->value.nodeset_value->count > 0;
+        default:
+            return 0;
+    }
+}
+
+/* fn:function-lookup(name, arity): the named function as an item,
+ * or the empty sequence. The name may carry an fn: prefix (the
+ * XPath 3.x argument is a QName in the fn namespace). */
+static struct leptris_xpath_result* fn_function_lookup(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)n;
+    struct leptris_xpath_result* nr = xpath_evaluate(ctx, args[0]);
+    if (!nr) return NULL;
+    char* name = scalar_str(nr);
+    xpath_result_free(nr);
+    if (!name) return NULL;
+
+    double arity = 0;
+    struct leptris_xpath_result* ar = xpath_evaluate(ctx, args[1]);
+    if (ar) {
+        if (ar->type == XPATH_RESULT_NUMBER) {
+            arity = ar->value.number_value;
+        } else {
+            char* s = scalar_str(ar);
+            if (s) { arity = atof(s); free(s); }
+        }
+        xpath_result_free(ar);
+    }
+
+    const char* bare = name;
+    if (strncmp(bare, "fn:", 3) == 0) bare += 3;
+
+    struct leptris_xpath_result* out = seq_new();
+    if (out) {
+        XPathFunctionDef* def = ctx->function_registry
+            ? xpath_function_registry_get(ctx->function_registry, bare)
+            : NULL;
+        if (def && arity >= (double)def->min_args &&
+            (def->max_args < 0 || arity <= (double)def->max_args)) {
+            char ref[192];
+            snprintf(ref, sizeof(ref), "\x03" "FR%s#%ld", bare,
+                     arity < 0 ? 0 : (long)arity);
+            seq_push_str(out, ref);
+        }
+    }
+    free(name);
+    return out;
+}
+
+/* fn:function-name($f): fn:local-name for named references; the
+ * empty sequence for anonymous closures. */
+static struct leptris_xpath_result* fn_function_name(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)n;
+    char* cc = fn_item_content(ctx, args, 0);
+    struct leptris_xpath_result* out;
+    if (cc && strncmp(cc, "\x03" "FR", 3) == 0) {
+        const char* nm = cc + 3;
+        const char* hash = strchr(nm, '#');
+        size_t len = hash ? (size_t)(hash - nm) : strlen(nm);
+        out = xpath_result_new(XPATH_RESULT_STRING);
+        if (out) {
+            char* buf = LEPTRIS_ALLOC_N(char, len + 4);
+            if (buf) {
+                memcpy(buf, "fn:", 3);
+                memcpy(buf + 3, nm, len);
+                buf[3 + len] = 0;
+                out->value.string_value = buf;
+            }
+        }
+    } else {
+        out = seq_new();
+    }
+    free(cc);
+    return out;
+}
+
+/* fn:function-arity($f): #N for named references; the closure's
+ * parameter count for inline functions. */
+static struct leptris_xpath_result* fn_function_arity(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)n;
+    char* cc = fn_item_content(ctx, args, 0);
+    if (!cc) return NULL;
+    double arity = 0;
+    if (strncmp(cc, "\x03" "FR", 3) == 0) {
+        const char* hash = strchr(cc + 3, '#');
+        arity = hash ? atof(hash + 1) : 0;
+    } else if (strncmp(cc, "\x03" "FN", 3) == 0) {
+        const char* p = cc + 4;
+        const char* pe = strchr(p, '\x02');
+        if (pe && pe > p) {
+            arity = 1;
+            for (const char* q = p; q < pe; q++)
+                if (*q == '\x01') arity++;
+        }
+    }
+    free(cc);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_NUMBER);
+    if (out) out->value.number_value = arity;
+    return out;
+}
+
+/* fn:for-each(sequence, $f) */
+static struct leptris_xpath_result* fn_for_each(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    if (!items) return NULL;
+    char* cc = fn_item_content(ctx, args, 1);
+    struct leptris_xpath_result* out = seq_new();
+    if (cc && out) {
+        for (size_t k = 0; k < cnt; k++) {
+            char* argv[1] = { items[k] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 1);
+            if (r) {
+                char* s = xpath_to_string(r);
+                seq_push_str(out, s ? s : "");
+                free(s);
+                xpath_result_free(r);
+            }
+        }
+    }
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
+/* fn:filter(sequence, $f) — members whose mapped result is truthy */
+static struct leptris_xpath_result* fn_filter(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    if (!items) return NULL;
+    char* cc = fn_item_content(ctx, args, 1);
+    struct leptris_xpath_result* out = seq_new();
+    if (cc && out) {
+        for (size_t k = 0; k < cnt; k++) {
+            char* argv[1] = { items[k] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 1);
+            if (r) {
+                if (fn_result_truthy(r)) seq_push_str(out, items[k]);
+                xpath_result_free(r);
+            }
+        }
+    }
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
+/* fn:fold-left(sequence, zero, $f) — f(acc, item) left to right */
+static struct leptris_xpath_result* fn_fold_left(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    if (!items) return NULL;
+    char* cc = fn_item_content(ctx, args, 2);
+    struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
+    char* acc = zr ? xpath_to_string(zr) : NULL;
+    if (zr) xpath_result_free(zr);
+    if (!acc) acc = leptris_strdup("");
+    if (cc && acc) {
+        for (size_t k = 0; k < cnt; k++) {
+            char* argv[2] = { acc, items[k] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 2);
+            char* ns = r ? xpath_to_string(r) : NULL;
+            if (r) xpath_result_free(r);
+            free(acc);
+            acc = ns ? ns : leptris_strdup("");
+        }
+    }
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(acc); acc = NULL; }
+    if (out) out->value.string_value = acc;
+    else free(acc);
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
+/* fn:fold-right(sequence, zero, $f) — f(item, acc) right to left */
+static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    if (!items) return NULL;
+    char* cc = fn_item_content(ctx, args, 2);
+    struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
+    char* acc = zr ? xpath_to_string(zr) : NULL;
+    if (zr) xpath_result_free(zr);
+    if (!acc) acc = leptris_strdup("");
+    if (cc && acc) {
+        for (size_t k = cnt; k > 0; k--) {
+            char* argv[2] = { items[k - 1], acc };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 2);
+            char* ns = r ? xpath_to_string(r) : NULL;
+            if (r) xpath_result_free(r);
+            free(acc);
+            acc = ns ? ns : leptris_strdup("");
+        }
+    }
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (out) out->value.string_value = acc;
+    else free(acc);
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -2129,6 +2385,14 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "zero-or-one", fn_zero_or_one, 1, 1);
     xpath_function_registry_register(registry, "one-or-more", fn_one_or_more, 1, 1);
     xpath_function_registry_register(registry, "exactly-one", fn_exactly_one, 1, 1);
+
+    xpath_function_registry_register(registry, "function-lookup", fn_function_lookup, 2, 2);
+    xpath_function_registry_register(registry, "function-name", fn_function_name, 1, 1);
+    xpath_function_registry_register(registry, "function-arity", fn_function_arity, 1, 1);
+    xpath_function_registry_register(registry, "for-each", fn_for_each, 2, 2);
+    xpath_function_registry_register(registry, "filter", fn_filter, 2, 2);
+    xpath_function_registry_register(registry, "fold-left", fn_fold_left, 3, 3);
+    xpath_function_registry_register(registry, "fold-right", fn_fold_right, 3, 3);
 
     xpath_function_registry_register(registry, "math:sqrt", fn_sqrt, 1, 1);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
