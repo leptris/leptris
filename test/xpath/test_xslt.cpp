@@ -3593,5 +3593,23 @@ TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
         "</xsl:template>",
         "<r/>")),
         "(compile-failed)");
+    /* Saxon-HE 12.7: XPST0003 "switch is not allowed in XPath"
+     * (XQuery-only) — our loud rejection is oracle parity. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"switch (2) { case 1 return 'one' "
+        "default return 'other' }\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "(compile-failed)");
+    /* 3.1 string constructors are XPath 4.0: Saxon-HE 12.7 rejects
+     * (XPST0003 "not configured to allow use of XPath 4.0 syntax")
+     * — parity until the Saxon-13 probe. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"`v={count(//i)}`\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "(compile-failed)");
 }
 

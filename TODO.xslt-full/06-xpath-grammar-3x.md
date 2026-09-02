@@ -49,3 +49,15 @@ XPATH_OP_SWITCH already exists in the enum + compiler fallback list;
 verify what's implemented and spec the gaps) and item 4 (3.1 string
 constructors `` `...{expr}...` ``; 'otherwise'/'||' → probe Saxon 13
 first). Then lane 08.
+
+## Status 2026-09-02 (v1.9.50) — LANE CLOSED
+
+Items 3-4 resolved by oracle verdicts (pinned in
+RejectsXQueryOnlySyntaxInExpressions):
+- switch: Saxon-HE 12.7 XPST0003 "switch is not allowed in XPath"
+  (XQuery-only). Our loud rejection = parity. XPATH_OP_SWITCH stays
+  for the XQuery lane (11/12).
+- string constructors + otherwise/||: XPath 4.0 — Saxon 12.7 rejects
+  (XPST0003 4.0 syntax). Deferred to the Saxon-13 probe (item 4's
+  own directive); rejecting now is parity.
+Lane 06 COMPLETE (items 1-2 shipped v1.9.49/v1.9.50). Next: lane 08.
