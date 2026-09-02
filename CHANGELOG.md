@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.54] - 2026-09-02
+
+### Added
+
+- postfix lookup ?key / ?integer (lane 08 tail) (xpath)
+
+
+
 ## [1.9.53] - 2026-09-02
 
 ### Added
