@@ -828,6 +828,42 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             next && next->type == TOK_DOLLAR) {
             /* Fall through to filter expression */
         }
+        /* 3.1 map constructor `map { k: v, ... }`. */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 current_token(parser)->value_len == 3 &&
+                 memcmp(current_token(parser)->value, "map", 3) == 0 &&
+                 next && next->type == TOK_LBRACE) {
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* mc = ast_node_new(XPATH_AST_OPERATOR);
+            if (!mc) return NULL;
+            mc->number_value = (double)XPATH_OP_MAP_CONSTRUCTOR;
+            while (!current_token_is(parser, TOK_RBRACE)) {
+                XPathASTNode* k = parse_expr(parser);
+                if (!k || !current_token_is(parser, TOK_COLON)) {
+                    ast_node_free(k);
+                    ast_node_free(mc);
+                    return NULL;
+                }
+                advance_token(parser);
+                XPathASTNode* v = parse_expr(parser);
+                if (!v) {
+                    ast_node_free(k);
+                    ast_node_free(mc);
+                    return NULL;
+                }
+                ast_node_add_child(mc, k);
+                ast_node_add_child(mc, v);
+                if (current_token_is(parser, TOK_COMMA)) advance_token(parser);
+                else break;
+            }
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(mc);
+                return NULL;
+            }
+            advance_token(parser);
+            return mc;
+        }
         /* If followed by '(', it's a function call - fall through to filter expression */
         else if (next && next->type == TOK_LPAREN) {
             /* Fall through to filter expression */

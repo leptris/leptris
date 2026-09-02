@@ -353,6 +353,56 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return body;
     }
 
+    /* 3.1 map constructor `map { k: v, ... }` (TODO.xslt-full/08):
+     * value-level representation — ONE synthetic text node whose
+     * content encodes the entries ("\x03MAP" + "\x02"key"\x01"value
+     * per entry, insertion order), flowing through the existing
+     * NODESET channel. map:* accessors decode it. */
+    if (op == XPATH_OP_MAP_CONSTRUCTOR) {
+        size_t cap = 32, len = 0;
+        char* buf = (char*)malloc(cap);
+        if (!buf) return NULL;
+        memcpy(buf, "\x03MAP", 4);
+        len = 4;
+        for (size_t i = 0; i + 1 < ast->child_count; i += 2) {
+            struct leptris_xpath_result* kr =
+                evaluate_expr(ctx, ast->children[i]);
+            char* k = kr ? xpath_to_string(kr) : NULL;
+            if (kr) xpath_result_free(kr);
+            struct leptris_xpath_result* vr =
+                evaluate_expr(ctx, ast->children[i + 1]);
+            char* v = vr ? xpath_to_string(vr) : NULL;
+            if (vr) xpath_result_free(vr);
+            size_t kn = k ? strlen(k) : 0, vn = v ? strlen(v) : 0;
+            while (len + kn + vn + 3 > cap) {
+                cap *= 2;
+                char* nb = (char*)realloc(buf, cap);
+                if (!nb) { free(buf); free(k); free(v); return NULL; }
+                buf = nb;
+            }
+            buf[len++] = '\x02';
+            if (kn) { memcpy(buf + len, k, kn); len += kn; }
+            buf[len++] = '\x01';
+            if (vn) { memcpy(buf + len, v, vn); len += vn; }
+            free(k);
+            free(v);
+        }
+        buf[len] = '\0';
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) { free(buf); return NULL; }
+        out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
+        XPathTextNode* tn = synth_text(buf, len);
+        free(buf);
+        if (!tn) { xpath_nodeset_free(out); return NULL; }
+        xpath_nodeset_add(out, tn);
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!result) { xpath_nodeset_free(out); return NULL; }
+        result->value.nodeset_value = out;
+        return result;
+    }
+
     /* XPath 3.0 simple map `L ! R`: R runs once per item of L with
      * the context item/position/size set to that item's slot;
      * results concatenate in order (members stringify, like the
