@@ -1173,3 +1173,110 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
     xpath_result_free(right);
     return result;
 }
+/* Lane 07B: call a function item by its closure content with N
+ * arguments given as strings — the HOF combiners (for-each,
+ * filter, fold-left, fold-right) and fn:function-lookup dispatch
+ * go through here. cc = the synthetic "\x03FRname#arity" or
+ * "\x03FN\x02params\x02hex" content; argv strings are borrowed for
+ * the duration of the call. */
+struct leptris_xpath_result* xpath_call_function_item(
+    XPathContext* ctx, const char* cc, char** argv, size_t argc) {
+    if (!cc) return NULL;
+
+    if (strncmp(cc, "\x03" "FR", 3) == 0) {
+        char name[128];
+        snprintf(name, sizeof(name), "%s", cc + 3);
+        char* hash = strchr(name, '#');
+        if (hash) *hash = 0;
+
+        /* String-literal argument nodes live on the stack and borrow
+         * argv; evaluate() strdups ->value, so nothing outlives the
+         * call. */
+        XPathASTNode argn[16];
+        XPathASTNode* child_arr[16];
+        size_t na = argc < 16 ? argc : 16;
+        for (size_t i = 0; i < na; i++) {
+            memset(&argn[i], 0, sizeof(argn[i]));
+            argn[i].type = XPATH_AST_STRING;
+            argn[i].value = argv[i];
+            child_arr[i] = &argn[i];
+        }
+        XPathASTNode fc;
+        memset(&fc, 0, sizeof(fc));
+        fc.type = XPATH_AST_FUNCTION_CALL;
+        fc.value = name;
+        fc.children = child_arr;
+        fc.child_count = na;
+        return evaluate_function_call_inline(ctx, &fc);
+    }
+
+    if (strncmp(cc, "\x03" "FN", 3) != 0) return NULL;
+
+    const char* p = cc + 4;
+    const char* pe = strchr(p, '\x02');
+    if (!pe || pe[1] == 0) return NULL;
+    XPathASTNode* body =
+        (XPathASTNode*)(uintptr_t)strtoull(pe + 1, NULL, 16);
+
+    XPathVariableSet* scratch = NULL;
+    if (!ctx->variable_set) {
+        scratch = xpath_variable_set_new();
+        if (!scratch) return NULL;
+        ctx->variable_set = scratch;
+    }
+    const char* param = p;
+    size_t ai = 0;
+    size_t bound = 0;
+    while (param < pe) {
+        const char* ne = strchr(param, '\x01');
+        if (!ne || ne > pe) ne = pe;
+        char pname[128];
+        size_t pn = (size_t)(ne - param);
+        if (pn >= sizeof(pname)) pn = sizeof(pname) - 1;
+        memcpy(pname, param, pn);
+        pname[pn] = 0;
+
+        XPathNodeSet* one = xpath_nodeset_new();
+        if (!one) break;
+        /* set_remove frees the nodeset — synthetic members must be
+         * owned (Linux LSan). */
+        one->owns_synthetic_text = 1;
+        if (ai < argc) {
+            XPathTextNode* tn = synth_text(argv[ai], strlen(argv[ai]));
+            if (tn) xpath_nodeset_add(one, tn);
+        }
+        XPathVariable* var = xpath_variable_set_add(
+            ctx->variable_set, pname, XPATH_VAR_TYPE_NODE_SET);
+        if (var) {
+            xpath_variable_set_nodeset(var, one);
+            bound++;
+        } else {
+            xpath_nodeset_free(one);
+        }
+        if (*ne != '\x01') break;
+        param = ne + 1;
+        ai++;
+    }
+
+    struct leptris_xpath_result* out = body ? evaluate_expr(ctx, body)
+                                            : NULL;
+
+    param = p;
+    while (bound--) {
+        const char* ne = strchr(param, '\x01');
+        if (!ne || ne > pe) ne = pe;
+        char pname[128];
+        size_t pn = (size_t)(ne - param);
+        if (pn >= sizeof(pname)) pn = sizeof(pname) - 1;
+        memcpy(pname, param, pn);
+        pname[pn] = 0;
+        xpath_variable_set_remove(ctx->variable_set, pname);
+        if (*ne != '\x01') break;
+        param = ne + 1;
+    }
+    if (scratch) {
+        ctx->variable_set = NULL;
+        xpath_variable_set_free(scratch);
+    }
+    return out;
+}

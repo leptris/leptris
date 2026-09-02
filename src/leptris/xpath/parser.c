@@ -1648,9 +1648,32 @@ static XPathASTNode* parse_function_call(XPathParser* parser, const char* name, 
         return NULL;
     }
 
-    /* Parse arguments */
+    /* Parse arguments. A leading `?` is a partial-application
+     * placeholder: concat('x', ?, 'z') desugars to the inline fn
+     * function($_1){ concat('x', $_1, 'z') } — the placeholder
+     * becomes a variable reference bound at dynamic-call time. */
+    size_t holes = 0;
     if (!current_token_is(parser, TOK_RPAREN)) {
         do {
+            if (current_token_is(parser, TOK_QUESTION)) {
+                advance_token(parser);
+                /* Hole names cannot collide with user variables
+                 * (NCNames exclude '%') and must not embed '\x01' —
+                 * that byte separates the INLINE_FN params string. */
+                char pname[16];
+                snprintf(pname, sizeof(pname), "%%%zu", holes + 1);
+                XPathASTNode* v =
+                    ast_node_new(XPATH_AST_VARIABLE_REFERENCE);
+                if (v) v->value = leptris_strdup(pname);
+                if (!v || !v->value) {
+                    ast_node_free(v);
+                    ast_node_free(node);
+                    return NULL;
+                }
+                ast_node_add_child(node, v);
+                holes++;
+                continue;
+            }
             XPathASTNode* arg = parse_expr(parser);
             if (!arg) {
                 ast_node_free(node);
@@ -1665,7 +1688,28 @@ static XPathASTNode* parse_function_call(XPathParser* parser, const char* name, 
         return NULL;
     }
 
-    return node;
+    if (!holes) return node;
+
+    /* Re-wrap the call as an inline function over the hole params
+     * (joined with '\x01', matching the INLINE_FN format). */
+    char params[128];
+    size_t plen = 0;
+    for (size_t i = 1; i <= holes; i++) {
+        int w = snprintf(params + plen, sizeof(params) - plen,
+                         i > 1 ? "\x01%%%zu" : "%%%zu", i);
+        if (w < 0 || (size_t)w >= sizeof(params) - plen) {
+            ast_node_free(node);
+            return NULL;
+        }
+        plen += (size_t)w;
+    }
+    XPathASTNode* fn = ast_node_new(XPATH_AST_OPERATOR);
+    if (!fn) { ast_node_free(node); return NULL; }
+    fn->number_value = (double)XPATH_OP_INLINE_FN;
+    fn->value = leptris_strdup(params);
+    if (!fn->value) { ast_node_free(fn); ast_node_free(node); return NULL; }
+    ast_node_add_child(fn, node);
+    return parse_postfix_ops(parser, fn);
 }
 
 /* ============================================================================
