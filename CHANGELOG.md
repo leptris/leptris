@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.59] - 2026-09-02
+
+### Fixed
+
+- named function references dispatch through the childless guard
+
+
+
 ## [1.9.58] - 2026-09-02
 
 ### Added
