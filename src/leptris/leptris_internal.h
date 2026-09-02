@@ -678,7 +678,11 @@ typedef enum {
     XPATH_OP_TREAT,
     /* 3.1 map constructor `map { k: v, ... }`: children alternate
      * key/value; the value is a synthetic encoded map node. */
-    XPATH_OP_MAP_CONSTRUCTOR
+    XPATH_OP_MAP_CONSTRUCTOR,
+    /* 3.1 square array constructor `[ a, b, ... ]`: one child per
+     * member; the value rides the map representation with
+     * positional keys "1".."n". */
+    XPATH_OP_ARRAY_CONSTRUCTOR
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope

@@ -34,6 +34,11 @@ XPathTextNode* xpath_synth_text(const char* content, size_t len) {
 }
 #define synth_text xpath_synth_text
 
+/* functions_ext31.c — shared value-level map builder (08). */
+void* xpath_map_builder_new(void);
+void xpath_map_builder_add(void* b, const char* k, const char* v);
+struct leptris_xpath_result* xpath_map_builder_finish(void* b);
+
 /* Full-lifetime copy of a nodeset: pointers are shared for document
  * nodes, but synthetic text members are DEEP-copied when the source
  * owns them — the copy outlives the source's storage (let bindings
@@ -351,6 +356,26 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             body = NULL;
         }
         return body;
+    }
+
+    /* 3.1 square array constructor `[ a, b, ... ]` (08C): members
+     * in order on the shared map representation with positional
+     * keys — every array:* accessor is the map operation with a
+     * formatted index. */
+    if (op == XPATH_OP_ARRAY_CONSTRUCTOR) {
+        void* b = xpath_map_builder_new();
+        if (!b) return NULL;
+        for (size_t i = 0; i < ast->child_count; i++) {
+            struct leptris_xpath_result* vr =
+                evaluate_expr(ctx, ast->children[i]);
+            char* v = vr ? xpath_to_string(vr) : NULL;
+            if (vr) xpath_result_free(vr);
+            char key[24];
+            snprintf(key, sizeof(key), "%zu", i + 1);
+            xpath_map_builder_add(b, key, v ? v : "");
+            free(v);
+        }
+        return xpath_map_builder_finish(b);
     }
 
     /* 3.1 map constructor `map { k: v, ... }` (TODO.xslt-full/08):

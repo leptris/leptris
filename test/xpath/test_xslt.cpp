@@ -3373,6 +3373,25 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, FnArrayConstructorAndAccessors) {
+    /* Lane 08C: the square array constructor + size/get/append/put.
+     * Saxon-HE 12.7 ground truth (/tmp/probe9/arr8.xsl); value-level
+     * arrays ride the map representation with positional keys. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:array='http://www.w3.org/2005/xpath-functions/array'>"
+        "<a><xsl:value-of select=\"array:size([ 'a', 'b', 3 ])\"/></a>"
+        "<b><xsl:value-of select=\"array:get([ 'a', 'b', 3 ], 2)\"/></b>"
+        "<c><xsl:value-of select=\"array:get(array:append("
+        "[ 'a', 'b' ], 'c'), 3)\"/></c>"
+        "<d><xsl:value-of select=\"array:get(array:put([ 'a', 'b' ],"
+        " 2, 'B'), 2)\"/></d>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:array=\"http://www.w3.org/2005/xpath-functions/array\">"
+        "<a>3</a><b>b</b><c>c</c><d>B</d></o>");
+}
+
 TEST(Xslt30, FnMapPutRemoveMergeAndXslMap) {
     /* Lane 08B: map:put/remove/merge + the xsl:map instruction
      * (xsl:map-entry @key is an EXPRESSION — Saxon-HE 12.7 ground

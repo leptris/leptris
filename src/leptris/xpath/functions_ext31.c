@@ -1536,6 +1536,114 @@ static struct leptris_xpath_result* fn_map_merge(XPathContext* ctx,
     return out;
 }
 
+/* ---- arrays (TODO.xslt-full/08C) ----
+ * Value-level arrays ride the map representation with positional
+ * keys "1".."n": every accessor is the map operation with a
+ * formatted index — one representation, two vocabularies. */
+
+/* Shared lookup core extracted from fn_map_get: evaluates args[0],
+ * returns the entry value for `key` (malloc'd "" when absent). */
+static char* map_lookup_core(XPathContext* ctx, XPathASTNode** args,
+                             const char* key) {
+    char* val = NULL;
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+        r->value.nodeset_value->count > 0) {
+        XPathTextNode* tn =
+            (XPathTextNode*)r->value.nodeset_value->nodes[0];
+        if (tn && tn->content &&
+            strncmp(tn->content, "\x03MAP", 4) == 0) {
+            const char* p = tn->content + 4;
+            while (*p == '\x02') {
+                const char* ke = strchr(p + 1, '\x01');
+                if (!ke) break;
+                const char* ve = ke + 1;
+                const char* en = ve;
+                while (*en && *en != '\x02') en++;
+                if (key && (size_t)(ke - (p + 1)) == strlen(key) &&
+                    memcmp(p + 1, key, strlen(key)) == 0) {
+                    val = LEPTRIS_ALLOC_N(char, (size_t)(en - ve) + 1);
+                    if (val) {
+                        memcpy(val, ve, (size_t)(en - ve));
+                        val[en - ve] = '\0';
+                    }
+                    break;
+                }
+                p = en;
+            }
+        }
+    }
+    if (r) leptris_xpath_result_free(r);
+    return val;
+}
+
+static struct leptris_xpath_result* fn_array_get(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    long idx = 1;
+    struct leptris_xpath_result* ir = xpath_evaluate(ctx, args[1]);
+    if (ir) {
+        idx = (long)leptris_xpath_result_number(ir);
+        leptris_xpath_result_free(ir);
+    }
+    char key[24];
+    snprintf(key, sizeof(key), "%ld", idx);
+    char* val = map_lookup_core(ctx, args, key);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (out) out->value.string_value = val ? val : leptris_strdup("");
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_array_append(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, &e);
+    char key[24];
+    snprintf(key, sizeof(key), "%zu", e.n + 1);
+    char* v = re_str_arg(ctx, args, 1);
+    map_entries_push(&e, key, strlen(key), v ? v : "",
+                     v ? strlen(v) : 0);
+    free(v);
+    struct leptris_xpath_result* out = xpath_map_value(&e);
+    map_entries_free(&e);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_array_put(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    long idx = 1;
+    struct leptris_xpath_result* ir = xpath_evaluate(ctx, args[1]);
+    if (ir) {
+        idx = (long)leptris_xpath_result_number(ir);
+        leptris_xpath_result_free(ir);
+    }
+    char key[24];
+    snprintf(key, sizeof(key), "%ld", idx);
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, &e);
+    char* v = re_str_arg(ctx, args, 2);
+    int replaced = 0;
+    for (size_t i = 0; i < e.n; i++) {
+        if (strcmp(e.k[i], key) == 0) {
+            free(e.v[i]);
+            e.v[i] = v ? v : leptris_strdup("");
+            v = NULL;
+            replaced = 1;
+            break;
+        }
+    }
+    if (!replaced)
+        map_entries_push(&e, key, strlen(key), v ? v : "",
+                         v ? strlen(v) : 0);
+    free(v);
+    struct leptris_xpath_result* out = xpath_map_value(&e);
+    map_entries_free(&e);
+    (void)n;
+    return out;
+}
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -1620,4 +1728,9 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "map:put", fn_map_put, 3, 3);
     xpath_function_registry_register(registry, "map:remove", fn_map_remove, 2, 2);
     xpath_function_registry_register(registry, "map:merge", fn_map_merge, 1, 1);
+    /* Arrays (08C) — canonical array: prefix, over the map repr. */
+    xpath_function_registry_register(registry, "array:size", fn_map_size, 1, 1);
+    xpath_function_registry_register(registry, "array:get", fn_array_get, 2, 2);
+    xpath_function_registry_register(registry, "array:append", fn_array_append, 2, 2);
+    xpath_function_registry_register(registry, "array:put", fn_array_put, 3, 3);
 }
