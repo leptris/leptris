@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- named function references dispatch through the childless guard
+- **Named function references dispatch** (TODO.xslt-full/07): `name#arity`
+  nodes carry no children, so `evaluate_operator`'s opening arity guard
+  rejected them before any operator check — every `$f := string-join#1`
+  dispatch failed "upstream" with no diagnostic. The FR synthetic-node
+  construction now runs before the guard, and the shadowed duplicate
+  block is gone. Also implements the XPath 3.1 one-arg `string-join`
+  (separator defaults to the zero-length string), which `string-join#1`
+  dispatch lands in: `$f(('a','b'))` → `ab`. Spec
+  `Xslt30.NamedFunctionReferenceDispatch` (string-join#1, concat#2),
+  Saxon-HE 12.7 oracle.
 
 
 
