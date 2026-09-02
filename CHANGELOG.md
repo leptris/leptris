@@ -4,7 +4,16 @@
 
 ### Added
 
-- xs: atomic constructor functions (lane 06) (xpath)
+- **`xs:` atomic constructor functions** (TODO.xslt-full/06, the
+  roadmap's constructor surface): `xs:string` / `xs:anyURI` take the
+  argument's string value, `xs:double` / `xs:decimal` convert through
+  `number()`, `xs:integer` truncates toward zero, and `xs:boolean`
+  follows the XPath `boolean()` rules (NaN casts to false). The XSD
+  namespace joins the extension-function namespace list so
+  `xs:`-prefixed calls resolve in any expression. Saxon-HE 12.7
+  ground truth: `xs:integer('42')+1` = 43, `xs:double('1.5')*2` = 3,
+  `xs:boolean('true')` = true, `xs:string(7)` = "7". Next in the
+  lane: `instance of` / `castable as` / `cast as` / `treat as`.
 
 
 
