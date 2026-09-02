@@ -813,6 +813,28 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
         return parse_location_path(parser);
     }
 
+    /* 3.1 square array constructor `[ a, b, ... ]` — a leading '['
+     * can only be this (predicates need a preceding expression). */
+    if (current_token_is(parser, TOK_LBRACKET)) {
+        advance_token(parser);
+        XPathASTNode* ac = ast_node_new(XPATH_AST_OPERATOR);
+        if (!ac) return NULL;
+        ac->number_value = (double)XPATH_OP_ARRAY_CONSTRUCTOR;
+        while (!current_token_is(parser, TOK_RBRACKET)) {
+            XPathASTNode* m = parse_expr(parser);
+            if (!m) { ast_node_free(ac); return NULL; }
+            ast_node_add_child(ac, m);
+            if (current_token_is(parser, TOK_COMMA)) advance_token(parser);
+            else break;
+        }
+        if (!current_token_is(parser, TOK_RBRACKET)) {
+            ast_node_free(ac);
+            return NULL;
+        }
+        advance_token(parser);
+        return ac;
+    }
+
     /* Check for relative paths starting with NCName/QName */
     if (current_token_is(parser, TOK_NCNAME) || current_token_is(parser, TOK_QNAME)) {
         XPathToken* next = peek_token(parser, 1);
