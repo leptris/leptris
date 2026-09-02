@@ -4,7 +4,17 @@
 
 ### Added
 
-- map:put/remove/merge + xsl:map (lane 08B; 09 closes) (xslt)
+- **`map:put` / `map:remove` / `map:merge` + `xsl:map`** (TODO.xslt-full/08
+  second slice) — and with `xsl:map` landing, **TODO.xslt-full/09 is fully
+  complete**. `map:put` replaces or appends; `map:remove` drops a key;
+  `map:merge` concatenates a sequence of maps (last wins on duplicate keys).
+  `xsl:map` + `xsl:map-entry` build the value from an expression `@key`
+  (Saxon-HE 12.7: `key="'k'"` — a bare name is a path) with `@select` or
+  content values; a variable whose content is a lone `xsl:map` binds the map
+  value. One representation authority now serves the constructor, `xsl:map`,
+  and every combiner (shared entry-list encode/decode + builder seam).
+  Includes a leak fix caught by the Linux CI ASAN leg (`map:merge`'s
+  destination entries). Next in the lane: arrays and the JSON family.
 
 ### Fixed
 
