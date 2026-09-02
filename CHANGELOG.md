@@ -4,7 +4,21 @@
 
 ### Added
 
-- inline function items + dynamic calls (lane 07 slice) (xpath)
+- **Inline function items + dynamic calls** (TODO.xslt-full/07 first
+  slice): `function($x){...}` closures — immediate calls
+  (`function($x){$x+1}(41)` → 42), let-bound calls, and multi-param
+  dispatch (`function($a,$b){$a*10+$b}` → 42). Value-level: the
+  closure rides one synthetic node with the body AST hex-encoded;
+  dynamic calls bind params through the FOR-discipline variable
+  sets. Two bug classes fixed en route, both recorded: C hex-escape
+  greed (`"\x03FN"` lexed `0x3F`+`'N'` — `F` is a hex digit; markers
+  now use string-literal concatenation) and NUL-bearing pointer bytes
+  truncated by the let machinery's strlen-wise deep copy (heap
+  overflow; hex encoding is NUL-safe). The param-binding nodes now
+  own their synthetic members (`set_remove` frees the nodeset — the
+  48-byte Linux-LSan leak macOS ASAN cannot see). `name#arity` parses
+  but its dispatch is next-window work (TODO 07). Saxon-HE 12.7
+  ground truth; spec RED first.
 
 ### Fixed
 
