@@ -4,8 +4,20 @@
 
 ### Added
 
-- parse-json producing map/array values (lane 08D) (xpath)
-- square array constructor + array:size/get/append/put (lane 08C) (xpath)
+- **Square array constructor + `array:size/get/append/put`**
+  (TODO.xslt-full/08C): value-level arrays ride the map
+  representation with positional keys — one representation, two
+  vocabularies; every accessor is the map operation with a formatted
+  index. A leading `[` in an expression can only be the constructor.
+  Saxon-HE 12.7 ground truth: size=3, get(2)='b', append(3)='c',
+  put(2)='B'.
+- **`parse-json`** (08D): a compact recursive-descent JSON parser
+  producing map/array values usable directly by the accessors — root
+  containers parse their members straight into the result (the
+  wrap-then-unwrap first cut corrupted delimiter scans: a 2-member
+  object reported size 4). Flat maps/arrays are exact; re-building
+  nested containers is the documented v1 limit. Saxon ground truth:
+  get('b')='beta', array:get(2)=20, size=2.
 
 
 
