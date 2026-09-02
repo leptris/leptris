@@ -534,6 +534,24 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "map") == 0) {
+        /* 3.0 §18: children are xsl:map-entry declarations. */
+        XsltInstr* in = instr_new(XSLT_INSTR_MAP);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "map-entry") == 0) {
+        /* §18: @key is an EXPRESSION (Saxon-HE 12.7 verified:
+         * key="'k'" — a bare name would be a path). Value: @select
+         * or the content. */
+        XsltInstr* in = instr_new(XSLT_INSTR_MAP_ENTRY);
+        if (!in) return NULL;
+        in->test = compile_attr_sp(sp, e, "key");
+        in->select = compile_attr_sp(sp, e, "select");
+        in->child = parse_content(sp, e);
+        return in;
+    }
 
     if (strcmp(local, "text") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_TEXT);
