@@ -4,7 +4,22 @@
 
 ### Added
 
-- function-item metadata, HOF combiners, partial application
+- **Function-item metadata + HOF combiners + partial application**
+  (TODO.xslt-full/07 slice B): `fn:function-lookup(name, arity)`
+  returns the named function as an item (fn: prefix tolerated,
+  arity validated against the registry) or the empty sequence;
+  `fn:function-name` gives `fn:local-name` for named references and
+  the empty sequence for anonymous closures; `fn:function-arity`
+  reads `#N` or counts the closure's parameters. `fn:for-each`,
+  `fn:filter`, `fn:fold-left`, `fn:fold-right` iterate sequences
+  through a new shared call seam (`xpath_call_function_item`) that
+  dispatches named references and inline closures alike. `?`
+  partial application desugars at parse time — `concat('x', ?, 'z')`
+  becomes `function($%1){ concat('x', $%1, 'z') }` (hole names use
+  `%N`: NCNames exclude `%`, and `\x01` would collide with the
+  closure params separator). Spec
+  `Xslt30.FunctionItemMetadataAndHofs` (11 cases), Saxon-HE 12.7
+  oracle.
 
 
 
