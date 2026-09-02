@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.45] - 2026-09-02
+
+### Added
+
+- xsl:evaluate with-params, xsl:merge, next-iteration chaining spec (xslt)
+
+
+
 ## [1.9.44] - 2026-09-02
 
 ### Added
