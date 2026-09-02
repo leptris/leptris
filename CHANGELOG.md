@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.57] - 2026-09-02
+
+### Added
+
+- fn:serialize with method json (lane 08 closes) (xpath)
+
+
+
 ## [1.9.56] - 2026-09-02
 
 ### Added
