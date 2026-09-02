@@ -4,7 +4,21 @@
 
 ### Added
 
-- xsl:evaluate with-params, xsl:merge, next-iteration chaining spec (xslt)
+- **`xsl:evaluate` with-params** (3.0 §14.3.2): child `xsl:with-param`
+  bindings are visible to the dynamic evaluation only — `@xpath`'s own
+  evaluation keeps the outer bindings (Saxon-HE 12.7 verified). Bindings
+  now go through `xslt_push_var` so the eval varset cache sees them; a
+  raw variable link left `$p` resolving as unknown and aborted the
+  transform. `xsl:evaluate`'s children are parsed at all now (they were
+  silently dropped).
+- **`xsl:merge`** (3.0 §14.3): full outer join of every `xsl:merge-source`
+  on the composite `xsl:merge-key` — stable sort with selection-order
+  tiebreak, the first key's `@order` governs the composite.
+  `current-merge-key()` and `current-merge-group(name)` are served
+  through the exec bridge next to `current-group()`. v1: `@select`
+  sources, string keys.
+- `xsl:next-iteration` with-param rebinding verified and pinned by spec
+  (param-chained sum 1..4 = 10).
 
 
 
