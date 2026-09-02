@@ -1220,6 +1220,141 @@ static struct leptris_xpath_result* fn_xs_boolean(XPathContext* ctx,
 
 extern XPathTextNode* xpath_synth_text(const char* content, size_t len);
 
+/* Entry list + shared encoder — the ONE representation authority
+ * for value-level maps (constructor, xsl:map, and the map:*
+ * combiners all go through it). */
+typedef struct {
+    char** k;
+    char** v;
+    size_t n, cap;
+} MapEntries;
+
+static void map_entries_push(MapEntries* e, const char* k, size_t kn,
+                             const char* v, size_t vn) {
+    if (e->n == e->cap) {
+        e->cap = e->cap ? e->cap * 2 : 8;
+        e->k = (char**)realloc(e->k, e->cap * sizeof(char*));
+        e->v = (char**)realloc(e->v, e->cap * sizeof(char*));
+        if (!e->k || !e->v) { e->n = 0; e->cap = 0; return; }
+    }
+    e->k[e->n] = LEPTRIS_ALLOC_N(char, kn + 1);
+    e->v[e->n] = LEPTRIS_ALLOC_N(char, vn + 1);
+    if (!e->k[e->n] || !e->v[e->n]) return;
+    if (kn) memcpy(e->k[e->n], k, kn);
+    e->k[e->n][kn] = '\0';
+    if (vn) memcpy(e->v[e->n], v, vn);
+    e->v[e->n][vn] = '\0';
+    e->n++;
+}
+
+static void map_entries_free(MapEntries* e) {
+    for (size_t i = 0; i < e->n; i++) {
+        if (e->k) free(e->k[i]);
+        if (e->v) free(e->v[i]);
+    }
+    free(e->k);
+    free(e->v);
+    e->k = e->v = NULL;
+    e->n = e->cap = 0;
+}
+
+/* Decode ONE map node's content (after the "\x03MAP" marker). */
+static void map_entries_decode(MapEntries* e, const char* p) {
+    while (p && *p == '\x02') {
+        const char* ke = strchr(p + 1, '\x01');
+        if (!ke) break;
+        const char* ve = ke + 1;
+        const char* en = ve;
+        while (*en && *en != '\x02') en++;
+        map_entries_push(e, p + 1, (size_t)(ke - (p + 1)),
+                         ve, (size_t)(en - ve));
+        p = en;
+    }
+}
+
+/* Evaluate argument 0 into entries: a single map node, or a
+ * sequence of map nodes (map:merge input). */
+static void map_entries_arg(XPathContext* ctx, XPathASTNode** args,
+                            MapEntries* e) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    if (!r) return;
+    if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+        for (size_t i = 0; i < r->value.nodeset_value->count; i++) {
+            XPathTextNode* tn =
+                (XPathTextNode*)r->value.nodeset_value->nodes[i];
+            if (tn && tn->content &&
+                strncmp(tn->content, "\x03MAP", 4) == 0)
+                map_entries_decode(e, tn->content + 4);
+        }
+    }
+    leptris_xpath_result_free(r);
+}
+
+/* Encode entries into the map representation string ("\x03MAP" +
+ * per entry "\x02"key"\x01"value). Returns malloc'd content. */
+char* xpath_map_encode(const MapEntries* e) {
+    size_t cap = 32, len = 4;
+    char* buf = (char*)malloc(cap);
+    if (!buf) return NULL;
+    memcpy(buf, "\x03MAP", 4);
+    for (size_t i = 0; i < e->n; i++) {
+        size_t kn = strlen(e->k[i]), vn = strlen(e->v[i]);
+        while (len + kn + vn + 3 > cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(buf, cap);
+            if (!nb) { free(buf); return NULL; }
+            buf = nb;
+        }
+        buf[len++] = '\x02';
+        if (kn) { memcpy(buf + len, e->k[i], kn); len += kn; }
+        buf[len++] = '\x01';
+        if (vn) { memcpy(buf + len, e->v[i], vn); len += vn; }
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+/* Encode entries into the map VALUE (nodeset of one synthetic
+ * text node) — the shape map:* results and xsl:map produce. */
+struct leptris_xpath_result* xpath_map_value(const MapEntries* e) {
+    char* content = xpath_map_encode(e);
+    if (!content) return NULL;
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) { free(content); return NULL; }
+    out->owns_synthetic_text = 1;
+    out->is_sequence = 1;
+    XPathTextNode* tn = xpath_synth_text(content, strlen(content));
+    free(content);
+    if (!tn) { xpath_nodeset_free(out); return NULL; }
+    xpath_nodeset_add(out, tn);
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) { xpath_nodeset_free(out); return NULL; }
+    r->value.nodeset_value = out;
+    return r;
+}
+
+/* Incremental builder over the shared representation — the XSLT
+ * exec's xsl:map seam (entries arrive one instruction at a time). */
+void* xpath_map_builder_new(void) {
+    MapEntries* e = (MapEntries*)calloc(1, sizeof(*e));
+    return e;
+}
+
+void xpath_map_builder_add(void* b, const char* k, const char* v) {
+    MapEntries* e = (MapEntries*)b;
+    if (!e || !k) return;
+    map_entries_push(e, k, strlen(k), v ? v : "", v ? strlen(v) : 0);
+}
+
+struct leptris_xpath_result* xpath_map_builder_finish(void* b) {
+    MapEntries* e = (MapEntries*)b;
+    if (!e) return NULL;
+    struct leptris_xpath_result* r = xpath_map_value(e);
+    map_entries_free(e);
+    free(e);
+    return r;
+}
+
 static struct leptris_xpath_result* fn_map_get(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* key = re_str_arg(ctx, args, 1);
@@ -1333,6 +1468,72 @@ static struct leptris_xpath_result* fn_map_contains(XPathContext* ctx,
     return out;
 }
 
+static struct leptris_xpath_result* fn_map_put(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* key = re_str_arg(ctx, args, 1);
+    char* val = (n >= 3) ? re_str_arg(ctx, args, 2) : leptris_strdup("");
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, &e);
+    int replaced = 0;
+    for (size_t i = 0; i < e.n; i++) {
+        if (key && strcmp(e.k[i], key) == 0) {
+            free(e.v[i]);
+            e.v[i] = val ? val : leptris_strdup("");
+            val = NULL;   /* ownership moved */
+            replaced = 1;
+            break;
+        }
+    }
+    if (!replaced && key)
+        map_entries_push(&e, key, strlen(key),
+                         val ? val : "", val ? strlen(val) : 0);
+    free(val);
+    free(key);
+    struct leptris_xpath_result* out = xpath_map_value(&e);
+    map_entries_free(&e);
+    return out;
+}
+
+static struct leptris_xpath_result* fn_map_remove(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* key = re_str_arg(ctx, args, 1);
+    MapEntries src = {0};
+    map_entries_arg(ctx, args, &src);
+    MapEntries dst;
+    memset(&dst, 0, sizeof(dst));
+    for (size_t i = 0; i < src.n; i++) {
+        if (key && strcmp(src.k[i], key) == 0) continue;
+        map_entries_push(&dst, src.k[i], strlen(src.k[i]),
+                         src.v[i], strlen(src.v[i]));
+    }
+    free(key);
+    struct leptris_xpath_result* out = xpath_map_value(&dst);
+    map_entries_free(&src);
+    map_entries_free(&dst);
+    (void)n;
+    return out;
+}
+
+/* map:merge: sequence of maps; on duplicate keys the LAST wins. */
+static struct leptris_xpath_result* fn_map_merge(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, &e);
+    MapEntries dst;
+    memset(&dst, 0, sizeof(dst));
+    for (size_t i = 0; i < e.n; i++) {
+        int last = 1;
+        for (size_t j = i + 1; j < e.n; j++)
+            if (strcmp(e.k[i], e.k[j]) == 0) { last = 0; break; }
+        if (last)
+            map_entries_push(&dst, e.k[i], strlen(e.k[i]),
+                             e.v[i], strlen(e.v[i]));
+    }
+    map_entries_free(&e);
+    (void)n;
+    return xpath_map_value(&dst);
+}
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -1414,4 +1615,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "map:size", fn_map_size, 1, 1);
     xpath_function_registry_register(registry, "map:keys", fn_map_keys, 1, 1);
     xpath_function_registry_register(registry, "map:contains", fn_map_contains, 2, 2);
+    xpath_function_registry_register(registry, "map:put", fn_map_put, 3, 3);
+    xpath_function_registry_register(registry, "map:remove", fn_map_remove, 2, 2);
+    xpath_function_registry_register(registry, "map:merge", fn_map_merge, 1, 1);
 }

@@ -3373,6 +3373,33 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, FnMapPutRemoveMergeAndXslMap) {
+    /* Lane 08B: map:put/remove/merge + the xsl:map instruction
+     * (xsl:map-entry @key is an EXPRESSION — Saxon-HE 12.7 ground
+     * truth, /tmp/probe9/map8d.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='xm'>"
+        "<xsl:map>"
+        "<xsl:map-entry key=\"'k'\" select='42'/>"
+        "<xsl:map-entry key=\"'n'\" select='count(//i)'/>"
+        "</xsl:map>"
+        "</xsl:variable>"
+        "<o xmlns:map='http://www.w3.org/2005/xpath-functions/map'>"
+        "<a><xsl:value-of select=\"map:get(map:put(map { 'a': 1 },"
+        " 'b', 2), 'b')\"/></a>"
+        "<b><xsl:value-of select=\"map:size(map:remove(map { 'a': 1,"
+        " 'b': 2 }, 'a'))\"/></b>"
+        "<c><xsl:value-of select=\"map:get(map:merge((map { 'a': 1 },"
+        " map { 'b': 2 })), 'b')\"/></c>"
+        "<d><xsl:value-of select='map:size($xm)'/>|"
+        "<xsl:value-of select=\"map:get($xm, 'k')\"/></d>"
+        "</o></xsl:template>",
+        "<r><i>1</i><i>2</i></r>")),
+        "<o xmlns:map=\"http://www.w3.org/2005/xpath-functions/map\">"
+        "<a>2</a><b>1</b><c>2</c><d>2|42</d></o>");
+}
+
 TEST(Xslt30, FnMapConstructorAndAccessors) {
     /* Lane 08 (TODO.xslt-full/08) first slice: the map constructor
      * expression + get/size/keys/contains. Saxon-HE 12.7 ground

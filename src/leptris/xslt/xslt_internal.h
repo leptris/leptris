@@ -91,6 +91,9 @@ typedef enum {
     XSLT_INSTR_MERGE_SOURCE,     /* named source; children are merge-keys */
     XSLT_INSTR_MERGE_KEY,        /* key expression + sort order */
     XSLT_INSTR_MERGE_ACTION,     /* body run per merge group */
+    XSLT_INSTR_MAP,              /* 3.0 §18: map constructor; children
+                                    are xsl:map-entry */
+    XSLT_INSTR_MAP_ENTRY,        /* @key expression + @select/content */
     XSLT_INSTR_RESULT_DOCUMENT,  /* 2.0/3.0 §11.8: serialize content
                                     to the href file; principal result
                                     unchanged */

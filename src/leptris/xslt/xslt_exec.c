@@ -29,6 +29,11 @@
  * (xslt_state is one of its three inputs). */
 void leptris_xpath_invalidate_fn_registry(struct leptris_document* doc);
 
+/* functions_ext31.c — the shared value-level map builder (08). */
+void* xpath_map_builder_new(void);
+void xpath_map_builder_add(void* b, const char* k, const char* v);
+struct leptris_xpath_result* xpath_map_builder_finish(void* b);
+
 static char* xslt_capture_children_text(XsltExec* ex,
                                         const XsltInstr* child,
                                         LeptrisElement node);
@@ -2486,12 +2491,53 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
 static struct leptris_xpath_result* xslt_capture_content(
     XsltExec* ex, const XsltInstr* child, LeptrisElement node);
 
+/* 3.0 §18 xsl:map: build the value-level map (shared representation
+ * through the functions_ext31 builder) from xsl:map-entry children. */
+static struct leptris_xpath_result* eval_xsl_map(XsltExec* ex,
+                                                 const XsltInstr* mi,
+                                                 LeptrisElement node) {
+    void* b = xpath_map_builder_new();
+    if (!b) return NULL;
+    for (const XsltInstr* c = mi->child; c; c = c->next) {
+        if (c->kind != XSLT_INSTR_MAP_ENTRY) continue;
+        char* k = NULL;
+        if (c->test) {
+            struct leptris_xpath_result* kr =
+                xslt_eval(ex, c->test, node);
+            if (kr) {
+                k = leptris_xpath_result_string(kr);
+                leptris_xpath_result_free(kr);
+            }
+        }
+        char* v = NULL;
+        if (c->select) {
+            struct leptris_xpath_result* vr =
+                xslt_eval(ex, c->select, node);
+            if (vr) {
+                v = leptris_xpath_result_string(vr);
+                leptris_xpath_result_free(vr);
+            }
+        } else if (c->child) {
+            v = xslt_capture_children_text(ex, c->child, node);
+        }
+        if (k) xpath_map_builder_add(b, k, v ? v : "");
+        free(k);
+        free(v);
+    }
+    return xpath_map_builder_finish(b);
+}
+
 static int op_variable(XsltExec* ex, const XsltInstr* in,
                        LeptrisElement node) {
     if (!in->name) return 0;
     struct leptris_xpath_result* v = NULL;
     if (in->select) {
         v = xslt_eval(ex, in->select, node);
+    } else if (in->child && in->child->kind == XSLT_INSTR_MAP &&
+               !in->child->next) {
+        /* §18: a variable whose content is a lone xsl:map binds the
+         * map VALUE (the Saxon as="map(*)" shape). */
+        v = eval_xsl_map(ex, in->child, node);
     } else if (in->child) {
         v = xslt_capture_content(ex, in->child, node);
     }
