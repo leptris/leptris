@@ -65,3 +65,15 @@ kept: build canonical XML TEXT (escape &<>" + classify
 number/boolean/null by lexical form) → parse into a scratch doc →
 return the ROOT ELEMENT in the nodeset; xml-to-json walks the
 fn: vocabulary back into the shared map representation.
+
+## xml-to-json handoff (2026-09-03, reverted clean; v1.9.55 has json-to-xml)
+
+Round-trip spec (written, Saxon-verified expectation):
+  map:get(xml-to-json(json-to-xml('{"b": "beta", "n": 2}')), 'b')
+  => beta, and 'n' => 2. First attempt: walker produced ZERO
+entries — suspect leptris_element_attribute(el, "key") returning
+NULL on the PARSED (namespaced fn: vocabulary) elements, or the
+arg-eval lifetime of the nested json-to-xml nodeset. Bisect with a
+gtest-only probe (NOT standalone .a probes — see v1.9.55 note).
+Walker design kept: map/array elements recurse via the builder;
+scalars add element-text under @key; result = shared map repr.
