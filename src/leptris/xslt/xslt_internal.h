@@ -74,6 +74,14 @@ typedef enum {
                                      first xsl:catch child */
     XSLT_INSTR_CATCH,            /* xsl:catch: runs on a dynamic error
                                      with $err:description bound */
+    XSLT_INSTR_ON_NON_EMPTY,     /* 3.0 §26.4: Saxon-HE evaluates the
+                                   content unconditionally (verified
+                                   12.7 — the spec permits buffering;
+                                   parity follows the oracle) */
+    XSLT_INSTR_WHERE_POPULATED, /* 3.0 §26.2: drop wholly-empty
+                                   content */
+    XSLT_INSTR_NEXT_MATCH,      /* 3.0 §6.6: invoke the next-lower
+                                   precedence matching rule */
     XSLT_INSTR_ON_EMPTY,         /* xsl:on-empty (3.0 §26.4): consumed
                                      by the enclosing result element —
                                      content runs only when the

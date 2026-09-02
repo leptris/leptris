@@ -1197,6 +1197,137 @@ static int op_analyze_string(XsltExec* ex, const XsltInstr* in,
  * failing evaluations or the error() bridge) runs the catch content
  * with $err:description bound to the message; the channel clears so
  * the transform continues. */
+/* 3.0 §26.4: Saxon-HE 12.7 evaluates on-non-empty content
+ * unconditionally (verified against the oracle; the spec allows
+ * buffering, parity follows observed behavior). */
+static int op_on_non_empty(XsltExec* ex, const XsltInstr* in,
+                           LeptrisElement node) {
+    if (!in->child) return 0;
+    return xslt_exec_instrs(ex, in->child, node);
+}
+
+/* 3.0 §26.2 where-populated: content runs into a scratch element;
+ * nodes built there splice into the real parent, an empty build
+ * vanishes. */
+static int op_where_populated(XsltExec* ex, const XsltInstr* in,
+                              LeptrisElement node) {
+    if (!in->child) return 0;
+    LeptrisElement saved = ex->pending_parent;
+    /* A detached scratch element on the result document — never in
+     * the fragment chain, so an empty build cannot leak a wrapper
+     * into the output. */
+    LeptrisElement scratch = leptris_element_create(ex->result, "wp");
+    if (!scratch) {
+        ex->pending_parent = saved;
+        return xslt_exec_instrs(ex, in->child, node);
+    }
+    ex->pending_parent = scratch;
+    int rc = xslt_exec_instrs(ex, in->child, node);
+    ex->pending_parent = saved;
+    if (rc) return rc;
+    if (!leptris_elem_first_child(scratch)) return 0;   /* empty: drop */
+    /* Splice scratch children into the real parent. */
+    LeptrisNodeRef c = leptris_node_first_child(leptris_element_as_node(scratch));
+    while (c) {
+        LeptrisNodeRef nx = leptris_node_next_sibling(c);
+        leptris_element_append_child_internal(
+            ex->pending_parent ? ex->pending_parent
+                               : (LeptrisElement)leptris_document_root(
+                                     ex->result),
+            (LeptrisNode*)c);
+        c = nx;
+    }
+    return 0;
+}
+
+/* 3.0 §6.6 next-match: among templates matching the node, invoke
+ * the best one strictly WORSE than the current rule (import rank,
+ * then priority, then declaration order). */
+static int xslt_template_matches_node(const XsltTemplate* t,
+                                      LeptrisElement node,
+                                      const XsltExec* ex);
+static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
+                              LeptrisElement node);
+static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
+                                LeptrisElement node,
+                                const XsltInstr* with_params);
+
+static double cur_pri_of(const XsltTemplate* t) {
+    double pri = 0;
+    for (const XsltPattern* pa = t->matches; pa; pa = pa->next)
+        if (pa->priority > pri) pri = pa->priority;
+    return pri;
+}
+
+static size_t cur_order_of(const XsltExec* ex, const XsltTemplate* cur) {
+    size_t order = 0;
+    for (const XsltTemplate* t = ex->sheet->templates; t;
+         t = t->next, order++)
+        if (t == cur) return order;
+    return 0;
+}
+
+static const XsltTemplate* xslt_select_next_match(
+        const XsltExec* ex, LeptrisElement node, const char* mode) {
+    const XsltTemplate* cur = ex->current_template;
+    if (!cur) return NULL;
+    const XsltTemplate* best = NULL;
+    double best_pri = 0;
+    size_t best_order = 0, order = 0;
+    for (const XsltTemplate* t = ex->sheet->templates; t;
+         t = t->next, order++) {
+        if (!t->matches || t == cur) continue;
+        if ((mode && !t->mode) || (!mode && t->mode)) continue;
+        if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
+        if (!xslt_template_matches_node(t, node, ex)) continue;
+        double pri = 0; int have = 0;
+        for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
+            XsltPattern one = *pa; one.next = NULL;
+            if (!xslt_template_matches_node(
+                    &(XsltTemplate){ .matches = &one, .ns = t->ns },
+                    node, ex))
+                continue;
+            if (!have || pa->priority > pri) { pri = pa->priority; have = 1; }
+        }
+        if (!have) continue;
+        /* t must be strictly worse than cur. */
+        int worse;
+        if (t->import_rank != cur->import_rank)
+            worse = t->import_rank > cur->import_rank;
+        else if (pri != cur_pri_of(cur))
+            worse = pri < cur_pri_of(cur);
+        else worse = order < cur_order_of(ex, cur);
+        if (!worse) continue;
+        int wins = 0;
+        if (!best) wins = 1;
+        else if (t->import_rank != best->import_rank)
+            wins = t->import_rank < best->import_rank;
+        else if (pri != best_pri) wins = pri > best_pri;
+        else wins = order >= best_order;
+        if (wins) { best = t; best_pri = pri; best_order = order; }
+    }
+    return best;
+}
+
+static int op_next_match(XsltExec* ex, const XsltInstr* in,
+                         LeptrisElement node) {
+    const XsltTemplate* t = xslt_select_next_match(
+        ex, node, ex->current_template ? ex->current_template->mode
+                                       : NULL);
+    if (!t) {
+        /* No lower rule: the built-in applies (§6.6). */
+        return op_apply_templates(
+            ex,
+            &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES,
+                          .name = ex->current_template
+                              ? ex->current_template->mode : NULL },
+            node);
+    }
+    (void)in;
+    return xslt_invoke_template(ex, t, node, NULL);
+}
+
+
 static int op_try(XsltExec* ex, const XsltInstr* in,
                   LeptrisElement node) {
     XsltInstr* catch_at = NULL;
@@ -3862,6 +3993,9 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_TEXT] = op_text;
     g_ops[XSLT_INSTR_VALUE_OF] = op_value_of;
     g_ops[XSLT_INSTR_SEQUENCE] = op_sequence;
+    g_ops[XSLT_INSTR_ON_NON_EMPTY] = op_on_non_empty;
+    g_ops[XSLT_INSTR_WHERE_POPULATED] = op_where_populated;
+    g_ops[XSLT_INSTR_NEXT_MATCH] = op_next_match;
     g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
     g_ops[XSLT_INSTR_ITERATE] = op_iterate;
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;
