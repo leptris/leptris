@@ -2012,6 +2012,104 @@ static struct leptris_xpath_result* fn_xml_to_json(
     return out;
 }
 
+/* fn:serialize (08 final): method json over the shared map
+ * representation — keys double-quoted, values escaped when their
+ * lexical form is not number/boolean/null. Other methods are v1
+ * string() of the item (the XML method is document-level). */
+static void json_out(char** buf, size_t* len, size_t* cap,
+                     const char* s) {
+    for (const char* p = s ? s : ""; *p; p++) {
+        const char* rep = NULL;
+        if ((unsigned char)*p == '"') rep = "\\\"";
+        else if (*p == '\\') rep = "\\\\";
+        else if (*p == '\n') rep = "\\n";
+        else if (*p == '\t') rep = "\\t";
+        else if (*p == '\r') rep = "\\r";
+        size_t need = rep ? strlen(rep) : 1;
+        while (*len + need + 1 > *cap) {
+            *cap *= 2;
+            char* nb = (char*)realloc(*buf, *cap);
+            if (!nb) return;
+            *buf = nb;
+        }
+        if (rep) { memcpy(*buf + *len, rep, need); *len += need; }
+        else (*buf)[(*len)++] = *p;
+    }
+}
+
+static struct leptris_xpath_result* fn_serialize(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* item = xpath_evaluate(ctx, args[0]);
+    if (!item) return NULL;
+    int json = (n >= 2);
+    char* method = NULL;
+    if (n >= 2) {
+        char* key = leptris_strdup("method");
+        struct leptris_xpath_result* opt =
+            xpath_evaluate(ctx, args[1]);
+        char* m = xpath_map_lookup_result(opt, key);
+        free(key);
+        if (opt) leptris_xpath_result_free(opt);
+        json = m && strcmp(m, "json") == 0;
+        free(m);
+        (void)method;
+    }
+    if (!json) {
+        /* v1: non-json methods take the string value. */
+        char* sv = leptris_xpath_result_string(item);
+        leptris_xpath_result_free(item);
+        struct leptris_xpath_result* out =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (out) out->value.string_value = sv ? sv : leptris_strdup("");
+        return out;
+    }
+    MapEntries e = {0};
+    if (item->type == XPATH_RESULT_NODESET && item->value.nodeset_value &&
+        item->value.nodeset_value->count > 0) {
+        XPathTextNode* tn =
+            (XPathTextNode*)item->value.nodeset_value->nodes[0];
+        if (tn && tn->content &&
+            strncmp(tn->content, "\x03MAP", 4) == 0)
+            map_entries_decode(&e, tn->content + 4);
+    }
+    leptris_xpath_result_free(item);
+    size_t cap = 64, len = 1;
+    char* buf = (char*)malloc(cap);
+    if (!buf) { map_entries_free(&e); return NULL; }
+    buf[0] = '{';
+    for (size_t i = 0; i < e.n; i++) {
+        if (i) {
+            while (len + 2 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+            buf[len++] = ',';
+        }
+        while (len + 4 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        buf[len++] = '"';
+        json_out(&buf, &len, &cap, e.k[i]);
+        while (len + 4 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        buf[len++] = '"';
+        buf[len++] = ':';
+        const char* ty = jtype_of(e.v[i]);
+        if (strcmp(ty, "string") == 0) {
+            while (len + 2 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+            buf[len++] = '"';
+            json_out(&buf, &len, &cap, e.v[i]);
+            while (len + 2 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+            buf[len++] = '"';
+        } else {
+            json_out(&buf, &len, &cap, e.v[i]);
+        }
+    }
+    while (len + 2 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+    buf[len++] = '}';
+    buf[len] = '\0';
+    map_entries_free(&e);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(buf); return NULL; }
+    out->value.string_value = buf;
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -2101,4 +2199,5 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "parse-json", fn_parse_json, 1, 1);
     xpath_function_registry_register(registry, "json-to-xml", fn_json_to_xml, 1, 1);
     xpath_function_registry_register(registry, "xml-to-json", fn_xml_to_json, 1, 1);
+    xpath_function_registry_register(registry, "serialize", fn_serialize, 1, 2);
 }

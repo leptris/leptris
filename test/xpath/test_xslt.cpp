@@ -3385,6 +3385,19 @@ TEST(Xslt30, PostfixLookupOnMapsAndArrays) {
         "<o><a>beta</a><b>20</b></o>");
 }
 
+TEST(Xslt30, SerializeJsonMethod) {
+    /* Lane 08 final: fn:serialize with method json over the shared
+     * map representation. Saxon-HE 12.7 ground truth
+     * (/tmp/probe9/ser8.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"serialize("
+        "parse-json('{&quot;b&quot;: &quot;beta&quot;, &quot;n&quot;: 2}'),"
+        " map { 'method': 'json' })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>{\"b\":\"beta\",\"n\":2}</o>");
+}
+
 TEST(Xslt30, XmlToJsonRoundTrip) {
     /* Lane 08: xml-to-json walks the canonical fn: vocabulary back
      * into the shared map representation. */
