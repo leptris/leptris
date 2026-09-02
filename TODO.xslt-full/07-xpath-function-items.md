@@ -44,3 +44,24 @@ first at DYN_CALL entry.
 Remaining after this slice: fn:function-lookup/name/arity, partial
 application, HOF combiners, PUBLIC XPathResultType change + FFI
 mirrors (leptris-ruby/py: PRs only, never release).
+
+## Update later 2026-09-03: slice GREEN locally, Linux-LSan leak
+
+The full slice (inline fns + dynamic calls, multi-param, hex
+closure encoding; both bug fixes below) was GREEN: test_xslt
+188/188, ctest 1203/1203, macOS ASAN clean — but Linux LSan
+flagged 2 leaked 48-byte synth nodes from the DYN_CALL param
+binding (evaluator_operators.c:488 → xpath_synth_text). macOS
+ASAN cannot run LSan (the known CI gap). Suspect: the unbind
+remove-by-name on the exec's cached varset (non-scratch path) —
+trace which of the 4 dyn calls leaks (2 objects) and whether
+xpath_variable_set_remove actually frees the nodeset when the set
+is the XSLT-exec mirror. Branch was reverted; the commit
+(feat/xpath-function-items2, PR #765) has the full implementation
+to re-apply verbatim, plus the two fixed bugs: (1) C hex-escape
+greed "\x03FN" → 0x3F+'N' (F is a hex digit; \x03MAP only worked
+because M isn't); (2) raw pointer bytes carry NULs and the let
+deep-copy truncates — closure body pointer is 16-hex-char encoded.
+Also open: name#arity (TOK_HASH + FN_REF) parses but its dispatch
+(f synthesized FUNCTION_CALL over borrowed arg ASTs) fails
+upstream of the call — case d of the spec, trimmed out.
