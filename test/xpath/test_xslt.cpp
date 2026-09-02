@@ -3373,6 +3373,18 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, PostfixLookupOnMapsAndArrays) {
+    /* Lane 08 tail: `?key` / `?integer` postfix lookup. Saxon-HE
+     * 12.7 ground truth (/tmp/probe9/lk8.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><a><xsl:value-of select=\"map { 'b': 'beta', 'c': 3 }?b\"/></a>"
+        "<b><xsl:value-of select=\"[10, 20, 30]?2\"/></b></o>"
+        "</xsl:template>",
+        "<r/>")),
+        "<o><a>beta</a><b>20</b></o>");
+}
+
 TEST(Xslt30, FnParseJsonFeedsMapAndArrays) {
     /* Lane 08D: parse-json produces map/array values usable by the
      * accessors. Saxon-HE 12.7 ground truth (/tmp/probe9/js8.xsl). */

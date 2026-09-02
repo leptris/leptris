@@ -34,6 +34,8 @@ static XPathASTNode* parse_arrow_expr(XPathParser* parser);
 static XPathASTNode* parse_path_expr(XPathParser* parser);
 static XPathASTNode* parse_filter_expr(XPathParser* parser);
 static XPathASTNode* parse_primary_expr(XPathParser* parser);
+static XPathASTNode* parse_postfix_ops(XPathParser* parser,
+                                       XPathASTNode* expr);
 static XPathASTNode* parse_if_expr(XPathParser* parser);
 static XPathASTNode* parse_for_expr(XPathParser* parser);
 static XPathASTNode* parse_let_expr(XPathParser* parser);
@@ -832,7 +834,7 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             return NULL;
         }
         advance_token(parser);
-        return ac;
+        return parse_postfix_ops(parser, ac);
     }
 
     /* Check for relative paths starting with NCName/QName */
@@ -884,7 +886,7 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                 return NULL;
             }
             advance_token(parser);
-            return mc;
+            return parse_postfix_ops(parser, mc);
         }
         /* If followed by '(', it's a function call - fall through to filter expression */
         else if (next && next->type == TOK_LPAREN) {
@@ -941,12 +943,38 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
 }
 
 /* Parse filter expressions */
-static XPathASTNode* parse_filter_expr(XPathParser* parser) {
-    XPathASTNode* expr = parse_primary_expr(parser);
-    if (!expr) return NULL;
+static XPathASTNode* parse_filter_expr(XPathParser* parser);
 
-    /* Parse predicates */
-    while (current_token_is(parser, TOK_LBRACKET)) {
+/* Postfix operations on a primary: predicates + 3.1 lookups.
+ * Shared by parse_filter_expr and the map/array constructors
+ * (which return from the path dispatch before the filter level —
+ * `map { 'b': 1 }?b` must still bind the lookup). */
+static XPathASTNode* parse_postfix_ops(XPathParser* parser,
+                                       XPathASTNode* expr) {
+    while (current_token_is(parser, TOK_LBRACKET) ||
+           current_token_is(parser, TOK_QUESTION)) {
+        if (current_token_is(parser, TOK_QUESTION)) {
+            advance_token(parser);
+            XPathToken* kt = current_token(parser);
+            if (!kt || (kt->type != TOK_NCNAME && kt->type != TOK_QNAME &&
+                        kt->type != TOK_NUMBER)) {
+                ast_node_free(expr);
+                return NULL;
+            }
+            char key[96];
+            size_t klen = kt->value_len < sizeof(key) - 1
+                              ? kt->value_len : sizeof(key) - 1;
+            memcpy(key, kt->value, klen);
+            key[klen] = '\0';
+            advance_token(parser);
+            XPathASTNode* lk = ast_node_new(XPATH_AST_OPERATOR);
+            if (!lk) { ast_node_free(expr); return NULL; }
+            lk->number_value = (double)XPATH_OP_LOOKUP;
+            lk->value = leptris_strdup(key);
+            ast_node_add_child(lk, expr);
+            expr = lk;
+            continue;
+        }
         XPathASTNode* pred = parse_predicate(parser);
         if (!pred) {
             ast_node_free(expr);
@@ -964,8 +992,13 @@ static XPathASTNode* parse_filter_expr(XPathParser* parser) {
         ast_node_add_child(filter, pred);
         expr = filter;
     }
-
     return expr;
+}
+
+static XPathASTNode* parse_filter_expr(XPathParser* parser) {
+    XPathASTNode* expr = parse_primary_expr(parser);
+    if (!expr) return NULL;
+    return parse_postfix_ops(parser, expr);
 }
 
 /* Parse primary expressions: NUMBER | STRING | FunctionCall | '(' Expr ')' */

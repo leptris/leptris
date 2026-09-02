@@ -1543,10 +1543,9 @@ static struct leptris_xpath_result* fn_map_merge(XPathContext* ctx,
 
 /* Shared lookup core extracted from fn_map_get: evaluates args[0],
  * returns the entry value for `key` (malloc'd "" when absent). */
-static char* map_lookup_core(XPathContext* ctx, XPathASTNode** args,
-                             const char* key) {
+char* xpath_map_lookup_result(struct leptris_xpath_result* r,
+                              const char* key) {
     char* val = NULL;
-    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
     if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
         r->value.nodeset_value->count > 0) {
         XPathTextNode* tn =
@@ -1573,6 +1572,13 @@ static char* map_lookup_core(XPathContext* ctx, XPathASTNode** args,
             }
         }
     }
+    return val;
+}
+
+static char* map_lookup_core(XPathContext* ctx, XPathASTNode** args,
+                             const char* key) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    char* val = xpath_map_lookup_result(r, key);
     if (r) leptris_xpath_result_free(r);
     return val;
 }
