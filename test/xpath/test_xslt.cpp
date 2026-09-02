@@ -3373,6 +3373,27 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, FnParseJsonFeedsMapAndArrays) {
+    /* Lane 08D: parse-json produces map/array values usable by the
+     * accessors. Saxon-HE 12.7 ground truth (/tmp/probe9/js8.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:map='http://www.w3.org/2005/xpath-functions/map'"
+        " xmlns:array='http://www.w3.org/2005/xpath-functions/array'>"
+        "<a><xsl:value-of select=\"map:get(parse-json("
+        "'{&quot;a&quot;: 1, &quot;b&quot;: &quot;beta&quot;}'),"
+        " 'b')\"/></a>"
+        "<b><xsl:value-of select=\"array:get(parse-json("
+        "'[10, 20, 30]'), 2)\"/></b>"
+        "<c><xsl:value-of select=\"map:size(parse-json("
+        "'{&quot;a&quot;: 1, &quot;b&quot;: 2}'))\"/></c>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:map=\"http://www.w3.org/2005/xpath-functions/map\""
+        " xmlns:array=\"http://www.w3.org/2005/xpath-functions/array\">"
+        "<a>beta</a><b>20</b><c>2</c></o>");
+}
+
 TEST(Xslt30, FnArrayConstructorAndAccessors) {
     /* Lane 08C: the square array constructor + size/get/append/put.
      * Saxon-HE 12.7 ground truth (/tmp/probe9/arr8.xsl); value-level

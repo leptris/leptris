@@ -1644,6 +1644,179 @@ static struct leptris_xpath_result* fn_array_put(XPathContext* ctx,
     return out;
 }
 
+/* ---- parse-json (TODO.xslt-full/08D) ----
+ * Compact recursive-descent JSON parser producing the shared
+ * map/array representation: objects → keyed entries, arrays →
+ * positional keys, scalars → their string form (value-level). */
+
+typedef struct { const char* p; int ok; } JsonScan;
+
+static void json_ws(JsonScan* s) {
+    while (*s->p == ' ' || *s->p == '\t' || *s->p == '\n' || *s->p == '\r')
+        s->p++;
+}
+
+/* Parse a JSON string literal into `out` (malloc'd, escapes
+ * resolved for the common set). */
+static int json_string(JsonScan* s, char** out) {
+    *out = NULL;
+    if (*s->p != '"') { s->ok = 0; return 0; }
+    s->p++;
+    size_t cap = 16, len = 0;
+    char* b = (char*)malloc(cap);
+    if (!b) { s->ok = 0; return 0; }
+    while (*s->p && *s->p != '"') {
+        char c = *s->p++;
+        if (c == '\\' && *s->p) {
+            char e = *s->p++;
+            if (e == 'n') c = '\n';
+            else if (e == 't') c = '\t';
+            else if (e == 'r') c = '\r';
+            else if (e == 'b') c = '\b';
+            else if (e == 'f') c = '\f';
+            else c = e;   /* \\ " / uXXXX (kept verbatim v1) */
+        }
+        if (len + 2 > cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(b, cap);
+            if (!nb) { free(b); s->ok = 0; return 0; }
+            b = nb;
+        }
+        b[len++] = c;
+    }
+    if (*s->p != '"') { free(b); s->ok = 0; return 0; }
+    s->p++;
+    b[len] = '\0';
+    *out = b;
+    return 1;
+}
+
+/* Member value under `key`: scalars land directly; nested
+ * containers are encoded as value strings (flat maps/arrays are
+ * exact; nested-container RE-building is the documented v1 limit). */
+static void json_value(JsonScan* s, void* b, const char* key);
+static struct leptris_xpath_result* json_root(JsonScan* s);
+
+static void json_value(JsonScan* s, void* b, const char* key) {
+    json_ws(s);
+    if (*s->p == '{' || *s->p == '[') {
+        struct leptris_xpath_result* sub = json_root(s);
+        if (sub) {
+            char* sv = leptris_xpath_result_string(sub);
+            if (b && key) xpath_map_builder_add(b, key, sv ? sv : "");
+            free(sv);
+            leptris_xpath_result_free(sub);
+            return;
+        }
+        s->ok = 0;
+        return;
+    }
+    if (*s->p == '"') {
+        char* v = NULL;
+        if (json_string(s, &v)) {
+            if (b && key) xpath_map_builder_add(b, key, v);
+            free(v);
+            return;
+        }
+        s->ok = 0;
+        return;
+    }
+    const char* st = s->p;
+    while (*s->p && *s->p != ',' && *s->p != '}' && *s->p != ']' &&
+           *s->p != ' ' && *s->p != '\n')
+        s->p++;
+    if (s->p == st) { s->ok = 0; return; }
+    size_t n = (size_t)(s->p - st);
+    char* v = LEPTRIS_ALLOC_N(char, n + 1);
+    if (v) {
+        memcpy(v, st, n);
+        v[n] = '\0';
+        if (b && key) xpath_map_builder_add(b, key, v);
+        free(v);
+    }
+}
+
+/* Root value: a container's members parse DIRECTLY into the result
+ * (never wrapped under a key — wrapping embedded a whole encoding
+ * inside another, and the size/get delimiter scans then counted the
+ * nested entries too). */
+static struct leptris_xpath_result* json_root(JsonScan* s) {
+    json_ws(s);
+    if (*s->p == '{' || *s->p == '[') {
+        int obj = (*s->p == '{');
+        s->p++;
+        void* b = xpath_map_builder_new();
+        if (!b) { s->ok = 0; return NULL; }
+        size_t idx = 1;
+        json_ws(s);
+        if ((obj && *s->p != '}') || (!obj && *s->p != ']')) {
+            for (;;) {
+                json_ws(s);
+                char k[32];
+                if (obj) {
+                    char* ks = NULL;
+                    if (!json_string(s, &ks)) break;
+                    snprintf(k, sizeof(k), "%s", ks);
+                    free(ks);
+                    json_ws(s);
+                    if (*s->p == ':') s->p++;
+                } else {
+                    snprintf(k, sizeof(k), "%zu", idx++);
+                }
+                json_value(s, b, k);
+                json_ws(s);
+                if (*s->p == ',') { s->p++; continue; }
+                break;
+            }
+        }
+        if ((obj && *s->p == '}') || (!obj && *s->p == ']')) s->p++;
+        else s->ok = 0;
+        return xpath_map_builder_finish(b);
+    }
+    if (*s->p == '"') {
+        char* v = NULL;
+        struct leptris_xpath_result* out = NULL;
+        if (json_string(s, &v)) {
+            out = xpath_result_new(XPATH_RESULT_STRING);
+            if (out) out->value.string_value = v;
+            else free(v);
+        }
+        return out;
+    }
+    const char* st = s->p;
+    while (*s->p && *s->p != ' ' && *s->p != '\n' && *s->p != '}' &&
+           *s->p != ']' && *s->p != ',')
+        s->p++;
+    if (s->p == st) { s->ok = 0; return NULL; }
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (out) {
+        out->value.string_value = LEPTRIS_ALLOC_N(
+            char, (size_t)(s->p - st) + 1);
+        if (out->value.string_value) {
+            memcpy(out->value.string_value, st, (size_t)(s->p - st));
+            out->value.string_value[s->p - st] = '\0';
+        }
+    }
+    return out;
+}
+
+static struct leptris_xpath_result* fn_parse_json(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = NULL;
+    if (in) {
+        JsonScan s = { in, 1 };
+        out = json_root(&s);
+        free(in);
+    }
+    if (!out) {
+        out = xpath_result_new(XPATH_RESULT_NODESET);
+        if (out) out->value.nodeset_value = xpath_nodeset_new();
+    }
+    (void)n;
+    return out;
+}
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -1733,4 +1906,6 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "array:get", fn_array_get, 2, 2);
     xpath_function_registry_register(registry, "array:append", fn_array_append, 2, 2);
     xpath_function_registry_register(registry, "array:put", fn_array_put, 3, 3);
+    /* JSON (08D). */
+    xpath_function_registry_register(registry, "parse-json", fn_parse_json, 1, 1);
 }
