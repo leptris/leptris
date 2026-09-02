@@ -1796,12 +1796,18 @@ static int op_iterate(XsltExec* ex, const XsltInstr* in,
         if (rc) break;
     }
     /* 3.0 §12.5: on-completion runs when the loop ENDED without
-     * xsl:break (sig != 2 on the final pass). Its instruction is
-     * skipped during the per-item walk (no registered op). */
+     * xsl:break (sig != 2 on the final pass), with the FINAL
+     * iteration's parameter values in scope (#729). Its instruction
+     * is skipped during the per-item walk (no registered op). */
     if (ex->iterate_signal != 2) {
         for (const XsltInstr* c = in->child; c; c = c->next) {
             if (c->kind != XSLT_INSTR_ON_COMPLETION) continue;
+            XsltVar* oc_mark = ex->vars;
+            for (XsltVar* pv = params; pv; pv = pv->prev)
+                xslt_push_var(ex, pv->name,
+                              result_clone_borrowed(pv->value));
             rc = xslt_exec_instrs(ex, c->child, node);
+            xslt_pop_vars_to(ex, oc_mark);
             break;
         }
     }
@@ -1911,11 +1917,19 @@ static int op_merge(XsltExec* ex, const XsltInstr* in,
             LeptrisNodeRef nd = leptris_xpath_result_get_node(r, i);
             if (!nd) continue;
             /* Composite key: every merge-key child's string value,
-             * '\x01'-joined (not in normal text, unlike '|'). */
+             * '\x01'-joined (not in normal text, unlike '|'). Keys
+             * live INSIDE the merge-source (REC grammar) or as direct
+             * children of xsl:merge (accepted by Saxon-HE — #731:
+             * sources without their own keys fell through with an
+             * empty composite, collapsing every group). */
+            const XsltInstr* skeys = NULL;
+            for (const XsltInstr* k = s->child; k; k = k->next)
+                if (k->kind == XSLT_INSTR_MERGE_KEY) { skeys = s->child; break; }
+            if (!skeys) skeys = in->child;   /* merge-level shared keys */
             size_t klen = 0, kcap = 16;
             char* key = (char*)malloc(kcap);
             if (!key) continue;
-            for (const XsltInstr* k = s->child; k; k = k->next) {
+            for (const XsltInstr* k = skeys; k; k = k->next) {
                 if (k->kind != XSLT_INSTR_MERGE_KEY || !k->select)
                     continue;
                 struct leptris_xpath_result* kr =
@@ -1933,7 +1947,7 @@ static int op_merge(XsltExec* ex, const XsltInstr* in,
                 if (ks) { memcpy(key + klen, ks, strlen(ks));
                           klen += strlen(ks); }
                 free(ks);
-                if (s->child == k && !g_merge_desc && k->num_start_at)
+                if (skeys == k && !g_merge_desc && k->num_start_at)
                     g_merge_desc = 1;
             }
             if (!key) continue;
