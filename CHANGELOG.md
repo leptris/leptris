@@ -4,7 +4,18 @@
 
 ### Added
 
-- xsl:result-document + xsl:character-map (batch E) (xslt)
+- **`xsl:result-document`** (2.0/3.0 §11.8): the content is built in a
+  fresh scratch document, serialized (declaration + UTF-8, character maps
+  applied) and written to the `@href` file, creating parent directories
+  as needed. The principal result is unchanged (Saxon-HE 12.7 ground
+  truth). v1: static `@href`, xml method.
+- **`xsl:character-map`** (§16.1): character → replacement-string tables
+  activated from `xsl:output/@use-character-maps` (whitespace-separated
+  names; all named maps apply). Substitution is a post-serialization pass
+  on the UTF-8 result — text spans and attribute-value quotes only, never
+  markup — so it composes with the us-ascii-escape and iconv transcode
+  steps that follow. Saxon-verified: two maps, text + attribute
+  substitution (`<o a="x->y">lambda</o>`).
 
 
 
