@@ -4,7 +4,18 @@
 
 ### Added
 
-- map constructor + map:get/size/keys/contains (lane 08A) (xpath)
+- **Value-level maps** (TODO.xslt-full/08 first slice): the 3.1 map
+  constructor `map { k: v, ... }` plus `map:get`, `map:size`,
+  `map:keys`, `map:contains`. A map is one synthetic text node
+  encoding its entries in insertion order, flowing through the
+  existing nodeset channel — no ABI change (the FFI map view is the
+  #683 follow-up). The lexer gained a token for the single `:`
+  constructor separator (previously a hard lex error, so nothing
+  that compiled changes); braces are accepted only by the map
+  grammar and any other brace shape still fails loudly, which let
+  the #692 post-compile brace backstop retire. Saxon-HE 12.7 ground
+  truth; next in the lane: map:put/remove/merge, `xsl:map` (closing
+  TODO 09), arrays, and the JSON family.
 
 
 
