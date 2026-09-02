@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.47] - 2026-09-02
+
+### Fixed
+
+- #720 sequence-use keys (UAF) + #721 element_copy namespaces
+
+
+
 ## [1.9.46] - 2026-09-02
 
 ### Added
