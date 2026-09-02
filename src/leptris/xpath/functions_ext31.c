@@ -1937,6 +1937,81 @@ static struct leptris_xpath_result* fn_json_to_xml(
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
 
+/* xml-to-json (08): walk the canonical fn: vocabulary back into
+ * the shared map representation — members add under @key; nested
+ * map/array elements recurse; scalars take the element text. */
+static void fnxml_walk(LeptrisElement el, void* b);
+
+static void fnxml_children(LeptrisElement el, void* b) {
+    for (LeptrisElement c = leptris_element_first_child_any(el); c;
+         c = (LeptrisElement)leptris_element_next_sibling_any(c)) {
+        if (leptris_node_get_type((LeptrisNodeRef)c) ==
+            LEPTRIS_NODE_TYPE_ELEMENT)
+            fnxml_walk(c, b);
+    }
+}
+
+static void fnxml_walk(LeptrisElement el, void* b) {
+    const char* name = leptris_element_name(el);
+    if (!name) return;
+    const char* key = leptris_element_attribute(el, "key");
+    if (strcmp(name, "map") == 0 || strcmp(name, "array") == 0) {
+        void* sub = xpath_map_builder_new();
+        fnxml_children(el, sub);
+        struct leptris_xpath_result* r = xpath_map_builder_finish(sub);
+        if (r) {
+            char* sv = leptris_xpath_result_string(r);
+            if (b && key) xpath_map_builder_add(b, key, sv ? sv : "");
+            free(sv);
+            leptris_xpath_result_free(r);
+        }
+        return;
+    }
+    const char* t = leptris_element_text(el);
+    if (b && key) xpath_map_builder_add(b, key, t ? t : "");
+}
+
+static struct leptris_xpath_result* fn_xml_to_json(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_NODESET);
+    if (!out) { if (r) leptris_xpath_result_free(r); return NULL; }
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value) {
+        if (r) leptris_xpath_result_free(r);
+        return out;
+    }
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+        for (size_t i = 0; i < r->value.nodeset_value->count; i++) {
+            LeptrisNodeRef nd = r->value.nodeset_value->nodes[i];
+            if (!nd || leptris_node_get_type(nd) !=
+                           LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            void* b = xpath_map_builder_new();
+            fnxml_children((LeptrisElement)nd, b);
+            struct leptris_xpath_result* m = xpath_map_builder_finish(b);
+            if (m && m->value.nodeset_value &&
+                m->value.nodeset_value->count > 0) {
+                /* Ownership transfer: m's nodeset OWNS the synthetic
+                 * map node — moving the pointer to `out` without
+                 * disowning left a dangling free (map:get read a
+                 * freed node and found nothing). */
+                xpath_nodeset_add(out->value.nodeset_value,
+                                  m->value.nodeset_value->nodes[0]);
+                m->value.nodeset_value->count = 0;
+                m->value.nodeset_value->owns_synthetic_text = 0;
+                out->value.nodeset_value->owns_synthetic_text = 1;
+                out->value.nodeset_value->is_sequence = 1;
+            }
+            if (m) leptris_xpath_result_free(m);
+        }
+    }
+    if (r) leptris_xpath_result_free(r);
+    (void)n;
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -2025,4 +2100,5 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     /* JSON (08D). */
     xpath_function_registry_register(registry, "parse-json", fn_parse_json, 1, 1);
     xpath_function_registry_register(registry, "json-to-xml", fn_json_to_xml, 1, 1);
+    xpath_function_registry_register(registry, "xml-to-json", fn_xml_to_json, 1, 1);
 }
