@@ -3252,6 +3252,34 @@ TEST(Xslt30, FnDates) {
         "[2026 9 2 10 30 45][2 3]");
 }
 
+TEST(Xslt30, WherePopulatedOnNonEmptyNextMatch) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09): where-
+     * populated drops wholly-empty content; on-non-empty is
+     * evaluated (Saxon reserves always-eval); next-match runs the
+     * next-lower-priority matching rule. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<wp><xsl:where-populated>"
+        "<xsl:value-of select='//i'/>, "
+        "<xsl:value-of select='//nope'/>"
+        "</xsl:where-populated>|</wp>"
+        "<wp2><xsl:where-populated>"
+        "<xsl:value-of select='//nope'/>"
+        "</xsl:where-populated>|</wp2>"
+        "<one><xsl:value-of select='//i'/>"
+        "<xsl:on-non-empty>!</xsl:on-non-empty>|</one>"
+        "<one2><xsl:value-of select='//nope'/>"
+        "<xsl:on-non-empty>!</xsl:on-non-empty>|</one2>"
+        "<nm><xsl:apply-templates select='//i'/></nm>"
+        "</xsl:template>"
+        "<xsl:template match='i' priority='1'>"
+        "<base><xsl:next-match/></base></xsl:template>"
+        "<xsl:template match='i'><low/></xsl:template>",
+        "<r><i>x</i></r>")),
+        "<wp>x, |</wp><wp2>|</wp2><one>x!|</one><one2>!|</one2>"
+        "<nm><base><low/></base></nm>");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"

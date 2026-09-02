@@ -597,10 +597,21 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
-    if (strcmp(local, "on-empty") == 0) {
-        XsltInstr* in = instr_new(XSLT_INSTR_ON_EMPTY);
+    if (strcmp(local, "on-empty") == 0 ||
+        strcmp(local, "on-non-empty") == 0 ||
+        strcmp(local, "where-populated") == 0) {
+        XsltInstr* in = instr_new(
+            strcmp(local, "on-empty") == 0 ? XSLT_INSTR_ON_EMPTY
+            : strcmp(local, "on-non-empty") == 0
+                ? XSLT_INSTR_ON_NON_EMPTY : XSLT_INSTR_WHERE_POPULATED);
         if (!in) return NULL;
         in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "next-match") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_NEXT_MATCH);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);   /* with-params */
         return in;
     }
     if (strcmp(local, "next-iteration") == 0) {
