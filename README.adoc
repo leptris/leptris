@@ -500,16 +500,25 @@ release, each feature verified against Saxon-HE 12.7 before landing:
 |`xsl:value-of` over sequences, `xsl:sequence`-style item lists, ranges `A to B`
 
 |Control
-|`if/then/else`, `for $x in ... return`, `xsl:iterate` (params, `xsl:next-iteration`, `xsl:break`), `xsl:try`/`xsl:catch` with `$err:description`
+|`if/then/else`, `for $x in ... return`, `xsl:iterate` (params, `xsl:next-iteration` chaining, `xsl:break`, `xsl:on-completion`), `xsl:try`/`xsl:catch` with `$err:description`
+
+|Constructors
+|`xsl:copy` with `@select` (§9.9.2 per-item copy semantics), `xsl:namespace` (§11.7), `xsl:document` (§11.8), `xsl:fork` arms, `xsl:where-populated`/`xsl:on-non-empty`, `xsl:next-match`, `xsl:param @default` (the 4.0 form)
 
 |Grouping
-|`xsl:for-each-group`: `group-by`, `group-adjacent`, `group-starting-with`, `group-ending-with`, with `current-group()`/`current-grouping-key()`
+|`xsl:for-each-group`: `group-by`, `group-adjacent`, `group-starting-with`, `group-ending-with`, with `current-group()`/`current-grouping-key()`; composite keys (`use="a b"` token lists)
+
+|Merging
+|`xsl:merge` (§14.3): multiple `xsl:merge-source`s joined on their `xsl:merge-key`s, with `current-merge-key()` and `current-merge-group(name)`
 
 |Strings
 |`xsl:analyze-string` with `regex-group(n)`, `xsl:on-empty`, text value templates (`expand-text`)
 
 |Dynamic evaluation
-|`xsl:evaluate`, `error($msg)`
+|`xsl:evaluate` (dynamic `@xpath`, `@context-item`, child `xsl:with-param`), `error($msg)`
+
+|Secondary output
+|`xsl:result-document` serializes its content to the `@href` file (parent directories created as needed); `xsl:character-map` with `xsl:output/@use-character-maps` substitutes characters in text and attribute values at serialization
 
 |Modes
 |`xsl:mode` with `use-accumulators` and all six `on-no-match` dispositions (`deep-copy`, `shallow-copy` — the 3.0 default, `shallow-skip`, `deep-skip`, `text-only-copy`, `fail`); 1.0 sheets keep the classic built-in rules
