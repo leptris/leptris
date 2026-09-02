@@ -4,7 +4,15 @@
 
 ### Added
 
-- instance of / castable as / cast as / treat as (lane 06) (xpath)
+- **XPath 2.0 type operators** (TODO.xslt-full/06): `instance of`,
+  `castable as`, `cast as`, `treat as` with SequenceType v1
+  (`xs:QName`, `node()`, `item()`, occurrence `*`/`+`). Value-level
+  type tests over the result model; `castable as` does full lexical
+  checks; `cast as` reuses the v1.9.49 constructor semantics
+  (`xs:integer` truncates toward zero); `treat as` passes through.
+  Saxon-HE 12.7 ground truth, including the falsifiable negative
+  (`'x' castable as xs:integer` = false) and `1.9 cast as
+  xs:integer` = 1.
 
 
 
