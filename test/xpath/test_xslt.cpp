@@ -3373,6 +3373,23 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, XsConstructorFunctions) {
+    /* Lane 06 (TODO.xslt-full/06): xs:* constructor functions.
+     * Saxon-HE 12.7 ground truth (/tmp/probe9/g6.xsl): the atomic
+     * constructors convert through the string/number value. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<a><xsl:value-of select=\"xs:integer('42') + 1\"/></a>"
+        "<b><xsl:value-of select=\"xs:double('1.5') * 2\"/></b>"
+        "<c><xsl:value-of select=\"xs:boolean('true')\"/></c>"
+        "<d><xsl:value-of select=\"xs:string(7)\"/></d>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<a>43</a><b>3</b><c>true</c><d>7</d></o>");
+}
+
 TEST(Xslt30, OnCompletionSeesIterateParams) {
     /* #729: the on-completion body runs with the FINAL iteration's
      * parameter values (§12.5). */

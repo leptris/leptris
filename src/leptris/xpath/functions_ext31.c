@@ -1161,6 +1161,58 @@ DATE_FIELD(days_from_dur, 7)
 DATE_FIELD(hours_from_dur, 8)
 
 
+/* ---- xs: atomic constructors (TODO.xslt-full/06; Saxon-HE 12.7
+ * ground truth banked /tmp/probe9/g6.xsl) ---- value-level casts:
+ * the numeric family converts through number() with xs:integer
+ * truncating toward zero; xs:boolean follows the XPath boolean()
+ * rules; xs:string/xs:anyURI take the string value (the same shape
+ * as the date passthrough constructors above). */
+
+static struct leptris_xpath_result* fn_xs_number_ctor(XPathContext* ctx,
+        XPathASTNode** args, size_t n, int integer_only) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    if (!r) return NULL;
+    double d = leptris_xpath_result_number(r);
+    leptris_xpath_result_free(r);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
+    if (!out) return NULL;
+    if (integer_only) d = (d < 0) ? ceil(d) : floor(d);
+    out->value.number_value = d;
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_xs_integer(XPathContext* ctx,
+        XPathASTNode** a, size_t n) {
+    return fn_xs_number_ctor(ctx, a, n, 1);
+}
+static struct leptris_xpath_result* fn_xs_double(XPathContext* ctx,
+        XPathASTNode** a, size_t n) {
+    return fn_xs_number_ctor(ctx, a, n, 0);
+}
+
+static struct leptris_xpath_result* fn_xs_boolean(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    if (!r) return NULL;
+    int b = 0;
+    if (r->type == XPATH_RESULT_NODESET)
+        b = r->value.nodeset_value && r->value.nodeset_value->count > 0;
+    else if (r->type == XPATH_RESULT_STRING)
+        b = r->value.string_value && r->value.string_value[0];
+    else if (r->type == XPATH_RESULT_BOOLEAN)
+        b = r->value.boolean_value;
+    else {
+        double d = r->value.number_value;
+        b = (d == d) && d != 0;   /* NaN casts to false */
+    }
+    leptris_xpath_result_free(r);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (out) out->value.boolean_value = b;
+    (void)n;
+    return out;
+}
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -1216,6 +1268,13 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "node-name", fn_node_name, 1, 1);
     /* Dates & durations (05, first slice) — canonical xs: prefix. */
     xpath_function_registry_register(registry, "xs:date", fn_passthrough_ctor, 1, 1);
+    /* Atomic constructors (06) — canonical xs: prefix. */
+    xpath_function_registry_register(registry, "xs:string", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:anyURI", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:integer", fn_xs_integer, 1, 1);
+    xpath_function_registry_register(registry, "xs:double", fn_xs_double, 1, 1);
+    xpath_function_registry_register(registry, "xs:decimal", fn_xs_double, 1, 1);
+    xpath_function_registry_register(registry, "xs:boolean", fn_xs_boolean, 1, 1);
     xpath_function_registry_register(registry, "xs:dateTime", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:time", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
