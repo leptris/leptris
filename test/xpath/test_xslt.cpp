@@ -3385,6 +3385,24 @@ TEST(Xslt30, PostfixLookupOnMapsAndArrays) {
         "<o><a>beta</a><b>20</b></o>");
 }
 
+TEST(Xslt30, XmlToJsonRoundTrip) {
+    /* Lane 08: xml-to-json walks the canonical fn: vocabulary back
+     * into the shared map representation. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:map='http://www.w3.org/2005/xpath-functions/map'>"
+        "<xsl:value-of select=\"map:get(xml-to-json("
+        "json-to-xml('{&quot;b&quot;: &quot;beta&quot;, &quot;n&quot;: 2}')),"
+        " 'b')\"/>|<xsl:value-of select=\"map:get(xml-to-json("
+        "json-to-xml('{&quot;b&quot;: &quot;beta&quot;, &quot;n&quot;: 2}')),"
+        " 'n')\"/>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:map=\"http://www.w3.org/2005/xpath-functions/map\">"
+        "beta|2</o>");
+}
+
+
 TEST(Xslt30, JsonToXmlCanonical) {
     /* Lane 08 final slice: the canonical fn: XML vocabulary
      * (Saxon-HE 12.7 ground truth, /tmp/probe9/jx8.xsl). */
