@@ -1823,6 +1823,116 @@ static struct leptris_xpath_result* fn_parse_json(XPathContext* ctx,
     return out;
 }
 
+/* json-to-xml (08 final slice): canonical fn: vocabulary. Values
+ * classify by lexical form; the XML is built as text and parsed
+ * into a scratch doc; the ROOT ELEMENT rides the nodeset. */
+static void xml_esc(char** buf, size_t* len, size_t* cap,
+                    const char* s) {
+    for (const char* p = s ? s : ""; *p; p++) {
+        const char* rep = NULL;
+        if (*p == '&') rep = "&amp;";
+        else if (*p == '<') rep = "&lt;";
+        else if (*p == '>') rep = "&gt;";
+        else if (*p == '"') rep = "&quot;";
+        size_t need = rep ? strlen(rep) : 1;
+        while (*len + need + 1 > *cap) {
+            *cap *= 2;
+            char* nb = (char*)realloc(*buf, *cap);
+            if (!nb) return;
+            *buf = nb;
+        }
+        if (rep) { memcpy(*buf + *len, rep, need); *len += need; }
+        else (*buf)[(*len)++] = *p;
+    }
+    (*buf)[*len] = '\0';
+}
+
+static void xml_add(char** buf, size_t* len, size_t* cap,
+                    const char* s) {
+    size_t need = strlen(s);
+    while (*len + need + 1 > *cap) {
+        *cap *= 2;
+        char* nb = (char*)realloc(*buf, *cap);
+        if (!nb) return;
+        *buf = nb;
+    }
+    memcpy(*buf + *len, s, need);
+    *len += need;
+    (*buf)[*len] = '\0';
+}
+
+static const char* jtype_of(const char* v) {
+    if (!v || !*v) return "string";
+    if (strcmp(v, "true") == 0 || strcmp(v, "false") == 0)
+        return "boolean";
+    if (strcmp(v, "null") == 0) return "null";
+    char* end = NULL;
+    strtod(v, &end);
+    return (end && *end == '\0') ? "number" : "string";
+}
+
+static struct leptris_xpath_result* fn_json_to_xml(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_NODESET);
+    if (!out) { free(in); return NULL; }
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value) { free(in); return out; }
+    if (!in) return out;
+    JsonScan s = { in, 1 };
+    struct leptris_xpath_result* root = json_root(&s);
+    free(in);
+    if (!root) return out;
+    size_t cap = 256, len = 0;
+    char* xml = (char*)malloc(cap);
+    if (!xml) { leptris_xpath_result_free(root); return out; }
+    xml[0] = '\0';
+    if (root->type == XPATH_RESULT_STRING &&
+        root->value.string_value) {
+        const char* ty = jtype_of(root->value.string_value);
+        xml_add(&xml, &len, &cap, "<string>");
+        xml_esc(&xml, &len, &cap, root->value.string_value);
+        xml_add(&xml, &len, &cap, "</string>");
+        (void)ty;
+    } else if (root->type == XPATH_RESULT_NODESET &&
+               root->value.nodeset_value &&
+               root->value.nodeset_value->count > 0) {
+        XPathTextNode* tn =
+            (XPathTextNode*)root->value.nodeset_value->nodes[0];
+        MapEntries e = {0};
+        if (tn && tn->content &&
+            strncmp(tn->content, "\x03MAP", 4) == 0)
+            map_entries_decode(&e, tn->content + 4);
+        xml_add(&xml, &len, &cap,
+                "<map xmlns=\"http://www.w3.org/2005/xpath-functions\">");
+        for (size_t i = 0; i < e.n; i++) {
+            const char* tag = jtype_of(e.v[i]);
+            xml_add(&xml, &len, &cap, "<");
+            xml_add(&xml, &len, &cap, tag);
+            xml_add(&xml, &len, &cap, " key=\"");
+            xml_esc(&xml, &len, &cap, e.k[i]);
+            xml_add(&xml, &len, &cap, "\">");
+            xml_esc(&xml, &len, &cap, e.v[i]);
+            xml_add(&xml, &len, &cap, "</");
+            xml_add(&xml, &len, &cap, tag);
+            xml_add(&xml, &len, &cap, ">");
+        }
+        xml_add(&xml, &len, &cap, "</map>");
+        map_entries_free(&e);
+    }
+    leptris_xpath_result_free(root);
+    LeptrisDocument doc = leptris_parse_string(xml, len, NULL);
+    free(xml);
+    if (doc) {
+        LeptrisElement rel = leptris_document_root(doc);
+        if (rel) xpath_nodeset_add(out->value.nodeset_value,
+                                   (LeptrisNodeRef)rel);
+    }
+    (void)n;
+    return out;
+}
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -1914,4 +2024,5 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "array:put", fn_array_put, 3, 3);
     /* JSON (08D). */
     xpath_function_registry_register(registry, "parse-json", fn_parse_json, 1, 1);
+    xpath_function_registry_register(registry, "json-to-xml", fn_json_to_xml, 1, 1);
 }
