@@ -4,7 +4,23 @@
 
 ### Fixed
 
-- #729 on-completion iterate params + #731 merge-level keys
+- **#729 — on-completion iterate params**: the per-iteration parameter
+  push/pop lives inside the loop, so the `xsl:on-completion` body ran
+  with no binding (`Variable 'sum' not found`). The final iteration's
+  values are now bound around the action per §12.5 — param-chained
+  sums work (`<xsl:iterate select='1 to 4'>` + `$sum` = 10).
+- **#731 — merge-level merge-keys**: `xsl:merge` read keys only from
+  inside each `xsl:merge-source`; sheets written with `xsl:merge-key`
+  as a direct child of `xsl:merge` (accepted by Saxon-HE) got no keys
+  — every item shared the empty composite, collapsing the merge into
+  one action with an empty `current-merge-key()`. Sources without
+  their own keys now fall back to the merge-level declarations.
+- **#730, #732 — triaged**: unquoted `xsl:evaluate xpath="$p"` fails
+  in the outer scope exactly as Saxon rejects it statically (the
+  with-param channel binds the dynamic phase; quoted `xpath="'$p'"`
+  verified against Saxon); multiple top-level result nodes are a
+  supported shape here (libxslt parity, suite-pinned) — pinned by
+  `Xslt30.MultipleTopLevelNodesSerializeFully`.
 
 
 
