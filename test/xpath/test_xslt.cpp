@@ -3316,6 +3316,43 @@ TEST(Xslt30, NumberStartAt) {
         "<o>[1][10][2][11]</o>");
 }
 
+TEST(Xslt30, CopySelectNamespaceDocumentDefault) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09 batch C).
+     * NOTE: @default is XSLT 4.0 (Saxon 12.7 rejects it
+     * statically) — our engine accepts it as a dynamic default;
+     * pinned at our semantics. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<cp><xsl:copy select='//i[1]/node()'/></cp>"
+        "<cp2><xsl:copy select='//i[1]/@n'/></cp2>"
+        "<ns><e><xsl:namespace name='x'>urn:xx</xsl:namespace></e></ns>"
+        "<dc><xsl:document><d/>text</xsl:document></dc>"
+        "</xsl:template>",
+        "<r><i n='5'>txt</i></r>")),
+        "<cp>txt</cp><cp2 n=\"5\"/>"
+        "<ns><e xmlns:x=\"urn:xx\"/></ns><dc><d/>text</dc>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:iterate select='1 to 3'>"
+        "<xsl:on-completion>done</xsl:on-completion><i/>"
+        "</xsl:iterate></o>"
+        "</xsl:template>",
+        "<r/>")),
+        "<o><i/><i/><i/>done</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template name='t'>"
+        "<xsl:param name='q' default=\"'dy'\"/>"
+        "[<xsl:value-of select='$q'/>]"
+        "</xsl:template>"
+        "<xsl:template match='/'>"
+        "<xsl:call-template name='t'/>"
+        "<xsl:call-template name='t'>"
+        "<xsl:with-param name='q' select='\"given\"'/></xsl:call-template>"
+        "</xsl:template>",
+        "<r/>")),
+        "[dy][given]");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"

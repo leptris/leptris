@@ -1213,6 +1213,29 @@ static int op_fork(XsltExec* ex, const XsltInstr* in,
     return xslt_exec_instrs(ex, in->child, node);
 }
 
+/* 2.0 §11.7 xsl:namespace: bind prefix->URI on the pending
+ * parent (a namespace node in the result). The URI is the string
+ * value of the content, captured off-tree (a scratch rtf buffer —
+ * emitting into the live result leaks text into the output). */
+static int op_namespace(XsltExec* ex, const XsltInstr* in,
+                        LeptrisElement node) {
+    if (!in->name || !ex->pending_parent) return 0;
+    char* uri = xslt_capture_children_text(ex, in->child, node);
+    if (uri) {
+        leptris_element_add_namespace_definition(ex->pending_parent,
+                                                 in->name, uri);
+        free(uri);
+    }
+    return 0;
+}
+
+/* 2.0 §11.8 xsl:document: content flows to the pending parent. */
+static int op_document(XsltExec* ex, const XsltInstr* in,
+                       LeptrisElement node) {
+    if (!in->child) return 0;
+    return xslt_exec_instrs(ex, in->child, node);
+}
+
 static int op_on_non_empty(XsltExec* ex, const XsltInstr* in,
                            LeptrisElement node) {
     if (!in->child) return 0;
@@ -1626,6 +1649,16 @@ static int op_iterate(XsltExec* ex, const XsltInstr* in,
         if (sig == 2) break;
         if (rc) break;
     }
+    /* 3.0 §12.5: on-completion runs when the loop ENDED without
+     * xsl:break (sig != 2 on the final pass). Its instruction is
+     * skipped during the per-item walk (no registered op). */
+    if (ex->iterate_signal != 2) {
+        for (const XsltInstr* c = in->child; c; c = c->next) {
+            if (c->kind != XSLT_INSTR_ON_COMPLETION) continue;
+            rc = xslt_exec_instrs(ex, c->child, node);
+            break;
+        }
+    }
     ex->iterate_depth--;
     ex->iterate_signal = 0;
     iter_params_free(ex->iter_params);
@@ -1930,6 +1963,11 @@ static int op_copy_of(XsltExec* ex, const XsltInstr* in,
 }
 
 static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
+    /* 3.0 §9.9.2: with @select the sequence constructor is ignored
+     * and each selected item is copied — the same per-item rules as
+     * copy-of (Saxon-HE 12.7 verified: attribute items rebind on
+     * the pending parent, element items deep-copy). */
+    if (in->select) return op_copy_of(ex, in, node);
     /* §7.5: copying an ATTRIBUTE (re)binds it on the pending
      * parent — later copies override earlier xsl:attribute values
      * (execution order wins, §7.1.3). */
@@ -2566,7 +2604,10 @@ static int xslt_bind_param_defaults(XsltExec* ex, const XsltInstr* body,
             if (hit) continue;
         }
         struct leptris_xpath_result* v = NULL;
-        if (p->select) {
+        if (p->num_count) {
+            /* 4.0 @default expression takes precedence. */
+            v = xslt_eval(ex, p->num_count, node);
+        } else if (p->select) {
             v = xslt_eval(ex, p->select, node);
         } else if (p->child) {
             /* Content default: build the RTF like op_variable. */
@@ -4016,6 +4057,8 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_WHERE_POPULATED] = op_where_populated;
     g_ops[XSLT_INSTR_NEXT_MATCH] = op_next_match;
     g_ops[XSLT_INSTR_FORK] = op_fork;
+    g_ops[XSLT_INSTR_NAMESPACE] = op_namespace;
+    g_ops[XSLT_INSTR_DOCUMENT] = op_document;
     g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
     g_ops[XSLT_INSTR_ITERATE] = op_iterate;
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;
