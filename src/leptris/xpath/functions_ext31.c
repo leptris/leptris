@@ -1530,8 +1530,10 @@ static struct leptris_xpath_result* fn_map_merge(XPathContext* ctx,
                              e.v[i], strlen(e.v[i]));
     }
     map_entries_free(&e);
+    struct leptris_xpath_result* out = xpath_map_value(&dst);
+    map_entries_free(&dst);
     (void)n;
-    return xpath_map_value(&dst);
+    return out;
 }
 
 /* ---- registration (OCP: one call from the standard init) ---- */
