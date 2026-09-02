@@ -244,6 +244,15 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->column++;
             return token;
 
+        case '#':
+            /* 3.0 named function reference: name#arity. */
+            token.type = TOK_HASH;
+            token.value = lexer->pos;
+            token.value_len = 1;
+            lexer->pos++;
+            lexer->column++;
+            return token;
+
         case '+':
             token.type = TOK_PLUS;
             token.value = lexer->pos;

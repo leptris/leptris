@@ -360,6 +360,171 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return body;
     }
 
+    /* ---- 3.0 function items (TODO.xslt-full/07) ----
+     * Value-level: a closure is ONE synthetic text node —
+     * "\x03FN\x02" params-'\x01'-joined "\x02" + the raw body-AST
+     * pointer bytes (borrowed from the enclosing compiled
+     * expression — transform-lifetime in XSLT; v1 scope). A named
+     * reference is "\x03FR" + "name#arity". Args/results are
+     * string-typed in this slice. */
+    if (op == XPATH_OP_INLINE_FN) {
+        size_t plen = ast->value ? strlen(ast->value) : 0;
+        size_t cap = plen + 24;
+        char* content = (char*)malloc(cap);
+        if (!content) return NULL;
+        memcpy(content, "\x03" "FN\x02", 4);
+        size_t len = 4;
+        if (plen) { memcpy(content + len, ast->value, plen); len += plen; }
+        content[len++] = '\x02';
+        /* The body pointer rides as 16 hex chars: raw pointer bytes
+         * carry NULs (high bytes), and the let machinery DEEP-COPIES
+         * synthetic nodes strlen-wise — a truncated closure made the
+         * call memcpy read past the buffer (ASAN heap-overflow). */
+        XPathASTNode* body = ast->children[0];
+        len += (size_t)snprintf(content + len, 17, "%016llx",
+                                (unsigned long long)(uintptr_t)body);
+        cap = len + 2;   /* snprintf may have needed more than 17 */
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) { free(content); return NULL; }
+        out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
+        XPathTextNode* tn = synth_text(content, len);
+        free(content);
+        if (!tn) { xpath_nodeset_free(out); return NULL; }
+        xpath_nodeset_add(out, tn);
+        struct leptris_xpath_result* r =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!r) { xpath_nodeset_free(out); return NULL; }
+        r->value.nodeset_value = out;
+        return r;
+    }
+    if (op == XPATH_OP_FN_REF) {
+        size_t rl = ast->value ? strlen(ast->value) : 0;
+        char content[192];
+        if (rl + 4 >= sizeof(content)) return NULL;
+        memcpy(content, "\x03" "FR", 3);
+        if (rl) memcpy(content + 3, ast->value, rl);
+        content[3 + rl] = 0;
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) return NULL;
+        out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
+        XPathTextNode* tn = synth_text(content, rl + 3);
+        if (!tn) { xpath_nodeset_free(out); return NULL; }
+        xpath_nodeset_add(out, tn);
+        struct leptris_xpath_result* r =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!r) { xpath_nodeset_free(out); return NULL; }
+        r->value.nodeset_value = out;
+        return r;
+    }
+    if (op == XPATH_OP_DYN_CALL) {
+        struct leptris_xpath_result* callee =
+            evaluate_expr(ctx, ast->children[0]);
+        if (!callee) return NULL;
+        const char* cc = NULL;
+        if (callee->type == XPATH_RESULT_NODESET &&
+            callee->value.nodeset_value &&
+            callee->value.nodeset_value->count > 0)
+            cc = ((XPathTextNode*)
+                      callee->value.nodeset_value->nodes[0])->content;
+        if (!cc) { xpath_result_free(callee); return NULL; }
+        if (strncmp(cc, "\x03" "FR", 3) == 0) {
+            /* Named reference: synthesize a function-call AST over
+             * the borrowed arg ASTs and dispatch through the
+             * ordinary call path. */
+            char name[128];
+            snprintf(name, sizeof(name), "%s", cc + 3);
+            char* hash = strchr(name, '#');
+            if (hash) *hash = 0;
+            XPathASTNode fc;
+            memset(&fc, 0, sizeof(fc));
+            fc.type = XPATH_AST_FUNCTION_CALL;
+            fc.value = name;
+            fc.children = ast->children + 1;
+            fc.child_count = ast->child_count - 1;
+            struct leptris_xpath_result* out =
+                evaluate_function_call_inline(ctx, &fc);
+            xpath_result_free(callee);
+            return out;
+        }
+        if (strncmp(cc, "\x03" "FN", 3) != 0) {
+            xpath_result_free(callee);
+            return NULL;
+        }
+        const char* p = cc + 4;
+        const char* pe = strchr(p, '\x02');
+        if (!pe || pe[1] == 0) {
+            xpath_result_free(callee);
+            return NULL;
+        }
+        XPathASTNode* body = (XPathASTNode*)(uintptr_t)strtoull(
+            pe + 1, NULL, 16);
+        XPathVariableSet* scratch = NULL;
+        if (!ctx->variable_set) {
+            scratch = xpath_variable_set_new();
+            if (!scratch) { xpath_result_free(callee); return NULL; }
+            ctx->variable_set = scratch;
+        }
+        const char* param = p;
+        size_t ai = 1;
+        size_t bound = 0;
+        while (param < pe) {
+            const char* ne = strchr(param, '\x01');
+            if (!ne || ne > pe) ne = pe;
+            char pname[128];
+            size_t pn = (size_t)(ne - param);
+            if (pn >= sizeof(pname)) pn = sizeof(pname) - 1;
+            memcpy(pname, param, pn);
+            pname[pn] = 0;
+            XPathNodeSet* one = xpath_nodeset_new();
+            if (one) {
+                if (ai < (size_t)ast->child_count) {
+                    struct leptris_xpath_result* ar =
+                        evaluate_expr(ctx, ast->children[ai]);
+                    char* sv = ar ? xpath_to_string(ar) : NULL;
+                    if (ar) xpath_result_free(ar);
+                    XPathTextNode* tn =
+                        synth_text(sv ? sv : "", sv ? strlen(sv) : 0);
+                    free(sv);
+                    if (tn) xpath_nodeset_add(one, tn);
+                }
+                XPathVariable* var = xpath_variable_set_add(
+                    ctx->variable_set, pname, XPATH_VAR_TYPE_NODE_SET);
+                if (var) {
+                    xpath_variable_set_nodeset(var, one);
+                    bound++;
+                } else {
+                    xpath_nodeset_free(one);
+                }
+            }
+            if (*ne != '\x01') break;
+            param = ne + 1;
+            ai++;
+        }
+        struct leptris_xpath_result* out =
+            body ? evaluate_expr(ctx, body) : NULL;
+        param = p;
+        while (bound--) {
+            const char* ne = strchr(param, '\x01');
+            if (!ne || ne > pe) ne = pe;
+            char pname[128];
+            size_t pn = (size_t)(ne - param);
+            if (pn >= sizeof(pname)) pn = sizeof(pname) - 1;
+            memcpy(pname, param, pn);
+            pname[pn] = 0;
+            xpath_variable_set_remove(ctx->variable_set, pname);
+            if (*ne != '\x01') break;
+            param = ne + 1;
+        }
+        if (scratch) {
+            ctx->variable_set = NULL;
+            xpath_variable_set_free(scratch);
+        }
+        xpath_result_free(callee);
+        return out;
+    }
+
     /* 3.1 postfix lookup `V?k` / `V?2` (08 tail): the map entry for
      * the key — array indices ARE the positional keys. */
     if (op == XPATH_OP_LOOKUP) {

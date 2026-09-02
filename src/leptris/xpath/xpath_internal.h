@@ -23,6 +23,7 @@ typedef enum {
     TOK_COMMA,
     TOK_COLON,   /* map constructor key/value separator (3.1) */
     TOK_QUESTION,/* postfix lookup ?key / ?integer (3.1) */
+    TOK_HASH,    /* named function reference name#arity (3.0) */
     TOK_DOUBLE_COLON,
     TOK_NCNAME,
     TOK_QNAME,

@@ -3385,6 +3385,39 @@ TEST(Xslt30, PostfixLookupOnMapsAndArrays) {
         "<o><a>beta</a><b>20</b></o>");
 }
 
+TEST(Xslt30, InlineFunctionItemsAndCalls) {
+    /* Lane 07 first slice: inline function items, dynamic calls,
+     * and named function references. Saxon-HE 12.7 ground truth
+     * (/tmp/probe9/fi7.xsl, fi7b.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $f := function($x) { $x * 2 }"
+        " return $f(21)\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>42</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"function($x) { $x + 1 }(41)\"/></o>"
+        "</xsl:template>",
+        "<r/>")),
+        "<o>42</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $sq := function($n) { $n * $n }"
+        " return $sq(7)\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>49</o>");
+    /* name#arity + FR dispatch: next window (see TODO 07 status —
+     * the FR branch synthesizes a FUNCTION_CALL over borrowed arg
+     * ASTs; the failure is upstream of the dyn call). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $d := function($a, $b)"
+        " { $a * 10 + $b } return $d(4, 2)\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>42</o>");
+}
+
 TEST(Xslt30, SerializeJsonMethod) {
     /* Lane 08 final: fn:serialize with method json over the shared
      * map representation. Saxon-HE 12.7 ground truth

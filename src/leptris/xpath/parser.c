@@ -852,6 +852,75 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             next && next->type == TOK_DOLLAR) {
             /* Fall through to filter expression */
         }
+        /* 3.0 inline function item `function ($a, $b) { body }`. */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 current_token(parser)->value_len == 8 &&
+                 memcmp(current_token(parser)->value, "function", 8) == 0 &&
+                 next && next->type == TOK_LPAREN) {
+            advance_token(parser);
+            advance_token(parser);
+            char params[256];
+            size_t plen = 0;
+            params[0] = 0;
+            while (!current_token_is(parser, TOK_RPAREN)) {
+                if (!current_token_is(parser, TOK_DOLLAR)) return NULL;
+                advance_token(parser);
+                XPathToken* pt = current_token(parser);
+                if (!pt || (pt->type != TOK_NCNAME &&
+                            pt->type != TOK_QNAME))
+                    return NULL;
+                if (plen && plen + 1 < sizeof(params))
+                    params[plen++] = '\x01';   /* matches the DYN_CALL splitter */
+                if (plen + pt->value_len < sizeof(params)) {
+                    memcpy(params + plen, pt->value, pt->value_len);
+                    plen += pt->value_len;
+                }
+                params[plen] = 0;
+                advance_token(parser);
+                if (current_token_is(parser, TOK_COMMA))
+                    advance_token(parser);
+                else break;
+            }
+            if (!current_token_is(parser, TOK_RPAREN)) return NULL;
+            advance_token(parser);
+            if (!current_token_is(parser, TOK_LBRACE)) return NULL;
+            advance_token(parser);
+            XPathASTNode* body = parse_expr(parser);
+            if (!body) return NULL;
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(body);
+                return NULL;
+            }
+            advance_token(parser);
+            XPathASTNode* fn = ast_node_new(XPATH_AST_OPERATOR);
+            if (!fn) { ast_node_free(body); return NULL; }
+            fn->number_value = (double)XPATH_OP_INLINE_FN;
+            fn->value = leptris_strdup(params);
+            ast_node_add_child(fn, body);
+            return parse_postfix_ops(parser, fn);
+        }
+        /* 3.0 named function reference `name#arity`. */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 next && next->type == TOK_HASH) {
+            char name[128];
+            size_t nl = current_token(parser)->value_len;
+            if (nl >= sizeof(name)) return NULL;
+            memcpy(name, current_token(parser)->value, nl);
+            name[nl] = 0;
+            advance_token(parser);
+            advance_token(parser);
+            XPathToken* at = current_token(parser);
+            if (!at || at->type != TOK_NUMBER) return NULL;
+            char ref[160];
+            snprintf(ref, sizeof(ref), "%.*s#%.*s",
+                     (int)nl, name, (int)at->value_len, at->value);
+            advance_token(parser);
+            XPathASTNode* fr = ast_node_new(XPATH_AST_OPERATOR);
+            if (!fr) return NULL;
+            fr->number_value = (double)XPATH_OP_FN_REF;
+            fr->value = leptris_strdup(ref);
+            return parse_postfix_ops(parser, fr);
+        }
         /* 3.1 map constructor `map { k: v, ... }`. */
         else if (current_token(parser)->type == TOK_NCNAME &&
                  current_token(parser)->value_len == 3 &&
@@ -952,7 +1021,33 @@ static XPathASTNode* parse_filter_expr(XPathParser* parser);
 static XPathASTNode* parse_postfix_ops(XPathParser* parser,
                                        XPathASTNode* expr) {
     while (current_token_is(parser, TOK_LBRACKET) ||
-           current_token_is(parser, TOK_QUESTION)) {
+           current_token_is(parser, TOK_QUESTION) ||
+           current_token_is(parser, TOK_LPAREN)) {
+        /* 3.0 dynamic call: primary '(' args ')' — a '(' after a
+         * complete primary can only be this (1.0 function calls
+         * are primaries themselves). */
+        if (current_token_is(parser, TOK_LPAREN)) {
+            advance_token(parser);
+            XPathASTNode* call = ast_node_new(XPATH_AST_OPERATOR);
+            if (!call) { ast_node_free(expr); return NULL; }
+            call->number_value = (double)XPATH_OP_DYN_CALL;
+            ast_node_add_child(call, expr);
+            while (!current_token_is(parser, TOK_RPAREN)) {
+                XPathASTNode* a = parse_expr(parser);
+                if (!a) { ast_node_free(call); return NULL; }
+                ast_node_add_child(call, a);
+                if (current_token_is(parser, TOK_COMMA))
+                    advance_token(parser);
+                else break;
+            }
+            if (!current_token_is(parser, TOK_RPAREN)) {
+                ast_node_free(call);
+                return NULL;
+            }
+            advance_token(parser);
+            expr = call;
+            continue;
+        }
         if (current_token_is(parser, TOK_QUESTION)) {
             advance_token(parser);
             XPathToken* kt = current_token(parser);
