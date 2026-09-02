@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.56] - 2026-09-02
+
+### Added
+
+- xml-to-json (lane 08) — walk the canonical fn: vocabulary (xpath)
+
+
+
 ## [1.9.55] - 2026-09-02
 
 ### Added
