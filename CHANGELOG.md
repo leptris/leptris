@@ -4,7 +4,17 @@
 
 ### Added
 
-- xml-to-json (lane 08) — walk the canonical fn: vocabulary (xpath)
+- **`xml-to-json`** (TODO.xslt-full/08): walks the canonical `fn:`
+  vocabulary back into the shared map representation — members add
+  under `@key`, nested containers recurse through the builder,
+  scalars take the element text. The round trip
+  `xml-to-json(json-to-xml('{"b": "beta", "n": 2}'))` verified
+  against the Saxon-HE 12.7 expectation. The handoff's zero-entries
+  mystery resolved to an ownership bug (the synthetic map node was
+  added to the result while the intermediate result still owned it —
+  freeing the intermediate left it dangling); ownership now
+  transfers explicitly, the same invariant family as the #720
+  sequence transfer.
 
 
 
