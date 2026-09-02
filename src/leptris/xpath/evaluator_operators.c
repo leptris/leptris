@@ -539,6 +539,17 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 XPathNodeSet* is = item->value.nodeset_value;
                 for (size_t j = 0; j < is->count; j++)
                     xpath_nodeset_add(out, is->nodes[j]);
+                /* #720: an item nodeset may OWN synthetic nodes
+                 * (attribute/namespace materialized by an axis eval)
+                 * — the borrowed pointers dangle once the item is
+                 * freed. Transfer ownership to the sequence (same
+                 * discipline as XPATH_OP_UNION, issue #514). */
+                out->owns_attributes |= is->owns_attributes;
+                out->owns_namespaces |= is->owns_namespaces;
+                out->owns_synthetic_text |= is->owns_synthetic_text;
+                is->owns_attributes = 0;
+                is->owns_namespaces = 0;
+                is->owns_synthetic_text = 0;
             } else {
                 char* piece = xpath_to_string(item);
                 XPathTextNode* tn = synth_text(piece ? piece : "",

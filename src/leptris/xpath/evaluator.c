@@ -529,38 +529,25 @@ void xpath_nodeset_dispose_node(void* node) {
 void xpath_nodeset_free(XPathNodeSet* nodeset) {
     if (!nodeset) return;
 
-    /* Free attribute nodes if we own them */
-    if (nodeset->owns_attributes && nodeset->nodes) {
+    /* ONE pass over the nodes, dispatching on kind + ownership —
+     * sequential per-flag loops re-read the TYPE of nodes an earlier
+     * loop already freed (#720: a sequence holding an owned attribute
+     * next to owned synthetic text). */
+    if ((nodeset->owns_attributes || nodeset->owns_namespaces ||
+         nodeset->owns_synthetic_text) && nodeset->nodes) {
         for (size_t i = 0; i < nodeset->count; i++) {
             void* node = nodeset->nodes[i];
-            if (node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ATTRIBUTE) {
+            if (!node) continue;
+            int ty = XPATH_NODE_TYPE(node);
+            if (ty == LEPTRIS_NODE_ATTRIBUTE &&
+                nodeset->owns_attributes) {
                 xpath_nodeset_dispose_node(node);
-            }
-        }
-    }
-
-    /* Free namespace nodes if we own them */
-    if (nodeset->owns_namespaces && nodeset->nodes) {
-        for (size_t i = 0; i < nodeset->count; i++) {
-            void* node = nodeset->nodes[i];
-            if (node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_NAMESPACE) {
-                LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
-                if (ns->prefix) LEPTRIS_FREE(ns->prefix);
-                if (ns->uri) LEPTRIS_FREE(ns->uri);
-                LEPTRIS_FREE(ns);
-            }
-        }
-    }
-
-    /* Free synthetic text nodes (EXSLT str:tokenize/split results —
-     * TODO.concurrency/06). */
-    if (nodeset->owns_synthetic_text && nodeset->nodes) {
-        for (size_t i = 0; i < nodeset->count; i++) {
-            void* node = nodeset->nodes[i];
-            if (node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT) {
-                XPathTextNode* t = (XPathTextNode*)node;
-                if (t->content) LEPTRIS_FREE(t->content);
-                LEPTRIS_FREE(t);
+            } else if (ty == LEPTRIS_NODE_NAMESPACE &&
+                       nodeset->owns_namespaces) {
+                xpath_nodeset_dispose_node(node);
+            } else if (ty == LEPTRIS_NODE_TEXT &&
+                       nodeset->owns_synthetic_text) {
+                xpath_nodeset_dispose_node(node);
             }
         }
     }

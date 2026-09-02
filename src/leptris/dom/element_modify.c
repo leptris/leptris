@@ -975,6 +975,36 @@ LeptrisStatus leptris_element_remove_attribute(LeptrisElement elem, const char* 
     return LEPTRIS_ERROR_NOT_FOUND;  /* Attribute not found */
 }
 
+/* #721: copy an element's namespace identity — the cached prefix and
+ * namespace URI (the name is stored LOCAL; the prefix is a separate
+ * cache slot) plus every xmlns:* declaration. Strings are duplicated
+ * into the target pool (leptris_element_name_view shares the source
+ * buffer cross-doc, and so do these). Call AFTER the copy is attached
+ * or registered so get_pool/get_document resolve through the chain. */
+static void copy_element_namespaces(LeptrisElement copy, LeptrisElement source,
+                                    LeptrisElement parent) {
+    LeptrisMemoryPool* pool = leptris_element_get_pool(parent);
+    if (!pool) return;
+    char* pfx = leptris_elem_prefix(source);
+    if (pfx) {
+        LeptrisStringView pv = leptris_sv_from_cstr(pfx);
+        leptris_elem_set_prefix(
+            copy, leptris_sv_to_cstr_pooled(&pv, pool), pool);
+    }
+    char* uri = leptris_elem_ns_uri(source);
+    if (uri) {
+        LeptrisStringView uv = leptris_sv_from_cstr(uri);
+        leptris_elem_set_ns_uri(
+            copy, leptris_sv_to_cstr_pooled(&uv, pool), pool);
+    }
+    for (int i = 0;; i++) {
+        const char* np = leptris_element_namespace_decl_prefix(source, i);
+        const char* nu = leptris_element_namespace_decl_uri(source, i);
+        if (!nu) break;
+        leptris_element_add_namespace_definition(copy, np ? np : "", nu);
+    }
+}
+
 /**
  * Append copy of element (Public API)
  */
@@ -1026,12 +1056,24 @@ LeptrisElement leptris_element_append_copy(LeptrisElement parent, LeptrisElement
         if (leptris_element_append_child(parent, copy) != LEPTRIS_OK) {
             return NULL;
         }
+        /* #721: namespaces — after append_child so pool/doc lookups
+         * resolve through the parent chain. A bare <p:c/> takes this
+         * path and must keep its binding. */
+        copy_element_namespaces(copy, source, parent);
         return copy;
     }
 
     /* Create new element with StringView (no C string conversion!) */
     LeptrisElement copy = leptris_element_create_with_view(name_copy_view, leptris_element_get_pool(parent));
     if (!copy) return NULL;
+
+    /* TODO 155 Phase A: register copy as a temporary root so recursive
+     * child-copy calls can reach the pool via leptris_element_get_pool. */
+    leptris_root_doc_register(copy, leptris_element_get_document(parent));
+
+    /* #721: namespaces — after registration so the internal
+     * accessors can allocate the ns_cache through the pool. */
+    copy_element_namespaces(copy, source, parent);
 
     /* TODO 155 Phase A: register copy as a temporary root so recursive
      * child-copy calls can reach the pool via leptris_element_get_pool. */

@@ -3280,6 +3280,25 @@ TEST(Xslt30, WherePopulatedOnNonEmptyNextMatch) {
         "<nm><base><low/></base></nm>");
 }
 
+TEST(Xslt30, SequenceUseKeyValues) {
+    /* #720: a sequence use expression (@v, .) indexes the node under
+     * EVERY item's value (Saxon composite="no" ground truth); a
+     * sequence lookup argument unions the per-item buckets. The
+     * 1.9.43 build stringified the whole sequence — empty for >1
+     * item, so the node was never indexed. */
+    EXPECT_EQ(body(run30(
+        "<xsl:key name='k' match='item' use='@v, .'/>"
+        "<xsl:template match='/'>"
+        "<o>"
+        "<a><xsl:value-of select=\"count(key('k', ('1', 'alpha')))\"/></a>"
+        "<b><xsl:value-of select=\"count(key('k', '1'))\"/></b>"
+        "<c><xsl:value-of select=\"count(key('k', 'alpha'))\"/></c>"
+        "<d><xsl:value-of select=\"count(key('k', '5 beta'))\"/></d>"
+        "</o></xsl:template>",
+        "<r><item v='1'>alpha</item><item v='5'>beta</item></r>")),
+        "<o><a>1</a><b>1</b><c>1</c><d>0</d></o>");
+}
+
 TEST(Xslt30, ForkCompositeKeysStartAt) {
     /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09): fork runs
      * its child sequences sequentially; a key whose use evaluates
