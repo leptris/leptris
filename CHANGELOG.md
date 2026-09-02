@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.51] - 2026-09-02
+
+### Added
+
+- map constructor + map:get/size/keys/contains (lane 08A) (xpath)
+
+
+
 ## [1.9.50] - 2026-09-02
 
 ### Added
