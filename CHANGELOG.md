@@ -4,7 +4,24 @@
 
 ### Fixed
 
-- #720 sequence-use keys (UAF) + #721 element_copy namespaces
+- **#720 — sequence-use keys**: a `xsl:key` with a sequence `use`
+  (`use="@v, ."`) crashed the transform through a use-after-free (the
+  sequence operator borrowed nodes from each item's result, then freed
+  the item — a synthetic attribute node dangled), and the node was
+  never indexed (the whole sequence stringified to empty). Ownership
+  now transfers to the sequence nodeset (the union op's #514
+  discipline), `xpath_nodeset_free` owns one dispatch pass instead of
+  three sequential loops that re-read freed nodes, and every ITEM of
+  the use result is a key value (Saxon `composite="no"` ground truth:
+  `('1','alpha')`→1, `'1'`→1, `'alpha'`→1; sequence lookups union
+  buckets, deduped).
+- **#721 — `leptris_element_copy` namespaces**: the copy dropped the
+  cached prefix and namespace URI (`elem->name` is the LOCAL name) and
+  every `xmlns:*` declaration. `copy_element_namespaces` duplicates
+  prefix/URI into the target pool and re-declares the bindings after
+  attach — `<p:r xmlns:p="urn:p"><p:c/></p:r>` round-trips
+  byte-for-byte and namespace resolution works on the copied subtree
+  (libxml2 `xmlDocCopyNode` parity).
 
 
 
