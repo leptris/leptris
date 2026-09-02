@@ -4,9 +4,14 @@
 
 ### Added
 
-- fork, number start-at, composite keys (#690/#685) (xslt)
-
-
+- **Three more 3.0 items implemented** (#690/#685): `xsl:fork`
+  (§14 — non-streaming arms run sequentially into the same
+  destination), `xsl:number @start-at` (§12.2 — offsets positional
+  numbering on every level), and composite keys (§12.2 — a use
+  value of multiple whitespace-separated tokens indexes the node
+  under each). Sequence items serialize space-separated across
+  consecutive sequence instructions (fork arms). Saxon-HE 12.7
+  verified.
 
 ## [1.9.42] - 2026-09-02
 
