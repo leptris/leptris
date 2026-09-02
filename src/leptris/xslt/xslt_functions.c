@@ -416,31 +416,58 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
             struct leptris_xpath_result* r =
                 xslt_eval(ex, kd->use, (LeptrisElement)e);
             if (!r) continue;
-            char* sv = leptris_xpath_result_string(r);
-            leptris_xpath_result_free(r);
-            if (sv) {
-                /* §12.2 composite keys: a use value of multiple
-                 * whitespace-separated tokens indexes the node
-                 * under EACH token (#690). */
-                char* q = sv;
-                while (*q) {
-                    while (*q == ' ' || *q == '\t' || *q == '\n') q++;
-                    if (!*q) break;
-                    char* st = q;
-                    while (*q && *q != ' ' && *q != '\t' && *q != '\n')
-                        q++;
-                    char saved = *q;
-                    *q = '\0';
-                    key_index_put(idx, st, e);
-                    *q = saved;
+            /* §12.2: EVERY item of the use result is a key value —
+             * a sequence use (use="@v, .") indexes the node under
+             * each item (Saxon composite="no" ground truth, #720).
+             * A single item's whitespace-separated tokens are indexed
+             * individually (the #690 use="a b" form). */
+            if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+                r->value.nodeset_value->count > 0) {
+                XPathNodeSet* is = r->value.nodeset_value;
+                for (size_t i = 0; i < is->count; i++) {
+                    XPathNodeSet* one = xpath_nodeset_new();
+                    if (!one) continue;
+                    xpath_nodeset_add(one, is->nodes[i]);
+                    struct leptris_xpath_result tmp;
+                    memset(&tmp, 0, sizeof(tmp));
+                    tmp.type = XPATH_RESULT_NODESET;
+                    tmp.value.nodeset_value = one;
+                    char* sv = leptris_xpath_result_string(&tmp);
+                    xpath_nodeset_free(one);
+                    if (!sv) continue;
+                    char* q = sv;
+                    while (*q) {
+                        while (*q == ' ' || *q == '\t' || *q == '\n') q++;
+                        if (!*q) break;
+                        char* st = q;
+                        while (*q && *q != ' ' && *q != '\t' && *q != '\n')
+                            q++;
+                        char saved = *q;
+                        *q = '\0';
+                        key_index_put(idx, st, e);
+                        *q = saved;
+                    }
+                    free(sv);
                 }
-                free(sv);
-                continue;
+            } else {
+                char* sv = leptris_xpath_result_string(r);
+                if (sv) {
+                    char* q = sv;
+                    while (*q) {
+                        while (*q == ' ' || *q == '\t' || *q == '\n') q++;
+                        if (!*q) break;
+                        char* st = q;
+                        while (*q && *q != ' ' && *q != '\t' && *q != '\n')
+                            q++;
+                        char saved = *q;
+                        *q = '\0';
+                        key_index_put(idx, st, e);
+                        *q = saved;
+                    }
+                    free(sv);
+                }
             }
-            if (sv) {
-                key_index_put(idx, sv, e);
-                free(sv);
-            }
+            leptris_xpath_result_free(r);
         }
     }
     return 0;
@@ -500,6 +527,11 @@ static struct leptris_xpath_result* xslt_fn_key(
         }
     }
     leptris_xpath_result_free(vr);
+    /* A sequence lookup argument unions buckets — the same node can
+     * hit under several key values and must appear once (XPath
+     * nodesets are duplicate-free; the doc-order sort dedups). */
+    if (r->value.nodeset_value)
+        xpath_nodeset_sort_doc_order(ctx, r->value.nodeset_value, 0);
     return r;
 }
 

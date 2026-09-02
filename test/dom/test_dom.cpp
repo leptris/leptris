@@ -1709,3 +1709,31 @@ TEST(ElementCopy, KeepsCommentAndPiChildren) {
     leptris_free_string(ser);
     leptris_document_free(doc);
 }
+
+TEST(ElementCopy, KeepsNamespacePrefixesAndDeclarations) {
+    /* #721: the copy loop dropped namespace declarations entirely —
+     * the copy serialized as <r><c/></r> and namespace resolution on
+     * the copied nodes returned NULL. libxml2 xmlDocCopyNode parity:
+     * the declarations and prefixed names round-trip. */
+    const char xml[] = "<p:r xmlns:p=\"urn:p\"><p:c/></p:r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisDocument target = leptris_document_create();
+    ASSERT_NE(target, nullptr);
+    LeptrisElement copy = leptris_element_copy(root, target);
+    ASSERT_NE(copy, nullptr);
+    char* ser = leptris_element_serialize(copy, NULL);
+    ASSERT_NE(ser, nullptr);
+    EXPECT_STREQ(ser, xml);
+    leptris_free_string(ser);
+    /* Namespace resolution on the copied subtree (not just bytes). */
+    LeptrisElement child = leptris_element_first_child_any(copy);
+    ASSERT_NE(child, nullptr);
+    LeptrisNamespace ns = leptris_element_namespace(child);
+    ASSERT_NE(ns, nullptr);
+    EXPECT_STREQ(leptris_namespace_uri(ns), "urn:p");
+    leptris_document_free(target);
+    leptris_document_free(doc);
+}
