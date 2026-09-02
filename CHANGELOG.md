@@ -4,9 +4,14 @@
 
 ### Added
 
-- where-populated, on-non-empty, next-match (#690/#685) (xslt)
-
-
+- **Three more 3.0 instructions leave the no-op list** (#690/#685):
+  `xsl:where-populated` (§26.2 — content builds into a detached
+  scratch element; a wholly-empty build vanishes), `xsl:on-non-empty`
+  (§26.4 — Saxon-HE 12.7 evaluates the content unconditionally,
+  verified live; the spec permits buffering, parity follows the
+  oracle), and `xsl:next-match` (§6.6 — invokes the best matching
+  rule strictly worse than the current one; none lower means the
+  built-in). Saxon byte-parity on all six probe shapes.
 
 ## [1.9.41] - 2026-09-02
 
