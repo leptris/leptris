@@ -3354,6 +3354,50 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, CharacterMapsApplyToTextAndAttributes) {
+    /* Saxon-HE 12.7 ground truth: both maps listed in
+     * use-character-maps apply; substitution hits text nodes AND
+     * attribute values, never markup. */
+    EXPECT_EQ(body(run30(
+        "<xsl:output use-character-maps='cm1 cm2'/>"
+        "<xsl:character-map name='cm1'>"
+        "<xsl:output-character character='&#8594;' string='-&gt;'/>"
+        "</xsl:character-map>"
+        "<xsl:character-map name='cm2'>"
+        "<xsl:output-character character='&#955;' string='lambda'/>"
+        "</xsl:character-map>"
+        "<xsl:template match='/'>"
+        "<o a='x&#8594;y'>&#955;</o></xsl:template>",
+        "<r/>")),
+        "<o a=\"x->y\">lambda</o>");
+}
+
+TEST(Xslt30, ResultDocumentWritesSecondaryFile) {
+    /* Saxon-HE 12.7 ground truth: the principal result is unchanged;
+     * the secondary document is serialized (with declaration) to the
+     * href. */
+    const char* path = "/tmp/leptris-rd-spec.xml";
+    remove(path);
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<main><xsl:result-document href='/tmp/leptris-rd-spec.xml'>"
+        "<sec n='1'>hello</sec></xsl:result-document>body</main>"
+        "</xsl:template>",
+        "<r/>")),
+        "<main>body</main>");
+    FILE* f = fopen(path, "rb");
+    ASSERT_NE(f, nullptr);
+    std::string got;
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) got.append(buf, n);
+    fclose(f);
+    remove(path);
+    EXPECT_EQ(got,
+              "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+              "<sec n=\"1\">hello</sec>");
+}
+
 TEST(Xslt30, NextIterationChainsParams) {
     /* Sum 1..4 via xsl:next-iteration param rebinding. */
     EXPECT_EQ(body(run30(

@@ -529,6 +529,16 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "result-document") == 0) {
+        /* 2.0/3.0 §11.8: content is serialized to the href FILE
+         * (v1: static href, xml method); the principal result is
+         * unchanged. */
+        XsltInstr* in = instr_new(XSLT_INSTR_RESULT_DOCUMENT);
+        if (!in) return NULL;
+        in->name = leptris_strdup(leptris_element_attribute(e, "href"));
+        in->child = parse_content(sp, e);
+        return in;
+    }
 
     if (strcmp(local, "text") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_TEXT);
@@ -1379,6 +1389,72 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
                     sp->sheet->out_cdata_elems = arr;
                 }
             }
+            /* §16.1 use-character-maps: whitespace-separated names of
+             * xsl:character-map declarations activated at output. */
+            const char* ucm =
+                leptris_element_attribute(e, "use-character-maps");
+            if (ucm && *ucm) {
+                char* tmp = leptris_strdup(ucm);
+                if (tmp) {
+                    char* save = NULL;
+                    char* tok = xslt_strtok(tmp, " \t\n,", &save);
+                    while (tok) {
+                        char** grown = (char**)realloc(
+                            sp->sheet->out_charmap_names,
+                            (sp->sheet->out_charmap_name_count + 1) *
+                                sizeof(char*));
+                        if (!grown) break;
+                        sp->sheet->out_charmap_names = grown;
+                        sp->sheet->out_charmap_names[
+                            sp->sheet->out_charmap_name_count++] =
+                            leptris_strdup(tok);
+                        tok = xslt_strtok(NULL, " \t\n,", &save);
+                    }
+                    free(tmp);
+                }
+            }
+            continue;
+        }
+        if (node_is_xsl(e, "character-map")) {
+            /* §16.1: table of character → replacement-string pairs;
+             * activated by name from xsl:output/@use-character-maps. */
+            const char* cname = leptris_element_attribute(e, "name");
+            if (cname && *cname) {
+                XsltCharMap* grown = (XsltCharMap*)realloc(
+                    sp->sheet->charmaps,
+                    (sp->sheet->charmap_count + 1) * sizeof(*grown));
+                if (grown) {
+                    XsltCharMap* cm = &grown[sp->sheet->charmap_count++];
+                    memset(cm, 0, sizeof(*cm));
+                    cm->name = leptris_strdup(cname);
+                    sp->sheet->charmaps = grown;
+                    for (LeptrisElement c = leptris_element_first_child_any(e);
+                         c; c = leptris_element_next_sibling_any(c)) {
+                        if (!node_is_xsl(c, "output-character")) continue;
+                        const char* ch =
+                            leptris_element_attribute(c, "character");
+                        const char* rs =
+                            leptris_element_attribute(c, "string");
+                        if (!ch || !*ch) continue;
+                        char** ng = (char**)realloc(
+                            cm->chars, (cm->count + 1) * sizeof(char*));
+                        char** nr = (char**)realloc(
+                            cm->repls, (cm->count + 1) * sizeof(char*));
+                        if (!ng || !nr) {
+                            if (ng) { cm->chars = ng; }
+                            else free(nr);
+                            if (nr) { cm->repls = nr; }
+                            else free(ng);
+                            break;
+                        }
+                        cm->chars = ng;
+                        cm->repls = nr;
+                        cm->chars[cm->count] = leptris_strdup(ch);
+                        cm->repls[cm->count] = leptris_strdup(rs ? rs : "");
+                        cm->count++;
+                    }
+                }
+            }
             continue;
         }
         if (node_is_xsl(e, "strip-space") ||
@@ -1772,6 +1848,20 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
     for (size_t i = 0; i < sheet->out_cdata_count; i++)
         free(sheet->out_cdata[i]);
     free(sheet->out_cdata);
+    /* §16.1 character maps + the active name list. */
+    for (size_t i = 0; i < sheet->charmap_count; i++) {
+        for (size_t k = 0; k < sheet->charmaps[i].count; k++) {
+            free(sheet->charmaps[i].chars[k]);
+            free(sheet->charmaps[i].repls[k]);
+        }
+        free(sheet->charmaps[i].name);
+        free(sheet->charmaps[i].chars);
+        free(sheet->charmaps[i].repls);
+    }
+    free(sheet->charmaps);
+    for (size_t i = 0; i < sheet->out_charmap_name_count; i++)
+        free(sheet->out_charmap_names[i]);
+    free(sheet->out_charmap_names);
     for (size_t i = 0; i < sheet->exclude_count; i++)
         free(sheet->exclude_pfx[i]);
     free(sheet->exclude_pfx);
