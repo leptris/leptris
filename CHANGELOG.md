@@ -4,7 +4,20 @@
 
 ### Added
 
-- copy/@select, xsl:namespace, xsl:document, on-completion, param/@default (xslt)
+- **Five more XSLT constructs** (TODO.xslt-full/09 batch C): `xsl:copy
+  @select` (3.0 §9.9.2 — the sequence constructor is ignored and each
+  selected item is copied with copy-of per-item semantics: attribute
+  items rebind on the pending parent, element items deep-copy),
+  `xsl:namespace` (2.0 §11.7 — binds prefix→URI on the pending
+  element; the URI is the string value of the content, captured
+  off-tree), `xsl:document` (2.0 §11.8 — document constructor, content
+  flows to the pending parent), `xsl:on-completion` (3.0 §12.5 — the
+  post-loop body of `xsl:iterate`, runs unless the loop ended in
+  `xsl:break`), and `xsl:param @default` (the 4.0 form — dynamic
+  default evaluated when no with-param binds, taking precedence over
+  the sequence constructor). Saxon-HE 12.7 ground truth for the spec;
+  @default is pinned at our semantics since Saxon 12.7 rejects it
+  statically.
 
 
 
