@@ -3373,6 +3373,76 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, OnCompletionSeesIterateParams) {
+    /* #729: the on-completion body runs with the FINAL iteration's
+     * parameter values (§12.5). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<out><xsl:iterate select='1 to 4'>"
+        "<xsl:param name='sum' select='0'/>"
+        "<xsl:next-iteration>"
+        "<xsl:with-param name='sum' select='$sum + .'/>"
+        "</xsl:next-iteration>"
+        "<xsl:on-completion><xsl:value-of select='$sum'/></xsl:on-completion>"
+        "</xsl:iterate></out></xsl:template>",
+        "<r/>")),
+        "<out>10</out>");
+}
+
+TEST(Xslt30, MergeGroupsByKeysAcrossShapes) {
+    /* #731: grouping by key must hold for string-sequence sources
+     * (synthetic text items) AND single sources with attribute keys. */
+    EXPECT_EQ(body(run30(
+        "<xsl:variable name='L' select=\"('a1', 'a3')\"/>"
+        "<xsl:variable name='R' select=\"('a2', 'a3')\"/>"
+        "<xsl:template match='/'>"
+        "<out><xsl:merge>"
+        "<xsl:merge-source name='l' select='$L'/>"
+        "<xsl:merge-source name='r' select='$R'/>"
+        "<xsl:merge-key select='string(.)'/>"
+        "<xsl:merge-action>"
+        "<m><xsl:value-of select='current-merge-key()'/>|"
+        "<xsl:value-of select=\"count(current-merge-group('l'))\"/>+"
+        "<xsl:value-of select=\"count(current-merge-group('r'))\"/></m>"
+        "</xsl:merge-action>"
+        "</xsl:merge></out></xsl:template>",
+        "<r/>")),
+        "<out><m>a1|1+0</m><m>a2|0+1</m><m>a3|1+1</m></out>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<out><xsl:merge>"
+        "<xsl:merge-source name='s' select='//i'>"
+        "<xsl:merge-key select='@k'/>"
+        "</xsl:merge-source>"
+        "<xsl:merge-action>"
+        "<m><xsl:value-of select='current-merge-key()'/></m>"
+        "</xsl:merge-action>"
+        "</xsl:merge></out></xsl:template>",
+        "<r><i k='a'>1</i><i k='b'>2</i></r>")),
+        "<out><m>a</m><m>b</m></out>");
+}
+
+TEST(Xslt30, MultipleTopLevelNodesSerializeFully) {
+    /* #732 triage: multiple top-level nodes are a SUPPORTED result
+     * shape (libxslt parity — the adopted suite pins byte-for-byte
+     * multi-root outputs; Saxon errors instead, which we
+     * deliberately do not mirror). Interleaved text, elements, and
+     * call-template text-only output must all survive. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>\n    <t1><xsl:value-of "
+        "select=\"'V'\"/></t1>\n    <t2><xsl:value-of "
+        "select=\"'W'\"/></t2>\n  </xsl:template>",
+        "<r/>")),
+        "<t1>V</t1><t2>W</t2>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template name='h'>H</xsl:template>"
+        "<xsl:template match='/'>"
+        "<xsl:call-template name='h'/>"
+        "<xsl:call-template name='h'/></xsl:template>",
+        "<r/>")),
+        "HH");
+}
+
 TEST(Xslt30, CharacterMapsApplyToTextAndAttributes) {
     /* Saxon-HE 12.7 ground truth: both maps listed in
      * use-character-maps apply; substitution hits text nodes AND
