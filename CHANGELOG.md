@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.50] - 2026-09-02
+
+### Added
+
+- instance of / castable as / cast as / treat as (lane 06) (xpath)
+
+
+
 ## [1.9.49] - 2026-09-02
 
 ### Added
