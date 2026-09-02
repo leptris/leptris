@@ -13,3 +13,34 @@ leptris-py — PRs ok, never release). Then:
 - xsl:function (see 09) reuses this machinery
 
 Gate: Xslt30.FnItems spec (Saxon-probed) + mirrors synced + suite.
+
+## Status 2026-09-03 — first slice attempted, reverted clean; bisect notes
+
+Ground truth banked (Saxon-HE 12.7, /tmp/probe9/fi7.xsl fi7b.xsl):
+  function($x){$x*2} via let → 42; immediate call fn(41) → 42;
+  string-join#1(('a','b')) → 'ab'; 2-param fn → 42.
+
+Design (kept, compiles clean — all parser/lexer/enum wiring was
+reverted with the slice): TOK_HASH token; XPATH_OP_INLINE_FN /
+FN_REF / DYN_CALL (all VM AST-fallback); parser hooks beside the
+`map` branch (function+LPAREN; NCNAME+HASH) and a TOK_LPAREN arm
+in parse_postfix_ops (dynamic call). Closure repr: synthetic node
+"\x03FN\x02" params-'\x01'-joined "\x02" + raw body-AST pointer
+bytes (borrowed, transform-lifetime); FN_REF = "\x03FR"+name#arity;
+DYN_CALL dispatches FR via a stack XPATH_AST_FUNCTION_CALL over
+borrowed arg ASTs, FN binds params (FOR-discipline variable sets).
+
+Bisect point (traces on the gtest surface): `function($x){$x+1}(41)`
+compiles but the transform errors. [dyn] enter fires (twice —
+why twice?), the callee-content branches are reached but the
+body-eval trace NEVER prints → the flow exits between the content
+check and the FN branch: prime suspect = the closure content never
+starts "\x03FN" (check what INLINE_FN actually produced — maybe
+evaluate_expr on the INLINE_FN AST never dispatched to
+evaluate_operator, so the callee is something else), or the
+strchr('\x02') guard rejected. Trace the callee content bytes hex-
+first at DYN_CALL entry.
+
+Remaining after this slice: fn:function-lookup/name/arity, partial
+application, HOF combiners, PUBLIC XPathResultType change + FFI
+mirrors (leptris-ruby/py: PRs only, never release).
