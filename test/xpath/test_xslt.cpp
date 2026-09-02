@@ -3373,6 +3373,26 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, CastAndInstanceof) {
+    /* Lane 06: instance of / castable as / cast as (Saxon-HE 12.7
+     * ground truth, /tmp/probe9/g6.xsl — incl. the falsifiable
+     * negative and the truncation case). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<a><xsl:value-of select=\"'x' instance of xs:string\"/></a>"
+        "<b><xsl:value-of select=\"//i instance of node()+\"/></b>"
+        "<c><xsl:value-of select=\"'3' castable as xs:integer\"/></c>"
+        "<d><xsl:value-of select=\"'x' castable as xs:integer\"/></d>"
+        "<e><xsl:value-of select=\"'42' cast as xs:integer\"/></e>"
+        "<f><xsl:value-of select=\"xs:double('1.9') cast as xs:integer\"/></f>"
+        "</o></xsl:template>",
+        "<r><i>1</i></r>")),
+        "<o xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<a>true</a><b>true</b><c>true</c><d>false</d>"
+        "<e>42</e><f>1</f></o>");
+}
+
 TEST(Xslt30, XsConstructorFunctions) {
     /* Lane 06 (TODO.xslt-full/06): xs:* constructor functions.
      * Saxon-HE 12.7 ground truth (/tmp/probe9/g6.xsl): the atomic

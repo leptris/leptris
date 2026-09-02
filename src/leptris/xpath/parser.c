@@ -335,6 +335,38 @@ static int ncname_is(XPathToken* t, const char* kw, size_t kwlen) {
            memcmp(t->value, kw, kwlen) == 0;
 }
 
+/* SequenceType v1 (TODO.xslt-full/06): a prefixed name arrives as
+ * one TOK_QNAME (xs:integer); a bare NCNAME may be a KindTest
+ * (node()/item()) with an argument list. Occurrence indicators:
+ * '*' and '+' only ('?' has no lexer token). Returns a malloc'd
+ * "name[()]" + indicator string, NULL on parse failure. */
+static char* parse_sequence_type(XPathParser* parser) {
+    XPathToken* t = current_token(parser);
+    /* TOK_NODE: the lexer keyword-tokenizes `node` (node tests). */
+    if (!t || (t->type != TOK_NCNAME && t->type != TOK_QNAME &&
+               t->type != TOK_NODE))
+        return NULL;
+    char buf[96];
+    size_t len = t->value_len;
+    if (len >= sizeof(buf) - 4) return NULL;
+    memcpy(buf, t->value, len);
+    buf[len] = '\0';
+    advance_token(parser);
+    /* KindTest argument list: node() / item(). */
+    if (current_token_is(parser, TOK_LPAREN)) {
+        advance_token(parser);
+        if (current_token_is(parser, TOK_RPAREN)) advance_token(parser);
+        else return NULL;
+        if (len + 2 < sizeof(buf) - 4) { buf[len++] = '('; buf[len++] = ')'; buf[len] = '\0'; }
+    }
+    /* Occurrence indicator. */
+    if (current_token_is(parser, TOK_STAR)) { buf[len++] = '*'; buf[len] = 0; advance_token(parser); }
+    else if (current_token_is(parser, TOK_PLUS)) { buf[len++] = '+'; buf[len] = 0; advance_token(parser); }
+    char* out = LEPTRIS_ALLOC_N(char, len + 1);
+    if (out) memcpy(out, buf, len + 1);
+    return out;
+}
+
 static XPathASTNode* parse_expr(XPathParser* parser) {
     XPathASTNode* e = parse_or_expr(parser);
     if (!e) return NULL;
@@ -350,6 +382,44 @@ static XPathASTNode* parse_expr(XPathParser* parser) {
         ast_node_add_child(node, e);
         ast_node_add_child(node, hi);
         return node;
+    }
+    /* 2.0 type operators (TODO.xslt-full/06): value-matched
+     * two-word keywords + a SequenceType. Same whole-expr shape as
+     * `to` above (X instance of T — comparisons against the result
+     * need parentheses, as with ranges). */
+    {
+        XPathOperatorType op;
+        int matched = 0;
+        XPathToken* t = current_token(parser);
+        XPathToken* t2 = (t && parser->token_pos + 1 < parser->token_count)
+                             ? &parser->tokens[parser->token_pos + 1] : NULL;
+        if (ncname_is(t, "instance", 8) &&
+            ncname_is(t2, "of", 2)) {
+            op = XPATH_OP_INSTANCE_OF; matched = 1;
+            advance_token(parser); advance_token(parser);
+        } else if (ncname_is(t, "castable", 8) &&
+                   ncname_is(t2, "as", 2)) {
+            op = XPATH_OP_CASTABLE; matched = 1;
+            advance_token(parser); advance_token(parser);
+        } else if (ncname_is(t, "cast", 4) &&
+                   ncname_is(t2, "as", 2)) {
+            op = XPATH_OP_CAST; matched = 1;
+            advance_token(parser); advance_token(parser);
+        } else if (ncname_is(t, "treat", 5) &&
+                   ncname_is(t2, "as", 2)) {
+            op = XPATH_OP_TREAT; matched = 1;
+            advance_token(parser); advance_token(parser);
+        }
+        if (matched) {
+            char* ty = parse_sequence_type(parser);
+            if (!ty) { ast_node_free(e); return NULL; }
+            XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+            if (!node) { free(ty); ast_node_free(e); return NULL; }
+            node->number_value = (double)op;
+            node->value = ty;
+            ast_node_add_child(node, e);
+            return node;
+        }
     }
     return e;
 }

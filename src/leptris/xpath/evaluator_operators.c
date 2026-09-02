@@ -522,6 +522,110 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return result;
     }
 
+    /* ---- 2.0 type operators (TODO.xslt-full/06): child[0] plus the
+     * SequenceType carried in ast->value ("xs:integer", "node()+").
+     * Value-level v1: kind tests over the 1.0 result model; treat
+     * as asserts nothing and passes the operand through. ---- */
+    if (op == XPATH_OP_INSTANCE_OF || op == XPATH_OP_CASTABLE ||
+        op == XPATH_OP_CAST || op == XPATH_OP_TREAT) {
+        struct leptris_xpath_result* v = evaluate_expr(ctx, ast->children[0]);
+        if (!v) return NULL;
+        if (op == XPATH_OP_TREAT) return v;
+        const char* ty = ast->value ? ast->value : "";
+        size_t tlen = strlen(ty);
+        char occ = tlen ? ty[tlen - 1] : 0;
+        if (occ == '?' || occ == '*' || occ == '+') tlen--;
+        char base[80];
+        if (tlen >= sizeof(base)) tlen = sizeof(base) - 1;
+        memcpy(base, ty, tlen);
+        base[tlen] = '\0';
+
+        if (op == XPATH_OP_INSTANCE_OF) {
+            struct leptris_xpath_result* out =
+                xpath_result_new(XPATH_RESULT_BOOLEAN);
+            if (!out) { xpath_result_free(v); return NULL; }
+            int m = 0;
+            if (strcmp(base, "node()") == 0) {
+                m = v->type == XPATH_RESULT_NODESET &&
+                    v->value.nodeset_value &&
+                    (occ != '+' || v->value.nodeset_value->count > 0);
+            } else if (strcmp(base, "item()") == 0) {
+                m = v->type != XPATH_RESULT_NODESET ||
+                    !v->value.nodeset_value ||
+                    v->value.nodeset_value->count > 0 ||
+                    occ == '*' || occ == '?';
+            } else if (strcmp(base, "xs:string") == 0 ||
+                       strcmp(base, "xs:anyURI") == 0 ||
+                       strncmp(base, "xs:date", 7) == 0 ||
+                       strcmp(base, "xs:time") == 0 ||
+                       strcmp(base, "xs:duration") == 0) {
+                m = v->type == XPATH_RESULT_STRING;
+            } else if (strcmp(base, "xs:boolean") == 0) {
+                m = v->type == XPATH_RESULT_BOOLEAN;
+            } else {
+                /* xs:integer/double/decimal/float — numeric family. */
+                m = v->type == XPATH_RESULT_NUMBER;
+            }
+            out->value.boolean_value = m;
+            xpath_result_free(v);
+            return out;
+        }
+        if (op == XPATH_OP_CASTABLE) {
+            struct leptris_xpath_result* out =
+                xpath_result_new(XPATH_RESULT_BOOLEAN);
+            if (!out) { xpath_result_free(v); return NULL; }
+            int ok = 1;
+            int numeric = strcmp(base, "xs:integer") == 0 ||
+                          strcmp(base, "xs:double") == 0 ||
+                          strcmp(base, "xs:decimal") == 0 ||
+                          strcmp(base, "xs:float") == 0;
+            if (numeric) {
+                char* s = xpath_to_string(v);
+                ok = 0;
+                if (s) {
+                    char* end = NULL;
+                    strtod(s, &end);
+                    while (end && *end == ' ') end++;
+                    ok = end && *end == '\0' && s[0] != '\0';
+                    free(s);
+                }
+            } else if (strcmp(base, "xs:boolean") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && (strcmp(s, "true") == 0 ||
+                           strcmp(s, "false") == 0 ||
+                           strcmp(s, "1") == 0 || strcmp(s, "0") == 0);
+                free(s);
+            }
+            out->value.boolean_value = ok;
+            xpath_result_free(v);
+            return out;
+        }
+        /* XPATH_OP_CAST: constructor semantics (xs:integer truncates
+         * toward zero — same rule as the registered constructors). */
+        {
+            struct leptris_xpath_result* out = NULL;
+            if (strcmp(base, "xs:string") == 0 ||
+                strcmp(base, "xs:anyURI") == 0 ||
+                strncmp(base, "xs:date", 7) == 0 ||
+                strcmp(base, "xs:time") == 0 ||
+                strcmp(base, "xs:duration") == 0) {
+                out = xpath_result_new(XPATH_RESULT_STRING);
+                if (out) out->value.string_value = xpath_to_string(v);
+            } else if (strcmp(base, "xs:boolean") == 0) {
+                out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+                if (out) out->value.boolean_value = xpath_to_boolean(v);
+            } else {
+                double d = xpath_to_number(v);
+                if (strcmp(base, "xs:integer") == 0)
+                    d = (d < 0) ? ceil(d) : floor(d);
+                out = xpath_result_new(XPATH_RESULT_NUMBER);
+                if (out) out->value.number_value = d;
+            }
+            xpath_result_free(v);
+            return out;
+        }
+    }
+
     /* XSLT 3.0 parenthesized item sequence: each child evaluates to
      * one member (nodeset children contribute their nodes in
      * order). */

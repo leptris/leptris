@@ -668,7 +668,14 @@ typedef enum {
     /* Parenthesized item sequence `('a','b',expr)`: N children, one
      * per member — evaluates to the sequence (synthetic-text
      * nodeset). */
-    XPATH_OP_SEQUENCE
+    XPATH_OP_SEQUENCE,
+    /* 2.0 type operators (TODO.xslt-full/06): one child + the
+     * SequenceType carried as node->value ("xs:integer", "node()+").
+     * TREAT passes the operand through (value-level v1). */
+    XPATH_OP_INSTANCE_OF,
+    XPATH_OP_CASTABLE,
+    XPATH_OP_CAST,
+    XPATH_OP_TREAT
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope
