@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.48] - 2026-09-02
+
+### Fixed
+
+- #729 on-completion iterate params + #731 merge-level keys
+
+
+
 ## [1.9.47] - 2026-09-02
 
 ### Fixed
