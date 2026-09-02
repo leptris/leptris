@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.49] - 2026-09-02
+
+### Added
+
+- xs: atomic constructor functions (lane 06) (xpath)
+
+
+
 ## [1.9.48] - 2026-09-02
 
 ### Fixed
