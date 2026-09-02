@@ -32,3 +32,16 @@ REMAINING (08 tail):
   join/fold-left/fold-right — thin MapEntries loops once HOF
   machinery (lane 07) exists for the callback forms.
 Then lane 07 → 12 (see 06's status block for the Saxon verdicts).
+
+## json-to-xml / xml-to-json ground truth (2026-09-03, next slice)
+
+Saxon-HE 12.7 (/tmp/probe9/jx8.xsl): json-to-xml('{"b":"beta","n":2}')
+=> <map xmlns="http://www.w3.org/2005/xpath-functions">
+     <string key="b">beta</string><number key="n">2</number></map>
+Canonical fn vocabulary: map/array/string/number/boolean/null,
+@key on members, arrays positional. Implementation note: these
+return a DOCUMENT node through the nodeset channel — the result
+nodeset does not own documents, so build the fragment in a scratch
+doc and LEAK-SAFELY by reusing the capture-content ownership
+discipline (xslt_capture_content pattern) or attaching to the exec.
+xml-to-json is the reverse walk over that vocabulary.
