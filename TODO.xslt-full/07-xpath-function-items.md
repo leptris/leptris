@@ -65,3 +65,33 @@ deep-copy truncates — closure body pointer is 16-hex-char encoded.
 Also open: name#arity (TOK_HASH + FN_REF) parses but its dispatch
 (f synthesized FUNCTION_CALL over borrowed arg ASTs) fails
 upstream of the call — case d of the spec, trimmed out.
+
+## Update 2026-09-03: FR dispatch + lane 07B SHIPPED (v1.9.59 / PR #768, 07B PR #770)
+
+- **FR dispatch root cause (v1.9.59, PR #768)**: FN_REF nodes carry
+  NO children, so evaluate_operator's opening `child_count < 1`
+  guard rejected them before any op check — the "fails upstream"
+  mystery closed. FR construction now runs BEFORE the guard; the
+  shadowed duplicate block deleted. Plus XPath 3.1 one-arg
+  string-join (separator '') — `string-join#1` lands in it.
+- **Lane 07B (PR #770)**: fn:function-lookup (string name, fn:
+  prefix stripped, registry arity-range validated; returns an FR
+  item or the empty sequence), fn:function-name (fn:name / empty),
+  fn:function-arity (#N / closure param count); fn:for-each,
+  fn:filter, fn:fold-left, fn:fold-right via the new
+  xpath_call_function_item seam (FR = synthesized call over string
+  literal arg nodes; FN = params bound from string args);
+  `?` partial application DESUGARED AT PARSE TIME to an inline fn
+  (`concat('x',?,'z')` → `function($%1){concat('x',$%1,'z')}`).
+  Banked invariant: hole names use `%N` — NCNames exclude '%', and
+  `\x01` inside a hole name COLLIDES with the params separator
+  (first attempt bound param "1" while the body referenced "\x011"
+  — the doubled ifn/dc eval trace was the giveaway).
+- Spec: Xslt30.NamedFunctionReferenceDispatch + 11-case
+  Xslt30.FunctionItemMetadataAndHofs (190 total in test_xslt).
+  Oracle: /tmp/probe9/l07b/{t1,t2}.xsl.
+
+Remaining for lane 07 closure: PUBLIC XPathResultType change +
+FFI mirrors (leptris-ruby/py — PRs only, never release);
+fn:for-each-pair and the map:/array: HOF family if the combiner
+seam makes them cheap; then lane 11/12 (XQuery).
