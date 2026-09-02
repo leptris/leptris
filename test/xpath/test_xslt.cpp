@@ -3280,6 +3280,42 @@ TEST(Xslt30, WherePopulatedOnNonEmptyNextMatch) {
         "<nm><base><low/></base></nm>");
 }
 
+TEST(Xslt30, ForkCompositeKeysStartAt) {
+    /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09): fork runs
+     * its child sequences sequentially; a key whose use evaluates
+     * to MULTIPLE whitespace-separated tokens indexes the node
+     * under each; xsl:number start-at offsets the sequence. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<fk><xsl:fork>"
+        "<xsl:sequence select=\"'a'\"/>"
+        "<xsl:sequence select=\"'b'\"/>"
+        "</xsl:fork></fk>"
+        "</xsl:template>",
+        "<r/>")),
+        "<fk>a b</fk>");
+    EXPECT_EQ(body(run30(
+        "<xsl:key name='k' match='item' use='@tags'/>"
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"count(key('k', 'x')), "
+        "count(key('k', 'y'))\"/>]"
+        "</xsl:template>",
+        "<r><item tags='x z'/><item tags='x y'/></r>")),
+        "[2 1]");
+}
+
+TEST(Xslt30, NumberStartAt) {
+    /* xsl:number start-at: the sequence begins at 10. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:for-each select='//i'>"
+        "[<xsl:number/>][<xsl:number start-at='10'/>]"
+        "</xsl:for-each></o>"
+        "</xsl:template>",
+        "<r><i/><i/></r>")),
+        "<o>[1][10][2][11]</o>");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
