@@ -45,3 +45,23 @@ nodeset does not own documents, so build the fragment in a scratch
 doc and LEAK-SAFELY by reusing the capture-content ownership
 discipline (xslt_capture_content pattern) or attaching to the exec.
 xml-to-json is the reverse walk over that vocabulary.
+
+## json-to-xml slice — precise handoff (2026-09-03, reverted clean)
+
+First implementation attempt returned an EMPTY nodeset and its
+internal leptris_parse_string was never reached (lldb: only the
+stylesheet + source parses fire) — so fn_json_to_xml exits early:
+either json_root returns NULL on this exact input (though the same
+root logic passes the parse-json specs — verify the escape/arg
+path: re_str_arg on a &quot;-laden select) or the registration is
+not reached. Bisect from a clean main with a one-line probe:
+printf the re_str_arg result + json_root outcome inside a scratch
+fn. Spec (Saxon ground truth, already written once):
+  copy-of json-to-xml('{"b": "beta", "n": 2}') =>
+  <o><map xmlns="http://www.w3.org/2005/xpath-functions">
+    <string key="b">beta</string><number key="n">2</number></map></o>
+and the xml-to-json round trip map:get(...,'b')='beta'. Design
+kept: build canonical XML TEXT (escape &<>" + classify
+number/boolean/null by lexical form) → parse into a scratch doc →
+return the ROOT ELEMENT in the nodeset; xml-to-json walks the
+fn: vocabulary back into the shared map representation.
