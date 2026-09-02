@@ -682,7 +682,10 @@ typedef enum {
     /* 3.1 square array constructor `[ a, b, ... ]`: one child per
      * member; the value rides the map representation with
      * positional keys "1".."n". */
-    XPATH_OP_ARRAY_CONSTRUCTOR
+    XPATH_OP_ARRAY_CONSTRUCTOR,
+    /* 3.1 postfix lookup `V?k` / `V?2`: child[0] + the key in
+     * node->value (array indices ARE the positional keys). */
+    XPATH_OP_LOOKUP
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope

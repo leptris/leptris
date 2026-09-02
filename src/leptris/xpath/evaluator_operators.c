@@ -38,6 +38,8 @@ XPathTextNode* xpath_synth_text(const char* content, size_t len) {
 void* xpath_map_builder_new(void);
 void xpath_map_builder_add(void* b, const char* k, const char* v);
 struct leptris_xpath_result* xpath_map_builder_finish(void* b);
+char* xpath_map_lookup_result(struct leptris_xpath_result* r,
+                              const char* key);
 
 /* Full-lifetime copy of a nodeset: pointers are shared for document
  * nodes, but synthetic text members are DEEP-copied when the source
@@ -356,6 +358,20 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             body = NULL;
         }
         return body;
+    }
+
+    /* 3.1 postfix lookup `V?k` / `V?2` (08 tail): the map entry for
+     * the key — array indices ARE the positional keys. */
+    if (op == XPATH_OP_LOOKUP) {
+        struct leptris_xpath_result* v = evaluate_expr(ctx, ast->children[0]);
+        if (!v) return NULL;
+        char* val = xpath_map_lookup_result(v, ast->value);
+        xpath_result_free(v);
+        struct leptris_xpath_result* out =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (!out) { free(val); return NULL; }
+        out->value.string_value = val ? val : leptris_strdup("");
+        return out;
     }
 
     /* 3.1 square array constructor `[ a, b, ... ]` (08C): members
