@@ -1365,7 +1365,9 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
                 op == XPATH_OP_CAST || op == XPATH_OP_TREAT ||
                 op == XPATH_OP_MAP_CONSTRUCTOR ||
                 op == XPATH_OP_ARRAY_CONSTRUCTOR ||
-                op == XPATH_OP_LOOKUP) {
+                op == XPATH_OP_LOOKUP ||
+                op == XPATH_OP_INLINE_FN || op == XPATH_OP_FN_REF ||
+                op == XPATH_OP_DYN_CALL) {
                 emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
                             add_const_ast(st, node));
                 break;

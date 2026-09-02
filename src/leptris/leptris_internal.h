@@ -685,7 +685,14 @@ typedef enum {
     XPATH_OP_ARRAY_CONSTRUCTOR,
     /* 3.1 postfix lookup `V?k` / `V?2`: child[0] + the key in
      * node->value (array indices ARE the positional keys). */
-    XPATH_OP_LOOKUP
+    XPATH_OP_LOOKUP,
+    /* 3.0 function items (07). INLINE_FN: value = params joined by
+     * ' ', children[0] = body; the value is a closure node. FN_REF:
+     * value = "name#arity". DYN_CALL: children[0] = callee,
+     * children[1..] = args. */
+    XPATH_OP_INLINE_FN,
+    XPATH_OP_FN_REF,
+    XPATH_OP_DYN_CALL
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope
