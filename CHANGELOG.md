@@ -4,7 +4,16 @@
 
 ### Added
 
-- fn:serialize with method json (lane 08 closes) (xpath)
+- **`fn:serialize` with `method: 'json'`** — TODO.xslt-full/08's
+  value-level surface is now complete. The shared map representation
+  emits as a JSON object: keys double-quoted, values escaped when
+  their lexical form is not number/boolean/null; non-json methods
+  take the string value. Saxon-HE 12.7 ground truth:
+  `serialize(parse-json('{"b": "beta", "n": 2}'), map { 'method':
+  'json' })` → `{"b":"beta","n":2}`. Lane 08 tally: map + array
+  constructors, all accessors, `parse-json`, `?lookup`,
+  `json-to-xml`, `xml-to-json`, `serialize` json (the HOF-form
+  combiners queue behind lane 07's function items).
 
 
 
