@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.60] - 2026-09-02
+
+### Added
+
+- function-item metadata, HOF combiners, partial application
+
+
+
 ## [1.9.59] - 2026-09-02
 
 ### Fixed
