@@ -479,6 +479,9 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             pname[pn] = 0;
             XPathNodeSet* one = xpath_nodeset_new();
             if (one) {
+                /* set_remove frees the nodeset — without this flag
+                 * the synthetic arg node leaks (48B, Linux LSan). */
+                one->owns_synthetic_text = 1;
                 if (ai < (size_t)ast->child_count) {
                     struct leptris_xpath_result* ar =
                         evaluate_expr(ctx, ast->children[ai]);
