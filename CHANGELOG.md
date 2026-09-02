@@ -4,7 +4,19 @@
 
 ### Added
 
-- json-to-xml canonical fn: vocabulary (lane 08 tail) (xpath)
+- **`json-to-xml`** (TODO.xslt-full/08 tail): the canonical `fn:`
+  XML vocabulary — the map/array is decoded from the shared
+  representation, values classify by lexical form
+  (number/boolean/null/string), the XML is built as escaped text and
+  parsed into a scratch document, and the root element rides the
+  nodeset channel. Saxon-HE 12.7 ground truth, byte-identical:
+  `json-to-xml('{"b": "beta", "n": 2}')` yields `<map
+  xmlns="http://www.w3.org/2005/xpath-functions"><string
+  key="b">beta</string><number key="n">2</number></map>`. The
+  earlier forced revert of this slice turned out to be the
+  stale-static-archive probe trap (standalone probes failed even
+  shipped functions; the test binary is the true surface) — the
+  bisect rule is recorded in the commit.
 
 
 
