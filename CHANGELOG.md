@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.53] - 2026-09-02
+
+### Added
+
+- parse-json producing map/array values (lane 08D) (xpath)
+- square array constructor + array:size/get/append/put (lane 08C) (xpath)
+
+
+
 ## [1.9.52] - 2026-09-02
 
 ### Added
