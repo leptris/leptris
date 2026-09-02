@@ -17,6 +17,11 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <math.h>   /* NAN — MSVC rejects constant NAN (C2124) */
+#if defined(_WIN32)
+#  include <direct.h>   /* _mkdir (xsl:result-document) */
+#else
+#  include <sys/stat.h> /* mkdir (xsl:result-document) */
+#endif
 
 #define XSLT_MAX_DEPTH 512
 
@@ -1251,6 +1256,130 @@ static int op_document(XsltExec* ex, const XsltInstr* in,
                        LeptrisElement node) {
     if (!in->child) return 0;
     return xslt_exec_instrs(ex, in->child, node);
+}
+
+/* §16.1 character-map substitution on a SERIALIZED string: mapped
+ * characters are replaced in text spans and inside attribute-value
+ * quotes — never elsewhere in markup (comments/PIs count as markup).
+ * Returns a fresh string, or NULL when no active map matches. */
+char* xslt_apply_output_charmaps(const XsltStylesheet* sheet,
+                                 const char* s) {
+    if (!sheet || !s || !sheet->out_charmap_name_count) return NULL;
+    size_t active = 0;
+    for (size_t i = 0; i < sheet->out_charmap_name_count; i++)
+        for (size_t m = 0; m < sheet->charmap_count; m++)
+            if (sheet->charmaps[m].name &&
+                strcmp(sheet->out_charmap_names[i],
+                       sheet->charmaps[m].name) == 0)
+                active += sheet->charmaps[m].count;
+    if (!active) return NULL;
+    size_t cap = strlen(s) + 64, len = 0;
+    char* out = (char*)malloc(cap);
+    if (!out) return NULL;
+    int in_tag = 0, quote = 0, changed = 0;
+    for (size_t i = 0; s[i];) {
+        const char* repl = NULL;
+        size_t clen = 1;
+        if (!in_tag || quote) {
+            for (size_t n = 0; n < sheet->out_charmap_name_count && !repl;
+                 n++)
+                for (size_t m = 0; m < sheet->charmap_count && !repl; m++) {
+                    if (!sheet->charmaps[m].name ||
+                        strcmp(sheet->out_charmap_names[n],
+                               sheet->charmaps[m].name) != 0)
+                        continue;
+                    for (size_t k = 0; k < sheet->charmaps[m].count; k++) {
+                        const char* c = sheet->charmaps[m].chars[k];
+                        size_t cl = strlen(c);
+                        if (cl && strncmp(s + i, c, cl) == 0) {
+                            repl = sheet->charmaps[m].repls[k];
+                            clen = cl;
+                            break;
+                        }
+                    }
+                }
+        }
+        const char* emit;
+        size_t elen;
+        if (repl) {
+            emit = repl;
+            elen = strlen(repl);
+            changed = 1;
+        } else {
+            emit = s + i;
+            elen = 1;
+            if (!in_tag) {
+                if (s[i] == '<') in_tag = 1;
+            } else if (quote) {
+                if (s[i] == quote) quote = 0;
+            } else {
+                if (s[i] == '"' || s[i] == '\'') quote = s[i];
+                else if (s[i] == '>') in_tag = 0;
+            }
+        }
+        while (len + elen + 1 > cap) {
+            cap *= 2;
+            char* ng = (char*)realloc(out, cap);
+            if (!ng) { free(out); return NULL; }
+            out = ng;
+        }
+        memcpy(out + len, emit, elen);
+        len += elen;
+        i += clen;
+    }
+    if (!changed) { free(out); return NULL; }
+    out[len] = '\0';
+    return out;
+}
+
+/* Create every directory component of a file path (best effort). */
+static void mkpath_for_file(const char* file) {
+    char* dup = leptris_strdup(file);
+    if (!dup) return;
+    for (char* p = dup + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+#if defined(_WIN32)
+        _mkdir(dup);
+#else
+        mkdir(dup, 0755);
+#endif
+        *p = '/';
+    }
+    free(dup);
+}
+
+/* 2.0/3.0 §11.8 xsl:result-document: build the content in a fresh
+ * scratch document, serialize it (with the sheet's character maps),
+ * and write it to the href file. The principal result is unchanged. */
+static int op_result_document(XsltExec* ex, const XsltInstr* in,
+                              LeptrisElement node) {
+    if (!in->name || !in->child) return 0;
+    LeptrisDocument saved_res = ex->result;
+    LeptrisElement saved_pp = ex->pending_parent;
+    ex->result = leptris_document_create();
+    ex->pending_parent = NULL;
+    xslt_exec_instrs(ex, in->child, node);
+    LeptrisDocument rd = ex->result;
+    ex->result = saved_res;
+    ex->pending_parent = saved_pp;
+    LeptrisSerializeOptions opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.xml_declaration = 1;
+    opts.encoding = "UTF-8";
+    char* out = leptris_document_serialize(rd, &opts);
+    leptris_document_free(rd);
+    if (!out) return 0;
+    char* mapped = xslt_apply_output_charmaps(ex->sheet, out);
+    if (mapped) { free(out); out = mapped; }
+    mkpath_for_file(in->name);
+    FILE* f = fopen(in->name, "wb");
+    if (f) {
+        fwrite(out, 1, strlen(out), f);
+        fclose(f);
+    }
+    free(out);
+    return 0;
 }
 
 static int op_on_non_empty(XsltExec* ex, const XsltInstr* in,
@@ -4236,6 +4365,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_NAMESPACE] = op_namespace;
     g_ops[XSLT_INSTR_DOCUMENT] = op_document;
     g_ops[XSLT_INSTR_MERGE] = op_merge;
+    g_ops[XSLT_INSTR_RESULT_DOCUMENT] = op_result_document;
     g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
     g_ops[XSLT_INSTR_ITERATE] = op_iterate;
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;

@@ -91,6 +91,9 @@ typedef enum {
     XSLT_INSTR_MERGE_SOURCE,     /* named source; children are merge-keys */
     XSLT_INSTR_MERGE_KEY,        /* key expression + sort order */
     XSLT_INSTR_MERGE_ACTION,     /* body run per merge group */
+    XSLT_INSTR_RESULT_DOCUMENT,  /* 2.0/3.0 §11.8: serialize content
+                                    to the href file; principal result
+                                    unchanged */
     XSLT_INSTR_ON_EMPTY,         /* xsl:on-empty (3.0 §26.4): consumed
                                      by the enclosing result element —
                                      content runs only when the
@@ -355,6 +358,16 @@ typedef struct xslt_ns_alias {
     struct xslt_ns_alias* next;
 } XsltNsAlias;
 
+/* Character map (§16.1 xsl:character-map): character → replacement
+ * string pairs, applied to text nodes and attribute values during
+ * serialization of results that use-character-maps names. */
+typedef struct {
+    char* name;
+    char** chars;      /* UTF-8 encoded single characters */
+    char** repls;      /* replacement strings (may be empty) */
+    size_t count;
+} XsltCharMap;
+
 struct xslt_styles {
     /* Templates in source order; selection sorts by (import_rank,
      * priority, order) at apply time per §5.4/5.5. */
@@ -401,6 +414,14 @@ struct xslt_styles {
     const char* out_doctype_system;
     const char* out_doctype_public;
     char** out_cdata_elems;        /* NULL-terminated name list */
+
+    /* §16.1 character maps: declared xsl:character-map tables; the
+     * names xsl:output/@use-character-maps lists activate at
+     * serialization (substitution in text and attribute values). */
+    XsltCharMap* charmaps;
+    size_t charmap_count;
+    char** out_charmap_names;
+    size_t out_charmap_name_count;
 
     /* xsl:decimal-format declarations; the head is the default. */
     XsltDecimalFormat* decformats;
@@ -462,6 +483,12 @@ struct xslt_styles {
 };
 
 typedef struct xslt_styles XsltStylesheet;
+
+/* xslt_exec.c — §16.1 character-map substitution on a serialized
+ * result string (NULL when no active map matches). Used by the
+ * principal output path and xsl:result-document. */
+char* xslt_apply_output_charmaps(const XsltStylesheet* sheet,
+                                 const char* s);
 
 /* ---- Execution state ---- */
 

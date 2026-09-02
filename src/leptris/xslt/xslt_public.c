@@ -616,6 +616,17 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
     }
 
     char* final = acc;
+    /* §16.1 character maps: substitute the mapped characters in text
+     * spans and attribute values while the result is still UTF-8 —
+     * the encoding step below (us-ascii escapes / iconv transcode)
+     * must see the replacements, not the mapped characters. */
+    if (final) {
+        char* mapped = xslt_apply_output_charmaps(ex->sheet, final);
+        if (mapped) {
+            free(final);
+            final = mapped;
+        }
+    }
     /* §16.1 output encoding: us-ascii escapes non-ASCII as numeric
      * character references; single-byte legacy encodings transcode
      * the UTF-8 result via iconv (libxslt behavior, bugs 159/95). */
