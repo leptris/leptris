@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.43] - 2026-09-02
+
+### Added
+
+- fork, number start-at, composite keys (#690/#685) (xslt)
+
+
+
 ## [1.9.42] - 2026-09-02
 
 ### Added
