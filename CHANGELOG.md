@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.44] - 2026-09-02
+
+### Added
+
+- copy/@select, xsl:namespace, xsl:document, on-completion, param/@default (xslt)
+
+
+
 ## [1.9.43] - 2026-09-02
 
 ### Added
