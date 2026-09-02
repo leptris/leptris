@@ -608,6 +608,14 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "fork") == 0) {
+        /* 3.0 §14: non-streaming fork = the child sequences run
+         * sequentially into the same destination (Saxon-HE). */
+        XsltInstr* in = instr_new(XSLT_INSTR_FORK);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
+        return in;
+    }
     if (strcmp(local, "next-match") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_NEXT_MATCH);
         if (!in) return NULL;
@@ -791,6 +799,8 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->num_group_sep = gp ? gp[0] : 0;
         const char* lv = leptris_element_attribute(e, "letter-value");
         in->letter_value = lv ? leptris_strdup(lv) : NULL;
+        const char* sa = leptris_element_attribute(e, "start-at");
+        in->num_start_at = sa ? atol(sa) : 0;
         return in;
     }
     /* Unknown xsl: instruction (§2.5/§15): a fallback container.

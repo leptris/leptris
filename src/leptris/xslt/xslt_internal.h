@@ -80,7 +80,9 @@ typedef enum {
                                    parity follows the oracle) */
     XSLT_INSTR_WHERE_POPULATED, /* 3.0 §26.2: drop wholly-empty
                                    content */
-    XSLT_INSTR_NEXT_MATCH,      /* 3.0 §6.6: invoke the next-lower
+    XSLT_INSTR_NEXT_MATCH,
+    XSLT_INSTR_FORK,             /* 3.0 §14: sequential arms
+                                    (non-streaming) */      /* 3.0 §6.6: invoke the next-lower
                                    precedence matching rule */
     XSLT_INSTR_ON_EMPTY,         /* xsl:on-empty (3.0 §26.4): consumed
                                      by the enclosing result element —
@@ -134,6 +136,7 @@ typedef struct xslt_instr {
     LeptrisXPathCompiled num_from;
     const char* num_format;         /* "1", "a", "A", "i", "I" prefix */
     int num_group_size;
+    long num_start_at;            /* §12.2 start-at (0 = default 1) */
     char num_group_sep;
 
     /* Sorts (FOR_EACH / APPLY_TEMPLATES). */

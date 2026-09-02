@@ -977,6 +977,11 @@ static int op_sequence(XsltExec* ex, const XsltInstr* in,
      * item sequences silently dropped their content). */
     if (r->type != XPATH_RESULT_NODESET) {
         char* p = leptris_xpath_result_string(r);
+        /* Sequence items serialize space-separated — including
+         * across consecutive sequence instructions (fork arms). */
+        if (p && p[0] && ex->pending_parent &&
+            leptris_elem_first_child(ex->pending_parent))
+            out_append_text(ex, ex->pending_parent, " ");
         out_append_text(ex, ex->pending_parent, p ? p : "");
         free(p);
         leptris_xpath_result_free(r);
@@ -1200,6 +1205,14 @@ static int op_analyze_string(XsltExec* ex, const XsltInstr* in,
 /* 3.0 §26.4: Saxon-HE 12.7 evaluates on-non-empty content
  * unconditionally (verified against the oracle; the spec allows
  * buffering, parity follows observed behavior). */
+/* 3.0 §14 fork: non-streaming = the arms run sequentially into
+ * the same destination (Saxon-HE ground truth). */
+static int op_fork(XsltExec* ex, const XsltInstr* in,
+                   LeptrisElement node) {
+    if (!in->child) return 0;
+    return xslt_exec_instrs(ex, in->child, node);
+}
+
 static int op_on_non_empty(XsltExec* ex, const XsltInstr* in,
                            LeptrisElement node) {
     if (!in->child) return 0;
@@ -3801,6 +3814,7 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
     } else if (in->num_level == 2) {
         values[0] = any_number(in, node, ex->source, ex);
         if (!values[0]) return 0;
+        if (in->num_start_at) values[0] += (unsigned long)(in->num_start_at - 1);
         nv = 1;
     } else if (in->num_level == 1) {
         /* multiple: every ancestor-or-self matching count, outermost
@@ -3810,7 +3824,10 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
         for (LeptrisElement a = node; a && nr < 64;
              a = leptris_node_parent((LeptrisNodeRef)a)) {
             if (count_matches(in, a, node, ex->source, ex))
-                rev[nr++] = sibling_number(in, a, ex->source, ex);
+                rev[nr++] = sibling_number(in, a, ex->source, ex) +
+                            (in->num_start_at
+                                 ? (unsigned long)(in->num_start_at - 1)
+                                 : 0);
             if (from_matches(in, a, ex->source, ex)) break;
         }
         for (int i = 0; i < nr; i++) values[i] = rev[nr - 1 - i];
@@ -3826,7 +3843,9 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
             if (from_matches(in, a, ex->source, ex)) break;
         }
         if (!target) return 0;   /* §7.7: no match → nothing emitted */
-        values[0] = sibling_number(in, target, ex->source, ex);
+        values[0] = sibling_number(in, target, ex->source, ex) +
+                    (in->num_start_at
+                         ? (unsigned long)(in->num_start_at - 1) : 0);
         nv = 1;
     }
 
@@ -3996,6 +4015,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_ON_NON_EMPTY] = op_on_non_empty;
     g_ops[XSLT_INSTR_WHERE_POPULATED] = op_where_populated;
     g_ops[XSLT_INSTR_NEXT_MATCH] = op_next_match;
+    g_ops[XSLT_INSTR_FORK] = op_fork;
     g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
     g_ops[XSLT_INSTR_ITERATE] = op_iterate;
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;

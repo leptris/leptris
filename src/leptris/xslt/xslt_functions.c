@@ -391,6 +391,25 @@ static int xslt_keys_build(XsltExec* ex, const char* name) {
             char* sv = leptris_xpath_result_string(r);
             leptris_xpath_result_free(r);
             if (sv) {
+                /* §12.2 composite keys: a use value of multiple
+                 * whitespace-separated tokens indexes the node
+                 * under EACH token (#690). */
+                char* q = sv;
+                while (*q) {
+                    while (*q == ' ' || *q == '\t' || *q == '\n') q++;
+                    if (!*q) break;
+                    char* st = q;
+                    while (*q && *q != ' ' && *q != '\t' && *q != '\n')
+                        q++;
+                    char saved = *q;
+                    *q = '\0';
+                    key_index_put(idx, st, e);
+                    *q = saved;
+                }
+                free(sv);
+                continue;
+            }
+            if (sv) {
                 key_index_put(idx, sv, e);
                 free(sv);
             }
