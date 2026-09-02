@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.52] - 2026-09-02
+
+### Added
+
+- map:put/remove/merge + xsl:map (lane 08B; 09 closes) (xslt)
+
+### Fixed
+
+- free merge's destination entries (Linux LSan leak, #748 CI)
+
+
+
 ## [1.9.51] - 2026-09-02
 
 ### Added
