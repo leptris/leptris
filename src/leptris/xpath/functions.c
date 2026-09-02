@@ -1920,11 +1920,20 @@ static struct leptris_xpath_result* xpath_func_string_join(
 ) {
     struct leptris_xpath_result* seq = xpath_evaluate(context, args[0]);
     if (!seq) return NULL;
-    struct leptris_xpath_result* sep_r = xpath_evaluate(context, args[1]);
-    if (!sep_r) { xpath_result_free(seq); return NULL; }
-    char* sep = result_to_string(sep_r);
-    xpath_result_free(sep_r);
-    if (!sep) { xpath_result_free(seq); return NULL; }
+    /* XPath 3.1 one-arg form: separator defaults to the zero-length
+     * string ($f(('a','b')) via string-join#1 depends on it). */
+    char* sep;
+    if (arg_count >= 2) {
+        struct leptris_xpath_result* sep_r = xpath_evaluate(context, args[1]);
+        if (!sep_r) { xpath_result_free(seq); return NULL; }
+        sep = result_to_string(sep_r);
+        xpath_result_free(sep_r);
+        if (!sep) { xpath_result_free(seq); return NULL; }
+    } else {
+        sep = (char*)LEPTRIS_ALLOC_N(char, 1);
+        if (!sep) { xpath_result_free(seq); return NULL; }
+        sep[0] = 0;
+    }
     size_t sep_len = strlen(sep);
 
     size_t cap = 64, len = 0;
@@ -2072,7 +2081,7 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     /* XPath 2.0+ string functions (XSLT 3.0) */
     xpath_function_registry_register(registry, "upper-case", xpath_func_upper_case, 1, 1);
     xpath_function_registry_register(registry, "lower-case", xpath_func_lower_case, 1, 1);
-    xpath_function_registry_register(registry, "string-join", xpath_func_string_join, 2, 2);
+    xpath_function_registry_register(registry, "string-join", xpath_func_string_join, 1, 2);
 
     /* Boolean functions (5) */
     xpath_function_registry_register(registry, "boolean", xpath_func_boolean, 1, 1);

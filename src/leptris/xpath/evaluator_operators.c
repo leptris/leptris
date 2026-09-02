@@ -83,7 +83,31 @@ static int op_relational_cmp(XPathOperatorType op, double a, double b) {
 
 struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                               XPathASTNode* ast) {
-    if (!ast || ast->child_count < 1) return NULL;
+    if (!ast) return NULL;
+    XPathOperatorType op0 = (XPathOperatorType)ast->number_value;
+    /* FN_REF is the one operator with no children; it must run
+     * before the arity guard below. */
+    if (op0 == XPATH_OP_FN_REF && ast->type == XPATH_AST_OPERATOR) {
+        size_t rl = ast->value ? strlen(ast->value) : 0;
+        char content[192];
+        if (rl + 4 >= sizeof(content)) return NULL;
+        memcpy(content, "\x03" "FR", 3);
+        if (rl) memcpy(content + 3, ast->value, rl);
+        content[3 + rl] = 0;
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) return NULL;
+        out->owns_synthetic_text = 1;
+        out->is_sequence = 1;
+        XPathTextNode* tn = synth_text(content, rl + 3);
+        if (!tn) { xpath_nodeset_free(out); return NULL; }
+        xpath_nodeset_add(out, tn);
+        struct leptris_xpath_result* r =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!r) { xpath_nodeset_free(out); return NULL; }
+        r->value.nodeset_value = out;
+        return r;
+    }
+    if (ast->child_count < 1) return NULL;
 
     XPathOperatorType op = (XPathOperatorType)ast->number_value;
 
@@ -390,26 +414,6 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         out->is_sequence = 1;
         XPathTextNode* tn = synth_text(content, len);
         free(content);
-        if (!tn) { xpath_nodeset_free(out); return NULL; }
-        xpath_nodeset_add(out, tn);
-        struct leptris_xpath_result* r =
-            xpath_result_new(XPATH_RESULT_NODESET);
-        if (!r) { xpath_nodeset_free(out); return NULL; }
-        r->value.nodeset_value = out;
-        return r;
-    }
-    if (op == XPATH_OP_FN_REF) {
-        size_t rl = ast->value ? strlen(ast->value) : 0;
-        char content[192];
-        if (rl + 4 >= sizeof(content)) return NULL;
-        memcpy(content, "\x03" "FR", 3);
-        if (rl) memcpy(content + 3, ast->value, rl);
-        content[3 + rl] = 0;
-        XPathNodeSet* out = xpath_nodeset_new();
-        if (!out) return NULL;
-        out->owns_synthetic_text = 1;
-        out->is_sequence = 1;
-        XPathTextNode* tn = synth_text(content, rl + 3);
         if (!tn) { xpath_nodeset_free(out); return NULL; }
         xpath_nodeset_add(out, tn);
         struct leptris_xpath_result* r =
