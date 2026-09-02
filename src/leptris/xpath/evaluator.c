@@ -42,6 +42,7 @@
  * silently hits the built-in count(). Adding extension support =
  * adding the URI here plus the handler registration. */
 static const char* const k_extension_ns_uris[] = {
+    "http://www.w3.org/2001/XMLSchema",   /* xs:* constructors (06) */
     "http://exslt.org/common",
     "http://exslt.org/sets",
     "http://exslt.org/strings",
