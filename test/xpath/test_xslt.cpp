@@ -3385,6 +3385,23 @@ TEST(Xslt30, PostfixLookupOnMapsAndArrays) {
         "<o><a>beta</a><b>20</b></o>");
 }
 
+TEST(Xslt30, NamedFunctionReferenceDispatch) {
+    /* Lane 07: name#arity — let-bound named refs dispatched as
+     * dynamic calls. Saxon-HE 12.7: string-join#1(('a','b'))='ab'. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $f := string-join#1"
+        " return $f(('a','b'))\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>ab</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"let $c := concat#2"
+        " return $c('x', 'y')\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>xy</o>");
+}
+
 TEST(Xslt30, InlineFunctionItemsAndCalls) {
     /* Lane 07 first slice: inline function items, dynamic calls,
      * and named function references. Saxon-HE 12.7 ground truth
