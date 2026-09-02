@@ -38,3 +38,14 @@ Gate: Xslt30.Grammar3x spec (Saxon-probed) + suite green.
 Gate: Xslt30.Grammar3x* spec (Saxon-probed) + full suite green +
 1.0 438/438 unchanged. NOTE (from #732): multi-top-level result
 nodes are SUPPORTED (libxslt parity) — never "fix" to Saxon's error.
+
+## Status 2026-09-02 (v1.9.49 + v1.9.50 shipped)
+
+DONE: item 1 (xs: constructors — v1.9.49, PR #737) and item 2
+(instance of / castable as / cast as / treat as — v1.9.50, PR #740;
+lexer gotcha: `node` is TOK_NODE not NCNAME; the four ops are VM
+AST-fallback). REMAINING: item 3 (switch expressions — note
+XPATH_OP_SWITCH already exists in the enum + compiler fallback list;
+verify what's implemented and spec the gaps) and item 4 (3.1 string
+constructors `` `...{expr}...` ``; 'otherwise'/'||' → probe Saxon 13
+first). Then lane 08.
