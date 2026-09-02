@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.46] - 2026-09-02
+
+### Added
+
+- xsl:result-document + xsl:character-map (batch E) (xslt)
+
+
+
 ## [1.9.45] - 2026-09-02
 
 ### Added
