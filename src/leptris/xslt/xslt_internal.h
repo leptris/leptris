@@ -87,6 +87,10 @@ typedef enum {
     XSLT_INSTR_NAMESPACE,        /* 2.0 §11.7: namespace node */
     XSLT_INSTR_DOCUMENT,         /* 2.0 §11.8: document constructor */
     XSLT_INSTR_ON_COMPLETION,    /* 3.0 §12.5: post-iterate body */
+    XSLT_INSTR_MERGE,            /* 3.0 §14.3: merge sources into groups */
+    XSLT_INSTR_MERGE_SOURCE,     /* named source; children are merge-keys */
+    XSLT_INSTR_MERGE_KEY,        /* key expression + sort order */
+    XSLT_INSTR_MERGE_ACTION,     /* body run per merge group */
     XSLT_INSTR_ON_EMPTY,         /* xsl:on-empty (3.0 §26.4): consumed
                                      by the enclosing result element —
                                      content runs only when the
@@ -470,6 +474,15 @@ typedef struct xslt_var {
     struct xslt_var* prev;
 } XsltVar;
 
+/* One xsl:merge-source's slice of the current merge group (§14.3):
+ * name is borrowed from the merge-source instruction; items are
+ * borrowed pointers into op_merge's sorted entry list. */
+typedef struct xslt_merge_side {
+    const char* name;
+    LeptrisNodeRef* items;
+    size_t n, cap;
+} XsltMergeSide;
+
 typedef struct xslt_exec {
     const XsltStylesheet* sheet;
     LeptrisDocument sheet_doc;      /* stylesheet document —
@@ -568,6 +581,15 @@ typedef struct xslt_exec {
      * the bridge. NULL outside a for-each-group body. */
     XPathNodeSet* cur_group;
     char* cur_group_key;
+
+    /* xsl:merge (3.0 §14.3): the group in flight — per-source item
+     * arrays (borrowed pointers; owned by op_merge's entry list) and
+     * the composite key string, served by current-merge-group() /
+     * current-merge-key() through the bridge. NULL/0 outside a
+     * merge-action body. */
+    char* merge_key;
+    XsltMergeSide* merge_sides;
+    size_t merge_side_count;
 
     /* xsl:analyze-string (3.0 §18): the match in flight — the source
      * string (owned for the duration of the matching-substring body)

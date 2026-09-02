@@ -210,6 +210,34 @@ static struct leptris_xpath_result* xslt_fn_current_grouping_key(
     return res_string(ex && ex->cur_group_key ? ex->cur_group_key : "");
 }
 
+/* current-merge-key()/current-merge-group() (3.0 §14.3): the merge
+ * group in flight inside xsl:merge-action — the composite key and
+ * the per-source item slices, borrowed from op_merge. */
+static struct leptris_xpath_result* xslt_fn_current_merge_key(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)args; (void)n;
+    XsltExec* ex = exec_from(ctx);
+    return res_string(ex && ex->merge_key ? ex->merge_key : "");
+}
+
+static struct leptris_xpath_result* xslt_fn_current_merge_group(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    XsltExec* ex = exec_from(ctx);
+    char* name = (n >= 1) ? arg_string(ctx, args, n, 0) : NULL;
+    struct leptris_xpath_result* r = res_empty_ns();
+    if (ex && ex->merge_sides && r) {
+        for (size_t i = 0; i < ex->merge_side_count; i++) {
+            const XsltMergeSide* sd = &ex->merge_sides[i];
+            if (name && (!sd->name || strcmp(sd->name, name) != 0))
+                continue;
+            for (size_t k = 0; k < sd->n; k++)
+                xpath_nodeset_add(r->value.nodeset_value, sd->items[k]);
+        }
+    }
+    free(name);
+    return r;
+}
+
 /* regex-group(n) (3.0 §18): the nth capture of the analyze-string
  * match in flight — offsets are POSIX regmatch values relative to
  * as_src + as_pos. */
@@ -1706,6 +1734,10 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
                           0, 0, exec);
     xslt_register_handler(r, "current-grouping-key",
                           xslt_fn_current_grouping_key, 0, 0, exec);
+    xslt_register_handler(r, "current-merge-key",
+                          xslt_fn_current_merge_key, 0, 0, exec);
+    xslt_register_handler(r, "current-merge-group",
+                          xslt_fn_current_merge_group, 0, 1, exec);
     xslt_register_handler(r, "regex-group", xslt_fn_regex_group,
                           1, 1, exec);
     xslt_register_handler(r, "error", xslt_fn_error, 0, 1, exec);

@@ -28,6 +28,9 @@ static char* xslt_capture_children_text(XsltExec* ex,
                                         const XsltInstr* child,
                                         LeptrisElement node);
 
+static struct leptris_xpath_result* xslt_capture_content(
+        XsltExec* ex, const XsltInstr* child, LeptrisElement node);
+
 /* Portable ASCII case-insensitive comparison (strcasecmp is
  * POSIX-only; MSVC has _stricmp). */
 static int xslt_ci_eq(const char* a, const char* b) {
@@ -1065,7 +1068,21 @@ static int op_evaluate(XsltExec* ex, const XsltInstr* in,
             (LeptrisNodeRef)leptris_document_get_node(ex->source);
         ctx = (LeptrisElement)dn;
     }
+    /* Child xsl:with-param bindings are visible to the DYNAMIC
+     * evaluation only (Saxon-HE 12.7 verified: @xpath's own
+     * evaluation resolves the outer bindings). xslt_push_var (not a
+     * raw XsltVar link) — the eval varset must be marked dirty or
+     * the new binding never reaches variable lookup. */
+    XsltVar* scope_mark = ex->vars;
+    for (const XsltInstr* w = in->child; w; w = w->next) {
+        if (w->kind != XSLT_INSTR_WITH_PARAM || !w->name) continue;
+        struct leptris_xpath_result* v = NULL;
+        if (w->select) v = xslt_eval(ex, w->select, node);
+        else if (w->child) v = xslt_capture_content(ex, w->child, node);
+        xslt_push_var(ex, w->name, v);
+    }
     struct leptris_xpath_result* r = ctx ? xslt_eval(ex, c, ctx) : NULL;
+    xslt_pop_vars_to(ex, scope_mark);
     leptris_xpath_compiled_free(c);
     if (!r) return 0;
     char* sv = value_of_string(ex, r);
@@ -1698,6 +1715,165 @@ static int op_break(XsltExec* ex, const XsltInstr* in,
     if (in->child) xslt_exec_instrs(ex, in->child, node);
     ex->iterate_signal = 2;
     return 0;
+}
+
+/* xsl:merge (3.0 §14.3): full outer join of every merge-source on
+ * the composite merge-key. v1: @select sources (for-each-source is
+ * TODO), string keys, and the FIRST key's @order governs the whole
+ * composite. Sources' select results stay alive for the whole merge
+ * (the entry list borrows their nodes). */
+typedef struct xslt_merge_entry {
+    char* key;                  /* owned composite key */
+    LeptrisNodeRef node;        /* borrowed from the source result */
+    size_t src;                 /* source index */
+    size_t ord;                 /* selection order (stable tiebreak) */
+} XsltMergeEntry;
+
+/* Merge sort direction flag for qsort (no context arg on MSVC). */
+#if defined(_MSC_VER)
+#  define LEPTRIS_TLS __declspec(thread)
+#else
+#  define LEPTRIS_TLS __thread
+#endif
+static LEPTRIS_TLS int g_merge_desc;
+
+static int merge_entry_cmp(const void* a, const void* b) {
+    const XsltMergeEntry* x = (const XsltMergeEntry*)a;
+    const XsltMergeEntry* y = (const XsltMergeEntry*)b;
+    int c = strcmp(x->key, y->key);
+    if (g_merge_desc) c = -c;
+    if (c == 0) c = (x->ord > y->ord) - (x->ord < y->ord);
+    return c;
+}
+
+static int op_merge(XsltExec* ex, const XsltInstr* in,
+                    LeptrisElement node) {
+    const XsltInstr* action = NULL;
+    const XsltInstr** srcs = NULL;
+    struct leptris_xpath_result** sres = NULL;
+    XsltMergeEntry* ents = NULL;
+    XsltMergeSide* sides = NULL;
+    size_t n_src = 0, n_ents = 0, ent_cap = 0;
+    int rc = 0;
+
+    for (const XsltInstr* c = in->child; c; c = c->next) {
+        if (c->kind == XSLT_INSTR_MERGE_SOURCE) n_src++;
+        else if (c->kind == XSLT_INSTR_MERGE_ACTION) action = c;
+    }
+    if (!action || !n_src) return 0;
+    srcs = (const XsltInstr**)calloc(n_src, sizeof(*srcs));
+    sres = (struct leptris_xpath_result**)
+        calloc(n_src, sizeof(*sres));
+    if (!srcs || !sres) { free(srcs); free(sres); return 0; }
+    size_t si = 0;
+    for (const XsltInstr* c = in->child; c; c = c->next)
+        if (c->kind == XSLT_INSTR_MERGE_SOURCE) srcs[si++] = c;
+
+    g_merge_desc = 0;
+    size_t ord = 0;
+    for (si = 0; si < n_src; si++) {
+        const XsltInstr* s = srcs[si];
+        if (!s->select) continue;
+        struct leptris_xpath_result* r = xslt_eval(ex, s->select, node);
+        if (!r) continue;
+        sres[si] = r;   /* stays alive: entries borrow its nodes */
+        size_t cnt = leptris_xpath_result_count(r);
+        for (size_t i = 0; i < cnt; i++) {
+            LeptrisNodeRef nd = leptris_xpath_result_get_node(r, i);
+            if (!nd) continue;
+            /* Composite key: every merge-key child's string value,
+             * '\x01'-joined (not in normal text, unlike '|'). */
+            size_t klen = 0, kcap = 16;
+            char* key = (char*)malloc(kcap);
+            if (!key) continue;
+            for (const XsltInstr* k = s->child; k; k = k->next) {
+                if (k->kind != XSLT_INSTR_MERGE_KEY || !k->select)
+                    continue;
+                struct leptris_xpath_result* kr =
+                    xslt_eval(ex, k->select, (LeptrisElement)nd);
+                char* ks = kr ? leptris_xpath_result_string(kr) : NULL;
+                if (kr) leptris_xpath_result_free(kr);
+                size_t add = (ks ? strlen(ks) : 0) + 1;
+                if (klen + add + 1 > kcap) {
+                    kcap = (klen + add + 1) * 2;
+                    char* nk = (char*)realloc(key, kcap);
+                    if (!nk) { free(key); free(ks); key = NULL; break; }
+                    key = nk;
+                }
+                if (klen) key[klen++] = '\x01';
+                if (ks) { memcpy(key + klen, ks, strlen(ks));
+                          klen += strlen(ks); }
+                free(ks);
+                if (s->child == k && !g_merge_desc && k->num_start_at)
+                    g_merge_desc = 1;
+            }
+            if (!key) continue;
+            key[klen] = '\0';
+            if (n_ents == ent_cap) {
+                ent_cap = ent_cap ? ent_cap * 2 : 16;
+                XsltMergeEntry* ne =
+                    (XsltMergeEntry*)realloc(ents, ent_cap * sizeof(*ne));
+                if (!ne) { free(key); continue; }
+                ents = ne;
+            }
+            ents[n_ents].key = key;
+            ents[n_ents].node = nd;
+            ents[n_ents].src = si;
+            ents[n_ents].ord = ord++;
+            n_ents++;
+        }
+    }
+
+    qsort(ents, n_ents, sizeof(*ents), merge_entry_cmp);
+
+    sides = (XsltMergeSide*)calloc(n_src, sizeof(*sides));
+    if (sides)
+        for (si = 0; si < n_src; si++) sides[si].name = srcs[si]->name;
+
+    char* saved_key = ex->merge_key;
+    XsltMergeSide* saved_sides = ex->merge_sides;
+    size_t saved_count = ex->merge_side_count;
+
+    size_t i = 0;
+    while (i < n_ents && !rc) {
+        size_t j = i;
+        while (j < n_ents && strcmp(ents[j].key, ents[i].key) == 0) j++;
+        for (si = 0; si < n_src; si++) sides[si].n = 0;
+        for (size_t k = i; k < j; k++) {
+            XsltMergeSide* sd = &sides[ents[k].src];
+            if (sd->n == sd->cap) {
+                sd->cap = sd->cap ? sd->cap * 2 : 4;
+                LeptrisNodeRef* ni = (LeptrisNodeRef*)
+                    realloc(sd->items, sd->cap * sizeof(*ni));
+                if (!ni) { sd->cap /= 2; continue; }
+                sd->items = ni;
+            }
+            sd->items[sd->n++] = ents[k].node;
+        }
+        ex->merge_key = ents[i].key;
+        ex->merge_sides = sides;
+        ex->merge_side_count = n_src;
+        LeptrisElement ctx = NULL;
+        for (si = 0; si < n_src && !ctx; si++)
+            if (sides[si].n) ctx = (LeptrisElement)sides[si].items[0];
+        rc = xslt_exec_instrs(ex, action->child, ctx ? ctx : node);
+        i = j;
+    }
+
+    ex->merge_key = saved_key;
+    ex->merge_sides = saved_sides;
+    ex->merge_side_count = saved_count;
+
+    if (sides)
+        for (si = 0; si < n_src; si++) free(sides[si].items);
+    free(sides);
+    for (i = 0; i < n_ents; i++) free(ents[i].key);
+    free(ents);
+    for (si = 0; si < n_src; si++)
+        if (sres[si]) leptris_xpath_result_free(sres[si]);
+    free(sres);
+    free(srcs);
+    return rc;
 }
 
 /* xsl:for-each-group (3.0 §14). Groups in first-appearance order;
@@ -4059,6 +4235,7 @@ static void register_ops(void) {
     g_ops[XSLT_INSTR_FORK] = op_fork;
     g_ops[XSLT_INSTR_NAMESPACE] = op_namespace;
     g_ops[XSLT_INSTR_DOCUMENT] = op_document;
+    g_ops[XSLT_INSTR_MERGE] = op_merge;
     g_ops[XSLT_INSTR_FOR_EACH] = op_for_each;
     g_ops[XSLT_INSTR_ITERATE] = op_iterate;
     g_ops[XSLT_INSTR_NEXT_ITERATION] = op_next_iteration;

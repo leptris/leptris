@@ -497,6 +497,38 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "merge") == 0) {
+        /* 3.0 §14.3: children are merge-source* + one merge-action. */
+        XsltInstr* in = instr_new(XSLT_INSTR_MERGE);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "merge-source") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_MERGE_SOURCE);
+        if (!in) return NULL;
+        in->name = leptris_strdup(leptris_element_attribute(e, "name"));
+        in->select = compile_attr_sp(sp, e, "select");
+        /* Children are merge-key declarations. */
+        in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "merge-key") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_MERGE_KEY);
+        if (!in) return NULL;
+        in->select = compile_attr_sp(sp, e, "select");
+        /* @order="descending" flips the sort; reused field (v1
+         * honors the FIRST key's order across the composite). */
+        const char* od = leptris_element_attribute(e, "order");
+        in->num_start_at = (od && strcmp(od, "descending") == 0);
+        return in;
+    }
+    if (strcmp(local, "merge-action") == 0) {
+        XsltInstr* in = instr_new(XSLT_INSTR_MERGE_ACTION);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
+        return in;
+    }
 
     if (strcmp(local, "text") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_TEXT);
@@ -582,6 +614,8 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         if (!in) return NULL;
         in->select = compile_attr_sp(sp, e, "xpath");
         in->context_item = compile_attr_sp(sp, e, "context-item");
+        /* Children are xsl:with-param for the dynamic phase. */
+        in->child = parse_content(sp, e);
         return in;
     }
     if (strcmp(local, "analyze-string") == 0) {

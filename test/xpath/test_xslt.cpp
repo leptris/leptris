@@ -3316,6 +3316,63 @@ TEST(Xslt30, NumberStartAt) {
         "<o>[1][10][2][11]</o>");
 }
 
+TEST(Xslt30, EvaluateWithParamsAndContext) {
+    /* Saxon-HE 12.7 ground truth: child xsl:with-param binds $p for
+     * the DYNAMIC phase only (@xpath's own evaluation saw the outer
+     * $p). context-item re-anchors the dynamic expression. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o>"
+        "<e1><xsl:evaluate xpath=\"'$p * 2'\">"
+        "<xsl:with-param name='p' select='42'/></xsl:evaluate></e1>"
+        "<e2><xsl:evaluate xpath=\"'count(//i)'\" context-item='/'/></e2>"
+        "<e3><xsl:evaluate xpath=\"'name(/*)'\" context-item='/*'/></e3>"
+        "</o></xsl:template>",
+        "<r><i>3</i><i>5</i></r>")),
+        "<o><e1>84</e1><e2>2</e2><e3>r</e3></o>");
+}
+
+TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
+    /* Saxon-HE 12.7 ground truth: keys 1,2,3; source a holds 1,3,
+     * source b holds 2,3; unmatched side is empty. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<m><xsl:merge>"
+        "<xsl:merge-source name='a' select='//i' sort-before-merge='yes'>"
+        "<xsl:merge-key select='@n' order='ascending'/>"
+        "</xsl:merge-source>"
+        "<xsl:merge-source name='b' select='//j' sort-before-merge='yes'>"
+        "<xsl:merge-key select='@n' order='ascending'/>"
+        "</xsl:merge-source>"
+        "<xsl:merge-action>"
+        "<g n='{current-merge-key()}'><xsl:value-of "
+        "select='current-merge-group(\"a\")/@n'/>|<xsl:value-of "
+        "select='current-merge-group(\"b\")/@n'/></g>"
+        "</xsl:merge-action>"
+        "</xsl:merge></m></xsl:template>",
+        "<r><i n='1'/><i n='3'/><j n='2'/><j n='3'/></r>")),
+        "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
+}
+
+TEST(Xslt30, NextIterationChainsParams) {
+    /* Sum 1..4 via xsl:next-iteration param rebinding. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:iterate select='1 to 4'>"
+        "<xsl:param name='acc' select='0'/>"
+        "<xsl:choose>"
+        "<xsl:when test='. = 4'><xsl:value-of select='$acc + .'/></xsl:when>"
+        "<xsl:otherwise>"
+        "<xsl:next-iteration>"
+        "<xsl:with-param name='acc' select='$acc + .'/>"
+        "</xsl:next-iteration>"
+        "</xsl:otherwise>"
+        "</xsl:choose>"
+        "</xsl:iterate></o></xsl:template>",
+        "<r/>")),
+        "<o>10</o>");
+}
+
 TEST(Xslt30, CopySelectNamespaceDocumentDefault) {
     /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09 batch C).
      * NOTE: @default is XSLT 4.0 (Saxon 12.7 rejects it
