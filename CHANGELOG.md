@@ -4,7 +4,15 @@
 
 ### Added
 
-- postfix lookup ?key / ?integer (lane 08 tail) (xpath)
+- **Postfix lookup `?key` / `?integer`** (TODO.xslt-full/08 tail):
+  `?` lexes as a token (previously a hard lex error — nothing that
+  compiled changes) and `V?k` resolves the map entry; array indices
+  ARE the positional keys, so `[10, 20, 30]?2` is the same lookup.
+  The postfix loop (predicates + lookups) is now one shared helper
+  used by both filter expressions and the map/array constructors —
+  the RED spec caught constructors bypassing the filter level, so
+  `map { 'b': 1 }?b` never bound before the fix. Saxon-HE 12.7
+  ground truth: `map?b`='beta', `[10,20,30]?2`=20.
 
 
 
