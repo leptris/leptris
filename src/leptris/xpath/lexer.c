@@ -346,26 +346,14 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
             lexer->column += 2;
             return token;
         }
-        /* Single colon is handled as part of QName */
-        if (lexer->input && lexer->pos >= lexer->input) {
-            size_t byte_offset = lexer->pos - lexer->input;
-
-            leptris_set_error_with_context(
-                LEPTRIS_ERROR_XPATH_SYNTAX,
-                "Unexpected ':' character in XPath expression",
-                lexer->input,
-                byte_offset,
-                lexer->line,
-                lexer->column
-            );
-        }
-
-        snprintf(lexer->error_msg, sizeof(lexer->error_msg),
-                "Unexpected character ':' at line %d, column %d",
-                lexer->line, lexer->column);
-        token.type = TOK_EOF;  /* Error token */
+        /* Map constructor key/value separator (3.1). A stray colon
+         * was a hard lex error before — nothing that lexed cleanly
+         * regresses. */
+        token.type = TOK_COLON;
         token.value = lexer->pos;
-        token.value_len = 0;
+        token.value_len = 1;
+        lexer->pos += 1;
+        lexer->column += 1;
         return token;
     }
 

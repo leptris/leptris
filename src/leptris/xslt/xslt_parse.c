@@ -109,18 +109,13 @@ static LeptrisXPathCompiled compile_attr_sp(SheetParser* sp,
     if (!v || !v[0]) return NULL;
     /* XQuery-only brace syntax must fail loudly (#692: some brace
      * shapes phantom-compiled to silent empty). The compiler runs
-     * FIRST so the XPath 3.1 switch(...) grammar can accept its own
-     * braces; a compile failure on brace-bearing text raises. */
+     * FIRST; braces are real tokens (TOK_LBRACE/TOK_COLON) accepted
+     * ONLY by the map-constructor grammar, so any other brace shape
+     * fails the parse right here — loud by construction. (The old
+     * post-compile brace backstop was retired when map constructors
+     * made brace-bearing selects legitimate.) */
     LeptrisXPathCompiled c = leptris_xpath_compile(v);
     if (!c) {
-        if (sp) sp->errors = 1;
-        return NULL;
-    }
-    if ((strchr(v, '{') || strchr(v, '}')) &&
-        strstr(v, "switch") != v) {
-        /* Phantom-compile backstop: reject brace shapes the
-         * compiler accepted but cannot mean (Saxon: XPST0003). */
-        leptris_xpath_compiled_free(c);
         if (sp) sp->errors = 1;
         return NULL;
     }

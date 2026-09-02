@@ -3373,6 +3373,26 @@ TEST(Xslt30, MergeTwoSourcesFullOuterJoin) {
         "<m><g n=\"1\">1|</g><g n=\"2\">|2</g><g n=\"3\">3|3</g></m>");
 }
 
+TEST(Xslt30, FnMapConstructorAndAccessors) {
+    /* Lane 08 (TODO.xslt-full/08) first slice: the map constructor
+     * expression + get/size/keys/contains. Saxon-HE 12.7 ground
+     * truth (/tmp/probe9/map8b.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:variable name='m' select=\"map { 'a': 1, 'b': 'beta',"
+        " 'c': count(//i) }\"/>"
+        "<o xmlns:map='http://www.w3.org/2005/xpath-functions/map'>"
+        "<a><xsl:value-of select='map:size($m)'/></a>"
+        "<b><xsl:value-of select=\"map:get($m, 'b')\"/></b>"
+        "<c><xsl:value-of select=\"string-join(map:keys($m), ',')\"/></c>"
+        "<d><xsl:value-of select=\"map:contains($m, 'a')\"/></d>"
+        "<e><xsl:value-of select=\"map:contains($m, 'z')\"/></e>"
+        "</o></xsl:template>",
+        "<r><i>1</i><i>2</i></r>")),
+        "<o xmlns:map=\"http://www.w3.org/2005/xpath-functions/map\">"
+        "<a>3</a><b>beta</b><c>a,b,c</c><d>true</d><e>false</e></o>");
+}
+
 TEST(Xslt30, CastAndInstanceof) {
     /* Lane 06: instance of / castable as / cast as (Saxon-HE 12.7
      * ground truth, /tmp/probe9/g6.xsl — incl. the falsifiable
@@ -3587,12 +3607,9 @@ TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
         "</xsl:template>",
         "<r/>")),
         "(compile-failed)");
-    EXPECT_EQ(body(run30(
-        "<xsl:template match='/'>"
-        "[<xsl:value-of select=\"map { 'a': 1 }\"/>]"
-        "</xsl:template>",
-        "<r/>")),
-        "(compile-failed)");
+    /* The map constructor compile-failure pin was superseded by
+     * lane 08: map { ... } is implemented (FnMapConstructorAnd
+     * Accessors). */
     /* Saxon-HE 12.7: XPST0003 "switch is not allowed in XPath"
      * (XQuery-only) — our loud rejection is oracle parity. */
     EXPECT_EQ(body(run30(

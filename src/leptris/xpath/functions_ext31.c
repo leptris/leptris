@@ -1213,6 +1213,126 @@ static struct leptris_xpath_result* fn_xs_boolean(XPathContext* ctx,
     return out;
 }
 
+/* ---- maps (TODO.xslt-full/08, first slice) ----
+ * Value-level: a map is ONE synthetic text node whose content is
+ * "\x03MAP" + per entry "\x02"key"\x01"value (insertion order) —
+ * the XPATH_OP_MAP_CONSTRUCTOR encoding. Accessors decode here. */
+
+extern XPathTextNode* xpath_synth_text(const char* content, size_t len);
+
+static struct leptris_xpath_result* fn_map_get(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* key = re_str_arg(ctx, args, 1);
+    char* val = NULL;
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    if (r) {
+        if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+            r->value.nodeset_value->count > 0) {
+            XPathTextNode* tn =
+                (XPathTextNode*)r->value.nodeset_value->nodes[0];
+            if (tn && tn->content &&
+                strncmp(tn->content, "\x03MAP", 4) == 0) {
+                const char* p = tn->content + 4;
+                while (*p == '\x02') {
+                    const char* ke = strchr(p + 1, '\x01');
+                    if (!ke) break;
+                    size_t klen = (size_t)(ke - (p + 1));
+                    const char* ve = ke + 1;
+                    const char* en = ve;
+                    while (*en && *en != '\x02') en++;
+                    if (key && klen == strlen(key) &&
+                        memcmp(p + 1, key, klen) == 0) {
+                        val = LEPTRIS_ALLOC_N(char,
+                                              (size_t)(en - ve) + 1);
+                        if (val) {
+                            memcpy(val, ve, (size_t)(en - ve));
+                            val[en - ve] = '\0';
+                        }
+                        break;
+                    }
+                    p = en;
+                }
+            }
+        }
+        leptris_xpath_result_free(r);
+    }
+    free(key);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (out) out->value.string_value = val ? val : leptris_strdup("");
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_map_size(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    size_t count = 0;
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+        r->value.nodeset_value->count > 0) {
+        XPathTextNode* tn = (XPathTextNode*)r->value.nodeset_value->nodes[0];
+        if (tn && tn->content && strncmp(tn->content, "\x03MAP", 4) == 0) {
+            const char* p = tn->content + 4;
+            while (*p == '\x02') {
+                count++;
+                p++;
+                const char* ke = strchr(p, '\x01');
+                if (!ke) break;
+                p = ke + 1;
+                while (*p && *p != '\x02') p++;
+            }
+        }
+    }
+    if (r) leptris_xpath_result_free(r);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
+    if (out) out->value.number_value = (double)count;
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_map_keys(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!out) return NULL;
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value) return out;
+    out->value.nodeset_value->owns_synthetic_text = 1;
+    out->value.nodeset_value->is_sequence = 1;
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+        r->value.nodeset_value->count > 0) {
+        XPathTextNode* tn = (XPathTextNode*)r->value.nodeset_value->nodes[0];
+        if (tn && tn->content && strncmp(tn->content, "\x03MAP", 4) == 0) {
+            const char* p = tn->content + 4;
+            while (*p == '\x02') {
+                const char* ke = strchr(p + 1, '\x01');
+                if (!ke) break;
+                XPathTextNode* kn =
+                    xpath_synth_text(p + 1, (size_t)(ke - (p + 1)));
+                if (kn) xpath_nodeset_add(out->value.nodeset_value, kn);
+                const char* en = ke + 1;
+                while (*en && *en != '\x02') en++;
+                p = en;
+            }
+        }
+    }
+    if (r) leptris_xpath_result_free(r);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_map_contains(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* got = fn_map_get(ctx, args, n);
+    int found = got && got->type == XPATH_RESULT_STRING &&
+                got->value.string_value &&
+                got->value.string_value[0] != '\0';
+    if (got) leptris_xpath_result_free(got);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (out) out->value.boolean_value = found;
+    return out;
+}
+
 /* ---- registration (OCP: one call from the standard init) ---- */
 
 void xpath_register_fn31(XPathFunctionRegistry* registry);
@@ -1289,4 +1409,9 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "matches", fn_matches, 2, 3);
     xpath_function_registry_register(registry, "replace", fn_replace, 3, 4);
     xpath_function_registry_register(registry, "tokenize", fn_tokenize, 2, 3);
+    /* Maps (08, first slice) — canonical map: prefix. */
+    xpath_function_registry_register(registry, "map:get", fn_map_get, 2, 2);
+    xpath_function_registry_register(registry, "map:size", fn_map_size, 1, 1);
+    xpath_function_registry_register(registry, "map:keys", fn_map_keys, 1, 1);
+    xpath_function_registry_register(registry, "map:contains", fn_map_contains, 2, 2);
 }
