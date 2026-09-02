@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.58] - 2026-09-02
+
+### Added
+
+- inline function items + dynamic calls (lane 07 slice) (xpath)
+
+### Fixed
+
+- own the synthetic arg nodes in dynamic-call param binding
+
+
+
 ## [1.9.57] - 2026-09-02
 
 ### Added
