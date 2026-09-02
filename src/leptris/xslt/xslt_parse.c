@@ -471,6 +471,32 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->child = parse_content(sp, e);
         return in;
     }
+    if (strcmp(local, "namespace") == 0) {
+        /* §11.7 (2.0): construct a namespace node on the pending
+         * parent — @name prefix, content = URI. */
+        XsltInstr* in = instr_new(XSLT_INSTR_NAMESPACE);
+        if (!in) return NULL;
+        in->name = leptris_strdup(leptris_element_attribute(e, "name"));
+        in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "document") == 0) {
+        /* §11.8 (2.0): content becomes children of the pending
+         * parent (a document constructor in sequence content is
+         * the content itself). */
+        XsltInstr* in = instr_new(XSLT_INSTR_DOCUMENT);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
+        return in;
+    }
+    if (strcmp(local, "on-completion") == 0) {
+        /* 3.0 §12.5: runs after xsl:iterate completes without
+         * xsl:break. */
+        XsltInstr* in = instr_new(XSLT_INSTR_ON_COMPLETION);
+        if (!in) return NULL;
+        in->child = parse_content(sp, e);
+        return in;
+    }
 
     if (strcmp(local, "text") == 0) {
         XsltInstr* in = instr_new(XSLT_INSTR_TEXT);
@@ -668,6 +694,11 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         in->is_param = (local[0] == 'p');   /* xsl:param (§11.6) */
         const char* tu = leptris_element_attribute(e, "tunnel");
         in->tunnel = in->is_param && tu && strcmp(tu, "yes") == 0;
+        if (in->is_param) {
+            /* 4.0 @default: evaluated when no with-param binds
+             * (takes precedence over the sequence constructor). */
+            in->num_count = compile_attr_sp(sp, e, "default");
+        }
         /* §11.1: the select resolves with the DECLARING element's
          * in-scope bindings — top-level variables of included
          * sheets carry their own (bug-36-). */
@@ -718,6 +749,9 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         build_ns_copy(sp, e, &in->ns_out_pfx, &in->ns_out_uri,
                       &in->ns_out_count, &in->ns_out_default,
                       &in->ns_out_default_pos);
+        /* 3.0 §9.9: copy/@select deep-copies the selected nodes
+         * (the node-kind copy semantics apply per item). */
+        in->select = compile_attr_sp(sp, e, "select");
         in->child = parse_content(sp, e);
         return in;
     }

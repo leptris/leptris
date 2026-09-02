@@ -80,10 +80,13 @@ typedef enum {
                                    parity follows the oracle) */
     XSLT_INSTR_WHERE_POPULATED, /* 3.0 §26.2: drop wholly-empty
                                    content */
-    XSLT_INSTR_NEXT_MATCH,
+    XSLT_INSTR_NEXT_MATCH,       /* 3.0 §6.6: invoke the next-lower
+                                    precedence matching rule */
     XSLT_INSTR_FORK,             /* 3.0 §14: sequential arms
-                                    (non-streaming) */      /* 3.0 §6.6: invoke the next-lower
-                                   precedence matching rule */
+                                    (non-streaming) */
+    XSLT_INSTR_NAMESPACE,        /* 2.0 §11.7: namespace node */
+    XSLT_INSTR_DOCUMENT,         /* 2.0 §11.8: document constructor */
+    XSLT_INSTR_ON_COMPLETION,    /* 3.0 §12.5: post-iterate body */
     XSLT_INSTR_ON_EMPTY,         /* xsl:on-empty (3.0 §26.4): consumed
                                      by the enclosing result element —
                                      content runs only when the
