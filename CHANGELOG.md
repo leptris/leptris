@@ -4,7 +4,25 @@
 
 ### Fixed
 
-- xs: lexical casts, instance-of node kinds/cardinality, cast-as in arithmetic
+- **xs: lexical casts + instance-of node kinds/cardinality**
+  (#739, #744). `xs:boolean('0')`/`xs:boolean('false')` now cast to
+  false — a string argument takes the XSD lexical forms
+  `true/1/false/0` (optional whitespace); anything else is a
+  dynamic error (Saxon FORG0001 parity). `xs:integer`/`xs:double`
+  validate string lexicals whole: `' 42 '` → 42, `' -3.9 '` as an
+  integer errors instead of returning a quiet NaN. In the
+  SequenceType family, `'12' cast as xs:integer + 1` no longer
+  fails compilation (occurrence indicators are taken only when the
+  next token cannot begin an expression; `?` is accepted;
+  `text()`/`comment()`/`processing-instruction()` are valid type
+  names; trailing `+ - *` folds onto the cast result), and
+  `instance of` checks every member — node kinds from the unified
+  tag space, occurrence-indicator cardinality, and numeric members
+  distinguished by a `\x03N` marker the sequence/range builders add
+  and `get_node_text` strips (`\x03` cannot occur in XML 1.0
+  text). Specs `InstanceOfNodeKindsAndCardinality`,
+  `CastAsNumericInExpressions`, `XsLexicalCastRules`; Saxon-HE 12.7
+  oracle.
 
 
 
