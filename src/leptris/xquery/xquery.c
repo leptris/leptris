@@ -1277,6 +1277,14 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
                     out->owns_synthetic_text = 1;
                     out->is_sequence = 1;
                     for (size_t ti = 0; ti < n_tuples; ti++) {
+                        /* xpath_variable_set_nodeset overwrites
+                         * without freeing — clear the key-loop
+                         * bindings before rebinding. */
+                        xq_unbind_all(ctx, q->clauses, q->nclauses);
+                        if (q->group_var)
+                            xpath_variable_set_remove(
+                                (XPathVariableSet*)ctx->variable_set,
+                                q->group_var);
                         xq_rebind(ctx, &tuples[ti]);
                         struct leptris_xpath_result* r =
                             evaluate_expr(ctx, q->return_ast);
