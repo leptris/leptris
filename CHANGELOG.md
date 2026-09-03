@@ -4,7 +4,20 @@
 
 ### Fixed
 
-- XQuery grammar gaps from first binding contact (#790)
+- **XQuery grammar gaps from first binding contact** (#790): (1)
+  a direct constructor as the FLWOR return clause now parses — the
+  translator dropped the comma between a text run and a nested
+  element, and whitespace-only text runs (the space before `<v>`)
+  became text nodes instead of stripping per XQuery's default
+  boundary-space handling; (2) `where`/`at` clauses work inside a
+  function-argument FLWOR — the XPath-level `for` expression
+  gained optional `at $pos` (position rides the FOR node's value
+  as `var \x01 pos`) and optional `where` (desugared to
+  `if (W, R, ())`); (3) `cast as` to numeric targets validates
+  string lexicals — `'nope' cast as xs:integer` is a dynamic error
+  (Saxon parity), so `try/catch` participates instead of quietly
+  NaN-ing. Spec `XQueryCore.Issue790GrammarGaps`; Saxon-HE 12.7
+  oracle.
 
 
 
