@@ -2,13 +2,32 @@
 
 ## [1.9.74] - 2026-09-03
 
-### Fixed
-
-- pool-owned ns declarations in the detached copier (Linux LSan) (dom)
-
 ### Performance
 
-- pool-threaded detached deep copy — subtree duplicate 2.3x Nokogiri (dom)
+- **Pool-threaded detached deep copy — subtree duplicate 2.3×
+  Nokogiri.** `leptris_element_copy` (the Ruby binding's
+  `Element#dup`) ran through `leptris_element_append_copy`: every
+  copied element paid a root-map registration (a malloc — needed
+  only so detached children could resolve their document before
+  linking), a parent-chain pool resolution, and public append
+  dispatch per child; the entry itself built under a throwaway
+  `__copy_root__` element and unlinked it after. The new
+  self-contained recursive copier threads the destination pool
+  through the walk (direct sibling/child linking, pooled string
+  copies, ONE root-map registration for the copy root) with
+  unchanged fidelity — elements/text/cdata/comment/PI children
+  (#696), attributes, namespace declarations (#721). 100-book
+  subtree: 0.111 → 0.048 ms (2.3×); Ruby `dup` vs Nokogiri 1.19.4:
+  0.7× behind → **2.27× ahead** (57.5 vs 130.8 µs). Also drops a
+  duplicated `root_doc_register` call in `append_copy`.
+
+### Fixed
+
+- Namespace declarations in the detached copier are pool-owned:
+  the public mutator's heap fallback fired mid-recursion (the copy
+  root registers only after the walk) and leaked 32 B per
+  namespaced copy — caught by the Linux ASAN leg.
+
 
 
 
