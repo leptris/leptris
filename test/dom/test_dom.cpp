@@ -658,6 +658,51 @@ TEST(ElementSetName, UpdatesLengthAndKeepsDocReachable) {
     leptris_document_free(doc);
 }
 
+/* Interleaved-parent appends (result-tree construction pattern,
+ * #682): append <b> to <out>, then <t>/<a> INTO <b>, then the next
+ * <b>... The document's mutation tail cache must keep a per-parent
+ * tail — a thrashing or stale entry attaches a child to the wrong
+ * tail and loses or reorders nodes. Strict document order across
+ * all 3 parents must survive. */
+TEST(ElementAppendChild, InterleavedParentsKeepStrictOrder) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<out/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement out = leptris_document_root(doc);
+
+    enum { N = 24 };
+    for (int i = 0; i < N; i++) {
+        LeptrisElement b = leptris_element_create(doc, "b");
+        ASSERT_NE(b, nullptr);
+        ASSERT_EQ(leptris_element_append_child(out, b), LEPTRIS_OK);
+
+        LeptrisElement t = leptris_element_create(doc, "t");
+        ASSERT_NE(t, nullptr);
+        ASSERT_EQ(leptris_element_append_child(b, t), LEPTRIS_OK);
+        ASSERT_EQ(leptris_element_set_text(t, "x"), LEPTRIS_OK);
+
+        LeptrisElement a = leptris_element_create(doc, "a");
+        ASSERT_NE(a, nullptr);
+        ASSERT_EQ(leptris_element_append_child(b, a), LEPTRIS_OK);
+        ASSERT_EQ(leptris_element_set_text(a, "y"), LEPTRIS_OK);
+    }
+
+    EXPECT_EQ(leptris_element_child_count(out), N);
+    char expect[128 + N * 24];
+    size_t len = 0;
+    len += (size_t)snprintf(expect + len, sizeof(expect) - len, "<out>");
+    for (int i = 0; i < N; i++)
+        len += (size_t)snprintf(expect + len, sizeof(expect) - len,
+                                "<b><t>x</t><a>y</a></b>");
+    len += (size_t)snprintf(expect + len, sizeof(expect) - len, "</out>");
+    char* ser = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(ser, nullptr);
+    EXPECT_STREQ(ser, expect);
+    leptris_free_string(ser);
+    leptris_document_free(doc);
+}
+
 /* Shorter new name: name_len must shrink too (0xFF sentinel logic). */
 TEST(ElementSetName, ShorterNameAlsoTruncatesCorrectly) {
     LeptrisStatus st = LEPTRIS_OK;

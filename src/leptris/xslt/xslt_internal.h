@@ -640,6 +640,12 @@ typedef struct xslt_exec {
      * order (libxslt's deterministic per-transform counter). */
     void* gids;
 
+    /* xslt_exec.c: AVT compiled-expression cache (#682) — {expr}
+     * parts compile once per transform instead of once per
+     * attribute/text evaluation (XsltAvtEntry chain, keyed by
+     * expression text). Freed by xslt_exec_free. */
+    void* avt_cache;
+
     /* RTF ownership chain: result-tree-fragment documents built by
      * <xsl:variable> bodies whose lifetime must outlive the
      * nodeset that references their nodes (§11.4 — the spec calls

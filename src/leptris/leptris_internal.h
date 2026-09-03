@@ -264,11 +264,19 @@ struct leptris_document {
      * set-attribute walk to the tail because elements carry no
      * last-child edge (64 B layout law, TODO 155). Sequential
      * mutation — the dominant programmatic-build pattern — appends
-     * to the SAME parent/element, so a one-entry cache makes the
-     * common case O(1). Verified before use via the child's parent
-     * back-pointer (stale entries fall back to the walk). */
-    struct leptris_element* mut_tail_parent;
-    struct leptris_node* mut_tail_child;
+     * to the SAME parent, so a cached tail makes the common case
+     * O(1). Result-tree construction INTERLEAVES parents (XSLT
+     * appends <b> to <out>, then <t>/<a> to <b>, then the next
+     * <b>...), and a one-entry cache thrashed exactly there: every
+     * other top-level append rewalked the child chain (#682 —
+     * ~2M sibling hops on a 2000-book transform). A direct-mapped
+     * array keyed by the element address keeps interleaved parents
+     * O(1) too. Entries are verified via the child's parent
+     * back-pointer; stale entries fall back to the walk. */
+    struct leptris_mut_tail {
+        struct leptris_element* parent;
+        struct leptris_node* child;
+    } mut_tail[8];
 
     /* FlatDoc + lazy-promote removed — direct_parse builds the
      * LeptrisElement tree eagerly. Retained as an always-zero field
