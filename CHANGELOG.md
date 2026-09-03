@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.74] - 2026-09-03
+
+### Fixed
+
+- pool-owned ns declarations in the detached copier (Linux LSan) (dom)
+
+### Performance
+
+- pool-threaded detached deep copy — subtree duplicate 2.3x Nokogiri (dom)
+
+
+
 ## [1.9.73] - 2026-09-03
 
 ### Added
