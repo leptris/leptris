@@ -3675,6 +3675,77 @@ TEST(Xslt30, XsConstructorFunctions) {
         "<a>43</a><b>3</b><c>true</c><d>7</d></o>");
 }
 
+TEST(Xslt30, InstanceOfNodeKindsAndCardinality) {
+    /* #744: element()/attribute()/text() must match their node
+     * kind, and occurrence indicators (? + *) must gate
+     * cardinality. Saxon-HE 12.7 (/tmp/probe9/l07b/t3.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<a><xsl:value-of select=\"//i[1] instance of element()\"/></a>"
+        "<b><xsl:value-of select=\"//i[1] instance of node()\"/></b>"
+        "<c><xsl:value-of select=\"//i/@id instance of attribute()\"/></c>"
+        "<d><xsl:value-of select=\"//text()[1] instance of text()\"/></d>"
+        "<e><xsl:value-of select=\"('a','b') instance of xs:string+\"/></e>"
+        "<f><xsl:value-of select=\"('a','b') instance of xs:string\"/></f>"
+        "<g><xsl:value-of select=\"'a' instance of xs:string?\"/></g>"
+        "<h><xsl:value-of select=\"//i instance of element()+\"/></h>"
+        "<i><xsl:value-of select=\"('a',1) instance of xs:string*\"/></i>"
+        "</o></xsl:template>",
+        "<r><i id='x'>1</i></r>")),
+        "<o xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<a>true</a><b>true</b><c>true</c><d>true</d>"
+        "<e>true</e><f>false</f><g>true</g><h>true</h><i>false</i>"
+        "</o>");
+}
+
+TEST(Xslt30, CastAsNumericInExpressions) {
+    /* #744: `cast as` a numeric target used to fail compilation
+     * when followed by an operator — the parser ate `+` as an
+     * occurrence indicator. Saxon-HE 12.7. */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<a><xsl:value-of select=\"'12' cast as xs:integer + 1\"/></a>"
+        "<b><xsl:value-of select=\"'2.5' cast as xs:double * 2\"/></b>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<a>13</a><b>5</b></o>");
+}
+
+TEST(Xslt30, XsLexicalCastRules) {
+    /* #739: constructors take XSD LEXICAL forms, not boolean()
+     * string-truthiness: '0'/'false' cast to false, whitespace is
+     * allowed, invalid lexicals are dynamic errors. Saxon-HE 12.7
+     * (FORG0001 on 'x' / ' -3.9 '). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<a><xsl:value-of select=\"xs:boolean('0')\"/></a>"
+        "<b><xsl:value-of select=\"xs:boolean('false')\"/></b>"
+        "<c><xsl:value-of select=\"xs:boolean(' true ')\"/></c>"
+        "<d><xsl:value-of select=\"xs:boolean('1')\"/></d>"
+        "<e><xsl:value-of select=\"xs:integer(' 42 ') + 1\"/></e>"
+        "</o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<a>false</a><b>false</b><c>true</c><d>true</d><e>43</e>"
+        "</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"xs:boolean('x')\" xmlns:xs="
+        "'http://www.w3.org/2001/XMLSchema'/></o></xsl:template>",
+        "<r/>")),
+        "(null)");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"xs:integer(' -3.9 ')\" xmlns:xs="
+        "'http://www.w3.org/2001/XMLSchema'/></o></xsl:template>",
+        "<r/>")),
+        "(null)");
+}
+
 TEST(Xslt30, OnCompletionSeesIterateParams) {
     /* #729: the on-completion body runs with the FINAL iteration's
      * parameter values (§12.5). */

@@ -1172,11 +1172,47 @@ static struct leptris_xpath_result* fn_xs_number_ctor(XPathContext* ctx,
         XPathASTNode** args, size_t n, int integer_only) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
     if (!r) return NULL;
-    double d = leptris_xpath_result_number(r);
+    double d;
+    if (r->type == XPATH_RESULT_STRING) {
+        /* XSD lexical form (#739): leading/trailing whitespace is
+         * allowed, the rest must convert whole — a silent NaN on
+         * invalid input is the silent-wrong class. */
+        const char* s = r->value.string_value ? r->value.string_value
+                                              : "";
+        while (isspace((unsigned char)*s)) s++;
+        const char* e = s + strlen(s);
+        while (e > s && isspace((unsigned char)e[-1])) e--;
+        size_t len = (size_t)(e - s);
+        int bad = (!len || len >= 120);
+        char buf[120];
+        if (!bad) {
+            memcpy(buf, s, len);
+            buf[len] = 0;
+            if (integer_only) {
+                const char* p = (buf[0] == '+' || buf[0] == '-')
+                                    ? buf + 1 : buf;
+                bad = !*p || strspn(p, "0123456789") != strlen(p);
+            } else {
+                char* endp = NULL;
+                d = strtod(buf, &endp);
+                bad = !endp || *endp;
+            }
+        }
+        if (bad) {
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "Invalid lexical form for xs:%s",
+                     integer_only ? "integer" : "double");
+            leptris_xpath_result_free(r);
+            return NULL;
+        }
+        if (integer_only) d = strtod(buf, NULL);
+    } else {
+        d = leptris_xpath_result_number(r);
+        if (integer_only) d = (d < 0) ? ceil(d) : floor(d);
+    }
     leptris_xpath_result_free(r);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!out) return NULL;
-    if (integer_only) d = (d < 0) ? ceil(d) : floor(d);
     out->value.number_value = d;
     (void)n;
     return out;
@@ -1198,8 +1234,29 @@ static struct leptris_xpath_result* fn_xs_boolean(XPathContext* ctx,
     int b = 0;
     if (r->type == XPATH_RESULT_NODESET)
         b = r->value.nodeset_value && r->value.nodeset_value->count > 0;
-    else if (r->type == XPATH_RESULT_STRING)
-        b = r->value.string_value && r->value.string_value[0];
+    else if (r->type == XPATH_RESULT_STRING) {
+        /* XSD lexical mapping (#739): only true/1/false/0 (with
+         * optional whitespace) cast from a string. */
+        const char* s = r->value.string_value ? r->value.string_value
+                                              : "";
+        while (isspace((unsigned char)*s)) s++;
+        const char* e = s + strlen(s);
+        while (e > s && isspace((unsigned char)e[-1])) e--;
+        size_t len = (size_t)(e - s);
+        if ((len == 4 && strncmp(s, "true", 4) == 0) ||
+            (len == 1 && *s == '1'))
+            b = 1;
+        else if ((len == 5 && strncmp(s, "false", 5) == 0) ||
+                 (len == 1 && *s == '0'))
+            b = 0;
+        else {
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "Cannot cast '%s' to xs:boolean",
+                     r->value.string_value);
+            leptris_xpath_result_free(r);
+            return NULL;
+        }
+    }
     else if (r->type == XPATH_RESULT_BOOLEAN)
         b = r->value.boolean_value;
     else {

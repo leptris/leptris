@@ -342,11 +342,33 @@ static int ncname_is(XPathToken* t, const char* kw, size_t kwlen) {
  * (node()/item()) with an argument list. Occurrence indicators:
  * '*' and '+' only ('?' has no lexer token). Returns a malloc'd
  * "name[()]" + indicator string, NULL on parse failure. */
+/* Can this token begin a primary/unary expression? Decides whether
+ * `*`/`+` after a SequenceType is an occurrence indicator or the
+ * multiplication/addition operator (`'12' cast as xs:integer + 1`
+ * — the operator; `'a' instance of xs:string*` at EOF — the
+ * indicator). */
+static int token_begins_expr(XPathTokenType t) {
+    switch (t) {
+        case TOK_NUMBER: case TOK_STRING: case TOK_NCNAME: case TOK_QNAME:
+        case TOK_DOLLAR: case TOK_LPAREN: case TOK_DOT: case TOK_DOUBLE_DOT:
+        case TOK_SLASH: case TOK_DOUBLE_SLASH: case TOK_AT: case TOK_MINUS:
+        case TOK_NODE: case TOK_TEXT: case TOK_COMMENT:
+        case TOK_PROCESSING_INSTRUCTION:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 static char* parse_sequence_type(XPathParser* parser) {
     XPathToken* t = current_token(parser);
-    /* TOK_NODE: the lexer keyword-tokenizes `node` (node tests). */
+    /* The lexer keyword-tokenizes node tests — `text()`,
+     * `comment()`, `processing-instruction()` are type names here
+     * too (issue #744). */
     if (!t || (t->type != TOK_NCNAME && t->type != TOK_QNAME &&
-               t->type != TOK_NODE))
+               t->type != TOK_NODE && t->type != TOK_TEXT &&
+               t->type != TOK_COMMENT &&
+               t->type != TOK_PROCESSING_INSTRUCTION))
         return NULL;
     char buf[96];
     size_t len = t->value_len;
@@ -361,9 +383,25 @@ static char* parse_sequence_type(XPathParser* parser) {
         else return NULL;
         if (len + 2 < sizeof(buf) - 4) { buf[len++] = '('; buf[len++] = ')'; buf[len] = '\0'; }
     }
-    /* Occurrence indicator. */
-    if (current_token_is(parser, TOK_STAR)) { buf[len++] = '*'; buf[len] = 0; advance_token(parser); }
-    else if (current_token_is(parser, TOK_PLUS)) { buf[len++] = '+'; buf[len] = 0; advance_token(parser); }
+    /* Occurrence indicators. `?` is unambiguous (postfix lookup
+     * applies to primary exprs, never type names); `*`/`+` need
+     * lookahead (#744). */
+    if (current_token_is(parser, TOK_QUESTION)) {
+        if (len + 1 < sizeof(buf) - 1) { buf[len++] = '?'; buf[len] = 0; }
+        advance_token(parser);
+    } else if (current_token_is(parser, TOK_STAR) ||
+               current_token_is(parser, TOK_PLUS)) {
+        XPathTokenType oc = current_token(parser)->type;
+        XPathToken* after = (parser->token_pos + 1 < parser->token_count)
+                                ? &parser->tokens[parser->token_pos + 1] : NULL;
+        if (!after || !token_begins_expr(after->type)) {
+            if (len + 1 < sizeof(buf) - 1) {
+                buf[len++] = (oc == TOK_STAR) ? '*' : '+';
+                buf[len] = 0;
+            }
+            advance_token(parser);
+        }
+    }
     char* out = LEPTRIS_ALLOC_N(char, len + 1);
     if (out) memcpy(out, buf, len + 1);
     return out;
@@ -420,6 +458,25 @@ static XPathASTNode* parse_expr(XPathParser* parser) {
             node->number_value = (double)op;
             node->value = ty;
             ast_node_add_child(node, e);
+            /* The type-op node closes above the additive level, so
+             * trailing arithmetic on the cast result must fold
+             * here: `'12' cast as xs:integer + 1` (#744). */
+            while (current_token_is(parser, TOK_PLUS) ||
+                   current_token_is(parser, TOK_MINUS) ||
+                   current_token_is(parser, TOK_STAR)) {
+                XPathTokenType ot = current_token(parser)->type;
+                advance_token(parser);
+                XPathASTNode* rhs = parse_or_expr(parser);
+                if (!rhs) { ast_node_free(node); return NULL; }
+                XPathASTNode* opn = ast_node_new(XPATH_AST_OPERATOR);
+                if (!opn) { ast_node_free(rhs); ast_node_free(node); return NULL; }
+                opn->number_value = (double)((ot == TOK_PLUS)   ? XPATH_OP_PLUS
+                                           : (ot == TOK_MINUS)  ? XPATH_OP_MINUS
+                                                                : XPATH_OP_MULTIPLY);
+                ast_node_add_child(opn, node);
+                ast_node_add_child(opn, rhs);
+                node = opn;
+            }
             return node;
         }
     }
