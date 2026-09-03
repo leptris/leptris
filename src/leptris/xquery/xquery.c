@@ -1523,11 +1523,19 @@ static const char* xq_translate_element(const char* p, const char* e,
     return end;
 }
 
+/* Whitespace-only text strips in direct constructors (XQuery
+ * default boundary-space handling). */
+static int xq_ws_only(const char* s, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (!isspace((unsigned char)s[i])) return 0;
+    return 1;
+}
+
 static void xq_translate_content(const char* s, const char* e, Buf* out) {
     const char* ts = s, *p = s;
     while (p < e) {
         if (*p == '{') {
-            if (p > ts) {
+            if (p > ts && !xq_ws_only(ts, (size_t)(p - ts))) {
                 if (out->len) buf_str(out, ", ");
                 buf_str(out, "text { ");
                 buf_lit(out, ts, (size_t)(p - ts));
@@ -1551,19 +1559,20 @@ static void xq_translate_content(const char* s, const char* e, Buf* out) {
             p = j + 1;
             ts = p;
         } else if (*p == '<' && p + 1 < e && xq_is_name_start(p[1])) {
-            if (p > ts) {
+            if (p > ts && !xq_ws_only(ts, (size_t)(p - ts))) {
                 if (out->len) buf_str(out, ", ");
                 buf_str(out, "text { ");
                 buf_lit(out, ts, (size_t)(p - ts));
                 buf_str(out, " }");
             }
+            if (out->len) buf_str(out, ", ");
             p = xq_translate_element(p, e, out);
             ts = p;
         } else {
             p++;
         }
     }
-    if (e > ts) {
+    if (e > ts && !xq_ws_only(ts, (size_t)(e - ts))) {
         if (out->len) buf_str(out, ", ");
         buf_str(out, "text { ");
         buf_lit(out, ts, (size_t)(e - ts));

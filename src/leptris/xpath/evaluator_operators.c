@@ -8,6 +8,7 @@
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
 #include <math.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,6 +80,19 @@ static int op_relational_cmp(XPathOperatorType op, double a, double b) {
         case XPATH_OP_GREATER_EQUAL: return a >= b;
         default: return 0;
     }
+}
+
+/* XSD numeric lexical check: trimmed, converts whole (integer
+ * targets additionally reject '.'-bearing forms via the caller's
+ * truncation). Used by the cast operator (#790). */
+static int xq_numeric_lexical(const char* s) {
+    while (isspace((unsigned char)*s)) s++;
+    const char* e = s + strlen(s);
+    while (e > s && isspace((unsigned char)e[-1])) e--;
+    if (e <= s) return 0;
+    char* endp = NULL;
+    strtod(s, &endp);
+    return endp == e;
 }
 
 struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
@@ -158,9 +172,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             (domain->type == XPATH_RESULT_NODESET)
                 ? domain->value.nodeset_value : NULL;
         size_t n = ns ? ns->count : 1;
+        /* ->value may carry "var\x01pos" (XQuery `for $x at $p`). */
+        const char* pos_sep = strchr(ast->value, '\x01');
+        char var_buf[128];
+        if (pos_sep) {
+            size_t vl = (size_t)(pos_sep - ast->value);
+            if (vl >= sizeof(var_buf)) vl = sizeof(var_buf) - 1;
+            memcpy(var_buf, ast->value, vl);
+            var_buf[vl] = 0;
+        }
+        const char* loop_var =
+            pos_sep ? var_buf : ast->value;
+        const char* pos_var = pos_sep ? pos_sep + 1 : NULL;
         for (size_t i = 0; i < n; i++) {
             XPathVariable* var = xpath_variable_set_add(
-                ctx->variable_set, ast->value, XPATH_VAR_TYPE_NODE_SET);
+                ctx->variable_set, loop_var, XPATH_VAR_TYPE_NODE_SET);
             if (!var) break;
             XPathNodeSet* one = xpath_nodeset_new();
             if (!one) break;
@@ -174,6 +200,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 if (tn) xpath_nodeset_add(one, tn);
             }
             xpath_variable_set_nodeset(var, one);
+            if (pos_var) {
+                char nb[24];
+                int nl = snprintf(nb, sizeof(nb), "\x03N%zu", i + 1);
+                XPathNodeSet* pone = xpath_nodeset_new();
+                if (pone) {
+                    pone->owns_synthetic_text = 1;
+                    XPathTextNode* ptn = synth_text(nb, (size_t)nl);
+                    if (ptn) xpath_nodeset_add(pone, ptn);
+                    XPathVariable* pvar = xpath_variable_set_add(
+                        ctx->variable_set, pos_var,
+                        XPATH_VAR_TYPE_NODE_SET);
+                    if (pvar) xpath_variable_set_nodeset(pvar, pone);
+                    else xpath_nodeset_free(pone);
+                }
+            }
 
             struct leptris_xpath_result* item =
                 evaluate_expr(ctx, ast->children[1]);
@@ -187,7 +228,9 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             }
             /* The variable OWNS the nodeset after set_nodeset —
              * remove frees it; do not double-free. */
-            xpath_variable_set_remove(ctx->variable_set, ast->value);
+            if (pos_var)
+                xpath_variable_set_remove(ctx->variable_set, pos_var);
+            xpath_variable_set_remove(ctx->variable_set, loop_var);
         }
         xpath_result_free(domain);
         if (scratch) ctx->variable_set = NULL;
@@ -1174,7 +1217,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 out = xpath_result_new(XPATH_RESULT_BOOLEAN);
                 if (out) out->value.boolean_value = xpath_to_boolean(v);
             } else {
-                double d = xpath_to_number(v);
+                /* Numeric targets validate string lexicals (#790):
+                 * 'nope' cast as xs:integer is a dynamic error
+                 * (Saxon), so try/catch can participate — a quiet
+                 * NaN is the silent-wrong class. */
+                double d;
+                if (v->type == XPATH_RESULT_STRING &&
+                    v->value.string_value &&
+                    !xq_numeric_lexical(v->value.string_value)) {
+                    snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                             "Cannot cast '%s' to %s",
+                             v->value.string_value, base);
+                    xpath_result_free(v);
+                    return NULL;
+                }
+                d = xpath_to_number(v);
                 if (strcmp(base, "xs:integer") == 0)
                     d = (d < 0) ? ceil(d) : floor(d);
                 out = xpath_result_new(XPATH_RESULT_NUMBER);

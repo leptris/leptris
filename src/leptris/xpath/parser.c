@@ -1436,18 +1436,65 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
     if (!var_name) return NULL;
     advance_token(parser);
 
+    /* XQuery `for $x at $p` — the position name rides ->value as
+     * var '\x01' pos (the evaluator splits it). */
+    char* pos_name = NULL;
+    {
+        XPathToken* at = current_token(parser);
+        if (at && at->type == TOK_NCNAME && at->value_len == 2 &&
+            memcmp(at->value, "at", 2) == 0) {
+            advance_token(parser);
+            XPathToken* pd = current_token(parser);
+            if (!pd || pd->type != TOK_DOLLAR) {
+                snprintf(parser->error_msg, sizeof(parser->error_msg),
+                         "Expected '$' position variable after at");
+                free(var_name);
+                return NULL;
+            }
+            advance_token(parser);
+            XPathToken* pt = current_token(parser);
+            if (!pt || (pt->type != TOK_NCNAME && pt->type != TOK_QNAME)) {
+                snprintf(parser->error_msg, sizeof(parser->error_msg),
+                         "Expected position variable name");
+                free(var_name);
+                return NULL;
+            }
+            pos_name = token_to_string(pt);
+            if (!pos_name) { free(var_name); return NULL; }
+            advance_token(parser);
+        }
+    }
+
     XPathToken* it = current_token(parser);
     if (!it || it->type != TOK_NCNAME || it->value_len != 2 ||
         memcmp(it->value, "in", 2) != 0) {
         snprintf(parser->error_msg, sizeof(parser->error_msg),
                  "Expected 'in' in for expression");
         free(var_name);
+        free(pos_name);
         return NULL;
     }
     advance_token(parser);
 
     XPathASTNode* domain = parse_expr(parser);
-    if (!domain) { free(var_name); return NULL; }
+    if (!domain) { free(var_name); free(pos_name); return NULL; }
+
+    /* XQuery `where` — desugars to if (W, R, ()). */
+    XPathASTNode* where_ast = NULL;
+    {
+        XPathToken* wt = current_token(parser);
+        if (wt && wt->type == TOK_NCNAME && wt->value_len == 5 &&
+            memcmp(wt->value, "where", 5) == 0) {
+            advance_token(parser);
+            where_ast = parse_expr(parser);
+            if (!where_ast) {
+                ast_node_free(domain);
+                free(var_name);
+                free(pos_name);
+                return NULL;
+            }
+        }
+    }
 
     XPathToken* rt = current_token(parser);
     if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
@@ -1455,7 +1502,9 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         snprintf(parser->error_msg, sizeof(parser->error_msg),
                  "Expected 'return' in for expression");
         ast_node_free(domain);
+        ast_node_free(where_ast);
         free(var_name);
+        free(pos_name);
         return NULL;
     }
     advance_token(parser);
@@ -1463,8 +1512,33 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
     XPathASTNode* ret = parse_expr(parser);
     if (!ret) {
         ast_node_free(domain);
+        ast_node_free(where_ast);
         free(var_name);
+        free(pos_name);
         return NULL;
+    }
+
+    if (where_ast) {
+        /* if (W, R, ()) — the empty sequence is a zero-child
+         * SEQUENCE. */
+        XPathASTNode* guard = ast_node_new(XPATH_AST_OPERATOR);
+        XPathASTNode* empty = ast_node_new(XPATH_AST_OPERATOR);
+        if (!guard || !empty) {
+            ast_node_free(guard);
+            ast_node_free(empty);
+            ast_node_free(domain);
+            ast_node_free(where_ast);
+            ast_node_free(ret);
+            free(var_name);
+            free(pos_name);
+            return NULL;
+        }
+        guard->number_value = (double)XPATH_OP_IF;
+        empty->number_value = (double)XPATH_OP_SEQUENCE;
+        ast_node_add_child(guard, where_ast);
+        ast_node_add_child(guard, ret);
+        ast_node_add_child(guard, empty);
+        ret = guard;
     }
 
     XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
@@ -1472,10 +1546,30 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         ast_node_free(domain);
         ast_node_free(ret);
         free(var_name);
+        free(pos_name);
         return NULL;
     }
     node->number_value = (double)XPATH_OP_FOR;
-    node->value = var_name;   /* the loop variable name */
+    if (pos_name) {
+        size_t vl = strlen(var_name), pl = strlen(pos_name);
+        char* joined = (char*)malloc(vl + pl + 2);
+        if (!joined) {
+            ast_node_free(domain);
+            ast_node_free(ret);
+            free(var_name);
+            free(pos_name);
+            return NULL;
+        }
+        memcpy(joined, var_name, vl);
+        joined[vl] = '\x01';
+        memcpy(joined + vl + 1, pos_name, pl + 1);
+        node->value = joined;
+        free(var_name);
+        free(pos_name);
+    } else {
+        node->value = var_name;   /* the loop variable name */
+        free(pos_name);
+    }
     ast_node_add_child(node, domain);
     ast_node_add_child(node, ret);
     return node;

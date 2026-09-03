@@ -258,3 +258,28 @@ TEST(XQueryCore, GroupBy) {
         "a:2 b:1");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, Issue790GrammarGaps) {
+    /* #790: constructor-as-return, FLWOR-with-where/at inside a
+     * function argument, cast lexical errors reachable by catch. */
+    LeptrisDocument doc = leptris_parse_string(
+        "<r><item><name>a</name></item><item><name>b</name></item>"
+        "<item><name>c</name></item></r>", 88, nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* 1. Constructor as the return clause (Saxon t20). */
+    EXPECT_EQ(seq_string(doc,
+        "for $i in //item return <v>{$i/name/text()}</v>"),
+        "<v>a</v> <v>b</v> <v>c</v>");
+    /* 2. where / at inside a function-argument FLWOR (Saxon t21). */
+    EXPECT_EQ(seq_string(doc,
+        "count(for $i in //item where number(1) > 0 return $i)"),
+        "3");
+    EXPECT_EQ(seq_string(doc,
+        "count(for $i at $p in //item return $p)"),
+        "3");
+    /* 3. cast lexical error is catchable (Saxon t22). */
+    EXPECT_EQ(seq_string(doc,
+        "try { 'nope' cast as xs:integer } catch * { 'caught' }"),
+        "caught");
+    leptris_document_free(doc);
+}
