@@ -4,11 +4,25 @@
 
 ### Added
 
-- XQuery tumbling/sliding windows (lane 12)
+- **XQuery tumbling/sliding windows** (TODO.xslt-full/12, #684):
+  `for tumbling|sliding window $w in D start $s [at $sp] [when W]
+  [end $e [at $ep] [when W2]] return R` — windows enumerate over
+  the domain; each binds `$w` to the member list plus the boundary
+  vars; tumbling resumes after the end, sliding after the start.
+  The tuple snapshot carries `$w`'s whole member list (the
+  group-by machinery reused). XPath 2.0 value-comparison keywords
+  (`eq`/`ne`/`lt`/`le`/`gt`/`ge`) join the relational parser —
+  window end-conditions lean on them; recognized only as bare
+  NCNames at operand boundaries so element names never match.
+  Spec `XQueryCore.TumblingWindow`/`SlidingWindow`; Saxon-HE 12.7
+  oracle.
 
 ### Fixed
 
-- unbind window names in xq_unbind_all (Linux LSan)
+- `xq_unbind_all` also unbinds window names — the phase-2 rebind
+  overwrote window bindings without freeing (2184B/query, Linux
+  LSan only). Window member lists borrow the domain's nodes —
+  claiming ownership had freed them mid-iteration.
 
 
 
