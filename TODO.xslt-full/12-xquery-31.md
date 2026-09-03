@@ -25,3 +25,21 @@ Gate: qt3tests XQuery 3.1 subset + qt3extra green.
 Remaining for lane 12: windowing (for tumbling/sliding window),
 typeswitch, the error-code model for named catches (thread the
 leptris_error_code through try), qt3tests 3.1 subset.
+
+## Update 2026-09-03 (later): windows SHIPPED (v1.9.69 / PR #795)
+
+- for tumbling|sliding window $w in D start ... end ...: windows
+  enumerate over the domain — $w = the member list (BORROWED from
+  the domain nodeset; claiming ownership freed the members
+  mid-iteration — the corrupted-output signature), boundary vars
+  ($s/$sp/$e/$ep) as singles. Tumbling resumes after the end,
+  sliding after the start. Tuple snapshots carry $w whole.
+- XPath 2.0 value-comparison keywords (eq/ne/lt/le/gt/ge) in the
+  relational parser — bare NCNames at operand boundaries only.
+- Banked: xq_unbind_all must cover window names (the 2184B/query
+  overwrite leak, Linux LSan only); scan_word needs scan_ws FIRST
+  after a keyword token (the fifth bite of that invariant).
+
+Remaining for lane 12: typeswitch, error-code model for named
+catches, qt3tests 3.1 subset. Lane 11 tail: collection(),
+qt3tests 1.0 subset, Windows CLI harness.
