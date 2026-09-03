@@ -4,11 +4,33 @@
 
 ### Added
 
-- XQuery 1.0 core — prolog + FLWOR over the XPath engine (#684-A)
+- **XQuery 1.0 core** (TODO.xslt-full/11 slice A, #684): a new
+  `src/leptris/xquery/` orchestration layer over the XPath engine —
+  no second evaluator. The prolog binds into the evaluation context
+  (`declare variable`, `declare namespace`, `declare function
+  local:*(...)` via the function-item closure seam; unsupported
+  declarations error explicitly), and FLWOR runs as a C-driven tuple
+  stream: nested `for` domains with the same bind/remove discipline
+  as `XPATH_OP_FOR`, `let` per enclosing tuple, `where`, stable
+  multi-key `order by` (asc/desc, numeric when both keys parse as
+  numbers), `return` as the synthetic-text sequence. Public API
+  `leptris_xquery_parse` / `_eval` / `_free`
+  (`src/include/leptris/xquery/xquery.h`); results reuse the XPath
+  result model. Scanner: nestable XQuery `(: :)` comments, QName
+  variable/function names (`$p:weight`, `local:twice`). Specs:
+  `test_xquery` (8 cases), Saxon-HE 12.7 `net.sf.saxon.Query`
+  oracle.
 
 ### Fixed
 
-- xquery eval frees the scratch variable set (Linux LSan)
+- The CLI printed the raw `\x03N` numeric-member marker for
+  range/sequence results — `leptris_xpath_result_node_value` now
+  strips it at the public boundary (a v1.9.61 regression), and the
+  CLI's `LEPTRIS_XPATH_FUNCTION` switch gaps are closed.
+- XQuery eval frees its scratch variable set (`xpath_context_cleanup`
+  treats it as caller-borrowed) — caught by Linux LSan, invisible to
+  macOS ASAN; namespace-mapping entries allocate through
+  `LEPTRIS_ALLOC` to match the cleanup channel.
 
 
 
