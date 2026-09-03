@@ -63,3 +63,24 @@ Remaining for lane 11: qt3tests XQuery 1.0 subset adoption,
 collection(), computed-document/value constructors, positional
 FOR ($x at $i). Then lane 12 (group by, windowing, try/catch —
 the #692 silent-wrong case, typeswitch).
+
+## Update 2026-09-03 (final): slice C SHIPPED (v1.9.66 / PR #786)
+
+- Positional for ($x at $i): 1-based position bound through the
+  tuple snapshot/rebind cycle. Banked: snapshot arrays size 2n
+  (var + pos var) — ASAN caught the n-sized overflow macOS ctest
+  missed; and the scan_word-doesn't-advance trap bit AGAIN in the
+  `at` keyword check (advance via s.p = w + wl, never s = scan
+  copy).
+- document { content }: no-wrapper serialization (Saxon). value {}
+  stays OUT — Saxon-HE rejects it (XPST0003).
+- try/catch (lane 12 opener, #692's silent-wrong FIXED): XPATH_OP_
+  TRY — failed try body runs the first catch whose name-test
+  matches; catch * catches all ($err:code/description/value bound
+  from ctx->error_msg, cleared on catch); named tests never match
+  (no error-code model — pinned: the error propagates). The XSLT
+  rejection pin flipped: try/catch is XPath 3.0.
+
+Lane 11 remainder (qt3tests subset, collection(), Windows CLI
+harness) is tracked in the line above; lane 12 continues with
+group by / windowing / typeswitch / error-code model.
