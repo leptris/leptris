@@ -4,7 +4,18 @@
 
 ### Added
 
-- LEPTRIS_XPATH_FUNCTION public type + HOF pairs/apply/array combiners
+- **`LEPTRIS_XPATH_FUNCTION` + HOF pairs/apply/array combiners**
+  (TODO.xslt-full/07 lane tail, #692-B). The public result-type
+  enum gains a function-item value (appended — existing ABI numbers
+  hold); the type accessor classifies the one-member synthetic
+  carrier (`\x03FN` closure / `\x03FR` named reference) at the
+  boundary, gated on the synthetic-text tag. New combiners through
+  the `xpath_call_function_item` seam: `fn:for-each-pair` (zip,
+  shorter input wins), `fn:apply($f, array)` (positional members as
+  the argument list), `map:for-each` (entry order), and
+  `array:for-each/filter/fold-left/fold-right`. Binding mirrors:
+  leptris-ruby#127 and leptris-py#71 (explicit XPathError when a
+  function item would cross the FFI boundary). Lane 07 is CLOSED.
 
 
 
