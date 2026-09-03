@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.73] - 2026-09-03
+
+### Added
+
+- XPath 2.0 ledger — quantified expressions, node comparisons, set algebra, (), ends-with, deep-equal (xpath)
+
+
+
 ## [1.9.72] - 2026-09-03
 
 ### Performance
