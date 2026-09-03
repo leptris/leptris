@@ -1373,7 +1373,14 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
                 op == XPATH_OP_TEXT_CTOR ||
                 op == XPATH_OP_DOCUMENT_CTOR ||
                 op == XPATH_OP_TRY ||
-                op == XPATH_OP_TYPESWITCH) {
+                op == XPATH_OP_TYPESWITCH ||
+                /* XPath 2.0 ledger ops (#684): binding loops and
+                 * nodeset algebra — AST interpreter. */
+                op == XPATH_OP_SOME || op == XPATH_OP_EVERY ||
+                op == XPATH_OP_BINDING ||
+                op == XPATH_OP_IS || op == XPATH_OP_NODE_BEFORE ||
+                op == XPATH_OP_NODE_AFTER ||
+                op == XPATH_OP_INTERSECT || op == XPATH_OP_EXCEPT) {
                 emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
                             add_const_ast(st, node));
                 break;

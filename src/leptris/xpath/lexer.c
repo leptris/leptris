@@ -414,6 +414,14 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
     }
 
     if (c == '<') {
+        if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '<') {
+            token.type = TOK_NODE_BEFORE;
+            token.value = lexer->pos;
+            token.value_len = 2;
+            lexer->pos += 2;
+            lexer->column += 2;
+            return token;
+        }
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '=') {
             token.type = TOK_LE;
             token.value = lexer->pos;
@@ -431,6 +439,14 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
     }
 
     if (c == '>') {
+        if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '>') {
+            token.type = TOK_NODE_AFTER;
+            token.value = lexer->pos;
+            token.value_len = 2;
+            lexer->pos += 2;
+            lexer->column += 2;
+            return token;
+        }
         if (lexer->pos + 1 < lexer->end && lexer->pos[1] == '=') {
             token.type = TOK_GE;
             token.value = lexer->pos;
