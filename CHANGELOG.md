@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.66] - 2026-09-03
+
+### Added
+
+- positional for, document{}, and real try/catch (#692 fix)
+
+
+
 ## [1.9.65] - 2026-09-03
 
 ### Added
