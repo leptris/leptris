@@ -99,6 +99,7 @@ leptris_add_test(test_compiled   xpath/test_compiled.cpp)
 leptris_add_test(test_xpath_conf xpath/test_xpath_conformance.cpp)
 leptris_add_test(test_bytecode_vm xpath/test_bytecode_vm.cpp)
 leptris_add_test(test_xslt        xpath/test_xslt.cpp)
+leptris_add_test(test_xquery      xquery/test_xquery.cpp)
 
 # The libxslt general suite (test/xslt/libxslt_suite_general) as
 # behavioral specs — data files stay in the source tree.
