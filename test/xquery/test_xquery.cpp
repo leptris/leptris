@@ -359,3 +359,59 @@ TEST(XQueryCore, CollectionRequiresCatalog) {
         "nocoll");
     leptris_document_free(doc);
 }
+
+/* ---- #684 audit slices: XQuery 1.0 conformance gaps found by the
+ * issue-checklist probe battery (all watched RED first). ---- */
+
+TEST(XQueryCore, EmptyComputedConstructors) {
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "element b { }"), "<b/>");
+    EXPECT_EQ(seq_string(doc, "element a { element b { } }"),
+              "<a><b/></a>");
+    EXPECT_EQ(seq_string(doc, "attribute n { }"), "");
+    EXPECT_EQ(seq_string(doc, "text { }"), "");
+    EXPECT_EQ(seq_string(doc, "element b { attribute n { }, 'v' }"),
+              "<b n=\"\">v</b>");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, DocumentConstructorWithDirectContent) {
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* Direct constructors inside computed-content braces — the
+     * textual translation must recurse into ctor keyword braces,
+     * not treat them as literal text. */
+    EXPECT_EQ(seq_string(doc, "document { <a><b>1</b></a> }"),
+              "<a><b>1</b></a>");
+    /* Constructors in nested expression positions (function args,
+     * FLWOR bodies) keep their value form; NAVIGATION into a
+     * constructed tree is the value-level contract's documented
+     * boundary (tree-level construction = lane-12 tail). */
+    EXPECT_EQ(seq_string(doc,
+        "string-join((document { <a/> }, <b>2</b>), '|')"),
+              "<a/>|<b>2</b>");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, VersionDeclaration) {
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "xquery version '1.0'; 1 + 1"), "2");
+    EXPECT_EQ(seq_string(doc,
+        "xquery version \"3.1\" encoding \"utf-8\"; count((1,2))"), "2");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, PrologNamespaceBindsDirectConstructor) {
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "declare namespace p='urn:p'; <p:e>v</p:e>"),
+              "<p:e>v</p:e>");
+    leptris_document_free(doc);
+}

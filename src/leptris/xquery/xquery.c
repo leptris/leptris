@@ -193,21 +193,65 @@ static void scan_expr_segment(Scan* s, int stop_at_comma) {
 }
 
 typedef struct { char* s; size_t len, cap; } Buf;
+static void buf_put(Buf* b, const char* s, size_t n);
+static void buf_str(Buf* b, const char* s);
+static const char* xq_translate_element(const char* p, const char* e,
+                                        Buf* out);
 static void xq_translate_content(const char* s, const char* e, Buf* out);
 static int xq_is_name_start(char c);
 
+/* Splice rewriter (#684): an expression span keeps its text
+ * verbatim; every DIRECT element constructor inside it is replaced
+ * by its computed form. Content-translating the whole span (the old
+ * approach) mangled expressions that merely CONTAIN a constructor —
+ * `count(document { <a/> }//b)` turned into text items. Adjacent
+ * constructors join with ", " (a top-level multi-ctor sequence). */
+static char* xq_splice_ctors(const char* a, const char* b) {
+    Buf tb = {0};
+    const char* p = a;
+    int prev_ctor = 0;
+    while (p < b) {
+        if (*p == '\'' || *p == '"') {
+            const char* q = p + 1;
+            while (q < b && *q != *p) q++;
+            buf_put(&tb, p, (size_t)((q < b ? q + 1 : b) - p));
+            p = (q < b) ? q + 1 : b;
+            prev_ctor = 0;
+            continue;
+        }
+        if (*p == '<' && p + 1 < b && xq_is_name_start(p[1])) {
+            if (prev_ctor && tb.len) buf_str(&tb, ", ");
+            /* Parenthesize: the computed form is a primary, and a
+             * following path step (`<a/>//x`) is only legal over a
+             * parenthesized primary. */
+            buf_str(&tb, "(");
+            const char* end = xq_translate_element(p, b, &tb);
+            buf_str(&tb, ")");
+            p = end ? end : p + 1;
+            prev_ctor = 1;
+            continue;
+        }
+        if (!isspace((unsigned char)*p)) prev_ctor = 0;
+        buf_put(&tb, p, 1);
+        p++;
+    }
+    if (!tb.s) {
+        tb.s = (char*)calloc(1, 1);
+        return tb.s;
+    }
+    tb.s[tb.len] = 0;
+    return tb.s;
+}
+
 static XPathASTNode* parse_expr_span(const char* a, const char* b) {
     if (a >= b) return NULL;
-    /* Direct element constructors translate to the computed form
-     * first (purely textual). */
     int has_ctor = 0;
     for (const char* q = a; q + 1 < b && !has_ctor; q++)
         if (*q == '<' && xq_is_name_start(q[1])) has_ctor = 1;
     char* translated = NULL;
     if (has_ctor) {
-        Buf tb = {0};
-        xq_translate_content(a, b, &tb);
-        translated = tb.s ? tb.s : (char*)calloc(1, 1);
+        translated = xq_splice_ctors(a, b);
+        if (!translated) return NULL;
         a = translated;
         b = translated + strlen(translated);
     }
@@ -463,6 +507,50 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
     /* Prolog. */
     scan_ws(&s);
     for (;;) {
+        /* XQuery version declaration: `xquery version 'X';`
+         * (+ optional `encoding "enc";`) — accepted and skipped
+         * (the engine's semantics are version-independent; #684). */
+        {
+            Scan t = s;
+            const char* w;
+            size_t wl = scan_word(&t, &w);
+            if (wl && word_is(w, wl, "xquery")) {
+                t.p = w + wl;
+                scan_ws(&t);
+                wl = scan_word(&t, &w);
+                if (wl && word_is(w, wl, "version")) {
+                    t.p = w + wl;
+                    scan_ws(&t);
+                    if (t.p < t.end &&
+                        (*t.p == '"' || *t.p == '\'')) {
+                        scan_string(&t);
+                        scan_ws(&t);
+                        /* optional encoding decl */
+                        {
+                            Scan e = t;
+                            const char* ew;
+                            size_t ewl = scan_word(&e, &ew);
+                            if (ewl && word_is(ew, ewl, "encoding")) {
+                                e.p = ew + ewl;
+                                scan_ws(&e);
+                                if (e.p < e.end &&
+                                    (*e.p == '"' || *e.p == '\'')) {
+                                    scan_string(&e);
+                                    t = e;
+                                    scan_ws(&t);
+                                }
+                            }
+                        }
+                        if (t.p < t.end && *t.p == ';') {
+                            t.p++;
+                            s = t;
+                            scan_ws(&s);
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
         const char* w;
         Scan t = s;
         size_t wl = scan_word(&t, &w);
@@ -2061,6 +2149,103 @@ static void xq_translate_content(const char* s, const char* e, Buf* out) {
             if (out->len) buf_str(out, ", ");
             p = xq_translate_element(p, e, out);
             ts = p;
+        } else if (xq_is_name_start(*p)) {
+            /* Computed-ctor keyword followed by '{' (document {
+             * ... }, text { ... }) or a name+'{' (element n { ... },
+             * attribute n { ... }): pass the keyword verbatim and
+             * recurse into the brace content so DIRECT constructors
+             * inside it translate too (#684 — `document { <a/> }`
+             * used to mangle into text). */
+            const char* w = p;
+            while (w < e && (xq_is_name_start(*w) ||
+                             isalnum((unsigned char)*w) || *w == '-' ||
+                             *w == '_' || *w == '.' || *w == ':'))
+                w++;
+            const char* gap = w;
+            while (gap < e && isspace((unsigned char)*gap)) gap++;
+            if (w < e && gap < e && *gap == '{' &&
+                ((size_t)(w - p) == 8 &&
+                     strncmp(p, "document", 8) == 0 ||
+                 (size_t)(w - p) == 4 && strncmp(p, "text", 4) == 0)) {
+                if (p > ts && !xq_ws_only(ts, (size_t)(p - ts))) {
+                    if (out->len) buf_str(out, ", ");
+                    buf_str(out, "text { ");
+                    buf_lit(out, ts, (size_t)(p - ts));
+                    buf_str(out, " }");
+                }
+                if (out->len) buf_str(out, ", ");
+                buf_put(out, p, (size_t)(w - p));
+                buf_str(out, " { ");
+                /* matching close brace, respecting nesting+quotes */
+                const char* j = gap + 1;
+                int depth = 1;
+                while (j < e && depth) {
+                    if (*j == '{') depth++;
+                    else if (*j == '}') depth--;
+                    else if (*j == '\'' || *j == '"') {
+                        char qc = *j++;
+                        while (j < e && *j != qc) j++;
+                    }
+                    if (depth) j++;
+                }
+                /* Fresh sub-buffer: the recursive translator emits
+                 * its own leading separators against out->len. */
+                Buf sub = {0};
+                xq_translate_content(gap + 1, j, &sub);
+                if (sub.len) buf_put(out, sub.s, sub.len);
+                free(sub.s);
+                buf_str(out, " }");
+                p = (j < e) ? j + 1 : e;
+                ts = p;
+            } else if (w < e && gap < e && *gap == '{' &&
+                       (((size_t)(w - p) == 7 &&
+                             strncmp(p, "element", 7) == 0) ||
+                        ((size_t)(w - p) == 9 &&
+                         strncmp(p, "attribute", 9) == 0)) &&
+                       gap != w /* a NAME must sit between */) {
+                /* element NAME { ... } / attribute NAME { ... }:
+                 * copy keyword+name, recurse the braces. */
+                const char* nm = w;
+                while (nm < e && (isalnum((unsigned char)*nm) ||
+                                  *nm == '_' || *nm == '-' ||
+                                  *nm == '.' || *nm == ':'))
+                    nm++;
+                const char* gap2 = nm;
+                while (gap2 < e && isspace((unsigned char)*gap2)) gap2++;
+                if (gap2 < e && *gap2 == '{' && nm > w) {
+                    if (p > ts && !xq_ws_only(ts, (size_t)(p - ts))) {
+                        if (out->len) buf_str(out, ", ");
+                        buf_str(out, "text { ");
+                        buf_lit(out, ts, (size_t)(p - ts));
+                        buf_str(out, " }");
+                    }
+                    if (out->len) buf_str(out, ", ");
+                    buf_put(out, p, (size_t)(nm - p));
+                    buf_str(out, " { ");
+                    const char* j = gap2 + 1;
+                    int depth = 1;
+                    while (j < e && depth) {
+                        if (*j == '{') depth++;
+                        else if (*j == '}') depth--;
+                        else if (*j == '\'' || *j == '"') {
+                            char qc = *j++;
+                            while (j < e && *j != qc) j++;
+                        }
+                        if (depth) j++;
+                    }
+                    Buf sub = {0};
+                    xq_translate_content(gap2 + 1, j, &sub);
+                    if (sub.len) buf_put(out, sub.s, sub.len);
+                    free(sub.s);
+                    buf_str(out, " }");
+                    p = (j < e) ? j + 1 : e;
+                    ts = p;
+                } else {
+                    p++;
+                }
+            } else {
+                p++;
+            }
         } else {
             p++;
         }
