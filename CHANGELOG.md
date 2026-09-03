@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.65] - 2026-09-03
+
+### Added
+
+- XQuery constructors, doc(), and the CLI xquery command (#684-B)
+
+### Fixed
+
+- xquery command struct is static (the registry never frees commands)
+
+
+
 ## [1.9.64] - 2026-09-03
 
 ### Added
