@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.75] - 2026-09-03
+
+### Added
+
+- tolerant HTML parsing mode - leptris_parse_html_string (#659) (html)
+
+
+
 ## [1.9.74] - 2026-09-03
 
 ### Performance
