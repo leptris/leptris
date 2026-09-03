@@ -3976,12 +3976,14 @@ TEST(Xslt30, CopySelectNamespaceDocumentDefault) {
 }
 
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
+    /* try/catch was implemented (TODO 11/12 lane, #692): XPath 3.0
+     * defines it, so this once-rejected form now evaluates. */
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
         "[<xsl:value-of select=\"try { 1 + 2 } catch * { 'no' }\"/>]"
         "</xsl:template>",
         "<r/>")),
-        "(compile-failed)");
+        "[3]");
     /* The map constructor compile-failure pin was superseded by
      * lane 08: map { ... } is implemented (FnMapConstructorAnd
      * Accessors). */

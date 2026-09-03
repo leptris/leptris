@@ -1370,7 +1370,9 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
                 op == XPATH_OP_DYN_CALL ||
                 op == XPATH_OP_ELEMENT_CTOR ||
                 op == XPATH_OP_ATTRIBUTE_CTOR ||
-                op == XPATH_OP_TEXT_CTOR) {
+                op == XPATH_OP_TEXT_CTOR ||
+                op == XPATH_OP_DOCUMENT_CTOR ||
+                op == XPATH_OP_TRY) {
                 emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
                             add_const_ast(st, node));
                 break;

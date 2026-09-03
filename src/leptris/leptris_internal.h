@@ -709,7 +709,13 @@ typedef enum {
      * content expression (content escaping applies). */
     XPATH_OP_ELEMENT_CTOR,
     XPATH_OP_ATTRIBUTE_CTOR,
-    XPATH_OP_TEXT_CTOR
+    XPATH_OP_TEXT_CTOR,
+    /* document { content } — serializes its content with no
+     * wrapper (Saxon). XPATH_OP_TRY: value = catch name-tests
+     * joined by '\x01' ("*" catches all), children[0] = try body,
+     * children[1..] = catch bodies in order. */
+    XPATH_OP_DOCUMENT_CTOR,
+    XPATH_OP_TRY
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope

@@ -185,3 +185,51 @@ TEST(XQueryCore, DirectConstructorWithTemplates) {
         "<out total=\"3\"><x>AA</x></out>");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, PositionalFor) {
+    /* Saxon t8: "1:a 2:b 3:c" */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "for $x at $i in ('a','b','c')"
+        " return concat($i, ':', $x)"),
+        "1:a 2:b 3:c");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, DocumentConstructor) {
+    /* Saxon t9: <n>1</n><n>2</n> — document serializes its content. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "for $v in (1,2) return document { element n { $v } }"),
+        "<n>1</n> <n>2</n>");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, TryCatch) {
+    /* #692's silent-wrong case: try/catch must catch dynamic errors
+     * and run the matching handler (Saxon t11/t15/t16). */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* No error: the try body's value passes through. */
+    EXPECT_EQ(seq_string(doc,
+        "try { 1 + count((1,2)) } catch * { -1 }"),
+        "3");
+    /* Dynamic error: catch * runs; $err:description carries the
+     * diagnostic. */
+    EXPECT_EQ(seq_string(doc,
+        "try { doc('no-such-file-xyz.xml') } catch * {"
+        " 'caught:' || contains($err:description, 'doc') }"),
+        "caught:true");
+    /* Named tests do not match (no code model yet): the error
+     * propagates as an evaluation failure. */
+    EXPECT_EQ(seq_string(doc,
+        "try { doc('no-such-file-xyz.xml') }"
+        " catch err:XPST0008 { 'undef' }"),
+        "(eval-failed)");
+    leptris_document_free(doc);
+}

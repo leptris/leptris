@@ -1021,6 +1021,123 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
          * (the lexer only keyword-tokenizes `text(`). */
         else if (current_token(parser)->type == TOK_NCNAME &&
                  next && next->type == TOK_LBRACE &&
+                 current_token(parser)->value_len == 8 &&
+                 memcmp(current_token(parser)->value, "document", 8) == 0) {
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* dc = ast_node_new(XPATH_AST_OPERATOR);
+            if (!dc) return NULL;
+            dc->number_value = (double)XPATH_OP_DOCUMENT_CTOR;
+            for (;;) {
+                XPathASTNode* item = parse_expr(parser);
+                if (!item) { ast_node_free(dc); return NULL; }
+                ast_node_add_child(dc, item);
+                if (current_token_is(parser, TOK_COMMA)) {
+                    advance_token(parser);
+                    continue;
+                }
+                break;
+            }
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(dc);
+                return NULL;
+            }
+            advance_token(parser);
+            return parse_postfix_ops(parser, dc);
+        }
+        /* XQuery 3.0 try/catch (#692): try { E } catch TEST { E }+.
+         * TEST: * | err:CODE | err:* */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 next && next->type == TOK_LBRACE &&
+                 current_token(parser)->value_len == 3 &&
+                 memcmp(current_token(parser)->value, "try", 3) == 0) {
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* body = parse_expr(parser);
+            if (!body) return NULL;
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(body);
+                return NULL;
+            }
+            advance_token(parser);
+            XPathASTNode* tc = ast_node_new(XPATH_AST_OPERATOR);
+            if (!tc) { ast_node_free(body); return NULL; }
+            tc->number_value = (double)XPATH_OP_TRY;
+            ast_node_add_child(tc, body);
+            char tests[256];
+            size_t tlen = 0;
+            tests[0] = 0;
+            while (current_token_is(parser, TOK_NCNAME) &&
+                   current_token(parser)->value_len == 5 &&
+                   memcmp(current_token(parser)->value, "catch", 5) == 0) {
+                advance_token(parser);
+                char test[128];
+                size_t tnl = 0;
+                test[0] = 0;
+                XPathToken* t = current_token(parser);
+                if (t && t->type == TOK_STAR) {
+                    test[tnl++] = '*';
+                    advance_token(parser);
+                } else if (t && (t->type == TOK_NCNAME ||
+                                 t->type == TOK_QNAME)) {
+                    if (t->value_len < sizeof(test)) {
+                        memcpy(test, t->value, t->value_len);
+                        tnl = t->value_len;
+                    }
+                    advance_token(parser);
+                    if (current_token_is(parser, TOK_COLON)) {
+                        advance_token(parser);
+                        if (tnl < sizeof(test) - 1) test[tnl++] = ':';
+                        t = current_token(parser);
+                        if (t && t->type == TOK_STAR) {
+                            if (tnl < sizeof(test) - 1) test[tnl++] = '*';
+                            advance_token(parser);
+                        } else if (t && (t->type == TOK_NCNAME ||
+                                         t->type == TOK_QNAME)) {
+                            if (tnl + t->value_len < sizeof(test)) {
+                                memcpy(test + tnl, t->value, t->value_len);
+                                tnl += t->value_len;
+                            }
+                            advance_token(parser);
+                        }
+                    }
+                }
+                if (!tnl) {
+                    ast_node_free(tc);
+                    return NULL;
+                }
+                test[tnl] = 0;
+                if (tlen && tlen + 1 < sizeof(tests))
+                    tests[tlen++] = '\x01';
+                if (tlen + tnl < sizeof(tests)) {
+                    memcpy(tests + tlen, test, tnl);
+                    tlen += tnl;
+                }
+                tests[tlen] = 0;
+                if (!current_token_is(parser, TOK_LBRACE)) {
+                    ast_node_free(tc);
+                    return NULL;
+                }
+                advance_token(parser);
+                XPathASTNode* cb = parse_expr(parser);
+                if (!cb) { ast_node_free(tc); return NULL; }
+                if (!current_token_is(parser, TOK_RBRACE)) {
+                    ast_node_free(cb);
+                    ast_node_free(tc);
+                    return NULL;
+                }
+                advance_token(parser);
+                ast_node_add_child(tc, cb);
+            }
+            if (tc->child_count < 2) {   /* try needs >= 1 catch */
+                ast_node_free(tc);
+                return NULL;
+            }
+            tc->value = leptris_strdup(tests);
+            return parse_postfix_ops(parser, tc);
+        }
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 next && next->type == TOK_LBRACE &&
                  current_token(parser)->value_len == 4 &&
                  memcmp(current_token(parser)->value, "text", 4) == 0) {
             advance_token(parser);
