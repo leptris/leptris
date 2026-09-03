@@ -184,10 +184,16 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         r->value.nodeset_value = out;
         return r;
     }
-    /* SEQUENCE is the one operator with a legal zero-child form —
-     * the `()` empty-sequence literal (and the where-desugar's
-     * else-arm). */
-    if (ast->child_count < 1 && op0 != XPATH_OP_SEQUENCE) return NULL;
+    /* Legal zero-child forms: SEQUENCE (the `()` literal and the
+     * where-desugar's else-arm) and EMPTY computed constructors
+     * (`element n { }`, `attribute n { }`, `text { }`,
+     * `document { }` — #684). */
+    if (ast->child_count < 1 && op0 != XPATH_OP_SEQUENCE &&
+        op0 != XPATH_OP_ELEMENT_CTOR &&
+        op0 != XPATH_OP_ATTRIBUTE_CTOR &&
+        op0 != XPATH_OP_TEXT_CTOR &&
+        op0 != XPATH_OP_DOCUMENT_CTOR)
+        return NULL;
 
     XPathOperatorType op = (XPathOperatorType)ast->number_value;
 

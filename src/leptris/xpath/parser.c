@@ -1154,6 +1154,11 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             XPathASTNode* dc = ast_node_new(XPATH_AST_OPERATOR);
             if (!dc) return NULL;
             dc->number_value = (double)XPATH_OP_DOCUMENT_CTOR;
+            /* Empty content `document { }` is legal (no children). */
+            if (current_token_is(parser, TOK_RBRACE) &&
+                dc->child_count == 0) {
+                /* fall through to the RBRACE consume below */
+            } else
             for (;;) {
                 XPathASTNode* item = parse_expr(parser);
                 if (!item) { ast_node_free(dc); return NULL; }
@@ -1376,7 +1381,16 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                  memcmp(current_token(parser)->value, "text", 4) == 0) {
             advance_token(parser);
             advance_token(parser);
-            XPathASTNode* body = parse_expr(parser);
+            /* `text { }` — the empty string (zero-child SEQUENCE,
+             * the `()` literal shape). */
+            XPathASTNode* body = NULL;
+            if (current_token_is(parser, TOK_RBRACE)) {
+                body = ast_node_new(XPATH_AST_OPERATOR);
+                if (body) body->number_value =
+                    (double)XPATH_OP_SEQUENCE;
+            } else {
+                body = parse_expr(parser);
+            }
             if (!body) return NULL;
             if (!current_token_is(parser, TOK_RBRACE)) {
                 ast_node_free(body);
@@ -1415,7 +1429,11 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             ctor->value = leptris_strdup(name);
             /* Comma-separated ctor children attach directly (the
              * evaluator sees attribute and content children up
-             * front). */
+             * front). Empty content `element n { }` is legal. */
+            if (current_token_is(parser, TOK_RBRACE) &&
+                ctor->child_count == 0) {
+                /* no content items */
+            } else
             for (;;) {
                 XPathASTNode* item = parse_expr(parser);
                 if (!item) { ast_node_free(ctor); return NULL; }
