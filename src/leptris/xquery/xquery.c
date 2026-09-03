@@ -174,16 +174,30 @@ static void scan_expr_segment(Scan* s, int stop_at_comma) {
     }
 }
 
+typedef struct { char* s; size_t len, cap; } Buf;
+static void xq_translate_content(const char* s, const char* e, Buf* out);
+static int xq_is_name_start(char c);
+
 static XPathASTNode* parse_expr_span(const char* a, const char* b) {
     if (a >= b) return NULL;
-    XPathParser* parser = xpath_parser_new(a, (size_t)(b - a));
-    if (!parser) return NULL;
-    XPathASTNode* ast = xpath_parse(parser);
-    if (!ast) {
-        xpath_parser_free(parser);
-        return NULL;
+    /* Direct element constructors translate to the computed form
+     * first (purely textual). */
+    int has_ctor = 0;
+    for (const char* q = a; q + 1 < b && !has_ctor; q++)
+        if (*q == '<' && xq_is_name_start(q[1])) has_ctor = 1;
+    char* translated = NULL;
+    if (has_ctor) {
+        Buf tb = {0};
+        xq_translate_content(a, b, &tb);
+        translated = tb.s ? tb.s : (char*)calloc(1, 1);
+        a = translated;
+        b = translated + strlen(translated);
     }
+    XPathParser* parser = xpath_parser_new(a, (size_t)(b - a));
+    if (!parser) { free(translated); return NULL; }
+    XPathASTNode* ast = xpath_parse(parser);
     xpath_parser_free(parser);
+    free(translated);
     return ast;
 }
 
@@ -1022,4 +1036,258 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
     }
     xpath_context_cleanup(ctx);
     return result;
+}
+
+/* ---- direct element constructors (TODO 11 slice B) ----
+ *
+ * Translated to the computed form before the XPath parser sees a
+ * span: <n a="{E}">{C}</n> becomes
+ * element n { attribute a { ...AVT... }, text { "..." }, (C) }.
+ * Purely textual — balanced-tag scans that respect quotes. */
+
+static void buf_put(Buf* b, const char* s, size_t n) {
+    if (b->len + n + 1 > b->cap) {
+        b->cap = b->cap ? b->cap * 2 : 64;
+        while (b->len + n + 1 > b->cap) b->cap *= 2;
+        b->s = (char*)realloc(b->s, b->cap);
+    }
+    if (!b->s) return;
+    memcpy(b->s + b->len, s, n);
+    b->len += n;
+    b->s[b->len] = 0;
+}
+
+static void buf_str(Buf* b, const char* s) {
+    buf_put(b, s, strlen(s));
+}
+
+/* Emit a text run as an XPath string literal (choosing the quote
+ * character that does not occur in the run; both occurring is
+ * split across a concat). */
+static void buf_lit(Buf* b, const char* s, size_t n) {
+    int sq = 0, dq = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '\'') sq = 1;
+        else if (s[i] == '"') dq = 1;
+    }
+    if (!sq) {
+        buf_put(b, "'", 1);
+        buf_put(b, s, n);
+        buf_put(b, "'", 1);
+    } else if (!dq) {
+        buf_put(b, "\"", 1);
+        buf_put(b, s, n);
+        buf_put(b, "\"", 1);
+    } else {
+        buf_str(b, "concat(");
+        for (size_t i = 0; i < n; i++) {
+            if (i) buf_str(b, ", ");
+            buf_put(b, s[i] == '\'' ? "\"" : "'", 1);
+            buf_put(b, s + i, 1);
+            buf_put(b, s[i] == '\'' ? "\"" : "'", 1);
+        }
+        buf_str(b, ")");
+    }
+}
+
+static int xq_is_name_start(char c) {
+    return isalpha((unsigned char)c) || c == '_' || c == ':';
+}
+static int xq_is_name_char(char c) {
+    return isalnum((unsigned char)c) || c == '_' || c == '-' ||
+           c == '.' || c == ':';
+}
+
+/* Emit an attribute value template: pre{E}post —> concat pieces. */
+static void buf_avt(Buf* b, const char* s, size_t n) {
+    int any = 0;
+    int n_pieces = 0;
+    Buf pieces = {0};
+    size_t i = 0, lit = 0;
+    while (i < n) {
+        if (s[i] == '{') {
+            if (i > lit) { buf_str(&pieces, any ? ", " : ""); buf_lit(&pieces, s + lit, i - lit); any = 1; }
+            size_t j = i + 1;
+            int depth = 1;
+            while (j < n && depth) {
+                if (s[j] == '{') depth++;
+                else if (s[j] == '}') depth--;
+                else if (s[j] == '\'' || s[j] == '"') {
+                    char q = s[j++];
+                    while (j < n && s[j] != q) j++;
+                }
+                if (depth) j++;
+            }
+            buf_str(&pieces, any ? ", " : "");
+            buf_put(&pieces, "(", 1);
+            buf_put(&pieces, s + i + 1, j > i + 1 ? j - (i + 1) : 0);
+            buf_put(&pieces, ")", 1);
+            any = 1;
+            n_pieces++;
+            i = j + 1;
+            lit = i;
+        } else i++;
+    }
+    if (lit < n) { buf_str(&pieces, any ? ", " : ""); buf_lit(&pieces, s + lit, n - lit); any = 1; n_pieces++; }
+    if (!any) buf_str(b, "''");
+    else if (n_pieces == 1) {
+        buf_put(b, pieces.s, pieces.len);
+    } else {
+        /* concat needs >= 2 args (arity 2..n) */
+        buf_str(b, "concat(");
+        buf_put(b, pieces.s, pieces.len);
+        buf_str(b, ", '')");
+    }
+    free(pieces.s);
+}
+
+static const char* xq_translate_element(const char* p, const char* e,
+                                        Buf* out);
+
+static void xq_translate_content(const char* s, const char* e, Buf* out);
+
+static const char* xq_translate_element(const char* p, const char* e,
+                                        Buf* out) {
+    /* p at '<', tag name follows. */
+    const char* tag = p + 1;
+    const char* q = tag;
+    while (q < e && xq_is_name_char(*q)) q++;
+    size_t tnlen = (size_t)(q - tag);
+    if (!tnlen) { buf_put(out, p, 1); return p + 1; }
+    const char* gt = q;
+    while (gt < e && *gt != '>') {
+        if (*gt == '"' || *gt == '\'') {
+            char qc = *gt++;
+            while (gt < e && *gt != qc) gt++;
+        }
+        if (gt < e && *gt != '>') gt++;
+    }
+    if (gt >= e) { buf_put(out, p, (size_t)(e - p)); return e; }
+    int self_closing = gt[-1] == '/';
+    const char* attr_end = self_closing ? gt - 1 : gt;
+
+    Buf ab = {0};
+    const char* ap = q;
+    while (ap < attr_end) {
+        while (ap < attr_end && isspace((unsigned char)*ap)) ap++;
+        if (ap >= attr_end) break;
+        const char* an = ap;
+        while (ap < attr_end && xq_is_name_char(*ap)) ap++;
+        size_t anlen = (size_t)(ap - an);
+        while (ap < attr_end && isspace((unsigned char)*ap)) ap++;
+        if (ap >= attr_end || *ap != '=' || anlen == 0) continue;
+        ap++;
+        while (ap < attr_end && isspace((unsigned char)*ap)) ap++;
+        if (ap >= attr_end || (*ap != '"' && *ap != '\'')) continue;
+        char qc = *ap++;
+        const char* av = ap;
+        while (ap < attr_end && *ap != qc) ap++;
+        if (ab.len) buf_str(&ab, ", ");
+        buf_str(&ab, "attribute ");
+        buf_put(&ab, an, anlen);
+        buf_str(&ab, " { ");
+        buf_avt(&ab, av, (size_t)(ap - av));
+        buf_str(&ab, " }");
+        ap++;
+    }
+
+    Buf cb = {0};
+    const char* end;
+    if (self_closing) {
+        end = gt + 1;
+    } else {
+        const char* body = gt + 1;
+        const char* close = body;
+        int depth = 1;
+        while (close < e) {
+            if (*close == '<') {
+                if (close + 1 < e && close[1] == '/' &&
+                    (size_t)(e - close) > tnlen + 2 &&
+                    strncmp(close + 2, tag, tnlen) == 0 &&
+                    close[2 + tnlen] == '>') {
+                    depth--;
+                    if (!depth) break;
+                } else if (close + 1 < e && xq_is_name_start(close[1])) {
+                    const char* nq = close + 1;
+                    while (nq < e && xq_is_name_char(*nq)) nq++;
+                    if ((size_t)(nq - close - 1) == tnlen &&
+                        strncmp(close + 1, tag, tnlen) == 0)
+                        depth++;
+                }
+            } else if (*close == '"' || *close == '\'') {
+                char qc = *close++;
+                while (close < e && *close != qc) close++;
+            }
+            close++;
+        }
+        if (close >= e) {
+            buf_put(out, p, (size_t)(e - p));
+            free(ab.s);
+            free(cb.s);
+            return e;
+        }
+        xq_translate_content(body, close, &cb);
+        end = close + 2 + tnlen + 1;   /* past </name> */
+    }
+
+    buf_str(out, "element ");
+    buf_put(out, tag, tnlen);
+    buf_str(out, " { ");
+    if (ab.len) {
+        buf_put(out, ab.s, ab.len);
+        if (cb.len) buf_str(out, ", ");
+    }
+    if (cb.len) buf_put(out, cb.s, cb.len);
+    buf_str(out, " }");
+    free(ab.s);
+    free(cb.s);
+    return end;
+}
+
+static void xq_translate_content(const char* s, const char* e, Buf* out) {
+    const char* ts = s, *p = s;
+    while (p < e) {
+        if (*p == '{') {
+            if (p > ts) {
+                if (out->len) buf_str(out, ", ");
+                buf_str(out, "text { ");
+                buf_lit(out, ts, (size_t)(p - ts));
+                buf_str(out, " }");
+            }
+            const char* j = p + 1;
+            int depth = 1;
+            while (j < e && depth) {
+                if (*j == '{') depth++;
+                else if (*j == '}') depth--;
+                else if (*j == '\'' || *j == '"') {
+                    char qc = *j++;
+                    while (j < e && *j != qc) j++;
+                }
+                if (depth) j++;
+            }
+            if (out->len) buf_str(out, ", ");
+            buf_put(out, "(", 1);
+            buf_put(out, p + 1, j > p + 1 ? (size_t)(j - (p + 1)) : 0);
+            buf_put(out, ")", 1);
+            p = j + 1;
+            ts = p;
+        } else if (*p == '<' && p + 1 < e && xq_is_name_start(p[1])) {
+            if (p > ts) {
+                if (out->len) buf_str(out, ", ");
+                buf_str(out, "text { ");
+                buf_lit(out, ts, (size_t)(p - ts));
+                buf_str(out, " }");
+            }
+            p = xq_translate_element(p, e, out);
+            ts = p;
+        } else {
+            p++;
+        }
+    }
+    if (e > ts) {
+        if (out->len) buf_str(out, ", ");
+        buf_str(out, "text { ");
+        buf_lit(out, ts, (size_t)(e - ts));
+        buf_str(out, " }");
+    }
 }

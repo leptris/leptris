@@ -1100,6 +1100,51 @@ static struct leptris_xpath_result* fn_node_name(XPathContext* ctx,
 
 #include <time.h>
 
+/* fn:doc(uri) — parse the file, return its root as a nodeset
+ * (TODO.xslt-full/11). The document anchors on the eval context
+ * (XPathContext.owned_docs): the nodeset borrows the root element,
+ * so the doc must outlive the result — cleanup frees the anchors. */
+static struct leptris_xpath_result* fn_doc(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    char* path = re_str_arg(ctx, args, 0);
+    if (!path) return NULL;
+    LeptrisDocument doc = leptris_parse_file(path, NULL);
+    free(path);
+    if (!doc) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "doc(): cannot load document");
+        return NULL;
+    }
+    LeptrisElement root = leptris_document_root(doc);
+    if (!root) {
+        leptris_document_free(doc);
+        return NULL;
+    }
+    if (ctx->n_owned_docs == ctx->cap_owned_docs) {
+        ctx->cap_owned_docs = ctx->cap_owned_docs
+                                  ? ctx->cap_owned_docs * 2 : 4;
+        ctx->owned_docs = (struct leptris_document**)realloc(
+            ctx->owned_docs,
+            ctx->cap_owned_docs * sizeof(struct leptris_document*));
+        if (!ctx->owned_docs) {
+            leptris_document_free(doc);
+            return NULL;
+        }
+    }
+    ctx->owned_docs[ctx->n_owned_docs++] = doc;
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_NODESET);
+    if (!out) return NULL;
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value) {
+        xpath_result_free(out);
+        return NULL;
+    }
+    xpath_nodeset_add(out->value.nodeset_value, root);
+    return out;
+}
+
 static struct leptris_xpath_result* fn_passthrough_ctor(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* in = re_str_arg(ctx, args, 0);
@@ -2658,6 +2703,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "tail", fn_tail, 1, 1);
     xpath_function_registry_register(registry, "reverse", fn_reverse, 1, 1);
     xpath_function_registry_register(registry, "unordered", fn_unordered, 1, 1);
+    xpath_function_registry_register(registry, "doc", fn_doc, 1, 1);
     xpath_function_registry_register(registry, "subsequence", fn_subsequence, 2, 3);
     xpath_function_registry_register(registry, "remove", fn_remove, 2, 2);
     xpath_function_registry_register(registry, "insert-before", fn_insert_before, 3, 3);

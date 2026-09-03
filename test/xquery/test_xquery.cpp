@@ -142,3 +142,46 @@ TEST(XQueryCore, NullArgumentsRejected) {
     leptris_xquery_free(xq);
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, DocAndComputedConstructors) {
+    /* Saxon t5: doc() + where + order by descending + computed
+     * element/attribute/text constructors. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "for $b in doc(\"" LEPTRIS_XQUERY_FIXTURE_DIR
+        "/books.xml\")//book "
+        "where $b/@price > 10 "
+        "order by $b/@price descending "
+        "return element r { attribute price { $b/@price },"
+        " text { $b/title } }"),
+        "<r price=\"20\">CC</r> <r price=\"12\">AA</r>");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, NestedComputedConstructors) {
+    /* Saxon t6: <items><n>1</n><n>2</n><n>3</n></items> */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "element items { for $n in 1 to 3"
+        " return element n { $n } }"),
+        "<items><n>1</n><n>2</n><n>3</n></items>");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, DirectConstructorWithTemplates) {
+    /* Saxon t7: <out total="3"><x>AA</x></out> — attribute value
+     * template + enclosed content expression. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "<a p=\"{1 + 1}\"/>"), "<a p=\"2\"/>");
+    EXPECT_EQ(seq_string(doc,
+        "<out total=\"{count(//book)}\">"
+        "<x>{string(//book[1]/title)}</x></out>"),
+        "<out total=\"3\"><x>AA</x></out>");
+    leptris_document_free(doc);
+}

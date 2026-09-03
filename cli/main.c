@@ -95,6 +95,7 @@ int main(int argc, char** argv) {
     cli_registry_register(registry, cli_command_parse());
     cli_registry_register(registry, cli_command_xpath());
     cli_registry_register(registry, cli_command_format());
+    cli_registry_register(registry, cli_command_xquery());
 
     /* Check if command specified */
     if (argc < 2) {
