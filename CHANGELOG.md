@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.67] - 2026-09-03
+
+### Added
+
+- XQuery group by (lane 12)
+
+### Fixed
+
+- unbind before phase-2 rebind (xpath_variable_set_nodeset overwrites without freeing)
+
+
+
 ## [1.9.66] - 2026-09-03
 
 ### Added
