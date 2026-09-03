@@ -991,10 +991,13 @@ int leptris_element_add_namespace(struct leptris_element* elem,
  * deep copier already knows the pool; resolving it through the
  * parent chain (root-map walk + TLS) per element dominated subtree
  * duplication profiles. */
-static void copy_element_namespaces_pooled(LeptrisElement copy,
-                                           LeptrisElement source,
-                                           LeptrisMemoryPool* pool) {
-    if (!pool) return;
+/* Returns 1 when any xmlns declaration was attached (the caller
+ * sets the document's has_namespaces resolution gate). */
+static int copy_element_namespaces_pooled(LeptrisElement copy,
+                                          LeptrisElement source,
+                                          LeptrisMemoryPool* pool) {
+    int any_decl = 0;
+    if (!pool) return 0;
     char* pfx = leptris_elem_prefix(source);
     if (pfx) {
         LeptrisStringView pv = leptris_sv_from_cstr(pfx);
@@ -1011,15 +1014,31 @@ static void copy_element_namespaces_pooled(LeptrisElement copy,
         const char* np = leptris_element_namespace_decl_prefix(source, i);
         const char* nu = leptris_element_namespace_decl_uri(source, i);
         if (!nu) break;
-        /* Pool-owned declaration from the THREADED pool — the copy
-         * is not root-registered yet mid-recursion, so the public
-         * mutator's own get_pool would fall to its HEAP fallback
-         * and leak at document teardown (Linux LSan, PR #806). */
+        /* Pool-owned declaration linked through the THREADED pool.
+         * The public leptris_element_add_namespace re-resolves the
+         * pool via get_document — the detached copy is NOT
+         * root-registered mid-recursion, so that path silently
+         * dropped every declaration (#812) or heap-leaked (the
+         * mutator's fallback, PR #806). The head accessor is the
+         * same one add_namespace writes. */
         const char* norm = (np && !*np) ? NULL : np;
         struct leptris_namespace* ns =
             leptris_namespace_new_pooled(norm, nu, pool);
-        if (ns) leptris_element_add_namespace(copy, ns);
+        if (!ns) break;
+        ns->next = NULL;
+        struct leptris_namespace** head =
+            leptris_elem_namespaces_ptr(copy, pool);
+        if (!head) break;
+        if (!*head) {
+            *head = ns;
+        } else {
+            struct leptris_namespace* tail = *head;
+            while (tail->next) tail = tail->next;
+            tail->next = ns;
+        }
+        any_decl = 1;
     }
+    return any_decl;
 }
 
 static void copy_element_namespaces(LeptrisElement copy, LeptrisElement source,
@@ -1839,7 +1858,8 @@ LeptrisElement leptris_element_append_copy_bulk(LeptrisElement parent, LeptrisEl
  * (issue #721). */
 static LeptrisElement copy_subtree_detached(LeptrisElement source,
                                             LeptrisElement parent_copy,
-                                            LeptrisMemoryPool* pool) {
+                                            LeptrisMemoryPool* pool,
+                                            struct leptris_document* doc) {
     LeptrisStringView name_view = leptris_element_name_view(source);
     if (leptris_sv_is_empty(&name_view)) return NULL;
     char* name_copy = leptris_sv_to_cstr_pooled(&name_view, pool);
@@ -1849,7 +1869,8 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
     if (!copy) return NULL;
     leptris_elem_set_parent(copy, parent_copy);
 
-    copy_element_namespaces_pooled(copy, source, pool);
+    if (copy_element_namespaces_pooled(copy, source, pool))
+        doc->has_namespaces = 1;
 
     for (struct leptris_attribute* sa =
              leptris_element_get_first_attribute(source);
@@ -1874,7 +1895,7 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
         LeptrisNodeRef cc = NULL;
         if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
             cc = (LeptrisNodeRef)copy_subtree_detached((LeptrisElement)c,
-                                                       copy, pool);
+                                                       copy, pool, doc);
         } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
             LeptrisTextNode* t = (LeptrisTextNode*)c;
             cc = (LeptrisNodeRef)leptris_text_create(t->content,
@@ -1931,7 +1952,7 @@ LEPTRIS_API LeptrisElement leptris_element_copy(LeptrisElement src,
     leptris_document_ensure_promoted(dest_doc);
 
     LeptrisElement copy =
-        copy_subtree_detached(src, NULL, dest_doc->pool);
+        copy_subtree_detached(src, NULL, dest_doc->pool, dest_doc);
     if (!copy) return NULL;
 
     /* Pool-named copies carry no name backpointer — one root-map

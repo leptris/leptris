@@ -658,6 +658,51 @@ TEST(ElementSetName, UpdatesLengthAndKeepsDocReachable) {
     leptris_document_free(doc);
 }
 
+/* #812 regression guard: declarations on the copied element that
+ * only DESCENDANTS use must survive leptris_element_copy (the
+ * 1.9.74 detached-copier rewrite routed attach through
+ * leptris_element_add_namespace, whose get_document resolution
+ * fails on the unregistered mid-construction copy — silently
+ * dropping every declaration). */
+TEST(ElementCopy, DescendantScopedDeclarationsSurvive) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<r xmlns:p=\"urn:p\"><p:c/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisDocument nd = leptris_document_create();
+    ASSERT_NE(nd, nullptr);
+    LeptrisElement copy =
+        leptris_element_copy(leptris_document_root(doc), nd);
+    ASSERT_NE(copy, nullptr);
+    ASSERT_EQ(leptris_document_set_root(nd, copy), LEPTRIS_OK);
+    char* out = leptris_document_serialize(nd, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r xmlns:p=\"urn:p\"><p:c/></r>");
+    leptris_free_string(out);
+    leptris_document_free(nd);
+
+    /* Multiple declarations, mixed use. */
+    const char xml2[] =
+        "<r xmlns:q=\"urn:q\" xmlns:p=\"urn:p\"><p:c/><q:d/></r>";
+    LeptrisDocument doc2 = leptris_parse_string(xml2, std::strlen(xml2), &st);
+    ASSERT_NE(doc2, nullptr);
+    LeptrisDocument nd2 = leptris_document_create();
+    ASSERT_NE(nd2, nullptr);
+    LeptrisElement copy2 =
+        leptris_element_copy(leptris_document_root(doc2), nd2);
+    ASSERT_NE(copy2, nullptr);
+    ASSERT_EQ(leptris_document_set_root(nd2, copy2), LEPTRIS_OK);
+    char* out2 = leptris_document_serialize(nd2, nullptr);
+    ASSERT_NE(out2, nullptr);
+    EXPECT_STREQ(out2,
+                 "<r xmlns:q=\"urn:q\" xmlns:p=\"urn:p\">"
+                 "<p:c/><q:d/></r>");
+    leptris_free_string(out2);
+    leptris_document_free(nd2);
+    leptris_document_free(doc2);
+    leptris_document_free(doc);
+}
+
 /* Interleaved-parent appends (result-tree construction pattern,
  * #682): append <b> to <out>, then <t>/<a> INTO <b>, then the next
  * <b>... The document's mutation tail cache must keep a per-parent
