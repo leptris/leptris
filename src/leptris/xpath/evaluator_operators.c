@@ -532,6 +532,107 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return out;
     }
 
+    /* XQuery 3.0 try/catch (#692): children[0] = try body,
+     * children[1..] = catch bodies; value = name-tests joined by
+     * '\x01'. No error-code model yet: "*" catches everything,
+     * named tests never match (the error propagates). */
+    if (op == XPATH_OP_TRY) {
+        struct leptris_xpath_result* v = evaluate_expr(ctx, ast->children[0]);
+        if (v) return v;
+        const char* tests = ast->value ? ast->value : "";
+        char desc_save[256];
+        snprintf(desc_save, sizeof(desc_save), "%s", ctx->error_msg);
+        const char* sep = strchr(tests, '\x01');
+        for (size_t i = 1; i < ast->child_count; i++) {
+            size_t tlen = sep ? (size_t)(sep - tests) : strlen(tests);
+            if (tlen == 1 && tests[0] == '*') {
+                /* Bind $err:* for the handler. */
+                XPathVariableSet* vs = (XPathVariableSet*)ctx->variable_set;
+                int created = 0;
+                if (!vs) {
+                    vs = xpath_variable_set_new();
+                    if (!vs) return NULL;
+                    ctx->variable_set = vs;
+                    created = 1;
+                }
+                char numbuf[24];
+                snprintf(numbuf, sizeof(numbuf), "\x03N0");
+                const char* bindings[][2] = {
+                    {"err:code", ""},
+                    {"err:description", desc_save[0] ? desc_save : "error"},
+                    {"err:value", ""},
+                };
+                for (size_t b = 0; b < 3; b++) {
+                    XPathNodeSet* one = xpath_nodeset_new();
+                    if (!one) continue;
+                    one->owns_synthetic_text = 1;
+                    XPathTextNode* tn = xpath_synth_text(
+                        bindings[b][1], strlen(bindings[b][1]));
+                    if (tn) xpath_nodeset_add(one, tn);
+                    XPathVariable* var = xpath_variable_set_add(
+                        vs, bindings[b][0], XPATH_VAR_TYPE_NODE_SET);
+                    if (var) xpath_variable_set_nodeset(var, one);
+                    else xpath_nodeset_free(one);
+                }
+                (void)numbuf;
+                ctx->error_msg[0] = '\0';
+                struct leptris_xpath_result* out =
+                    evaluate_expr(ctx, ast->children[i]);
+                for (size_t b = 0; b < 3; b++)
+                    xpath_variable_set_remove(vs, bindings[b][0]);
+                if (created) {
+                    ctx->variable_set = NULL;
+                    xpath_variable_set_free(vs);
+                }
+                return out;
+            }
+            if (sep) {
+                tests = sep + 1;
+                sep = strchr(tests, '\x01');
+            }
+        }
+        return NULL;   /* no matching catch: propagate */
+    }
+
+    /* document { content } (TODO 11): serialize children with no
+     * wrapper tag — the ELEMENT_CTOR content pass minus the tag. */
+    if (op == XPATH_OP_DOCUMENT_CTOR) {
+        size_t cap = 64, len = 0;
+        char* buf = (char*)malloc(cap);
+        if (!buf) return NULL;
+        buf[0] = 0;
+        for (size_t i = 0; i < ast->child_count; i++) {
+            struct leptris_xpath_result* v = evaluate_expr(ctx, ast->children[i]);
+            if (!v) continue;
+            if (v->type == XPATH_RESULT_NODESET && v->value.nodeset_value) {
+                for (size_t m = 0; m < v->value.nodeset_value->count; m++) {
+                    char* t = get_node_text(v->value.nodeset_value->nodes[m]);
+                    if (!t) continue;
+                    while (len + strlen(t) + 1 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
+                    memcpy(buf + len, t, strlen(t));
+                    len += strlen(t);
+                    buf[len] = 0;
+                    free(t);
+                }
+            } else {
+                char* t = xpath_to_string(v);
+                if (t) {
+                    while (len + strlen(t) + 1 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
+                    memcpy(buf + len, t, strlen(t));
+                    len += strlen(t);
+                    buf[len] = 0;
+                    free(t);
+                }
+            }
+            xpath_result_free(v);
+        }
+        struct leptris_xpath_result* out =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (!out) { free(buf); return NULL; }
+        out->value.string_value = buf;
+        return out;
+    }
+
     /* ---- XQuery 1.0 constructors (TODO.xslt-full/11): value-level
      * — the result is the serialized XML string. Attribute values
      * escape &<"', text content escapes &<; raw expression content

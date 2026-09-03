@@ -43,6 +43,7 @@ typedef struct {
 typedef struct {
     int is_for;        /* 0 = let */
     char* var;
+    char* pos_var;     /* XQuery `for $x at $i` — NULL if none */
     XPathASTNode* expr;
 } XqClause;
 
@@ -223,6 +224,7 @@ static void xq_free(struct LeptrisXQueryInternal* q) {
     free(q->decls);
     for (size_t i = 0; i < q->nclauses; i++) {
         free(q->clauses[i].var);
+        free(q->clauses[i].pos_var);
         if (q->clauses[i].expr) ast_node_free(q->clauses[i].expr);
     }
     free(q->clauses);
@@ -460,8 +462,24 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                         xq_free(q);
                         return NULL;
                     }
+                    char* pos_var = NULL;
                     scan_ws(&s);
                     if (is_for) {
+                        /* positional: for $x at $i in ... */
+                        Scan at = s;
+                        const char* aw;
+                        size_t awl = scan_word(&at, &aw);
+                        if (awl && word_is(aw, awl, "at") &&
+                            aw + awl < s.end) {
+                            s.p = aw + awl;
+                            pos_var = parse_dollar_name(&s);
+                            if (!pos_var) {
+                                free(var);
+                                xq_free(q);
+                                return NULL;
+                            }
+                            scan_ws(&s);
+                        }
                         const char* iw;
                         size_t iwl = scan_word(&s, &iw);
                         if (!iwl || !word_is(iw, iwl, "in")) {
@@ -499,6 +517,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                     q->clauses = grown;
                     q->clauses[q->nclauses].is_for = is_for;
                     q->clauses[q->nclauses].var = var;
+                    q->clauses[q->nclauses].pos_var = pos_var;
                     q->clauses[q->nclauses].expr = expr;
                     q->nclauses++;
                     s = e;
@@ -688,37 +707,50 @@ static void xq_tuple_free(XqTuple* t) {
 
 static void xq_unbind_all(XPathContext* ctx, XqClause* clauses,
                           size_t n) {
-    for (size_t i = 0; i < n; i++)
+    for (size_t i = 0; i < n; i++) {
         xpath_variable_set_remove((XPathVariableSet*)ctx->variable_set,
                                   clauses[i].var);
+        if (clauses[i].pos_var)
+            xpath_variable_set_remove(
+                (XPathVariableSet*)ctx->variable_set,
+                clauses[i].pos_var);
+    }
 }
 
 /* Snapshot the current clause bindings. */
 static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
                        XqTuple* t) {
-    t->names = (char**)calloc(n, sizeof(char*));
-    t->contents = (char**)calloc(n, sizeof(char*));
-    t->nodes = (void**)calloc(n, sizeof(void*));
+    /* var + optional pos var per clause */
+    t->names = (char**)calloc(2 * n, sizeof(char*));
+    t->contents = (char**)calloc(2 * n, sizeof(char*));
+    t->nodes = (void**)calloc(2 * n, sizeof(void*));
     t->n = 0;
     t->keys = NULL;
     t->nkeys = 0;
     if (!t->names || !t->contents || !t->nodes) return 0;
     for (size_t i = 0; i < n; i++) {
-        XPathVariable* var = xpath_variable_set_get(
-            (XPathVariableSet*)ctx->variable_set, clauses[i].var);
-        if (!var) continue;
-        XPathNodeSet* ns = var->value.v.nodeset_value;
-        void* node = (ns && ns->count) ? ns->nodes[0] : NULL;
-        t->names[t->n] = strdup(clauses[i].var);
-        if (node && XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
-            t->nodes[t->n] = node;
-            t->contents[t->n] = NULL;
-        } else if (node) {
-            const char* c = ((XPathTextNode*)node)->content;
-            t->contents[t->n] = strdup(c ? c : "");
-            t->nodes[t->n] = NULL;
+        const char* names[2];
+        names[0] = clauses[i].var;
+        names[1] = clauses[i].pos_var;
+        for (int k = 0; k < 2; k++) {
+            if (!names[k]) continue;
+            if (t->n >= 2 * n) break;
+            XPathVariable* var = xpath_variable_set_get(
+                (XPathVariableSet*)ctx->variable_set, names[k]);
+            if (!var) continue;
+            XPathNodeSet* ns = var->value.v.nodeset_value;
+            void* node = (ns && ns->count) ? ns->nodes[0] : NULL;
+            t->names[t->n] = strdup(names[k]);
+            if (node && XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
+                t->nodes[t->n] = node;
+                t->contents[t->n] = NULL;
+            } else if (node) {
+                const char* c = ((XPathTextNode*)node)->content;
+                t->contents[t->n] = strdup(c ? c : "");
+                t->nodes[t->n] = NULL;
+            }
+            t->n++;
         }
-        t->n++;
     }
     return 1;
 }
@@ -831,7 +863,26 @@ static int xq_enumerate(struct LeptrisXQueryInternal* q, XPathContext* ctx,
                 break;
             }
             xpath_variable_set_nodeset(var, one);
+            /* positional `at $i` — 1-based, numeric-marker member */
+            if (c->pos_var) {
+                char nb[24];
+                int nl = snprintf(nb, sizeof(nb), "\x03N%zu", i + 1);
+                XPathNodeSet* pone = xpath_nodeset_new();
+                if (pone) {
+                    pone->owns_synthetic_text = 1;
+                    XPathTextNode* ptn = xpath_synth_text(nb, (size_t)nl);
+                    if (ptn) xpath_nodeset_add(pone, ptn);
+                    XPathVariable* pvar = xpath_variable_set_add(
+                        (XPathVariableSet*)ctx->variable_set,
+                        c->pos_var, XPATH_VAR_TYPE_NODE_SET);
+                    if (pvar) xpath_variable_set_nodeset(pvar, pone);
+                    else xpath_nodeset_free(pone);
+                }
+            }
             ok = xq_enumerate(q, ctx, idx + 1, out, out_n, out_cap);
+            if (c->pos_var)
+                xpath_variable_set_remove(
+                    (XPathVariableSet*)ctx->variable_set, c->pos_var);
             xpath_variable_set_remove(
                 (XPathVariableSet*)ctx->variable_set, c->var);
         }
