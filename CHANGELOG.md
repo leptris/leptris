@@ -4,8 +4,21 @@
 
 ### Performance
 
-- cache fragment-output tails; value-of "." string-value fast path (xslt)
-
+- **Fragment-output tail caches + `value-of select="."` fast path**
+  (lane 13 second slice, #682). Fragment-level output (no pending
+  parent) chained after the result root's sibling tail or onto the
+  pre-root fragment list by walking to the tail on EVERY append —
+  O(N) per node and O(N²) per transform. 50k top-level
+  `xsl:value-of` texts took 1424 ms; both chains now append at a
+  cached tail (the root-sibling entry self-validates via
+  `next_sibling == NULL`; result chains are append-only) — 10.6 ms,
+  a 135x win. `value-of select="."`, the most common select in
+  stylesheets, is flagged at parse time and emits the context
+  node's string-value directly, skipping the eval machinery's
+  nodeset + result wrapper per call. Dispatch fixture: 11.17 →
+  10.56 ms (lxml reference 4.69 ms). New specs pin the deep
+  string-value semantics of the fast path and exact fragment order
+  across text/comments/top-level elements.
 
 
 ## [1.9.71] - 2026-09-03
