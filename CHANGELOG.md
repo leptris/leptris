@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.71] - 2026-09-03
+
+### Performance
+
+- compile AVT expressions once per transform; keyed mutation tail cache (xslt)
+
+
+
 ## [1.9.70] - 2026-09-03
 
 ### Added
