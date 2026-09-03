@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.69] - 2026-09-03
+
+### Added
+
+- XQuery tumbling/sliding windows (lane 12)
+
+### Fixed
+
+- unbind window names in xq_unbind_all (Linux LSan)
+
+
+
 ## [1.9.68] - 2026-09-03
 
 ### Fixed
