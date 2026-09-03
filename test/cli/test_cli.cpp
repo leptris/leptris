@@ -193,10 +193,23 @@ TEST(CliParse, RejectsDeepNesting) {
 
 // ---- xquery ----------------------------------------------------------------
 
+/* Windows cmd.exe does not honor the helper's single-quote
+ * wrapping, so spaced expressions ride a query FILE instead. */
+static std::string write_xq_file(const char* query) {
+    std::string path = "/tmp/leptris_xq_query";
+    FILE* fp = std::fopen(path.c_str(), "wb");
+    if (fp) {
+        std::fwrite(query, 1, std::strlen(query), fp);
+        std::fclose(fp);
+    }
+    return path;
+}
+
 TEST(CliXquery, EvaluatesFlworFromInlineExpression) {
-    auto r = run_cli({"xquery", "-e",
-                      "for $n in 1 to 3 order by $n descending"
-                      " return $n * 2"});
+    auto r = run_cli({"xquery", "-q",
+                      write_xq_file("for $n in 1 to 3"
+                                    " order by $n descending"
+                                    " return $n * 2").c_str()});
     EXPECT_EQ(r.exit_code, 0);
     EXPECT_EQ(r.out, "6 4 2\n");
 }
@@ -206,11 +219,13 @@ TEST(CliXquery, SourceDocumentAndConstructors) {
     std::string books = src_dir && src_dir[0]
         ? std::string(src_dir) + "/test/xquery/books.xml"
         : "../test/xquery/books.xml";
-    auto r = run_cli({"xquery", "-s", books, "-e",
-                      "for $b in //book where $b/@price > 10"
-                      " order by $b/@price descending"
-                      " return element r { attribute price { $b/@price },"
-                      " text { $b/title } }"});
+    auto r = run_cli({"xquery", "-s", books.c_str(), "-q",
+                      write_xq_file(
+                          "for $b in //book where $b/@price > 10"
+                          " order by $b/@price descending"
+                          " return element r { attribute price"
+                          " { $b/@price }, text { $b/title } }")
+                          .c_str()});
     EXPECT_EQ(r.exit_code, 0);
     EXPECT_EQ(r.out,
               "<r price=\"20\">CC</r> <r price=\"12\">AA</r>\n");
