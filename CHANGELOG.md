@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.61] - 2026-09-03
+
+### Fixed
+
+- xs: lexical casts, instance-of node kinds/cardinality, cast-as in arithmetic
+
+
+
 ## [1.9.60] - 2026-09-02
 
 ### Added
