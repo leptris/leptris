@@ -4,11 +4,26 @@
 
 ### Added
 
-- XQuery group by (lane 12)
+- **XQuery `group by`** (TODO.xslt-full/12, #684): `group by $k :=
+  Expr` partitions the tuple stream on the key value in
+  first-appearance order; every clause variable is rebound to the
+  group's member list (nodes preserved — paths and `count()`
+  navigate the whole group, per the Saxon oracle) and the group
+  variable carries the key. Order keys moved from enumeration to
+  the eval phase, so `group by` + `order by count($b) descending`
+  composes the way Saxon does. Structurally, `XqTuple` generalized
+  to per-variable member lists (single-member for plain FLWOR,
+  aggregated for groups); `xq_rebind` joins them as one nodeset —
+  `xpath_nodeset_free`'s per-kind dispatch makes mixed
+  document-node/synthetic groups safe. Spec `XQueryCore.GroupBy`;
+  Saxon-HE 12.7 oracle.
 
 ### Fixed
 
-- unbind before phase-2 rebind (xpath_variable_set_nodeset overwrites without freeing)
+- Unbind before the phase-2 rebind: `xpath_variable_set_nodeset`
+  overwrites without freeing, so the key-loop bindings leaked one
+  168-byte nodeset per query — invisible to macOS ASAN (no LSan),
+  caught by the Linux CI leg.
 
 
 
