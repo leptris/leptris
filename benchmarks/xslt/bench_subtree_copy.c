@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 199309L
 /* benchmarks/xslt/bench_subtree_copy.c — lane 13 subtree
  * duplicate scorecard (#682/#653): leptris_element_copy of a
  * 100-book subtree into a fresh document (create + copy + free
@@ -10,12 +9,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "leptris.h"
-
-static double now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
-}
+#include "utils.h"
 
 int main(void) {
     int books = 100;
@@ -43,14 +37,14 @@ int main(void) {
 
     double best = 1e18;
     for (int rep = 0; rep < 9; rep++) {
-        double t0 = now_ms();
+        double t0 = benchmark_time_us() / 1000.0;
         for (int i = 0; i < 200; i++) {
             LeptrisDocument nd = leptris_document_create();
             LeptrisElement c = leptris_element_copy(root, nd);
             if (!c) { printf("copy failed\n"); return 1; }
             leptris_document_free(nd);
         }
-        double ms = (now_ms() - t0) / 200.0;
+        double ms = (benchmark_time_us() / 1000.0 - t0) / 200.0;
         if (ms < best) best = ms;
     }
     printf("element_copy %d-book subtree: %.3f ms/copy (best of 9x200)\n",

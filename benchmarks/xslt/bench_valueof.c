@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 199309L
 /* benchmarks/xslt/bench_valueof.c — lane 13 fragment-output
  * canary (#682): 50k top-level value-of texts exercise the
  * fragment tail caches (XsltExec.root_sib_tail / frag_tail). The
@@ -9,12 +8,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "leptris.h"
-
-static double now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
-}
+#include "utils.h"
 
 int main(void) {
     int n = 50000;
@@ -38,9 +32,9 @@ int main(void) {
     leptris_free_string(out);
     double best = 1e18;
     for (int rep = 0; rep < 9; rep++) {
-        double t0 = now_ms();
+        double t0 = benchmark_time_us() / 1000.0;
         out = leptris_xslt_apply_string(x, d);
-        double ms = now_ms() - t0;
+        double ms = benchmark_time_us() / 1000.0 - t0;
         leptris_free_string(out);
         if (ms < best) best = ms;
     }
