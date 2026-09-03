@@ -15,3 +15,33 @@ is the honest reference). Work:
   discipline memory); PerfRegression budget updates; the harness
   becomes the release scorecard (site G2/G3)
 Gate: s1/s2/s3 >= libxslt in-process on this machine, documented.
+
+## Status 2026-09-03 (v1.9.71-74) — three quadratics killed, gap
+## 12.83 → 10.56 ms vs lxml 4.69 ms (2.25x)
+
+Shipped:
+- v1.9.71 AVT compile cache (XsltExec.avt_cache — one compile per
+  transform, not per evaluation) + direct-mapped 8-slot mutation
+  tail cache (doc->mut_tail[(addr>>4)&7]; the single slot thrashed
+  on interleaved result-tree parents, ~2M sibling hops/transform).
+- v1.9.72 fragment tail caches (XsltExec.root_sib_tail/frag_tail —
+  fragment-level appends walked the chain per node; 50k top-level
+  value-of texts 1424ms → 10.6ms = 135x) + value-of select="."
+  parse-time fast path (select_is_dot → get_node_text).
+- v1.9.74 subtree duplicate: copy_subtree_detached threads the
+  dest pool (C 0.111→0.048ms; Ruby dup 2.27x Nokogiri).
+- Measured-and-DISCARDED: out_place_elem internal append (doc
+  resolution already O(1) via the name backpointer).
+
+Remaining (profile is DIFFUSE — no single >10% lever):
+- allocator churn ~7% (per-eval nodeset/result wrappers; a scratch
+  pool risks the clean document-scoped ownership model)
+- interpreter self: xslt_exec_instrs 7.4%, invoke_template 4.5%,
+  op_result_elem 4.5% — frame-free invoke fast path when a
+  template has no params/sorts is the next measurable lever
+- template dispatch: name-keyed candidate index (libxslt-style)
+  for stylesheets with many templates
+- harness: promote /tmp/dispatch_bench.c + vo_bench.c into
+  benchmarks/ as the release scorecard
+Open measurement protocol: best-of-batches, never mean.
+

@@ -100,6 +100,7 @@ leptris_add_test(test_xpath_conf xpath/test_xpath_conformance.cpp)
 leptris_add_test(test_bytecode_vm xpath/test_bytecode_vm.cpp)
 leptris_add_test(test_xslt        xpath/test_xslt.cpp)
 leptris_add_test(test_xquery      xquery/test_xquery.cpp)
+leptris_add_test(test_html        html/test_html.cpp)
 target_compile_definitions(test_xquery PRIVATE
     LEPTRIS_XQUERY_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/test/xquery")
 

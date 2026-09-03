@@ -91,6 +91,10 @@ set(LEPTRIS_SOURCES
     # XPath engine — prolog bindings + FLWOR tuple stream.
     leptris/xquery/xquery.c
 
+    # HTML parsing mode (#659): tolerant HTML4/5 into the standard
+    # DOM — same nodes, same pool, same serializer as XML.
+    leptris/html/html_parse.c
+
     # SAX
     leptris/sax/parser.c
     leptris/sax/pull.c
