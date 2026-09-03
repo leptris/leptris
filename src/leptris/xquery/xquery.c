@@ -41,10 +41,21 @@ typedef struct {
 } XqDecl;
 
 typedef struct {
-    int is_for;        /* 0 = let */
+    int sliding;                     /* 0 = tumbling */
+    char* win_var;
+    char* s_var, *s_pos_var;
+    XPathASTNode* s_when;
+    char* e_var, *e_pos_var;
+    XPathASTNode* e_when;
+    XPathASTNode* domain;
+} XqWindow;
+
+typedef struct {
+    int is_for;        /* 0 = let; 2 = window */
     char* var;
     char* pos_var;     /* XQuery `for $x at $i` — NULL if none */
     XPathASTNode* expr;
+    XqWindow win;
 } XqClause;
 
 typedef struct {
@@ -138,7 +149,11 @@ static int is_clause_word(const char* w, size_t len) {
            word_is(w, len, "where") || word_is(w, len, "order") ||
            word_is(w, len, "by") || word_is(w, len, "return") ||
            word_is(w, len, "stable") || word_is(w, len, "ascending") ||
-           word_is(w, len, "descending") || word_is(w, len, "group");
+           word_is(w, len, "descending") || word_is(w, len, "group") ||
+           word_is(w, len, "tumbling") || word_is(w, len, "sliding") ||
+           word_is(w, len, "window") || word_is(w, len, "start") ||
+           word_is(w, len, "end") || word_is(w, len, "when") ||
+           word_is(w, len, "at");
 }
 
 /* Advance over one FLWOR expression segment: stops before a clause
@@ -228,6 +243,17 @@ static void xq_free(struct LeptrisXQueryInternal* q) {
         free(q->clauses[i].var);
         free(q->clauses[i].pos_var);
         if (q->clauses[i].expr) ast_node_free(q->clauses[i].expr);
+        if (q->clauses[i].is_for == 2) {
+            XqWindow* w = &q->clauses[i].win;
+            free(w->win_var);
+            free(w->s_var);
+            free(w->s_pos_var);
+            free(w->e_var);
+            free(w->e_pos_var);
+            if (w->s_when) ast_node_free(w->s_when);
+            if (w->e_when) ast_node_free(w->e_when);
+            if (w->domain) ast_node_free(w->domain);
+        }
     }
     free(q->clauses);
     if (q->where_ast) ast_node_free(q->where_ast);
@@ -238,6 +264,24 @@ static void xq_free(struct LeptrisXQueryInternal* q) {
     if (q->group_key) ast_node_free(q->group_key);
     if (q->return_ast) ast_node_free(q->return_ast);
     free(q);
+}
+
+static void xq_clause_partial_free(XqClause* c) {
+    if (c->is_for != 2) {
+        free(c->var);
+        free(c->pos_var);
+        if (c->expr) ast_node_free(c->expr);
+        return;
+    }
+    XqWindow* w = &c->win;
+    free(w->win_var);
+    free(w->s_var);
+    free(w->s_pos_var);
+    free(w->e_var);
+    free(w->e_pos_var);
+    if (w->s_when) ast_node_free(w->s_when);
+    if (w->e_when) ast_node_free(w->e_when);
+    if (w->domain) ast_node_free(w->domain);
 }
 
 /* Parse one `$name` reference; returns the bare name (malloc). */
@@ -461,6 +505,168 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                 if (word_is(kw, kwl, "stable")) continue;
                 if (word_is(kw, kwl, "for") || word_is(kw, kwl, "let")) {
                     int is_for = word_is(kw, kwl, "for");
+                    /* window clause: for tumbling|sliding window
+                     * $w in D start ... end ... (TODO 12) */
+                    {
+                        Scan wk = s;
+                        scan_ws(&wk);
+                        const char* wword;
+                        size_t wwl = scan_word(&wk, &wword);
+                        if (is_for && wwl &&
+                            (word_is(wword, wwl, "tumbling") ||
+                             word_is(wword, wwl, "sliding"))) {
+                            int sliding =
+                                word_is(wword, wwl, "sliding");
+                            s.p = wword + wwl;
+                            scan_ws(&s);
+                            const char* kw2;
+                            size_t k2 = scan_word(&s, &kw2);
+                            if (!k2 || !word_is(kw2, k2, "window")) {
+                                xq_free(q);
+                                return NULL;
+                            }
+                            s.p = kw2 + k2;
+                            XqClause wc;
+                            memset(&wc, 0, sizeof(wc));
+                            wc.is_for = 2;
+                            wc.win.sliding = sliding;
+                            wc.win.win_var = parse_dollar_name(&s);
+                            if (!wc.win.win_var) {
+                                xq_free(q);
+                                return NULL;
+                            }
+                            scan_ws(&s);
+                            const char* iw;
+                            size_t iwl = scan_word(&s, &iw);
+                            if (!iwl || !word_is(iw, iwl, "in")) {
+                                xq_clause_partial_free(&wc);
+                                xq_free(q);
+                                return NULL;
+                            }
+                            s.p = iw + iwl;
+                            Scan e = s;
+                            scan_expr_segment(&e, 0);
+                            wc.win.domain = parse_expr_span(s.p, e.p);
+                            if (!wc.win.domain) {
+                                xq_clause_partial_free(&wc);
+                                xq_free(q);
+                                return NULL;
+                            }
+                            s = e;
+                            /* start clause */
+                            scan_ws(&s);
+                            const char* sw;
+                            size_t swl = scan_word(&s, &sw);
+                            if (!swl || !word_is(sw, swl, "start")) {
+                                xq_clause_partial_free(&wc);
+                                xq_free(q);
+                                return NULL;
+                            }
+                            s.p = sw + swl;
+                            scan_ws(&s);
+                            if (s.p < s.end && *s.p == '$') {
+                                wc.win.s_var = parse_dollar_name(&s);
+                                if (!wc.win.s_var) {
+                                    xq_clause_partial_free(&wc);
+                                    xq_free(q);
+                                    return NULL;
+                                }
+                                scan_ws(&s);
+                                const char* aw;
+                                size_t awl = scan_word(&s, &aw);
+                                if (awl && word_is(aw, awl, "at")) {
+                                    s.p = aw + awl;
+                                    wc.win.s_pos_var =
+                                        parse_dollar_name(&s);
+                                    if (!wc.win.s_pos_var) {
+                                        xq_clause_partial_free(&wc);
+                                        xq_free(q);
+                                        return NULL;
+                                    }
+                                    scan_ws(&s);
+                                }
+                            }
+                            {
+                                const char* ww;
+                                size_t wwl2 = scan_word(&s, &ww);
+                                if (wwl2 && word_is(ww, wwl2, "when")) {
+                                    s.p = ww + wwl2;
+                                    Scan se = s;
+                                    scan_expr_segment(&se, 0);
+                                    wc.win.s_when =
+                                        parse_expr_span(s.p, se.p);
+                                    if (!wc.win.s_when) {
+                                        xq_clause_partial_free(&wc);
+                                        xq_free(q);
+                                        return NULL;
+                                    }
+                                    s = se;
+                                }
+                            }
+                            /* optional end clause */
+                            scan_ws(&s);
+                            {
+                                const char* ew;
+                                size_t ewl = scan_word(&s, &ew);
+                                if (ewl && word_is(ew, ewl, "end")) {
+                                    s.p = ew + ewl;
+                                    scan_ws(&s);
+                                    if (s.p < s.end && *s.p == '$') {
+                                        wc.win.e_var =
+                                            parse_dollar_name(&s);
+                                        if (!wc.win.e_var) {
+                                            xq_clause_partial_free(&wc);
+                                            xq_free(q);
+                                            return NULL;
+                                        }
+                                        scan_ws(&s);
+                                        const char* aw;
+                                        size_t awl = scan_word(&s, &aw);
+                                        if (awl &&
+                                            word_is(aw, awl, "at")) {
+                                            s.p = aw + awl;
+                                            wc.win.e_pos_var =
+                                                parse_dollar_name(&s);
+                                            if (!wc.win.e_pos_var) {
+                                                xq_clause_partial_free(
+                                                    &wc);
+                                                xq_free(q);
+                                                return NULL;
+                                            }
+                                            scan_ws(&s);
+                                        }
+                                    }
+                                    const char* ww;
+                                    size_t wwl2 = scan_word(&s, &ww);
+                                    if (wwl2 && word_is(ww, wwl2, "when")) {
+                                        s.p = ww + wwl2;
+                                        Scan ee = s;
+                                        scan_expr_segment(&ee, 0);
+                                        wc.win.e_when =
+                                            parse_expr_span(s.p, ee.p);
+                                        if (!wc.win.e_when) {
+                                            xq_clause_partial_free(&wc);
+                                            xq_free(q);
+                                            return NULL;
+                                        }
+                                        s = ee;
+                                    }
+                                }
+                            }
+                            XqClause* grown =
+                                (XqClause*)realloc(
+                                    q->clauses, (q->nclauses + 1) *
+                                                    sizeof(XqClause));
+                            if (!grown) {
+                                xq_clause_partial_free(&wc);
+                                xq_free(q);
+                                return NULL;
+                            }
+                            q->clauses = grown;
+                            q->clauses[q->nclauses++] = wc;
+                            continue;
+                        }
+                    }
                     char* var = parse_dollar_name(&s);
                     if (!var) {
                         xq_free(q);
@@ -765,23 +971,86 @@ static void xq_unbind_all(XPathContext* ctx, XqClause* clauses,
 /* Snapshot the current clause bindings. */
 static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
                        XqTuple* t) {
-    /* var + optional pos var per clause */
-    t->names = (char**)calloc(2 * n, sizeof(char*));
-    t->contents = (char***)calloc(2 * n, sizeof(char**));
-    t->nodes = (void***)calloc(2 * n, sizeof(void**));
-    t->counts = (size_t*)calloc(2 * n, sizeof(size_t));
+    /* var + optional pos var per clause; windows carry up to 5 */
+    t->names = (char**)calloc(6 * n + 1, sizeof(char*));
+    t->contents = (char***)calloc(6 * n + 1, sizeof(char**));
+    t->nodes = (void***)calloc(6 * n + 1, sizeof(void**));
+    t->counts = (size_t*)calloc(6 * n + 1, sizeof(size_t));
     t->n = 0;
     t->keys = NULL;
     t->nkeys = 0;
     if (!t->names || !t->contents || !t->nodes || !t->counts)
         return 0;
     for (size_t i = 0; i < n; i++) {
+        if (clauses[i].is_for == 2) {
+            /* window: $w is the whole member list; the boundary
+             * vars are single members. */
+            XqWindow* w = &clauses[i].win;
+            const char* singles[4];
+            singles[0] = w->s_var;
+            singles[1] = w->s_pos_var;
+            singles[2] = w->e_var;
+            singles[3] = w->e_pos_var;
+            if (w->win_var) {
+                XPathVariable* var = xpath_variable_set_get(
+                    (XPathVariableSet*)ctx->variable_set, w->win_var);
+                if (var && var->value.v.nodeset_value) {
+                    XPathNodeSet* ns = var->value.v.nodeset_value;
+                    t->names[t->n] = strdup(w->win_var);
+                    t->contents[t->n] = (char**)calloc(
+                        ns->count ? ns->count : 1, sizeof(char*));
+                    t->nodes[t->n] = (void**)calloc(
+                        ns->count ? ns->count : 1, sizeof(void*));
+                    t->counts[t->n] = ns->count;
+                    if (!t->contents[t->n] || !t->nodes[t->n])
+                        return 0;
+                    for (size_t m = 0; m < ns->count; m++) {
+                        void* node = ns->nodes[m];
+                        if (node &&
+                            XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
+                            t->nodes[t->n][m] = node;
+                            t->contents[t->n][m] = NULL;
+                        } else if (node) {
+                            const char* c =
+                                ((XPathTextNode*)node)->content;
+                            t->contents[t->n][m] = strdup(c ? c : "");
+                            t->nodes[t->n][m] = NULL;
+                        }
+                    }
+                    t->n++;
+                }
+            }
+            for (int k = 0; k < 4; k++) {
+                if (!singles[k]) continue;
+                XPathVariable* var = xpath_variable_set_get(
+                    (XPathVariableSet*)ctx->variable_set, singles[k]);
+                if (!var) continue;
+                XPathNodeSet* ns = var->value.v.nodeset_value;
+                void* node = (ns && ns->count) ? ns->nodes[0] : NULL;
+                t->names[t->n] = strdup(singles[k]);
+                t->contents[t->n] = (char**)calloc(1, sizeof(char*));
+                t->nodes[t->n] = (void**)calloc(1, sizeof(void*));
+                t->counts[t->n] = 1;
+                if (!t->contents[t->n] || !t->nodes[t->n]) return 0;
+                if (node &&
+                    XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
+                    t->nodes[t->n][0] = node;
+                    t->contents[t->n][0] = NULL;
+                } else if (node) {
+                    const char* c = ((XPathTextNode*)node)->content;
+                    t->contents[t->n][0] = strdup(c ? c : "");
+                    t->nodes[t->n][0] = NULL;
+                }
+                t->n++;
+            }
+            continue;
+        }
         const char* names[2];
         names[0] = clauses[i].var;
         names[1] = clauses[i].pos_var;
         for (int k = 0; k < 2; k++) {
             if (!names[k]) continue;
-            if (t->n >= 2 * n) break;
+            if (t->n >= 6 * n) break;
             XPathVariable* var = xpath_variable_set_get(
                 (XPathVariableSet*)ctx->variable_set, names[k]);
             if (!var) continue;
@@ -837,6 +1106,53 @@ static int xq_rebind(XPathContext* ctx, const XqTuple* t) {
     return 1;
 }
 
+static void xq_window_bind(XPathContext* ctx, XqWindow* w,
+                           XPathNodeSet* ns, size_t start,
+                           size_t n) {
+    (void)n;
+    if (w->s_var) {
+        XPathNodeSet* one = xpath_nodeset_new();
+        if (one) {
+            xpath_nodeset_add(one, ns->nodes[start]);
+            XPathVariable* var = xpath_variable_set_add(
+                (XPathVariableSet*)ctx->variable_set, w->s_var,
+                XPATH_VAR_TYPE_NODE_SET);
+            if (var) xpath_variable_set_nodeset(var, one);
+            else xpath_nodeset_free(one);
+        }
+    }
+    if (w->s_pos_var) {
+        char nb[24];
+        int nl = snprintf(nb, sizeof(nb), "\x03N%zu", start + 1);
+        XPathNodeSet* pone = xpath_nodeset_new();
+        if (pone) {
+            pone->owns_synthetic_text = 1;
+            XPathTextNode* ptn = xpath_synth_text(nb, (size_t)nl);
+            if (ptn) xpath_nodeset_add(pone, ptn);
+            XPathVariable* var = xpath_variable_set_add(
+                (XPathVariableSet*)ctx->variable_set,
+                w->s_pos_var, XPATH_VAR_TYPE_NODE_SET);
+            if (var) xpath_variable_set_nodeset(var, pone);
+            else xpath_nodeset_free(pone);
+        }
+    }
+}
+
+static void xq_window_unbind(XPathContext* ctx, XqWindow* w) {
+    if (w->s_var)
+        xpath_variable_set_remove(
+            (XPathVariableSet*)ctx->variable_set, w->s_var);
+    if (w->s_pos_var)
+        xpath_variable_set_remove(
+            (XPathVariableSet*)ctx->variable_set, w->s_pos_var);
+    if (w->e_var)
+        xpath_variable_set_remove(
+            (XPathVariableSet*)ctx->variable_set, w->e_var);
+    if (w->e_pos_var)
+        xpath_variable_set_remove(
+            (XPathVariableSet*)ctx->variable_set, w->e_pos_var);
+}
+
 static int key_cmp(const char* a, const char* b) {
     char *ea = NULL, *eb = NULL;
     double va = strtod(a, &ea);
@@ -873,6 +1189,161 @@ static int xq_enumerate(struct LeptrisXQueryInternal* q, XPathContext* ctx,
     }
 
     XqClause* c = &q->clauses[idx];
+    if (c->is_for == 2) {
+        /* Window clause (TODO 12): enumerate windows, each binding
+         * $w to the member list and the boundary vars. */
+        XqWindow* w = &c->win;
+        struct leptris_xpath_result* domain =
+            evaluate_expr(ctx, w->domain);
+        if (!domain) return 0;
+        int ok = 1;
+        if (domain->type != XPATH_RESULT_NODESET ||
+            !domain->value.nodeset_value) {
+            xpath_result_free(domain);
+            return 1;   /* empty/atomic domain: no windows */
+        }
+        XPathNodeSet* ns = domain->value.nodeset_value;
+        size_t n = ns->count;
+        size_t start = 0;
+        while (start < n && ok) {
+            /* start condition */
+            int starts = 1;
+            if (w->s_when) {
+                xq_window_unbind(ctx, w);
+                xq_window_bind(ctx, w, ns, start, n);
+                struct leptris_xpath_result* r =
+                    evaluate_expr(ctx, w->s_when);
+                starts = r ? xpath_to_boolean(r) : 0;
+                if (r) xpath_result_free(r);
+            }
+            if (!starts) {
+                start++;
+                continue;
+            }
+            /* end: first position >= start whose condition holds
+             * (default: the last item). */
+            size_t end = n - 1;
+            if (w->e_when) {
+                end = 0;
+                for (size_t p = start + 1; p < n; p++) {
+                    xq_window_unbind(ctx, w);
+                    xq_window_bind(ctx, w, ns, start, n);
+                    /* candidate end at p */
+                    if (w->e_var) {
+                        XPathNodeSet* one = xpath_nodeset_new();
+                        if (one) {
+                            xpath_nodeset_add(one, ns->nodes[p]);
+                            XPathVariable* var = xpath_variable_set_add(
+                                (XPathVariableSet*)ctx->variable_set,
+                                w->e_var, XPATH_VAR_TYPE_NODE_SET);
+                            if (var)
+                                xpath_variable_set_nodeset(var, one);
+                            else
+                                xpath_nodeset_free(one);
+                        }
+                    }
+                    if (w->e_pos_var) {
+                        char nb[24];
+                        int nl2 = snprintf(nb, sizeof(nb),
+                                           "\x03N%zu", p + 1);
+                        XPathNodeSet* pone = xpath_nodeset_new();
+                        if (pone) {
+                            pone->owns_synthetic_text = 1;
+                            XPathTextNode* ptn =
+                                xpath_synth_text(nb, (size_t)nl2);
+                            if (ptn) xpath_nodeset_add(pone, ptn);
+                            XPathVariable* var =
+                                xpath_variable_set_add(
+                                    (XPathVariableSet*)
+                                        ctx->variable_set,
+                                    w->e_pos_var,
+                                    XPATH_VAR_TYPE_NODE_SET);
+                            if (var)
+                                xpath_variable_set_nodeset(var, pone);
+                            else
+                                xpath_nodeset_free(pone);
+                        }
+                    }
+                    struct leptris_xpath_result* r =
+                        evaluate_expr(ctx, w->e_when);
+                    int ends = r ? xpath_to_boolean(r) : 0;
+                    if (r) xpath_result_free(r);
+                    if (ends) {
+                        end = p;
+                        break;
+                    }
+                }
+                if (end == 0 && start + 1 <= n - 1 && n > 0) {
+                    /* no end matched: window runs to the end */
+                    end = n - 1;
+                } else if (end == 0) {
+                    end = n - 1;
+                }
+            }
+            /* bind the window vars and recurse */
+            xq_window_unbind(ctx, w);
+            {
+                /* $w = member list */
+                XPathNodeSet* all = xpath_nodeset_new();
+                if (!all) { ok = 0; break; }
+                for (size_t k = start; k <= end; k++)
+                    xpath_nodeset_add(all, ns->nodes[k]);
+                /* members are BORROWED from the domain nodeset —
+                 * claiming ownership would free them on unbind
+                 * while the domain still uses them. */
+                all->owns_synthetic_text = 0;
+                XPathVariable* var = xpath_variable_set_add(
+                    (XPathVariableSet*)ctx->variable_set,
+                    w->win_var, XPATH_VAR_TYPE_NODE_SET);
+                if (var) xpath_variable_set_nodeset(var, all);
+                else { xpath_nodeset_free(all); ok = 0; break; }
+            }
+            xq_window_bind(ctx, w, ns, start, n);
+            if (w->e_var || w->e_pos_var) {
+                if (w->e_var) {
+                    XPathNodeSet* one = xpath_nodeset_new();
+                    if (one) {
+                        xpath_nodeset_add(one, ns->nodes[end]);
+                        XPathVariable* var = xpath_variable_set_add(
+                            (XPathVariableSet*)ctx->variable_set,
+                            w->e_var, XPATH_VAR_TYPE_NODE_SET);
+                        if (var)
+                            xpath_variable_set_nodeset(var, one);
+                        else xpath_nodeset_free(one);
+                    }
+                }
+                if (w->e_pos_var) {
+                    char nb[24];
+                    int nl3 = snprintf(nb, sizeof(nb),
+                                       "\x03N%zu", end + 1);
+                    XPathNodeSet* pone = xpath_nodeset_new();
+                    if (pone) {
+                        pone->owns_synthetic_text = 1;
+                        XPathTextNode* ptn =
+                            xpath_synth_text(nb, (size_t)nl3);
+                        if (ptn) xpath_nodeset_add(pone, ptn);
+                        XPathVariable* var = xpath_variable_set_add(
+                            (XPathVariableSet*)ctx->variable_set,
+                            w->e_pos_var,
+                            XPATH_VAR_TYPE_NODE_SET);
+                        if (var)
+                            xpath_variable_set_nodeset(var, pone);
+                        else xpath_nodeset_free(pone);
+                    }
+                }
+            }
+            ok = xq_enumerate(q, ctx, idx + 1, out, out_n, out_cap);
+            xq_window_unbind(ctx, w);
+            xpath_variable_set_remove(
+                (XPathVariableSet*)ctx->variable_set, w->win_var);
+            if (!w->sliding)
+                start = end + 1;   /* tumbling: next after the end */
+            else
+                start++;
+        }
+        xpath_result_free(domain);
+        return ok;
+    }
     if (!c->is_for) {
         /* LET: evaluated per enclosing-FOR tuple — later clause
          * domains may reference it. */

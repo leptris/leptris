@@ -283,3 +283,31 @@ TEST(XQueryCore, Issue790GrammarGaps) {
         "caught");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, TumblingWindow) {
+    /* Saxon w1: <w s="1" n="3"/><w s="4" n="3"/> */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "for tumbling window $w in (1,2,3,4,5,6)"
+        " start $s at $sp when true()"
+        " end $e at $ep when $ep - $sp ge 2"
+        " return <w s='{$s}' n='{count($w)}'/>"),
+        "<w s=\"1\" n=\"3\"/> <w s=\"4\" n=\"3\"/>");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, SlidingWindow) {
+    /* Saxon: overlapping windows over (1,2,3,4) */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "for sliding window $w in (1,2,3,4)"
+        " start $s at $sp when true()"
+        " end $e at $ep when $ep - $sp ge 1"
+        " return string-join(for $x in $w return string($x), ',')"),
+        "1,2 2,3 3,4 4");
+    leptris_document_free(doc);
+}
