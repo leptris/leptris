@@ -4,7 +4,23 @@
 
 ### Added
 
-- XQuery typeswitch, error-code model, collection() (lane 12 remainder)
+- **XQuery typeswitch, error-code model, `collection()`**
+  (TODO.xslt-full/12 remainder, #692/#684). `typeswitch (E) case T
+  return R ... default return RD` dispatches through the per-member
+  SequenceType classifier extracted from `instance of` — one
+  type-test authority shared by both. `XPathContext.error_code`
+  carries the failing operation's QName local part (`fn:doc`/
+  `collection()` set `FODC0002`, cast-lexical failures `FORG0001`);
+  named `catch err:CODE` clauses match it, `$err:code` binds the
+  code, both channels clear on catch. `collection()` errors "No
+  default collection has been defined" (Saxon parity) — catchable.
+  Two drive-by root-cause fixes the typeswitch bisect exposed: the
+  FOR evaluator's scalar-domain branch now marks numeric members
+  (`\x03N`), and `xpath_nodeset_deep_copy` copies raw content —
+  its `get_node_text` round-trip stripped the numeric marker, so
+  `$v instance of xs:integer` was false through any let/var
+  deep-copy path. Specs `Typeswitch`/`NamedCatchWithErrorCode`/
+  `CollectionRequiresCatalog`; Saxon-HE 12.7 oracle.
 
 
 
