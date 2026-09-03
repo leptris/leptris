@@ -1329,11 +1329,11 @@ static void map_entries_decode(MapEntries* e, const char* p) {
     }
 }
 
-/* Evaluate argument 0 into entries: a single map node, or a
+/* Evaluate argument i into entries: a single map node, or a
  * sequence of map nodes (map:merge input). */
 static void map_entries_arg(XPathContext* ctx, XPathASTNode** args,
-                            MapEntries* e) {
-    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+                            size_t i, MapEntries* e) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
     if (!r) return;
     if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
         for (size_t i = 0; i < r->value.nodeset_value->count; i++) {
@@ -1530,7 +1530,7 @@ static struct leptris_xpath_result* fn_map_put(XPathContext* ctx,
     char* key = re_str_arg(ctx, args, 1);
     char* val = (n >= 3) ? re_str_arg(ctx, args, 2) : leptris_strdup("");
     MapEntries e = {0};
-    map_entries_arg(ctx, args, &e);
+    map_entries_arg(ctx, args, 0, &e);
     int replaced = 0;
     for (size_t i = 0; i < e.n; i++) {
         if (key && strcmp(e.k[i], key) == 0) {
@@ -1555,7 +1555,7 @@ static struct leptris_xpath_result* fn_map_remove(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* key = re_str_arg(ctx, args, 1);
     MapEntries src = {0};
-    map_entries_arg(ctx, args, &src);
+    map_entries_arg(ctx, args, 0, &src);
     MapEntries dst;
     memset(&dst, 0, sizeof(dst));
     for (size_t i = 0; i < src.n; i++) {
@@ -1575,7 +1575,7 @@ static struct leptris_xpath_result* fn_map_remove(XPathContext* ctx,
 static struct leptris_xpath_result* fn_map_merge(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     MapEntries e = {0};
-    map_entries_arg(ctx, args, &e);
+    map_entries_arg(ctx, args, 0, &e);
     MapEntries dst;
     memset(&dst, 0, sizeof(dst));
     for (size_t i = 0; i < e.n; i++) {
@@ -1661,7 +1661,7 @@ static struct leptris_xpath_result* fn_array_get(XPathContext* ctx,
 static struct leptris_xpath_result* fn_array_append(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     MapEntries e = {0};
-    map_entries_arg(ctx, args, &e);
+    map_entries_arg(ctx, args, 0, &e);
     char key[24];
     snprintf(key, sizeof(key), "%zu", e.n + 1);
     char* v = re_str_arg(ctx, args, 1);
@@ -1685,7 +1685,7 @@ static struct leptris_xpath_result* fn_array_put(XPathContext* ctx,
     char key[24];
     snprintf(key, sizeof(key), "%ld", idx);
     MapEntries e = {0};
-    map_entries_arg(ctx, args, &e);
+    map_entries_arg(ctx, args, 0, &e);
     char* v = re_str_arg(ctx, args, 2);
     int replaced = 0;
     for (size_t i = 0; i < e.n; i++) {
@@ -2423,6 +2423,233 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
     return out;
 }
 
+/* fn:for-each-pair(seq1, seq2, $f) — zip; the shorter input wins */
+static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t c1, c2;
+    char** xs = collect_items(ctx, args, 1, 0, &c1);
+    if (!xs) return NULL;
+    char** ys = collect_items(ctx, args, 1, 1, &c2);
+    char* cc = fn_item_content(ctx, args, 2);
+    struct leptris_xpath_result* out = seq_new();
+    if (cc && out) {
+        size_t cnt = c1 < c2 ? c1 : c2;
+        for (size_t k = 0; k < cnt; k++) {
+            char* argv[2] = { xs[k], ys[k] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 2);
+            if (r) {
+                char* s = xpath_to_string(r);
+                seq_push_str(out, s ? s : "");
+                free(s);
+                xpath_result_free(r);
+            }
+        }
+    }
+    free(cc);
+    free_items(xs, c1);
+    free_items(ys, c2);
+    return out;
+}
+
+/* fn:apply($f, array) — call with the array's members as the
+ * argument list. */
+static struct leptris_xpath_result* fn_apply(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    char* cc = fn_item_content(ctx, args, 0);
+    if (!cc) return NULL;
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, 1, &e);
+    struct leptris_xpath_result* out = NULL;
+    if (e.n) {
+        char** argv = (char**)calloc(e.n, sizeof(char*));
+        if (argv) {
+            size_t argc = 0;
+            for (size_t i = 0; i < e.n; i++) {
+                long idx = strtol(e.k[i], NULL, 10);
+                if (idx >= 1 && (size_t)idx <= e.n)
+                    argv[idx - 1] = e.v[i];
+            }
+            for (size_t i = 0; i < e.n; i++)
+                if (argv[i]) argv[argc++] = argv[i];
+            out = xpath_call_function_item(ctx, cc, argv, argc);
+            free(argv);
+        }
+    }
+    map_entries_free(&e);
+    free(cc);
+    return out;
+}
+
+/* map:for-each(map, $f) — f(key, value) per entry, in entry order */
+static struct leptris_xpath_result* fn_map_for_each(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, 0, &e);
+    char* cc = fn_item_content(ctx, args, 1);
+    struct leptris_xpath_result* out = seq_new();
+    if (cc && out) {
+        for (size_t i = 0; i < e.n; i++) {
+            char* argv[2] = { e.k[i], e.v[i] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 2);
+            if (r) {
+                char* s = xpath_to_string(r);
+                seq_push_str(out, s ? s : "");
+                free(s);
+                xpath_result_free(r);
+            }
+        }
+    }
+    free(cc);
+    map_entries_free(&e);
+    return out;
+}
+
+/* Array members in positional order: entries keyed 1..n. */
+static char** array_members_arg(XPathContext* ctx, XPathASTNode** args,
+                                size_t i, size_t* out_n) {
+    *out_n = 0;
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, i, &e);
+    if (!e.n) { map_entries_free(&e); return NULL; }
+    char** members = (char**)calloc(e.n, sizeof(char*));
+    if (!members) { map_entries_free(&e); return NULL; }
+    for (size_t j = 0; j < e.n; j++) {
+        long idx = strtol(e.k[j], NULL, 10);
+        if (idx >= 1 && (size_t)idx <= e.n && !members[idx - 1])
+            members[idx - 1] = leptris_strdup(e.v[j]);
+    }
+    /* map_entries_free zeroes e.n — capture it first. */
+    size_t n_members = e.n;
+    map_entries_free(&e);
+    size_t cnt = 0;
+    for (size_t j = 0; j < n_members; j++)
+        if (members[j]) members[cnt++] = members[j];
+    if (!cnt) { free(members); return NULL; }
+    *out_n = cnt;
+    return members;
+}
+
+/* array:for-each(array, $f) */
+static struct leptris_xpath_result* fn_array_for_each(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = array_members_arg(ctx, args, 0, &cnt);
+    if (!items) return seq_new();
+    char* cc = fn_item_content(ctx, args, 1);
+    struct leptris_xpath_result* out = seq_new();
+    if (cc && out) {
+        for (size_t k = 0; k < cnt; k++) {
+            char* argv[1] = { items[k] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 1);
+            if (r) {
+                char* s = xpath_to_string(r);
+                seq_push_str(out, s ? s : "");
+                free(s);
+                xpath_result_free(r);
+            }
+        }
+    }
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
+/* array:filter(array, $f) — members whose mapped result is truthy */
+static struct leptris_xpath_result* fn_array_filter(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = array_members_arg(ctx, args, 0, &cnt);
+    if (!items) return seq_new();
+    char* cc = fn_item_content(ctx, args, 1);
+    struct leptris_xpath_result* out = seq_new();
+    if (cc && out) {
+        for (size_t k = 0; k < cnt; k++) {
+            char* argv[1] = { items[k] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 1);
+            if (r) {
+                if (fn_result_truthy(r)) seq_push_str(out, items[k]);
+                xpath_result_free(r);
+            }
+        }
+    }
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
+/* array:fold-left(array, zero, $f) — f(acc, member), left to right */
+static struct leptris_xpath_result* fn_array_fold_left(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = array_members_arg(ctx, args, 0, &cnt);
+    if (!items) return NULL;
+    char* cc = fn_item_content(ctx, args, 2);
+    struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
+    char* acc = zr ? xpath_to_string(zr) : NULL;
+    if (zr) xpath_result_free(zr);
+    if (!acc) acc = leptris_strdup("");
+    if (cc && acc) {
+        for (size_t k = 0; k < cnt; k++) {
+            char* argv[2] = { acc, items[k] };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 2);
+            char* ns = r ? xpath_to_string(r) : NULL;
+            if (r) xpath_result_free(r);
+            free(acc);
+            acc = ns ? ns : leptris_strdup("");
+        }
+    }
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (out) out->value.string_value = acc;
+    else free(acc);
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
+/* array:fold-right(array, zero, $f) — f(member, acc), right to left */
+static struct leptris_xpath_result* fn_array_fold_right(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    size_t cnt;
+    char** items = array_members_arg(ctx, args, 0, &cnt);
+    if (!items) return NULL;
+    char* cc = fn_item_content(ctx, args, 2);
+    struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
+    char* acc = zr ? xpath_to_string(zr) : NULL;
+    if (zr) xpath_result_free(zr);
+    if (!acc) acc = leptris_strdup("");
+    if (cc && acc) {
+        for (size_t k = cnt; k > 0; k--) {
+            char* argv[2] = { items[k - 1], acc };
+            struct leptris_xpath_result* r =
+                xpath_call_function_item(ctx, cc, argv, 2);
+            char* ns = r ? xpath_to_string(r) : NULL;
+            if (r) xpath_result_free(r);
+            free(acc);
+            acc = ns ? ns : leptris_strdup("");
+        }
+    }
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (out) out->value.string_value = acc;
+    else free(acc);
+    free(cc);
+    free_items(items, cnt);
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -2450,6 +2677,15 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "filter", fn_filter, 2, 2);
     xpath_function_registry_register(registry, "fold-left", fn_fold_left, 3, 3);
     xpath_function_registry_register(registry, "fold-right", fn_fold_right, 3, 3);
+    xpath_function_registry_register(registry, "for-each-pair", fn_for_each_pair, 3, 3);
+    xpath_function_registry_register(registry, "apply", fn_apply, 2, 2);
+
+    xpath_function_registry_register(registry, "map:for-each", fn_map_for_each, 2, 2);
+
+    xpath_function_registry_register(registry, "array:for-each", fn_array_for_each, 2, 2);
+    xpath_function_registry_register(registry, "array:filter", fn_array_filter, 2, 2);
+    xpath_function_registry_register(registry, "array:fold-left", fn_array_fold_left, 3, 3);
+    xpath_function_registry_register(registry, "array:fold-right", fn_array_fold_right, 3, 3);
 
     xpath_function_registry_register(registry, "math:sqrt", fn_sqrt, 1, 1);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);

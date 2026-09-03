@@ -3402,6 +3402,65 @@ TEST(Xslt30, NamedFunctionReferenceDispatch) {
         "<o>xy</o>");
 }
 
+TEST(Xslt30, HofPairsApplyAndArrayCombinators) {
+    /* Lane 07 tail: fn:for-each-pair, fn:apply, map:for-each, and
+     * the array: HOF family through the combiner seam.
+     * Saxon-HE 12.7 (/tmp/probe9/l07b/t5.xsl). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"for-each-pair(('a','b'), (1,2),"
+        " function($s,$n){ $s || $n })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>a1 b2</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"apply(concat#2, ['x','y'])\""
+        "/></o></xsl:template>",
+        "<r/>")),
+        "<o>xy</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<o><xsl:value-of select=\"apply(function($a,$b,$c)"
+        "{ $a * 100 + $b * 10 + $c }, [1,2,3])\"/></o></xsl:template>",
+        "<r/>")),
+        "<o>123</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'"
+        " xmlns:map='http://www.w3.org/2005/xpath-functions/map'>"
+        "<o><xsl:value-of select=\"map:for-each(map{'a':1,'b':2},"
+        " function($k,$v){ $k || '=' || $v })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:map=\"http://www.w3.org/2005/xpath-functions/map\">a=1 b=2</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'"
+        " xmlns:array='http://www.w3.org/2005/xpath-functions/array'>"
+        "<o><xsl:value-of select=\"array:for-each([10,20],"
+        " function($n){ $n + 1 })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:array=\"http://www.w3.org/2005/xpath-functions/array\">11 21</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'"
+        " xmlns:array='http://www.w3.org/2005/xpath-functions/array'>"
+        "<o><xsl:value-of select=\"array:filter([1,2,3,4,5,6],"
+        " function($n){ $n mod 2 = 0 })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:array=\"http://www.w3.org/2005/xpath-functions/array\">2 4 6</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'"
+        " xmlns:array='http://www.w3.org/2005/xpath-functions/array'>"
+        "<o><xsl:value-of select=\"array:fold-left([1,2,3,4], 0,"
+        " function($a,$b){ $a + $b })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:array=\"http://www.w3.org/2005/xpath-functions/array\">10</o>");
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'"
+        " xmlns:array='http://www.w3.org/2005/xpath-functions/array'>"
+        "<o><xsl:value-of select=\"array:fold-right([1,2,3,4], 0,"
+        " function($a,$b){ $a - $b })\"/></o></xsl:template>",
+        "<r/>")),
+        "<o xmlns:array=\"http://www.w3.org/2005/xpath-functions/array\">-2</o>");
+}
+
 TEST(Xslt30, FunctionItemMetadataAndHofs) {
     /* Lane 07B: fn:function-lookup/name/arity, fn:for-each/filter/
      * fold-left/fold-right, and ? partial application.

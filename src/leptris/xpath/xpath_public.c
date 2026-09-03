@@ -146,6 +146,22 @@ LEPTRIS_API LeptrisXPathResultType leptris_xpath_result_type(LeptrisXPathResult 
     /* Map internal XPathResultType to public LeptrisXPathResultType */
     switch (result->type) {
         case XPATH_RESULT_NODESET:
+            /* A function item rides a one-member synthetic nodeset
+             * ("\x03FN" closure / "\x03FR" named reference) —
+             * classify it here, at the public boundary. Only the
+             * synthetic carrier qualifies; a single-member REAL
+             * nodeset is an ordinary nodeset. */
+            if (result->value.nodeset_value &&
+                result->value.nodeset_value->count == 1) {
+                void* n = result->value.nodeset_value->nodes[0];
+                if (n && XPATH_NODE_TYPE(n) == LEPTRIS_NODE_TEXT) {
+                    XPathTextNode* tn = (XPathTextNode*)n;
+                    if (tn->content &&
+                        (strncmp(tn->content, "\x03" "FN", 3) == 0 ||
+                         strncmp(tn->content, "\x03" "FR", 3) == 0))
+                        return LEPTRIS_XPATH_FUNCTION;
+                }
+            }
             return LEPTRIS_XPATH_NODESET;
         case XPATH_RESULT_BOOLEAN:
             return LEPTRIS_XPATH_BOOLEAN;
