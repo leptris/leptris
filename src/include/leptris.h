@@ -2944,6 +2944,28 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_ns(
 LEPTRIS_API void leptris_free_string(char* str);
 
 /**
+ * Pre-scan predicate: does the buffer contain a named entity
+ * reference that is NOT one of the five predefined XML entities
+ * (amp, lt, gt, quot, apos) or a numeric character reference?
+ *
+ * Downstream adapters (e.g. moxml) preprocess XML so non-standard
+ * named entities round-trip; for the overwhelmingly common case —
+ * all entities predefined or numeric — no rewrite is needed. This
+ * one-pass C check replaces a whole-buffer regex scan on the
+ * caller's side (issue #745: +61% parse overhead down to ~+2%).
+ *
+ * A bare '&' with no terminating ';' is not an entity reference
+ * and is left to the parser's error reporting.
+ *
+ * @param s Buffer to scan (can be NULL)
+ * @param len Buffer length in bytes
+ * @return 1 if a non-standard named entity reference is present,
+ *         0 otherwise
+ */
+LEPTRIS_API int leptris_str_has_nonstandard_entity(const char* s,
+                                                   size_t len);
+
+/**
  * Cleanup function to free internal memory structures (for testing)
  *
  * This function cleans up the compact pointer overflow table and other

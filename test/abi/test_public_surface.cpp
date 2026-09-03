@@ -37,6 +37,34 @@ TEST(PublicSurface, VersionAndMessages) {
                  leptris_status_string(LEPTRIS_OK));
 }
 
+/* ---- nonstandard-entity pre-scan (#745) ---- */
+
+TEST(PublicSurface, StrHasNonstandardEntity) {
+    /* The five predefined entities and numeric character
+     * references are standard — no rewrite needed downstream. */
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(
+                  "<p a=\"&quot;x&quot;\">a &amp; &lt; &gt; &apos;</p>", 49), 0);
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(
+                  "&#65;&#x41;", 11), 0);
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(
+                  "plain text, no markup", 21), 0);
+    /* A named entity outside the predefined set needs the
+     * downstream pre-scan rewrite. */
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(
+                  "a &nbsp; b", 10), 1);
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(
+                  "&amp; ok &eacute; here", 22), 1);
+    /* Standard prefix, nonstandard later in the buffer. */
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(
+                  "&lt; then &mdash;", 17), 1);
+    /* A bare & with no terminator is not an entity reference
+     * (parse-error territory, not the pre-scan's call). */
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(
+                  "a & b", 5), 0);
+    EXPECT_EQ(leptris_str_has_nonstandard_entity("", 0), 0);
+    EXPECT_EQ(leptris_str_has_nonstandard_entity(nullptr, 0), 0);
+}
+
 /* ---- file I/O round-trip ---- */
 
 TEST(PublicSurface, FileIO) {

@@ -1040,6 +1040,52 @@ LEPTRIS_API void leptris_free_string(char* str) {
     }
 }
 
+/* One-pass entity pre-scan (#745): 1 when the buffer carries a
+ * named entity that is not one of the five predefined XML entities
+ * (numeric character references are fine too). A bare '&' without
+ * a ';' is not an entity reference — the parser reports it. */
+LEPTRIS_API int leptris_str_has_nonstandard_entity(const char* s,
+                                                   size_t len) {
+    if (!s || len < 3) return 0;
+    const char* end = s + len;
+    for (const char* p = s; p < end; p++) {
+        if (*p != '&') continue;
+        /* Entity names have no fixed length cap in XML; anything
+         * beyond the longest realistic name is not an entity
+         * reference (or the parser will say so). */
+        size_t span = 0;
+        const char* q = p + 1;
+        while (q < end && *q != ';' && *q != '&' && *q != '<' &&
+               span < 64) {
+            q++;
+            span++;
+        }
+        if (q >= end || *q != ';' || span == 0) continue;   /* not &name; */
+        if (p[1] == '#') continue;                          /* numeric */
+        const char* name = p + 1;
+        switch (span) {
+            case 2:
+                if (name[0] == 'l' && name[1] == 't') continue;
+                if (name[0] == 'g' && name[1] == 't') continue;
+                break;
+            case 3:
+                if (name[0] == 'a' && name[1] == 'm' &&
+                    name[2] == 'p') continue;
+                break;
+            case 4:
+                if (name[0] == 'q' && name[1] == 'u' &&
+                    name[2] == 'o' && name[3] == 't') continue;
+                if (name[0] == 'a' && name[1] == 'p' &&
+                    name[2] == 'o' && name[3] == 's') continue;
+                break;
+            default:
+                break;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 
 /* ============================================================================
  * Document String Finalization
