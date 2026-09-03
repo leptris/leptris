@@ -233,3 +233,28 @@ TEST(XQueryCore, TryCatch) {
         "(eval-failed)");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, GroupBy) {
+    /* Saxon g1-g3: groups in first-appearance order; the for var
+     * is rebound to the group's items as a sequence. */
+    LeptrisDocument doc = leptris_parse_string(
+        "<r><book cat='a'/><book cat='b'/><book cat='a'/>"
+        "<book cat='c'/><book cat='b'/></r>", 82, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "for $b in //book group by $cat := $b/@cat"
+        " return element g { attribute c { $cat },"
+        " attribute n { count($b) } }"),
+        "<g c=\"a\" n=\"2\"/> <g c=\"b\" n=\"2\"/> <g c=\"c\" n=\"1\"/>");
+    /* group by + order by: the sort sees the grouped state. */
+    EXPECT_EQ(seq_string(doc,
+        "for $b in //book group by $cat := $b/@cat"
+        " order by count($b) descending"
+        " return $cat || ':' || count($b)"),
+        "a:2 b:2 c:1");
+    EXPECT_EQ(seq_string(doc,
+        "for $x in ('a','b','a') group by $k := $x"
+        " return concat($k, ':', count($x))"),
+        "a:2 b:1");
+    leptris_document_free(doc);
+}
