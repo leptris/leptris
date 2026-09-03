@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L
 /* benchmarks/xslt/bench_subtree_copy.c — lane 13 subtree
  * duplicate scorecard (#682/#653): leptris_element_copy of a
  * 100-book subtree into a fresh document (create + copy + free

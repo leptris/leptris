@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L
 /* benchmarks/xslt/bench_valueof.c — lane 13 fragment-output
  * canary (#682): 50k top-level value-of texts exercise the
  * fragment tail caches (XsltExec.root_sib_tail / frag_tail). The
