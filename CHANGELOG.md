@@ -4,7 +4,15 @@
 
 ### Added
 
-- leptris_str_has_nonstandard_entity pre-scan predicate (#745)
+- **`leptris_str_has_nonstandard_entity(s, len)`** (#745): a
+  one-pass C predicate — does the buffer contain a named entity
+  reference that is not one of the five predefined XML entities
+  (nor numeric)? Downstream adapters (moxl) currently settle this
+  with a whole-buffer Ruby regex scan measured at +61% parse
+  overhead on a 58 KB document; the C check makes it ~+2%. A bare
+  `&` without a terminator is not an entity reference and stays
+  the parser's business. Spec
+  `PublicSurface.StrHasNonstandardEntity`.
 
 
 
