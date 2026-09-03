@@ -95,3 +95,27 @@ Remaining for lane 07 closure: PUBLIC XPathResultType change +
 FFI mirrors (leptris-ruby/py — PRs only, never release);
 fn:for-each-pair and the map:/array: HOF family if the combiner
 seam makes them cheap; then lane 11/12 (XQuery).
+
+## Update 2026-09-03 (later): LANE 07 CLOSED (v1.9.63 / PR #777)
+
+- Public type: LEPTRIS_XPATH_FUNCTION (appended to
+  LeptrisXPathResultType; ABI numbers hold) — the type accessor
+  classifies the one-member synthetic carrier, GATED on the
+  synthetic-text tag (casting a real single-element nodeset as
+  XPathTextNode segfaulted the CLI predicate spec — caught by the
+  full ctest gate).
+- Combininers through xpath_call_function_item: for-each-pair
+  (zip), apply($f, array) (positional members as the arg list),
+  map:for-each (entry order), array:for-each/filter/fold-left/
+  fold-right. En-route bug class: map_entries_free ZEROES e.n —
+  capture the count before the compaction loop.
+- FFI mirrors shipped as PRs (never release, per the standing
+  rule): leptris-ruby#127 (constant + explicit XPathError wrap
+  branch), leptris-py#71 (same + _leptrisaccel.c finish_result
+  hands rtype 4 to the engine path — a bare NULL there surfaced as
+  SystemError; also un-pinned #744's element() pin).
+- Specs: Xslt30.HofPairsApplyAndArrayCombinators (8),
+  XPathResultTypes.FunctionItemsReportFunctionType; oracle
+  /tmp/probe9/l07b/t5.xsl. Remaining from the lane brief (fn:sort
+  with key/ Collation arity, fn:for-each-pair over uneven inputs
+  past the zip): fold into the #691 catalog tail, not blockers.
