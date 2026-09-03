@@ -829,6 +829,11 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
     tn->base.type = LEPTRIS_NODE_TYPE_TEXT;
     tn->base.frozen = 1;   /* parse-created: set here, not after */
     tn->base.version = 0;
+    /* #815: the carve skips the memset dp_cpi_carve pays — a dirty
+     * recycled pool page left raw set on ~5-7% of churn-parses and
+     * serialize_text_internal then emitted text VERBATIM (raw < in
+     * the output, invalid XML). */
+    tn->base.raw = 0;
     tn->base.binding_wrapper = NULL;
     tn->base.line = 0;     /* caller stamps the offset */
     tn->content = (char*)content;
