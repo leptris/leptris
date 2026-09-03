@@ -644,6 +644,36 @@ static XPathASTNode* parse_relational_expr(XPathParser* parser) {
     while (1) {
         XPathOperatorType op_type;
 
+        /* XPath 2.0 value-comparison keywords (eq/ne/lt/le/gt/ge)
+         * — XQuery window conditions use them heavily. Only bare
+         * NCNames followed by whitespace/operand qualify. */
+        int kw_op = 0;
+        {
+            XPathToken* t = current_token(parser);
+            if (t && t->type == TOK_NCNAME) {
+                XPathToken* nx =
+                    parser->token_pos + 1 < parser->token_count
+                        ? &parser->tokens[parser->token_pos + 1]
+                        : NULL;
+                int boundary =
+                    !nx || nx->type == TOK_EOF ||
+                    nx->type == TOK_RPAREN || nx->type == TOK_COMMA ||
+                    nx->type == TOK_RBRACE || nx->type == TOK_LBRACE ||
+                    nx->type == TOK_NUMBER || nx->type == TOK_STRING ||
+                    nx->type == TOK_DOLLAR || nx->type == TOK_LPAREN ||
+                    nx->type == TOK_MINUS;
+                if (boundary) {
+                    if (t->value_len == 2 &&
+                        (memcmp(t->value, "eq", 2) == 0 ||
+                         memcmp(t->value, "ne", 2) == 0 ||
+                         memcmp(t->value, "lt", 2) == 0 ||
+                         memcmp(t->value, "le", 2) == 0 ||
+                         memcmp(t->value, "gt", 2) == 0 ||
+                         memcmp(t->value, "ge", 2) == 0))
+                        kw_op = 1;
+                }
+            }
+        }
         if (current_token_is(parser, TOK_LT)) {
             op_type = XPATH_OP_LESS;
         } else if (current_token_is(parser, TOK_LE)) {
@@ -652,6 +682,20 @@ static XPathASTNode* parse_relational_expr(XPathParser* parser) {
             op_type = XPATH_OP_GREATER;
         } else if (current_token_is(parser, TOK_GE)) {
             op_type = XPATH_OP_GREATER_EQUAL;
+        } else if (kw_op) {
+            XPathToken* t = current_token(parser);
+            if (t->value[0] == 'e' && t->value[1] == 'q')
+                op_type = XPATH_OP_EQUAL;
+            else if (t->value[0] == 'n')
+                op_type = XPATH_OP_NOT_EQUAL;
+            else if (t->value[0] == 'l' && t->value[1] == 't')
+                op_type = XPATH_OP_LESS;
+            else if (t->value[0] == 'l')
+                op_type = XPATH_OP_LESS_EQUAL;
+            else if (t->value[0] == 'g' && t->value[1] == 't')
+                op_type = XPATH_OP_GREATER;
+            else
+                op_type = XPATH_OP_GREATER_EQUAL;
         } else {
             break;
         }
