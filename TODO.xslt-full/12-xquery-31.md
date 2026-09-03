@@ -43,3 +43,23 @@ leptris_error_code through try), qt3tests 3.1 subset.
 Remaining for lane 12: typeswitch, error-code model for named
 catches, qt3tests 3.1 subset. Lane 11 tail: collection(),
 qt3tests 1.0 subset, Windows CLI harness.
+
+## Update 2026-09-03 (final): typeswitch + error codes + collection SHIPPED (v1.9.70 / PR #798)
+
+- typeswitch (E) case T return R ... default return RD — dispatch
+  through xpath_result_matches_type, the ONE SequenceType
+  classifier shared with instance-of (the type-name parse must
+  stop at 'return' — the keyword was swallowed into the type).
+- Error-code model: XPathContext.error_code (local part only) —
+  doc()/collection() set FODC0002, cast-lexical failures FORG0001;
+  named catches match, $err:code binds, channels clear on catch.
+- collection() = 'No default collection has been defined' (Saxon).
+- Drive-by: FOR's scalar-domain branch marks numeric members;
+  xpath_nodeset_deep_copy copies RAW content — its get_node_text
+  round-trip stripped the \x03N marker ($v instance of xs:integer
+  was false through any let/var deep-copy path — the typeswitch
+  bisect exposed a latent instance-of bug).
+
+Lane 12 language surface COMPLETE except qt3tests subset
+adoption. Lane 11 tail: qt3tests 1.0 subset, Windows CLI harness
+(collection() landed here).
