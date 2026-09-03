@@ -37,3 +37,29 @@ Gate: qt3tests XQuery 1.0 subset adopted + Saxon side-by-side.
 Remaining for lane 11: direct+computed element constructors,
 doc()/collection(), qt3tests 1.0 subset adoption, CLI `xquery`
 command, then lane 12 (group by/window, try/catch, typeswitch).
+
+## Update 2026-09-03 (later): slice B SHIPPED (v1.9.65 / PR #783)
+
+- Computed constructors (element/attribute/text) as XPath ops —
+  value-level serialized-XML strings; empty elements self-close
+  (Saxon). Comma-separated ctor bodies attach children directly
+  (SEQUENCE wrappers also flattened).
+- Direct constructors translate to the computed form in the xquery
+  scanner (balanced-tag text scans; AVTs → concat pieces, single
+  pieces stay bare — concat rejects arity 1; text runs → text{}
+  literals). XQuery-scoped; XSLT keeps literal result elements.
+- fn:doc(): document anchors on XPathContext.owned_docs, freed by
+  xpath_context_cleanup — the borrowed root outlives the result.
+- CLI: leptris xquery [-s FILE] (-q FILE | -e EXPR). Banked: CLI
+  command structs MUST be static (cli_registry_free never frees
+  them — a malloc'd one leaked 48B and aborted every CLI test
+  under Linux ASAN abort_on_error); Windows cmd.exe ignores the
+  test harness's single-quote wrapping and has no /tmp — CliXquery
+  specs ride a cwd-relative query FILE and are !defined(_WIN32)
+  gated (the LIBRARY tests are green on Windows; the harness-side
+  plumbing is the TODO follow-up).
+
+Remaining for lane 11: qt3tests XQuery 1.0 subset adoption,
+collection(), computed-document/value constructors, positional
+FOR ($x at $i). Then lane 12 (group by, windowing, try/catch —
+the #692 silent-wrong case, typeswitch).
