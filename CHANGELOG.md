@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.62] - 2026-09-03
+
+### Added
+
+- leptris_str_has_nonstandard_entity pre-scan predicate (#745)
+
+
+
 ## [1.9.61] - 2026-09-03
 
 ### Fixed
