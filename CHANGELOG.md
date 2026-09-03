@@ -4,8 +4,24 @@
 
 ### Performance
 
-- compile AVT expressions once per transform; keyed mutation tail cache (xslt)
-
+- **AVT compile cache + keyed mutation tail cache** (lane 13 first
+  slice, #682). Two root causes dominated the dispatch-transform
+  profile. First, `eval_avt` recompiled every `{expr}` part on
+  every evaluation — a literal result element's `{@id}` compiled
+  2000× per transform; compiled handles are now cached on the
+  transform keyed by expression text. Second, elements carry no
+  last-child edge, so appends walked the child chain unless the
+  document's single-slot mutation tail cache hit — and result-tree
+  construction interleaves parents (`<b>`→`<out>`, then
+  `<t>`/`<a>`→`<b>`, then the next `<b>`), thrashing the slot into
+  an O(N) walk for every other top-level append (~2M sibling hops
+  on a 2000-book fixture). The cache is now a direct-mapped 8-slot
+  array keyed by element address; stale entries still fall back to
+  the walk via the parent back-pointer check. Dispatch fixture:
+  12.83 → 11.17 ms (lxml 4.69 ms); the sibling walk disappears
+  from the profile. Also drops two dead comparators that had
+  regressed warning-clean. New spec pins strict document order
+  across interleaved-parent appends.
 
 
 ## [1.9.70] - 2026-09-03
