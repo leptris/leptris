@@ -1344,6 +1344,14 @@ static void parse_top_level(SheetParser* sp, LeptrisElement root) {
             }
             continue;
         }
+        /* xsl:global-context-item (3.0 §10): the transform always
+         * runs with the source document as its global context item,
+         * so the declaration is accepted as a no-op (as/use-when
+         * ride along; the no-context error path cannot occur —
+         * #690 audit). */
+        if (node_is_xsl(e, "global-context-item")) {
+            continue;
+        }
         if (node_is_xsl(e, "output")) {
             const char* m = leptris_element_attribute(e, "method");
             sp->sheet->out_method_text = m && strcmp(m, "text") == 0;
