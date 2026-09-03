@@ -959,6 +959,28 @@ static void xq_tuple_free(XqTuple* t) {
 static void xq_unbind_all(XPathContext* ctx, XqClause* clauses,
                           size_t n) {
     for (size_t i = 0; i < n; i++) {
+        if (clauses[i].is_for == 2) {
+            XqWindow* w = &clauses[i].win;
+            if (w->win_var)
+                xpath_variable_set_remove(
+                    (XPathVariableSet*)ctx->variable_set,
+                    w->win_var);
+            if (w->s_var)
+                xpath_variable_set_remove(
+                    (XPathVariableSet*)ctx->variable_set, w->s_var);
+            if (w->s_pos_var)
+                xpath_variable_set_remove(
+                    (XPathVariableSet*)ctx->variable_set,
+                    w->s_pos_var);
+            if (w->e_var)
+                xpath_variable_set_remove(
+                    (XPathVariableSet*)ctx->variable_set, w->e_var);
+            if (w->e_pos_var)
+                xpath_variable_set_remove(
+                    (XPathVariableSet*)ctx->variable_set,
+                    w->e_pos_var);
+            continue;
+        }
         xpath_variable_set_remove((XPathVariableSet*)ctx->variable_set,
                                   clauses[i].var);
         if (clauses[i].pos_var)
