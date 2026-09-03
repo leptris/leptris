@@ -552,6 +552,32 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
  */
 LEPTRIS_API LeptrisDocument leptris_parse_string(const char* xml, size_t length, LeptrisStatus* status);
 
+/**
+ * Parse an HTML string into a document (issue #659)
+ *
+ * Tolerant HTML4/5 parse into the standard DOM: implied end tags
+ * (p/li/td/tr/th/dt/dd/option/...), void elements, raw-text
+ * <script>/<style>, minimized + unquoted attribute values,
+ * case-insensitive tag/attribute names, and the HTML named-entity
+ * table. Behaviors follow libxml2's HTMLparser as exposed by
+ * Nokogiri (fragment shape: no synthesized <html>/<head>/<body>,
+ * no implied <tbody>). Malformed input never fails the parse — it
+ * degrades to text; a document with no nodes at all is an error.
+ * The result serializes and queries (XPath/XSLT) like any
+ * libleptris document.
+ *
+ * @param html HTML input (must be valid UTF-8)
+ * @param length Length of input in bytes
+ * @param status Output status code (can be NULL)
+ * @return Document handle or NULL on error
+ *
+ * Memory: Caller must call leptris_document_free() when done
+ * Thread safety: Not thread-safe. One document per thread.
+ */
+LEPTRIS_API LeptrisDocument leptris_parse_html_string(const char* html,
+                                                      size_t length,
+                                                      LeptrisStatus* status);
+
 
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
                                                     size_t length,
