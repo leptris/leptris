@@ -208,6 +208,14 @@ extern cli_command_t* cli_command_format(void);
  */
 extern cli_command_t* cli_command_version(void);
 
+/**
+ * Get the 'xquery' command
+ *
+ * Command: leptris xquery [OPTIONS] (-q FILE | -e EXPR)
+ * Purpose: Execute an XQuery 1.0 query
+ */
+extern cli_command_t* cli_command_xquery(void);
+
 #ifdef __cplusplus
 }
 #endif

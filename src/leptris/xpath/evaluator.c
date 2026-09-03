@@ -132,6 +132,9 @@ void xpath_context_init(XPathContext* context,
     }
 
     context->current_fn_user_data = NULL;
+    context->owned_docs = NULL;
+    context->n_owned_docs = 0;
+    context->cap_owned_docs = 0;
 }
 
 void xpath_context_free(XPathContext* context) {
@@ -166,6 +169,15 @@ void xpath_context_cleanup(XPathContext* context) {
         xpath_function_registry_free((XPathFunctionRegistry*)context->function_registry);
     }
     context->registry_borrowed = 0;
+
+    /* fn:doc() anchors — the results borrowed their roots. */
+    for (size_t i = 0; i < context->n_owned_docs; i++)
+        if (context->owned_docs[i])
+            leptris_document_free(context->owned_docs[i]);
+    free(context->owned_docs);
+    context->owned_docs = NULL;
+    context->n_owned_docs = 0;
+    context->cap_owned_docs = 0;
 }
 
 const char* xpath_context_error(XPathContext* context) {

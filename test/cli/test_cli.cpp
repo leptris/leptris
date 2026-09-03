@@ -190,3 +190,28 @@ TEST(CliParse, RejectsDeepNesting) {
 }
 
 }  // namespace
+
+// ---- xquery ----------------------------------------------------------------
+
+TEST(CliXquery, EvaluatesFlworFromInlineExpression) {
+    auto r = run_cli({"xquery", "-e",
+                      "for $n in 1 to 3 order by $n descending"
+                      " return $n * 2"});
+    EXPECT_EQ(r.exit_code, 0);
+    EXPECT_EQ(r.out, "6 4 2\n");
+}
+
+TEST(CliXquery, SourceDocumentAndConstructors) {
+    const char* src_dir = std::getenv("LEPTRIS_SOURCE_DIR");
+    std::string books = src_dir && src_dir[0]
+        ? std::string(src_dir) + "/test/xquery/books.xml"
+        : "../test/xquery/books.xml";
+    auto r = run_cli({"xquery", "-s", books, "-e",
+                      "for $b in //book where $b/@price > 10"
+                      " order by $b/@price descending"
+                      " return element r { attribute price { $b/@price },"
+                      " text { $b/title } }"});
+    EXPECT_EQ(r.exit_code, 0);
+    EXPECT_EQ(r.out,
+              "<r price=\"20\">CC</r> <r price=\"12\">AA</r>\n");
+}

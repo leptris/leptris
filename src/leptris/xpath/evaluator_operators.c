@@ -532,6 +532,153 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return out;
     }
 
+    /* ---- XQuery 1.0 constructors (TODO.xslt-full/11): value-level
+     * — the result is the serialized XML string. Attribute values
+     * escape &<"', text content escapes &<; raw expression content
+     * passes through (a nested constructor's result is already
+     * markup; arbitrary-string escaping is a value-model limit). */
+    if (op == XPATH_OP_TEXT_CTOR || op == XPATH_OP_ATTRIBUTE_CTOR ||
+        op == XPATH_OP_ELEMENT_CTOR) {
+        if (op != XPATH_OP_ELEMENT_CTOR) {
+            char* s = NULL;
+            if (ast->child_count >= 1) {
+                struct leptris_xpath_result* v =
+                    evaluate_expr(ctx, ast->children[0]);
+                s = v ? xpath_to_string(v) : NULL;
+                if (v) xpath_result_free(v);
+            }
+            if (!s) s = leptris_strdup("");
+            struct leptris_xpath_result* out =
+                xpath_result_new(XPATH_RESULT_STRING);
+            if (!out) { free(s); return NULL; }
+            out->value.string_value = s;
+            return out;
+        }
+
+        /* ELEMENT_CTOR: attribute children first, then content. */
+        size_t cap = 64, len = 0;
+        char* buf = (char*)malloc(cap);
+        if (!buf) return NULL;
+        buf[0] = 0;
+        const char* name = ast->value ? ast->value : "e";
+        len += (size_t)snprintf(buf, cap, "<%s", name);
+        for (size_t i = 0; i < ast->child_count; i++) {
+            XPathASTNode* c = ast->children[i];
+            size_t attr_n = 1;
+            XPathASTNode** attrs = &c;
+            if (c->type == XPATH_AST_OPERATOR &&
+                (XPathOperatorType)c->number_value == XPATH_OP_SEQUENCE) {
+                attrs = c->children;
+                attr_n = c->child_count;
+            }
+            for (size_t at = 0; at < attr_n; at++) {
+            XPathASTNode* ca = attrs[at];
+            if (ca->type == XPATH_AST_OPERATOR &&
+                (XPathOperatorType)ca->number_value ==
+                    XPATH_OP_ATTRIBUTE_CTOR) {
+                struct leptris_xpath_result* av =
+                    evaluate_expr(ctx, ca->children ? ca->children[0]
+                                                    : NULL);
+                char* v = av ? xpath_to_string(av) : NULL;
+                if (av) xpath_result_free(av);
+                if (!v) v = leptris_strdup("");
+                size_t need = len + strlen(name) + strlen(v) * 6 + 8;
+                while (need + 1 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
+                buf[len++] = ' ';
+                memcpy(buf + len, c->value, strlen(c->value));
+                len += strlen(c->value);
+                buf[len++] = '=';
+                buf[len++] = '"';
+                for (const char* q = v; *q; q++) {
+                    if (*q == '&') { memcpy(buf + len, "&amp;", 5); len += 5; }
+                    else if (*q == '<') { memcpy(buf + len, "&lt;", 4); len += 4; }
+                    else if (*q == '"') { memcpy(buf + len, "&quot;", 6); len += 6; }
+                    else buf[len++] = *q;
+                }
+                buf[len++] = '"';
+                buf[len] = 0;
+                free(v);
+            }
+            }
+        }
+        buf[len] = 0;
+        size_t content_start_len = len;
+        buf[len++] = '>';
+        buf[len] = 0;
+        /* Comma-separated ctor bodies arrive as SEQUENCE nodes —
+         * flatten one level so attribute/content children are seen
+         * directly. */
+        for (size_t i = 0; i < ast->child_count; i++) {
+            XPathASTNode* c = ast->children[i];
+            size_t item_n = 1;
+            XPathASTNode** items = &c;
+            if (c->type == XPATH_AST_OPERATOR &&
+                (XPathOperatorType)c->number_value == XPATH_OP_SEQUENCE) {
+                items = c->children;
+                item_n = c->child_count;
+            }
+            for (size_t it = 0; it < item_n; it++) {
+            XPathASTNode* ci = items[it];
+            if (ci->type == XPATH_AST_OPERATOR &&
+                (XPathOperatorType)ci->number_value ==
+                    XPATH_OP_ATTRIBUTE_CTOR)
+                continue;
+            int escape = ci->type == XPATH_AST_OPERATOR &&
+                         (XPathOperatorType)ci->number_value ==
+                             XPATH_OP_TEXT_CTOR;
+            struct leptris_xpath_result* v = evaluate_expr(ctx, ci);
+            if (!v) continue;
+            if (v->type == XPATH_RESULT_NODESET &&
+                v->value.nodeset_value) {
+                /* Sequence: members concatenate with no separator
+                 * (adjacent constructed items). */
+                for (size_t m = 0; m < v->value.nodeset_value->count;
+                     m++) {
+                    char* t = get_node_text(
+                        v->value.nodeset_value->nodes[m]);
+                    if (!t) continue;
+                    for (const char* q = t; *q; q++) {
+                        while (len + 8 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
+                        if (escape && *q == '&') { memcpy(buf + len, "&amp;", 5); len += 5; }
+                        else if (escape && *q == '<') { memcpy(buf + len, "&lt;", 4); len += 4; }
+                        else buf[len++] = *q;
+                    }
+                    buf[len] = 0;
+                    free(t);
+                }
+            } else {
+                char* t = xpath_to_string(v);
+                if (t) {
+                    for (const char* q = t; *q; q++) {
+                        while (len + 8 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
+                        if (escape && *q == '&') { memcpy(buf + len, "&amp;", 5); len += 5; }
+                        else if (escape && *q == '<') { memcpy(buf + len, "&lt;", 4); len += 4; }
+                        else buf[len++] = *q;
+                    }
+                    buf[len] = 0;
+                    free(t);
+                }
+            }
+            xpath_result_free(v);
+            }
+        }
+        /* Empty content self-closes (Saxon serialization). */
+        if (len == content_start_len + 1) {
+            len--;             /* the '>' */
+            buf[len++] = '/';
+            buf[len++] = '>';
+            buf[len] = 0;
+        } else {
+            while (len + strlen(name) + 4 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
+            len += (size_t)snprintf(buf + len, cap - len, "</%s>", name);
+        }
+        struct leptris_xpath_result* out =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (!out) { free(buf); return NULL; }
+        out->value.string_value = buf;
+        return out;
+    }
+
     /* 3.1 postfix lookup `V?k` / `V?2` (08 tail): the map entry for
      * the key — array indices ARE the positional keys. */
     if (op == XPATH_OP_LOOKUP) {

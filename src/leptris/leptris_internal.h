@@ -620,6 +620,14 @@ typedef struct xpath_context {
     /* The registry came from the document's cached_fn_registry —
      * context cleanup must NOT free it (the document owns it). */
     int registry_borrowed;
+
+    /* Documents loaded by fn:doc() during this evaluation —
+     * context-lifetime anchors (TODO.xslt-full/11): the returned
+     * nodeset borrows the root element, so the owning document must
+     * outlive the result. Cleanup frees them. */
+    struct leptris_document** owned_docs;
+    size_t n_owned_docs;
+    size_t cap_owned_docs;
 } XPathContext;
 
 /* XPath operator types - From ext/leptris/xpath.h */
@@ -692,7 +700,16 @@ typedef enum {
      * children[1..] = args. */
     XPATH_OP_INLINE_FN,
     XPATH_OP_FN_REF,
-    XPATH_OP_DYN_CALL
+    XPATH_OP_DYN_CALL,
+    /* XQuery 1.0 constructors (TODO.xslt-full/11; value-level —
+     * the result is the serialized XML string). ELEMENT_CTOR:
+     * value = element name, children = ATTRIBUTE_CTOR nodes first,
+     * then content expressions. ATTRIBUTE_CTOR: value = attr name,
+     * children[0] = value expression. TEXT_CTOR: children[0] =
+     * content expression (content escaping applies). */
+    XPATH_OP_ELEMENT_CTOR,
+    XPATH_OP_ATTRIBUTE_CTOR,
+    XPATH_OP_TEXT_CTOR
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope

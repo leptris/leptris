@@ -1014,6 +1014,74 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             advance_token(parser);
             return parse_postfix_ops(parser, mc);
         }
+        /* XQuery 1.0 computed constructors (TODO.xslt-full/11):
+         * element NAME { content }, attribute NAME { value },
+         * text { content }. Matched only with the name+brace in
+         * place — bare `element`/`text` name tests stay intact
+         * (the lexer only keyword-tokenizes `text(`). */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 next && next->type == TOK_LBRACE &&
+                 current_token(parser)->value_len == 4 &&
+                 memcmp(current_token(parser)->value, "text", 4) == 0) {
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* body = parse_expr(parser);
+            if (!body) return NULL;
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(body);
+                return NULL;
+            }
+            advance_token(parser);
+            XPathASTNode* tc = ast_node_new(XPATH_AST_OPERATOR);
+            if (!tc) { ast_node_free(body); return NULL; }
+            tc->number_value = (double)XPATH_OP_TEXT_CTOR;
+            ast_node_add_child(tc, body);
+            return parse_postfix_ops(parser, tc);
+        }
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 ((current_token(parser)->value_len == 7 &&
+                   memcmp(current_token(parser)->value, "element", 7) == 0) ||
+                  (current_token(parser)->value_len == 9 &&
+                   memcmp(current_token(parser)->value, "attribute", 9) == 0)) &&
+                 next && (next->type == TOK_NCNAME ||
+                          next->type == TOK_QNAME) &&
+                 parser->token_pos + 2 < parser->token_count &&
+                 parser->tokens[parser->token_pos + 2].type == TOK_LBRACE) {
+            int is_attr =
+                current_token(parser)->value_len == 9;
+            char name[128];
+            size_t nl = next->value_len;
+            if (nl >= sizeof(name)) return NULL;
+            memcpy(name, next->value, nl);
+            name[nl] = 0;
+            advance_token(parser);
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* ctor = ast_node_new(XPATH_AST_OPERATOR);
+            if (!ctor) return NULL;
+            ctor->number_value = (double)(is_attr ? XPATH_OP_ATTRIBUTE_CTOR
+                                                  : XPATH_OP_ELEMENT_CTOR);
+            ctor->value = leptris_strdup(name);
+            /* Comma-separated ctor children attach directly (the
+             * evaluator sees attribute and content children up
+             * front). */
+            for (;;) {
+                XPathASTNode* item = parse_expr(parser);
+                if (!item) { ast_node_free(ctor); return NULL; }
+                ast_node_add_child(ctor, item);
+                if (current_token_is(parser, TOK_COMMA)) {
+                    advance_token(parser);
+                    continue;
+                }
+                break;
+            }
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(ctor);
+                return NULL;
+            }
+            advance_token(parser);
+            return parse_postfix_ops(parser, ctor);
+        }
         /* If followed by '(', it's a function call - fall through to filter expression */
         else if (next && next->type == TOK_LPAREN) {
             /* Fall through to filter expression */

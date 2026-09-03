@@ -11,6 +11,7 @@ add_executable(leptris-cli
     commands/parse.c
     commands/xpath.c
     commands/format.c
+    commands/xquery.c
 )
 
 # Link to libleptris. When both static and shared are built, link the
