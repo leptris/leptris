@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.76] - 2026-09-03
+
+### Added
+
+- #817 - leptris_element_set_namespace + coherent rename prefixes (dom)
+- accept xsl:global-context-item declaration (#690 audit) (xslt)
+- conformance tail - empty ctors, version decl, splice ctor rewriting (#684) (xquery)
+
+### Fixed
+
+- #815 - uninitialized raw bit emitted verbatim text (parser)
+- #814 - where-filtered items vanish instead of empty strings (xquery)
+- #813 - Nokogiri parity for minimized attrs and the wrapper (html)
+- #812 — detached copier dropped descendant-scoped xmlns declarations (dom)
+
+
+
 ## [1.9.75] - 2026-09-03
 
 ### Added
