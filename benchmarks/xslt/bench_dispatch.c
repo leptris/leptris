@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L
 /* benchmarks/xslt/bench_dispatch.c — lane 13 release scorecard
  * (#682): the template-dispatch fixture. 2000 books, one
  * apply-templates walk, AVT attribute, value-of selects.
