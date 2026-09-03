@@ -711,15 +711,21 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
     }
 
     /* Mutation tail cache (TODO 195): sequential appends target the
-     * same parent; the cached tail skips the O(N) walk. Verified by
-     * the child's parent back-pointer — a removed or re-parented
-     * cached tail fails the check and falls back to the walk. */
+     * same parent; the cached tail skips the O(N) walk. Direct-
+     * mapped by element address so INTERLEAVED parents (result-tree
+     * construction) each keep a slot — a single slot thrashed on
+     * every other append (#682). Validated by the child's parent
+     * back-pointer: a removed or re-parented cached tail fails the
+     * check and falls back to the walk. */
     struct leptris_document* mut_doc = doc;
-    LeptrisNode* mut_tail =
-        (mut_doc && mut_doc->mut_tail_parent == elem && mut_doc->mut_tail_child &&
-         leptris_node_parent(mut_doc->mut_tail_child) == elem)
-            ? mut_doc->mut_tail_child
-            : NULL;
+    LeptrisNode* mut_tail = NULL;
+    if (mut_doc) {
+        struct leptris_mut_tail* s =
+            &mut_doc->mut_tail[(((uintptr_t)elem) >> 4) & 7];
+        if (s->parent == elem && s->child &&
+            leptris_node_parent(s->child) == elem)
+            mut_tail = s->child;
+    }
 
     /* For element children, set up linked list structure */
     if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
@@ -781,8 +787,10 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
     }
 
     if (mut_doc) {
-        mut_doc->mut_tail_parent = elem;
-        mut_doc->mut_tail_child = child;
+        struct leptris_mut_tail* s =
+            &mut_doc->mut_tail[(((uintptr_t)elem) >> 4) & 7];
+        s->parent = elem;
+        s->child = child;
     }
 
     /* COW: Increment version on modification */

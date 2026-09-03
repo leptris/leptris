@@ -410,6 +410,41 @@ static char* string_value_deep(LeptrisElement e) {
 
 /* ---- Instruction handlers (registered below) ---- */
 
+/* AVT compiled-expression cache (#682): a literal result element's
+ * "book-{@id}" attribute otherwise recompiles its {expr} part for
+ * every node it is evaluated against. Distinct expressions per
+ * transform are few, so a keyed chain compiles each once. */
+typedef struct XsltAvtEntry {
+    struct XsltAvtEntry* next;
+    LeptrisXPathCompiled c;
+    char expr[];
+} XsltAvtEntry;
+
+static LeptrisXPathCompiled avt_compiled(XsltExec* ex, const char* s,
+                                         size_t n) {
+    for (XsltAvtEntry* e = (XsltAvtEntry*)ex->avt_cache; e; e = e->next)
+        if (strlen(e->expr) == n && memcmp(e->expr, s, n) == 0)
+            return e->c;
+    XsltAvtEntry* e = (XsltAvtEntry*)malloc(sizeof(*e) + n + 1);
+    if (!e) return NULL;
+    memcpy(e->expr, s, n);
+    e->expr[n] = 0;
+    e->c = leptris_xpath_compile(e->expr);
+    if (!e->c) { free(e); return NULL; }
+    e->next = (XsltAvtEntry*)ex->avt_cache;
+    ex->avt_cache = e;
+    return e->c;
+}
+
+static void xslt_avt_free(XsltExec* ex) {
+    while (ex->avt_cache) {
+        XsltAvtEntry* e = (XsltAvtEntry*)ex->avt_cache;
+        ex->avt_cache = e->next;
+        leptris_xpath_compiled_free(e->c);
+        free(e);
+    }
+}
+
 /* Evaluate an attribute-value template: "a{expr}b" pieces are
  * concatenated; {{ and }} are literal braces (§7.1.1). */
 static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
@@ -451,25 +486,18 @@ static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
                 continue;
             }
             size_t elen = (size_t)(close - p - 1);
-            char* expr = (char*)malloc(elen + 1);
-            if (expr) {
-                memcpy(expr, p + 1, elen);
-                expr[elen] = 0;
-                LeptrisXPathCompiled c = leptris_xpath_compile(expr);
-                free(expr);
-                if (c) {
-                    struct leptris_xpath_result* r =
-                        xslt_eval(ex, c, node);
-                    char* sv = r ? leptris_xpath_result_string(r) : NULL;
-                    if (r) leptris_xpath_result_free(r);
-                    leptris_xpath_compiled_free(c);
-                    if (sv) {
-                        size_t sl = strlen(sv);
-                        while (len + sl + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
-                        memcpy(out + len, sv, sl);
-                        len += sl;
-                        leptris_free_string(sv);
-                    }
+            LeptrisXPathCompiled c = avt_compiled(ex, p + 1, elen);
+            if (c) {
+                struct leptris_xpath_result* r =
+                    xslt_eval(ex, c, node);
+                char* sv = r ? leptris_xpath_result_string(r) : NULL;
+                if (r) leptris_xpath_result_free(r);
+                if (sv) {
+                    size_t sl = strlen(sv);
+                    while (len + sl + 1 >= cap) { cap *= 2; out = realloc(out, cap); }
+                    memcpy(out + len, sv, sl);
+                    len += sl;
+                    leptris_free_string(sv);
                 }
             }
             p = close + 1;
@@ -1559,17 +1587,6 @@ static int op_try(XsltExec* ex, const XsltInstr* in,
 
     if (link) *link = catch_at;
     return rc;
-}
-
-/* §10 stable sort by string/number key — shared by for-each and
- * apply-templates (single-key v1: the first xsl:sort). */
-/* §10 stable multi-key comparator. */
-static int xslt_sort_compare(const XsltInstr* in,
-                            const char* a_str, const char* b_str) {
-    for (const XsltSort* s = in->sorts; s; s = s->next) {
-        (void)a_str; (void)b_str;
-    }
-    return 0;
 }
 
 /* §10 stable multi-key sort — caches each (item,sort-key) string,
@@ -2685,17 +2702,6 @@ static int ws_only(const char* t) {
         if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') return 0;
     }
     return 1;
-}
-
-/* §3.4 name-test list entry: "*" matches every element name (a
- * NameTest per the patterns grammar), anything else is an exact
- * QName comparison. */
-static int name_in_list(char** list, const char* name) {
-    if (!list || !name) return 0;
-    for (size_t i = 0; list[i]; i++)
-        if (strcmp(list[i], "*") == 0 || strcmp(list[i], name) == 0)
-            return 1;
-    return 0;
 }
 
 static int ancestor_xml_space_preserve(LeptrisElement e) {
@@ -4462,6 +4468,7 @@ void xslt_exec_free(XsltExec* ex) {
     xslt_bridge_free(ex);
     xslt_ufn_free(ex);
     xslt_gids_free(ex);
+    xslt_avt_free(ex);
     if (ex->fn_result) leptris_xpath_result_free(ex->fn_result);
     while (ex->vars) xslt_pop_var(ex, NULL);
     while (ex->tunnel_vars) {
