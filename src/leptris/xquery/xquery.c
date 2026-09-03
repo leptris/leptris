@@ -60,6 +60,8 @@ struct LeptrisXQueryInternal {
     XPathASTNode* where_ast;
     XqOrderKey* keys;
     size_t nkeys;
+    char* group_var;        /* group by $k := Expr (12) */
+    XPathASTNode* group_key;
     XPathASTNode* return_ast;
 };
 
@@ -136,7 +138,7 @@ static int is_clause_word(const char* w, size_t len) {
            word_is(w, len, "where") || word_is(w, len, "order") ||
            word_is(w, len, "by") || word_is(w, len, "return") ||
            word_is(w, len, "stable") || word_is(w, len, "ascending") ||
-           word_is(w, len, "descending");
+           word_is(w, len, "descending") || word_is(w, len, "group");
 }
 
 /* Advance over one FLWOR expression segment: stops before a clause
@@ -232,6 +234,8 @@ static void xq_free(struct LeptrisXQueryInternal* q) {
     for (size_t i = 0; i < q->nkeys; i++)
         if (q->keys[i].key) ast_node_free(q->keys[i].key);
     free(q->keys);
+    free(q->group_var);
+    if (q->group_key) ast_node_free(q->group_key);
     if (q->return_ast) ast_node_free(q->return_ast);
     free(q);
 }
@@ -530,6 +534,39 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                         return NULL;
                     }
                     s = e;
+                } else if (word_is(kw, kwl, "group")) {
+                    scan_ws(&s);
+                    const char* bw;
+                    size_t bwl = scan_word(&s, &bw);
+                    if (!bwl || !word_is(bw, bwl, "by")) {
+                        xq_free(q);
+                        return NULL;
+                    }
+                    s.p = bw + bwl;
+                    char* gvar = parse_dollar_name(&s);
+                    if (!gvar) {
+                        xq_free(q);
+                        return NULL;
+                    }
+                    scan_ws(&s);
+                    if (s.p + 1 >= s.end || s.p[0] != ':' ||
+                        s.p[1] != '=') {
+                        free(gvar);
+                        xq_free(q);
+                        return NULL;
+                    }
+                    s.p += 2;
+                    Scan e = s;
+                    scan_expr_segment(&e, 0);
+                    XPathASTNode* gk = parse_expr_span(s.p, e.p);
+                    if (!gk) {
+                        free(gvar);
+                        xq_free(q);
+                        return NULL;
+                    }
+                    q->group_var = gvar;
+                    q->group_key = gk;
+                    s = e;
                 } else if (word_is(kw, kwl, "order")) {
                     scan_ws(&s);
                     const char* bw;
@@ -683,11 +720,14 @@ static int xq_bind(XPathContext* ctx, const char* name,
     return 1;
 }
 
-/* Tuple snapshot: var bindings as raw member contents. */
+/* Tuple snapshot: per var, a LIST of members (nodes or raw
+ * synthetic contents) — group by rebinds vars to whole-group
+ * sequences. */
 typedef struct {
     char** names;
-    char** contents;   /* synthetic raw content; NULL entry = node */
-    void** nodes;
+    char*** contents;  /* contents[i][j]; NULL member = node */
+    void*** nodes;
+    size_t* counts;
     size_t n;
     char** keys;       /* order-key strings */
     size_t nkeys;
@@ -696,11 +736,16 @@ typedef struct {
 static void xq_tuple_free(XqTuple* t) {
     for (size_t i = 0; i < t->n; i++) {
         free(t->names[i]);
+        for (size_t j = 0; j < t->counts[i]; j++) {
+            if (t->contents[i]) free(t->contents[i][j]);
+        }
         free(t->contents[i]);
+        free(t->nodes[i]);
     }
     free(t->names);
     free(t->contents);
     free(t->nodes);
+    free(t->counts);
     for (size_t i = 0; i < t->nkeys; i++) free(t->keys[i]);
     free(t->keys);
 }
@@ -722,12 +767,14 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
                        XqTuple* t) {
     /* var + optional pos var per clause */
     t->names = (char**)calloc(2 * n, sizeof(char*));
-    t->contents = (char**)calloc(2 * n, sizeof(char*));
-    t->nodes = (void**)calloc(2 * n, sizeof(void*));
+    t->contents = (char***)calloc(2 * n, sizeof(char**));
+    t->nodes = (void***)calloc(2 * n, sizeof(void**));
+    t->counts = (size_t*)calloc(2 * n, sizeof(size_t));
     t->n = 0;
     t->keys = NULL;
     t->nkeys = 0;
-    if (!t->names || !t->contents || !t->nodes) return 0;
+    if (!t->names || !t->contents || !t->nodes || !t->counts)
+        return 0;
     for (size_t i = 0; i < n; i++) {
         const char* names[2];
         names[0] = clauses[i].var;
@@ -741,13 +788,17 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
             XPathNodeSet* ns = var->value.v.nodeset_value;
             void* node = (ns && ns->count) ? ns->nodes[0] : NULL;
             t->names[t->n] = strdup(names[k]);
+            t->contents[t->n] = (char**)calloc(1, sizeof(char*));
+            t->nodes[t->n] = (void**)calloc(1, sizeof(void*));
+            t->counts[t->n] = 1;
+            if (!t->contents[t->n] || !t->nodes[t->n]) return 0;
             if (node && XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
-                t->nodes[t->n] = node;
-                t->contents[t->n] = NULL;
+                t->nodes[t->n][0] = node;
+                t->contents[t->n][0] = NULL;
             } else if (node) {
                 const char* c = ((XPathTextNode*)node)->content;
-                t->contents[t->n] = strdup(c ? c : "");
-                t->nodes[t->n] = NULL;
+                t->contents[t->n][0] = strdup(c ? c : "");
+                t->nodes[t->n][0] = NULL;
             }
             t->n++;
         }
@@ -755,20 +806,25 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
     return 1;
 }
 
-/* Rebind a snapshot into the context. */
+/* Rebind a snapshot into the context (member lists join as one
+ * nodeset — group sequences included). */
 static int xq_rebind(XPathContext* ctx, const XqTuple* t) {
     for (size_t i = 0; i < t->n; i++) {
         XPathNodeSet* one = xpath_nodeset_new();
         if (!one) return 0;
-        one->owns_synthetic_text = 1;
-        if (t->nodes[i]) {
-            xpath_nodeset_add(one, t->nodes[i]);
-            one->owns_synthetic_text = 0;   /* document node */
-        } else if (t->contents[i]) {
-            XPathTextNode* tn = xpath_synth_text(
-                t->contents[i], strlen(t->contents[i]));
-            if (tn) xpath_nodeset_add(one, tn);
+        for (size_t j = 0; j < t->counts[i]; j++) {
+            if (t->nodes[i][j]) {
+                xpath_nodeset_add(one, t->nodes[i][j]);
+            } else if (t->contents[i][j]) {
+                XPathTextNode* tn = xpath_synth_text(
+                    t->contents[i][j], strlen(t->contents[i][j]));
+                if (tn) xpath_nodeset_add(one, tn);
+            }
         }
+        /* nodeset_free frees only synthetic-text members; document
+         * nodes are skipped by the kind dispatch — safe for mixed
+         * group sequences. */
+        one->owns_synthetic_text = 1;
         XPathVariable* var = xpath_variable_set_add(
             (XPathVariableSet*)ctx->variable_set, t->names[i],
             XPATH_VAR_TYPE_NODE_SET);
@@ -811,18 +867,8 @@ static int xq_enumerate(struct LeptrisXQueryInternal* q, XPathContext* ctx,
         XqTuple* t = &(*out)[(*out_n)++];
         memset(t, 0, sizeof(*t));
         if (!xq_snapshot(ctx, q->clauses, q->nclauses, t)) return 0;
-        if (q->nkeys) {
-            t->keys = (char**)calloc(q->nkeys, sizeof(char*));
-            if (!t->keys) return 0;
-            t->nkeys = q->nkeys;
-            for (size_t k = 0; k < q->nkeys; k++) {
-                struct leptris_xpath_result* r =
-                    evaluate_expr(ctx, q->keys[k].key);
-                char* s = r ? xpath_to_string(r) : NULL;
-                xpath_result_free(r);
-                t->keys[k] = s ? s : strdup("");
-            }
-        }
+        /* Order keys are evaluated at the EVAL phase — after
+         * group by, they see the grouped bindings (Saxon). */
         return 1;
     }
 
@@ -1021,7 +1067,181 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
             size_t n_tuples = 0, cap = 0;
             if (!xq_enumerate(q, ctx, 0, &tuples, &n_tuples, &cap)) {
                 err = 1;
-            } else {
+            } else if (q->group_var) {
+                /* group by (12): partition on the key value in
+                 * first-appearance order; every clause var is
+                 * rebound to the group's member list, and the
+                 * group var carries the key. */
+                char** gkeys = NULL;
+                size_t** gmembers = NULL;   /* per group: tuple indices */
+                size_t* gcounts = NULL;
+                size_t n_groups = 0;
+                XqTuple* grouped = NULL;
+                size_t n_grouped = 0;
+                int gerr = 0;
+                gkeys = (char**)calloc(n_tuples ? n_tuples : 1,
+                                       sizeof(char*));
+                gmembers = (size_t**)calloc(n_tuples ? n_tuples : 1,
+                                            sizeof(size_t*));
+                gcounts = (size_t*)calloc(n_tuples ? n_tuples : 1,
+                                          sizeof(size_t));
+                grouped = (XqTuple*)calloc(n_tuples ? n_tuples : 1,
+                                           sizeof(XqTuple));
+                if (!gkeys || !gmembers || !gcounts || !grouped)
+                    gerr = 1;
+                for (size_t ti = 0; ti < n_tuples && !gerr; ti++) {
+                    xq_unbind_all(ctx, q->clauses, q->nclauses);
+                    if (!xq_rebind(ctx, &tuples[ti])) {
+                        gerr = 1;
+                        break;
+                    }
+                    struct leptris_xpath_result* kr =
+                        evaluate_expr(ctx, q->group_key);
+                    char* key = kr ? xpath_to_string(kr) : NULL;
+                    if (kr) xpath_result_free(kr);
+                    if (!key) key = strdup("");
+                    size_t g = n_groups;
+                    for (size_t x = 0; x < n_groups; x++) {
+                        if (strcmp(gkeys[x], key) == 0) {
+                            g = x;
+                            break;
+                        }
+                    }
+                    if (g == n_groups) {
+                        gkeys[g] = key;
+                        gcounts[g] = 0;
+                        gmembers[g] = (size_t*)calloc(
+                            n_tuples, sizeof(size_t));
+                        if (!gmembers[g]) {
+                            gerr = 1;
+                            free(key);
+                            break;
+                        }
+                        n_groups++;
+                    } else {
+                        free(key);
+                    }
+                    gmembers[g][gcounts[g]++] = ti;
+                }
+                for (size_t g = 0; g < n_groups && !gerr; g++) {
+                    /* Build the group tuple from the first member's
+                     * shape, aggregating every member's values. */
+                    XqTuple* first = &tuples[gmembers[g][0]];
+                    XqTuple* gt = &grouped[n_grouped];
+                    memset(gt, 0, sizeof(*gt));
+                    gt->names = (char**)calloc(first->n + 1,
+                                               sizeof(char*));
+                    gt->contents = (char***)calloc(
+                        first->n + 1, sizeof(char**));
+                    gt->nodes = (void***)calloc(first->n + 1,
+                                                sizeof(void**));
+                    gt->counts = (size_t*)calloc(first->n + 1,
+                                                 sizeof(size_t));
+                    if (!gt->names || !gt->contents || !gt->nodes ||
+                        !gt->counts) {
+                        gerr = 1;
+                        break;
+                    }
+                    gt->n = 0;
+                    for (size_t v = 0; v < first->n; v++) {
+                        gt->names[gt->n] = strdup(first->names[v]);
+                        size_t total = 0;
+                        for (size_t m = 0; m < gcounts[g]; m++)
+                            total += tuples[gmembers[g][m]].counts[v];
+                        gt->contents[gt->n] = (char**)calloc(
+                            total ? total : 1, sizeof(char*));
+                        gt->nodes[gt->n] = (void**)calloc(
+                            total ? total : 1, sizeof(void*));
+                        if (!gt->contents[gt->n] || !gt->nodes[gt->n]) {
+                            gerr = 1;
+                            break;
+                        }
+                        size_t w = 0;
+                        for (size_t m = 0; m < gcounts[g]; m++) {
+                            XqTuple* mt = &tuples[gmembers[g][m]];
+                            for (size_t j = 0; j < mt->counts[v];
+                                 j++) {
+                                if (mt->nodes[v][j]) {
+                                    gt->nodes[gt->n][w] =
+                                        mt->nodes[v][j];
+                                } else {
+                                    gt->contents[gt->n][w] = strdup(
+                                        mt->contents[v][j]);
+                                }
+                                w++;
+                            }
+                        }
+                        gt->counts[gt->n] = total;
+                        gt->n++;
+                    }
+                    if (gerr) break;
+                    /* the group variable carries the key */
+                    gt->names[gt->n] = strdup(q->group_var);
+                    gt->contents[gt->n] = (char**)calloc(
+                        1, sizeof(char*));
+                    gt->nodes[gt->n] = (void**)calloc(1, sizeof(void*));
+                    if (!gt->names[gt->n] || !gt->contents[gt->n] ||
+                        !gt->nodes[gt->n]) {
+                        gerr = 1;
+                        break;
+                    }
+                    gt->contents[gt->n][0] = strdup(gkeys[g]);
+                    gt->counts[gt->n] = 1;
+                    gt->n++;
+                    n_grouped++;
+                }
+                for (size_t g = 0; g < n_groups; g++) {
+                    free(gkeys[g]);
+                    free(gmembers[g]);
+                }
+                free(gkeys);
+                free(gmembers);
+                free(gcounts);
+                for (size_t ti = 0; ti < n_tuples; ti++)
+                    xq_tuple_free(&tuples[ti]);
+                free(tuples);
+                if (gerr) {
+                    for (size_t gi = 0; gi < n_grouped; gi++)
+                        xq_tuple_free(&grouped[gi]);
+                    free(grouped);
+                    err = 1;
+                } else {
+                    tuples = grouped;
+                    n_tuples = n_grouped;
+                }
+            }
+            if (!err) {
+                /* Order keys: evaluated against the (possibly
+                 * grouped) bindings. */
+                for (size_t ti = 0; ti < n_tuples && !err; ti++) {
+                    xq_unbind_all(ctx, q->clauses, q->nclauses);
+                    if (q->group_var)
+                        xpath_variable_set_remove(
+                            (XPathVariableSet*)ctx->variable_set,
+                            q->group_var);
+                    if (!xq_rebind(ctx, &tuples[ti])) {
+                        err = 1;
+                        break;
+                    }
+                    if (q->nkeys) {
+                        tuples[ti].keys = (char**)calloc(
+                            q->nkeys, sizeof(char*));
+                        if (!tuples[ti].keys) {
+                            err = 1;
+                            break;
+                        }
+                        tuples[ti].nkeys = q->nkeys;
+                        for (size_t k = 0; k < q->nkeys; k++) {
+                            struct leptris_xpath_result* r =
+                                evaluate_expr(ctx, q->keys[k].key);
+                            char* ks = r ? xpath_to_string(r) : NULL;
+                            xpath_result_free(r);
+                            tuples[ti].keys[k] = ks ? ks : strdup("");
+                        }
+                    }
+                }
+            }
+            if (!err) {
                 /* Stable order-by: insertion sort over key lists. */
                 for (size_t i = 1; i < n_tuples; i++) {
                     XqTuple tmp = tuples[i];
