@@ -981,9 +981,13 @@ LeptrisStatus leptris_element_remove_attribute(LeptrisElement elem, const char* 
  * into the target pool (leptris_element_name_view shares the source
  * buffer cross-doc, and so do these). Call AFTER the copy is attached
  * or registered so get_pool/get_document resolve through the chain. */
-static void copy_element_namespaces(LeptrisElement copy, LeptrisElement source,
-                                    LeptrisElement parent) {
-    LeptrisMemoryPool* pool = leptris_element_get_pool(parent);
+/* #804 perf: pool-threaded core of copy_element_namespaces — the
+ * deep copier already knows the pool; resolving it through the
+ * parent chain (root-map walk + TLS) per element dominated subtree
+ * duplication profiles. */
+static void copy_element_namespaces_pooled(LeptrisElement copy,
+                                           LeptrisElement source,
+                                           LeptrisMemoryPool* pool) {
     if (!pool) return;
     char* pfx = leptris_elem_prefix(source);
     if (pfx) {
@@ -1003,6 +1007,13 @@ static void copy_element_namespaces(LeptrisElement copy, LeptrisElement source,
         if (!nu) break;
         leptris_element_add_namespace_definition(copy, np ? np : "", nu);
     }
+}
+
+static void copy_element_namespaces(LeptrisElement copy, LeptrisElement source,
+                                    LeptrisElement parent) {
+    LeptrisMemoryPool* pool = leptris_element_get_pool(parent);
+    if (!pool) return;
+    copy_element_namespaces_pooled(copy, source, pool);
 }
 
 /**
@@ -1074,10 +1085,6 @@ LeptrisElement leptris_element_append_copy(LeptrisElement parent, LeptrisElement
     /* #721: namespaces — after registration so the internal
      * accessors can allocate the ns_cache through the pool. */
     copy_element_namespaces(copy, source, parent);
-
-    /* TODO 155 Phase A: register copy as a temporary root so recursive
-     * child-copy calls can reach the pool via leptris_element_get_pool. */
-    leptris_root_doc_register(copy, leptris_element_get_document(parent));
 
     /* Copy attributes - optimized: direct StringView copy when same document */
     uint8_t attr_count = leptris_element_attribute_count(source);
@@ -1808,16 +1815,100 @@ LeptrisElement leptris_element_append_copy_bulk(LeptrisElement parent, LeptrisEl
     return copy;
 }
 
+/* #804 perf: detached deep-copy core. Threads the destination pool
+ * through the recursion — no per-node document/pool resolution, no
+ * per-element root-map registration (a malloc each), no public-API
+ * mutation dispatch. The TOP copy registers in the root map once so
+ * the detached tree still resolves its document; descendants reach
+ * it through the parent chain they already carry. Fidelity matches
+ * leptris_element_append_copy: elements, text, cdata, comment, PI
+ * children (issue #696), attributes, and namespace declarations
+ * (issue #721). */
+static LeptrisElement copy_subtree_detached(LeptrisElement source,
+                                            LeptrisElement parent_copy,
+                                            LeptrisMemoryPool* pool) {
+    LeptrisStringView name_view = leptris_element_name_view(source);
+    if (leptris_sv_is_empty(&name_view)) return NULL;
+    char* name_copy = leptris_sv_to_cstr_pooled(&name_view, pool);
+    if (!name_copy) return NULL;
+    LeptrisElement copy = leptris_element_create_with_view(
+        leptris_sv_from_cstr(name_copy), pool);
+    if (!copy) return NULL;
+    leptris_elem_set_parent(copy, parent_copy);
+
+    copy_element_namespaces_pooled(copy, source, pool);
+
+    for (struct leptris_attribute* sa =
+             leptris_element_get_first_attribute(source);
+         sa; sa = leptris_attr_next(sa)) {
+        if (leptris_sv_is_empty(&sa->name_view)) continue;
+        char* n = leptris_pool_strdup(pool, sa->name_view.data);
+        if (!n) continue;
+        char* v = leptris_sv_is_empty(&sa->value_view)
+                      ? NULL
+                      : leptris_pool_strdup(pool, sa->value_view.data);
+        LeptrisStringView nv = leptris_sv_from_cstr(n);
+        LeptrisStringView vv =
+            v ? leptris_sv_from_cstr(v) : leptris_sv_from_cstr("");
+        leptris_element_add_attribute(copy, nv, vv, pool);
+    }
+
+    LeptrisNodeRef first = NULL;
+    LeptrisNodeRef last = NULL;
+    for (LeptrisNodeRef c = leptris_elem_first_child(source); c;
+         c = leptris_node_get_next_sibling(c)) {
+        int ty = leptris_node_get_type(c);
+        LeptrisNodeRef cc = NULL;
+        if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
+            cc = (LeptrisNodeRef)copy_subtree_detached((LeptrisElement)c,
+                                                       copy, pool);
+        } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+            LeptrisTextNode* t = (LeptrisTextNode*)c;
+            cc = (LeptrisNodeRef)leptris_text_create(t->content,
+                                                     t->content_len, pool);
+            if (cc) leptris_textnode_set_parent((LeptrisTextNode*)cc, copy);
+        } else if (ty == LEPTRIS_NODE_TYPE_CDATA) {
+            LeptrisCDATANode* cd = (LeptrisCDATANode*)c;
+            cc = (LeptrisNodeRef)leptris_cdata_create(
+                cd->content, cd->content ? strlen(cd->content) : 0, pool);
+            if (cc) leptris_cdata_set_parent((LeptrisCDATANode*)cc, copy);
+        } else if (ty == LEPTRIS_NODE_TYPE_COMMENT) {
+            LeptrisCommentNode* cm = (LeptrisCommentNode*)c;
+            cc = (LeptrisNodeRef)leptris_comment_create(
+                cm->content, cm->content ? strlen(cm->content) : 0, pool);
+            if (cc)
+                leptris_comment_set_parent((LeptrisCommentNode*)cc, copy);
+        } else if (ty == LEPTRIS_NODE_TYPE_PI) {
+            LeptrisPINode* pi = (LeptrisPINode*)c;
+            cc = (LeptrisNodeRef)leptris_pi_create(
+                pi->target, pi->target ? strlen(pi->target) : 0,
+                pi->data ? pi->data : "",
+                pi->data ? strlen(pi->data) : 0, pool);
+            if (cc) leptris_pi_set_parent((LeptrisPINode*)cc, copy);
+        }
+        if (!cc) continue;
+        if (!first) {
+            first = cc;
+        } else {
+            leptris_node_set_next_sibling(last, cc);
+        }
+        last = cc;
+    }
+    leptris_elem_set_first_child(copy, first);
+    leptris_elem_set_last_child(copy, last);
+    /* Issue #213 semantics: child_count counts ELEMENT children. */
+    copy->child_count = source->child_count;
+    return copy;
+}
+
 /* Issue #148 Phase 1: detached deep copy.
  *
- * Extracts the "copy subtree into dest pool" core from
- * leptris_element_append_copy_bulk. Returns a copy with no parent
- * reference; the caller is responsible for attaching it.
- *
- * The subtree is copied recursively (elements, text, comment,
- * cdata, pi, attributes, namespace declarations). All allocations
- * come from dest_doc->pool so a single leptris_document_free
- * releases them. */
+ * Copies the subtree into dest_doc's pool (one register of the copy
+ * root keeps document resolution working while detached) and
+ * returns it with no parent — the caller attaches it. All node
+ * kinds, attributes, and namespace declarations survive (issues
+ * #696/#721); leptris_document_free on dest_doc releases
+ * everything. */
 LEPTRIS_API LeptrisElement leptris_element_copy(LeptrisElement src,
                                               LeptrisDocument dest_doc) {
     if (!src || !dest_doc) return NULL;
@@ -1826,24 +1917,13 @@ LEPTRIS_API LeptrisElement leptris_element_copy(LeptrisElement src,
     /* Trigger lazy promote on dest so the pool is initialized. */
     leptris_document_ensure_promoted(dest_doc);
 
-    /* Strategy: build the copy in a temporary root, then unlink.
-     * The temporary is itself a pool-allocated element we never
-     * expose; leptris_document_free will reclaim it. The
-     * leptris_element_append_copy path is the well-tested deep-copy
-     * route (handles cross-doc name/attr pool duplication, namespace
-     * declarations, mixed-content children). Using it directly
-     * avoids re-implementing the recursive walk. */
-    LeptrisElement tmp_parent = leptris_element_create(dest_doc, "__copy_root__");
-    if (!tmp_parent) return NULL;
+    LeptrisElement copy =
+        copy_subtree_detached(src, NULL, dest_doc->pool);
+    if (!copy) return NULL;
 
-    LeptrisElement copy = leptris_element_append_copy(tmp_parent, src);
-    if (!copy) {
-        /* Pool owns tmp_parent; nothing to free here. */
-        return NULL;
-    }
-
-    /* Detach from tmp_parent so the caller owns the result. */
-    leptris_node_unlink(leptris_element_as_node(copy));
+    /* Pool-named copies carry no name backpointer — one root-map
+     * registration keeps the detached tree resolving to dest_doc. */
+    leptris_root_doc_register(copy, dest_doc);
     return copy;
 }
 
