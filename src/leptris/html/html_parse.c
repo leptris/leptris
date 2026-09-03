@@ -5,9 +5,9 @@
  * follow libxml2's HTMLparser as Nokogiri exposes it: implied end
  * tags (p/li/td/tr/th/dt/dd/option/...), void elements, raw-text
  * script/style, minimized + unquoted attributes, case-insensitive
- * tag/attribute names, HTML named entities. No synthesized
- * <html>/<head>/<body> and no implied <tbody> (fragment shape,
- * like Nokogiri::HTML::DocumentFragment).
+ * tag/attribute names, HTML named entities. With no explicit
+ * <html>, the Nokogiri document shape is synthesized: <html><body>
+ * (no <head> unless head content arrives; no implied <tbody>).
  *
  * The tokenizer never fails: malformed input degrades to text or
  * is dropped, and the builder closes open elements at EOF. */
@@ -2512,7 +2512,9 @@ LEPTRIS_API LeptrisDocument leptris_parse_html_string(
             if (vs) {
                 aval = h_decode(b.pool, vs, vs + vlen);
             } else {
-                aval = aname;   /* minimized */
+                /* Minimized (boolean) attribute: value is the EMPTY
+                 * string (html5lib/Nokogiri DOM: checked=""). */
+                aval = (char*)"";
             }
             if (aval)
                 leptris_element_add_attribute(
@@ -2595,9 +2597,8 @@ done:
         b.top_head = NULL;
         b.top_tail = NULL;
         LeptrisElement html = h_open_named(&b, "html", 0);
-        LeptrisElement head = h_new_child(&b, html, "head");
         LeptrisElement body = h_new_child(&b, html, "body");
-        if (!html || !head || !body) {
+        if (!html || !body) {
             if (status) *status = LEPTRIS_ERROR_MEMORY;
             leptris_document_free(doc);
             return NULL;

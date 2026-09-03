@@ -28,10 +28,10 @@ std::string Html(const char* in) {
         r = r.substr(rest);
     }
     /* The parser synthesizes the Nokogiri document shape
-     * <html><head/><body>...</body></html>; the specs below pin
-     * the BODY content (the tolerant-parsing behaviors under
-     * test). The wrapper itself has its own spec. */
-    const char* open_w = "<html><head/><body>";
+     * <html><body>...</body></html> (no empty <head> — Nokogiri
+     * omits it without head content); the specs below pin the BODY
+     * content (the tolerant-parsing behaviors under test). */
+    const char* open_w = "<html><body>";
     const char* close_w = "</body></html>";
     if (r.compare(0, std::strlen(open_w), open_w) == 0 &&
         r.size() >= std::strlen(open_w) + std::strlen(close_w) &&
@@ -52,16 +52,16 @@ TEST(HtmlParse, SynthesizesNokogiriDocumentShape) {
     LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
     EXPECT_STREQ(leptris_element_name(root), "html");
-    EXPECT_EQ(leptris_element_child_count(root), 2u);
-    LeptrisElement head = leptris_document_root(doc) == nullptr
-                              ? nullptr
-                              : (LeptrisElement)leptris_node_first_child(
-                                    (LeptrisNodeRef)root);
-    ASSERT_NE(head, nullptr);
-    EXPECT_STREQ(leptris_element_name(head), "head");
+    /* Nokogiri shape: html > body only (no empty head). */
+    EXPECT_EQ(leptris_element_child_count(root), 1u);
+    LeptrisElement body = (LeptrisElement)leptris_node_first_child(
+        (LeptrisNodeRef)root);
+    ASSERT_NE(body, nullptr);
+    EXPECT_STREQ(leptris_element_name(body), "body");
     char* out = leptris_document_serialize(doc, nullptr);
     ASSERT_NE(out, nullptr);
-    EXPECT_TRUE(std::strstr(out, "<body><p>x</p></body>") != nullptr);
+    EXPECT_TRUE(std::strstr(out, "<html><body><p>x</p></body></html>") !=
+                nullptr);
     leptris_free_string(out);
     leptris_document_free(doc);
 }
@@ -108,15 +108,16 @@ TEST(HtmlParse, NamesAndAttributesLowercased) {
 }
 
 TEST(HtmlParse, MinimizedAndUnquotedAttributes) {
-    /* Boolean attribute: value defaults to the name. */
+    /* Boolean attribute: value is the EMPTY string (the
+     * html5lib/Nokogiri DOM stores checked=""). */
     EXPECT_EQ(Html("<input type=checkbox checked>"),
-              "<input type=\"checkbox\" checked=\"checked\"/>");
+              "<input type=\"checkbox\" checked=\"\"/>");
     /* Unquoted values end at whitespace (HTML5 §13.2.5.43): the
      * remainder is a NEW minimized attribute, exactly as libxml2. */
     EXPECT_EQ(Html("<a href=/x>y</a>"),
               "<a href=\"/x\">y</a>");
     EXPECT_EQ(Html("<a href=/x y.html>t</a>"),
-              "<a href=\"/x\" y.html=\"y.html\">t</a>");
+              "<a href=\"/x\" y.html=\"\">t</a>");
 }
 
 TEST(HtmlParse, ScriptAndStyleAreRawText) {
