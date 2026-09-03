@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.68] - 2026-09-03
+
+### Fixed
+
+- XQuery grammar gaps from first binding contact (#790)
+
+
+
 ## [1.9.67] - 2026-09-03
 
 ### Added
