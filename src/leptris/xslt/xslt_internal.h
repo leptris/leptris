@@ -205,6 +205,9 @@ typedef struct xslt_instr {
                                        template-parameter semantics
                                        (§11.6): default applies only when
                                        no with-param binds the name. */
+    int select_is_dot;              /* VALUE_OF @select is exactly "."
+                                       — the string-value fast path
+                                       skips the eval machinery (#682). */
 
     /* TEXT (3.0 §10.4.2): the text carries {expr} value templates —
      * expand at execution (sheet-level expand-text="yes"). */
@@ -654,6 +657,17 @@ typedef struct xslt_exec {
      * pointing into one of these documents. Freed by
      * xslt_exec_free. */
     void* rtf_chain;
+
+    /* Fragment-output tails (#682): fragment-level appends (no
+     * pending parent) chain after the result root's sibling tail,
+     * or onto the pre-root frag list — walking to that tail per
+     * append is O(N) and a text-heavy fragment made the whole
+     * transform O(N²) (~1.4 s for 50k value-of texts). Both tails
+     * are cached here; the root-sibling entry self-validates via
+     * next_sibling == NULL (result chains are append-only), the
+     * frag-list tail is exact by construction. */
+    LeptrisNodeRef root_sib_tail;
+    void* frag_tail;
 } XsltExec;
 
 /* xslt_exec.c — public transform entry. */

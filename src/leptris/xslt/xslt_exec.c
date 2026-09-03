@@ -272,14 +272,21 @@ static LeptrisElement out_place_elem(XsltExec* ex, LeptrisElement parent,
         LeptrisElement root = leptris_document_root(ex->result);
         if (!root) {
             leptris_document_set_root(ex->result, e);
+            ex->root_sib_tail = NULL;   /* new chain: root is the head */
         } else {
-            LeptrisElement last = root;
-            while (leptris_node_get_next_sibling(
-                       leptris_element_as_node(last)))
-                last = (LeptrisElement)leptris_node_get_next_sibling(
-                    leptris_element_as_node(last));
+            /* Cached tail (append-only chain; NULL-next validates);
+             * stale entries rewalk from the root. */
+            LeptrisElement last = (LeptrisElement)ex->root_sib_tail;
+            if (!last ||
+                leptris_node_get_next_sibling(
+                    leptris_element_as_node(last)))
+                for (last = root; leptris_node_get_next_sibling(
+                          leptris_element_as_node(last));
+                     last = (LeptrisElement)leptris_node_get_next_sibling(
+                         leptris_element_as_node(last))) {}
             leptris_node_set_next_sibling(
                 leptris_element_as_node(last), leptris_element_as_node(e));
+            ex->root_sib_tail = (LeptrisNodeRef)e;
         }
     } else {
         leptris_element_append_child(parent, e);
@@ -900,17 +907,25 @@ static char* escape_fragment_text(const char* t, int doe) {
 
 /* Fragment-level node (comment/PI with no pending parent): chain as
  * a child of the current result root when one exists, else hold on
- * the frag list until an element anchors the chain. */
+ * the frag list until an element anchors the chain. Both chains
+ * append at the CACHED tail — the per-append tail walk was O(N)
+ * (#682). */
 static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n) {
     LeptrisElement root = leptris_document_root(ex->result);
     if (root) {
         /* Chain AFTER the root's sibling tail — the same layout
          * out_append_elem uses for multiple top-level elements, so
-         * serialization walks one chain for every node kind. */
-        LeptrisNodeRef last = leptris_element_as_node(root);
-        while (leptris_node_get_next_sibling(last))
-            last = leptris_node_get_next_sibling(last);
+         * serialization walks one chain for every node kind. The
+         * cached tail is valid while its next is NULL (result
+         * chains are append-only); a stale entry falls back to the
+         * walk. */
+        LeptrisNodeRef last = ex->root_sib_tail;
+        if (!last || leptris_node_get_next_sibling(last))
+            for (last = leptris_element_as_node(root);
+                 leptris_node_get_next_sibling(last);
+                 last = leptris_node_get_next_sibling(last)) {}
         leptris_node_set_next_sibling(last, n);
+        ex->root_sib_tail = n;
         return;
     }
     XsltFragNode* fn = (XsltFragNode*)calloc(1, sizeof(*fn));
@@ -919,10 +934,12 @@ static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n) {
     if (!ex->frag_nodes) {
         ex->frag_nodes = fn;
     } else {
-        XsltFragNode* t = (XsltFragNode*)ex->frag_nodes;
-        while (t->next) t = t->next;
+        XsltFragNode* t = (XsltFragNode*)ex->frag_tail;
+        if (!t)
+            for (t = (XsltFragNode*)ex->frag_nodes; t->next; t = t->next) {}
         t->next = fn;
     }
+    ex->frag_tail = fn;
 }
 
 static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
@@ -1065,10 +1082,21 @@ static int op_sequence(XsltExec* ex, const XsltInstr* in,
 
 static int op_value_of(XsltExec* ex, const XsltInstr* in,
                        LeptrisElement node) {
-    struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
-    if (!r) return 0;
-    char* sv = value_of_string(ex, r);
-    leptris_xpath_result_free(r);
+    /* select="." (parse-time flag): the string-value of the context
+     * node, directly — the eval machinery would build a single-node
+     * nodeset, a result wrapper and a conversion string per call
+     * (#682; get_node_text IS the string-value for every node
+     * kind, markers stripped). */
+    char* sv = NULL;
+    if (in->select_is_dot) {
+        extern char* get_node_text(void* n);
+        sv = get_node_text(node);
+    } else {
+        struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
+        if (!r) return 0;
+        sv = value_of_string(ex, r);
+        leptris_xpath_result_free(r);
+    }
     if (sv) {
         op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT, .text = sv,
                                   .doe = in->doe },
