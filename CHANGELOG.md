@@ -4,7 +4,22 @@
 
 ### Added
 
-- positional for, document{}, and real try/catch (#692 fix)
+- **Positional `for`, `document {}`, real `try/catch`**
+  (TODO.xslt-full/11 slice C + first 12 piece; #684, #692).
+  `for $x at $i in ...` binds the 1-based position through the
+  tuple snapshot/rebind cycle. `document { content }` serializes
+  its children with no wrapper tag (Saxon; `value {}` stays out —
+  Saxon-HE rejects it too). `try { E } catch TEST { E }+` — the
+  #692 silent-wrong case (try/catch used to evaluate to empty
+  with no error) — now runs the first matching catch: `catch *`
+  catches everything with `$err:code`/`$err:description`/`$err:value`
+  bound from the context diagnostic and the error channel cleared;
+  named tests never match (no error-code model yet — the error
+  propagates, pinned by spec). XPath 3.0 defines try/catch, so the
+  XSLT-side rejection pin flipped to acceptance. En route: the
+  tuple-snapshot arrays size 2n (var + pos var) — sized n, ASAN
+  caught an 8-byte overflow macOS ctest alone would have missed.
+  Specs: `XQueryCore` (14); Saxon-HE 12.7 oracle.
 
 
 
