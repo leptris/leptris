@@ -207,6 +207,12 @@ endif()
 # ----------------------------------------------------------------------------
 leptris_add_benchmark(bench_serialize        serialization/bench_leptris_serialize.c)
 leptris_add_benchmark(bench_modify_leptris    modification/bench_leptris_modify.c)
+
+# XSLT release scorecard (TODO.xslt-full/13, #682): the transform
+# fixtures the perf lane gates on — best-of protocol, never mean.
+leptris_add_benchmark(bench_xslt_dispatch     xslt/bench_dispatch.c)
+leptris_add_benchmark(bench_xslt_valueof      xslt/bench_valueof.c)
+leptris_add_benchmark(bench_xslt_subtree_copy xslt/bench_subtree_copy.c)
 # bench_node_creation.c uses the deprecated _fast node-create variants that
 # TODO 18 collapsed into a single entry point; rewrite before re-enabling.
 
