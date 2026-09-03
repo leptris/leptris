@@ -196,7 +196,9 @@ TEST(CliParse, RejectsDeepNesting) {
 /* Windows cmd.exe does not honor the helper's single-quote
  * wrapping, so spaced expressions ride a query FILE instead. */
 static std::string write_xq_file(const char* query) {
-    std::string path = "/tmp/leptris_xq_query";
+    /* Relative to cwd (the build dir): /tmp does not exist on
+     * Windows runners. */
+    std::string path = "leptris_xq_query.tmp";
     FILE* fp = std::fopen(path.c_str(), "wb");
     if (fp) {
         std::fwrite(query, 1, std::strlen(query), fp);
