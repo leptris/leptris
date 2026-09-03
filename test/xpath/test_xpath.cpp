@@ -47,6 +47,32 @@ TEST(XPathFunctions, CountReturnsNodeSetSize) {
     leptris_document_free(doc);
 }
 
+/* Lane 07 tail (#692-B): function items report a distinct public
+ * result type at the boundary — closures and named references. */
+TEST(XPathResultTypes, FunctionItemsReportFunctionType) {
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r =
+        leptris_xpath_eval(doc, nullptr, "concat#2");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_FUNCTION);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval(doc, nullptr, "function($x){ $x + 1 }");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_FUNCTION);
+    leptris_xpath_result_free(r);
+
+    /* Sanity: ordinary results are unaffected. */
+    r = leptris_xpath_eval(doc, nullptr, "//book");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_NODESET);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
 /* XPath 1.0 §4.3 lang(): the NEAREST xml:lang declaration decides —
  * a closer non-matching declaration is not walked past (libxslt
  * bug-142: a ja span inside a fr root must not match lang('fr') via

@@ -59,7 +59,12 @@ typedef enum {
     LEPTRIS_XPATH_NODESET,
     LEPTRIS_XPATH_BOOLEAN,
     LEPTRIS_XPATH_NUMBER,
-    LEPTRIS_XPATH_STRING
+    LEPTRIS_XPATH_STRING,
+    /* XPath 3.0 function item: a closure or named function
+     * reference. Internally carried as a single-member synthetic
+     * nodeset; classified at this public boundary. Appended —
+     * existing values keep their ABI numbers. */
+    LEPTRIS_XPATH_FUNCTION
 } LeptrisXPathResultType;
 
 /* ============================================================================
