@@ -540,6 +540,30 @@ LeptrisStatus leptris_element_set_name(LeptrisElement elem, const char* name) {
         elem->name = leptris_strdup(name);
     }
     if (!elem->name) return LEPTRIS_ERROR_MEMORY;
+    /* #817: keep the prefix cache coherent with the new name — an
+     * UNQUALIFIED rename must not let the serializer resurrect the
+     * old prefix (p:child renamed to child emitted p:child). A
+     * qualified rename adopts the lexical prefix; its URI stays
+     * whatever is in scope (set_namespace rebinds explicitly). */
+    {
+        const char* colon = strchr(elem->name, ':');
+        LeptrisMemoryPool* npool = leptris_element_get_pool(elem);
+        if (colon && colon > elem->name) {
+            size_t pl = (size_t)(colon - elem->name);
+            char* pfx = (char*)leptris_pool_alloc(
+                npool, pl + 1);
+            if (pfx) {
+                memcpy(pfx, elem->name, pl);
+                pfx[pl] = 0;
+                leptris_elem_set_prefix(elem, pfx, npool);
+                /* Name storage is the LOCAL part; slide past the
+                 * prefix. */
+                elem->name = (char*)colon + 1;
+            }
+        } else {
+            leptris_elem_set_prefix(elem, NULL, npool);
+        }
+    }
     elem->name_hash = leptris_name_hash_compute(elem->name);
     elem->name_len = (uint8_t)(strlen(elem->name) > 254
                                    ? 0xFF : strlen(elem->name));
