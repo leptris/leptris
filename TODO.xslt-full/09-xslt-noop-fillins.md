@@ -18,3 +18,18 @@ error (never silent). Items:
   param chaining re-check, xsl:evaluate with-params
 - xsl:where-populated / xsl:on-non-empty
 Gate: Xslt30.* spec per item (Saxon-probed) + suite green.
+
+## Status 2026-09-03 — CLOSED (re-audit after v1.9.75)
+
+Every listed item ships with an Xslt30 spec (Saxon-probed):
+sequence/perform-sort/next-match/merge/fork/result-document/
+where-populated/on-non-empty (batches B-E, v1.9.2x), @default/
+copy-@select/xsl:namespace/xsl:document/on-completion (batch C,
+#729-#732 family), @start-at, xsl:map+map-entry (08B), composite
+keys (#720), next-iteration chaining + evaluate with-params (batch
+D), xsl:assert, shadow attributes, accumulator. The 2026-09-03
+re-audit added xsl:global-context-item acceptance (no-op by
+construction — the transform always carries the source doc).
+Remaining OUT (tracked elsewhere): xsl:use-package/packaging
+(roadmap v3.1 packages, non-blocking), streaming (explicit
+non-goal). Issues #690/#685 close on this evidence.
