@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.64] - 2026-09-03
+
+### Added
+
+- XQuery 1.0 core — prolog + FLWOR over the XPath engine (#684-A)
+
+### Fixed
+
+- xquery eval frees the scratch variable set (Linux LSan)
+
+
+
 ## [1.9.63] - 2026-09-03
 
 ### Added
