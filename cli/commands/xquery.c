@@ -176,12 +176,13 @@ static void xquery_print_help(void) {
     printf("  -e EXPR   inline query expression\n");
 }
 
+static cli_command_t xquery_command = {
+    .name = "xquery",
+    .description = "Execute an XQuery 1.0 query",
+    .execute = xquery_run,
+    .print_help = xquery_print_help
+};
+
 cli_command_t* cli_command_xquery(void) {
-    cli_command_t* cmd = malloc(sizeof(cli_command_t));
-    if (!cmd) return NULL;
-    cmd->name = "xquery";
-    cmd->description = "Execute an XQuery 1.0 query";
-    cmd->execute = xquery_run;
-    cmd->print_help = xquery_print_help;
-    return cmd;
+    return &xquery_command;
 }
