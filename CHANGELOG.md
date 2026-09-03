@@ -4,16 +4,43 @@
 
 ### Added
 
-- #817 - leptris_element_set_namespace + coherent rename prefixes (dom)
-- accept xsl:global-context-item declaration (#690 audit) (xslt)
-- conformance tail - empty ctors, version decl, splice ctor rewriting (#684) (xquery)
+- **`leptris_element_set_namespace`** (#817): the setter
+  counterpart of `leptris_element_namespace` (Nokogiri
+  `node.namespace=` parity) — NULL detaches (prefix + link clear,
+  an `xmlns=""` undeclaration blocks in-scope defaults), a URI
+  rebinds to its in-scope declaration. `set_name` now keeps the
+  prefix cache coherent (unqualified renames no longer resurrect
+  the old prefix at serialization), and `xmlns=""` resolves to
+  no-namespace (NULL) in the getter.
+- **XQuery conformance tail** (#684 audit): empty computed
+  constructors (`element/attribute/text/document NAME? { }`),
+  the `xquery version` declaration (+encoding), and splice ctor
+  rewriting — expression text stays verbatim while direct
+  constructors inside it (function arguments, nested braces)
+  translate to their computed forms. Also accepts
+  `xsl:global-context-item` (#690 audit; a no-op by
+  construction).
 
 ### Fixed
 
-- #815 - uninitialized raw bit emitted verbatim text (parser)
-- #814 - where-filtered items vanish instead of empty strings (xquery)
-- #813 - Nokogiri parity for minimized attrs and the wrapper (html)
-- #812 — detached copier dropped descendant-scoped xmlns declarations (dom)
+- **#815 (critical): intermittent verbatim text.** The parser's
+  text-node carve skipped one initialization — `base.raw` on a
+  dirty recycled pool page landed set on ~5-7% of parses under
+  allocation churn, and the serializer then emitted that node's
+  text VERBATIM (raw `<`, invalid output). Reproduced with the
+  reporter's harness (3/100); 0/100 after the one-line fix.
+- **#812: detached copier dropped descendant-scoped xmlns
+  declarations** (v1.9.74 regression): the attach path re-resolved
+  the pool through the document chain, which fails on the
+  unregistered mid-construction copy — declarations now link
+  through the threaded pool. Copy perf holds (0.042 ms per
+  100-book subtree).
+- **#813: HTML parse Nokogiri parity** — minimized attributes
+  carry the empty string (`checked=""`), no empty `<head/>` in
+  the synthesized wrapper, header docs match behavior.
+- **#814: where-filtered FLWOR items** in function-argument
+  position became empty strings — an empty sequence now
+  contributes nothing (Saxon semantics); `''` results still do.
 
 
 
