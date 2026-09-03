@@ -4,8 +4,20 @@
 
 ### Added
 
-- XPath 2.0 ledger — quantified expressions, node comparisons, set algebra, (), ends-with, deep-equal (xpath)
-
+- **XPath 2.0 ledger** (#684 dependency list — XQuery 1.0 embeds
+  XPath 2.0, so these were the conformance blockers): quantified
+  expressions `some`/`every $v in E (, $w in F) satisfies T`
+  (cartesian bindings, short-circuiting, vacuous `every` on empty
+  domains); node comparisons `is`, `<<`, `>>` on the first node of
+  each operand with document order from the shared rank table; set
+  algebra `intersect`/`except` binding tighter than `|`; the
+  empty-sequence literal `()` (also repairs the latent
+  where-desugar else-arm evaluating to an eval failure); and
+  `fn:ends-with` plus `fn:deep-equal` (structural node comparison
+  — kind, name, unordered attribute set, deep content, numeric
+  members via the type marker). New ops route through the AST
+  interpreter (VM fast paths can follow). 6 new `XPath20Ledger`
+  specs, all watched RED first.
 
 
 ## [1.9.72] - 2026-09-03
