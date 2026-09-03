@@ -617,6 +617,11 @@ typedef struct xpath_context {
      * Standard handlers ignore the slot. */
     void* current_fn_user_data;
 
+    /* Dynamic error code (XQuery try/catch, TODO 12): the last
+     * error's QName local part (e.g. "FODC0002"); empty when the
+     * failing path had no code. Named catches match it. */
+    char error_code[32];
+
     /* The registry came from the document's cached_fn_registry —
      * context cleanup must NOT free it (the document owns it). */
     int registry_borrowed;
@@ -715,7 +720,11 @@ typedef enum {
      * joined by '\x01' ("*" catches all), children[0] = try body,
      * children[1..] = catch bodies in order. */
     XPATH_OP_DOCUMENT_CTOR,
-    XPATH_OP_TRY
+    XPATH_OP_TRY,
+    /* XQuery 3.0 typeswitch: value = case SequenceTypes joined
+     * by '\x01' (a trailing empty entry = the default arm),
+     * children = [operand, ret1, ret2, ..., defaultRet]. */
+    XPATH_OP_TYPESWITCH
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope
