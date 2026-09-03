@@ -2164,9 +2164,10 @@ static void xq_translate_content(const char* s, const char* e, Buf* out) {
             const char* gap = w;
             while (gap < e && isspace((unsigned char)*gap)) gap++;
             if (w < e && gap < e && *gap == '{' &&
-                ((size_t)(w - p) == 8 &&
-                     strncmp(p, "document", 8) == 0 ||
-                 (size_t)(w - p) == 4 && strncmp(p, "text", 4) == 0)) {
+                (((size_t)(w - p) == 8 &&
+                  strncmp(p, "document", 8) == 0) ||
+                 ((size_t)(w - p) == 4 &&
+                  strncmp(p, "text", 4) == 0))) {
                 if (p > ts && !xq_ws_only(ts, (size_t)(p - ts))) {
                     if (out->len) buf_str(out, ", ");
                     buf_str(out, "text { ");
