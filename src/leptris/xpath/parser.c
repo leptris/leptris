@@ -1089,6 +1089,114 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             advance_token(parser);
             return parse_postfix_ops(parser, dc);
         }
+        /* XQuery 3.0 typeswitch (#692/12): typeswitch (E)
+         * case T1 return R1 case T2 return R2 ... default return
+         * RD. Dispatch reuses the instance-of classifier. */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 next && next->type == TOK_LPAREN &&
+                 current_token(parser)->value_len == 10 &&
+                 memcmp(current_token(parser)->value, "typeswitch", 10) == 0) {
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* operand = parse_expr(parser);
+            if (!operand) return NULL;
+            if (!current_token_is(parser, TOK_RPAREN)) {
+                ast_node_free(operand);
+                return NULL;
+            }
+            advance_token(parser);
+            XPathASTNode* ts = ast_node_new(XPATH_AST_OPERATOR);
+            if (!ts) { ast_node_free(operand); return NULL; }
+            ts->number_value = (double)XPATH_OP_TYPESWITCH;
+            ast_node_add_child(ts, operand);
+            char types[512];
+            size_t ty = 0;
+            types[0] = 0;
+            for (;;) {
+                XPathToken* t = current_token(parser);
+                int is_default = 0;
+                if (t && t->type == TOK_NCNAME && t->value_len == 7 &&
+                    memcmp(t->value, "default", 7) == 0) {
+                    is_default = 1;
+                    advance_token(parser);
+                } else if (t && t->type == TOK_NCNAME &&
+                           t->value_len == 4 &&
+                           memcmp(t->value, "case", 4) == 0) {
+                    advance_token(parser);
+                    /* SequenceType name (+ occurrence ignored) */
+                    char tn[96];
+                    size_t tnl = 0;
+                    tn[0] = 0;
+                    for (;;) {
+                        XPathToken* nt = current_token(parser);
+                        if (!nt || (nt->type != TOK_NCNAME &&
+                                    nt->type != TOK_QNAME &&
+                                    nt->type != TOK_NODE &&
+                                    nt->type != TOK_TEXT &&
+                                    nt->type != TOK_COMMENT &&
+                                    nt->type !=
+                                        TOK_PROCESSING_INSTRUCTION))
+                            break;
+                        /* `return` starts the arm, not the type */
+                        if (nt->type == TOK_NCNAME &&
+                            nt->value_len == 6 &&
+                            memcmp(nt->value, "return", 6) == 0)
+                            break;
+                        size_t cp = tnl ? 1 : 0;   /* ':' separator */
+                        if (ty + tnl + nt->value_len + cp + 2 >=
+                            sizeof(types))
+                            break;
+                        if (tnl && tnl + 1 < sizeof(tn)) tn[tnl++] = ':';
+                        if (nt->value_len < sizeof(tn) - tnl) {
+                            memcpy(tn + tnl, nt->value, nt->value_len);
+                            tnl += nt->value_len;
+                            tn[tnl] = 0;
+                        }
+                        advance_token(parser);
+                        if (current_token_is(parser, TOK_LPAREN)) {
+                            advance_token(parser);
+                            if (current_token_is(parser, TOK_RPAREN))
+                                advance_token(parser);
+                            else { ast_node_free(ts); return NULL; }
+                            if (tnl + 2 < sizeof(tn)) {
+                                tn[tnl++] = '(';
+                                tn[tnl++] = ')';
+                                tn[tnl] = 0;
+                            }
+                            break;
+                        }
+                    }
+                    if (!tnl) { ast_node_free(ts); return NULL; }
+                    if (ty) types[ty++] = '\x01';
+                    if (ty + tnl < sizeof(types)) {
+                        memcpy(types + ty, tn, tnl);
+                        ty += tnl;
+                    }
+                    types[ty] = 0;
+                } else {
+                    ast_node_free(ts);
+                    return NULL;
+                }
+                XPathToken* rt = current_token(parser);
+                if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
+                    memcmp(rt->value, "return", 6) != 0) {
+                    ast_node_free(ts);
+                    return NULL;
+                }
+                advance_token(parser);
+                XPathASTNode* ret = parse_expr(parser);
+                if (!ret) { ast_node_free(ts); return NULL; }
+                ast_node_add_child(ts, ret);
+                if (is_default) break;
+            }
+            if (ty && ty + 2 < sizeof(types)) {
+                types[ty++] = '\x01';
+                types[ty++] = '\x01';   /* empty default marker */
+                types[ty] = 0;
+            }
+            ts->value = leptris_strdup(types);
+            return parse_postfix_ops(parser, ts);
+        }
         /* XQuery 3.0 try/catch (#692): try { E } catch TEST { E }+.
          * TEST: * | err:CODE | err:* */
         else if (current_token(parser)->type == TOK_NCNAME &&

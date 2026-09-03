@@ -59,10 +59,12 @@ XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src) {
     for (size_t i = 0; i < src->count; i++) {
         void* n = src->nodes[i];
         if (n && XPATH_NODE_TYPE(n) == LEPTRIS_NODE_TEXT) {
-            char* txt = get_node_text(n);
-            size_t len = txt ? strlen(txt) : 0;
-            XPathTextNode* tn = xpath_synth_text(txt ? txt : "", len);
-            free(txt);
+            /* RAW content copy — the \x03N numeric marker is part
+             * of the internal value (get_node_text strips it for
+             * public string consumers; deep copies must not). */
+            const char* c = ((XPathTextNode*)n)->content;
+            XPathTextNode* tn =
+                xpath_synth_text(c ? c : "", c ? strlen(c) : 0);
             if (tn) xpath_nodeset_add(dst, tn);
         } else {
             xpath_nodeset_add(dst, n);
@@ -80,6 +82,67 @@ static int op_relational_cmp(XPathOperatorType op, double a, double b) {
         case XPATH_OP_GREATER_EQUAL: return a >= b;
         default: return 0;
     }
+}
+
+/* Per-member SequenceType classification — shared by
+ * `instance of` and XQuery typeswitch. */
+int xpath_result_matches_type(struct leptris_xpath_result* v,
+                              const char* base) {
+    int is_string_ty = strcmp(base, "xs:string") == 0 ||
+                       strcmp(base, "xs:anyURI") == 0 ||
+                       strncmp(base, "xs:date", 7) == 0 ||
+                       strcmp(base, "xs:time") == 0 ||
+                       strcmp(base, "xs:duration") == 0;
+    int is_bool_ty = strcmp(base, "xs:boolean") == 0;
+    int is_num_ty = !is_string_ty && !is_bool_ty &&
+                    strcmp(base, "node()") != 0 &&
+                    strcmp(base, "item()") != 0 &&
+                    strcmp(base, "element()") != 0 &&
+                    strcmp(base, "attribute()") != 0 &&
+                    strcmp(base, "text()") != 0 &&
+                    strcmp(base, "comment()") != 0 &&
+                    strcmp(base, "processing-instruction()") != 0;
+    if (v->type == XPATH_RESULT_NODESET && v->value.nodeset_value) {
+        XPathNodeSet* ns = v->value.nodeset_value;
+        for (size_t i = 0; i < ns->count; i++) {
+            void* n = ns->nodes[i];
+            int tag = n ? (int)XPATH_NODE_TYPE(n) : -1;
+            const char* mc =
+                (tag == (int)LEPTRIS_NODE_TEXT && n)
+                    ? ((XPathTextNode*)n)->content : NULL;
+            int is_num_member = mc && mc[0] == '\x03' && mc[1] == 'N';
+            if (strcmp(base, "item()") == 0) {
+                /* every member is an item */
+            } else if (strcmp(base, "node()") == 0) {
+                if (!(tag >= 0 && tag <= 7)) return 0;
+            } else if (strcmp(base, "element()") == 0) {
+                if (tag != (int)LEPTRIS_NODE_ELEMENT) return 0;
+            } else if (strcmp(base, "attribute()") == 0) {
+                if (tag != (int)LEPTRIS_NODE_ATTRIBUTE) return 0;
+            } else if (strcmp(base, "text()") == 0) {
+                if (!(tag == 1 || tag == 3)) return 0;
+            } else if (strcmp(base, "comment()") == 0) {
+                if (tag != 2) return 0;
+            } else if (strcmp(base, "processing-instruction()") == 0) {
+                if (tag != 4) return 0;
+            } else if (is_string_ty) {
+                if (!(tag == (int)LEPTRIS_NODE_TEXT && !is_num_member))
+                    return 0;
+            } else if (is_bool_ty) {
+                return 0;
+            } else if (is_num_ty) {
+                if (!is_num_member) return 0;
+            } else {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (is_string_ty) return v->type == XPATH_RESULT_STRING;
+    if (is_bool_ty) return v->type == XPATH_RESULT_BOOLEAN;
+    if (is_num_ty) return v->type == XPATH_RESULT_NUMBER;
+    if (strcmp(base, "item()") == 0) return 1;
+    return 0;   /* node kinds: a scalar is not a node */
 }
 
 /* XSD numeric lexical check: trimmed, converts whole (integer
@@ -194,10 +257,26 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 xpath_nodeset_add(one, ns->nodes[i]);
             } else {
                 char* sv = xpath_to_string(domain);
-                XPathTextNode* tn =
-                    synth_text(sv ? sv : "", sv ? strlen(sv) : 0);
-                free(sv);
-                if (tn) xpath_nodeset_add(one, tn);
+                if (domain->type == XPATH_RESULT_NUMBER && sv) {
+                    /* numeric marker — instance of / typeswitch */
+                    size_t sl = strlen(sv);
+                    char* marked = (char*)malloc(sl + 3);
+                    if (marked) {
+                        marked[0] = '\x03';
+                        marked[1] = 'N';
+                        memcpy(marked + 2, sv, sl + 1);
+                        XPathTextNode* tn =
+                            synth_text(marked, sl + 2);
+                        free(marked);
+                        if (tn) xpath_nodeset_add(one, tn);
+                    }
+                    free(sv);
+                } else {
+                    XPathTextNode* tn =
+                        synth_text(sv ? sv : "", sv ? strlen(sv) : 0);
+                    free(sv);
+                    if (tn) xpath_nodeset_add(one, tn);
+                }
             }
             xpath_variable_set_nodeset(var, one);
             if (pos_var) {
@@ -575,6 +654,37 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         return out;
     }
 
+    /* XQuery 3.0 typeswitch: children[0] = operand, then one
+     * return per case; the value's trailing empty entry marks the
+     * default arm (its return is the last child). */
+    if (op == XPATH_OP_TYPESWITCH) {
+        struct leptris_xpath_result* v =
+            evaluate_expr(ctx, ast->children[0]);
+        if (!v) return NULL;
+        const char* types = ast->value ? ast->value : "";
+        size_t case_i = 1;
+        const char* p = types;
+        for (; *p || *(p + 1); ) {
+            const char* sep = strchr(p, '\x01');
+            size_t tlen = sep ? (size_t)(sep - p) : strlen(p);
+            if (*p == '\0' || tlen == 0) break;   /* default arm */
+            char base[80];
+            if (tlen >= sizeof(base)) tlen = sizeof(base) - 1;
+            memcpy(base, p, tlen);
+            base[tlen] = 0;
+            if (xpath_result_matches_type(v, base)) {
+                xpath_result_free(v);
+                return evaluate_expr(ctx, ast->children[case_i]);
+            }
+            case_i++;
+            if (!sep) break;
+            p = sep + 1;
+        }
+        xpath_result_free(v);
+        /* default: the last child */
+        return evaluate_expr(ctx, ast->children[ast->child_count - 1]);
+    }
+
     /* XQuery 3.0 try/catch (#692): children[0] = try body,
      * children[1..] = catch bodies; value = name-tests joined by
      * '\x01'. No error-code model yet: "*" catches everything,
@@ -588,7 +698,20 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         const char* sep = strchr(tests, '\x01');
         for (size_t i = 1; i < ast->child_count; i++) {
             size_t tlen = sep ? (size_t)(sep - tests) : strlen(tests);
+            int matched = 0;
             if (tlen == 1 && tests[0] == '*') {
+                matched = 1;
+            } else {
+                /* Named test: the error code's local part. */
+                const char* colon = memchr(tests, ':', tlen);
+                size_t local_len = colon
+                    ? tlen - (size_t)(colon - tests) - 1 : tlen;
+                const char* local = colon ? colon + 1 : tests;
+                if (local_len == strlen(ctx->error_code) &&
+                    strncmp(local, ctx->error_code, local_len) == 0)
+                    matched = 1;
+            }
+            if (matched) {
                 /* Bind $err:* for the handler. */
                 XPathVariableSet* vs = (XPathVariableSet*)ctx->variable_set;
                 int created = 0;
@@ -600,8 +723,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 }
                 char numbuf[24];
                 snprintf(numbuf, sizeof(numbuf), "\x03N0");
+                char code_save[32];
+                snprintf(code_save, sizeof(code_save), "%s",
+                         ctx->error_code);
                 const char* bindings[][2] = {
-                    {"err:code", ""},
+                    {"err:code", code_save},
                     {"err:description", desc_save[0] ? desc_save : "error"},
                     {"err:value", ""},
                 };
@@ -619,6 +745,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 }
                 (void)numbuf;
                 ctx->error_msg[0] = '\0';
+                ctx->error_code[0] = '\0';
                 struct leptris_xpath_result* out =
                     evaluate_expr(ctx, ast->children[i]);
                 for (size_t b = 0; b < 3; b++)
@@ -1228,6 +1355,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                              "Cannot cast '%s' to %s",
                              v->value.string_value, base);
+                    snprintf(ctx->error_code, sizeof(ctx->error_code),
+                             "FORG0001");
                     xpath_result_free(v);
                     return NULL;
                 }

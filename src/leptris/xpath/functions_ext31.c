@@ -178,6 +178,18 @@ static struct leptris_xpath_result* fn_reverse(XPathContext* ctx,
     return out;
 }
 
+/* fn:collection() — no default collection is defined in this
+ * build: a dynamic error (Saxon FODC0002 parity), catchable. */
+static struct leptris_xpath_result* fn_collection(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)args;
+    (void)n;
+    snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+             "No default collection has been defined");
+    snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0002");
+    return NULL;
+}
+
 static struct leptris_xpath_result* fn_unordered(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
@@ -1114,6 +1126,8 @@ static struct leptris_xpath_result* fn_doc(XPathContext* ctx,
     if (!doc) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                  "doc(): cannot load document");
+        snprintf(ctx->error_code, sizeof(ctx->error_code),
+                 "FODC0002");
         return NULL;
     }
     LeptrisElement root = leptris_document_root(doc);
@@ -2704,6 +2718,8 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "reverse", fn_reverse, 1, 1);
     xpath_function_registry_register(registry, "unordered", fn_unordered, 1, 1);
     xpath_function_registry_register(registry, "doc", fn_doc, 1, 1);
+    xpath_function_registry_register(registry, "collection",
+                                     fn_collection, 0, 1);
     xpath_function_registry_register(registry, "subsequence", fn_subsequence, 2, 3);
     xpath_function_registry_register(registry, "remove", fn_remove, 2, 2);
     xpath_function_registry_register(registry, "insert-before", fn_insert_before, 3, 3);

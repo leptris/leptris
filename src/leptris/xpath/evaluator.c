@@ -132,6 +132,7 @@ void xpath_context_init(XPathContext* context,
     }
 
     context->current_fn_user_data = NULL;
+    context->error_code[0] = '\0';
     context->owned_docs = NULL;
     context->n_owned_docs = 0;
     context->cap_owned_docs = 0;

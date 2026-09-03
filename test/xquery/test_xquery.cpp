@@ -311,3 +311,51 @@ TEST(XQueryCore, SlidingWindow) {
         "1,2 2,3 3,4 4");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, Typeswitch) {
+    /* Saxon ts1/ts2: per-case type dispatch with default. */
+    LeptrisDocument doc = leptris_parse_string(
+        "<r><item>a</item><item>b</item></r>", 35, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "for $v in (42, 'str', //item)"
+        " return typeswitch ($v)"
+        " case xs:integer return 'int'"
+        " case xs:string return 'string'"
+        " case element() return 'element'"
+        " default return 'other'"),
+        "int string element element");
+    EXPECT_EQ(seq_string(doc,
+        "typeswitch (//item[1]) case node() return 'node'"
+        " default return 'no'"),
+        "node");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, NamedCatchWithErrorCode) {
+    /* Saxon c1: err:FODC0002 matches a doc() failure. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "try { doc('no-file.xml') } catch err:FODC0002 { 'FODC' }"
+        " catch * { 'ANY' }"),
+        "FODC");
+    /* Wrong code: falls to catch *. */
+    EXPECT_EQ(seq_string(doc,
+        "try { doc('no-file.xml') } catch err:XPST0008 { 'WRONG' }"
+        " catch * { 'ANY' }"),
+        "ANY");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, CollectionRequiresCatalog) {
+    /* Saxon: no default collection defined — a dynamic error. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "try { count(collection()) }"
+                              " catch err:FODC0002 { 'nocoll' }"),
+        "nocoll");
+    leptris_document_free(doc);
+}
