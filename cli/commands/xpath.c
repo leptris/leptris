@@ -294,6 +294,9 @@ static cli_result_t xpath_execute(int argc, char** argv) {
             case LEPTRIS_XPATH_NODESET:
                 result_type = "nodeset";
                 break;
+            case LEPTRIS_XPATH_FUNCTION:
+                result_type = "function";
+                break;
             case LEPTRIS_XPATH_BOOLEAN:
                 result_type = "boolean";
                 break;
@@ -345,6 +348,7 @@ static cli_result_t xpath_execute(int argc, char** argv) {
          * gone with the internals include). */
         switch (leptris_xpath_result_type(xpath_result)) {
             case LEPTRIS_XPATH_NODESET:
+            case LEPTRIS_XPATH_FUNCTION:
                 fmt->print_nodeset(xpath_result, stdout, fmt->context);
                 break;
 

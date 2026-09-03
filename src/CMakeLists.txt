@@ -87,6 +87,10 @@ set(LEPTRIS_SOURCES
     leptris/xslt/xslt_public.c
     leptris/xslt/xslt_functions.c
 
+    # XQuery 1.0 core (TODO.xslt-full/11): orchestration over the
+    # XPath engine — prolog bindings + FLWOR tuple stream.
+    leptris/xquery/xquery.c
+
     # SAX
     leptris/sax/parser.c
     leptris/sax/pull.c

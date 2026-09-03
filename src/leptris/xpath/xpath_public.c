@@ -321,6 +321,12 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
     }
     if (tag == LEPTRIS_NODE_TEXT) {
         XPathTextNode* text = (XPathTextNode*)node;
+        /* Numeric sequence members carry a "\x03N" marker for
+         * per-member type checks — never show it to public
+         * consumers. */
+        if (text->content && text->content[0] == '\x03' &&
+            text->content[1] == 'N')
+            return text->content + 2;
         return text->content;
     }
     return NULL;
