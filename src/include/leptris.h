@@ -2174,6 +2174,28 @@ LEPTRIS_API char* leptris_c14n_canonicalize_subtree_ex(
 LEPTRIS_API LeptrisNamespace leptris_element_namespace(LeptrisElement elem);
 
 /**
+ * Set (or detach) an element's namespace (issue #817)
+ *
+ * The setter counterpart of leptris_element_namespace, matching
+ * Nokogiri's node.namespace= semantics:
+ * - NULL (or "") DETACHES: the resolved namespace link and the
+ *   name's prefix clear, and an xmlns="" undeclaration is added so
+ *   an in-scope default namespace cannot capture the now
+ *   unqualified name.
+ * - A non-empty URI REBINDS to an IN-SCOPE declaration carrying
+ *   that URI (its prefix is adopted). A URI with no in-scope
+ *   declaration returns LEPTRIS_ERROR_NOT_FOUND — this API does
+ *   not invent declarations; call
+ *   leptris_element_add_namespace_definition first.
+ *
+ * @param elem Element
+ * @param uri Namespace URI, or NULL to detach
+ * @return LEPTRIS_OK, or an error status
+ */
+LEPTRIS_API LeptrisStatus leptris_element_set_namespace(
+    LeptrisElement elem, const char* uri);
+
+/**
  * Get an element's own namespace prefix
  *
  * The prefix of the element's qualified name (e.g. "foo" in

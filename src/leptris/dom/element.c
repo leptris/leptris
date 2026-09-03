@@ -450,9 +450,13 @@ const char* leptris_element_get_namespace_uri(LeptrisElement elem) {
     char* cached = leptris_elem_ns_uri(elem);
     if (cached) return cached;
 
-    /* LAZY NAMESPACE RESOLUTION: resolve via ancestors. */
+    /* LAZY NAMESPACE RESOLUTION: resolve via ancestors. An
+     * xmlns="" UNDECLARATION resolves to the empty string — the
+     * element deliberately has NO namespace (the #817 detach and
+     * the default-ns undeclare path), not an empty-URI one. */
     const char* prefix = leptris_elem_prefix(elem);
     const char* uri = leptris_element_lookup_namespace(elem, prefix);
+    if (uri && !*uri) return NULL;
     if (uri) {
         LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
         if (pool) {

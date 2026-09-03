@@ -658,6 +658,71 @@ TEST(ElementSetName, UpdatesLengthAndKeepsDocReachable) {
     leptris_document_free(doc);
 }
 
+/* #817: set_name must keep the prefix cache coherent — renaming a
+ * prefixed element to an UNQUALIFIED name may not resurrect the
+ * prefix at serialization time; and the namespace-detach entry
+ * (leptris_element_set_namespace with NULL) clears the link so the
+ * getter reads NULL and the serializer emits the unqualified name
+ * with the xmlns="" undeclaration. */
+TEST(ElementNamespace, SetNameUnqualifiedDoesNotResurrectPrefix) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<r xmlns:p=\"urn:p\"><p:child/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement r = leptris_document_root(doc);
+    LeptrisElement el = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(r));
+    ASSERT_NE(el, nullptr);
+    EXPECT_EQ(leptris_element_set_name(el, "child"), LEPTRIS_OK);
+    char* out = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(std::strstr(out, "<child") != nullptr) << out;
+    EXPECT_TRUE(std::strstr(out, "p:child") == nullptr)
+        << "serializer resurrected the prefix after unqualify: " << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(ElementNamespace, SetNamespaceNullDetaches) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<r xmlns:p=\"urn:p\"><p:child/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement r = leptris_document_root(doc);
+    LeptrisElement el = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(r));
+    ASSERT_NE(el, nullptr);
+    EXPECT_EQ(leptris_element_set_namespace(el, nullptr), LEPTRIS_OK);
+    EXPECT_EQ(leptris_element_namespace(el), nullptr);
+    EXPECT_EQ(leptris_element_prefix(el), nullptr);
+    char* out = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(std::strstr(out, "p:child") == nullptr)
+        << "prefix survived detach: " << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(ElementNamespace, SetNamespaceRebindsToInScopePrefix) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<r xmlns:p=\"urn:p\" xmlns:q=\"urn:q\"><p:child/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement r = leptris_document_root(doc);
+    LeptrisElement el = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(r));
+    ASSERT_NE(el, nullptr);
+    EXPECT_EQ(leptris_element_set_namespace(el, "urn:q"), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_namespace(el), "urn:q");
+    EXPECT_STREQ(leptris_element_prefix(el), "q");
+    char* out = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(std::strstr(out, "q:child") != nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
 /* #812 regression guard: declarations on the copied element that
  * only DESCENDANTS use must survive leptris_element_copy (the
  * 1.9.74 detached-copier rewrite routed attach through

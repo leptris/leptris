@@ -1327,6 +1327,53 @@ LEPTRIS_API LeptrisStatus leptris_element_set_default_namespace(
     return leptris_element_add_namespace_definition(elem, NULL, href);
 }
 
+/* #817: the namespace-setter counterpart of
+ * leptris_element_namespace (Nokogiri node.namespace= parity).
+ *
+ * NULL/"" detaches: the resolved link and the name's prefix slot
+ * clear, and an xmlns="" UNDECLARATION is added so an in-scope
+ * default namespace cannot capture the now-unqualified name. A
+ * non-empty URI rebinds to an IN-SCOPE declaration carrying that
+ * URI (the prefix is adopted); a URI with no in-scope declaration
+ * is rejected — this API does not invent declarations (call
+ * add_namespace_definition first).
+ */
+LEPTRIS_API LeptrisStatus leptris_element_set_namespace(
+    LeptrisElement elem, const char* uri) {
+    if (!elem) return LEPTRIS_ERROR_NULL_ARG;
+    LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
+    if (!pool) return LEPTRIS_ERROR_INVALID_ARG;
+
+    if (!uri || !*uri) {
+        leptris_elem_set_prefix(elem, NULL, pool);
+        leptris_elem_set_ns_uri(elem, NULL, pool);
+        LeptrisStatus rc =
+            leptris_element_add_namespace_definition(elem, NULL, "");
+        if (rc == LEPTRIS_OK)
+            leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(elem));
+        return rc;
+    }
+
+    for (LeptrisElement a = elem; a;
+         a = (LeptrisElement)leptris_node_parent((LeptrisNodeRef)a)) {
+        for (int i = 0;; i++) {
+            const char* p = leptris_element_namespace_decl_prefix(a, i);
+            const char* u = leptris_element_namespace_decl_uri(a, i);
+            if (!u) break;
+            if (p && *p && strcmp(u, uri) == 0) {
+                char* pc = leptris_pool_strdup(pool, p);
+                char* uc = leptris_pool_strdup(pool, uri);
+                if (!pc || !uc) return LEPTRIS_ERROR_MEMORY;
+                leptris_elem_set_prefix(elem, pc, pool);
+                leptris_elem_set_ns_uri(elem, uc, pool);
+                leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(elem));
+                return LEPTRIS_OK;
+            }
+        }
+    }
+    return LEPTRIS_ERROR_NOT_FOUND;
+}
+
 LEPTRIS_API LeptrisStatus leptris_element_remove_namespace_definition(
     LeptrisElement elem, const char* prefix) {
     if (!elem) return LEPTRIS_ERROR_NULL_ARG;
