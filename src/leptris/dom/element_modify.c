@@ -975,6 +975,12 @@ LeptrisStatus leptris_element_remove_attribute(LeptrisElement elem, const char* 
     return LEPTRIS_ERROR_NOT_FOUND;  /* Attribute not found */
 }
 
+/* element.c: attach a namespace declaration node to the element's
+ * list (takes ownership; the pooled deep-copy path builds its own
+ * pooled declarations). */
+int leptris_element_add_namespace(struct leptris_element* elem,
+                                  struct leptris_namespace* ns);
+
 /* #721: copy an element's namespace identity — the cached prefix and
  * namespace URI (the name is stored LOCAL; the prefix is a separate
  * cache slot) plus every xmlns:* declaration. Strings are duplicated
@@ -1005,7 +1011,14 @@ static void copy_element_namespaces_pooled(LeptrisElement copy,
         const char* np = leptris_element_namespace_decl_prefix(source, i);
         const char* nu = leptris_element_namespace_decl_uri(source, i);
         if (!nu) break;
-        leptris_element_add_namespace_definition(copy, np ? np : "", nu);
+        /* Pool-owned declaration from the THREADED pool — the copy
+         * is not root-registered yet mid-recursion, so the public
+         * mutator's own get_pool would fall to its HEAP fallback
+         * and leak at document teardown (Linux LSan, PR #806). */
+        const char* norm = (np && !*np) ? NULL : np;
+        struct leptris_namespace* ns =
+            leptris_namespace_new_pooled(norm, nu, pool);
+        if (ns) leptris_element_add_namespace(copy, ns);
     }
 }
 
