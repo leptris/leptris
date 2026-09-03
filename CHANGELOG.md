@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.72] - 2026-09-03
+
+### Performance
+
+- cache fragment-output tails; value-of "." string-value fast path (xslt)
+
+
+
 ## [1.9.71] - 2026-09-03
 
 ### Performance
