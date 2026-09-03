@@ -4032,6 +4032,17 @@ TEST(Xslt30, FragmentNodesKeepOrderAcrossTailCache) {
         "onetwothree");
 }
 
+TEST(Xslt30, GlobalContextItemDeclarationAccepted) {
+    /* #690 audit: the declaration is a no-op here — the transform
+     * always carries the source document as its global context. */
+    EXPECT_EQ(body(run30(
+        "<xsl:global-context-item as='item()' use-accumulators='#all'/>"
+        "<xsl:template match='/'>[<xsl:value-of select='count(//*)'/>]"
+        "</xsl:template>",
+        "<r><a/><b/></r>")),
+        "[3]");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     /* try/catch was implemented (TODO 11/12 lane, #692): XPath 3.0
      * defines it, so this once-rejected form now evaluates. */
