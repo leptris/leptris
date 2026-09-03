@@ -39,6 +39,8 @@ static XPathASTNode* parse_postfix_ops(XPathParser* parser,
 static XPathASTNode* parse_if_expr(XPathParser* parser);
 static XPathASTNode* parse_for_expr(XPathParser* parser);
 static XPathASTNode* parse_let_expr(XPathParser* parser);
+static XPathASTNode* parse_quantified_expr(XPathParser* parser);
+static int token_starts_path(XPathToken* t);
 /* Saxon-HE rejects switch in XPath EXPRESSIONS (XPST0003 — the
  * syntax is XSLT 3.0 PATTERN-only). parse_switch_expr lands with
  * pattern support (TODO.xslt-full/06). */
@@ -646,8 +648,10 @@ static XPathASTNode* parse_relational_expr(XPathParser* parser) {
 
         /* XPath 2.0 value-comparison keywords (eq/ne/lt/le/gt/ge)
          * — XQuery window conditions use them heavily. Only bare
-         * NCNames followed by whitespace/operand qualify. */
+         * NCNames followed by whitespace/operand qualify. `is`
+         * joins the family as the node-identity comparison. */
         int kw_op = 0;
+        int kw_is = 0;
         {
             XPathToken* t = current_token(parser);
             if (t && t->type == TOK_NCNAME) {
@@ -671,8 +675,24 @@ static XPathASTNode* parse_relational_expr(XPathParser* parser) {
                          memcmp(t->value, "gt", 2) == 0 ||
                          memcmp(t->value, "ge", 2) == 0))
                         kw_op = 1;
+                    else if (t->value_len == 2 &&
+                             memcmp(t->value, "is", 2) == 0)
+                        kw_is = 1;
                 }
             }
+        }
+        /* `is` operands are node-y: accept path starts as followers
+         * (//x is //y, . is $v) beyond the scalar boundary list. */
+        if (!kw_is) {
+            XPathToken* t = current_token(parser);
+            XPathToken* nx =
+                parser->token_pos + 1 < parser->token_count
+                    ? &parser->tokens[parser->token_pos + 1]
+                    : NULL;
+            if (t && t->type == TOK_NCNAME && t->value_len == 2 &&
+                memcmp(t->value, "is", 2) == 0 &&
+                token_starts_path(nx))
+                kw_is = 1;
         }
         if (current_token_is(parser, TOK_LT)) {
             op_type = XPATH_OP_LESS;
@@ -682,6 +702,12 @@ static XPathASTNode* parse_relational_expr(XPathParser* parser) {
             op_type = XPATH_OP_GREATER;
         } else if (current_token_is(parser, TOK_GE)) {
             op_type = XPATH_OP_GREATER_EQUAL;
+        } else if (current_token_is(parser, TOK_NODE_BEFORE)) {
+            op_type = XPATH_OP_NODE_BEFORE;
+        } else if (current_token_is(parser, TOK_NODE_AFTER)) {
+            op_type = XPATH_OP_NODE_AFTER;
+        } else if (kw_is) {
+            op_type = XPATH_OP_IS;
         } else if (kw_op) {
             XPathToken* t = current_token(parser);
             if (t->value[0] == 'e' && t->value[1] == 'q')
@@ -818,13 +844,64 @@ static XPathASTNode* parse_simple_map_expr(XPathParser* parser) {
     return left;
 }
 
-static XPathASTNode* parse_union_expr(XPathParser* parser) {
+/* XPath 2.0 set algebra binds TIGHTER than '|': IntersectExceptExpr
+ * := SimpleMapExpr ( ('intersect'|'except') SimpleMapExpr )* (#684).
+ * The keywords are bare NCNames in operator position followed by a
+ * path start — after '/' they stay name tests. */
+static int token_starts_path(XPathToken* t) {
+    if (!t) return 0;
+    switch (t->type) {
+        case TOK_NCNAME: case TOK_QNAME: case TOK_DOLLAR:
+        case TOK_LPAREN: case TOK_NUMBER: case TOK_STRING:
+        case TOK_DOT: case TOK_DOUBLE_DOT: case TOK_SLASH:
+        case TOK_DOUBLE_SLASH: case TOK_AT: case TOK_STAR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static XPathASTNode* parse_intersect_except_expr(XPathParser* parser) {
     XPathASTNode* left = parse_simple_map_expr(parser);
+    if (!left) return NULL;
+
+    while (1) {
+        XPathToken* t = current_token(parser);
+        int is_intersect = 0, is_except = 0;
+        if (t && t->type == TOK_NCNAME) {
+            XPathToken* nx =
+                parser->token_pos + 1 < parser->token_count
+                    ? &parser->tokens[parser->token_pos + 1]
+                    : NULL;
+            if (token_starts_path(nx)) {
+                if (t->value_len == 9 &&
+                    memcmp(t->value, "intersect", 9) == 0)
+                    is_intersect = 1;
+                else if (t->value_len == 6 &&
+                         memcmp(t->value, "except", 6) == 0)
+                    is_except = 1;
+            }
+        }
+        if (!is_intersect && !is_except) break;
+
+        advance_token(parser);
+        XPathASTNode* right = parse_simple_map_expr(parser);
+        if (!right) { ast_node_free(left); return NULL; }
+        left = create_operator_node(
+            is_intersect ? XPATH_OP_INTERSECT : XPATH_OP_EXCEPT,
+            left, right);
+        if (!left) return NULL;
+    }
+    return left;
+}
+
+static XPathASTNode* parse_union_expr(XPathParser* parser) {
+    XPathASTNode* left = parse_intersect_except_expr(parser);
     if (!left) return NULL;
 
     while (current_token_is(parser, TOK_PIPE)) {
         advance_token(parser);
-        XPathASTNode* right = parse_simple_map_expr(parser);
+        XPathASTNode* right = parse_intersect_except_expr(parser);
         if (!right) {
             ast_node_free(left);
             return NULL;
@@ -942,14 +1019,19 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
     if (current_token_is(parser, TOK_NCNAME) || current_token_is(parser, TOK_QNAME)) {
         XPathToken* next = peek_token(parser, 1);
 
-        /* `for $v ...` / `let $v := ...` (XSLT 3.0 / XPath 3.1) —
-         * fall through to the primary's hooks before the
-         * location-path dispatch eats the keyword as a name test. */
+        /* `for $v ...` / `let $v := ...` (XSLT 3.0 / XPath 3.1) and
+         * the XPath 2.0 quantified `some`/`every $v in ...` — fall
+         * through to the primary's hooks before the location-path
+         * dispatch eats the keyword as a name test. */
         if (current_token(parser)->type == TOK_NCNAME &&
             ((current_token(parser)->value_len == 3 &&
               memcmp(current_token(parser)->value, "for", 3) == 0) ||
              (current_token(parser)->value_len == 3 &&
-              memcmp(current_token(parser)->value, "let", 3) == 0)) &&
+              memcmp(current_token(parser)->value, "let", 3) == 0) ||
+             (current_token(parser)->value_len == 4 &&
+              memcmp(current_token(parser)->value, "some", 4) == 0) ||
+             (current_token(parser)->value_len == 5 &&
+              memcmp(current_token(parser)->value, "every", 5) == 0)) &&
             next && next->type == TOK_DOLLAR) {
             /* Fall through to filter expression */
         }
@@ -1732,6 +1814,88 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
  * expression — sequences are parenthesized); each binding may
  * reference the earlier ones. The operator node carries [0..n-1]
  * = binding values, [n] = body; ->value space-joins the names. */
+/* XPath 2.0 quantified expression (#684):
+ * ("some" | "every") "$" VarName "in" ExprSingle
+ *                    ("," "$" VarName "in" ExprSingle)*
+ *                    "satisfies" ExprSingle.
+ * AST: SOME/EVERY operator whose children are the BINDING nodes
+ * followed by the test; each BINDING carries the variable name in
+ * ->value with its domain as the single child. */
+static XPathASTNode* parse_quantified_expr(XPathParser* parser) {
+    XPathToken* q = current_token(parser);
+    int is_every =
+        q->value_len == 5;   /* "some"=4, "every"=5 */
+    advance_token(parser);   /* consume some/every */
+
+    XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+    if (!node) return NULL;
+    node->number_value =
+        (double)(is_every ? XPATH_OP_EVERY : XPATH_OP_SOME);
+
+    do {
+        XPathToken* d = current_token(parser);
+        if (!d || d->type != TOK_DOLLAR) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected '$' variable in quantified expression");
+            ast_node_free(node);
+            return NULL;
+        }
+        advance_token(parser);
+        XPathToken* vt = current_token(parser);
+        if (!vt || (vt->type != TOK_NCNAME && vt->type != TOK_QNAME)) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected variable name in quantified expression");
+            ast_node_free(node);
+            return NULL;
+        }
+        char* var_name = token_to_string(vt);
+        if (!var_name) { ast_node_free(node); return NULL; }
+        advance_token(parser);
+
+        XPathToken* it = current_token(parser);
+        if (!it || it->type != TOK_NCNAME || it->value_len != 2 ||
+            memcmp(it->value, "in", 2) != 0) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected 'in' in quantified expression");
+            free(var_name);
+            ast_node_free(node);
+            return NULL;
+        }
+        advance_token(parser);
+
+        XPathASTNode* domain = parse_expr(parser);
+        if (!domain) { free(var_name); ast_node_free(node); return NULL; }
+
+        XPathASTNode* binding = ast_node_new(XPATH_AST_OPERATOR);
+        if (!binding) {
+            free(var_name);
+            ast_node_free(domain);
+            ast_node_free(node);
+            return NULL;
+        }
+        binding->number_value = (double)XPATH_OP_BINDING;
+        binding->value = var_name;
+        ast_node_add_child(binding, domain);
+        ast_node_add_child(node, binding);
+    } while (current_token_is(parser, TOK_COMMA) &&
+             (advance_token(parser), 1));
+
+    XPathToken* st = current_token(parser);
+    if (!st || st->type != TOK_NCNAME || st->value_len != 9 ||
+        memcmp(st->value, "satisfies", 9) != 0) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg),
+                 "Expected 'satisfies' in quantified expression");
+        ast_node_free(node);
+        return NULL;
+    }
+    advance_token(parser);
+
+    XPathASTNode* test = parse_expr(parser);
+    if (!test) { ast_node_free(node); return NULL; }
+    ast_node_add_child(node, test);
+    return node;
+}
+
 static XPathASTNode* parse_let_expr(XPathParser* parser) {
     advance_token(parser);   /* consume `let` */
 
@@ -1973,6 +2137,16 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
     /* Parenthesized expression */
     if (tok->type == TOK_LPAREN) {
         advance_token(parser);
+        /* XPath 2.0 empty sequence `()` — a zero-child SEQUENCE
+         * (the same shape `for ... where` desugars to). */
+        if (current_token_is(parser, TOK_RPAREN)) {
+            advance_token(parser);
+            XPathASTNode* empty =
+                ast_node_new(XPATH_AST_OPERATOR);
+            if (!empty) return NULL;
+            empty->number_value = (double)XPATH_OP_SEQUENCE;
+            return empty;
+        }
         XPathASTNode* expr = parse_expr(parser);
         if (!expr) return NULL;
 
@@ -2038,6 +2212,16 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         XPathToken* fn = peek_token(parser, 1);
         if (fn && fn->type == TOK_DOLLAR)
             return parse_for_expr(parser);
+    }
+
+    /* XPath 2.0 quantified `some`/`every $v in E satisfies T` —
+     * the $-lookahead guard keeps name tests intact (#684). */
+    if (tok->type == TOK_NCNAME &&
+        ((tok->value_len == 4 && memcmp(tok->value, "some", 4) == 0) ||
+         (tok->value_len == 5 && memcmp(tok->value, "every", 5) == 0))) {
+        XPathToken* fn = peek_token(parser, 1);
+        if (fn && fn->type == TOK_DOLLAR)
+            return parse_quantified_expr(parser);
     }
 
     /* XPath 3.1 `let $x := E return B` — same $-lookahead guard. */

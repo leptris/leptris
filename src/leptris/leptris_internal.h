@@ -732,7 +732,26 @@ typedef enum {
     /* XQuery 3.0 typeswitch: value = case SequenceTypes joined
      * by '\x01' (a trailing empty entry = the default arm),
      * children = [operand, ret1, ret2, ..., defaultRet]. */
-    XPATH_OP_TYPESWITCH
+    XPATH_OP_TYPESWITCH,
+    /* XPath 2.0 node comparisons (#684 ledger): operands evaluate
+     * to nodesets; the comparison applies to the FIRST node of
+     * each — an empty operand makes the result false. IS is
+     * identity; NODE_BEFORE/AFTER are document order. */
+    XPATH_OP_IS,
+    XPATH_OP_NODE_BEFORE,
+    XPATH_OP_NODE_AFTER,
+    /* XPath 2.0 set operations (#684): identity-based nodeset
+     * algebra, result in document order. */
+    XPATH_OP_INTERSECT,
+    XPATH_OP_EXCEPT,
+    /* XPath 2.0 quantified expressions (#684): children = binding
+     * nodes then the test. Each binding is an XPATH_OP_BINDING
+     * operator (value = variable name, children[0] = domain);
+     * SOME is true when any tuple satisfies, EVERY when all do
+     * (vacuously true on an empty domain). */
+    XPATH_OP_SOME,
+    XPATH_OP_EVERY,
+    XPATH_OP_BINDING
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope

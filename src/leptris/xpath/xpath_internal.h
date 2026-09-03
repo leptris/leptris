@@ -67,6 +67,8 @@ typedef enum {
     TOK_CONCAT, /* || — XPath 3.0 string concatenation */
     TOK_LBRACE, /* { — XPath 3.1 switch bodies */
     TOK_RBRACE, /* } */
+    TOK_NODE_BEFORE, /* << — XPath 2.0 node comparison */
+    TOK_NODE_AFTER,  /* >> — XPath 2.0 node comparison */
     TOK_VARIABLE_REFERENCE  /* Variable name after $ */
 } XPathTokenType;
 

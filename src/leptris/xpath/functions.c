@@ -10,6 +10,9 @@
 #include "../include/leptris.h"
 #include "../dom/element.h"
 #include "../dom/pi.h"
+#include "../dom/text.h"
+#include "../dom/cdata.h"
+#include "../dom/comment.h"
 #include "../common/port.h"
 #include "../dtd/model.h"   /* ttdtd_lookup_attribute (id() §4.1) */
 #include <string.h>
@@ -486,6 +489,242 @@ static struct leptris_xpath_result* xpath_func_starts_with(XPathContext* context
     if (!result) return NULL;
     result->value.boolean_value = match;
 
+    return result;
+}
+
+/* ends-with(string, string) — XPath 2.0 (#684): true when the first
+ * string's tail equals the suffix (an empty suffix always matches). */
+static struct leptris_xpath_result* xpath_func_ends_with(XPathContext* context,
+    XPathASTNode** args,
+    size_t arg_count
+) {
+    if (arg_count != 2) {
+        snprintf(context->error_msg, sizeof(context->error_msg),
+                "ends-with() requires exactly 2 arguments, got %zu", arg_count);
+        return NULL;
+    }
+
+    struct leptris_xpath_result* str_result = xpath_evaluate(context, args[0]);
+    if (!str_result) return NULL;
+
+    struct leptris_xpath_result* suffix_result = xpath_evaluate(context, args[1]);
+    if (!suffix_result) {
+        xpath_result_free(str_result);
+        return NULL;
+    }
+
+    char* str = result_to_string(str_result);
+    char* suffix = result_to_string(suffix_result);
+
+    size_t sl = strlen(str), fl = strlen(suffix);
+    int match = fl <= sl && memcmp(str + sl - fl, suffix, fl) == 0;
+
+    LEPTRIS_FREE(str);
+    LEPTRIS_FREE(suffix);
+    xpath_result_free(str_result);
+    xpath_result_free(suffix_result);
+
+    struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!result) return NULL;
+    result->value.boolean_value = match;
+
+    return result;
+}
+
+/* ---- fn:deep-equal (XPath 2.0, #684) ----
+ * Sequences are equal at equal length with pairwise-equal items:
+ * nodes compare by kind, name, unordered attribute set and deep
+ * content; atomic items compare numerically for numbers, lexically
+ * for strings/booleans; kind mismatches are false (not errors). */
+
+/* Unordered attribute-set comparison: every attribute of A must
+ * exist in B with the same value (lookup by NUL-terminated name
+ * snapshot — attribute counts match before we get here). */
+static int de_attrs_equal(LeptrisElement a, LeptrisElement b) {
+    size_t ca = leptris_element_attribute_count(a);
+    if (ca != leptris_element_attribute_count(b)) return 0;
+    for (size_t i = 0; i < ca; i++) {
+        struct leptris_attribute* aa =
+            leptris_element_get_attribute_by_index(a, (uint8_t)i);
+        if (!aa) return 0;
+        LeptrisStringView nv = leptris_attribute_name_view(aa);
+        char nbuf[256];
+        size_t nl = nv.length < sizeof(nbuf) - 1
+                        ? nv.length : sizeof(nbuf) - 1;
+        memcpy(nbuf, nv.data, nl);
+        nbuf[nl] = 0;
+        const char* bval = leptris_element_attribute(b, nbuf);
+        if (!bval) return 0;
+        LeptrisStringView av = leptris_attribute_value_view(aa);
+        size_t bl = strlen(bval);
+        if (bl != av.length ||
+            memcmp(av.data, bval, av.length) != 0)
+            return 0;
+    }
+    return 1;
+}
+
+static int de_node_equal(LeptrisNodeRef a, LeptrisNodeRef b) {
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    int ta = leptris_node_get_type(a);
+    int tb = leptris_node_get_type(b);
+    if (ta != tb) return 0;
+    switch (ta) {
+        case LEPTRIS_NODE_TYPE_ELEMENT: {
+            const char* na = leptris_element_get_name((LeptrisElement)a);
+            const char* nb = leptris_element_get_name((LeptrisElement)b);
+            if (!na || !nb || strcmp(na, nb) != 0) return 0;
+            if (!de_attrs_equal((LeptrisElement)a, (LeptrisElement)b))
+                return 0;
+            break;
+        }
+        case LEPTRIS_NODE_TYPE_TEXT:
+            return strcmp(leptris_text_get_content((LeptrisTextNode*)a),
+                          leptris_text_get_content((LeptrisTextNode*)b)) == 0;
+        case LEPTRIS_NODE_TYPE_CDATA:
+            return strcmp(((LeptrisCDATANode*)a)->content,
+                          ((LeptrisCDATANode*)b)->content) == 0;
+        case LEPTRIS_NODE_TYPE_COMMENT:
+            return strcmp(
+                       leptris_comment_get_content((LeptrisCommentNode*)a),
+                       leptris_comment_get_content((LeptrisCommentNode*)b)) == 0;
+        case LEPTRIS_NODE_TYPE_PI:
+            return strcmp(leptris_pi_get_target((LeptrisPINode*)a),
+                          leptris_pi_get_target((LeptrisPINode*)b)) == 0 &&
+                   strcmp(leptris_pi_get_data((LeptrisPINode*)a),
+                          leptris_pi_get_data((LeptrisPINode*)b)) == 0;
+        default:
+            return 0;
+    }
+    /* Element children: pairwise, in order. */
+    LeptrisNodeRef ca = leptris_node_first_child(a);
+    LeptrisNodeRef cb = leptris_node_first_child(b);
+    while (ca && cb) {
+        if (!de_node_equal(ca, cb)) return 0;
+        ca = leptris_node_next_sibling(ca);
+        cb = leptris_node_next_sibling(cb);
+    }
+    return ca == NULL && cb == NULL;
+}
+
+/* One comparable item: kind 0 = node, 1 = number, 2 = string,
+ * 3 = boolean. Synthetic sequence members carry the "\x03N" numeric
+ * marker (stripped here); other synthetic text is a string. */
+typedef struct {
+    int kind;
+    double num;
+    char* str;            /* owned for synthetic items */
+    const char* borrow;   /* document-lifetime text */
+    LeptrisNodeRef node;
+} DeItem;
+
+static void de_item_clear(DeItem* it) {
+    if (it->str) LEPTRIS_FREE(it->str);
+    it->str = NULL;
+}
+
+static int de_item_equal(DeItem* a, DeItem* b) {
+    if (a->kind != b->kind) return 0;
+    switch (a->kind) {
+        case 0: return de_node_equal(a->node, b->node);
+        case 1: return a->num == b->num;
+        case 2: {
+            const char* as = a->str ? a->str : (a->borrow ? a->borrow : "");
+            const char* bs = b->str ? b->str : (b->borrow ? b->borrow : "");
+            return strcmp(as, bs) == 0;
+        }
+        default: return a->num == b->num;   /* booleans as 0/1 */
+    }
+}
+
+/* Collect a result's items into out (cap-limited); returns count. */
+static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
+                         size_t cap) {
+    if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+        XPathNodeSet* ns = r->value.nodeset_value;
+        size_t n = ns->count < cap ? ns->count : cap;
+        for (size_t i = 0; i < n; i++) {
+            out[i].str = NULL;
+            out[i].borrow = NULL;
+            out[i].node = NULL;
+            int ty = XPATH_NODE_TYPE(ns->nodes[i]);
+            if (ty == LEPTRIS_NODE_TEXT) {
+                /* Synthetic sequence member (tag 8): content rides
+                 * the XPathTextNode struct, numeric members carry
+                 * the "\x03N" marker. */
+                const char* c = ((XPathTextNode*)ns->nodes[i])->content;
+                c = c ? c : "";
+                if (c[0] == '\x03' && c[1] == 'N') {
+                    out[i].kind = 1;
+                    out[i].num = strtod(c + 2, NULL);
+                } else {
+                    out[i].kind = 2;
+                    out[i].borrow = c;
+                }
+            } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+                out[i].kind = 2;
+                out[i].borrow = leptris_text_get_content(
+                    (LeptrisTextNode*)ns->nodes[i]);
+            } else {
+                out[i].kind = 0;
+                out[i].node = ns->nodes[i];
+            }
+        }
+        return ns->count;
+    }
+    out[0].str = NULL;
+    out[0].borrow = NULL;
+    out[0].node = NULL;
+    if (r->type == XPATH_RESULT_NUMBER) {
+        out[0].kind = 1;
+        out[0].num = r->value.number_value;
+    } else if (r->type == XPATH_RESULT_BOOLEAN) {
+        out[0].kind = 3;
+        out[0].num = r->value.boolean_value ? 1 : 0;
+    } else {
+        out[0].kind = 2;
+        out[0].str = result_to_string(r);
+    }
+    return 1;
+}
+
+/* deep-equal(arg1, arg2) - deep structural/value comparison. */
+static struct leptris_xpath_result* xpath_func_deep_equal(XPathContext* context,
+    XPathASTNode** args,
+    size_t arg_count
+) {
+    if (arg_count != 2) {
+        snprintf(context->error_msg, sizeof(context->error_msg),
+                "deep-equal() requires exactly 2 arguments, got %zu", arg_count);
+        return NULL;
+    }
+
+    struct leptris_xpath_result* a = xpath_evaluate(context, args[0]);
+    if (!a) return NULL;
+    struct leptris_xpath_result* b = xpath_evaluate(context, args[1]);
+    if (!b) {
+        xpath_result_free(a);
+        return NULL;
+    }
+
+    enum { CAP = 64 };
+    DeItem ia[CAP], ib[CAP];
+    size_t na = de_collect(a, ia, CAP);
+    size_t nb = de_collect(b, ib, CAP);
+
+    int equal = na == nb;
+    for (size_t i = 0; equal && i < na && i < CAP; i++)
+        equal = de_item_equal(&ia[i], &ib[i]);
+
+    for (size_t i = 0; i < na && i < CAP; i++) de_item_clear(&ia[i]);
+    for (size_t i = 0; i < nb && i < CAP; i++) de_item_clear(&ib[i]);
+    xpath_result_free(a);
+    xpath_result_free(b);
+
+    struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!result) return NULL;
+    result->value.boolean_value = equal;
     return result;
 }
 
@@ -2070,6 +2309,8 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "string", xpath_func_string, 0, 1);
     xpath_function_registry_register(registry, "concat", xpath_func_concat, 2, -1);
     xpath_function_registry_register(registry, "starts-with", xpath_func_starts_with, 2, 2);
+    xpath_function_registry_register(registry, "ends-with", xpath_func_ends_with, 2, 2);
+    xpath_function_registry_register(registry, "deep-equal", xpath_func_deep_equal, 2, 2);
     xpath_function_registry_register(registry, "contains", xpath_func_contains, 2, 2);
     xpath_function_registry_register(registry, "substring", xpath_func_substring, 2, 3);
     xpath_function_registry_register(registry, "substring-before", xpath_func_substring_before, 2, 2);

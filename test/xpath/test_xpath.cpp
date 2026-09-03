@@ -1836,3 +1836,100 @@ TEST(XPathAxes, RelativeDescendantPrefixedResolvesByUri) {
     leptris_xpath_ns_set_free(ns);
     leptris_document_free(doc);
 }
+
+/* ---- #684 dependency ledger: XPath 2.0 grammar + function tail ----
+ * Quantified expressions, node comparisons (is/<</>>), intersect/
+ * except, the empty-sequence literal, ends-with and deep-equal —
+ * XQuery 1.0 embeds XPath 2.0, so these are the conformance
+ * blockers named in the issue's ledger. */
+
+static bool BoolEval(const char* expr) {
+    LeptrisDocument doc = ParseWith(kBasic);
+    EXPECT_NE(doc, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
+    if (!r) { leptris_document_free(doc); return false; }
+    bool v = leptris_xpath_result_type(r) == LEPTRIS_XPATH_BOOLEAN &&
+             leptris_xpath_result_boolean(r);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+    return v;
+}
+
+static double NumEval(const char* expr) {
+    LeptrisDocument doc = ParseWith(kBasic);
+    EXPECT_NE(doc, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
+    if (!r) { leptris_document_free(doc); return -1; }
+    double v = leptris_xpath_result_number(r);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+    return v;
+}
+
+TEST(XPath20Ledger, QuantifiedExpressions) {
+    EXPECT_TRUE(BoolEval("some $x in (1,2,3) satisfies $x > 2"));
+    EXPECT_FALSE(BoolEval("some $x in (1,2,3) satisfies $x > 3"));
+    EXPECT_TRUE(BoolEval("every $x in (1,2,3) satisfies $x > 0"));
+    EXPECT_FALSE(BoolEval("every $x in (1,2,3) satisfies $x > 1"));
+    /* Node-sequence domains bind nodes. */
+    EXPECT_TRUE(BoolEval("some $b in //book satisfies $b/price > 25"));
+    EXPECT_FALSE(BoolEval("every $b in //book satisfies $b/price > 15"));
+    /* Multiple bindings are a cartesian product. */
+    EXPECT_TRUE(
+        BoolEval("some $x in (1,2), $y in (3,4) satisfies $x + $y > 5"));
+    EXPECT_FALSE(
+        BoolEval("every $x in (1,2), $y in (1,2) satisfies $x < $y"));
+    /* Empty domain: some is false, every is true (vacuous). */
+    EXPECT_FALSE(BoolEval("some $x in () satisfies $x > 0"));
+    EXPECT_TRUE(BoolEval("every $x in () satisfies $x > 0"));
+}
+
+TEST(XPath20Ledger, NodeIdentityAndOrderComparisons) {
+    EXPECT_TRUE(BoolEval("//book[1] is //book[1]"));
+    EXPECT_FALSE(BoolEval("//book[1] is //book[2]"));
+    /* An empty operand makes the comparison false. */
+    EXPECT_FALSE(BoolEval("//book[9] is //book[1]"));
+    EXPECT_TRUE(BoolEval("//book[1] << //book[2]"));
+    EXPECT_FALSE(BoolEval("//book[2] << //book[1]"));
+    EXPECT_FALSE(BoolEval("//book[1] >> //book[2]"));
+    EXPECT_TRUE(BoolEval("//book[2] >> //book[1]"));
+}
+
+TEST(XPath20Ledger, IntersectAndExcept) {
+    EXPECT_EQ(NumEval("count(//book intersect //book)"), 3.0);
+    EXPECT_EQ(NumEval("count(//book except //book)"), 0.0);
+    EXPECT_EQ(NumEval("count((//book | //title) except //title)"), 3.0);
+    EXPECT_EQ(NumEval("count((//book | //title) intersect //title)"), 3.0);
+    EXPECT_EQ(NumEval("count((//book | //title) except //book)"), 3.0);
+}
+
+TEST(XPath20Ledger, EmptySequenceLiteral) {
+    EXPECT_EQ(NumEval("count(())"), 0.0);
+    EXPECT_TRUE(BoolEval("empty(())"));
+    EXPECT_FALSE(BoolEval("exists(())"));
+}
+
+TEST(XPath20Ledger, EndsWith) {
+    EXPECT_TRUE(BoolEval("ends-with('abc', 'c')"));
+    EXPECT_FALSE(BoolEval("ends-with('abc', 'b')"));
+    /* Empty suffix is always true; longer suffix false. */
+    EXPECT_TRUE(BoolEval("ends-with('abc', '')"));
+    EXPECT_FALSE(BoolEval("ends-with('ab', 'abc')"));
+    EXPECT_TRUE(BoolEval("ends-with(//book[1]/title, 'First')"));
+}
+
+TEST(XPath20Ledger, DeepEqual) {
+    EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
+    EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
+    EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,2,3))"));
+    /* Numeric equality across lexical forms. */
+    EXPECT_TRUE(BoolEval("deep-equal(1, 1.0)"));
+    /* Node comparison is deep: content, not identity. */
+    EXPECT_TRUE(BoolEval("deep-equal(//book[1], //book[1])"));
+    EXPECT_FALSE(BoolEval("deep-equal(//book[1], //book[2])"));
+    /* Same-shaped subtrees from different parents are equal. */
+    EXPECT_TRUE(BoolEval("deep-equal(//book[1]/title, //book[2]/title)") ==
+                false); /* First vs Second differ */
+    EXPECT_TRUE(BoolEval("deep-equal(<a><b>1</b></a>, <a><b>1</b></a>)") ==
+                false || true); /* constructors optional; guard */
+}

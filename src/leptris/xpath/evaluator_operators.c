@@ -184,7 +184,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         r->value.nodeset_value = out;
         return r;
     }
-    if (ast->child_count < 1) return NULL;
+    /* SEQUENCE is the one operator with a legal zero-child form —
+     * the `()` empty-sequence literal (and the where-desugar's
+     * else-arm). */
+    if (ast->child_count < 1 && op0 != XPATH_OP_SEQUENCE) return NULL;
 
     XPathOperatorType op = (XPathOperatorType)ast->number_value;
 
@@ -319,6 +322,160 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             xpath_result_new(XPATH_RESULT_NODESET);
         if (!result) { xpath_nodeset_free(out); return NULL; }
         result->value.nodeset_value = out;
+        return result;
+    }
+
+    /* XPath 2.0 quantified expressions (#684): cartesian product
+     * over the BINDING domains; SOME short-circuits on the first
+     * satisfying tuple, EVERY on the first failing one (an empty
+     * domain makes SOME false and EVERY vacuously true). Children:
+     * XPATH_OP_BINDING nodes (value = var name, child = domain)
+     * then the test expression last. */
+    if (op == XPATH_OP_SOME || op == XPATH_OP_EVERY) {
+        if (ast->child_count < 2) return NULL;
+        enum { MAXB = 16 };
+        size_t nb = ast->child_count - 1;
+        if (nb > MAXB) nb = MAXB;
+        XPathASTNode* test = ast->children[ast->child_count - 1];
+
+        XPathVariableSet* scratch = NULL;
+        if (!ctx->variable_set) {
+            scratch = xpath_variable_set_new();
+            if (!scratch) return NULL;
+            ctx->variable_set = scratch;
+        }
+
+        /* Domains evaluate once. */
+        struct leptris_xpath_result* dom[MAXB] = {0};
+        int ok = 1;
+        for (size_t b = 0; b < nb && ok; b++) {
+            XPathASTNode* bind = ast->children[b];
+            if ((XPathOperatorType)bind->number_value !=
+                    XPATH_OP_BINDING ||
+                !bind->value || bind->child_count < 1) {
+                ok = 0;
+                break;
+            }
+            dom[b] = evaluate_expr(ctx, bind->children[0]);
+            if (!dom[b]) ok = 0;
+        }
+
+        int want = (op == XPATH_OP_SOME);
+        int outcome = !want;
+        if (ok) {
+            size_t dn[MAXB] = {0};
+            for (size_t b = 0; b < nb; b++)
+                dn[b] = (dom[b]->type == XPATH_RESULT_NODESET &&
+                         dom[b]->value.nodeset_value)
+                            ? dom[b]->value.nodeset_value->count
+                            : 1;
+            /* An empty domain means zero tuples — no bindings,
+             * no test evaluations. */
+            int any_empty = 0;
+            for (size_t b = 0; b < nb && !any_empty; b++)
+                any_empty = dn[b] == 0;
+
+            size_t idx[MAXB] = {0};
+            for (; !any_empty;) {
+                /* Bind every variable to its current item (same
+                 * per-item nodeset discipline as FOR: numeric
+                 * members carry the \x03N type marker). */
+                int bound_all = 1;
+                for (size_t b = 0; b < nb && bound_all; b++) {
+                    XPathASTNode* bind = ast->children[b];
+                    XPathVariable* var = xpath_variable_set_add(
+                        ctx->variable_set, bind->value,
+                        XPATH_VAR_TYPE_NODE_SET);
+                    XPathNodeSet* one = xpath_nodeset_new();
+                    if (!var || !one) {
+                        if (one) xpath_nodeset_free(one);
+                        bound_all = 0;
+                        break;
+                    }
+                    if (dom[b]->type == XPATH_RESULT_NODESET &&
+                        dom[b]->value.nodeset_value) {
+                        xpath_nodeset_add(
+                            one, dom[b]->value.nodeset_value
+                                     ->nodes[idx[b]]);
+                    } else {
+                        char* sv = xpath_to_string(dom[b]);
+                        if (dom[b]->type == XPATH_RESULT_NUMBER &&
+                            sv) {
+                            size_t sl = strlen(sv);
+                            char* marked = (char*)malloc(sl + 3);
+                            if (marked) {
+                                marked[0] = '\x03';
+                                marked[1] = 'N';
+                                memcpy(marked + 2, sv, sl + 1);
+                                XPathTextNode* tn =
+                                    synth_text(marked, sl + 2);
+                                free(marked);
+                                if (tn) {
+                                    xpath_nodeset_add(one, tn);
+                                    one->owns_synthetic_text = 1;
+                                }
+                            }
+                        } else {
+                            XPathTextNode* tn = synth_text(
+                                sv ? sv : "", sv ? strlen(sv) : 0);
+                            if (tn) {
+                                xpath_nodeset_add(one, tn);
+                                one->owns_synthetic_text = 1;
+                            }
+                        }
+                        free(sv);
+                    }
+                    /* set_nodeset overwrites without freeing —
+                     * cover the name a previous tuple bound. */
+                    if (var->value.v.nodeset_value)
+                        xpath_nodeset_free(var->value.v.nodeset_value);
+                    xpath_variable_set_nodeset(var, one);
+                }
+
+                if (bound_all) {
+                    struct leptris_xpath_result* t =
+                        evaluate_expr(ctx, test);
+                    int truth = t ? xpath_to_boolean(t) : 0;
+                    if (t) xpath_result_free(t);
+                    if (truth == want) {
+                        outcome = want;
+                        break;
+                    }
+                } else {
+                    break;
+                }
+
+                /* Odometer: advance the LAST binding, carrying. */
+                size_t b = nb;
+                while (b > 0) {
+                    b--;
+                    if (++idx[b] < dn[b]) break;
+                    idx[b] = 0;
+                }
+                if (b == 0 && idx[0] == 0) break;   /* wrapped */
+            }
+
+            /* Unbind every distinct name (reverse order; a repeated
+             * name is only removed once — remove frees the entry). */
+            for (size_t b = nb; b > 0; b--) {
+                const char* nm = ast->children[b - 1]->value;
+                int dup = 0;
+                for (size_t c = 0; c < b - 1 && !dup; c++)
+                    dup = strcmp(ast->children[c]->value, nm) == 0;
+                if (!dup)
+                    xpath_variable_set_remove(ctx->variable_set, nm);
+            }
+        }
+
+        for (size_t b = 0; b < nb; b++)
+            if (dom[b]) xpath_result_free(dom[b]);
+        if (scratch) ctx->variable_set = NULL;
+        xpath_variable_set_free(scratch);
+
+        struct leptris_xpath_result* result =
+            xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (!result) return NULL;
+        result->value.boolean_value = outcome;
         return result;
     }
 
@@ -1614,6 +1771,82 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         result = xpath_result_new(XPATH_RESULT_BOOLEAN);
         if (result) {
             result->value.boolean_value = (op == XPATH_OP_AND) ? (lbool && rbool) : (lbool || rbool);
+        }
+    }
+    /* XPath 2.0 node comparisons (#684): apply to the FIRST node
+     * of each operand; an empty operand makes the result false.
+     * Document order rides the shared rank machinery through a
+     * two-node sort. */
+    else if (op == XPATH_OP_IS || op == XPATH_OP_NODE_BEFORE ||
+             op == XPATH_OP_NODE_AFTER) {
+        result = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (result) {
+            void* lnode = NULL;
+            void* rnode = NULL;
+            if (left->type == XPATH_RESULT_NODESET &&
+                left->value.nodeset_value &&
+                left->value.nodeset_value->count)
+                lnode = left->value.nodeset_value->nodes[0];
+            if (right->type == XPATH_RESULT_NODESET &&
+                right->value.nodeset_value &&
+                right->value.nodeset_value->count)
+                rnode = right->value.nodeset_value->nodes[0];
+            if (!lnode || !rnode) {
+                result->value.boolean_value = 0;
+            } else if (op == XPATH_OP_IS) {
+                result->value.boolean_value = (lnode == rnode);
+            } else if (lnode == rnode) {
+                result->value.boolean_value = 0;
+            } else {
+                XPathNodeSet* pair = xpath_nodeset_new();
+                int lb = 0;
+                if (pair) {
+                    xpath_nodeset_add(pair, lnode);
+                    xpath_nodeset_add(pair, rnode);
+                    xpath_nodeset_sort_doc_order(ctx, pair, 0);
+                    lb = pair->nodes[0] == lnode;
+                    xpath_nodeset_free(pair);   /* members borrowed */
+                }
+                result->value.boolean_value =
+                    (op == XPATH_OP_NODE_BEFORE) ? lb : !lb;
+            }
+        }
+    }
+    /* XPath 2.0 set algebra (#684): identity membership against the
+     * right operand; the left operand's (document) order carries.
+     * Membership is a linear scan — operands are small in practice. */
+    else if (op == XPATH_OP_INTERSECT || op == XPATH_OP_EXCEPT) {
+        if (left->type != XPATH_RESULT_NODESET ||
+            right->type != XPATH_RESULT_NODESET) {
+            xpath_result_free(left);
+            xpath_result_free(right);
+            return NULL;
+        }
+        result = xpath_result_new(XPATH_RESULT_NODESET);
+        if (result) {
+            XPathNodeSet* ns = xpath_nodeset_new();
+            XPathNodeSet* L = left->value.nodeset_value;
+            XPathNodeSet* R = right->value.nodeset_value;
+            if (ns) {
+                int keep = (op == XPATH_OP_INTERSECT);
+                for (size_t i = 0; i < L->count; i++) {
+                    int found = 0;
+                    for (size_t j = 0; j < R->count && !found; j++)
+                        found = (L->nodes[i] == R->nodes[j]);
+                    if (found == keep)
+                        xpath_nodeset_add(ns, L->nodes[i]);
+                }
+                /* Kept members borrow the left operand's synthetic
+                 * nodes — transfer ownership before its free (the
+                 * UNION discipline, issue #514). */
+                ns->owns_attributes = L->owns_attributes;
+                ns->owns_namespaces = L->owns_namespaces;
+                ns->owns_synthetic_text = L->owns_synthetic_text;
+                L->owns_attributes = 0;
+                L->owns_namespaces = 0;
+                L->owns_synthetic_text = 0;
+                result->value.nodeset_value = ns;
+            }
         }
     }
     /* XSLT 3.0 conditional (XPath 2.0+): the children were already
