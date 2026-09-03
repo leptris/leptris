@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.63] - 2026-09-03
+
+### Added
+
+- LEPTRIS_XPATH_FUNCTION public type + HOF pairs/apply/array combiners
+
+
+
 ## [1.9.62] - 2026-09-03
 
 ### Added
