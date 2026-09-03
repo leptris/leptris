@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.70] - 2026-09-03
+
+### Added
+
+- XQuery typeswitch, error-code model, collection() (lane 12 remainder)
+
+
+
 ## [1.9.69] - 2026-09-03
 
 ### Added
