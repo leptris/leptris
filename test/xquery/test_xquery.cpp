@@ -415,3 +415,27 @@ TEST(XQueryCore, PrologNamespaceBindsDirectConstructor) {
               "<p:e>v</p:e>");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, WhereDropsFilteredItemsInArgumentPosition) {
+    /* #814: the where-desugar's else-arm is `()` — an empty
+     * SEQUENCE must contribute NOTHING to the FLWOR result, not an
+     * empty-string member (Saxon: "2,3" / "2!"). */
+    const char xml[] =
+        "<r><item cat='a' v='1'>x</item>"
+        "<item cat='b' v='2'>y</item><item cat='a' v='3'>z</item></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "string-join(for $i in //item where $i/@v > 1"
+        " return string($i/@v), ',')"),
+        "2,3");
+    EXPECT_EQ(seq_string(doc,
+        "concat(for $i in //item where $i/@v = 2"
+        " return string($i/@v), '!')"),
+        "2!");
+    /* Empty-string MEMBERS still count (only empty sequences drop). */
+    EXPECT_EQ(seq_string(doc,
+        "string-join(for $i in //item return '', ',')"),
+        ",,");
+    leptris_document_free(doc);
+}

@@ -307,6 +307,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             struct leptris_xpath_result* item =
                 evaluate_expr(ctx, ast->children[1]);
             if (item) {
+                /* Sequence semantics (#814): an EMPTY result —
+                 * notably the where-desugar's `()` else-arm —
+                 * contributes NOTHING; it must not stringify into
+                 * an empty-string member (Saxon drops it). */
+                if (item->type == XPATH_RESULT_NODESET &&
+                    (!item->value.nodeset_value ||
+                     item->value.nodeset_value->count == 0)) {
+                    xpath_result_free(item);
+                    if (pos_var)
+                        xpath_variable_set_remove(
+                            ctx->variable_set, pos_var);
+                    xpath_variable_set_remove(
+                        ctx->variable_set, loop_var);
+                    continue;
+                }
                 char* piece = xpath_to_string(item);
                 xpath_result_free(item);
                 XPathTextNode* tn = synth_text(piece ? piece : "",
