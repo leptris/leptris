@@ -888,12 +888,17 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
         }
     }
 
+    /* xpath_context_cleanup treats variable_set as caller-borrowed
+     * — the scratch set is ours to free (with every binding still
+     * in it; set_free releases the owned nodesets). */
+    XPathVariableSet* scratch_vs = NULL;
     if (!ctx->variable_set) {
-        ctx->variable_set = xpath_variable_set_new();
-        if (!ctx->variable_set) {
+        scratch_vs = xpath_variable_set_new();
+        if (!scratch_vs) {
             xpath_context_cleanup(ctx);
             return NULL;
         }
+        ctx->variable_set = scratch_vs;
     }
 
     /* Prolog in order: namespaces, then variables/functions as
@@ -913,10 +918,17 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
                 err = 1;
                 break;
             }
-            ctx->namespace_mappings[ctx->namespace_count].prefix =
-                strdup(d->name);
-            ctx->namespace_mappings[ctx->namespace_count].uri =
-                strdup(d->uri);
+            /* cleanup frees these with LEPTRIS_FREE — allocate
+             * through the matching channel. */
+            {
+                size_t pn = strlen(d->name), un = strlen(d->uri);
+                char* pfx = (char*)LEPTRIS_ALLOC_N(char, pn + 1);
+                char* uri = (char*)LEPTRIS_ALLOC_N(char, un + 1);
+                if (pfx) { memcpy(pfx, d->name, pn); pfx[pn] = 0; }
+                if (uri) { memcpy(uri, d->uri, un); uri[un] = 0; }
+                ctx->namespace_mappings[ctx->namespace_count].prefix = pfx;
+                ctx->namespace_mappings[ctx->namespace_count].uri = uri;
+            }
             ctx->namespace_count++;
             ctx->namespaces_collected = 1;   /* keep ours */
         } else if (d->kind == XQ_DECL_VAR) {
@@ -1004,6 +1016,10 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
 
     for (size_t i = 0; i < n_fn_contents; i++) free(fn_contents[i]);
     free(fn_contents);
+    if (scratch_vs) {
+        ctx->variable_set = NULL;
+        xpath_variable_set_free(scratch_vs);
+    }
     xpath_context_cleanup(ctx);
     return result;
 }
