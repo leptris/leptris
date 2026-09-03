@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 199309L
 /* benchmarks/xslt/bench_dispatch.c — lane 13 release scorecard
  * (#682): the template-dispatch fixture. 2000 books, one
  * apply-templates walk, AVT attribute, value-of selects.
@@ -10,12 +9,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "leptris.h"
-
-static double now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
-}
+#include "utils.h"
 
 int main(void) {
     int books = 2000;
@@ -44,9 +38,9 @@ int main(void) {
     leptris_free_string(out);
     double best = 1e18;
     for (int rep = 0; rep < 9; rep++) {
-        double t0 = now_ms();
+        double t0 = benchmark_time_us() / 1000.0;
         out = leptris_xslt_apply_string(x, d);
-        double ms = now_ms() - t0;
+        double ms = benchmark_time_us() / 1000.0 - t0;
         leptris_free_string(out);
         if (ms < best) best = ms;
     }
