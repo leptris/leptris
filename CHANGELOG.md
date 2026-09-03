@@ -4,11 +4,29 @@
 
 ### Added
 
-- XQuery constructors, doc(), and the CLI xquery command (#684-B)
+- **XQuery constructors, `fn:doc()`, CLI `xquery`** (TODO.xslt-full/11
+  slice B, #684). Computed constructors (`element NAME {}`,
+  `attribute NAME {}`, `text {}`) are new XPath ops — value-level:
+  the result is the serialized XML string (attributes escape
+  `& < "`, `text{}` escapes `& <`, nested constructors concatenate,
+  empty elements self-close per Saxon). Direct constructors
+  (`<out total="{expr}">{expr}</out>`) translate to the computed
+  form in the XQuery scanner — textual balanced-tag scans;
+  attribute value templates become `concat` pieces. `fn:doc()`
+  returns the parsed file's root, with the document anchored on
+  the eval context (`XPathContext.owned_docs`, freed by cleanup)
+  so the borrowed root outlives the result. New CLI command
+  `leptris xquery [-s FILE] (-q FILE | -e EXPR)`. Specs:
+  `XQueryCore` (11) + `CliXquery` (macOS/Linux; the Windows
+  shell-harness leg is tracked in TODO 11 — the library surface is
+  green there). Saxon-HE 12.7 oracle.
 
 ### Fixed
 
-- xquery command struct is static (the registry never frees commands)
+- The xquery CLI command struct is static — `cli_registry_free`
+  documents commands as static or separately managed; the malloc'd
+  48-byte struct leaked at exit (macOS leaks leg) and aborted every
+  CLI test under Linux ASAN's `abort_on_error`.
 
 
 
