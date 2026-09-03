@@ -577,6 +577,23 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
         XsltInstr* in = instr_new(XSLT_INSTR_VALUE_OF);
         if (!in) return NULL;
         in->select = compile_attr_sp(sp, e, "select");
+        /* select="." fast path (#682): the string-value of the
+         * context node needs no evaluation — flag it at parse
+         * time. Whitespace around the dot is legal XPath; a '{'
+         * means the 3.0 attribute is a value template, never a
+         * bare dot. */
+        const char* sel = leptris_element_attribute(e, "select");
+        if (sel) {
+            while (*sel == ' ' || *sel == '\t' || *sel == '\r' ||
+                   *sel == '\n') sel++;
+            const char* end = sel;
+            while (*end) end++;
+            while (end > sel && (end[-1] == ' ' || end[-1] == '\t' ||
+                                 end[-1] == '\r' || end[-1] == '\n'))
+                end--;
+            in->select_is_dot = end - sel == 1 && *sel == '.' &&
+                                !strchr(sel, '{');
+        }
         const char* doe = leptris_element_attribute(e, "disable-output-escaping");
         in->doe = doe && strcmp(doe, "yes") == 0;
         return in;

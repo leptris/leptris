@@ -3975,6 +3975,63 @@ TEST(Xslt30, CopySelectNamespaceDocumentDefault) {
         "[dy][given]");
 }
 
+/* value-of select="." takes the parse-time fast path (no eval
+ * machinery, #682): the emitted text must stay the context node's
+ * FULL string-value — deep descendant text for elements, the value
+ * for attribute context nodes — in both 1.0 and 3.0 sheets, and
+ * with surrounding whitespace in the attribute. */
+TEST(Xslt30, ValueOfDotIsDeepStringValue) {
+    const char* sheet =
+        "<xsl:template match='/'>"
+        "<e><xsl:value-of select='.'/></e>"
+        "<w><xsl:value-of select=' . '/></w>"
+        "</xsl:template>";
+    EXPECT_EQ(body(run(sheet, "<r>x<b/>y<!--c--><i>z</i></r>")),
+              "<e>xyz</e><w>xyz</w>");
+    EXPECT_EQ(body(run30(sheet, "<r>x<b/>y<!--c--><i>z</i></r>")),
+              "<e>xyz</e><w>xyz</w>");
+    /* '.' with an attribute context node (for-each over @*): the
+     * string-value of an attribute is its value. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/i'>"
+        "<xsl:for-each select='@*'>[<xsl:value-of select='.'/>]</xsl:for-each>"
+        "</xsl:template>",
+        "<i a='1' b='2'/>")),
+        "[1][2]");
+    /* Text-node context: string-value is the text itself (the
+     * literal &lt;/&gt; around it re-escape on output). */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/r/t'>"
+        "&lt;<xsl:value-of select='.'/>&gt;"
+        "</xsl:template>",
+        "<r><t>hi</t></r>")),
+        "&lt;hi&gt;");
+}
+
+/* Fragment-output order across the cached tails (#682): top-level
+ * nodes with no pending parent chain after the root's siblings
+ * (pre-root ones hold on the frag list) — a stale tail entry would
+ * drop or reorder nodes. Pins the exact order for text, comments
+ * and multiple top-level elements, interleaved. */
+TEST(Xslt30, FragmentNodesKeepOrderAcrossTailCache) {
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "a<xsl:comment>c1</xsl:comment>"
+        "<e1/>b<xsl:comment>c2</xsl:comment>"
+        "<e2/>c"
+        "</xsl:template>",
+        "<r/>")),
+        "a<!--c1--><e1/>b<!--c2--><e2/>c");
+    /* Pure-text fragment (no element ever anchors the chain): every
+     * value-of keeps its position. */
+    EXPECT_EQ(body(run(
+        "<xsl:template match='/'>"
+        "<xsl:for-each select='//t'><xsl:value-of select='.'/></xsl:for-each>"
+        "</xsl:template>",
+        "<r><t>one</t><t>two</t><t>three</t></r>")),
+        "onetwothree");
+}
+
 TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
     /* try/catch was implemented (TODO 11/12 lane, #692): XPath 3.0
      * defines it, so this once-rejected form now evaluates. */
