@@ -772,8 +772,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         out->owns_synthetic_text = 1;
         out->is_sequence = 1;
         for (long v = lo; v <= hi && v - lo < 100000; v++) {
-            char buf[24];
-            int l = snprintf(buf, sizeof buf, "%ld", v);
+            char buf[28];
+            int l = snprintf(buf, sizeof buf, "\x03N%ld", v);
             XPathTextNode* tn = synth_text(buf, (size_t)l);
             if (!tn) break;
             xpath_nodeset_add(out, tn);
@@ -798,6 +798,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         size_t tlen = strlen(ty);
         char occ = tlen ? ty[tlen - 1] : 0;
         if (occ == '?' || occ == '*' || occ == '+') tlen--;
+        else occ = 0;   /* exact-one cardinality */
         char base[80];
         if (tlen >= sizeof(base)) tlen = sizeof(base) - 1;
         memcpy(base, ty, tlen);
@@ -808,26 +809,73 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 xpath_result_new(XPATH_RESULT_BOOLEAN);
             if (!out) { xpath_result_free(v); return NULL; }
             int m = 0;
-            if (strcmp(base, "node()") == 0) {
-                m = v->type == XPATH_RESULT_NODESET &&
-                    v->value.nodeset_value &&
-                    (occ != '+' || v->value.nodeset_value->count > 0);
-            } else if (strcmp(base, "item()") == 0) {
-                m = v->type != XPATH_RESULT_NODESET ||
-                    !v->value.nodeset_value ||
-                    v->value.nodeset_value->count > 0 ||
-                    occ == '*' || occ == '?';
-            } else if (strcmp(base, "xs:string") == 0 ||
-                       strcmp(base, "xs:anyURI") == 0 ||
-                       strncmp(base, "xs:date", 7) == 0 ||
-                       strcmp(base, "xs:time") == 0 ||
-                       strcmp(base, "xs:duration") == 0) {
-                m = v->type == XPATH_RESULT_STRING;
-            } else if (strcmp(base, "xs:boolean") == 0) {
-                m = v->type == XPATH_RESULT_BOOLEAN;
+            /* Per-member check with cardinality gating (#744): the
+             * tag space classifies real nodes (0 element, 1 text,
+             * 2 comment, 3 cdata, 4 pi) against synthetics (6
+             * attribute, 8 atomic-string carrier); "\x03N"-marked
+             * tag-8 members are numerics. */
+            int is_string_ty = strcmp(base, "xs:string") == 0 ||
+                               strcmp(base, "xs:anyURI") == 0 ||
+                               strncmp(base, "xs:date", 7) == 0 ||
+                               strcmp(base, "xs:time") == 0 ||
+                               strcmp(base, "xs:duration") == 0;
+            int is_bool_ty = strcmp(base, "xs:boolean") == 0;
+            int is_num_ty = !is_string_ty && !is_bool_ty &&
+                            strcmp(base, "node()") != 0 &&
+                            strcmp(base, "item()") != 0 &&
+                            strcmp(base, "element()") != 0 &&
+                            strcmp(base, "attribute()") != 0 &&
+                            strcmp(base, "text()") != 0 &&
+                            strcmp(base, "comment()") != 0 &&
+                            strcmp(base, "processing-instruction()") != 0;
+            if (v->type == XPATH_RESULT_NODESET && v->value.nodeset_value) {
+                XPathNodeSet* ns = v->value.nodeset_value;
+                size_t cnt = ns->count;
+                m = (occ == 0) ? (cnt == 1)
+                  : (occ == '?') ? (cnt <= 1)
+                  : (occ == '+') ? (cnt >= 1)
+                                 : 1;   /* '*' */
+                for (size_t i = 0; m && i < cnt; i++) {
+                    void* n = ns->nodes[i];
+                    int tag = n ? (int)XPATH_NODE_TYPE(n) : -1;
+                    const char* mc =
+                        (tag == (int)LEPTRIS_NODE_TEXT && n)
+                            ? ((XPathTextNode*)n)->content : NULL;
+                    int is_num_member = mc && mc[0] == '\x03' &&
+                                        mc[1] == 'N';
+                    if (strcmp(base, "item()") == 0) {
+                        /* every member is an item */
+                    } else if (strcmp(base, "node()") == 0) {
+                        m = tag >= 0 && tag <= 7;
+                    } else if (strcmp(base, "element()") == 0) {
+                        m = tag == (int)LEPTRIS_NODE_ELEMENT;
+                    } else if (strcmp(base, "attribute()") == 0) {
+                        m = tag == (int)LEPTRIS_NODE_ATTRIBUTE;
+                    } else if (strcmp(base, "text()") == 0) {
+                        /* real text/cdata; NOT synthetic carriers */
+                        m = tag == 1 || tag == 3;
+                    } else if (strcmp(base, "comment()") == 0) {
+                        m = tag == 2;
+                    } else if (strcmp(base, "processing-instruction()") == 0) {
+                        m = tag == 4;
+                    } else if (is_string_ty) {
+                        m = tag == (int)LEPTRIS_NODE_TEXT && !is_num_member;
+                    } else if (is_bool_ty) {
+                        m = 0;
+                    } else if (is_num_ty) {
+                        m = is_num_member;
+                    } else {
+                        m = 0;
+                    }
+                }
             } else {
-                /* xs:integer/double/decimal/float — numeric family. */
-                m = v->type == XPATH_RESULT_NUMBER;
+                /* Scalar result: exactly one item — every
+                 * occurrence indicator admits it. */
+                if (is_string_ty) m = v->type == XPATH_RESULT_STRING;
+                else if (is_bool_ty) m = v->type == XPATH_RESULT_BOOLEAN;
+                else if (is_num_ty) m = v->type == XPATH_RESULT_NUMBER;
+                else if (strcmp(base, "item()") == 0) m = 1;
+                else m = 0;   /* node kinds: a scalar is not a node */
             }
             out->value.boolean_value = m;
             xpath_result_free(v);
@@ -919,10 +967,27 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 is->owns_synthetic_text = 0;
             } else {
                 char* piece = xpath_to_string(item);
-                XPathTextNode* tn = synth_text(piece ? piece : "",
-                                               piece ? strlen(piece) : 0);
+                if (item->type == XPATH_RESULT_NUMBER) {
+                    /* "\x03N" marks numeric members for per-member
+                     * type checks (instance of); get_node_text
+                     * strips it for string consumers. */
+                    size_t pl = piece ? strlen(piece) : 0;
+                    char* marked = (char*)malloc(pl + 3);
+                    if (marked) {
+                        marked[0] = '\x03'; marked[1] = 'N';
+                        if (pl) memcpy(marked + 2, piece, pl);
+                        marked[2 + pl] = 0;
+                        XPathTextNode* tn = synth_text(marked, pl + 2);
+                        free(marked);
+                        if (tn) xpath_nodeset_add(out, tn);
+                    }
+                } else {
+                    XPathTextNode* tn =
+                        synth_text(piece ? piece : "",
+                                   piece ? strlen(piece) : 0);
+                    if (tn) xpath_nodeset_add(out, tn);
+                }
                 free(piece);
-                if (tn) xpath_nodeset_add(out, tn);
             }
             xpath_result_free(item);
         }

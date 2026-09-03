@@ -168,7 +168,13 @@ char* get_node_text(void* node) {
 
         case LEPTRIS_NODE_TEXT: {
             XPathTextNode* text = (XPathTextNode*)node;
-            return leptris_strdup(text->content ? text->content : "");
+            const char* c = text->content ? text->content : "";
+            /* Numeric sequence members carry a "\x03N" marker for
+             * per-member type checks (instance of). \x03 is invalid
+             * in XML 1.0 text, so it can never collide with real
+             * content — strip it for every string consumer. */
+            if (c[0] == '\x03' && c[1] == 'N') c += 2;
+            return leptris_strdup(c);
         }
 
         default:
