@@ -4,8 +4,21 @@
 
 ### Added
 
-- tolerant HTML parsing mode - leptris_parse_html_string (#659) (html)
-
+- **HTML parsing mode** (#659, lane 14 slice 1 — the last
+  Nokogiri capability gap): `leptris_parse_html_string` —
+  tolerant HTML4/5 parse into the STANDARD DOM (same nodes, pool,
+  serializer, and XPath/XSLT as XML; no parallel tree). Implied
+  end tags (p/li/dt/dd/td/th/tr/thead/tbody/tfoot/option), void
+  elements, raw-text `<script>`/`<style>`, case-insensitive names
+  (stored lowercased), minimized + unquoted attributes, the full
+  WHATWG named-entity set (2032 single-codepoint references) plus
+  numeric references in text and attribute values, stray-end-tag
+  pop-until-matched, EOF closing, and a never-failing tokenizer.
+  Nokogiri document shape: an input without `<html>` gets
+  `<html><head/><body>…</body></html>` synthesized; explicit
+  `<html>` is honored; no implied `<tbody>` (libxml2 parity).
+  13 new specs in `test/html/` (all watched RED first), including
+  XPath-queryability of parsed HTML documents.
 
 
 ## [1.9.74] - 2026-09-03
