@@ -2207,6 +2207,36 @@ TEST(XPath20Ledger, Snapshot) {
     }
 }
 
+/* #691: fn:analyze-string - fn:match / fn:non-match elements
+ * (with fn:group children) on the document-lifetime anchor chain.
+ * Paths use local-name() - the constructed names carry the literal
+ * fn: prefix. */
+TEST(XPath20Ledger, AnalyzeString) {
+    /* a,1,b,2,c: two digit matches, three gaps. */
+    EXPECT_EQ(NumEval(
+        "count(analyze-string('a1b2c', '[0-9]')"
+        "/*[local-name()='match'])"), 2.0);
+    EXPECT_EQ(NumEval(
+        "count(analyze-string('a1b2c', '[0-9]')"
+        "/*[local-name()='non-match'])"), 3.0);
+    EXPECT_EQ(StrEval(
+        "string(analyze-string('a1b2c', '[0-9]')"
+        "/*[local-name()='match'][1])"), "1");
+    EXPECT_EQ(NumEval(
+        "count(analyze-string('2024-05', '([0-9]+)-([0-9]+)')"
+        "/*[local-name()='match']/*[local-name()='group'])"), 2.0);
+    EXPECT_EQ(StrEval(
+        "string(analyze-string('2024-05', '([0-9]+)-([0-9]+)')"
+        "/*[local-name()='match']"
+        "/*[local-name()='group'][@nr='2'])"), "05");
+    /* no match: the whole input is one non-match; overall string
+     * value is the input. */
+    EXPECT_EQ(NumEval(
+        "count(analyze-string('abc', '[0-9]')"
+        "/*[local-name()='non-match'])"), 1.0);
+    EXPECT_EQ(StrEval("string(analyze-string('abc', '[0-9]'))"), "abc");
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));

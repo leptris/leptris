@@ -3457,6 +3457,127 @@ static struct leptris_xpath_result* fn_snapshot(XPathContext* ctx,
     return out;
 }
 
+#ifdef LEPTRIS_HAVE_POSIX_RE
+/* #691: fn:analyze-string — the fn:match / fn:non-match element
+ * model (fn:group children carry @nr) built on a fresh document
+ * anchored on the SOURCE tree (the anchor chain snapshot shipped).
+ * POSIX regex with the same flag translation fn:matches uses. */
+static void analyze_append_text(LeptrisDocument doc, LeptrisElement parent,
+                                const char* p, size_t n) {
+    if (!n) return;
+    char* buf = (char*)malloc(n + 1);
+    if (!buf) return;
+    memcpy(buf, p, n);
+    buf[n] = 0;
+    LeptrisNodeRef tn = leptris_text_node_create(doc, buf);
+    free(buf);
+    if (tn) leptris_element_append_child(parent, (LeptrisElement)tn);
+}
+
+static struct leptris_xpath_result* fn_analyze_string(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    char* pat = re_str_arg(ctx, args, 1);
+    char* fl = (n >= 3) ? re_str_arg(ctx, args, 2) : leptris_strdup("");
+    if (!in || !pat) { free(in); free(pat); free(fl); return NULL; }
+    char* xp = re_pattern_for(pat, fl);
+    struct leptris_xpath_result* out = NULL;
+    regex_t rx;
+    if (xp && regcomp(&rx, xp, re_flags(fl)) == 0) {
+        LeptrisDocument doc = leptris_document_create();
+        LeptrisElement root =
+            doc ? leptris_element_create(doc, "fn:analyze-string") : NULL;
+        if (root) {
+            regmatch_t pm[12];
+            const char* p = in;
+            while (*p && regexec(&rx, p, 12, pm, 0) == 0) {
+                if (pm[0].rm_so > 0) {
+                    LeptrisElement nm =
+                        leptris_element_create(doc, "fn:non-match");
+                    if (nm) {
+                        analyze_append_text(doc, nm, p,
+                                            (size_t)pm[0].rm_so);
+                        leptris_element_append_child(root, nm);
+                    }
+                }
+                LeptrisElement m = leptris_element_create(doc, "fn:match");
+                if (m) {
+                    /* offsets are MATCH-relative: base at rm_so. */
+                    const char* mb = p + pm[0].rm_so;
+                    regoff_t prev = 0;
+                    char nrbuf[8];
+                    for (int g = 1; g < 12; g++) {
+                        if (pm[g].rm_so < 0) break;
+                        analyze_append_text(doc, m, mb + prev,
+                                            (size_t)(pm[g].rm_so - prev));
+                        LeptrisElement ge =
+                            leptris_element_create(doc, "fn:group");
+                        snprintf(nrbuf, sizeof(nrbuf), "%d", g);
+                        leptris_element_set_attribute(ge, "nr", nrbuf);
+                        analyze_append_text(doc, ge, mb + pm[g].rm_so,
+                                            (size_t)(pm[g].rm_eo -
+                                                     pm[g].rm_so));
+                        leptris_element_append_child(m, ge);
+                        prev = pm[g].rm_eo;
+                    }
+                    analyze_append_text(doc, m, mb + prev,
+                                        (size_t)(pm[0].rm_eo - pm[0].rm_so -
+                                                 prev));
+                    leptris_element_append_child(root, m);
+                }
+                if (pm[0].rm_eo == pm[0].rm_so) {
+                    /* zero-length match: emit the char, advance one
+                     * byte (UTF-8 self-synchronizing boundary is
+                     * acceptable for the value-level model). */
+                    LeptrisElement nm =
+                        leptris_element_create(doc, "fn:non-match");
+                    if (nm) {
+                        analyze_append_text(doc, nm, p, 1);
+                        leptris_element_append_child(root, nm);
+                    }
+                    p++;
+                } else {
+                    p += pm[0].rm_eo;
+                }
+            }
+            if (*p) {
+                LeptrisElement nm =
+                    leptris_element_create(doc, "fn:non-match");
+                if (nm) {
+                    analyze_append_text(doc, nm, p, strlen(p));
+                    leptris_element_append_child(root, nm);
+                }
+            }
+            out = xpath_result_new(XPATH_RESULT_NODESET);
+            if (out) {
+                out->value.nodeset_value = xpath_nodeset_new();
+                if (!out->value.nodeset_value) {
+                    xpath_result_free(out);
+                    out = NULL;
+                } else {
+                    xpath_nodeset_add(out->value.nodeset_value, root);
+                }
+            }
+            if (!out || xq_anchor_on_source(ctx, doc) != 0) {
+                if (out) { xpath_result_free(out); out = NULL; }
+            }
+        } else if (doc) {
+            leptris_document_free(doc);
+        }
+        regfree(&rx);
+    }
+    if (!out) {
+        out = xpath_result_new(XPATH_RESULT_STRING);
+        if (out) out->value.string_value = leptris_strdup("");
+    }
+    free(xp);
+    free(in);
+    free(pat);
+    free(fl);
+    return out;
+}
+#endif
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -3527,6 +3648,9 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "random-number-generator", fn_random_number_generator, 0, 1);
     xpath_function_registry_register(registry, "format-number", fn_format_number_plain, 2, 3);
     xpath_function_registry_register(registry, "snapshot", fn_snapshot, 1, 1);
+#ifdef LEPTRIS_HAVE_POSIX_RE
+    xpath_function_registry_register(registry, "analyze-string", fn_analyze_string, 2, 3);
+#endif
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
     xpath_function_registry_register(registry, "math:exp", fn_exp, 1, 1);
     xpath_function_registry_register(registry, "math:exp10", fn_exp10, 1, 1);
