@@ -2141,11 +2141,36 @@ static int h_closes(const char* open, const char* start) {
 }
 
 /* ---- HTML entity decode: named table + numeric, lenient ---- */
+/* #848: the old lookup was a linear scan with a strlen per entry
+ * — O(2032 x len) per entity reference, superlinear in entity
+ * count. A lazily-sorted pointer index turns each lookup into a
+ * binary search. */
+typedef const struct { const char* name; uint32_t cp; }* HtmlEntPtr;
+static HtmlEntPtr h_ent_index[K_HTML_ENTITY_COUNT];
+static int h_ent_sorted = 0;
+
+static int h_ent_cmp(const void* a, const void* b) {
+    return strcmp((*(const HtmlEntPtr*)a)->name,
+                  (*(const HtmlEntPtr*)b)->name);
+}
+
 static uint32_t h_entity_lookup(const char* name, size_t len) {
-    for (size_t i = 0; i < K_HTML_ENTITY_COUNT; i++) {
-        const char* n = k_html_entities[i].name;
-        if (strlen(n) == len && memcmp(n, name, len) == 0)
-            return k_html_entities[i].cp;
+    if (!h_ent_sorted) {
+        for (size_t i = 0; i < K_HTML_ENTITY_COUNT; i++)
+            h_ent_index[i] = &k_html_entities[i];
+        qsort(h_ent_index, K_HTML_ENTITY_COUNT,
+              sizeof(h_ent_index[0]), h_ent_cmp);
+        h_ent_sorted = 1;
+    }
+    size_t lo = 0, hi = K_HTML_ENTITY_COUNT;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        const char* n = h_ent_index[mid]->name;
+        int c = strncmp(n, name, len);
+        if (c == 0 && n[len] != 0) c = 1;   /* entry longer than key */
+        if (c == 0) return h_ent_index[mid]->cp;
+        if (c < 0) lo = mid + 1;
+        else hi = mid;
     }
     return 0;
 }
