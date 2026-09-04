@@ -16,3 +16,12 @@ registered in the core registry (functions.c) — no new types.
   trim option second pass)
 
 Gate: Xslt30.FnSequences spec (Saxon-probed) + full suite green.
+
+
+## Status 2026-09-04 — sequence node tail shipped
+
+innermost/outermost (ancestor/descendant-in-set filters),
+has-children (explicit + zero-arg context form; text children
+count), path (root-anchored /a/b[2] positional form), nilled
+(xsi:nil read). fn:snapshot still open — needs detached-copy result
+trees (copy_subtree_detached is the building block).

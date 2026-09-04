@@ -10,3 +10,15 @@ only (no timezone DB beyond fixed offsets — Saxon-HE parity needs
 implicit TZ only).
 
 Gate: Xslt30.FnDates spec (Saxon-probed) + suite green.
+
+
+## Status 2026-09-04 — accessor matrix complete (value-level)
+
+All accessors registered: year/month/day-from-date,
+hours/minutes/seconds-from-dateTime, minutes/seconds-from-duration
+(new), plus the pre-existing set. Duration parsing is now a full
+ISO 8601 walker (P[nY][nM][nD][T[nH][nM][nS]], negatable) — the old
+sscanf only understood P<days>DT<hours>H. xs:dayTimeDuration /
+xs:yearMonthDuration are passthrough constructor aliases. Remaining
+value-level gaps (tracked, non-blocking): adjust-*-to-timezone (no
+timezone model), format-date/time/dateTime, current-* functions.
