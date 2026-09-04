@@ -2796,6 +2796,243 @@ static struct leptris_xpath_result* fn_array_fold_right(XPathContext* ctx,
     return out;
 }
 
+/* ---- sequence/doc tail (#691) ---- */
+
+/* First node of args[i], or the context node when the argument is
+ * absent. Nodes are document-owned; the nodeset container holding
+ * them may be freed after the pointer is taken. */
+static void* node_arg_or_ctx(XPathContext* ctx, XPathASTNode** args,
+                             size_t n, size_t i) {
+    if (n > i) {
+        struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
+        void* nd = NULL;
+        if (r && r->type == XPATH_RESULT_NODESET &&
+            r->value.nodeset_value && r->value.nodeset_value->count)
+            nd = r->value.nodeset_value->nodes[0];
+        leptris_xpath_result_free(r);
+        if (nd) return nd;
+    }
+    return ctx->context_node;
+}
+
+static struct leptris_xpath_result* fn_innermost(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!out) { leptris_xpath_result_free(r); return NULL; }
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value) {
+        xpath_result_free(out);
+        leptris_xpath_result_free(r);
+        return NULL;
+    }
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+        XPathNodeSet* src = r->value.nodeset_value;
+        for (size_t i = 0; i < src->count; i++) {
+            int covered = 0;
+            for (LeptrisElement p = leptris_node_parent(src->nodes[i]);
+                 p && !covered;
+                 p = leptris_node_parent((LeptrisNodeRef)p))
+                for (size_t j = 0; j < src->count; j++)
+                    if (src->nodes[j] == (void*)p) { covered = 1; break; }
+            if (!covered)
+                xpath_nodeset_add(out->value.nodeset_value, src->nodes[i]);
+        }
+    }
+    leptris_xpath_result_free(r);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_outermost(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!out) { leptris_xpath_result_free(r); return NULL; }
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value) {
+        xpath_result_free(out);
+        leptris_xpath_result_free(r);
+        return NULL;
+    }
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+        XPathNodeSet* src = r->value.nodeset_value;
+        char* covered = (char*)calloc(src->count ? src->count : 1, 1);
+        if (!covered) {
+            leptris_xpath_result_free(r);
+            return out;
+        }
+        /* A node is dropped when some set member sits below it:
+         * walk every member's ancestor chain and mark matches. */
+        for (size_t j = 0; j < src->count; j++)
+            for (LeptrisElement p = leptris_node_parent(src->nodes[j]); p;
+                 p = leptris_node_parent((LeptrisNodeRef)p))
+                for (size_t i = 0; i < src->count; i++)
+                    if (src->nodes[i] == (void*)p) covered[i] = 1;
+        for (size_t i = 0; i < src->count; i++)
+            if (!covered[i])
+                xpath_nodeset_add(out->value.nodeset_value, src->nodes[i]);
+        free(covered);
+    }
+    leptris_xpath_result_free(r);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_has_children(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    void* nd = node_arg_or_ctx(ctx, args, n, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!out) return NULL;
+    out->value.boolean_value = nd && leptris_node_first_child(nd) != NULL;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_nilled(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    void* nd = node_arg_or_ctx(ctx, args, n, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!out) return NULL;
+    out->value.boolean_value = 0;
+    if (nd && leptris_node_get_type(nd) == LEPTRIS_NODE_TYPE_ELEMENT) {
+        const char* v = leptris_element_attribute((LeptrisElement)nd,
+                                                  "xsi:nil");
+        out->value.boolean_value = v && strcmp(v, "true") == 0;
+    }
+    return out;
+}
+
+static int path_append(char** b, size_t* len, size_t* cap,
+                       const char* s) {
+    size_t sl = strlen(s);
+    if (*len + sl + 1 > *cap) {
+        size_t nc = *cap ? *cap : 64;
+        while (nc < *len + sl + 1) nc *= 2;
+        char* g = (char*)realloc(*b, nc);
+        if (!g) return 0;
+        *b = g;
+        *cap = nc;
+    }
+    memcpy(*b + *len, s, sl);
+    *len += sl;
+    return 1;
+}
+
+static struct leptris_xpath_result* fn_path(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    void* nd = node_arg_or_ctx(ctx, args, n, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) return NULL;
+    out->value.string_value = leptris_strdup("");
+    if (!nd || leptris_node_get_type(nd) != LEPTRIS_NODE_TYPE_ELEMENT)
+        return out;
+    /* Climb to the root, then emit downward with same-name
+     * position predicates where siblings repeat the name. */
+    LeptrisElement chain[256];
+    size_t depth = 0;
+    for (LeptrisElement e = (LeptrisElement)nd; e && depth < 256;
+         e = leptris_node_parent((LeptrisNodeRef)e))
+        chain[depth++] = e;
+    char* b = NULL;
+    size_t bl = 0, bc = 0;
+    for (size_t i = depth; i-- > 0;) {
+        const char* nm = leptris_element_get_name(chain[i]);
+        path_append(&b, &bl, &bc, "/");
+        path_append(&b, &bl, &bc, nm ? nm : "*");
+        size_t same = 0, pos = 0;
+        for (LeptrisNodeRef s = leptris_node_first_child(
+                 (LeptrisNodeRef)leptris_node_parent((LeptrisNodeRef)chain[i]));
+             s; s = leptris_node_next_sibling(s)) {
+            if (leptris_node_get_type(s) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            const char* snm = leptris_element_get_name((LeptrisElement)s);
+            if (!nm || (snm && strcmp(snm, nm) == 0)) {
+                same++;
+                if (s == (LeptrisNodeRef)chain[i]) pos = same;
+            }
+        }
+        if (same > 1) {
+            char idx[32];
+            snprintf(idx, sizeof(idx), "[%zu]", pos);
+            path_append(&b, &bl, &bc, idx);
+        }
+    }
+    if (b) {
+        free(out->value.string_value);
+        b[bl] = 0;
+        out->value.string_value = b;
+    }
+    return out;
+}
+
+/* In-memory documents carry no base or document URI. */
+static struct leptris_xpath_result* fn_base_uri(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    node_arg_or_ctx(ctx, args, n, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) return NULL;
+    out->value.string_value = leptris_strdup("");
+    return out;
+}
+
+static struct leptris_xpath_result* fn_uri_constant(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)ctx; (void)args; (void)n;
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) return NULL;
+    out->value.string_value = leptris_strdup("");
+    return out;
+}
+
+static struct leptris_xpath_result* fn_doc_available(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* path = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!out) { free(path); return NULL; }
+    out->value.boolean_value = 0;
+    if (path) {
+        LeptrisDocument d = leptris_parse_file(path, NULL);
+        if (d) {
+            out->value.boolean_value = 1;
+            leptris_document_free(d);
+        }
+        free(path);
+    }
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_json_doc(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    char* path = re_str_arg(ctx, args, 0);
+    if (!path) return NULL;
+    FILE* f = fopen(path, "rb");
+    free(path);
+    struct leptris_xpath_result* out = NULL;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        char* buf = (char*)malloc(sz > 0 ? (size_t)sz + 1 : 1);
+        if (buf) {
+            size_t got = fread(buf, 1, (size_t)sz, f);
+            buf[got] = 0;
+            JsonScan s = { buf, 1 };
+            out = json_root(&s);
+            free(buf);
+        }
+        fclose(f);
+    }
+    if (!out) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "json-doc(): cannot load JSON");
+        snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0002");
+        return NULL;
+    }
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -2841,6 +3078,16 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "array:fold-right", fn_array_fold_right, 3, 3);
 
     xpath_function_registry_register(registry, "math:sqrt", fn_sqrt, 1, 1);
+    xpath_function_registry_register(registry, "innermost", fn_innermost, 1, 1);
+    xpath_function_registry_register(registry, "outermost", fn_outermost, 1, 1);
+    xpath_function_registry_register(registry, "has-children", fn_has_children, 0, 1);
+    xpath_function_registry_register(registry, "nilled", fn_nilled, 0, 1);
+    xpath_function_registry_register(registry, "path", fn_path, 0, 1);
+    xpath_function_registry_register(registry, "base-uri", fn_base_uri, 0, 1);
+    xpath_function_registry_register(registry, "document-uri", fn_uri_constant, 0, 1);
+    xpath_function_registry_register(registry, "static-base-uri", fn_uri_constant, 0, 0);
+    xpath_function_registry_register(registry, "doc-available", fn_doc_available, 1, 1);
+    xpath_function_registry_register(registry, "json-doc", fn_json_doc, 1, 1);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
     xpath_function_registry_register(registry, "math:exp", fn_exp, 1, 1);
     xpath_function_registry_register(registry, "math:exp10", fn_exp10, 1, 1);
