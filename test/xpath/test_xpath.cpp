@@ -2001,6 +2001,57 @@ TEST(XPath20Ledger, DocumentUriTail) {
     remove("leptris-jsondoc.json");
 }
 
+TEST(XPath20Ledger, ScalarTail) {
+    /* compare: codepoint order, -1/0/1, empty operand -> empty. */
+    EXPECT_EQ(NumEval("compare('abc', 'abd')"), -1.0);
+    EXPECT_EQ(NumEval("compare('abd', 'abc')"), 1.0);
+    EXPECT_EQ(NumEval("compare('abc', 'abc')"), 0.0);
+    EXPECT_EQ(StrEval("compare((), 'a')"), "");
+    /* codepoint-equal. */
+    EXPECT_TRUE(BoolEval("codepoint-equal('ABC', 'ABC')"));
+    EXPECT_FALSE(BoolEval("codepoint-equal('ABC', 'abc')"));
+    /* round with precision: decimal places and negative (tens). */
+    EXPECT_EQ(NumEval("round(1.25, 1)"), 1.3);
+    EXPECT_EQ(NumEval("round(1.24, 1)"), 1.2);
+    EXPECT_EQ(NumEval("round(-1.25, 1)"), -1.2);
+    EXPECT_EQ(NumEval("round(15, -1)"), 20.0);
+    EXPECT_EQ(NumEval("round(12, 0)"), 12.0);
+    /* normalize-unicode: NFD decomposed composes to NFC equal. */
+    EXPECT_TRUE(BoolEval(
+        "normalize-unicode('é', 'NFC') = "
+        "normalize-unicode('é', 'NFC')"));
+    EXPECT_EQ(StrEval("normalize-unicode('abc')"), "abc");
+    /* resolve-QName: prefix resolved against the element's in-scope
+     * namespaces; the URI rides the QName side channel. */
+    {
+        LeptrisDocument d = ParseWith(
+            "<r xmlns:p=\"urn:p\"><e/></r>");
+        ASSERT_NE(d, nullptr);
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr,
+            "string(resolve-QName('p:x', //e))");
+        ASSERT_NE(r, nullptr);
+        char* sv = leptris_xpath_result_string(r);
+        EXPECT_STREQ(sv ? sv : "", "p:x");
+        leptris_free_string(sv);
+        leptris_xpath_result_free(r);
+        LeptrisXPathResult r2 = leptris_xpath_eval(d, nullptr,
+            "namespace-uri-from-QName(resolve-QName('p:x', //e))");
+        ASSERT_NE(r2, nullptr);
+        char* sv2 = leptris_xpath_result_string(r2);
+        EXPECT_STREQ(sv2 ? sv2 : "", "urn:p");
+        leptris_free_string(sv2);
+        leptris_xpath_result_free(r2);
+        leptris_document_free(d);
+    }
+    /* environment-variable / available-environment-variables. */
+    setenv("LEPTRIS_X691", "yes", 1);
+    EXPECT_EQ(StrEval("environment-variable('LEPTRIS_X691')"), "yes");
+    EXPECT_EQ(StrEval("environment-variable('LEPTRIS_NOPE_691')"), "");
+    EXPECT_TRUE(BoolEval(
+        "exists(available-environment-variables()[. = 'LEPTRIS_X691'])"));
+    unsetenv("LEPTRIS_X691");
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
