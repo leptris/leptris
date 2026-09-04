@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.83] - 2026-09-04
+
+### Added
+
+- #659 PI-ish bogus constructs - <?target data?> becomes a PI node (libxml2 shape) (html)
+
+
+
 ## [1.9.82] - 2026-09-04
 ### Added
 
