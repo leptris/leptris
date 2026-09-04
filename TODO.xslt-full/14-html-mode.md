@@ -35,3 +35,23 @@ Remaining slices:
 - bindings: expose the entry in leptris-ruby/py (their entries
   tracked on #683)
 
+
+
+## Status 2026-09-05 (v1.9.83-85): slice 2 shipped
+
+- PI-ish bogus constructs (v1.9.83): `<?target data?>` = PI node,
+  data keeps trailing `?`, leading ws trimmed (libxml2 shape).
+- Head-content lift (v1.9.84): contiguous leading title/meta/link/
+  base run -> synthesized `<head>` before `<body>`; sibling chain
+  severed at the boundary.
+- Characterization (v1.9.85): `<template>` = ordinary element
+  (libxml2 predates WHATWG inert-fragment — NO special handling is
+  correct for parity); misnesting = close-at-outer-end-tag +
+  stray-drop (our natural-nesting model). Both locked as gate
+  specs. RE-SCOPE: adoption-agency is needed ONLY for the html5lib
+  corpus gate (different tree shape), NOT for Nokogiri parity.
+
+Remaining: html5lib tokenizer/tree corpus adoption (needs the
+adoption-agency tree shape + a JSON test harness), Nokogiri parity
+corpus on a crawl sample, bindings exposure of
+leptris_parse_html_string.
