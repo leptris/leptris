@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.82] - 2026-09-04
+
+### Added
+
+- #691 analyze-string - fn:match/fn:non-match/fn:group model on the anchor chain (xpath)
+
+### Fixed
+
+- probe analyze-string availability (no POSIX regex on Windows) (test)
+
+
+
 ## [1.9.81] - 2026-09-04
 ### Added
 
