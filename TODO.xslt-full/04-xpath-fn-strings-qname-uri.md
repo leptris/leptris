@@ -13,3 +13,18 @@ local-name-from-QName, prefix-from-QName, namespace-uri-from-QName,
 node-name (element/attribute/PI), expanded-QName-to-string.
 
 Gate: Xslt30.FnStrings spec (Saxon-probed) + suite green.
+
+
+## Status 2026-09-04 — string/QName/URI tail shipped (v1.9.77+)
+
+Shipped in the #691 scalar-tail wave: compare, codepoint-equal,
+normalize-unicode (utf8proc forms; absent when built without
+utf8proc), resolve-QName (prefix against in-scope namespaces via
+the QName TLS channel), environment-variable,
+available-environment-variables, unparsed-text / -lines /
+-available (raw file reads, CWD-relative), uri-collection (empty
+catalog). Remaining in this lane: analyze-string (needs the
+fn:match/fn:non-match element model — XSLT xsl:analyze-string
+exists; the fn form returns nodes), fn:format-number as a plain
+XPath fn (the formatting core lives XSLT-side — layering decision
+needed), fn:snapshot (needs detached-copy result trees).
