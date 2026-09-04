@@ -2044,12 +2044,20 @@ TEST(XPath20Ledger, ScalarTail) {
         leptris_document_free(d);
     }
     /* environment-variable / available-environment-variables. */
+#ifdef _WIN32
+    _putenv("LEPTRIS_X691=yes");
+#else
     setenv("LEPTRIS_X691", "yes", 1);
+#endif
     EXPECT_EQ(StrEval("environment-variable('LEPTRIS_X691')"), "yes");
     EXPECT_EQ(StrEval("environment-variable('LEPTRIS_NOPE_691')"), "");
     EXPECT_TRUE(BoolEval(
         "exists(available-environment-variables()[. = 'LEPTRIS_X691'])"));
+#ifdef _WIN32
+    _putenv("LEPTRIS_X691=");
+#else
     unsetenv("LEPTRIS_X691");
+#endif
 }
 
 /* #683: the standard eval + compiled entries already speak the
