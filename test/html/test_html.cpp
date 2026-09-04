@@ -308,3 +308,48 @@ TEST(HtmlParse, HeadContentLift) {
     leptris_xpath_result_free(r);
     leptris_document_free(d);
 }
+
+
+/* #659 characterization (Nokogiri/libxml2 ground truth, probed):
+ * <template> is an ORDINARY element with its children in place
+ * (libxml2 predates the WHATWG inert-fragment model), and
+ * misnesting closes the formatting element at the outer end tag
+ * with the stray end tag dropped - "natural nesting + stray-pop".
+ * These specs lock the parity in so later slices cannot regress
+ * it while chasing the html5lib corpus. */
+TEST(HtmlParse, TemplateAndMisnestingLibxml2Shape) {
+    const char* h1 = "<template><b>x</b>text</template><p>after</p>";
+    LeptrisDocument d = leptris_parse_html_string(h1, strlen(h1), NULL);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, NULL, "count(/html/body/template/b)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, NULL, "string(/html/body/template)");
+    ASSERT_NE(r, nullptr);
+    char* sv = leptris_xpath_result_string(r);
+    EXPECT_STREQ(sv ? sv : "", "xtext");
+    leptris_free_string(sv);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+
+    const char* h2 = "<b>1<i>2</b>3</i>";
+    d = leptris_parse_html_string(h2, strlen(h2), NULL);
+    ASSERT_NE(d, nullptr);
+    r = leptris_xpath_eval(d, NULL, "count(/html/body/b/i)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, NULL, "count(/html/body/i)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 0.0);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, NULL, "string(/html/body)");
+    ASSERT_NE(r, nullptr);
+    sv = leptris_xpath_result_string(r);
+    EXPECT_STREQ(sv ? sv : "", "123");
+    leptris_free_string(sv);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
