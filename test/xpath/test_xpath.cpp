@@ -2052,6 +2052,41 @@ TEST(XPath20Ledger, ScalarTail) {
     unsetenv("LEPTRIS_X691");
 }
 
+/* #683: the standard eval + compiled entries already speak the
+ * 3.x composition grammar — no separate eval31 surface needed
+ * (superset semantics; lock the behavior in as a gate). */
+TEST(XPath20Ledger, XPath31ThroughStandardEntry) {
+    EXPECT_EQ(NumEval("let $x := 2 return $x + 1"), 3.0);
+    EXPECT_EQ(StrEval("if (count(//book) = 3) then 'three' else 'other'"),
+              "three");
+    EXPECT_EQ(NumEval("count(for $b in //book return $b/price)"), 3.0);
+    EXPECT_EQ(NumEval("count(//book ! string(@id))"), 3.0);
+    EXPECT_EQ(NumEval("count((1 to 5))"), 5.0);
+    EXPECT_EQ(StrEval("string((1 to 5)[4])"), "4");
+    EXPECT_EQ(StrEval(
+        "switch (//book[1]/@id) case 'b1' return 'first' "
+        "default return 'other'"), "first");
+    EXPECT_EQ(NumEval("map { 'k': 7 }?k"), 7.0);
+    /* An array is a single item: [2] filters positions, ?2
+     * subscripts members. */
+    EXPECT_EQ(NumEval("count([1,2,3])"), 1.0);
+    EXPECT_EQ(NumEval("[1,2,3]?2"), 2.0);
+    /* The compiled entry evaluates the same grammar. */
+    {
+        LeptrisDocument doc = ParseWith(kBasic);
+        ASSERT_NE(doc, nullptr);
+        LeptrisXPathCompiled c =
+            leptris_xpath_compile("count(for $b in //book return $b)");
+        ASSERT_NE(c, nullptr);
+        LeptrisXPathResult r = leptris_xpath_compiled_eval(c, doc, nullptr);
+        ASSERT_NE(r, nullptr);
+        EXPECT_EQ(leptris_xpath_result_number(r), 3.0);
+        leptris_xpath_result_free(r);
+        leptris_xpath_compiled_free(c);
+        leptris_document_free(doc);
+    }
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
