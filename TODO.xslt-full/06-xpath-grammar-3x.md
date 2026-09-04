@@ -61,3 +61,23 @@ RejectsXQueryOnlySyntaxInExpressions):
   (XPST0003 4.0 syntax). Deferred to the Saxon-13 probe (item 4's
   own directive); rejecting now is parity.
 Lane 06 COMPLETE (items 1-2 shipped v1.9.49/v1.9.50). Next: lane 08.
+
+
+## Status 2026-09-03 (post v1.9.76 + PR #825) — grammar surface COMPLETE
+
+Shipped through the wave: xs:* constructors + cast/castable/
+instance of/treat (v1.9.49-50), `||` concat, `=>`, `!`, `let`,
+`for ... return`, if/then/else, function items (`function($x){}`,
+name#arity, partial application `?`), inline HOFs, dynamic calls
+($f(21)), maps/arrays (both constructor forms incl. `array { E }`),
+typeswitch, try/catch expressions with the error-code model,
+quantified some/every, is/<</>>, intersect/except, `()`, deep-
+equal, ends-with, the XQuery 3.0 braceless switch, and
+parse-xml/parse-fragment returning document nodes. The #if 0'd
+braced switch form stays rejected (Saxon XPST0003 parity).
+
+Remaining (tracked, not blocking):
+- string constructors `` `lit{expr}lit` `` (3.1)
+- fn-as-path-step (`X/string()` — XQuery allows PostfixExpr steps)
+- VM opcodes for the fallback-eval'd 3.x ops (perf, lane 13)
+- packaging (xsl:use-package — roadmap v3.1), streaming (non-goal)
