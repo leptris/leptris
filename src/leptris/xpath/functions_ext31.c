@@ -16,6 +16,7 @@
 #include "evaluator_internal.h"
 #include "../include/leptris.h"
 #include "../dom/element.h"
+#include "../unicode/unicode.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -3033,6 +3034,165 @@ static struct leptris_xpath_result* fn_json_doc(XPathContext* ctx,
     return out;
 }
 
+/* ---- scalar tail (#691 slice 2) ---- */
+
+/* Like re_str_arg, but an EMPTY SEQUENCE argument yields NULL
+ * (fn:compare's empty-operand rule; re_str_arg stringifies empty
+ * nodesets to ""). */
+static char* re_str_arg_opt(XPathContext* ctx, XPathASTNode** args,
+                            size_t i) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
+    if (!r) return NULL;
+    if (r->type == XPATH_RESULT_NODESET &&
+        (!r->value.nodeset_value || r->value.nodeset_value->count == 0)) {
+        leptris_xpath_result_free(r);
+        return NULL;
+    }
+    char* s = (r->type == XPATH_RESULT_NODESET)
+                  ? leptris_xpath_result_string(r)
+                  : scalar_str(r);
+    leptris_xpath_result_free(r);
+    return s;
+}
+
+static struct leptris_xpath_result* fn_compare(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* a = re_str_arg_opt(ctx, args, 0);
+    char* b = re_str_arg_opt(ctx, args, 1);
+    struct leptris_xpath_result* out = NULL;
+    if (a && b) {  /* an empty operand yields the empty sequence */
+        out = xpath_result_new(XPATH_RESULT_NUMBER);
+        if (out)
+            out->value.number_value =
+                strcmp(a, b) < 0 ? -1 : strcmp(a, b) > 0 ? 1 : 0;
+    } else {
+        out = xpath_result_new(XPATH_RESULT_NODESET);
+        if (out) out->value.nodeset_value = xpath_nodeset_new();
+    }
+    free(a);
+    free(b);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_codepoint_equal(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* a = re_str_arg(ctx, args, 0);
+    char* b = re_str_arg(ctx, args, 1);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!out) { free(a); free(b); return NULL; }
+    out->value.boolean_value =
+        a && b && strcmp(a, b) == 0;  /* empty operand -> false */
+    free(a);
+    free(b);
+    (void)n;
+    return out;
+}
+
+#ifdef LEPTRIS_HAS_UTF8PROC
+static struct leptris_xpath_result* fn_normalize_unicode(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* in = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    out->value.string_value = in;
+    if (n >= 2) {
+        char* form = re_str_arg(ctx, args, 1);
+        leptris_unicode_normalization_t f = LEPTRIS_UNICODE_NFC;
+        if (form) {
+            if (strcmp(form, "NFD") == 0) f = LEPTRIS_UNICODE_NFD;
+            else if (strcmp(form, "NFKC") == 0) f = LEPTRIS_UNICODE_NFKC;
+            else if (strcmp(form, "NFKD") == 0) f = LEPTRIS_UNICODE_NFKD;
+            free(form);
+        }
+        size_t ol = 0;
+        char* norm = leptris_unicode_normalize(in ? in : "",
+                                               in ? strlen(in) : 0, f, &ol);
+        if (norm) {
+            free(in);
+            out->value.string_value = norm;
+        }
+    }
+    return out;
+}
+#endif
+
+static struct leptris_xpath_result* fn_resolve_qname(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* qn = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(qn); return NULL; }
+    out->value.string_value = leptris_strdup(qn ? qn : "");
+    LeptrisElement e = NULL;
+    if (n >= 2) {
+        struct leptris_xpath_result* r = xpath_evaluate(ctx, args[1]);
+        if (r && r->type == XPATH_RESULT_NODESET &&
+            r->value.nodeset_value && r->value.nodeset_value->count) {
+            void* nd = r->value.nodeset_value->nodes[0];
+            if (leptris_node_get_type(nd) == LEPTRIS_NODE_TYPE_ELEMENT)
+                e = (LeptrisElement)nd;
+        }
+        leptris_xpath_result_free(r);
+    }
+    if (qn) {
+        const char* colon = strchr(qn, ':');
+        char prefix[128];
+        const char* uri = NULL;
+        if (colon) {
+            size_t pl = (size_t)(colon - qn);
+            if (pl < sizeof(prefix)) {
+                memcpy(prefix, qn, pl);
+                prefix[pl] = 0;
+                uri = e ? leptris_element_namespace_for_prefix(e, prefix)
+                        : NULL;
+            }
+        } else {
+            uri = e ? leptris_element_namespace_for_prefix(e, "") : NULL;
+        }
+        snprintf(last_qname_uri, sizeof(last_qname_uri), "%s",
+                 uri ? uri : "");
+    }
+    free(qn);
+    return out;
+}
+
+static struct leptris_xpath_result* fn_environment_variable(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* name = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(name); return NULL; }
+    const char* v = name ? getenv(name) : NULL;
+    out->value.string_value = leptris_strdup(v ? v : "");
+    free(name);
+    (void)n;
+    return out;
+}
+
+#ifndef _WIN32
+extern char** environ;
+#endif
+
+static struct leptris_xpath_result* fn_available_env_vars(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* out = seq_new();
+    if (!out) return NULL;
+#ifndef _WIN32
+    for (char** e = environ; e && *e; e++) {
+        const char* eq = strchr(*e, '=');
+        if (!eq) continue;
+        size_t nl = (size_t)(eq - *e);
+        char* name = (char*)malloc(nl + 1);
+        if (!name) continue;
+        memcpy(name, *e, nl);
+        name[nl] = 0;
+        seq_push_str(out, name);
+        free(name);
+    }
+#endif
+    (void)ctx; (void)args; (void)n;
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -3088,6 +3248,14 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "static-base-uri", fn_uri_constant, 0, 0);
     xpath_function_registry_register(registry, "doc-available", fn_doc_available, 1, 1);
     xpath_function_registry_register(registry, "json-doc", fn_json_doc, 1, 1);
+    xpath_function_registry_register(registry, "compare", fn_compare, 2, 3);
+    xpath_function_registry_register(registry, "codepoint-equal", fn_codepoint_equal, 2, 2);
+#ifdef LEPTRIS_HAS_UTF8PROC
+    xpath_function_registry_register(registry, "normalize-unicode", fn_normalize_unicode, 1, 2);
+#endif
+    xpath_function_registry_register(registry, "resolve-QName", fn_resolve_qname, 2, 2);
+    xpath_function_registry_register(registry, "environment-variable", fn_environment_variable, 1, 1);
+    xpath_function_registry_register(registry, "available-environment-variables", fn_available_env_vars, 0, 0);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
     xpath_function_registry_register(registry, "math:exp", fn_exp, 1, 1);
     xpath_function_registry_register(registry, "math:exp10", fn_exp10, 1, 1);

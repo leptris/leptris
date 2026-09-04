@@ -1470,9 +1470,9 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
     XPathASTNode** args,
     size_t arg_count
 ) {
-    if (arg_count != 1) {
+    if (arg_count < 1 || arg_count > 2) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "round() requires exactly 1 argument");
+                "round() requires 1 or 2 arguments");
         return NULL;
     }
 
@@ -1485,8 +1485,24 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!result) return NULL;
 
-    /* XPath round() rounds half toward +Inf (spec 4.4). */
-    result->value.number_value = xpath_round_half_up(num);
+    /* XPath round() rounds half toward +Inf (spec 4.4). The 2-arg
+     * form (2.0) scales by 10^precision first — negative precision
+     * rounds to tens, hundreds, ... */
+    double scale = 1.0;
+    if (arg_count == 2) {
+        struct leptris_xpath_result* p = xpath_evaluate(context, args[1]);
+        if (!p) { xpath_result_free(result); return NULL; }
+        double pd = result_to_number(p);
+        xpath_result_free(p);
+        if (!(pd >= -100 && pd <= 100)) {
+            snprintf(context->error_msg, sizeof(context->error_msg),
+                     "round(): precision out of range");
+            xpath_result_free(result);
+            return NULL;
+        }
+        scale = pow(10.0, pd);
+    }
+    result->value.number_value = xpath_round_half_up(num * scale) / scale;
     return result;
 }
 
@@ -2336,7 +2352,7 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "sum", xpath_func_sum, 1, 1);
     xpath_function_registry_register(registry, "floor", xpath_func_floor, 1, 1);
     xpath_function_registry_register(registry, "ceiling", xpath_func_ceiling, 1, 1);
-    xpath_function_registry_register(registry, "round", xpath_func_round, 1, 1);
+    xpath_function_registry_register(registry, "round", xpath_func_round, 1, 2);
 
     /* Node-set functions (5 implemented) */
     xpath_function_registry_register(registry, "count", xpath_func_count, 1, 1);
