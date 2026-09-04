@@ -2116,6 +2116,28 @@ TEST(XPath20Ledger, FnAsPathStep) {
     EXPECT_EQ(StrEval("string(//book[3]/price/number())"), "30");
 }
 
+/* #691 date/duration tail: *-from-date / *-from-dateTime /
+ * *-from-duration accessors (ISO components, value-level). */
+TEST(XPath20Ledger, DateAccessorTail) {
+    EXPECT_EQ(NumEval("year-from-date('2024-05-06')"), 2024.0);
+    EXPECT_EQ(NumEval("month-from-date('2024-05-06')"), 5.0);
+    EXPECT_EQ(NumEval("day-from-date('2024-05-06')"), 6.0);
+    EXPECT_EQ(NumEval("hours-from-dateTime('2024-05-06T07:08:09')"), 7.0);
+    EXPECT_EQ(NumEval("minutes-from-dateTime('2024-05-06T07:08:09')"), 8.0);
+    EXPECT_EQ(NumEval("seconds-from-dateTime('2024-05-06T07:08:09')"), 9.0);
+    /* durations: full P..T.. form, days-only, time-only. */
+    EXPECT_EQ(NumEval("days-from-duration('P3DT2H')"), 3.0);
+    EXPECT_EQ(NumEval("hours-from-duration('P3DT2H')"), 2.0);
+    EXPECT_EQ(NumEval("hours-from-duration('PT5H')"), 5.0);
+    EXPECT_EQ(NumEval("minutes-from-duration('PT2H30M')"), 30.0);
+    EXPECT_EQ(NumEval("seconds-from-duration('PT90.5S')"), 90.0);
+    /* constructor aliases are passthrough shapes. */
+    EXPECT_EQ(StrEval("xs:dayTimeDuration('PT2H')"), "PT2H");
+    EXPECT_EQ(StrEval("xs:yearMonthDuration('P1Y2M')"), "P1Y2M");
+    EXPECT_EQ(NumEval(
+        "hours-from-duration(xs:dayTimeDuration('PT3H'))"), 3.0);
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
