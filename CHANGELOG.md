@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.84] - 2026-09-04
+
+### Added
+
+- #659 head-content lift - leading title/meta/link/base into a synthesized head (libxml2 shape) (html)
+
+
+
 ## [1.9.83] - 2026-09-04
 ### Added
 
