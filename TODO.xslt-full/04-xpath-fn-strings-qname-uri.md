@@ -47,3 +47,21 @@ Remaining in this lane:
 - fn:snapshot — detached deep copies via copy_subtree_detached,
   anchored on a fresh document through the owned-docs chain.
 - RNG 'next'/'permute' members — need function-item closure state.
+
+
+## Status addendum 2 (v1.9.80 candidate)
+
+format-number SHIPPED (PR #836): the JDK pattern core is SSOT in
+common/format_number.{h,c}; XSLT keeps the decimal-format lookup
+and maps it into a spec; plain XPath gets the default-format fn.
+
+BANKED INVARIANT (cost a SEGV to learn): the function registry is
+LAST-REGISTRATION-WINS. Overriding layers (XSLT bridge, EXSLT)
+register after the standard library; any handler that resolves its
+closure through the per-function user_data slot MUST register via
+xpath_function_registry_register_ud so the override carries its
+own closure — a plain re-register leaves user_data NULL and the
+handler dereferences garbage. Plain overrides reset user_data
+explicitly. Symptom class: same-named fn silently behaving like
+the base layer inside transforms (multi-byte df separators became
+pattern suffix text).
