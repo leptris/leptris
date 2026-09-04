@@ -1,11 +1,17 @@
 ## [Unreleased]
 
 ## [1.9.81] - 2026-09-04
-
 ### Added
 
-- #691 snapshot - document-lifetime anchor chain + detached deep copies (xpath)
-
+- **#691 `fn:snapshot`** and the **document-lifetime anchor chain**
+  it requires: `leptris_document` grows an anchored-docs array
+  released by `leptris_document_free`, so constructed-node documents
+  can anchor on the SOURCE tree. This is the owner that outlives a
+  plain `leptris_xpath_eval` result (the evaluation context's
+  owned-doc chain is destroyed at eval return — documented after a
+  heap-use-after-free investigation). `fn:snapshot` deep-copies each
+  input element onto a fresh anchored document and returns the
+  copies; `fn:analyze-string` lands on the same chain.
 
 
 ## [1.9.80] - 2026-09-04
