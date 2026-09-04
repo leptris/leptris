@@ -3168,16 +3168,19 @@ static struct leptris_xpath_result* fn_environment_variable(
     return out;
 }
 
-#ifndef _WIN32
+#ifdef _WIN32
+extern char** _environ;   /* MSVC CRT (MBCS build) */
+#define LEPTRIS_ENVIRON _environ
+#else
 extern char** environ;
+#define LEPTRIS_ENVIRON environ
 #endif
 
 static struct leptris_xpath_result* fn_available_env_vars(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     struct leptris_xpath_result* out = seq_new();
     if (!out) return NULL;
-#ifndef _WIN32
-    for (char** e = environ; e && *e; e++) {
+    for (char** e = LEPTRIS_ENVIRON; e && *e; e++) {
         const char* eq = strchr(*e, '=');
         if (!eq) continue;
         size_t nl = (size_t)(eq - *e);
@@ -3188,7 +3191,6 @@ static struct leptris_xpath_result* fn_available_env_vars(XPathContext* ctx,
         seq_push_str(out, name);
         free(name);
     }
-#endif
     (void)ctx; (void)args; (void)n;
     return out;
 }
