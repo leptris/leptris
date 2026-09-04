@@ -2182,6 +2182,31 @@ TEST(XPath20Ledger, FormatNumberXPath) {
     EXPECT_EQ(StrEval("format-number(12, '')"), "12");
 }
 
+/* #691: fn:snapshot - detached deep copies anchored on the
+ * SOURCE document (value-level: element nodes). */
+TEST(XPath20Ledger, Snapshot) {
+    EXPECT_EQ(NumEval("count(snapshot(//book))"), 3.0);
+    EXPECT_EQ(StrEval("snapshot(//book[2])/title"), "Second");
+    EXPECT_EQ(StrEval("name(snapshot(//book[2]))"), "book");
+    EXPECT_EQ(NumEval("count(snapshot(//book[1])/descendant::*)"), 2.0);
+    EXPECT_TRUE(BoolEval("deep-equal(snapshot(//book[1])/*, //book[1]/*)"));
+    /* the snapshot survives result consumption AND stays independent
+     * of later source mutations. */
+    {
+        LeptrisDocument d = ParseWith(kBasic);
+        ASSERT_NE(d, nullptr);
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr,
+                                                 "snapshot(//book[1])");
+        ASSERT_NE(r, nullptr);
+        EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+        LeptrisElement b = leptris_xpath_result_get(r, 0);
+        ASSERT_NE(b, nullptr);
+        EXPECT_STREQ(leptris_element_name(b), "book");
+        leptris_xpath_result_free(r);
+        leptris_document_free(d);   /* frees the anchored copy too */
+    }
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));

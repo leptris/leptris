@@ -833,6 +833,13 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     extern void leptris_xpath_free_custom_fns(struct leptris_document*);
     leptris_xpath_free_custom_fns(doc);
 
+    /* Constructed-node anchors (#691): snapshot copies and
+     * analyze-string trees borrowed by evaluation results. */
+    for (size_t i = 0; i < doc->n_anchored_docs; i++)
+        if (doc->anchored_docs[i])
+            leptris_document_free(doc->anchored_docs[i]);
+    LEPTRIS_FREE(doc->anchored_docs);
+
     /* Free element index (TODO 132) */
     if (doc->element_index) {
         leptris_element_index_free(doc->element_index);
