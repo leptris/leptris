@@ -3317,6 +3317,55 @@ static struct leptris_xpath_result* fn_uri_collection(XPathContext* ctx,
     return out;
 }
 
+/* #691: fn:random-number-generator. The map carries 'number'
+ * only — 'next' and 'permute' are function-item closures (the
+ * value-level model has no per-call callable state; tracked in
+ * TODO.xslt-full/04). Seeded calls are deterministic (xorshift64*
+ * over an FNV-1a of the seed); unseeded calls mix the clock. */
+static struct leptris_xpath_result* fn_random_number_generator(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* seed = (n >= 1) ? re_str_arg(ctx, args, 0) : NULL;
+    unsigned long long st;
+    if (seed) {
+        st = 1469598103934665603ULL;
+        for (const char* p = seed; *p; p++) {
+            st ^= (unsigned char)*p;
+            st *= 1099511628211ULL;
+        }
+    } else {
+        st = (unsigned long long)time(NULL) * 6364136223846793005ULL
+             ^ (unsigned long long)(uintptr_t)ctx;
+    }
+    st ^= st >> 12; st ^= st << 25; st ^= st >> 27;
+    st *= 2685821657736338717ULL;
+    double v = (double)(st >> 11) / 9007199254740992.0;
+
+    char numbuf[64];
+    snprintf(numbuf, sizeof(numbuf), "%.17g", v);
+    char* content = (char*)malloc(12 + strlen(numbuf) + 1);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_NODESET);
+    if (!content || !out) {
+        free(content);
+        xpath_result_free(out);
+        free(seed);
+        return NULL;
+    }
+    sprintf(content, "\x03MAP\x02number\x01%s", numbuf);
+    XPathTextNode* tn = xpath_synth_text(content, strlen(content));
+    free(content);
+    free(seed);
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value || !tn) {
+        xpath_result_free(out);
+        return NULL;
+    }
+    out->value.nodeset_value->owns_synthetic_text = 1;
+    out->value.nodeset_value->is_sequence = 1;
+    xpath_nodeset_add(out->value.nodeset_value, tn);
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -3384,6 +3433,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "unparsed-text-lines", fn_unparsed_text_lines, 1, 2);
     xpath_function_registry_register(registry, "unparsed-text-available", fn_unparsed_text_available, 1, 2);
     xpath_function_registry_register(registry, "uri-collection", fn_uri_collection, 0, 1);
+    xpath_function_registry_register(registry, "random-number-generator", fn_random_number_generator, 0, 1);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
     xpath_function_registry_register(registry, "math:exp", fn_exp, 1, 1);
     xpath_function_registry_register(registry, "math:exp10", fn_exp10, 1, 1);
