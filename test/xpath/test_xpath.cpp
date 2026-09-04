@@ -2141,7 +2141,8 @@ TEST(XPath20Ledger, DateAccessorTail) {
 /* #691: unparsed-text family + uri-collection (empty without a
  * collection catalog). */
 TEST(XPath20Ledger, UnparsedText) {
-    FILE* f = fopen("leptris-unparsed.txt", "w");
+    /* Binary mode: Windows text mode would write CRLF. */
+    FILE* f = fopen("leptris-unparsed.txt", "wb");
     ASSERT_NE(f, nullptr);
     fputs("alpha\nbeta", f);
     fclose(f);
