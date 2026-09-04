@@ -491,3 +491,26 @@ TEST(XQueryCore, ParseXmlAndFragment) {
         "name(parse-xml-fragment('<p/>q')/*[1])"), "p");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, StringConstructors) {
+    /* #692 tail: XQuery 3.1 string constructors. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "`price is {//book[1]/@price}!`"),
+              "price is 12!");
+    EXPECT_EQ(seq_string(doc, "`{{x}}`"), "{x}");
+    EXPECT_EQ(seq_string(doc, "``"), "");
+    EXPECT_EQ(seq_string(doc, "`plain`"), "plain");
+    EXPECT_EQ(seq_string(doc, "`{1 + 1}`"), "2");
+    /* literal that looks like a direct constructor stays text. */
+    EXPECT_EQ(seq_string(doc, "`<a/>`"), "<a/>");
+    /* embedded double quotes; a brace inside an expr string literal. */
+    EXPECT_EQ(seq_string(doc, "`say \"hi\" {1}`"), "say \"hi\" 1");
+    EXPECT_EQ(seq_string(doc, "`x{'a}b'}`"), "xa}b");
+    /* string ctor in function-argument position. */
+    EXPECT_EQ(seq_string(doc, "concat(`A`, `-`, `B`)"), "A-B");
+    /* clause keyword inside literal text must not split the FLWOR scan. */
+    EXPECT_EQ(seq_string(doc, "`a where b`"), "a where b");
+    leptris_document_free(doc);
+}
