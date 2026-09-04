@@ -1,11 +1,14 @@
 ## [Unreleased]
 
 ## [1.9.83] - 2026-09-04
-
 ### Added
 
-- #659 PI-ish bogus constructs - <?target data?> becomes a PI node (libxml2 shape) (html)
-
+- **#659 HTML: PI-ish bogus constructs** — in HTML input,
+  `<?target data?>` is kept as a PI node with the libxml2/Nokogiri
+  shape (data includes the trailing `?`, leading whitespace
+  trimmed). `<!...>` non-comment constructs (DOCTYPE, `<![CDATA[`)
+  were verified against the same ground truth: dropping to the
+  first `>` without perturbing text is already correct.
 
 
 ## [1.9.82] - 2026-09-04
