@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.81] - 2026-09-04
+
+### Added
+
+- #691 snapshot - document-lifetime anchor chain + detached deep copies (xpath)
+
+
+
 ## [1.9.80] - 2026-09-04
 ### Added
 
