@@ -2633,6 +2633,42 @@ done:
         b.top_head = NULL;
         b.top_tail = NULL;
         LeptrisElement html = h_open_named(&b, "html", 0);
+        /* Head-content lift (#659, libxml2 shape): a contiguous
+         * leading run of title/meta/link/base ELEMENTS moves into a
+         * synthesized <head> placed before <body>; only synthesize
+         * <head> when the run is non-empty (the no-empty-head rule).
+         * Anything after body content starts stays put. */
+        LeptrisNodeRef head_end = orig_head;   /* first non-head node */
+        while (head_end &&
+               leptris_node_get_type(head_end) ==
+                   LEPTRIS_NODE_TYPE_ELEMENT) {
+            const char* hn = leptris_element_name((LeptrisElement)head_end);
+            if (!(h_ieq_raw(hn, "title") || h_ieq_raw(hn, "meta") ||
+                  h_ieq_raw(hn, "link") || h_ieq_raw(hn, "base")))
+                break;
+            head_end = leptris_node_get_next_sibling(head_end);
+        }
+        LeptrisElement head = NULL;
+        if (head_end != orig_head) {
+            head = h_new_child(&b, html, "head");
+            if (head) {
+                size_t hn = 0;
+                LeptrisNodeRef hlast = NULL;
+                for (LeptrisNodeRef c = orig_head; c && c != head_end; ) {
+                    LeptrisNodeRef next =
+                        leptris_node_get_next_sibling(c);
+                    leptris_element_set_parent((LeptrisElement)c, head);
+                    hlast = c;
+                    hn++;
+                    c = next;
+                }
+                leptris_elem_set_first_child(head, orig_head);
+                leptris_elem_set_last_child(head, hlast);
+                head->child_count = hn;
+                /* sever the two chains at the lift boundary */
+                if (hlast) leptris_node_set_next_sibling(hlast, NULL);
+            }
+        }
         LeptrisElement body = h_new_child(&b, html, "body");
         if (!html || !body) {
             if (status) *status = LEPTRIS_ERROR_MEMORY;
@@ -2643,7 +2679,7 @@ done:
          * sibling links; reparent and re-anchor. */
         size_t elems = 0;
         LeptrisNodeRef last = NULL;
-        for (LeptrisNodeRef c = orig_head; c; ) {
+        for (LeptrisNodeRef c = head_end ? head_end : orig_head; c; ) {
             LeptrisNodeRef next = leptris_node_get_next_sibling(c);
             int ty = leptris_node_get_type(c);
             if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
@@ -2661,7 +2697,7 @@ done:
             last = c;
             c = next;
         }
-        leptris_elem_set_first_child(body, orig_head);
+        leptris_elem_set_first_child(body, head ? head_end : orig_head);
         leptris_elem_set_last_child(body, last ? last : orig_tail);
         body->child_count = elems;
         b.top_head = (LeptrisNodeRef)html;
