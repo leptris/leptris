@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+## [1.9.77] - 2026-09-04
+
+### Added
+
+- #692 grammar tail - switch, array{}, parse-xml, nested lookups (xquery)
+
+### Fixed
+
+- free parse-xml-fragment source string (LSan leak, Linux CI) (xquery)
+- use the shared benchmark_time_us timer (bench)
+- _POSIX_C_SOURCE for clock_gettime on Linux (C99 strict) (bench)
+
+### Performance
+
+- promote the lane-13 release scorecard (#682) (bench)
+
+
+
 ## [1.9.76] - 2026-09-03
 
 ### Added
