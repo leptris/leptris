@@ -1378,6 +1378,7 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
                  * nodeset algebra — AST interpreter. */
                 op == XPATH_OP_SOME || op == XPATH_OP_EVERY ||
                 op == XPATH_OP_BINDING ||
+                op == XPATH_OP_ARRAY_OF ||
                 op == XPATH_OP_IS || op == XPATH_OP_NODE_BEFORE ||
                 op == XPATH_OP_NODE_AFTER ||
                 op == XPATH_OP_INTERSECT || op == XPATH_OP_EXCEPT) {

@@ -1116,6 +1116,9 @@ static struct leptris_xpath_result* fn_node_name(XPathContext* ctx,
  * (TODO.xslt-full/11). The document anchors on the eval context
  * (XPathContext.owned_docs): the nodeset borrows the root element,
  * so the doc must outlive the result — cleanup frees the anchors. */
+#include "../dom/document_node.h"
+static struct leptris_xpath_result* xq_anchor_owned_doc(
+    XPathContext* ctx, struct leptris_document* doc, int fragment);
 static struct leptris_xpath_result* fn_doc(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
@@ -1135,18 +1138,54 @@ static struct leptris_xpath_result* fn_doc(XPathContext* ctx,
         leptris_document_free(doc);
         return NULL;
     }
+    struct leptris_xpath_result* out =
+        xq_anchor_owned_doc(ctx, doc, 0);
+    if (!out) leptris_document_free(doc);
+    return out;
+}
+
+/* Anchor a caller-parsed document on the context's owned chain and
+ * return its DOCUMENT NODE (XQuery: parse-xml and
+ * parse-xml-fragment yield a document node, so /root and /* step
+ * from the document level, #692). fragment==1 additionally SPLICES
+ * the wrapper's children to the document level (root = first
+ * element, doc-children = the fragment chain) so /* hits the
+ * fragment nodes. The nodeset borrows; cleanup frees the document
+ * with the context. */
+static struct leptris_xpath_result* xq_anchor_owned_doc(
+    XPathContext* ctx, struct leptris_document* doc, int fragment) {
+    if (fragment) {
+        LeptrisElement wrap = leptris_document_root(doc);
+        if (wrap) {
+            LeptrisNodeRef c = leptris_node_first_child(
+                leptris_element_as_node(wrap));
+            LeptrisElement first_elem = NULL;
+            LeptrisNodeRef last = NULL;
+            while (c) {
+                LeptrisNodeRef next = leptris_node_get_next_sibling(c);
+                if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT &&
+                    !first_elem)
+                    first_elem = (LeptrisElement)c;
+                if (!last) doc->doc_children_head = c;
+                else leptris_node_set_next_sibling(last, c);
+                last = c;
+                c = next;
+            }
+            doc->doc_children_tail = last;
+            doc->new_dom_root = first_elem;
+        }
+    }
     if (ctx->n_owned_docs == ctx->cap_owned_docs) {
         ctx->cap_owned_docs = ctx->cap_owned_docs
                                   ? ctx->cap_owned_docs * 2 : 4;
         ctx->owned_docs = (struct leptris_document**)realloc(
             ctx->owned_docs,
             ctx->cap_owned_docs * sizeof(struct leptris_document*));
-        if (!ctx->owned_docs) {
-            leptris_document_free(doc);
-            return NULL;
-        }
+        if (!ctx->owned_docs) return NULL;
     }
     ctx->owned_docs[ctx->n_owned_docs++] = doc;
+    LeptrisNode* dn = leptris_document_get_node(doc);
+    if (!dn) return NULL;
     struct leptris_xpath_result* out =
         xpath_result_new(XPATH_RESULT_NODESET);
     if (!out) return NULL;
@@ -1155,8 +1194,55 @@ static struct leptris_xpath_result* fn_doc(XPathContext* ctx,
         xpath_result_free(out);
         return NULL;
     }
-    xpath_nodeset_add(out->value.nodeset_value, root);
+    xpath_nodeset_add(out->value.nodeset_value, dn);
     return out;
+}
+
+/* fn:parse-xml (arg: XML string) -> document node sequence (#692).
+ * Owned-doc anchored, like doc(). */
+static struct leptris_xpath_result* fn_parse_xml(
+    XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)n;
+    char* src = re_str_arg(ctx, args, 0);
+    if (!src) return NULL;
+    LeptrisDocument doc = leptris_parse_string(src, strlen(src), NULL);
+    free(src);
+    if (!doc) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "parse-xml(): invalid XML");
+        snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0006");
+        return NULL;
+    }
+    return xq_anchor_owned_doc(ctx, doc, 0);
+}
+
+/* fn:parse-xml-fragment: multiple top-level nodes are legal — the
+ * input is wrapped, and the returned sequence is the wrapper's
+ * CHILDREN (borrowed; the owned doc anchors them). */
+static struct leptris_xpath_result* fn_parse_xml_fragment(
+    XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)n;
+    char* src = re_str_arg(ctx, args, 0);
+    if (!src) return NULL;
+    size_t sl = strlen(src);
+    const char* wrap_open = "<leptris:frag xmlns:leptris='urn:leptris:frag'>";
+    const char* wrap_close = "</leptris:frag>";
+    size_t ol = strlen(wrap_open), cl = strlen(wrap_close);
+    char* wrapped = (char*)malloc(sl + ol + cl + 1);
+    if (!wrapped) return NULL;
+    memcpy(wrapped, wrap_open, ol);
+    memcpy(wrapped + ol, src, sl);
+    memcpy(wrapped + ol + sl, wrap_close, cl);
+    wrapped[ol + sl + cl] = 0;
+    LeptrisDocument doc = leptris_parse_string(wrapped, ol + sl + cl, NULL);
+    free(wrapped);
+    if (!doc) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "parse-xml-fragment(): invalid XML");
+        snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0006");
+        return NULL;
+    }
+    return xq_anchor_owned_doc(ctx, doc, 1);
 }
 
 static struct leptris_xpath_result* fn_passthrough_ctor(XPathContext* ctx,
@@ -2718,6 +2804,10 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "reverse", fn_reverse, 1, 1);
     xpath_function_registry_register(registry, "unordered", fn_unordered, 1, 1);
     xpath_function_registry_register(registry, "doc", fn_doc, 1, 1);
+    xpath_function_registry_register(registry, "parse-xml",
+                                     fn_parse_xml, 1, 1);
+    xpath_function_registry_register(registry, "parse-xml-fragment",
+                                     fn_parse_xml_fragment, 1, 1);
     xpath_function_registry_register(registry, "collection",
                                      fn_collection, 0, 1);
     xpath_function_registry_register(registry, "subsequence", fn_subsequence, 2, 3);
