@@ -115,6 +115,30 @@ void xpath_function_registry_free(XPathFunctionRegistry* registry) {
     LEPTRIS_FREE(registry);
 }
 
+void xpath_function_registry_register_ud(
+    XPathFunctionRegistry* registry,
+    const char* name,
+    XPathFunctionHandler handler,
+    int min_args,
+    int max_args,
+    void* user_data
+) {
+    if (!registry || !name || !handler) return;
+    for (size_t i = 0; i < registry->count; i++) {
+        if (strcmp(registry->functions[i].name, name) == 0) {
+            registry->functions[i].handler = handler;
+            registry->functions[i].min_args = min_args;
+            registry->functions[i].max_args = max_args;
+            registry->functions[i].user_data = user_data;
+            return;
+        }
+    }
+    xpath_function_registry_register(registry, name, handler,
+                                     min_args, max_args);
+    if (registry->count > 0)
+        registry->functions[registry->count - 1].user_data = user_data;
+}
+
 void xpath_function_registry_register(
     XPathFunctionRegistry* registry,
     const char* name,
@@ -135,6 +159,20 @@ void xpath_function_registry_register(
         if (!new_functions) return;
         registry->functions = new_functions;
         registry->capacity = new_capacity;
+    }
+
+    /* Last registration WINS: the standard library loads first,
+     * then ext31 families, then the XSLT bridge / EXSLT packs —
+     * each layer overrides same-named core entries (the bridge's
+     * format-number must own the name inside transforms). */
+    for (size_t i = 0; i < registry->count; i++) {
+        if (strcmp(registry->functions[i].name, name) == 0) {
+            registry->functions[i].handler = handler;
+            registry->functions[i].min_args = min_args;
+            registry->functions[i].max_args = max_args;
+            registry->functions[i].user_data = NULL;
+            return;
+        }
     }
 
     /* Add function */

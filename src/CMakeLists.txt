@@ -45,6 +45,7 @@ set(LEPTRIS_SOURCES
 
     # Common utilities
     leptris/common/string_view.c
+    leptris/common/format_number.c
     leptris/common/entities.c
     leptris/common/chartype.c
     # AOT SIMD framework (TODO 175): scalar impls + runtime dispatch

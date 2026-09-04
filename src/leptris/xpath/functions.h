@@ -103,6 +103,19 @@ void xpath_function_registry_register(
     int max_args
 );
 
+/* Same, with per-function opaque state (TODO 148): the LAST
+ * registration still wins and carries ITS user_data — overriding
+ * layers (XSLT bridge) must use this variant so their handler's
+ * closure replaces the standard entry's NULL. */
+void xpath_function_registry_register_ud(
+    XPathFunctionRegistry* registry,
+    const char* name,
+    XPathFunctionHandler handler,
+    int min_args,
+    int max_args,
+    void* user_data
+);
+
 /**
  * Lookup function by name
  *
