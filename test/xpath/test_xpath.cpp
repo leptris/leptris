@@ -2156,6 +2156,20 @@ TEST(XPath20Ledger, UnparsedText) {
     EXPECT_EQ(NumEval("count(uri-collection())"), 0.0);
 }
 
+/* #691: random-number-generator - seeded (deterministic per
+ * seed), number in [0,1); the next/permute function-item members
+ * need closure state (documented gap). */
+TEST(XPath20Ledger, RandomNumberGenerator) {
+    EXPECT_TRUE(BoolEval(
+        "let $a := random-number-generator('seed691')?number "
+        "return $a = random-number-generator('seed691')?number"));
+    EXPECT_TRUE(BoolEval("random-number-generator()?number >= 0"));
+    EXPECT_TRUE(BoolEval("random-number-generator()?number < 1"));
+    EXPECT_EQ(NumEval("count(map:keys(random-number-generator()))"), 1.0);
+    EXPECT_TRUE(BoolEval(
+        "map:get(random-number-generator('k'), 'number') >= 0"));
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
