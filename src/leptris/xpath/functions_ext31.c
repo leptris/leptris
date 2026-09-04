@@ -1269,12 +1269,32 @@ static struct leptris_xpath_result* fn_date_field(XPathContext* ctx,
     if (in) {
         int y = 0, mo = 0, d = 0, h = 0, mi = 0;
         double se = 0;
-        long dd = 0, dh = 0;
-        char dur_sign = 0;
         const char* t = strstr(in, "T");
-        if (sscanf(in, "P%ldDT%ldH", &dd, &dh) >= 1) dur_sign = 'P';
-        if (dur_sign == 'P') {
-            v = (which == 7) ? dd : (which == 8) ? dh : 0;
+        long dd = 0, dh = 0, dm = 0;
+        double dsec = 0;
+        if (in[0] == 'P' || (in[0] == '-' && in[1] == 'P')) {
+            /* ISO 8601 duration P[nY][nM][nD][T[nH][nM][nS]]: 'M'
+             * means months before T, minutes after. */
+            const char* q = in + (in[0] == '-' ? 1 : 0) + 1;
+            int in_time = 0;
+            while (*q) {
+                if (*q == 'T') { in_time = 1; q++; continue; }
+                char* end = NULL;
+                double num = strtod(q, &end);
+                if (end == q) break;
+                char unit = *end;
+                if (!in_time) {
+                    if (unit == 'D') dd = (long)num;
+                } else {
+                    if (unit == 'H') dh = (long)num;
+                    else if (unit == 'M') dm = (long)num;
+                    else if (unit == 'S') dsec = num;
+                }
+                q = end + 1;
+            }
+            v = (which == 7) ? dd : (which == 8) ? dh
+              : (which == 9) ? dm : (which == 10) ? (long)dsec : 0;
+            if (in[0] == '-') v = -v;
         } else if (sscanf(in, "%d-%d-%d", &y, &mo, &d) == 3) {
             if (t) sscanf(t, "T%d:%d:%lf", &h, &mi, &se);
             else sscanf(in, "%*d-%*d-%*dT%d:%d:%lf", &h, &mi, &se);
@@ -1306,6 +1326,8 @@ DATE_FIELD(minutes_from_t, 5)
 DATE_FIELD(seconds_from_t, 6)
 DATE_FIELD(days_from_dur, 7)
 DATE_FIELD(hours_from_dur, 8)
+DATE_FIELD(minutes_from_dur, 9)
+DATE_FIELD(seconds_from_dur, 10)
 
 
 /* ---- xs: atomic constructors (TODO.xslt-full/06; Saxon-HE 12.7
@@ -3298,7 +3320,17 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:dateTime", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:time", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:dayTimeDuration", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:yearMonthDuration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "year-from-dateTime", fn_year_from_dt, 1, 1);
+    xpath_function_registry_register(registry, "year-from-date", fn_year_from_dt, 1, 1);
+    xpath_function_registry_register(registry, "month-from-date", fn_month_from_dt, 1, 1);
+    xpath_function_registry_register(registry, "day-from-date", fn_day_from_dt, 1, 1);
+    xpath_function_registry_register(registry, "hours-from-dateTime", fn_hours_from_t, 1, 1);
+    xpath_function_registry_register(registry, "minutes-from-dateTime", fn_minutes_from_t, 1, 1);
+    xpath_function_registry_register(registry, "seconds-from-dateTime", fn_seconds_from_t, 1, 1);
+    xpath_function_registry_register(registry, "minutes-from-duration", fn_minutes_from_dur, 1, 1);
+    xpath_function_registry_register(registry, "seconds-from-duration", fn_seconds_from_dur, 1, 1);
     xpath_function_registry_register(registry, "month-from-dateTime", fn_month_from_dt, 1, 1);
     xpath_function_registry_register(registry, "day-from-dateTime", fn_day_from_dt, 1, 1);
     xpath_function_registry_register(registry, "hours-from-time", fn_hours_from_t, 1, 1);
