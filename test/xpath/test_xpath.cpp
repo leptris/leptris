@@ -1984,20 +1984,21 @@ TEST(XPath20Ledger, DocumentUriTail) {
     /* doc-available: false for an unloadable path, true for a
      * parseable file. */
     EXPECT_FALSE(BoolEval("doc-available('/nonexistent/leptris-zz.xml')"));
-    FILE* f = fopen("/tmp/leptris-docavail.xml", "w");
+    /* CWD-relative paths: portable across POSIX and Windows. */
+    FILE* f = fopen("leptris-docavail.xml", "w");
     ASSERT_NE(f, nullptr);
     fputs("<ok/>", f);
     fclose(f);
-    EXPECT_TRUE(BoolEval("doc-available('/tmp/leptris-docavail.xml')"));
-    remove("/tmp/leptris-docavail.xml");
+    EXPECT_TRUE(BoolEval("doc-available('leptris-docavail.xml')"));
+    remove("leptris-docavail.xml");
     /* json-doc: a JSON file parses to a map. */
-    f = fopen("/tmp/leptris-jsondoc.json", "w");
+    f = fopen("leptris-jsondoc.json", "w");
     ASSERT_NE(f, nullptr);
     fputs("{\"k\": 7}", f);
     fclose(f);
-    EXPECT_EQ(NumEval("map:get(json-doc('/tmp/leptris-jsondoc.json'), 'k')"),
+    EXPECT_EQ(NumEval("map:get(json-doc('leptris-jsondoc.json'), 'k')"),
               7.0);
-    remove("/tmp/leptris-jsondoc.json");
+    remove("leptris-jsondoc.json");
 }
 
 TEST(XPath20Ledger, DeepEqual) {
