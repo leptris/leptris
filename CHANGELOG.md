@@ -1,15 +1,17 @@
 ## [Unreleased]
 
 ## [1.9.82] - 2026-09-04
-
 ### Added
 
-- #691 analyze-string - fn:match/fn:non-match/fn:group model on the anchor chain (xpath)
-
-### Fixed
-
-- probe analyze-string availability (no POSIX regex on Windows) (test)
-
+- **#691 `fn:analyze-string`** — the last function in the catalog.
+  The `fn:match` / `fn:non-match` element model (`fn:group` children
+  carry `@nr`) is built on a fresh document through the v1.9.81
+  document-lifetime anchor chain: regex iteration reuses the
+  `fn:matches` POSIX flag translation, non-match gaps between
+  matches, match-relative group offsets, trailing non-match,
+  zero-length-match advance, and an overall string value equal to
+  the input. Registered under `LEPTRIS_HAVE_POSIX_RE` like the
+  regex trio.
 
 
 ## [1.9.81] - 2026-09-04
