@@ -2138,6 +2138,23 @@ TEST(XPath20Ledger, DateAccessorTail) {
         "hours-from-duration(xs:dayTimeDuration('PT3H'))"), 3.0);
 }
 
+/* #691: unparsed-text family + uri-collection (empty without a
+ * collection catalog). */
+TEST(XPath20Ledger, UnparsedText) {
+    FILE* f = fopen("leptris-unparsed.txt", "w");
+    ASSERT_NE(f, nullptr);
+    fputs("alpha\nbeta", f);
+    fclose(f);
+    EXPECT_EQ(StrEval("unparsed-text('leptris-unparsed.txt')"),
+              "alpha\nbeta");
+    EXPECT_EQ(NumEval("count(unparsed-text-lines('leptris-unparsed.txt'))"),
+              2.0);
+    remove("leptris-unparsed.txt");
+    /* A missing file is an error, not an empty string. */
+    EXPECT_FALSE(BoolEval("unparsed-text-available('nope-691.txt')"));
+    EXPECT_EQ(NumEval("count(uri-collection())"), 0.0);
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));

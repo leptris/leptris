@@ -3217,6 +3217,106 @@ static struct leptris_xpath_result* fn_available_env_vars(XPathContext* ctx,
     return out;
 }
 
+/* #691 stragglers: the unparsed-text family over a raw file read
+ * (same loader json-doc uses) and the empty catalog uri-collection. */
+static char* read_file_text(const char* path, size_t* out_len) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* buf = (char*)malloc(sz > 0 ? (size_t)sz + 1 : 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)sz, f);
+    buf[got] = 0;
+    fclose(f);
+    if (out_len) *out_len = got;
+    return buf;
+}
+
+static struct leptris_xpath_result* fn_unparsed_text(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    char* path = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(path); return NULL; }
+    out->value.string_value = leptris_strdup("");
+    if (path) {
+        size_t len = 0;
+        char* buf = read_file_text(path, &len);
+        free(path);
+        if (!buf) {
+            xpath_result_free(out);
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "unparsed-text(): cannot load text");
+            snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0002");
+            return NULL;
+        }
+        free(out->value.string_value);
+        out->value.string_value = buf;
+    }
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_unparsed_text_lines(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* path = re_str_arg(ctx, args, 0);
+    if (!path) return NULL;
+    size_t len = 0;
+    char* buf = read_file_text(path, &len);
+    free(path);
+    if (!buf) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "unparsed-text-lines(): cannot load text");
+        snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0002");
+        return NULL;
+    }
+    struct leptris_xpath_result* out = seq_new();
+    if (!out) { free(buf); return NULL; }
+    char* p = buf;
+    while (p < buf + len) {
+        char* nl = (char*)memchr(p, '\n', (size_t)(buf + len - p));
+        char* end = nl ? nl : buf + len;
+        char saved = *end;
+        *end = 0;
+        seq_push_str(out, p);
+        *end = saved;
+        p = nl ? nl + 1 : buf + len;
+    }
+    if (len > 0 && buf[len - 1] == '\n' && out->value.nodeset_value &&
+        out->value.nodeset_value->count)
+        out->value.nodeset_value->count--;  /* no trailing empty line */
+    free(buf);
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_unparsed_text_available(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    char* path = re_str_arg(ctx, args, 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+    if (!out) { free(path); return NULL; }
+    out->value.boolean_value = 0;
+    if (path) {
+        size_t len = 0;
+        char* buf = read_file_text(path, &len);
+        if (buf) {
+            out->value.boolean_value = 1;
+            free(buf);
+        }
+        free(path);
+    }
+    (void)n;
+    return out;
+}
+
+static struct leptris_xpath_result* fn_uri_collection(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* out = seq_new();
+    (void)ctx; (void)args; (void)n;
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -3280,6 +3380,10 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "resolve-QName", fn_resolve_qname, 2, 2);
     xpath_function_registry_register(registry, "environment-variable", fn_environment_variable, 1, 1);
     xpath_function_registry_register(registry, "available-environment-variables", fn_available_env_vars, 0, 0);
+    xpath_function_registry_register(registry, "unparsed-text", fn_unparsed_text, 1, 2);
+    xpath_function_registry_register(registry, "unparsed-text-lines", fn_unparsed_text_lines, 1, 2);
+    xpath_function_registry_register(registry, "unparsed-text-available", fn_unparsed_text_available, 1, 2);
+    xpath_function_registry_register(registry, "uri-collection", fn_uri_collection, 0, 1);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
     xpath_function_registry_register(registry, "math:exp", fn_exp, 1, 1);
     xpath_function_registry_register(registry, "math:exp10", fn_exp10, 1, 1);
