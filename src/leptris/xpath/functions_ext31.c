@@ -1146,11 +1146,11 @@ static struct leptris_xpath_result* fn_doc(XPathContext* ctx,
 
 /* Anchor a caller-parsed document on the context's owned chain and
  * return its DOCUMENT NODE (XQuery: parse-xml and
- * parse-xml-fragment yield a document node, so /root and /* step
- * from the document level, #692). fragment==1 additionally SPLICES
+ * parse-xml-fragment yield a document node, so /root and
+ * absolute paths step from the document level, #692). fragment==1 additionally SPLICES
  * the wrapper's children to the document level (root = first
- * element, doc-children = the fragment chain) so /* hits the
- * fragment nodes. The nodeset borrows; cleanup frees the document
+ * element, doc-children = the fragment chain) so absolute
+ * paths hit the fragment nodes. The nodeset borrows; cleanup frees the document
  * with the context. */
 static struct leptris_xpath_result* xq_anchor_owned_doc(
     XPathContext* ctx, struct leptris_document* doc, int fragment) {
