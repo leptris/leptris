@@ -2170,6 +2170,18 @@ TEST(XPath20Ledger, RandomNumberGenerator) {
         "map:get(random-number-generator('k'), 'number') >= 0"));
 }
 
+/* #691: fn:format-number as a PLAIN XPath function (the JDK
+ * pattern core is now shared SSOT with the XSLT layer; the default
+ * decimal format applies - named formats are an XSLT context). */
+TEST(XPath20Ledger, FormatNumberXPath) {
+    EXPECT_EQ(StrEval("format-number(1234.567, '#,##0.00')"), "1,234.57");
+    EXPECT_EQ(StrEval("format-number(0.5, '0%')"), "50%");
+    EXPECT_EQ(StrEval("format-number(42, '000')"), "042");
+    EXPECT_EQ(StrEval("format-number(-7, '0')"), "-7");
+    EXPECT_EQ(StrEval("format-number(0 div 0, '0')"), "NaN");
+    EXPECT_EQ(StrEval("format-number(12, '')"), "12");
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
