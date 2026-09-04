@@ -40,6 +40,7 @@ static XPathASTNode* parse_if_expr(XPathParser* parser);
 static XPathASTNode* parse_for_expr(XPathParser* parser);
 static XPathASTNode* parse_let_expr(XPathParser* parser);
 static XPathASTNode* parse_quantified_expr(XPathParser* parser);
+static XPathASTNode* parse_switch_expr(XPathParser* parser);
 static int token_starts_path(XPathToken* t);
 /* Saxon-HE rejects switch in XPath EXPRESSIONS (XPST0003 — the
  * syntax is XSLT 3.0 PATTERN-only). parse_switch_expr lands with
@@ -1035,6 +1036,19 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             next && next->type == TOK_DOLLAR) {
             /* Fall through to filter expression */
         }
+        /* switch( and array{ fall through the same way (#692). */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 current_token(parser)->value_len == 6 &&
+                 memcmp(current_token(parser)->value, "switch", 6) == 0 &&
+                 next && next->type == TOK_LPAREN) {
+            /* Fall through to filter expression */
+        }
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 current_token(parser)->value_len == 5 &&
+                 memcmp(current_token(parser)->value, "array", 5) == 0 &&
+                 next && next->type == TOK_LBRACE) {
+            /* Fall through to filter expression */
+        }
         /* 3.0 inline function item `function ($a, $b) { body }`. */
         else if (current_token(parser)->type == TOK_NCNAME &&
                  current_token(parser)->value_len == 8 &&
@@ -1998,23 +2012,19 @@ fail:
     return NULL;
 }
 
-/* XPath 3.1 switch: `switch (E) { case T return R ... default
- * return D }`. Value-matched keywords keep name tests intact. */
-#if 0
+/* XQuery 3.0 switch: `switch (E) case T return R ...
+ * default return D` (braceless — the XPath 3.1 braced form is
+ * Saxon-rejected in expressions; XQuery's shape is the spec
+ * one). First case whose test VALUE-equals the operand wins;
+ * default is mandatory (XQuery 3.0 §3.10.2). */
 static XPathASTNode* parse_switch_expr(XPathParser* parser) {
     advance_token(parser);   /* consume `switch` */
-    if (!consume_token(parser, TOK_LPAREN,
-                       "Expected '(' after switch"))
+    if (!consume_token(parser, TOK_LPAREN, "Expected '(' after switch"))
         return NULL;
     XPathASTNode* operand = parse_expr(parser);
     if (!operand) return NULL;
     if (!consume_token(parser, TOK_RPAREN,
                        "Expected ')' after switch operand")) {
-        ast_node_free(operand);
-        return NULL;
-    }
-    if (!consume_token(parser, TOK_LBRACE,
-                       "Expected '{' to open the switch body")) {
         ast_node_free(operand);
         return NULL;
     }
@@ -2028,7 +2038,7 @@ static XPathASTNode* parse_switch_expr(XPathParser* parser) {
         XPathToken* kw = current_token(parser);
         if (!kw || kw->type != TOK_NCNAME) {
             snprintf(parser->error_msg, sizeof(parser->error_msg),
-                     "Expected 'case' or 'default' in switch body");
+                     "Expected 'case' or 'default' in switch");
             ast_node_free(node);
             return NULL;
         }
@@ -2038,7 +2048,7 @@ static XPathASTNode* parse_switch_expr(XPathParser* parser) {
                       memcmp(kw->value, "case", 4) == 0;
         if (!is_default && !is_case) {
             snprintf(parser->error_msg, sizeof(parser->error_msg),
-                     "Expected 'case' or 'default' in switch body");
+                     "Expected 'case' or 'default' in switch");
             ast_node_free(node);
             return NULL;
         }
@@ -2080,24 +2090,11 @@ static XPathASTNode* parse_switch_expr(XPathParser* parser) {
             XPathASTNode* res = parse_expr(parser);
             if (!res) { ast_node_free(node); return NULL; }
             node->value = leptris_strdup("__switch_default");
-            node->number_value = (double)XPATH_OP_SWITCH;
-            /* default result rides as the LAST child; marked by the
-             * node->value sentinel. */
             ast_node_add_child(node, res);
-            break;
+            return parse_postfix_ops(parser, node);
         }
-        if (current_token_is(parser, TOK_RBRACE)) break;
     }
-    if (!consume_token(parser, TOK_RBRACE,
-                       "Expected '}' to close the switch body")) {
-        ast_node_free(node);
-        return NULL;
-    }
-    return node;
 }
-#endif
-
-
 static XPathASTNode* parse_primary_expr(XPathParser* parser) {
     XPathToken* tok = current_token(parser);
     if (!tok) {
@@ -2240,6 +2237,52 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         XPathToken* fn = peek_token(parser, 1);
         if (fn && fn->type == TOK_DOLLAR)
             return parse_quantified_expr(parser);
+    }
+
+    /* XQuery 3.0 `switch (E) case ...` — the '('-lookahead guard
+     * keeps name tests intact (#692). */
+    if (tok->type == TOK_NCNAME && tok->value_len == 6 &&
+        memcmp(tok->value, "switch", 6) == 0) {
+        XPathToken* fn = peek_token(parser, 1);
+        if (fn && fn->type == TOK_LPAREN)
+            return parse_switch_expr(parser);
+    }
+
+    /* XQuery 3.0 computed array constructor `array { E }` (#692). */
+    if (tok->type == TOK_NCNAME && tok->value_len == 5 &&
+        memcmp(tok->value, "array", 5) == 0) {
+        XPathToken* fn = peek_token(parser, 1);
+        if (fn && fn->type == TOK_LBRACE) {
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* ac = ast_node_new(XPATH_AST_OPERATOR);
+            if (!ac) return NULL;
+            ac->number_value = (double)XPATH_OP_ARRAY_OF;
+            /* Comma-separated content exprs (each's ITEMS flatten
+             * into the array, #692 §3.10.3). */
+            if (current_token_is(parser, TOK_RBRACE) &&
+                ac->child_count == 0) {
+                /* empty array */
+            } else
+            for (;;) {
+                XPathASTNode* item = parse_expr(parser);
+                if (!item) { ast_node_free(ac); return NULL; }
+                ast_node_add_child(ac, item);
+                if (current_token_is(parser, TOK_COMMA)) {
+                    advance_token(parser);
+                    continue;
+                }
+                break;
+            }
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                snprintf(parser->error_msg, sizeof(parser->error_msg),
+                         "Expected '}' after array content");
+                ast_node_free(ac);
+                return NULL;
+            }
+            advance_token(parser);
+            return parse_postfix_ops(parser, ac);
+        }
     }
 
     /* XPath 3.1 `let $x := E return B` — same $-lookahead guard. */

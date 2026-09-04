@@ -439,3 +439,55 @@ TEST(XQueryCore, WhereDropsFilteredItemsInArgumentPosition) {
         ",,");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, ArrayConstructorAndChainedLookup) {
+    /* #692: computed array constructor `array { ... }` (the [..]
+     * form already worked) + chained map/array lookups. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "array { 1, 2 }?2"), "2");
+    EXPECT_EQ(seq_string(doc, "array { //book/title }?1"),
+              "AA");
+    EXPECT_EQ(seq_string(doc, "map { 'k': array { 1, 2 } }?k?2"), "2");
+    EXPECT_EQ(seq_string(doc, "array:size(array { 1 to 5 })"), "5");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, SwitchExpression) {
+    /* #692: XQuery 3.0 switch — first matching case operand
+     * (value equality) wins; default otherwise. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "switch (2) case 1 return 'a' case 2 return 'b'"
+        " default return 'c'"), "b");
+    EXPECT_EQ(seq_string(doc,
+        "switch (9) case 1 return 'a' case 2 return 'b'"
+        " default return 'c'"), "c");
+    EXPECT_EQ(seq_string(doc,
+        "for $b in //book[1]/* "
+        "return switch (name($b)) "
+        "case 'title' return 'T' case 'author' return 'A' "
+        "default return '?'"), "T");
+    /* default arm: no case matches. */
+    EXPECT_EQ(seq_string(doc,
+        "switch (//book[1]/@price) case 1 return 'one'"
+        " case 99 return 'ninenine' default return 'other'"), "other");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, ParseXmlAndFragment) {
+    /* #692: fn:parse-xml / parse-xml-fragment. */
+    LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
+                                               nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "count(parse-xml('<a><b/><b/></a>')//b)"), "2");
+    EXPECT_EQ(seq_string(doc,
+        "string(parse-xml('<a>x</a>')/a)"), "x");
+    EXPECT_EQ(seq_string(doc,
+        "name(parse-xml-fragment('<p/>q')/*[1])"), "p");
+    leptris_document_free(doc);
+}

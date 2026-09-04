@@ -1135,10 +1135,39 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         if (!v) return NULL;
         char* val = xpath_map_lookup_result(v, ast->value);
         xpath_result_free(v);
+        if (!val) val = leptris_strdup("");
+        /* A stored nested aggregate ("MAP...") returns as a
+         * CARRIER nodeset member so the next lookup in a chain
+         * decodes it (#692). */
+        if (val[0] == '\x03' && val[1] == 'M' && val[2] == 'A' &&
+            val[3] == 'P') {
+            for (char* q = val; *q; q++) {
+                if (*q == '\x0E') *q = '\x02';
+                else if (*q == '\x0F') *q = '\x01';
+            }
+            XPathNodeSet* out = xpath_nodeset_new();
+            if (out) {
+                out->owns_synthetic_text = 1;
+                out->is_sequence = 1;
+                XPathTextNode* tn =
+                    synth_text(val, strlen(val));
+                free(val);
+                if (tn) {
+                    xpath_nodeset_add(out, tn);
+                    struct leptris_xpath_result* r =
+                        xpath_result_new(XPATH_RESULT_NODESET);
+                    if (r) {
+                        r->value.nodeset_value = out;
+                        return r;
+                    }
+                    xpath_nodeset_free(out);
+                }
+            }
+        }
         struct leptris_xpath_result* out =
             xpath_result_new(XPATH_RESULT_STRING);
         if (!out) { free(val); return NULL; }
-        out->value.string_value = val ? val : leptris_strdup("");
+        out->value.string_value = val;
         return out;
     }
 
@@ -1146,6 +1175,38 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
      * in order on the shared map representation with positional
      * keys — every array:* accessor is the map operation with a
      * formatted index. */
+    /* XQuery 3.0 `array { E1, E2, ... }`: members are the ITEMS of
+     * every content expression, in order (#692 §3.10.3). */
+    if (op == XPATH_OP_ARRAY_OF) {
+        void* b = xpath_map_builder_new();
+        if (!b) return NULL;
+        size_t idx = 1;
+        for (size_t c = 0; c < ast->child_count; c++) {
+            struct leptris_xpath_result* content =
+                evaluate_expr(ctx, ast->children[c]);
+            if (!content) { /* skip failed members */ continue; }
+            if (content->type == XPATH_RESULT_NODESET &&
+                content->value.nodeset_value) {
+                XPathNodeSet* ns = content->value.nodeset_value;
+                for (size_t i = 0; i < ns->count; i++) {
+                    char* v = get_node_text(ns->nodes[i]);
+                    char key[24];
+                    snprintf(key, sizeof(key), "%zu", idx++);
+                    xpath_map_builder_add(b, key, v ? v : "");
+                    free(v);
+                }
+            } else {
+                char* v = xpath_to_string(content);
+                char key[24];
+                snprintf(key, sizeof(key), "%zu", idx++);
+                xpath_map_builder_add(b, key, v ? v : "");
+                free(v);
+            }
+            xpath_result_free(content);
+        }
+        return xpath_map_builder_finish(b);
+    }
+
     if (op == XPATH_OP_ARRAY_CONSTRUCTOR) {
         void* b = xpath_map_builder_new();
         if (!b) return NULL;
@@ -1180,7 +1241,37 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (kr) xpath_result_free(kr);
             struct leptris_xpath_result* vr =
                 evaluate_expr(ctx, ast->children[i + 1]);
-            char* v = vr ? xpath_to_string(vr) : NULL;
+            /* Nested map/array values keep their RAW carrier
+             * encoding ("MAP...") so chained lookups (?k?2)
+             * decode the inner aggregate (#692); get_node_text
+             * strips the marker for string consumers. */
+            char* v = NULL;
+            if (vr && vr->type == XPATH_RESULT_NODESET &&
+                vr->value.nodeset_value &&
+                vr->value.nodeset_value->count == 1) {
+                void* mv = vr->value.nodeset_value->nodes[0];
+                if (mv && XPATH_NODE_TYPE(mv) == (int)LEPTRIS_NODE_TEXT) {
+                    const char* mc = ((XPathTextNode*)mv)->content;
+                    if (mc && mc[0] == '\x03' && mc[1] == 'M' &&
+                        mc[2] == 'A' && mc[3] == 'P') {
+                        /* Escape the inner entry separators so the
+                         * OUTER value scan (ends at the next \x02)
+                         * cannot stop inside the nested aggregate;
+                         * the lookup un-escapes on carrier wrap. */
+                        size_t ml = strlen(mc);
+                        v = LEPTRIS_ALLOC_N(char, ml + 1);
+                        if (v) {
+                            for (size_t mi = 0; mi < ml; mi++) {
+                                char c = mc[mi];
+                                v[mi] = c == '\x02' ? '\x0E'
+                                        : c == '\x01' ? '\x0F' : c;
+                            }
+                            v[ml] = 0;
+                        }
+                    }
+                }
+            }
+            if (!v && vr) v = xpath_to_string(vr);
             if (vr) xpath_result_free(vr);
             size_t kn = k ? strlen(k) : 0, vn = v ? strlen(v) : 0;
             while (len + kn + vn + 3 > cap) {

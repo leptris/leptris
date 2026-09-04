@@ -751,7 +751,11 @@ typedef enum {
      * (vacuously true on an empty domain). */
     XPATH_OP_SOME,
     XPATH_OP_EVERY,
-    XPATH_OP_BINDING
+    XPATH_OP_BINDING,
+    /* XQuery 3.0 computed array constructor `array { E }` (#692):
+     * members are the ITEMS of E (the [..] square form's members
+     * are its comma-separated expressions). */
+    XPATH_OP_ARRAY_OF
 } XPathOperatorType;
 
 /* XPathAxisType defined above (near XPathASTType) so it's in scope
