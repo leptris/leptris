@@ -1,14 +1,23 @@
 ## [Unreleased]
 
 ## [1.9.79] - 2026-09-04
-
 ### Added
 
-- #691 random-number-generator - seeded xorshift64* on the map carrier (number key) (xpath)
+- **#691 `fn:random-number-generator`**: seeded calls are
+  deterministic (FNV-1a of the seed feeding xorshift64*); the result
+  is the standard map carrier with `number` in [0,1), so `?number`
+  and `map:get(...)` both work. `next` / `permute` need function-item
+  closure state — documented gap.
 
 ### Performance
 
-- one-pass template selection - each pattern alternative matched once, priority rides the same walk (xslt)
+- **#682 one-pass template selection**: `xslt_select_template` and
+  `xslt_select_next_match` previously evaluated every pattern
+  alternative twice per dispatch candidate (any-match test, then the
+  per-alternative priority loop); both now fold to a single walk.
+  Semantics identical; the unused wrapper is deleted. On the
+  4-template scorecard the effect sits inside the run-to-run noise
+  band — the win scales with alternative and template counts.
 
 
 
