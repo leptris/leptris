@@ -2099,6 +2099,23 @@ TEST(XPath20Ledger, XPath31ThroughStandardEntry) {
     }
 }
 
+/* #692: function calls in path-step position — XPath 2.0+
+ * PostfixExpr steps (`a/string()`), desugared to the simple map. */
+TEST(XPath20Ledger, FnAsPathStep) {
+    EXPECT_EQ(NumEval("count(//book/string())"), 3.0);
+    EXPECT_EQ(StrEval("//book[1]/title/string()"), "First");
+    EXPECT_EQ(StrEval("//book[2]/name()"), "book");
+    EXPECT_EQ(NumEval("count(//title/normalize-space())"), 3.0);
+    EXPECT_EQ(StrEval("normalize-space(//book[1]/title/string())"),
+              "First");
+    /* same shape as the explicit simple map */
+    EXPECT_EQ(NumEval("count(//book ! string())"), 3.0);
+    /* text()/comment() node tests are NOT function steps. */
+    EXPECT_EQ(NumEval("count(//book[1]/title/text())"), 1.0);
+    /* deep path: steps before the function step still select. */
+    EXPECT_EQ(StrEval("string(//book[3]/price/number())"), "30");
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
