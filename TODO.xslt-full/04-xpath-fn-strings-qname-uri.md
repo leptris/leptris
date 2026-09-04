@@ -65,3 +65,20 @@ handler dereferences garbage. Plain overrides reset user_data
 explicitly. Symptom class: same-named fn silently behaving like
 the base layer inside transforms (multi-byte df separators became
 pattern suffix text).
+
+
+## snapshot design note (2026-09-04, post-v1.9.80 attempt)
+
+The obvious anchoring (fresh leptris_document_create + copies via
+leptris_element_append_copy under a wrapper root + ctx owned_docs)
+is INSUFFICIENT for plain leptris_xpath_eval: xpath_context_cleanup
+frees owned_docs BEFORE the public eval returns (heap-use-after-free
+on the borrowed copies at the first result_string call). The
+owned-doc chain works only inside XSLT/XQuery lifecycles where the
+context outlives result consumption. Correct fix: a document-
+lifetime chain — an anchored-docs array on the SOURCE document
+(leptris_document_free releases them), so snapshot copies live
+exactly as long as the source tree. Field + free-path change +
+specs; analyze-string needs the same chain (its constructed
+fn:match/fn:non-match elements face the identical lifecycle).
+RED spec was written first and reverted with the code.
