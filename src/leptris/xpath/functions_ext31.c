@@ -3372,9 +3372,8 @@ static struct leptris_xpath_result* fn_random_number_generator(
  * need the xsl:decimal-format context the XSLT bridge supplies). */
 static struct leptris_xpath_result* fn_format_number_plain(
         XPathContext* ctx, XPathASTNode** args, size_t n) {
-    fprintf(stderr, "FNFN: reached n=%zu\n", n); fflush(stderr);
     struct leptris_xpath_result* v = xpath_evaluate(ctx, args[0]);
-    if (!v) { fprintf(stderr, "FNFN: arg0 eval NULL\n"); return NULL; }
+    if (!v) return NULL;
     double num = leptris_xpath_result_number(v);
     leptris_xpath_result_free(v);
     char* pat = re_str_arg(ctx, args, 1);
