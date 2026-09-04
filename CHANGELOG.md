@@ -1,13 +1,17 @@
 ## [Unreleased]
 
 ## [1.9.85] - 2026-09-04
+### Fixed
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
-
-### Changed
-
-- (describe changes here)
+- **#659 HTML: characterization specs** for the two remaining
+  tree-builder behaviors, probed against Nokogiri/libxml2:
+  `<template>` is an ordinary element with children in place
+  (libxml2 predates the WHATWG inert-fragment model), and
+  misnesting closes the formatting element at the outer end tag
+  with the stray end tag dropped. Both already matched; they are
+  now locked in as gate specs so the html5lib-corpus work (which
+  uses the different adoption-agency shape) cannot silently
+  regress Nokogiri parity.
 
 
 ## [1.9.84] - 2026-09-04
