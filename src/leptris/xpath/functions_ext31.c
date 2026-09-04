@@ -16,6 +16,7 @@
 #include "evaluator_internal.h"
 #include "../include/leptris.h"
 #include "../dom/element.h"
+#include "../common/format_number.h"
 #include "../unicode/unicode.h"
 #include <string.h>
 #include <stdlib.h>
@@ -3366,6 +3367,27 @@ static struct leptris_xpath_result* fn_random_number_generator(
     return out;
 }
 
+/* #691: fn:format-number outside XSLT — the shared JDK pattern
+ * core under the DEFAULT decimal format (named decimal formats
+ * need the xsl:decimal-format context the XSLT bridge supplies). */
+static struct leptris_xpath_result* fn_format_number_plain(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    fprintf(stderr, "FNFN: reached n=%zu\n", n); fflush(stderr);
+    struct leptris_xpath_result* v = xpath_evaluate(ctx, args[0]);
+    if (!v) { fprintf(stderr, "FNFN: arg0 eval NULL\n"); return NULL; }
+    double num = leptris_xpath_result_number(v);
+    leptris_xpath_result_free(v);
+    char* pat = re_str_arg(ctx, args, 1);
+    char* out_s = pat ? leptris_format_number_core(num, pat,
+                          leptris_format_number_default()) : NULL;
+    free(pat);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(out_s); return NULL; }
+    out->value.string_value = out_s ? out_s : leptris_strdup("");
+    (void)n;
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -3434,6 +3456,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "unparsed-text-available", fn_unparsed_text_available, 1, 2);
     xpath_function_registry_register(registry, "uri-collection", fn_uri_collection, 0, 1);
     xpath_function_registry_register(registry, "random-number-generator", fn_random_number_generator, 0, 1);
+    xpath_function_registry_register(registry, "format-number", fn_format_number_plain, 2, 3);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
     xpath_function_registry_register(registry, "math:exp", fn_exp, 1, 1);
     xpath_function_registry_register(registry, "math:exp10", fn_exp10, 1, 1);
