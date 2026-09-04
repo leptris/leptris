@@ -1866,6 +1866,19 @@ static double NumEval(const char* expr) {
     return v;
 }
 
+static std::string StrEval(const char* expr) {
+    LeptrisDocument doc = ParseWith(kBasic);
+    EXPECT_NE(doc, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
+    if (!r) { leptris_document_free(doc); return "(eval-failed)"; }
+    char* s = leptris_xpath_result_string(r);
+    std::string v = s ? s : "";
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+    return v;
+}
+
 TEST(XPath20Ledger, QuantifiedExpressions) {
     EXPECT_TRUE(BoolEval("some $x in (1,2,3) satisfies $x > 2"));
     EXPECT_FALSE(BoolEval("some $x in (1,2,3) satisfies $x > 3"));
@@ -1916,6 +1929,75 @@ TEST(XPath20Ledger, EndsWith) {
     EXPECT_TRUE(BoolEval("ends-with('abc', '')"));
     EXPECT_FALSE(BoolEval("ends-with('ab', 'abc')"));
     EXPECT_TRUE(BoolEval("ends-with(//book[1]/title, 'First')"));
+}
+
+TEST(XPath20Ledger, SequenceNodeTail) {
+    /* innermost: no ancestor in the supplied set. */
+    EXPECT_EQ(NumEval("count(innermost(//*))"), 1.0);          /* catalog */
+    EXPECT_EQ(NumEval("count(innermost(//book | //title))"), 3.0);
+    /* outermost: no descendant in the supplied set. */
+    EXPECT_EQ(NumEval("count(outermost(//*))"), 6.0);          /* leaves */
+    EXPECT_EQ(NumEval("count(outermost(//book | //title))"), 3.0);
+    /* has-children: explicit node and the zero-arg context form. */
+    EXPECT_TRUE(BoolEval("has-children(//book[1])"));
+    /* Text children count; only a truly empty element is false. */
+    EXPECT_TRUE(BoolEval("has-children(//book[1]/title)"));
+    EXPECT_TRUE(BoolEval("has-children()"));
+    {
+        LeptrisDocument d = ParseWith("<r><a/><b>t</b></r>");
+        ASSERT_NE(d, nullptr);
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr,
+                                                 "has-children(//a)");
+        ASSERT_NE(r, nullptr);
+        EXPECT_FALSE(leptris_xpath_result_boolean(r));
+        leptris_xpath_result_free(r);
+        leptris_document_free(d);
+    }
+    /* path: root-anchored positional path. */
+    EXPECT_EQ(StrEval("path(//book[2])"), "/catalog/book[2]");
+    EXPECT_EQ(StrEval("path(//book[2]/title)"), "/catalog/book[2]/title");
+    EXPECT_EQ(StrEval("path(/*)"), "/catalog");
+    /* nilled: false without xsi:nil, true with. */
+    EXPECT_FALSE(BoolEval("nilled(//book[1])"));
+    {
+        LeptrisDocument d = ParseWith(
+            "<r xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+            "<a xsi:nil=\"true\"/><b/></r>");
+        ASSERT_NE(d, nullptr);
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr, "nilled(//a)");
+        ASSERT_NE(r, nullptr);
+        EXPECT_TRUE(leptris_xpath_result_boolean(r));
+        leptris_xpath_result_free(r);
+        LeptrisXPathResult r2 = leptris_xpath_eval(d, nullptr, "nilled(//b)");
+        ASSERT_NE(r2, nullptr);
+        EXPECT_FALSE(leptris_xpath_result_boolean(r2));
+        leptris_xpath_result_free(r2);
+        leptris_document_free(d);
+    }
+}
+
+TEST(XPath20Ledger, DocumentUriTail) {
+    /* In-memory documents carry no base/document URI. */
+    EXPECT_EQ(StrEval("base-uri(//book[1])"), "");
+    EXPECT_EQ(StrEval("static-base-uri()"), "");
+    EXPECT_EQ(StrEval("document-uri(/)"), "");
+    /* doc-available: false for an unloadable path, true for a
+     * parseable file. */
+    EXPECT_FALSE(BoolEval("doc-available('/nonexistent/leptris-zz.xml')"));
+    FILE* f = fopen("/tmp/leptris-docavail.xml", "w");
+    ASSERT_NE(f, nullptr);
+    fputs("<ok/>", f);
+    fclose(f);
+    EXPECT_TRUE(BoolEval("doc-available('/tmp/leptris-docavail.xml')"));
+    remove("/tmp/leptris-docavail.xml");
+    /* json-doc: a JSON file parses to a map. */
+    f = fopen("/tmp/leptris-jsondoc.json", "w");
+    ASSERT_NE(f, nullptr);
+    fputs("{\"k\": 7}", f);
+    fclose(f);
+    EXPECT_EQ(NumEval("map:get(json-doc('/tmp/leptris-jsondoc.json'), 'k')"),
+              7.0);
+    remove("/tmp/leptris-jsondoc.json");
 }
 
 TEST(XPath20Ledger, DeepEqual) {
