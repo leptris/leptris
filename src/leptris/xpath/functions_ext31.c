@@ -1229,9 +1229,10 @@ static struct leptris_xpath_result* fn_parse_xml_fragment(
     const char* wrap_close = "</leptris:frag>";
     size_t ol = strlen(wrap_open), cl = strlen(wrap_close);
     char* wrapped = (char*)malloc(sl + ol + cl + 1);
-    if (!wrapped) return NULL;
+    if (!wrapped) { free(src); return NULL; }
     memcpy(wrapped, wrap_open, ol);
     memcpy(wrapped + ol, src, sl);
+    free(src);
     memcpy(wrapped + ol + sl, wrap_close, cl);
     wrapped[ol + sl + cl] = 0;
     LeptrisDocument doc = leptris_parse_string(wrapped, ol + sl + cl, NULL);
