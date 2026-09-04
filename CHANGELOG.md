@@ -1,11 +1,13 @@
 ## [Unreleased]
 
 ## [1.9.84] - 2026-09-04
-
 ### Added
 
-- #659 head-content lift - leading title/meta/link/base into a synthesized head (libxml2 shape) (html)
-
+- **#659 HTML: head-content placement lift** — a contiguous leading
+  run of `title`/`meta`/`link`/`base` elements moves into a
+  synthesized `<head>` placed before `<body>` (the libxml2/Nokogiri
+  shape). Once body content starts nothing lifts, and no empty
+  `<head>` is ever synthesized.
 
 
 ## [1.9.83] - 2026-09-04
