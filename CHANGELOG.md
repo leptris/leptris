@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.80] - 2026-09-04
+
+### Added
+
+- #691 format-number as a plain XPath fn - shared JDK pattern core (common/format_number) + last-wins registry with user_data override (xpath)
+
+### Fixed
+
+- drop diagnostic
+
+
+
 ## [1.9.79] - 2026-09-04
 ### Added
 
