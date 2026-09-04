@@ -167,6 +167,12 @@ static void scan_expr_segment(Scan* s, int stop_at_comma) {
             scan_string(s);
             continue;
         }
+        if (c == '`') {
+            s->p++;
+            while (s->p < s->end && *s->p != '`') s->p++;
+            if (s->p < s->end) s->p++;
+            continue;
+        }
         if (c == '(' || c == '[' || c == '{') depth++;
         else if (c == ')' || c == ']' || c == '}') {
             if (depth == 0) return;   /* segment boundary */
@@ -194,6 +200,9 @@ static void scan_expr_segment(Scan* s, int stop_at_comma) {
 
 typedef struct { char* s; size_t len, cap; } Buf;
 static void buf_put(Buf* b, const char* s, size_t n);
+static void xq_expand_span(const char* a, const char* b, Buf* out);
+static const char* xq_expr_close(const char* p, const char* cb);
+static const char* xq_ctor_end(const char* ca, const char* cb);
 static void buf_str(Buf* b, const char* s);
 static const char* xq_translate_element(const char* p, const char* e,
                                         Buf* out);
@@ -243,23 +252,203 @@ static char* xq_splice_ctors(const char* a, const char* b) {
     return tb.s;
 }
 
+/* String-constructor rewriter (#692 tail, XQuery 3.1):
+ * `lit {expr} lit` expands to concat("lit", string(EXPR), "lit").
+ * Doubled braces are literal braces; enclosed expressions are
+ * brace-matched with quote and nested-ctor awareness. Expansion MUST
+ * run before the direct-constructor splice — `<a/>` inside backticks
+ * is a STRING, and once quoted the splice pass skips it. */
+static const char* xq_skip_quoted(const char* q, const char* b) {
+    char qt = *q;
+    q++;
+    while (q < b) {
+        if (*q == qt && q + 1 < b && q[1] == qt) { q += 2; continue; }
+        if (*q == qt) return q + 1;
+        q++;
+    }
+    return b;
+}
+
+/* Closing backtick of a ctor whose content starts at ca, or NULL. */
+static const char* xq_ctor_end(const char* ca, const char* cb) {
+    const char* p = ca;
+    while (p < cb) {
+        if (*p == '`') return p;
+        if (*p == '{' && p + 1 < cb && p[1] == '{') { p += 2; continue; }
+        if (*p == '}' && p + 1 < cb && p[1] == '}') { p += 2; continue; }
+        if (*p == '{') {
+            const char* e = xq_expr_close(p, cb);
+            if (!e) return NULL;
+            p = e + 1;
+            continue;
+        }
+        p++;
+    }
+    return NULL;
+}
+
+/* Matching '}' for the '{' at p, or NULL. Skips quoted strings and
+ * nested string constructors inside the expression. */
+static const char* xq_expr_close(const char* p, const char* cb) {
+    int depth = 1;
+    const char* q = p + 1;
+    while (q < cb && depth > 0) {
+        if (*q == '\'' || *q == '"') {
+            q = xq_skip_quoted(q, cb);
+        } else if (*q == '`') {
+            const char* e = xq_ctor_end(q + 1, cb);
+            if (!e) return NULL;
+            q = e + 1;
+        } else {
+            if (*q == '{') depth++;
+            else if (*q == '}') depth--;
+            q++;
+        }
+    }
+    return depth == 0 ? q - 1 : NULL;
+}
+
+/* Append a literal chunk as one or more quoted XPath string args.
+ * The XPath 1.0 lexer has NO escape: a literal ends at the first
+ * matching quote. So runs go out double-quoted (split at "), and a
+ * lone " goes out as the one-char literal '"'. Segments rejoin via
+ * concat(), which the caller wraps once chunks >= 2. */
+static void xq_emit_quoted(Buf* args, const char* s, size_t n, int* nch) {
+    size_t i = 0;
+    while (i < n) {
+        size_t j = i;
+        if (s[j] != '"') {
+            while (j < n && s[j] != '"') j++;
+            if (*nch) buf_str(args, ", ");
+            buf_put(args, "\"", 1);
+            buf_put(args, s + i, j - i);
+            buf_put(args, "\"", 1);
+        } else {
+            if (*nch) buf_str(args, ", ");
+            buf_str(args, "'\"'");
+            j++;
+        }
+        (*nch)++;
+        i = j;
+    }
+}
+
+/* Expand ctor content [ca,cb) into out as ONE expression. */
+static void xq_emit_str_ctor(const char* ca, const char* cb, Buf* out) {
+    Buf args = {0}, lit = {0};
+    int nch = 0;
+    const char* p = ca;
+    while (p < cb) {
+        if (*p == '{' && p + 1 < cb && p[1] == '{') {
+            buf_put(&lit, "{", 1);
+            p += 2;
+            continue;
+        }
+        if (*p == '}' && p + 1 < cb && p[1] == '}') {
+            buf_put(&lit, "}", 1);
+            p += 2;
+            continue;
+        }
+        if (*p == '{') {
+            const char* e = xq_expr_close(p, cb);
+            if (!e) break;
+            xq_emit_quoted(&args, lit.s, lit.len, &nch);
+            lit.len = 0;
+            if (e > p + 1) {  /* empty {} contributes nothing */
+                if (nch) buf_str(&args, ", ");
+                buf_str(&args, "string(");
+                Buf inner = {0};
+                xq_expand_span(p + 1, e, &inner);
+                buf_put(&args, inner.s ? inner.s : "",
+                        inner.s ? inner.len : 0);
+                free(inner.s);
+                buf_str(&args, ")");
+                nch++;
+            }
+            p = e + 1;
+            continue;
+        }
+        buf_put(&lit, p, 1);
+        p++;
+    }
+    xq_emit_quoted(&args, lit.s, lit.len, &nch);
+    free(lit.s);
+    if (nch == 0) {
+        buf_str(out, "\"\"");
+    } else if (nch == 1) {
+        buf_put(out, args.s, args.len);
+    } else {
+        buf_str(out, "concat(");
+        buf_put(out, args.s, args.len);
+        buf_str(out, ")");
+    }
+    free(args.s);
+}
+
+/* Copy span verbatim, expanding every string constructor in it. */
+static void xq_expand_span(const char* a, const char* b, Buf* out) {
+    const char* p = a;
+    while (p < b) {
+        if (*p == '\'' || *p == '"') {
+            const char* q = xq_skip_quoted(p, b);
+            buf_put(out, p, (size_t)(q - p));
+            p = q;
+            continue;
+        }
+        if (*p == '`') {
+            const char* e = xq_ctor_end(p + 1, b);
+            if (!e) {
+                buf_put(out, p, (size_t)(b - p));
+                return;
+            }
+            xq_emit_str_ctor(p + 1, e, out);
+            p = e + 1;
+            continue;
+        }
+        buf_put(out, p, 1);
+        p++;
+    }
+}
+
+/* Whole-span entry: NULL when no backtick (caller keeps the text). */
+static char* xq_rewrite_str_ctors(const char* a, const char* b) {
+    int has = 0;
+    for (const char* q = a; q < b && !has; q++)
+        if (*q == '`') has = 1;
+    if (!has) return NULL;
+    Buf tb = {0};
+    xq_expand_span(a, b, &tb);
+    if (!tb.s) {
+        tb.s = (char*)calloc(1, 1);
+        return tb.s;
+    }
+    tb.s[tb.len] = 0;
+    return tb.s;
+}
+
 static XPathASTNode* parse_expr_span(const char* a, const char* b) {
     if (a >= b) return NULL;
+    char* rewritten = xq_rewrite_str_ctors(a, b);
+    if (rewritten) {
+        a = rewritten;
+        b = rewritten + strlen(rewritten);
+    }
     int has_ctor = 0;
     for (const char* q = a; q + 1 < b && !has_ctor; q++)
         if (*q == '<' && xq_is_name_start(q[1])) has_ctor = 1;
     char* translated = NULL;
     if (has_ctor) {
         translated = xq_splice_ctors(a, b);
-        if (!translated) return NULL;
+        if (!translated) { free(rewritten); return NULL; }
         a = translated;
         b = translated + strlen(translated);
     }
     XPathParser* parser = xpath_parser_new(a, (size_t)(b - a));
-    if (!parser) { free(translated); return NULL; }
+    if (!parser) { free(translated); free(rewritten); return NULL; }
     XPathASTNode* ast = xpath_parse(parser);
     xpath_parser_free(parser);
     free(translated);
+    free(rewritten);
     return ast;
 }
 
