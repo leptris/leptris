@@ -3387,6 +3387,76 @@ static struct leptris_xpath_result* fn_format_number_plain(
     return out;
 }
 
+/* Anchor a constructed-node document on the SOURCE document
+ * (#691): plain leptris_xpath_eval frees the context before the
+ * result is consumed, so the ctx owned_docs chain cannot carry
+ * constructed nodes; the source doc's lifetime is the only owner
+ * that outlives the result. */
+static int xq_anchor_on_source(XPathContext* ctx,
+                               struct leptris_document* anchored) {
+    struct leptris_document* src = ctx->document;
+    if (!src) {
+        leptris_document_free(anchored);
+        return -1;
+    }
+    if (src->n_anchored_docs == src->cap_anchored_docs) {
+        size_t nc = src->cap_anchored_docs
+                        ? src->cap_anchored_docs * 2 : 4;
+        struct leptris_document** grown = (struct leptris_document**)
+            realloc(src->anchored_docs, nc * sizeof(*grown));
+        if (!grown) {
+            leptris_document_free(anchored);
+            return -1;
+        }
+        src->anchored_docs = grown;
+        src->cap_anchored_docs = nc;
+    }
+    src->anchored_docs[src->n_anchored_docs++] = anchored;
+    return 0;
+}
+
+/* #691: fn:snapshot — detached deep copies of the input elements
+ * on a fresh document anchored on the SOURCE tree. */
+static struct leptris_xpath_result* fn_snapshot(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NODESET);
+    if (!out) { leptris_xpath_result_free(r); return NULL; }
+    out->value.nodeset_value = xpath_nodeset_new();
+    if (!out->value.nodeset_value) {
+        xpath_result_free(out);
+        leptris_xpath_result_free(r);
+        return NULL;
+    }
+    if (r && r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+        r->value.nodeset_value->count) {
+        LeptrisDocument doc = leptris_document_create();
+        LeptrisElement wrap = doc ? leptris_element_create(doc, "snapshot")
+                                  : NULL;
+        if (wrap) {
+            XPathNodeSet* src = r->value.nodeset_value;
+            for (size_t i = 0; i < src->count; i++) {
+                void* nd = src->nodes[i];
+                if (leptris_node_get_type(nd) != LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement c = leptris_element_append_copy(
+                    wrap, (LeptrisElement)nd);
+                if (c) xpath_nodeset_add(out->value.nodeset_value, c);
+            }
+            if (xq_anchor_on_source(ctx, doc) != 0) {
+                xpath_result_free(out);
+                leptris_xpath_result_free(r);
+                return NULL;
+            }
+        } else if (doc) {
+            leptris_document_free(doc);
+        }
+    }
+    leptris_xpath_result_free(r);
+    (void)n;
+    return out;
+}
+
 void xpath_register_fn31(XPathFunctionRegistry* registry) {
     if (!registry) return;
     xpath_function_registry_register(registry, "exists", fn_exists, 1, 1);
@@ -3456,6 +3526,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "uri-collection", fn_uri_collection, 0, 1);
     xpath_function_registry_register(registry, "random-number-generator", fn_random_number_generator, 0, 1);
     xpath_function_registry_register(registry, "format-number", fn_format_number_plain, 2, 3);
+    xpath_function_registry_register(registry, "snapshot", fn_snapshot, 1, 1);
     xpath_function_registry_register(registry, "math:pow", fn_pow, 2, 2);
     xpath_function_registry_register(registry, "math:exp", fn_exp, 1, 1);
     xpath_function_registry_register(registry, "math:exp10", fn_exp10, 1, 1);

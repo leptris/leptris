@@ -135,6 +135,14 @@ struct leptris_document {
      * singleton — dom/document_node.h). XSLT's initial context and
      * "/" pattern matching run on it. */
     void* document_node;
+    /* Constructed-node anchors (#691): documents holding snapshot
+     * copies / analyze-string result trees, released with THIS
+     * document so borrowed nodes live exactly as long as the
+     * source tree (the ctx owned_docs chain dies at public-eval
+     * return and cannot serve plain leptris_xpath_eval results). */
+    struct leptris_document** anchored_docs;
+    size_t n_anchored_docs;
+    size_t cap_anchored_docs;
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */
