@@ -253,3 +253,58 @@ TEST(HtmlParse, ProcessingInstructionAndBogus) {
     leptris_xpath_result_free(r);
     leptris_document_free(d2);
 }
+
+
+/* #659: head-content lift — a contiguous leading run of
+ * title/meta/link/base elements moves into a synthesized <head>
+ * (libxml2 shape); after body content starts, nothing lifts; no
+ * empty head is synthesized. */
+TEST(HtmlParse, HeadContentLift) {
+    const char* h1 = "<title>t</title><p>x</p>";
+    LeptrisDocument d = leptris_parse_html_string(h1, strlen(h1), NULL);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, NULL, "name(/html/*[1])");
+    ASSERT_NE(r, nullptr);
+    char* sv = leptris_xpath_result_string(r);
+    EXPECT_STREQ(sv ? sv : "", "head");
+    leptris_free_string(sv);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, NULL, "name(/html/head/*[1])");
+    ASSERT_NE(r, nullptr);
+    sv = leptris_xpath_result_string(r);
+    EXPECT_STREQ(sv ? sv : "", "title");
+    leptris_free_string(sv);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, NULL, "name(/html/body/*[1])");
+    ASSERT_NE(r, nullptr);
+    sv = leptris_xpath_result_string(r);
+    EXPECT_STREQ(sv ? sv : "", "p");
+    leptris_free_string(sv);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+
+    /* title after body content does NOT lift */
+    const char* h2 = "<p>x</p><title>after</title>";
+    d = leptris_parse_html_string(h2, strlen(h2), NULL);
+    ASSERT_NE(d, nullptr);
+    r = leptris_xpath_eval(d, NULL, "count(/html/head)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 0.0);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, NULL, "count(/html/body/title)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+
+    /* meta+link+base prefix lifts; no head without head elements */
+    const char* h3 = "<meta charset='utf-8'><link rel='s'><b>b</b>";
+    d = leptris_parse_html_string(h3, strlen(h3), NULL);
+    ASSERT_NE(d, nullptr);
+    r = leptris_xpath_eval(d, NULL, "count(/html/head/*)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 2.0);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
