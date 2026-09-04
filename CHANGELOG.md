@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.78] - 2026-09-04
+
+### Added
+
+- #691 unparsed-text family + uri-collection (empty catalog) (xpath)
+- #691 date tail - from-date/from-dateTime accessors, full ISO duration parser, xs:dayTime/yearMonthDuration aliases (xpath)
+- #692 fn-as-path-step - postfix function steps desugar to the simple map (xpath)
+- #691 scalar tail - compare/codepoint-equal/normalize-unicode/round(precision)/resolve-QName/environment fns (xpath)
+- #691 sequence/doc tail - innermost/outermost/has-children/path/nilled/base-uri/document-uri/static-base-uri/doc-available/json-doc (xpath)
+
+### Fixed
+
+- binary-mode temp file so newline expectations hold on Windows (test)
+- probe normalize-unicode availability (builds without utf8proc) (test)
+- available-environment-variables enumerates on Windows too (_environ) (xpath)
+- portable env-var setup for MSVC (setenv -> _putenv) (test)
+- doc-available/json-doc specs use CWD-relative paths (Windows has no /tmp) (test)
+
+
+
 ## [1.9.77] - 2026-09-04
 
 ### Added
