@@ -28,3 +28,22 @@ fn:match/fn:non-match element model — XSLT xsl:analyze-string
 exists; the fn form returns nodes), fn:format-number as a plain
 XPath fn (the formatting core lives XSLT-side — layering decision
 needed), fn:snapshot (needs detached-copy result trees).
+
+
+## Status addendum 2026-09-04 (v1.9.79 candidate)
+
+random-number-generator SHIPPED (PR #834): seeded xorshift64*
+deterministic per seed, map carrier with 'number' in [0,1).
+Remaining in this lane:
+- fn:analyze-string — needs the fn:match/fn:non-match element
+  model; build on a fresh anchored document (xq_anchor_owned_doc
+  chain) + POSIX regex iteration; xsl:analyze-string exists
+  XSLT-side as the semantic reference.
+- fn:format-number as plain XPath — move the self-contained core
+  (parse_pattern/PatternInfo/format_value, ~200 lines) from
+  xslt_functions.c into a shared common/ module; XSLT keeps the
+  decimal-format lookup and passes separator chars. Libxslt-suite
+  format-number corners gate the move.
+- fn:snapshot — detached deep copies via copy_subtree_detached,
+  anchored on a fresh document through the owned-docs chain.
+- RNG 'next'/'permute' members — need function-item closure state.
