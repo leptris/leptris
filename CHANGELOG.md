@@ -4,17 +4,31 @@
 
 ### Added
 
-- #692 grammar tail - switch, array{}, parse-xml, nested lookups (xquery)
+- **XQuery 3.0 grammar tail (#692)**:
+  - braceless `switch` expressions (`case V return R`, mandatory
+    `default`) — the braced Saxon form stays rejected with
+    XPST0003 parity;
+  - square-form array constructor `array { E }` (members = items of
+    the content expression), composing with `?index` / chained
+    lookups;
+  - `fn:parse-xml` and `fn:parse-xml-fragment` return a DOCUMENT
+    NODE (paths step from the document level; a fragment splices
+    its nodes to the top level);
+  - nested map/array lookups keep carrier composition intact (inner
+    separators escaped on store, unescaped on carrier wrap).
+- **Benchmarks**: the lane-13 release scorecard ships under
+  `benchmarks/xslt/` (dispatch, value-of, subtree-copy) with the
+  shared `benchmark_time_us` timer — run them on any release to
+  compare against the reference numbers in TODO.xslt-full/13.
 
 ### Fixed
 
-- free parse-xml-fragment source string (LSan leak, Linux CI) (xquery)
-- use the shared benchmark_time_us timer (bench)
-- _POSIX_C_SOURCE for clock_gettime on Linux (C99 strict) (bench)
-
-### Performance
-
-- promote the lane-13 release scorecard (#682) (bench)
+- `parse-xml-fragment` leaked its (strdup'd) argument string on
+  every call — caught by the Linux LSan CI leg, invisible on macOS
+  (no LSan support); the string is now freed after the wrapper
+  copy.
+- Benchmark timers compile under strict C99 on both glibc (no
+  feature-test macro juggling) and macOS.
 
 
 
