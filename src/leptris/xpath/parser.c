@@ -2550,6 +2550,22 @@ static XPathASTNode* parse_location_path(XPathParser* parser) {
             ast_node_free(node);
             return NULL;
         }
+        if (rel->type == XPATH_AST_OPERATOR) {
+            /* Postfix fn-step rehang (#692): the map chain's leftmost
+             * RELATIVE_PATH folds INTO the absolute path so the
+             * absolute evaluator only ever sees plain steps; the map
+             * then applies per item over the absolute result. */
+            XPathASTNode* m = rel;
+            while (m->children[0]->type == XPATH_AST_OPERATOR)
+                m = m->children[0];
+            XPathASTNode* r = m->children[0];
+            for (size_t i = 0; i < r->child_count; i++)
+                ast_node_add_child(node, r->children[i]);
+            r->child_count = 0;
+            ast_node_free(r);
+            m->children[0] = node;
+            return rel;
+        }
         ast_node_add_child(node, rel);
 
         return node;
@@ -2571,7 +2587,11 @@ static XPathASTNode* parse_location_path(XPathParser* parser) {
     return rel;
 }
 
-/* Parse relative location path */
+/* Parse relative location path. A name directly followed by '(' in
+ * STEP position is a postfix FUNCTION step (XPath 2.0+ PostfixExpr,
+ * #692) — node-test keywords (text/comment/node) lex as their own
+ * tokens, so they never reach this branch. It desugars to the simple
+ * map; after the first one every later step maps per item too. */
 static XPathASTNode* parse_relative_location_path(XPathParser* parser) {
     XPathASTNode* node = ast_node_new(XPATH_AST_RELATIVE_PATH);
     if (!node) return NULL;
@@ -2584,16 +2604,53 @@ static XPathASTNode* parse_relative_location_path(XPathParser* parser) {
     }
     ast_node_add_child(node, step);
 
+    XPathASTNode* left = node;
+    int mapped = 0;
+
     /* Parse additional steps */
     while (current_token_is(parser, TOK_SLASH) || current_token_is(parser, TOK_DOUBLE_SLASH)) {
         int is_double = current_token_is(parser, TOK_DOUBLE_SLASH);
         advance_token(parser);
 
+        if (!mapped &&
+            (current_token_is(parser, TOK_NCNAME) ||
+             current_token_is(parser, TOK_QNAME)) &&
+            peek_token(parser, 1) &&
+            peek_token(parser, 1)->type == TOK_LPAREN) {
+            XPathToken nt = *current_token(parser);
+            advance_token(parser);
+            XPathASTNode* fc =
+                parse_function_call(parser, nt.value, nt.value_len);
+            XPathASTNode* map =
+                fc ? ast_node_new(XPATH_AST_OPERATOR) : NULL;
+            if (!map) {
+                ast_node_free(fc);
+                ast_node_free(left);
+                return NULL;
+            }
+            map->number_value = (double)XPATH_OP_MAP;
+            ast_node_add_child(map, left);
+            ast_node_add_child(map, fc);
+            left = map;
+            mapped = 1;
+            continue;
+        }
+
+        /* Steps after a function step: a fresh relative path mapped
+         * per item; plain steps append to the container as before. */
+        XPathASTNode* step_host = mapped
+            ? ast_node_new(XPATH_AST_RELATIVE_PATH) : node;
+        if (!step_host) {
+            ast_node_free(left);
+            return NULL;
+        }
+
         if (is_double) {
             /* Insert descendant-or-self::node() step */
             XPathASTNode* desc_step = ast_node_new(XPATH_AST_STEP);
             if (!desc_step) {
-                ast_node_free(node);
+                if (mapped) ast_node_free(step_host);
+                ast_node_free(left);
                 return NULL;
             }
             desc_step->value = leptris_strdup("descendant-or-self");
@@ -2603,18 +2660,32 @@ static XPathASTNode* parse_relative_location_path(XPathParser* parser) {
                 node_test->value = leptris_strdup("node");
             }
             ast_node_add_child(desc_step, node_test);
-            ast_node_add_child(node, desc_step);
+            ast_node_add_child(step_host, desc_step);
         }
 
         step = parse_step(parser);
         if (!step) {
-            ast_node_free(node);
+            if (mapped) ast_node_free(step_host);
+            ast_node_free(left);
             return NULL;
         }
-        ast_node_add_child(node, step);
+        ast_node_add_child(step_host, step);
+
+        if (mapped) {
+            XPathASTNode* map = ast_node_new(XPATH_AST_OPERATOR);
+            if (!map) {
+                ast_node_free(step_host);
+                ast_node_free(left);
+                return NULL;
+            }
+            map->number_value = (double)XPATH_OP_MAP;
+            ast_node_add_child(map, left);
+            ast_node_add_child(map, step_host);
+            left = map;
+        }
     }
 
-    return node;
+    return left;
 }
 
 /* Parse step */
