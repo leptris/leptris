@@ -1,15 +1,26 @@
 ## [Unreleased]
 
 ## [1.9.80] - 2026-09-04
-
 ### Added
 
-- #691 format-number as a plain XPath fn - shared JDK pattern core (common/format_number) + last-wins registry with user_data override (xpath)
+- **#691 `fn:format-number` as a plain XPath function**: the
+  JDK1.1 pattern grammar + digit formatting moved verbatim from the
+  XSLT layer to a shared `common/format_number` core (SSOT). The
+  XSLT layer keeps the `xsl:decimal-format` lookup and maps it into
+  a spec; plain XPath evaluates under the default decimal format
+  (named decimal formats require the XSLT context).
 
 ### Fixed
 
-- drop diagnostic
-
+- **Function registry is now last-registration-wins**: registering
+  a same-named function at the standard layer previously appended a
+  duplicate and the FIRST entry kept winning, silently shadowing
+  the XSLT bridge's decimal-format-aware `format-number` inside
+  transforms (multi-byte grouping separators degraded to pattern
+  suffix text). Overriding layers register through the new
+  `xpath_function_registry_register_ud`, which carries the
+  per-function `user_data` closure — a plain re-register resets it
+  (a NULL closure in a bridge handler is a guaranteed crash).
 
 
 ## [1.9.79] - 2026-09-04
