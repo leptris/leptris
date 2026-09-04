@@ -45,3 +45,27 @@ Remaining (profile is DIFFUSE — no single >10% lever):
   benchmarks/ as the release scorecard
 Open measurement protocol: best-of-batches, never mean.
 
+
+
+## Status 2026-09-04 (v1.9.79 candidate)
+
+- One-pass template selection shipped (PR #833): both selectors
+  matched every pattern alternative TWICE (any-match test + the
+  per-alternative priority loop); now one walk. Honest bench note:
+  inside the noise band on the 4-template scorecard (9.25-9.51ms
+  best-of-9 either way) — single-alternative ladders fail fast on
+  name mismatch; the win scales with alternative/template counts.
+- invoke_template is ALREADY stack-frame-free (stack arrays, var
+  pointer save/restore); bind_param_defaults breaks on the first
+  non-param instruction — the "frame-free invoke" lever from the
+  earlier profile is effectively free already.
+
+Remaining, in expected-value order:
+1. allocator churn ~7%: per-eval nodeset/result wrappers; a scratch
+   pool risks the document-scoped ownership model — needs a design
+   conversation before touching the memory model.
+2. op_call_template named-call scan is linear in template count —
+   a name-keyed index matters for template-heavy stylesheets, not
+   for the current scorecard (4 templates).
+3. profile again with a template-heavy fixture before claiming the
+   next lever (the 2000-book profile is diffuse by design).
