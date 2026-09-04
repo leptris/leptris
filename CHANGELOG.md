@@ -4,53 +4,46 @@
 
 ### Added
 
-- #691 unparsed-text family + uri-collection (empty catalog) (xpath)
-- #691 date tail - from-date/from-dateTime accessors, full ISO duration parser, xs:dayTime/yearMonthDuration aliases (xpath)
-- #692 fn-as-path-step - postfix function steps desugar to the simple map (xpath)
-- #691 scalar tail - compare/codepoint-equal/normalize-unicode/round(precision)/resolve-QName/environment fns (xpath)
-- #691 sequence/doc tail - innermost/outermost/has-children/path/nilled/base-uri/document-uri/static-base-uri/doc-available/json-doc (xpath)
+- **#691 catalog tail, sequence/doc slice**: `fn:innermost` /
+  `fn:outermost` (ancestor/descendant-in-set filters), `fn:has-children`
+  (explicit or zero-arg context form; text children count), `fn:path`
+  (root-anchored `/a/b[2]` positional form, predicates only where
+  same-name siblings repeat), `fn:nilled` (xsi:nil read),
+  `fn:base-uri` / `fn:document-uri` / `fn:static-base-uri` (empty
+  for in-memory documents), `fn:doc-available`, `fn:json-doc`.
+- **#691 catalog tail, scalar slice**: `fn:compare` (empty operand
+  yields the empty sequence), `fn:codepoint-equal`,
+  `fn:normalize-unicode` (utf8proc NFC/NFD/NFKC/NFKD),
+  `fn:round($x, $precision)` (negative precision rounds to tens),
+  `fn:resolve-QName` (prefix resolved through the element's in-scope
+  namespaces), `fn:environment-variable`,
+  `fn:available-environment-variables` (POSIX and Windows).
+- **#691 date tail**: `year/month/day-from-date`,
+  `hours/minutes/seconds-from-dateTime`,
+  `minutes/seconds-from-duration`; duration parsing is now a full
+  ISO 8601 walker (P[nY][nM][nD][T[nH][nM][nS]], negatable — the old
+  parser only understood days-hours forms);
+  `xs:dayTimeDuration` / `xs:yearMonthDuration` constructor aliases.
+- **#691 unparsed-text family**: `fn:unparsed-text`,
+  `fn:unparsed-text-lines`, `fn:unparsed-text-available` (raw file
+  reads), `fn:uri-collection` (empty catalog).
+- **#692 fn-as-path-step**: function calls in path-step position
+  (`//item/string()`) parse and evaluate — desugared to the simple
+  map, so `a/f()` ≡ `a ! f()`; node-test keywords (text/comment/
+  node) are unaffected, and a function step after an absolute path
+  keeps predicates (`//a[1]/string()` selects the first node only).
+- **#683 gate**: `XPath20Ledger.XPath31ThroughStandardEntry` locks
+  the 3.x grammar (let / if / for / `!` / ranges / switch / map and
+  array lookups) behind the STANDARD `leptris_xpath_eval` and
+  `leptris_xpath_compiled_eval` entries — verified by public-API
+  probe, closed as satisfied.
 
 ### Fixed
 
-- binary-mode temp file so newline expectations hold on Windows (test)
-- probe normalize-unicode availability (builds without utf8proc) (test)
-- available-environment-variables enumerates on Windows too (_environ) (xpath)
-- portable env-var setup for MSVC (setenv -> _putenv) (test)
-- doc-available/json-doc specs use CWD-relative paths (Windows has no /tmp) (test)
-
-
-
-## [1.9.77] - 2026-09-04
-
-### Added
-
-- **XQuery 3.0 grammar tail (#692)**:
-  - braceless `switch` expressions (`case V return R`, mandatory
-    `default`) — the braced Saxon form stays rejected with
-    XPST0003 parity;
-  - square-form array constructor `array { E }` (members = items of
-    the content expression), composing with `?index` / chained
-    lookups;
-  - `fn:parse-xml` and `fn:parse-xml-fragment` return a DOCUMENT
-    NODE (paths step from the document level; a fragment splices
-    its nodes to the top level);
-  - nested map/array lookups keep carrier composition intact (inner
-    separators escaped on store, unescaped on carrier wrap).
-- **Benchmarks**: the lane-13 release scorecard ships under
-  `benchmarks/xslt/` (dispatch, value-of, subtree-copy) with the
-  shared `benchmark_time_us` timer — run them on any release to
-  compare against the reference numbers in TODO.xslt-full/13.
-
-### Fixed
-
-- `parse-xml-fragment` leaked its (strdup'd) argument string on
-  every call — caught by the Linux LSan CI leg, invisible on macOS
-  (no LSan support); the string is now freed after the wrapper
-  copy.
-- Benchmark timers compile under strict C99 on both glibc (no
-  feature-test macro juggling) and macOS.
-
-
+- `parse-xml-fragment` leaked its strdup'd argument string on every
+  call (Linux LSan CI; freed after the wrapper copy).
+- Test portability: no `/tmp` paths (CWD-relative) and `_putenv` on
+  MSVC; two comments rephrased to clear -Wcomment.
 
 ## [1.9.76] - 2026-09-03
 
