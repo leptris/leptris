@@ -2425,6 +2425,42 @@ LEPTRIS_API LeptrisDocument leptris_parse_html_string(
             continue;
         }
 
+        if (k1 == '?') {
+            /* Processing-instruction-ish bogus construct (#659):
+             * libxml2 keeps a PI node whose data INCLUDES the
+             * trailing '?' — content runs to the first '>'. */
+            if (text < p) {
+                char* dec = h_decode(b.pool, text, p);
+                if (dec && *dec) {
+                    LeptrisTextNode* t = leptris_text_create(
+                        dec, strlen(dec), b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
+            }
+            const char* ts = p + 2;   /* skip "<?" */
+            const char* q = ts;
+            while (q < end && !h_is_ws(*q) && *q != '>') q++;
+            size_t tlen = (size_t)(q - ts);
+            const char* de = (q < end && *q == '>') ? q : q;
+            while (de < end && *de != '>') de++;
+            const char* ds = ts + tlen;
+            while (ds < de && h_is_ws(*ds)) ds++;   /* libxml2 trims */
+            size_t dlen = (size_t)(de > ds ? de - ds : 0);
+            char* tgt = (char*)leptris_pool_alloc(b.pool, tlen + 1);
+            char* dat = (char*)leptris_pool_alloc(b.pool, dlen + 1);
+            if (tgt && dat) {
+                memcpy(tgt, ts, tlen);
+                tgt[tlen] = 0;
+                if (dlen) memcpy(dat, ds, dlen);
+                dat[dlen] = 0;
+                LeptrisNodeRef pi = leptris_pi_node_create(doc, tgt, dat);
+                if (pi) h_append(&b, pi);
+            }
+            p = (de < end) ? de + 1 : end;
+            text = p;
+            continue;
+        }
+
         if (!h_isalnum(k1) && k1 != '_' && k1 != ':') {
             /* '<' not starting a tag: literal text. */
             p++;

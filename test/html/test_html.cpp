@@ -203,3 +203,53 @@ TEST(HtmlParse, CaseInsensitiveCloseMatches) {
 }
 
 }  // namespace
+
+
+/* #659 slice 2: processing-instruction-ish bogus constructs.
+ * libxml2/Nokogiri ground truth: <?target data?> becomes a PI
+ * node whose data INCLUDES the trailing '?'; <!...> non-comment
+ * (DOCTYPE, <![CDATA[) is dropped to first '>' and does not
+ * perturb the text. */
+TEST(HtmlParse, ProcessingInstructionAndBogus) {
+    LeptrisDocument d = leptris_parse_html_string(
+        "<div>a<?foo bar?>b</div>",
+        strlen("<div>a<?foo bar?>b</div>"), NULL);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement div = leptris_document_root(d) ? nullptr : nullptr;
+    LeptrisElement root = leptris_document_root(d);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement body = leptris_element_first_child_any(root);
+    ASSERT_NE(body, nullptr);
+    LeptrisElement dv = leptris_element_first_child_any(body);
+    ASSERT_NE(dv, nullptr);
+    /* children: text "a", PI(foo, "bar?"), text "b" */
+    LeptrisNodeRef c1 = leptris_node_first_child(
+        leptris_element_as_node(dv));
+    ASSERT_NE(c1, nullptr);
+    EXPECT_EQ(leptris_node_get_type(c1), LEPTRIS_NODE_TYPE_TEXT);
+    LeptrisNodeRef c2 = leptris_node_next_sibling(c1);
+    ASSERT_NE(c2, nullptr);
+    EXPECT_EQ(leptris_node_get_type(c2), LEPTRIS_NODE_TYPE_PI);
+    const char* nm = leptris_pi_node_get_target(c2);
+    EXPECT_STREQ(nm ? nm : "", "foo");
+    const char* pd = leptris_pi_node_get_data(c2);
+    EXPECT_STREQ(pd ? pd : "", "bar?");
+    LeptrisNodeRef c3 = leptris_node_next_sibling(c2);
+    ASSERT_NE(c3, nullptr);
+    EXPECT_EQ(leptris_node_get_type(c3), LEPTRIS_NODE_TYPE_TEXT);
+    leptris_document_free(d);
+
+    /* bogus <!...> drops to '>' without touching the text */
+    LeptrisDocument d2 = leptris_parse_html_string(
+        "<p>a<![CDATA[x]]>b</p>",
+        strlen("<p>a<![CDATA[x]]>b</p>"), NULL);
+    ASSERT_NE(d2, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d2, NULL, "string(//p)");
+    ASSERT_NE(r, nullptr);
+    char* sv = leptris_xpath_result_string(r);
+    EXPECT_STREQ(sv ? sv : "", "ab");
+    leptris_free_string(sv);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d2);
+}
