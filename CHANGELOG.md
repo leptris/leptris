@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.79] - 2026-09-04
+
+### Added
+
+- #691 random-number-generator - seeded xorshift64* on the map carrier (number key) (xpath)
+
+### Performance
+
+- one-pass template selection - each pattern alternative matched once, priority rides the same walk (xslt)
+
+
+
 ## [1.9.78] - 2026-09-04
 
 ### Added
