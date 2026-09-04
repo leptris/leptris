@@ -1486,9 +1486,6 @@ static int op_where_populated(XsltExec* ex, const XsltInstr* in,
 /* 3.0 §6.6 next-match: among templates matching the node, invoke
  * the best one strictly WORSE than the current rule (import rank,
  * then priority, then declaration order). */
-static int xslt_template_matches_node(const XsltTemplate* t,
-                                      LeptrisElement node,
-                                      const XsltExec* ex);
 static int op_apply_templates(XsltExec* ex, const XsltInstr* in,
                               LeptrisElement node);
 static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
@@ -1522,13 +1519,10 @@ static const XsltTemplate* xslt_select_next_match(
         if (!t->matches || t == cur) continue;
         if ((mode && !t->mode) || (!mode && t->mode)) continue;
         if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
-        if (!xslt_template_matches_node(t, node, ex)) continue;
+        /* ONE pass over the alternatives (see xslt_select_template). */
         double pri = 0; int have = 0;
         for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
-            XsltPattern one = *pa; one.next = NULL;
-            if (!xslt_template_matches_node(
-                    &(XsltTemplate){ .matches = &one, .ns = t->ns },
-                    node, ex))
+            if (!xslt_pattern_matches(pa, node, ex->source, t->ns))
                 continue;
             if (!have || pa->priority > pri) { pri = pa->priority; have = 1; }
         }
@@ -2871,12 +2865,6 @@ static int pattern_matches_nodekind(const XsltPattern* p,
 /* §5.2: every node kind matches through the FULL pattern ladder —
  * position predicates included. The old kind-only shortcut made
  * match="text()[2]" fire for every text node (libxslt bug-182). */
-static int xslt_template_matches_node(const XsltTemplate* t,
-                                      LeptrisElement node,
-                                      const XsltExec* ex) {
-    return xslt_pattern_matches(t->matches, node, ex->source, t->ns);
-}
-
 static const XsltTemplate* xslt_select_template(
         const XsltExec* ex, LeptrisElement node, const char* mode,
         int min_rank) {
@@ -2888,14 +2876,14 @@ static const XsltTemplate* xslt_select_template(
         if (t->import_rank < min_rank) continue;
         if ((mode && !t->mode) || (!mode && t->mode)) continue;
         if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
-        if (!xslt_template_matches_node(t, node, ex)) continue;
-        /* Max priority among the MATCHING alternatives. */
+        /* ONE pass over the alternatives: each is matched exactly
+         * once and the max priority rides the same walk (the old
+         * shape matched the whole list first, then re-evaluated
+         * every alternative for priority — 2x the pattern cost per
+         * dispatch candidate). */
         double pri = 0; int have = 0;
         for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
-            XsltPattern one = *pa; one.next = NULL;
-            if (!xslt_template_matches_node(
-                    &(XsltTemplate){ .matches = &one, .ns = t->ns },
-                    node, ex))
+            if (!xslt_pattern_matches(pa, node, ex->source, t->ns))
                 continue;
             if (!have || pa->priority > pri) { pri = pa->priority; have = 1; }
         }
