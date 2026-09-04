@@ -2212,6 +2212,11 @@ TEST(XPath20Ledger, Snapshot) {
  * Paths use local-name() - the constructed names carry the literal
  * fn: prefix. */
 TEST(XPath20Ledger, AnalyzeString) {
+    /* POSIX-gated like the regex trio: probe before asserting. */
+    if (NumEval("count(analyze-string('a', '[0-9]'))") < 0) {
+        SUCCEED() << "analyze-string needs POSIX regex";
+        return;
+    }
     /* a,1,b,2,c: two digit matches, three gaps. */
     EXPECT_EQ(NumEval(
         "count(analyze-string('a1b2c', '[0-9]')"
