@@ -230,8 +230,13 @@ std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
                         /* A #data after this case's #document: a
                          * BLANK line above = the next case; no blank
                          * = html5lib's fragment-pair continuation
-                         * (two #data groups, one case). */
-                        if (i > 0 && lines[i - 1].empty()) break;
+                         * (two #data groups, one case). #original
+                         * provenance lines (Nokogiri reference) are
+                         * transparent to the boundary check. */
+                        size_t b = i;
+                        while (b > 0 &&
+                               lines[b - 1].rfind("#original", 0) == 0) b--;
+                        if (b > 0 && lines[b - 1].empty()) break;
                         c.skip = true;
                         c.skip_why = "fragment pair";
                         break;
@@ -540,4 +545,57 @@ TEST(Html5LibCorpus, TreeConstruction) {
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it. */
     EXPECT_GE(passed, (size_t)193);
+
+    /* ---- Nokogiri PARITY (#659's actual target) ----
+     *
+     * The goal is libxml2/Nokogiri parity, not WHATWG conformance —
+     * libxml2 itself fails most html5lib expectations. The
+     * committed nokogiri-tree-tests.dat records what Nokogiri::HTML
+     * produces for every runnable corpus case (same "| " dialect),
+     * so this pass measures parity directly. Regenerate with
+     * benchmarks/html/gen_nokogiri_reference.rb. */
+    {
+        std::vector<XCase> cs =
+            ScanFile(dir + "/../../nokogiri-tree-tests.dat",
+                     "nokogiri-tree-tests.dat", &err);
+        ASSERT_TRUE(cs.empty() || err.empty()) << err;
+        size_t ptotal = 0, ppassed = 0, pfailed = 0, pskip = 0;
+        std::vector<std::string> pfails;
+        for (auto& c : cs) {
+            ptotal++;
+            if (c.skip) { pskip++; continue; }
+            LeptrisStatus st = LEPTRIS_OK;
+            LeptrisDocument d = leptris_parse_html_string(
+                c.data.c_str(), c.data.size(), &st);
+            if (!d) {
+                pfailed++;
+                pfails.push_back(c.id + ": parse failed");
+                continue;
+            }
+            ONode ours = CollectDocument(d);
+            Coalesce(&ours);
+            NormalizeExpected(&c.doc);
+            std::string why;
+            if (Compare(c.doc, ours, &why)) {
+                ppassed++;
+            } else {
+                pfailed++;
+                pfails.push_back(c.id + ": " + why.substr(0, 120));
+            }
+            leptris_document_free(d);
+        }
+        FILE* rl = fopen("nokogiri-parity-redlist.txt", "w");
+        if (rl) {
+            for (auto& f : pfails) fprintf(rl, "%s\n", f.c_str());
+            fclose(rl);
+        }
+        printf("[nokogiri-parity] total=%zu pass=%zu fail=%zu skip=%zu "
+               "(red-list: nokogiri-parity-redlist.txt)\n",
+               ptotal, ppassed, pfailed, pskip);
+        for (size_t i = 0; i < pfails.size() && i < 15; i++)
+            printf("  PARITY-FAIL %s\n", pfails[i].c_str());
+        EXPECT_GT(ptotal, (size_t)1400);
+        /* Parity floor — the true #659 metric; only raises. */
+        EXPECT_GE(ppassed, (size_t)372);
+    }
 }

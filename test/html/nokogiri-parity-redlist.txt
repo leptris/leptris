@@ -1,0 +1,1183 @@
+nokogiri-tree-tests.dat:5: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:8: child count on <a text '': 1 != 2 [at <b> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:9: child count on <a text '': 1 != 2 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:11: child count on <table text '': 1 != 3 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:17: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:18: child count on <i text '': 2 != 1 [at <b> child 1] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:20: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:21: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:22: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:23: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:24: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:25: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:26: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:27: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:28: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:29: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:30: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:31: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:32: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:33: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:34: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:35: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:36: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:37: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:38: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:39: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:40: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:41: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:42: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:43: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:44: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:45: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:46: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:47: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:48: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:49: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:50: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:51: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:52: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:53: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:54: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:55: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:56: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:57: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:58: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:59: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:60: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:61: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:62: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:63: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:64: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:65: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:66: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:67: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:68: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:69: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:70: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:71: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:72: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:73: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:74: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:75: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:76: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:77: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:78: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:79: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:80: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:81: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:82: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:83: element name 'title' != 'head' [at <html> child 1] [at <> child 0]
+nokogiri-tree-tests.dat:84: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:85: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:86: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:87: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:88: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:89: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:90: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:91: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:92: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:93: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:94: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:95: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:96: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:97: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:98: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:99: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:100: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:101: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:102: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:103: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:104: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:105: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:106: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:107: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:108: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:109: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:110: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:111: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:112: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:113: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:114: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:115: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:116: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:117: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:118: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:119: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:120: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:124: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:125: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:126: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:127: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:128: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:129: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:130: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:131: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:132: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:133: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:134: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:135: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:136: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:137: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:138: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:139: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:140: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:141: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:142: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:143: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:144: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:145: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:146: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:147: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:149: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:150: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:151: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:156: child count on <colgroup text '': 1 != 0 [at <table> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:159: child count on <select text '': 1 != 0 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:160: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:161: element name 'frameset' != 'html' [at <> child 0]
+nokogiri-tree-tests.dat:162: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:170: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:171: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:172: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:173: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:174: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:175: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:176: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:177: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:178: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:179: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:180: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:181: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:182: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:183: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:184: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:185: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:186: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:187: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:188: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:189: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:190: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:191: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:192: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:193: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:194: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:195: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:196: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:197: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:198: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:199: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:200: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:201: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:202: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:203: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:204: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:205: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:206: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:207: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:208: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:209: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:210: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:211: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:212: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:213: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:214: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:215: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:216: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:217: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:218: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:219: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:220: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:221: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:222: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:223: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:224: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:225: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:226: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:227: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:228: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:229: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:230: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:231: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:232: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:233: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:234: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:235: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:236: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:237: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:238: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:239: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:240: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:241: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:242: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:243: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:244: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:271: element name 'div<div' != 'div' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:272: missing @foo on <div> [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:274: attr count on <div>: 1 != 0 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:276: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:277: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:278: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:279: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:280: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:281: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:282: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:283: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:284: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:287: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:288: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:291: child count on <b text '': 2 != 1 [at <i> child 1] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:302: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:303: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:304: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:305: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:307: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:308: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:309: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:310: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:311: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:312: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:313: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:314: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:315: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:316: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:317: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:318: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:319: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:320: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:321: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:322: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:323: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:324: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:325: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:326: element name 'body' != 'table' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:327: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:328: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:329: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:330: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:331: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:332: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:333: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:334: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:335: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:336: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:337: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:338: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:339: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:340: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:341: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:342: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:343: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:344: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:345: element name 'body' != 'table' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:347: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:348: child count on <svg text '': 2 != 1 [at <td> child 0] [at <tr> child 0] [at <table> child 0] [at <body> child 0] [at <ht
+nokogiri-tree-tests.dat:349: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:351: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:352: node kind mismatch [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:354: child count on <html text '': 2 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:355: element name 'select' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:356: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:357: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:360: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:361: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:362: element name 'body' != 'svg' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:371: child count on <svg text '': 1 != 2 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:372: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:373: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:374: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:375: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:376: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:377: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:378: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:379: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:380: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:381: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:382: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:383: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:384: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:385: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:386: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:387: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:388: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:389: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:390: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:391: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:392: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:393: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:394: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:395: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:396: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:397: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:398: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:399: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:400: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:401: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:402: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:403: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:404: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:405: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:406: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:407: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:408: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:409: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:410: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:411: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:412: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:413: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:414: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:415: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:416: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:417: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:418: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:419: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:420: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:421: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:422: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:423: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:424: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:425: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:426: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:427: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:428: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:429: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:430: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:431: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:435: child count on <colgroup text '': 1 != 0 [at <table> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:437: child count on <table text '': 1 != 0 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:442: child count on <td text '': 1 != 0 [at <table> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:445: child count on <tr text '': 1 != 0 [at <table> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:450: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:453: element name 'template' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:454: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:455: child count on <div text '': 2 != 1 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:478: element name 'body' != 'table' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:486: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:487: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:489: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:492: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:493: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:494: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:495: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:496: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:497: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:498: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:499: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:500: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:501: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:502: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:503: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:504: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:505: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:506: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:507: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:508: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:509: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:510: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:511: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:512: element name 'body' != 'table' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:513: attr count on <body>: 0 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:514: element name 'template' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:515: element name 'template' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:516: element name 'template' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:517: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:518: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:519: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:520: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:521: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:522: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:523: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:524: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:525: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:526: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:527: element name 'body' != 'template' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:528: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:545: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:546: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:547: element name 'body' != 'span' [at <body> child 1] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:549: child count on <foo text '': 2 != 1 [at <svg> child 0] [at <template> child 0] [at <body> child 0] [at <html> child 0] [
+nokogiri-tree-tests.dat:551: element name 'body' != 'table' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:552: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:553: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:554: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:555: child count on <html text '': 3 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:556: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:557: child count on <template text '': 1 != 2 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:558: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:559: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:560: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:561: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:563: child count on <body text '': 7 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:565: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:566: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:567: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:568: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:569: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:570: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:571: element name 'head' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:572: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:573: element name 'head' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:575: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:576: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:577: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:578: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:579: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:581: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:585: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:586: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:587: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:588: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:590: child count on <b text '': 2 != 1 [at <select> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:591: child count on <body text '': 1 != 5 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:593: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:594: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:595: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:596: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:597: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:598: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:599: child count on <body text '': 0 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:600: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:601: child count on <body text '': 0 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:602: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:603: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:604: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:605: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:606: child count on <body text '': 0 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:607: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:608: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:609: child count on <body text '': 0 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:610: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:611: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:612: child count on <b text '': 1 != 0 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:613: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:614: child count on <body text '': 2 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:615: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:616: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:620: child count on <b text '': 3 != 2 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:621: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:622: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:629: child count on <div text '': 2 != 3 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:630: child count on <div text '': 2 != 3 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:631: child count on <div text '': 2 != 3 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:632: child count on <i text '': 2 != 1 [at <b> child 1] [at <div> child 1] [at <body> child 0] [at <html> child 0] [at <> chi
+nokogiri-tree-tests.dat:633: child count on <i text '': 2 != 1 [at <b> child 1] [at <div> child 1] [at <body> child 0] [at <html> child 0] [at <> chi
+nokogiri-tree-tests.dat:634: child count on <i text '': 2 != 1 [at <b> child 1] [at <div> child 1] [at <body> child 0] [at <html> child 0] [at <> chi
+nokogiri-tree-tests.dat:635: child count on <i text '': 2 != 1 [at <b> child 1] [at <div> child 1] [at <body> child 0] [at <html> child 0] [at <> chi
+nokogiri-tree-tests.dat:636: child count on <div text '': 3 != 4 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:637: missing @attribute------------------------------------------------------------------------------------------- on <test> 
+nokogiri-tree-tests.dat:638: child count on <body text '': 1 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:639: child count on <body text '': 1 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:642: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:643: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:644: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:645: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:646: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:647: child count on <tr text '': 2 != 3 [at <table> child 1] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:648: child count on <body text '': 1 != 5 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:651: child count on <body text '': 1 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:652: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:653: child count on <html text '': 1 != 0 [at <> child 0]
+nokogiri-tree-tests.dat:654: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:659: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:660: child count on <b text '': 2 != 1 [at <select> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:661: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:662: child count on <body text '': 1 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:663: child count on <div text '': 1 != 3 [at <li> child 0] [at <ul> child 3] [at <body> child 0] [at <html> child 0] [at <> c
+nokogiri-tree-tests.dat:665: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:666: child count on <body text '': 1 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:667: child count on <table text '': 1 != 4 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:669: child count on <table text '': 1 != 2 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:670: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:672: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:673: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:674: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:675: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:676: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:677: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:678: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:679: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:680: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:681: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:682: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:683: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:684: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:685: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:686: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:687: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:688: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:689: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:690: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:691: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:692: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:693: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:694: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:695: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:696: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:697: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:698: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:705: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:706: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:707: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:708: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:727: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:728: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:729: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:730: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:731: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:732: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:733: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:734: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:735: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:736: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:737: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:738: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:739: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:740: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:741: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:742: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:743: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:744: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:745: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:746: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:747: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:748: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:749: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:751: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:752: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:754: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:755: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:756: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:757: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:758: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:759: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:760: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:761: child count on <html text '': 1 != 3 [at <> child 0]
+nokogiri-tree-tests.dat:762: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:763: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:764: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:765: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:766: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:767: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:768: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:769: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:770: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:771: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:772: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:773: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:774: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:775: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:776: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:777: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:778: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:779: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:780: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:781: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:782: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:783: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:784: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:785: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:786: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:787: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:788: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:789: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:790: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:791: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:792: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:793: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:794: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:795: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:796: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:797: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:798: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:799: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:800: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:801: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:802: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:803: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:804: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:805: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:806: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:807: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:808: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:809: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:810: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:811: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:812: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:813: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:814: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:815: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:816: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:817: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:818: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:819: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:820: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:821: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:822: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:823: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:824: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:825: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:826: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:827: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:828: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:829: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:830: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:831: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:832: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:833: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:834: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:835: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:836: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:837: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:838: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:839: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:840: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:841: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:842: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:843: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:844: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:845: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:846: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:847: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:848: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:849: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:850: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:851: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:852: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:853: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:854: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:855: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:856: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:857: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:858: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:859: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:860: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:861: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:862: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:863: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:864: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:865: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:866: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:867: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:868: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:869: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:870: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:871: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:872: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:873: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:874: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:875: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:876: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:877: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:878: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:879: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:880: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:881: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:882: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:883: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:884: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:885: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:886: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:887: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:888: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:889: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:890: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:891: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:892: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:893: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:894: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:895: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:896: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:897: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:898: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:899: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:900: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:901: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:902: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:903: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:904: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:905: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:906: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:907: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:908: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:909: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:910: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:911: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:912: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:913: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:914: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:915: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:916: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:917: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:918: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:919: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:920: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:921: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:922: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:923: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:924: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:925: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:926: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:927: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:928: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:929: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:930: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:931: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:932: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:933: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:934: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:935: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:936: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:937: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:938: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:939: child count on <title text '': 3 != 2 [at <head> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:943: element name 'body' != 'noframes' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:944: element name 'body' != 'noframes' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:948: child count on <iframe text '': 2 != 1 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:951: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:952: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:953: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:954: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:955: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:956: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:957: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:958: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:959: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:960: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:961: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:962: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:963: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:964: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:965: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:966: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:968: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:969: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:970: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:971: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:972: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:973: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:974: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:975: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:976: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:977: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:978: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:979: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:980: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:981: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:982: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:983: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:984: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:985: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:986: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:987: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:988: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:989: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:990: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:991: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:992: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:993: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:994: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:995: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:996: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:997: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:998: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:999: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1000: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1001: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1002: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1003: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1004: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1005: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1006: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1007: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1008: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1009: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1010: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1011: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1012: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1013: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1014: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1015: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1016: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1017: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1018: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1019: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1020: element name 'ruby' != 'body' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1021: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1022: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1023: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1024: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1025: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1026: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1027: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1028: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1029: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1030: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1031: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1032: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1033: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1034: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1035: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1036: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1037: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1038: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1039: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1040: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1041: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1042: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1043: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1044: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1045: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1047: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1048: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1049: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1050: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1051: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1052: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1053: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1054: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1055: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1056: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1057: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1058: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1059: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1060: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1061: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1062: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1063: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1064: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1065: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1066: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1067: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1068: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1069: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1070: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1071: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1072: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1073: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1074: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1075: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1076: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1077: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1078: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1079: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1080: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:1081: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:1082: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1083: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1084: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1085: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1086: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1087: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1088: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1089: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1090: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1091: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1092: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1093: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1094: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1095: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1096: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1097: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1098: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1099: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1100: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1101: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1102: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1103: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1104: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1105: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1106: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1110: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1111: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1112: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1113: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1114: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1115: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1116: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1117: element name 'body' != 'head' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1120: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1121: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1122: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:1123: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1124: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1125: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1126: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:1127: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:1128: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:1129: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1130: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1131: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1132: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1133: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1134: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1135: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1136: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1137: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1138: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1139: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1140: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:1141: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1142: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1143: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1144: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1145: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1146: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1147: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:1148: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:1149: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:1150: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1151: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1152: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1153: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1154: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:1155: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1156: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1157: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1158: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1159: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1160: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1161: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1162: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1163: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1164: node kind mismatch [at <> child 0]
+nokogiri-tree-tests.dat:1165: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1166: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1167: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1168: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1169: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1170: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1171: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1172: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1173: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1174: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1175: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1176: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1177: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1178: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1179: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1180: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1181: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1182: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1183: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1184: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1185: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1186: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1187: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1188: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1189: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1190: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1191: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1192: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1193: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1194: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1195: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1196: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1197: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1198: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1199: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1200: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1201: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1202: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1203: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1204: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1205: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1206: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1207: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1208: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1210: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1211: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1212: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1213: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1214: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1215: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1216: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1217: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1242: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1243: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1244: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1259: child count on <cite text '': 2 != 1 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1264: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1265: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1266: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1267: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1268: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1269: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1270: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1271: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1272: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1273: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1274: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1275: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1276: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1277: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1278: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1279: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1280: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1281: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1282: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1283: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1284: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1285: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1286: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1287: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1288: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1289: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1290: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1291: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1292: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1293: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1294: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1295: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1296: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1297: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1298: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1299: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1300: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1301: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1302: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1303: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1304: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1305: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1306: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1307: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1308: attr count on <code>: 2 != 1 [at <p> child 0] [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1309: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1310: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1311: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1312: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1313: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1319: element name 'body' != 'style' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1320: element name 'body' != 'script' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1321: child count on <html text '': 1 != 4 [at <> child 0]
+nokogiri-tree-tests.dat:1322: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1323: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1324: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1325: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1326: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1327: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1328: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1329: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1330: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1331: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1332: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1334: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:1335: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1336: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1337: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1338: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1339: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1340: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1341: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1343: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1344: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1345: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1346: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1347: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1349: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1350: node kind mismatch [at <body> child 0] [at <html> child 1] [at <> child 0]
+nokogiri-tree-tests.dat:1352: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1353: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1355: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:1356: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:1357: child count on <html text '': 2 != 1 [at <> child 0]
+nokogiri-tree-tests.dat:1359: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1360: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1361: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1362: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1363: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:1364: child count on < text '': 1 != 0
+nokogiri-tree-tests.dat:1365: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1366: child count on <html text '': 1 != 3 [at <> child 0]
+nokogiri-tree-tests.dat:1367: child count on <html text '': 1 != 3 [at <> child 0]
+nokogiri-tree-tests.dat:1368: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1369: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1370: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1382: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1383: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1392: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1394: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1395: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1396: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1397: element name 'body' != 'frameset' [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1398: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1399: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1400: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1401: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1402: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1403: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1404: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1405: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1406: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1407: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1408: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1409: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1410: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1411: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1412: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1413: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1414: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1415: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1416: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1417: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1418: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1419: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1420: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1421: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1425: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1426: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1434: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1435: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1436: child count on <body text '': 2 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1438: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1439: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1440: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1441: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1442: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1443: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1444: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1445: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1446: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1447: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1448: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1449: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1450: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1451: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1452: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1453: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1454: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1455: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1456: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1457: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1458: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1459: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1460: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1461: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1462: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1463: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1464: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1465: child count on <body text '': 2 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1466: child count on <html text '': 9 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1467: child count on <b text '': 1 != 0 [at <body> child 5] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1468: child count on <html text '': 3 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1469: child count on <body text '': 3 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1473: child count on <body text '': 4 != 2 [at <html> child 1] [at <> child 0]
+nokogiri-tree-tests.dat:1474: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1484: child count on <body text '': 0 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1486: child count on <body text '': 1 != 2 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1487: element name '' != 'rdar:' [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1489: node kind mismatch [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1490: attr count on <body>: 0 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1491: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1493: child count on <body text '': 1 != 0 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1494: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1505: child count on <select text '': 2 != 1 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1506: child count on <body text '': 5 != 3 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1508: child count on <html text '': 1 != 2 [at <> child 0]
+nokogiri-tree-tests.dat:1509: child count on <html text '': 1 != 3 [at <> child 0]
+nokogiri-tree-tests.dat:1510: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1511: child count on <body text '': 3 != 1 [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1513: child count on <font text '': 1 != 2 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1518: attr count on <img>: 2 != 1 [at <body> child 0] [at <html> child 0] [at <> child 0]
+nokogiri-tree-tests.dat:1521: child count on <svg text '': 2 != 1 [at <td> child 0] [at <tr> child 0] [at <table> child 0] [at <body> child 0] [at <ht
+nokogiri-tree-tests.dat:1524: child count on < text '': 1 != 2
+nokogiri-tree-tests.dat:1525: child count on < text '': 1 != 2
