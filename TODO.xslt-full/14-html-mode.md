@@ -55,3 +55,37 @@ Remaining: html5lib tokenizer/tree corpus adoption (needs the
 adoption-agency tree shape + a JSON test harness), Nokogiri parity
 corpus on a crawl sample, bindings exposure of
 leptris_parse_html_string.
+
+## Design 2026-09-05 — html5lib corpus harness (the #659 slice)
+
+Corpus: html5lib/html5lib-tests tree-construction .dat files
+(Nokogiri vendors them as a git submodule; reference
+~/src/external/nokogiri). Pin a snapshot in-repo under
+test/html/html5lib-tests/ (vendored copy, not a submodule —
+CI must not need network; keep only tree-construction + a
+README crediting upstream + the pinned commit).
+
+Harness shape (test/html/test_html5lib.cpp):
+1. .dat scanner: split on blank-line-separated blocks; fields
+   |#data| |#errors| |#document| |#script-on| (skip script-on
+   variants initially). Multiple #data sections per case are
+   fragments-after-document pairs (stage 2; skip initially).
+2. Expected-tree parser: read the "| " indented lines into a
+   node tree spec (element/name-ns, text, comment, DOCTYPE,
+   template content). Namespaced names carry the URI in braces
+   (svg/mathml foreign content).
+3. Runner: leptris_parse_html_string per case; walk our tree in
+   the same order; compare node kind, name, namespace URI (not
+   prefix), attributes (order-insensitive), text content.
+4. Mode-gate: the corpus REQUIRES adoption-agency for the
+   formatting-element cases (~15% of cases) — mode-gated OFF in
+   slice 1; the mode flips on when AA lands, keeping the
+   Nokogiri-parity characterization specs green meanwhile.
+5. Report: pass/skip counts by category; a red list file
+   (like open_cases.txt) naming the failing cases that AA +
+   later slices must close, so progress is falsifiable.
+
+Estimated slices: (a) scanner+expected parser+runner skeleton
+with pass-count spec ~ 1 PR; (b) fix fallout outside AA
+(misnesting corners the characterization gate already shapes);
+(c) AA implementation gated ON + red-list burn-down.
