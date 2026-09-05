@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.92] - 2026-09-05
+
+### Performance
+
+- kill the append-tail cache thrash - entity-heavy HTML 6.8x (dom)
+
+
+
 ## [1.9.91] - 2026-09-05
 
 ### Added
