@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.89] - 2026-09-05
+
+### Fixed
+
+- #857 - analyze-string group spans are subject-relative (xpath)
+
+
+
 ## [1.9.88] - 2026-09-05
 
 ### Changed
