@@ -50,6 +50,23 @@ static size_t gen_page(char* out) {
     return len;
 }
 
+/* Entity-laden shape (the #848-report class): 20k paragraphs each
+ * carrying 7 named/numeric entities. Exposed the append-tail cache
+ * thrash (8 slots: the persistent <body> parent evicted ~1/8 pairs,
+ * every miss walked the whole chain — 291ms for 1.3MB; 64 slots =
+ * 42ms, ahead of libxml2's 48ms). */
+static size_t gen_entities(char* out, int paras) {
+    size_t len = 0;
+    len += (size_t)sprintf(out + len,
+        "<!DOCTYPE html><html><body>");
+    for (int i = 0; i < paras; i++)
+        len += (size_t)sprintf(out + len,
+            "<p id='p%d'>&nbsp;&amp;&copy;&mdash;&hellip;&euro;"
+            "&#8212;txt</p>", i);
+    len += (size_t)sprintf(out + len, "</body></html>");
+    return len;
+}
+
 int main(void) {
     size_t cap = 1u << 22;
     char* html = (char*)malloc(cap);
@@ -71,6 +88,23 @@ int main(void) {
         if (us < best) best = us;
     }
     printf("leptris html parse: %zu bytes, %.0f us, %.1f MB/s (best of %d)\n",
+           len, best, (double)len / best, reps);
+
+    /* Entity-laden second shape (nokogiri reference: same page). */
+    len = gen_entities(html, 20000);
+    warm = leptris_parse_html_string(html, len, &st);
+    if (!warm) { printf("entity parse failed\n"); return 1; }
+    leptris_document_free(warm);
+    best = 1e18;
+    for (int i = 0; i < reps; i++) {
+        double t0 = benchmark_time_us();
+        LeptrisDocument d = leptris_parse_html_string(html, len, &st);
+        double us = benchmark_time_us() - t0;
+        leptris_document_free(d);
+        if (us < best) best = us;
+    }
+    printf("leptris html parse (entity-laden): %zu bytes, %.0f us, "
+           "%.1f MB/s (best of %d)\n",
            len, best, (double)len / best, reps);
     free(html);
     return 0;

@@ -47,3 +47,18 @@ reps.times do
 end
 printf("nokogiri(libxml2) html parse: %d bytes, %.0f us, %.1f MB/s (best of %d)\n",
        html.bytesize, best * 1_000_000, html.bytesize / best / 1_000_000, reps)
+
+ent = +"<!DOCTYPE html><html><body>"
+20000.times { |i| ent << "<p id='p#{i}'>&nbsp;&amp;&copy;&mdash;&hellip;&euro;&#8212;txt</p>" }
+ent << "</body></html>"
+Nokogiri::HTML(ent)
+best = Float::INFINITY
+reps.times do
+  t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  doc = Nokogiri::HTML(ent)
+  dt = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+  doc = nil
+  best = dt if dt < best
+end
+printf("nokogiri(libxml2) html parse (entity-laden): %d bytes, %.0f us, %.1f MB/s (best of %d)\n",
+       ent.bytesize, best * 1_000_000, ent.bytesize / best / 1_000_000, reps)
