@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.90] - 2026-09-05
+
+### Added
+
+- #659 - html5lib tree-construction corpus harness (slice 1) (html)
+
+### Fixed
+
+- #659 - empty-shape inputs are documents; harness portable to MSVC (html)
+
+
+
 ## [1.9.89] - 2026-09-05
 
 ### Fixed
