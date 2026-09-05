@@ -1499,6 +1499,12 @@ static double cur_pri_of(const XsltTemplate* t) {
     return pri;
 }
 
+/* #866: a template reachable through several name keys must be
+ * considered once per dispatch — stamp it with the select call's
+ * generation instead of keeping a seen-list. */
+static __thread unsigned xslt_dispatch_gen;
+#define XSLT_DISPATCH_NEXT_GEN() (++xslt_dispatch_gen)
+
 static const XsltTemplate* xslt_select_next_match(
         const XsltExec* ex, LeptrisElement node, const char* mode) {
     const XsltTemplate* cur = ex->current_template;
@@ -1512,8 +1518,48 @@ static const XsltTemplate* xslt_select_next_match(
     if (!bucket) return NULL;
     const int node_is_elem = leptris_node_get_type((LeptrisNodeRef)node) ==
                              LEPTRIS_NODE_TYPE_ELEMENT;
-    for (size_t bi = 0; bi < bucket->n; bi++) {
-        const XsltTemplate* t = bucket->list[bi];
+    const XsltNameKey* nkey = NULL;
+    if (node_is_elem) {
+        const char* nn = leptris_element_get_name(node);
+        if (nn) nkey = xslt_bucket_name_key(bucket, nn);
+    }
+    size_t nattrs = node_is_elem
+        ? leptris_element_attribute_count(node) : 0;
+    const unsigned gen = XSLT_DISPATCH_NEXT_GEN();
+    for (int part = 0; part < 2 + (int)nattrs; part++) {
+    XsltTemplate* const* cand = NULL;
+    size_t ncand = 0;
+    if (part == 0) {
+        if (!nkey) continue;
+        cand = nkey->list;
+        ncand = nkey->n;
+    } else if (part == 1) {
+        cand = bucket->other;
+        ncand = bucket->n_other;
+    } else {
+        /* #866: literal @attr='value' candidates — probe the value
+         * index with each attribute of this element. */
+        if (!bucket->pkeys) continue;
+        size_t ai = (size_t)(part - 2);
+        LeptrisAttribute a = leptris_element_first_attribute(node);
+        for (size_t j = 0; a && j < ai; j++) a = leptris_attribute_next(a);
+        if (!a) continue;
+        const char* an = leptris_attribute_get_name(a);
+        const char* av = leptris_attribute_get_value(node, a);
+        if (!an || !av) continue;
+        const struct xslt_pkey* pk =
+            xslt_bucket_pred_key(bucket,
+                                 nkey ? nkey->name
+                                      : leptris_element_get_name(node),
+                                 an, av);
+        if (!pk) continue;
+        cand = pk->list;
+        ncand = pk->n;
+    }
+    for (size_t bi = 0; bi < ncand; bi++) {
+        XsltTemplate* t = cand[bi];
+        if (t->dispatch_stamp == gen) continue;
+        t->dispatch_stamp = gen;
         size_t order = t->order;
         if (t == cur) continue;
         /* ONE pass over the alternatives (see xslt_select_template). */
@@ -1550,6 +1596,7 @@ static const XsltTemplate* xslt_select_next_match(
         else if (pri != best_pri) wins = pri > best_pri;
         else wins = order >= best_order;
         if (wins) { best = t; best_pri = pri; best_order = order; }
+    }
     }
     return best;
 }
@@ -2885,8 +2932,48 @@ static const XsltTemplate* xslt_select_template(
     if (!bucket) return NULL;
     const int node_is_elem = leptris_node_get_type((LeptrisNodeRef)node) ==
                              LEPTRIS_NODE_TYPE_ELEMENT;
-    for (size_t bi = 0; bi < bucket->n; bi++) {
-        const XsltTemplate* t = bucket->list[bi];
+    const XsltNameKey* nkey = NULL;
+    if (node_is_elem) {
+        const char* nn = leptris_element_get_name(node);
+        if (nn) nkey = xslt_bucket_name_key(bucket, nn);
+    }
+    size_t nattrs = node_is_elem
+        ? leptris_element_attribute_count(node) : 0;
+    const unsigned gen = XSLT_DISPATCH_NEXT_GEN();
+    for (int part = 0; part < 2 + (int)nattrs; part++) {
+    XsltTemplate* const* cand = NULL;
+    size_t ncand = 0;
+    if (part == 0) {
+        if (!nkey) continue;
+        cand = nkey->list;
+        ncand = nkey->n;
+    } else if (part == 1) {
+        cand = bucket->other;
+        ncand = bucket->n_other;
+    } else {
+        /* #866: literal @attr='value' candidates — probe the value
+         * index with each attribute of this element. */
+        if (!bucket->pkeys) continue;
+        size_t ai = (size_t)(part - 2);
+        LeptrisAttribute a = leptris_element_first_attribute(node);
+        for (size_t j = 0; a && j < ai; j++) a = leptris_attribute_next(a);
+        if (!a) continue;
+        const char* an = leptris_attribute_get_name(a);
+        const char* av = leptris_attribute_get_value(node, a);
+        if (!an || !av) continue;
+        const struct xslt_pkey* pk =
+            xslt_bucket_pred_key(bucket,
+                                 nkey ? nkey->name
+                                      : leptris_element_get_name(node),
+                                 an, av);
+        if (!pk) continue;
+        cand = pk->list;
+        ncand = pk->n;
+    }
+    for (size_t bi = 0; bi < ncand; bi++) {
+        XsltTemplate* t = cand[bi];
+        if (t->dispatch_stamp == gen) continue;
+        t->dispatch_stamp = gen;
         size_t order = t->order;
         if (t->import_rank < min_rank) continue;
         /* ONE pass over the alternatives: each is matched exactly
@@ -2922,6 +3009,7 @@ static const XsltTemplate* xslt_select_template(
         else if (pri != best_pri) wins = pri > best_pri;
         else wins = order >= best_order;   /* tie: last declared */
         if (wins) { best = t; best_pri = pri; best_order = order; }
+    }
     }
     return best;
 }

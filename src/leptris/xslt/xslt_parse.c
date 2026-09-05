@@ -1137,6 +1137,54 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
                 strcpy(p->expr_name, leaf);
                 p->expr_name_only = 1;
             }
+            /* #866: the leaf's Name test even under predicates —
+             * everything before the first '[' / '@' / '(' in a
+             * single-step, unprefixed, non-wildcard leaf. */
+            {
+                size_t nl = 0;
+                while (leaf[nl] && leaf[nl] != '[' && leaf[nl] != '@' &&
+                       leaf[nl] != '(' && leaf[nl] != ':')
+                    nl++;
+                /* Only a genuine Name test: the remainder after the
+                 * name must be empty or a predicate ('[', '@') — a
+                 * '(' means a node-type test (text(), node(),
+                 * processing-instruction()) or a function call
+                 * (id('x')), which matches by kind, not name. */
+                if (nl && nl < sizeof(p->leaf_name) &&
+                    !(nl == 1 && leaf[0] == '*') && !last &&
+                    (leaf[nl] == 0 || leaf[nl] == '[' || leaf[nl] == '@')) {
+                    memcpy(p->leaf_name, leaf, nl);
+                    p->leaf_name[nl] = 0;
+                    p->leaf_named = 1;
+                    /* Literal @attr='value' predicate: [@a='v'] or
+                     * [@a="v"] and nothing else. */
+                    if (leaf[nl] == '[') {
+                        const char* q = leaf + nl + 1;
+                        if (*q == '@') {
+                            size_t al = 1;
+                            while (q[al] && q[al] != '=') al++;
+                            size_t an = al - 1;
+                            if (q[al] == '=' &&
+                                (q[al + 1] == '\'' || q[al + 1] == '"')) {
+                                char term = q[al + 1];
+                                size_t v0 = al + 2;
+                                size_t vl = v0;
+                                while (q[vl] && q[vl] != term) vl++;
+                                if (q[vl] == term && q[vl + 1] == ']' &&
+                                    q[vl + 2] == 0 && an > 0 &&
+                                    an < sizeof(p->pred_attr) &&
+                                    vl - v0 < sizeof(p->pred_val)) {
+                                    memcpy(p->pred_attr, q + 1, an);
+                                    p->pred_attr[an] = 0;
+                                    memcpy(p->pred_val, q + v0, vl - v0);
+                                    p->pred_val[vl - v0] = 0;
+                                    p->pred_literal = 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             *tail = p;
             tail = &p->next;
             free(alts[i]);
@@ -1845,6 +1893,88 @@ void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
                     if (!b->list) { mm--; continue; }
                 }
                 b->list[b->n++] = t;
+                /* #866 name keys: every alternative that names an
+                 * element links the template under that name; any
+                 * other-shaped alternative also lands in the
+                 * any-element remainder. */
+                int has_other = 0;
+                for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
+                    if (!pa->leaf_named) { has_other = 1; continue; }
+                    if (pa->pred_literal) {
+                        /* Value-index candidate — NOT in the plain
+                         * name list (that is the point: 120
+                         * item[@k='N'] templates must not all
+                         * evaluate their predicates). */
+                        char kb[64 + 48 + 96 + 8];
+                        int kl = snprintf(kb, sizeof(kb), "%s\x1f%s\x1f%s",
+                                          pa->leaf_name, pa->pred_attr,
+                                          pa->pred_val);
+                        if (kl <= 0 || (size_t)kl >= sizeof(kb)) continue;
+                        size_t kh2 = tpl_name_hash(kb) & 127;
+                        struct xslt_pkey* k2 = NULL;
+                        while (b->pkeys && kh2 < b->pkeycap &&
+                               b->pkeys[kh2].key) {
+                            if (strcmp(b->pkeys[kh2].key, kb) == 0) {
+                                k2 = &b->pkeys[kh2]; break;
+                            }
+                            kh2 = (kh2 + 1) & 127;
+                        }
+                        if (!k2) {
+                            if (!b->pkeys) {
+                                b->pkeys = (struct xslt_pkey*)calloc(
+                                    128, sizeof(struct xslt_pkey));
+                                if (!b->pkeys) continue;
+                                b->pkeycap = 128;
+                            }
+                            if (b->npkeys >= 96) continue;
+                            k2 = &b->pkeys[kh2];
+                            k2->key = leptris_strdup(kb);
+                            if (!k2->key) continue;
+                            b->npkeys++;
+                        }
+                        if (!k2->list) {
+                            k2->list = (XsltTemplate**)malloc(
+                                n * sizeof(XsltTemplate*));
+                            if (!k2->list) continue;
+                        }
+                        k2->list[k2->n++] = t;
+                        continue;
+                    }
+                    size_t kh = tpl_name_hash(pa->leaf_name) & 63;
+                    XsltNameKey* k = NULL;
+                    while (b->keys && kh < b->keycap && b->keys[kh].name) {
+                        if (strcmp(b->keys[kh].name, pa->leaf_name) == 0) {
+                            k = &b->keys[kh]; break;
+                        }
+                        kh = (kh + 1) & 63;
+                    }
+                    if (!k) {
+                        if (!b->keys) {
+                            b->keys = (XsltNameKey*)calloc(
+                                64, sizeof(XsltNameKey));
+                            if (!b->keys) continue;
+                            b->keycap = 64;
+                        }
+                        if (b->nkeys >= 48) continue;   /* near-full */
+                        k = &b->keys[kh];
+                        k->name = pa->leaf_name;
+                        b->nkeys++;
+                    }
+                    if (!k->list) {
+                        k->list = (XsltTemplate**)malloc(
+                            n * sizeof(XsltTemplate*));
+                        if (!k->list) continue;
+                    }
+                    k->list[k->n++] = t;
+                }
+                if (has_other) {
+                    if (!b->other) {
+                        b->other = (XsltTemplate**)malloc(
+                            n * sizeof(XsltTemplate*));
+                        if (!b->other) continue;
+                    }
+                    b->other[b->n_other++] = t;
+                }
             }
             sheet->modes = modes;
             sheet->mode_count = mm;
@@ -1865,6 +1995,32 @@ XsltTemplate* xslt_sheet_named(const XsltStylesheet* sheet,
     return NULL;
 }
 
+const struct xslt_pkey* xslt_bucket_pred_key(
+        const XsltModeBucket* b, const char* elem, const char* attr,
+        const char* val) {
+    if (!b || !b->pkeys || !elem || !attr || !val) return NULL;
+    char kb[64 + 48 + 96 + 8];
+    int kl = snprintf(kb, sizeof(kb), "%s\x1f%s\x1f%s", elem, attr, val);
+    if (kl <= 0 || (size_t)kl >= sizeof(kb)) return NULL;
+    size_t kh = tpl_name_hash(kb) & 127;
+    while (b->pkeys[kh].key) {
+        if (strcmp(b->pkeys[kh].key, kb) == 0) return &b->pkeys[kh];
+        kh = (kh + 1) & 127;
+    }
+    return NULL;
+}
+
+const XsltNameKey* xslt_bucket_name_key(const XsltModeBucket* b,
+                                        const char* name) {
+    if (!b || !b->keys || !name) return NULL;
+    size_t kh = tpl_name_hash(name) & 63;
+    while (b->keys[kh].name) {
+        if (strcmp(b->keys[kh].name, name) == 0) return &b->keys[kh];
+        kh = (kh + 1) & 63;
+    }
+    return NULL;
+}
+
 const XsltModeBucket* xslt_sheet_mode(const XsltStylesheet* sheet,
                                       const char* mode) {
     if (!sheet) return NULL;
@@ -1880,8 +2036,22 @@ const XsltModeBucket* xslt_sheet_mode(const XsltStylesheet* sheet,
 void xslt_stylesheet_free(XsltStylesheet* sheet) {
     if (!sheet) return;
     free(sheet->named_slot);
-    for (size_t i = 0; i < sheet->mode_count; i++)
+    for (size_t i = 0; i < sheet->mode_count; i++) {
+        if (sheet->modes[i].keys) {
+            for (size_t k = 0; k < sheet->modes[i].keycap; k++)
+                free(sheet->modes[i].keys[k].list);
+            free(sheet->modes[i].keys);
+        }
+        if (sheet->modes[i].pkeys) {
+            for (size_t k = 0; k < sheet->modes[i].pkeycap; k++) {
+                free(sheet->modes[i].pkeys[k].key);
+                free(sheet->modes[i].pkeys[k].list);
+            }
+            free(sheet->modes[i].pkeys);
+        }
+        free(sheet->modes[i].other);
         free(sheet->modes[i].list);
+    }
     free(sheet->modes);
     XsltTemplate* t = sheet->templates;
     while (t) {
