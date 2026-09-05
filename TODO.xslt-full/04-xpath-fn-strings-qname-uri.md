@@ -82,3 +82,16 @@ exactly as long as the source tree. Field + free-path change +
 specs; analyze-string needs the same chain (its constructed
 fn:match/fn:non-match elements face the identical lifecycle).
 RED spec was written first and reverted with the code.
+
+## Status addendum 2026-09-05 (#846 fixed, PR #854)
+
+analyze-string namespace resolution shipped: the root cause was NOT
+in analyze-string or the resolver at all — constructed elements
+never had their QNames split (full lexical "fn:match" in name,
+prefix NULL), while every resolver compares name against the test's
+LOCAL part. leptris_elem_split_qname at both creation paths gives
+constructed elements the parser shape; one xmlns:fn declaration on
+the result root resolves every descendant. Also in that PR:
+op_element reads the element prefix instead of re-parsing the name,
+and the HTML serializer gates void/raw/break rules to unprefixed
+names (s:img is not the HTML img — bug-117). Lane 04 CLOSED.
