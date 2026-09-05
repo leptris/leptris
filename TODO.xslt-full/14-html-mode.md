@@ -121,3 +121,21 @@ error in lenient HTML: the wrapper synthesis handles the empty
 chain (html>body empty). Floor 186 -> 193; spec
 EmptyShapeInputsAreDocuments pins it. Remaining parse-fails (23)
 are deeper tokenizer edges - next slice.
+
+## Status 2026-09-05 (night) — Nokogiri PARITY floor (the real metric)
+
+nokogiri-tree-tests.dat: 1555 Nokogiri::HTML reference trees for
+every runnable corpus case (gen_nokogiri_reference.rb, same "| "
+dialect the harness parses; libxml2's implicit doctype filtered to
+input-doctyped cases only). The harness now reports BOTH meters:
+html5lib conformance (193) and NOKOGIRI PARITY — 372/1555 exact
+tree matches, 1183-entry parity red-list committed
+(test/html/nokogiri-parity-redlist.txt), floor pinned.
+
+Parity failure shape (first bucket): misnesting/adoption-adjacent
+child-count diffs under b/a/body — the libxml2 tree-builder
+behaviors (formatting-element handling) we have NOT replicated.
+That is the #659 work list, ranked by the red-list.
+
+Separate: HTML parse throughput gated - 90.2 vs 31.1 MB/s (2.9x
+ahead of libxml2, byte-identical 450KB fixtures, PR #867).
