@@ -102,8 +102,19 @@ leptris_add_test(test_xslt        xpath/test_xslt.cpp)
 leptris_add_test(test_xquery      xquery/test_xquery.cpp)
 leptris_add_test(test_html        html/test_html.cpp)
 leptris_add_test(test_html5lib     html/test_html5lib.cpp)
+file(GLOB html5lib_dats
+     "${CMAKE_CURRENT_SOURCE_DIR}/html/html5lib-tests/tree-construction/*.dat")
+list(SORT html5lib_dats)
+set(HTML5LIB_DAT_LIST "")
+foreach(f ${html5lib_dats})
+    get_filename_component(basename "${f}" NAME)
+    list(APPEND HTML5LIB_DAT_LIST "\"${basename}\"")
+endforeach()
+string(REPLACE ";" ",\n    " HTML5LIB_DAT_INITIALIZER "${HTML5LIB_DAT_LIST}")
+configure_file(html/html5lib_cases.h.in html/html5lib_cases.h @ONLY)
 target_compile_definitions(test_html5lib PRIVATE
     LEPTRIS_HTML5LIB_DIR="${CMAKE_CURRENT_SOURCE_DIR}/html/html5lib-tests/tree-construction")
+target_include_directories(test_html5lib PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/html)
 target_compile_definitions(test_xquery PRIVATE
     LEPTRIS_XQUERY_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/test/xquery")
 

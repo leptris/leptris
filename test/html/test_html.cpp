@@ -44,6 +44,29 @@ std::string Html(const char* in) {
     return r;
 }
 
+/* #659 (html5lib corpus fallout): inputs that append NOTHING
+ * (stray end tag only, a doctype-only document, a second doctype,
+ * an empty string) must still parse to the empty Nokogiri shape —
+ * "nothing parsed" is not an error in lenient HTML mode. */
+TEST(HtmlParse, EmptyShapeInputsAreDocuments) {
+    const char* cases[] = {
+        "", "</menuitem>", "</b>", "<!DOCTYPE html><!DOCTYPE html>",
+        "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n"
+        "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">",
+    };
+    for (const char* in : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument doc =
+            leptris_parse_html_string(in, std::strlen(in), &st);
+        EXPECT_NE(doc, nullptr) << "input: " << in;
+        if (!doc) continue;
+        LeptrisElement root = leptris_document_root(doc);
+        ASSERT_NE(root, nullptr);
+        EXPECT_STREQ(leptris_element_name(root), "html");
+        leptris_document_free(doc);
+    }
+}
+
 TEST(HtmlParse, SynthesizesNokogiriDocumentShape) {
     LeptrisStatus st = LEPTRIS_OK;
     const char in[] = "<p>x</p>";

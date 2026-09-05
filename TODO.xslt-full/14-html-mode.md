@@ -111,3 +111,13 @@ Red-list snapshot: test/html/html5lib-redlist.txt. Failure shape:
 30 parse-failed, 13 kind. NEXT slices by category, NOT adoption
 agency first: the child-count/html cluster is the implied-head +
 foster-parenting model — the biggest bucket.
+
+## Follow-up (same day): empty-shape inputs are documents (+7)
+
+The harness's 30 parse-failed cases exposed that inputs appending
+NOTHING (stray end tag only, doctype-only, second doctype, empty
+string) hard-failed at the done-gate. Nothing-parsed is not an
+error in lenient HTML: the wrapper synthesis handles the empty
+chain (html>body empty). Floor 186 -> 193; spec
+EmptyShapeInputsAreDocuments pins it. Remaining parse-fails (23)
+are deeper tokenizer edges - next slice.
