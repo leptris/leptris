@@ -2,6 +2,22 @@
 
 ## [1.9.92] - 2026-09-05
 
+### Fixed
+
+- **#848 follow-up — the append-tail cache thrash.** Entity-laden
+  HTML at scale (1.3MB, 140k entities) parsed 6x BEHIND libxml2
+  (291ms vs 48ms) and superlinearly — but the entity table was not
+  the cost (the #848 binary search holds). The 8-slot direct-mapped
+  append-tail cache thrashed on the HTML shape, which alternates a
+  persistent parent (<body>) with a fresh parent each element pair:
+  the body entry was evicted ~1/8 pairs and every miss walked the
+  whole child chain — O(n²) over 40k nodes. 64 slots: 291ms →
+  38-44ms, now at par to 1.15x AHEAD of libxml2 on the same
+  fixture. No sub-1x HTML parse shape remains (general pages: 2.9x
+  ahead). The entity-laden shape is gated in bench_html_parse for
+  both engines.
+
+
 ### Performance
 
 - kill the append-tail cache thrash - entity-heavy HTML 6.8x (dom)
