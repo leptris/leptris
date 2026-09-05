@@ -2628,13 +2628,10 @@ LEPTRIS_API LeptrisDocument leptris_parse_html_string(
     }
 
 done:
-    if (!b.top_head) {
-        /* Nothing parsed at all is an error (everything else
-         * degrades to text). */
-        if (status) *status = LEPTRIS_ERROR_PARSE;
-        leptris_document_free(doc);
-        return NULL;
-    }
+    ;
+    /* Nothing appended (empty input, stray end tags only, doctype
+     * only) is NOT an error in lenient HTML mode: the wrapper
+     * synthesis below yields the empty Nokogiri shape. */
     /* Nokogiri document shape (#659): with no explicit <html>,
      * synthesize <html><head></head><body>content</body></html> —
      * the document model is single-rooted, and libxml2's

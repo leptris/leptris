@@ -26,9 +26,9 @@ extern "C" {
 const char* leptris_element_get_namespace_uri(LeptrisElement elem);
 }
 #include <cstdio>
-#include <dirent.h>
 #include <algorithm>
 #include <map>
+#include "html5lib_cases.h"
 #include <cstring>
 #include <string>
 #include <vector>
@@ -471,22 +471,10 @@ TEST(Html5LibCorpus, TreeConstruction) {
     std::string dir = srcdir && *srcdir
         ? srcdir
         : LEPTRIS_HTML5LIB_DIR;
-    std::vector<std::string> files;
-    {
-        DIR* d = opendir(dir.c_str());
-        if (!d) {
-            FAIL() << "cannot open corpus dir: " << dir;
-            return;
-        }
-        struct dirent* de;
-        while ((de = readdir(d))) {
-            std::string n = de->d_name;
-            if (n.size() > 4 && n.compare(n.size() - 4, 4, ".dat") == 0)
-                files.push_back(n);
-        }
-        closedir(d);
-        std::sort(files.begin(), files.end());
-    }
+    std::vector<std::string> files(kHtml5libDatFiles,
+                                   kHtml5libDatFiles +
+                                       sizeof(kHtml5libDatFiles) /
+                                           sizeof(kHtml5libDatFiles[0]));
     size_t total = 0, passed = 0, skipped = 0, failed = 0;
     std::vector<std::string> failures;
     std::string err;
@@ -551,5 +539,5 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it. */
-    EXPECT_GE(passed, (size_t)186);
+    EXPECT_GE(passed, (size_t)193);
 }
