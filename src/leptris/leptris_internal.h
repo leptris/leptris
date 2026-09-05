@@ -284,7 +284,11 @@ struct leptris_document {
     struct leptris_mut_tail {
         struct leptris_element* parent;
         struct leptris_node* child;
-    } mut_tail[8];
+    /* 64 slots: HTML parses alternate a persistent parent (body)
+     * with a fresh child-parent every element pair — at 8 slots the
+     * body entry was evicted ~1/8 pairs and each miss walked the
+     * whole child chain (O(n^2) on element/entity-heavy pages). */
+    } mut_tail[64];
 
     /* FlatDoc + lazy-promote removed — direct_parse builds the
      * LeptrisElement tree eagerly. Retained as an always-zero field
