@@ -3539,32 +3539,22 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
     LeptrisElement e = out_append_elem(ex, ex->pending_parent, name,
                                        ns_avt ? ns_avt : pfx_ns);
     if (pfx_ns) {
-        const char* en2 = leptris_element_name(e);
-        const char* c2 = en2 ? strchr(en2, ':') : NULL;
-        if (c2) {
-            char p2[80];
-            size_t pl2 = (size_t)(c2 - en2);
-            snprintf(p2, sizeof(p2), "%.*s", (int)pl2, en2);
-            if (!result_ns_in_scope(e, p2, pfx_ns))
-                leptris_element_add_namespace_definition(e, p2, pfx_ns);
-        }
+        /* The created element carries its prefix (QName split at
+         * creation, #846) — no re-parse of the name. */
+        const char* p2 = leptris_element_get_prefix(e);
+        if (p2 && !result_ns_in_scope(e, p2, pfx_ns))
+            leptris_element_add_namespace_definition(e, p2, pfx_ns);
         free(pfx_ns);
     }
     free(name);
     if (!e) { free(ns_avt); return -1; }
     if (ns_avt) {
-        const char* en = leptris_element_name(e);
-        const char* colon = en ? strchr(en, ':') : NULL;
-        char pfx[80];
-        const char* dpfx = "";
-        if (colon) {
-            size_t pl = (size_t)(colon - en);
-            snprintf(pfx, sizeof(pfx), "%.*s", (int)pl, en);
-            dpfx = pfx;
-        }
         /* Skip the declaration when the result ancestors already
          * bind the prefix (or default) to the same URI — libxslt
-         * relies on inheritance (bug-179). */
+         * relies on inheritance (bug-179). The prefix comes from
+         * the created element (QName split at creation, #846). */
+        const char* dpfx = leptris_element_get_prefix(e);
+        if (!dpfx) dpfx = "";
         if (!result_ns_in_scope(e, dpfx, ns_avt))
             leptris_element_add_namespace_definition(e, dpfx, ns_avt);
         free(ns_avt);

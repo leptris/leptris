@@ -423,6 +423,26 @@ static inline void leptris_elem_set_ns_uri(LeptrisElement e, char* uri,
     e->ns_cache->namespace_uri = uri;
 }
 
+/* #846: split a just-stored QName copy ("p:local") into prefix +
+ * local, giving constructed elements the same shape the parser
+ * produces (dp_split_hash_name): name points at the local part,
+ * ns_cache->prefix at the pre-colon span, hash/len recomputed for
+ * the local part. The name storage must be owned and writable
+ * (pool or mut-block copy) — the split NULs the colon in place.
+ * No-op for colon-free names. */
+static inline void leptris_elem_split_qname(LeptrisElement e,
+                                            LeptrisMemoryPool* pool) {
+    if (!e || !e->name) return;
+    char* colon = strchr(e->name, ':');
+    if (!colon) return;
+    *colon = '\0';
+    leptris_elem_set_prefix(e, e->name, pool);
+    e->name = colon + 1;
+    size_t local_len = strlen(e->name);
+    e->name_len = (local_len > 254) ? 0xFF : (uint8_t)local_len;
+    e->name_hash = leptris_name_hash_compute(e->name);
+}
+
 /* Get the linked list of xmlns:* declarations on this element.
  * Returns NULL when the element has no namespace declarations
  * (the overwhelmingly common case). TODO 155 Phase B. */

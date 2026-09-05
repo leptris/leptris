@@ -60,6 +60,8 @@ LeptrisElement leptris_element_create_with_view(
     elem->name_hash = leptris_name_hash_compute(elem->name);
     elem->name_len = (name_view.length > 254)
         ? 0xFF : (uint8_t)name_view.length;
+    /* Pool copy is writable: a QName splits in place (#846). */
+    leptris_elem_split_qname(elem, pool);
 
     return elem;
 }

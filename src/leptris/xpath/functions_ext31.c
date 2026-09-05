@@ -3488,6 +3488,10 @@ static struct leptris_xpath_result* fn_analyze_string(XPathContext* ctx,
         LeptrisElement root =
             doc ? leptris_element_create(doc, "fn:analyze-string") : NULL;
         if (root) {
+            /* F+O model: the result carries the functions namespace,
+             * resolvable through one root declaration (#846). */
+            leptris_element_add_namespace_definition(
+                root, "fn", "http://www.w3.org/2005/xpath-functions");
             regmatch_t pm[12];
             const char* p = in;
             while (*p && regexec(&rx, p, 12, pm, 0) == 0) {
