@@ -274,6 +274,19 @@ typedef struct xslt_pattern {
      * bare name test or "*" (see xslt_pattern.c). */
     char expr_name[64];
     int expr_name_only;
+    /* #866: the leaf's element Name test even when the alternative
+     * carries predicates ("item[@k='N']" -> "item") — dispatch
+     * sub-buckets candidates by it. Unset for "*", node(), prefixed
+     * or multi-step shapes (those candidates match any element and
+     * stay in the bucket's other-list). */
+    char leaf_name[64];
+    int leaf_named;
+    /* #866: set when the alternative is leaf_named and its ONLY
+     * predicate is a literal attribute equality ("item[@k='3']") —
+     * the dispatch value-index shape. */
+    char pred_attr[48];
+    char pred_val[96];
+    int pred_literal;
     /* Compiled step ladder (pattern-compiler fast path): the
      * alternative is a child-axis name/kind ladder with an
      * optional predicate on the LAST step. Matching then costs
@@ -307,6 +320,9 @@ typedef struct xslt_template {
      * plain name + no-namespace check: no doc climb, no ladder. */
     const char* fast_name;          /* points into matches->expr_name */
     double fast_pri;
+    unsigned dispatch_stamp;        /* per-select dedupe (#866): a
+                                     * template reachable through
+                                     * several name keys */
     const char* name;               /* NULL for match-only */
     const char* mode;               /* NULL = default mode */
     XsltInstr* body;
@@ -325,10 +341,32 @@ typedef struct xslt_template {
  * order as the full template list — §5.4 selection is unchanged,
  * only the candidate set narrows to the mode). NULL mode = the
  * default mode. */
-typedef struct xslt_mode_bucket {
-    const char* mode;               /* borrowed from the template */
+/* #866 value-index key: "name\x1fattr\x1fvalue" (string owned). */
+struct xslt_pkey {
+    char* key;
     XsltTemplate** list;
     size_t n;
+};
+
+typedef struct xslt_name_key {
+    const char* name;               /* borrowed: pattern leaf_name */
+    XsltTemplate** list;
+    size_t n;
+} XsltNameKey;
+
+typedef struct xslt_mode_bucket {
+    const char* mode;               /* borrowed from the template */
+    XsltTemplate** list;            /* all candidates, sheet order */
+    size_t n;
+    /* #866: candidates sub-bucketed by the pattern's element Name
+     * test (open-addressed), plus the any-element remainder. */
+    XsltNameKey* keys;
+    size_t nkeys, keycap;
+    XsltTemplate** other;
+    size_t n_other;
+        /* #866: literal @attr='value' predicate index (xslt_pkey). */
+    struct xslt_pkey* pkeys;
+    size_t npkeys, pkeycap;
 } XsltModeBucket;
 
 /* EXSLT func:function (http://exslt.org/functions): a stylesheet-
@@ -715,6 +753,12 @@ XsltTemplate* xslt_sheet_named(const XsltStylesheet* sheet,
                                const char* name);
 const XsltModeBucket* xslt_sheet_mode(const XsltStylesheet* sheet,
                                       const char* mode);
+const XsltNameKey* xslt_bucket_name_key(const XsltModeBucket* b,
+                                        const char* name);
+const struct xslt_pkey* xslt_bucket_pred_key(const XsltModeBucket* b,
+                                             const char* elem,
+                                             const char* attr,
+                                             const char* val);
 XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
                                            LeptrisElement root);
 void xslt_stylesheet_free(XsltStylesheet* sheet);

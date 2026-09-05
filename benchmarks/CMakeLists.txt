@@ -213,6 +213,7 @@ leptris_add_benchmark(bench_modify_leptris    modification/bench_leptris_modify.
 leptris_add_benchmark(bench_xslt_dispatch     xslt/bench_dispatch.c utils.c)
 leptris_add_benchmark(bench_html_parse      html/bench_html_parse.c utils.c)
 leptris_add_benchmark(bench_xslt_dispatch_heavy xslt/bench_dispatch_heavy.c utils.c)
+leptris_add_benchmark(bench_xslt_dispatch_pred xslt/bench_dispatch_pred.c utils.c)
 leptris_add_benchmark(bench_xslt_valueof      xslt/bench_valueof.c utils.c)
 leptris_add_benchmark(bench_xslt_subtree_copy xslt/bench_subtree_copy.c utils.c)
 # bench_node_creation.c uses the deprecated _fast node-create variants that
