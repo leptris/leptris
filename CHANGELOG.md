@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.87] - 2026-09-05
+
+### Fixed
+
+- #846 - split constructed QNames; F+O namespace on analyze-string result (dom,xpath)
+
+
+
 ## [1.9.86] - 2026-09-05
 
 ### Fixed
