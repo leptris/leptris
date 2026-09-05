@@ -3493,8 +3493,15 @@ static struct leptris_xpath_result* fn_analyze_string(XPathContext* ctx,
             leptris_element_add_namespace_definition(
                 root, "fn", "http://www.w3.org/2005/xpath-functions");
             regmatch_t pm[12];
+            /* #857: ask for exactly re_nsub+1 slots — BSD regexec
+             * leaves the remainder untouched, so stale stack data
+             * (from a previous analyze-string call) read as phantom
+             * groups and corrupted the match/group spans. */
+            const size_t nmatch =
+                (size_t)rx.re_nsub + 1 <= 12 ? (size_t)rx.re_nsub + 1 : 12;
+            const int max_group = (int)nmatch - 1;
             const char* p = in;
-            while (*p && regexec(&rx, p, 12, pm, 0) == 0) {
+            while (*p && regexec(&rx, p, nmatch, pm, 0) == 0) {
                 if (pm[0].rm_so > 0) {
                     LeptrisElement nm =
                         leptris_element_create(doc, "fn:non-match");
@@ -3506,27 +3513,28 @@ static struct leptris_xpath_result* fn_analyze_string(XPathContext* ctx,
                 }
                 LeptrisElement m = leptris_element_create(doc, "fn:match");
                 if (m) {
-                    /* offsets are MATCH-relative: base at rm_so. */
-                    const char* mb = p + pm[0].rm_so;
-                    regoff_t prev = 0;
+                    /* POSIX pmatch offsets are SUBJECT-relative (to
+                     * p, not the match start) — #857: basing them at
+                     * the match start read past the match whenever
+                     * the match did not begin at offset 0. */
+                    regoff_t prev = pm[0].rm_so;
                     char nrbuf[8];
-                    for (int g = 1; g < 12; g++) {
+                    for (int g = 1; g <= max_group; g++) {
                         if (pm[g].rm_so < 0) break;
-                        analyze_append_text(doc, m, mb + prev,
+                        analyze_append_text(doc, m, p + prev,
                                             (size_t)(pm[g].rm_so - prev));
                         LeptrisElement ge =
                             leptris_element_create(doc, "fn:group");
                         snprintf(nrbuf, sizeof(nrbuf), "%d", g);
                         leptris_element_set_attribute(ge, "nr", nrbuf);
-                        analyze_append_text(doc, ge, mb + pm[g].rm_so,
+                        analyze_append_text(doc, ge, p + pm[g].rm_so,
                                             (size_t)(pm[g].rm_eo -
                                                      pm[g].rm_so));
                         leptris_element_append_child(m, ge);
                         prev = pm[g].rm_eo;
                     }
-                    analyze_append_text(doc, m, mb + prev,
-                                        (size_t)(pm[0].rm_eo - pm[0].rm_so -
-                                                 prev));
+                    analyze_append_text(doc, m, p + prev,
+                                        (size_t)(pm[0].rm_eo - prev));
                     leptris_element_append_child(root, m);
                 }
                 if (pm[0].rm_eo == pm[0].rm_so) {

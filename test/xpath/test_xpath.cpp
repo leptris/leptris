@@ -2242,6 +2242,54 @@ TEST(XPath20Ledger, AnalyzeString) {
     EXPECT_EQ(StrEval("string(analyze-string('abc', '[0-9]'))"), "abc");
 }
 
+TEST(XPath20Ledger, AnalyzeStringGroupSpans) {
+    /* #857: regexec must be asked for exactly re_nsub+1 slots —
+     * BSD leaves the rest untouched, so stale stack data became
+     * phantom groups (single-group regexes leaked the following
+     * non-match; results were call-order dependent). */
+    if (NumEval("count(analyze-string('a', '[0-9]'))") < 0) {
+        SUCCEED() << "analyze-string needs POSIX regex";
+        return;
+    }
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    leptris_xpath_ns_set_add(
+        ns, "fn", "http://www.w3.org/2005/xpath-functions");
+
+    /* Single group: the match and the group are exactly the span. */
+    EXPECT_EQ(StrEval(
+        "string(analyze-string('ab12cd', '([0-9]+)')/fn:match[1])"),
+        "12");
+    EXPECT_EQ(StrEval(
+        "string(analyze-string('ab12cd', '([0-9]+)')"
+        "/fn:match[1]/fn:group)"), "12");
+    EXPECT_EQ(NumEval(
+        "count(analyze-string('ab12cd', '([0-9]+)')"
+        "/fn:match[1]/fn:group)"), 1.0);
+
+    /* Same evaluation, after the single-group call above: the
+     * multi-group shape must not inherit its spans (the order
+     * dependence from the report). The regex covers the whole
+     * input, so the match IS the whole string. */
+    EXPECT_EQ(StrEval(
+        "string(analyze-string('ab12cd', '([a-z]+)([0-9]+)([a-z]+)')"
+        "/fn:match[1])"), "ab12cd");
+    EXPECT_EQ(StrEval(
+        "string-join(analyze-string('ab12cd',"
+        " '([a-z]+)([0-9]+)([a-z]+)')"
+        "/fn:match[1]/fn:group, ',')"), "ab,12,cd");
+
+    /* No groups at all: the match is the whole span. */
+    EXPECT_EQ(StrEval(
+        "string(analyze-string('ab12cd', '[0-9]+')/fn:match[1])"),
+        "12");
+
+    leptris_xpath_ns_set_free(ns);
+    leptris_document_free(doc);
+}
+
 TEST(XPath20Ledger, AnalyzeStringNamespace) {
     /* #846: per F+O, the analyze-string result carries fn:match,
      * fn:non-match and fn:group in the functions namespace; prefixed
