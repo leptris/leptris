@@ -69,3 +69,16 @@ Remaining, in expected-value order:
    for the current scorecard (4 templates).
 3. profile again with a template-heavy fixture before claiming the
    next lever (the 2000-book profile is diffuse by design).
+
+## Status 2026-09-05 — #682 phase A: template-heavy fixture shipped
+
+bench_xslt_dispatch_heavy (120 templates: 30 names x 3 modes +
+30-link named chain, 2400 elements) + heavy_lxml.py reference.
+
+Baseline (this machine, best of 9):
+- leptris 10.21 ms vs in-process lxml 3.12 ms = 3.27x
+  (the diffuse 2000-book profile reads 2.25x) — template-count-
+  scaled overhead confirmed. Next: sample this bench (not the
+  diffuse one) — expected suspects: op_call_template named-call
+  linear scan (60 templates), pattern alternative scan per
+  element (90 alternatives), mode-switch machinery.
