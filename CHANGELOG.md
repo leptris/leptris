@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.88] - 2026-09-05
+
+### Performance
+
+- #682 - dispatch indexes: named hash, mode buckets, bare-name fast path (xslt)
+- #682 phase A - template-heavy dispatch fixture (bench)
+
+
+
 ## [1.9.87] - 2026-09-05
 
 ### Fixed
