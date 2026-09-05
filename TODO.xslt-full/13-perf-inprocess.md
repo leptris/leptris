@@ -105,3 +105,14 @@ get_document 99 + get_pool 51 (per-result-element doc climbs),
 malloc/free ~244. NEXT SLICES in expected-value order: (1) result
 attr-index churn, (2) TLS/allocator consolidation - needs the
 design conversation (document-scoped ownership, TODO 13 item 1).
+
+## Measured-and-discarded 2026-09-05: attr-index lazy registration
+
+Below-4-attrs elements skipping doc-level attr-index registration
+(walk instead of sentinel+entry): heavy bench 5.56 -> 5.60ms =
+noise. The attr cluster in the profile is mut_str_carve + sv
+copies, not index maintenance. Reverted; do not re-try. The
+residual 1.78x gap is the diffuse remainder: TLS thunks (the
+nodeset/result free-lists), per-result-element doc/pool climbs,
+serializer, allocator - i.e. the consolidation item below, which
+needs the design conversation (document-scoped ownership).
