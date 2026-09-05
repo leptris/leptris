@@ -1146,6 +1146,7 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
 
     /* Append (imported templates were added FIRST by construction —
      * xsl:import is processed before the body). */
+    t->order = sp->sheet->template_count;
     if (!sp->sheet->templates) {
         sp->sheet->templates = t;
     } else {
@@ -1781,8 +1782,107 @@ static void free_instr_list(XsltInstr* list) {
     }
 }
 
+/* ---- dispatch indexes (#682) ----
+ *
+ * Named lookup: open-addressed FNV-1a map. Inserts walk the list in
+ * sheet order and overwrite on the same name, so the surviving
+ * entry is the LAST declaration — the §11.6 winner the previous
+ * full linear scan produced. Mode buckets: candidate arrays per
+ * distinct mode, preserving sheet order. */
+static size_t tpl_name_hash(const char* s) {
+    size_t h = 1469598103934665603ull;
+    while (*s) { h ^= (unsigned char)*s++; h *= 1099511628211ull; }
+    return h;
+}
+
+void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
+    if (!sheet) return;
+    size_t n = sheet->template_count;
+    if (n && !sheet->named_slot) {
+        size_t cap = 8;
+        while (cap < n * 2) cap <<= 1;
+        sheet->named_slot =
+            (XsltTemplate**)calloc(cap, sizeof(XsltTemplate*));
+        if (sheet->named_slot) {
+            sheet->named_cap = cap;
+            for (XsltTemplate* t = sheet->templates; t; t = t->next) {
+                if (!t->name) continue;
+                size_t i = tpl_name_hash(t->name) & (cap - 1);
+                while (sheet->named_slot[i] &&
+                       strcmp(sheet->named_slot[i]->name, t->name) != 0)
+                    i = (i + 1) & (cap - 1);
+                sheet->named_slot[i] = t;   /* last declaration wins */
+            }
+        }
+    }
+    if (!sheet->modes && n) {
+        /* Single pass: the bucket array is sized to the match-
+         * template count (an upper bound on distinct modes); each
+         * new mode claims the next slot, candidates append in
+         * sheet order. */
+        XsltModeBucket* modes =
+            (XsltModeBucket*)calloc(n, sizeof(XsltModeBucket));
+        if (modes) {
+            size_t mm = 0;
+            for (XsltTemplate* t = sheet->templates; t; t = t->next) {
+                if (!t->matches) continue;
+                if (!t->matches->next && t->matches->expr_name_only) {
+                    t->fast_name = t->matches->expr_name;
+                    t->fast_pri = t->matches->priority;
+                }
+                XsltModeBucket* b = NULL;
+                for (size_t i = 0; i < mm; i++)
+                    if ((modes[i].mode == NULL && t->mode == NULL) ||
+                        (modes[i].mode && t->mode &&
+                         strcmp(modes[i].mode, t->mode) == 0)) {
+                        b = &modes[i]; break;
+                    }
+                if (!b) {
+                    b = &modes[mm++];
+                    b->mode = t->mode;
+                    b->list =
+                        (XsltTemplate**)malloc(n * sizeof(XsltTemplate*));
+                    if (!b->list) { mm--; continue; }
+                }
+                b->list[b->n++] = t;
+            }
+            sheet->modes = modes;
+            sheet->mode_count = mm;
+        }
+    }
+}
+
+XsltTemplate* xslt_sheet_named(const XsltStylesheet* sheet,
+                               const char* name) {
+    if (!sheet || !name || !sheet->named_slot) return NULL;
+    size_t cap = sheet->named_cap;
+    size_t i = tpl_name_hash(name) & (cap - 1);
+    while (sheet->named_slot[i]) {
+        if (strcmp(sheet->named_slot[i]->name, name) == 0)
+            return sheet->named_slot[i];
+        i = (i + 1) & (cap - 1);
+    }
+    return NULL;
+}
+
+const XsltModeBucket* xslt_sheet_mode(const XsltStylesheet* sheet,
+                                      const char* mode) {
+    if (!sheet) return NULL;
+    for (size_t i = 0; i < sheet->mode_count; i++) {
+        const XsltModeBucket* b = &sheet->modes[i];
+        if ((b->mode == NULL && mode == NULL) ||
+            (b->mode && mode && strcmp(b->mode, mode) == 0))
+            return b;
+    }
+    return NULL;
+}
+
 void xslt_stylesheet_free(XsltStylesheet* sheet) {
     if (!sheet) return;
+    free(sheet->named_slot);
+    for (size_t i = 0; i < sheet->mode_count; i++)
+        free(sheet->modes[i].list);
+    free(sheet->modes);
     XsltTemplate* t = sheet->templates;
     while (t) {
         XsltTemplate* n = t->next;
@@ -2016,5 +2116,6 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
         xslt_stylesheet_free(sheet);
         return NULL;
     }
+    xslt_sheet_build_dispatch(sheet);
     return sheet;
 }

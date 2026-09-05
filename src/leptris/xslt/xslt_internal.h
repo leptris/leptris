@@ -302,9 +302,17 @@ typedef struct xslt_pat_step {
 
 typedef struct xslt_template {
     XsltPattern* matches;           /* NULL for named-only */
+    /* #682 dispatch fast path: set when the pattern is exactly one
+     * bare-Name (or "*") alternative — child::NAME matches by a
+     * plain name + no-namespace check: no doc climb, no ladder. */
+    const char* fast_name;          /* points into matches->expr_name */
+    double fast_pri;
     const char* name;               /* NULL for match-only */
     const char* mode;               /* NULL = default mode */
     XsltInstr* body;
+    size_t order;                   /* position in the sheet list —
+                                     * §5.5 tie-break ("last declared
+                                     * wins") without rescanning */
     int import_rank;                /* 0 = this sheet, 1+ = imported */
     LeptrisXPathNsSet ns;           /* §5.3 in-scope bindings of the
                                        template element — prefixed
@@ -312,6 +320,16 @@ typedef struct xslt_template {
                                        resolve through here */
     struct xslt_template* next;     /* sheet order (imports first) */
 } XsltTemplate;
+
+/* Per-mode dispatch candidates in sheet order (the same relative
+ * order as the full template list — §5.4 selection is unchanged,
+ * only the candidate set narrows to the mode). NULL mode = the
+ * default mode. */
+typedef struct xslt_mode_bucket {
+    const char* mode;               /* borrowed from the template */
+    XsltTemplate** list;
+    size_t n;
+} XsltModeBucket;
 
 /* EXSLT func:function (http://exslt.org/functions): a stylesheet-
  * defined extension function callable from XPath. Registered in the
@@ -379,6 +397,18 @@ struct xslt_styles {
      * priority, order) at apply time per §5.4/5.5. */
     XsltTemplate* templates;
     size_t template_count;
+
+    /* Dispatch indexes, built once at parse (the sheet is immutable
+     * at exec) — #682: template-heavy stylesheets paid an O(T) scan
+     * per named call and per apply-templates dispatch. Named lookup:
+     * open-addressed name -> template; inserts in sheet order
+     * overwrite, so a hit is the LAST declaration, exactly the
+     * §11.6 winner the linear scan produced. Mode buckets group the
+     * candidates a dispatch actually considers. */
+    XsltTemplate** named_slot;      /* hash table, NULL = empty */
+    size_t named_cap;               /* power of two */
+    struct xslt_mode_bucket* modes;
+    size_t mode_count;
 
     /* Named template lookup: linear over the same array (stylesheets
      * rarely have many named templates; revisit at scale). */
@@ -680,6 +710,11 @@ void xslt_exec_free(XsltExec* ex);
 
 /* xslt_parse.c — compilation. */
 XsltStylesheet* xslt_stylesheet_parse(LeptrisDocument doc);
+void xslt_sheet_build_dispatch(XsltStylesheet* sheet);
+XsltTemplate* xslt_sheet_named(const XsltStylesheet* sheet,
+                               const char* name);
+const XsltModeBucket* xslt_sheet_mode(const XsltStylesheet* sheet,
+                                      const char* mode);
 XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
                                            LeptrisElement root);
 void xslt_stylesheet_free(XsltStylesheet* sheet);

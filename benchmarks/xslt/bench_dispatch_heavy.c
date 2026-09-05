@@ -62,8 +62,10 @@ int main(void) {
     if (!d || !x) { printf("setup failed\n"); return 1; }
     char* out = leptris_xslt_apply_string(x, d);
     leptris_free_string(out);
+    int total_reps = getenv("XSLT_BENCH_REPS")
+        ? atoi(getenv("XSLT_BENCH_REPS")) : 9;
     double best = 1e18;
-    for (int rep = 0; rep < 9; rep++) {
+    for (int rep = 0; rep < total_reps; rep++) {
         double t0 = benchmark_time_us() / 1000.0;
         out = leptris_xslt_apply_string(x, d);
         double ms = benchmark_time_us() / 1000.0 - t0;

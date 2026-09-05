@@ -82,3 +82,26 @@ Baseline (this machine, best of 9):
   diffuse one) — expected suspects: op_call_template named-call
   linear scan (60 templates), pattern alternative scan per
   element (90 alternatives), mode-switch machinery.
+
+## Status 2026-09-05 (later) — #682 phase B: dispatch indexes shipped
+
+Three levers, exact-semantics-preserving:
+- named-template hash (open-addressed, inserts in sheet order so a
+  hit IS the last declaration = the §11.6 winner the linear scan
+  produced);
+- mode buckets (per-mode candidate arrays in sheet order);
+- bare-Name dispatch fast path (lone expr_name_only alternative =
+  child::NAME: name + no-ns check, no doc climb, no ladder).
+
+Numbers (same machine): heavy 10.21 -> 5.56 ms (1.83x; vs lxml
+3.12 = 1.78x behind, from 3.27x); light dispatch 10.5 -> 8.97 ms;
+transform/valueof unchanged. Full ctest 1285/1285.
+
+Post-fix profile (sample): tlv_get_addr 335 (TLS thunks - the
+free-lists), select_template self 167 + strcmp 162 (30-candidate
+scans - name-bucketing blocked by priority interplay), attr churn
+set_attribute 148 + probe 95 + rehash 92 (result-tree attrs),
+get_document 99 + get_pool 51 (per-result-element doc climbs),
+malloc/free ~244. NEXT SLICES in expected-value order: (1) result
+attr-index churn, (2) TLS/allocator consolidation - needs the
+design conversation (document-scoped ownership, TODO 13 item 1).

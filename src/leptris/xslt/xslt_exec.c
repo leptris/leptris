@@ -1499,28 +1499,36 @@ static double cur_pri_of(const XsltTemplate* t) {
     return pri;
 }
 
-static size_t cur_order_of(const XsltExec* ex, const XsltTemplate* cur) {
-    size_t order = 0;
-    for (const XsltTemplate* t = ex->sheet->templates; t;
-         t = t->next, order++)
-        if (t == cur) return order;
-    return 0;
-}
-
 static const XsltTemplate* xslt_select_next_match(
         const XsltExec* ex, LeptrisElement node, const char* mode) {
     const XsltTemplate* cur = ex->current_template;
     if (!cur) return NULL;
     const XsltTemplate* best = NULL;
     double best_pri = 0;
-    size_t best_order = 0, order = 0;
-    for (const XsltTemplate* t = ex->sheet->templates; t;
-         t = t->next, order++) {
-        if (!t->matches || t == cur) continue;
-        if ((mode && !t->mode) || (!mode && t->mode)) continue;
-        if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
+    size_t best_order = 0;
+    const double cur_pri = cur_pri_of(cur);
+    const size_t cur_order = cur->order;
+    const XsltModeBucket* bucket = xslt_sheet_mode(ex->sheet, mode);
+    if (!bucket) return NULL;
+    const int node_is_elem = leptris_node_get_type((LeptrisNodeRef)node) ==
+                             LEPTRIS_NODE_TYPE_ELEMENT;
+    for (size_t bi = 0; bi < bucket->n; bi++) {
+        const XsltTemplate* t = bucket->list[bi];
+        size_t order = t->order;
+        if (t == cur) continue;
         /* ONE pass over the alternatives (see xslt_select_template). */
         double pri = 0; int have = 0;
+        if (t->fast_name && node_is_elem) {
+            const char* fn = t->fast_name;
+            if (!(fn[0] == '*' && fn[1] == 0)) {
+                const char* nn = leptris_element_get_name(node);
+                if (!nn || strcmp(nn, fn) != 0) continue;
+                const char* nu = leptris_element_get_namespace_uri(node);
+                if (nu && nu[0]) continue;
+            }
+            pri = t->fast_pri;
+            have = 1;
+        } else
         for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
             if (!xslt_pattern_matches(pa, node, ex->source, t->ns))
                 continue;
@@ -1531,9 +1539,9 @@ static const XsltTemplate* xslt_select_next_match(
         int worse;
         if (t->import_rank != cur->import_rank)
             worse = t->import_rank > cur->import_rank;
-        else if (pri != cur_pri_of(cur))
-            worse = pri < cur_pri_of(cur);
-        else worse = order < cur_order_of(ex, cur);
+        else if (pri != cur_pri)
+            worse = pri < cur_pri;
+        else worse = order < cur_order;
         if (!worse) continue;
         int wins = 0;
         if (!best) wins = 1;
@@ -2698,10 +2706,9 @@ static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
 static int op_call_template(XsltExec* ex, const XsltInstr* in,
                             LeptrisElement node) {
     if (!in->name) return 0;
-    const XsltTemplate* t = NULL;
-    for (const XsltTemplate* ct = ex->sheet->templates; ct; ct = ct->next) {
-        if (ct->name && strcmp(ct->name, in->name) == 0) t = ct;
-    }
+    /* Hash lookup (#682): the index keeps the LAST declaration per
+     * name, the same §11.6 winner the linear scan selected. */
+    const XsltTemplate* t = xslt_sheet_named(ex->sheet, in->name);
     if (!t) return 0;
     /* §11 scoping lives in xslt_invoke_template (shared with
      * apply-templates): globals + own locals, never caller locals. */
@@ -2870,18 +2877,38 @@ static const XsltTemplate* xslt_select_template(
         int min_rank) {
     const XsltTemplate* best = NULL;
     double best_pri = 0;
-    size_t best_order = 0, order = 0;
-    for (const XsltTemplate* t = ex->sheet->templates; t; t = t->next, order++) {
-        if (!t->matches) continue;
+    size_t best_order = 0;
+    /* Mode bucket (#682): same candidates in the same sheet order,
+     * without the per-template mode comparison the full-list scan
+     * paid on every dispatch. */
+    const XsltModeBucket* bucket = xslt_sheet_mode(ex->sheet, mode);
+    if (!bucket) return NULL;
+    const int node_is_elem = leptris_node_get_type((LeptrisNodeRef)node) ==
+                             LEPTRIS_NODE_TYPE_ELEMENT;
+    for (size_t bi = 0; bi < bucket->n; bi++) {
+        const XsltTemplate* t = bucket->list[bi];
+        size_t order = t->order;
         if (t->import_rank < min_rank) continue;
-        if ((mode && !t->mode) || (!mode && t->mode)) continue;
-        if (mode && t->mode && strcmp(mode, t->mode) != 0) continue;
         /* ONE pass over the alternatives: each is matched exactly
          * once and the max priority rides the same walk (the old
          * shape matched the whole list first, then re-evaluated
          * every alternative for priority — 2x the pattern cost per
          * dispatch candidate). */
         double pri = 0; int have = 0;
+        /* #682 fast path: a lone bare-Name alternative is
+         * child::NAME — plain name + no-namespace check, no doc
+         * climb, no ladder ("*" matches every element). */
+        if (t->fast_name && node_is_elem) {
+            const char* fn = t->fast_name;
+            if (!(fn[0] == '*' && fn[1] == 0)) {
+                const char* nn = leptris_element_get_name(node);
+                if (!nn || strcmp(nn, fn) != 0) continue;
+                const char* nu = leptris_element_get_namespace_uri(node);
+                if (nu && nu[0]) continue;
+            }
+            pri = t->fast_pri;
+            have = 1;
+        } else
         for (const XsltPattern* pa = t->matches; pa; pa = pa->next) {
             if (!xslt_pattern_matches(pa, node, ex->source, t->ns))
                 continue;
