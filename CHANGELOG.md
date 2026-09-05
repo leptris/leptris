@@ -2,6 +2,26 @@
 
 ## [1.9.93] - 2026-09-05
 
+### Changed
+
+- **#866 — predicate-pattern dispatch indexes.** Template-heavy
+  stylesheets whose patterns carry predicates (the common
+  real-world shape, `match="item[@k='N']"`) still paid the full
+  candidate ladder after the v1.9.88 indexes: 82ms on a
+  120-template fixture vs libxml2/libxslt's 58ms. Two new
+  semantics-preserving indexes: **name keys** (every alternative
+  that names an element links its template under that name — a
+  `foo` element never evaluates `item[...]` candidates; node-type
+  and function-call patterns stay in the any-element remainder)
+  and a **literal value index** (an alternative that is exactly
+  `name[@attr='value']` joins a `(name, attr, value)` bucket,
+  probed once per element attribute — the predicates stop running
+  entirely). Numbers: the fixture 82.2 → 2.06 ms (**40x; ~28x
+  ahead of libxslt**); heterogeneous heavy dispatch 5.56 → 4.92
+  ms; the 2000-book scorecard 8.97 → **3.93 ms**. Fixture gated as
+  `bench_xslt_dispatch_pred`.
+
+
 ### Fixed
 
 - use LEPTRIS_THREAD_LOCAL for the dispatch generation counter (MSVC)
