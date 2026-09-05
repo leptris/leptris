@@ -9,6 +9,7 @@
  *
  * Output grows in exec->result through the public mutation API;
  * text-method output accumulates string-values only. */
+#include "../common/port.h"
 #include "xslt_internal.h"
 #include "../dtd/model.h"   /* leptris_dtd_apply_attribute_defaults (#606) */
 #include "../dom/text.h"
@@ -1502,7 +1503,7 @@ static double cur_pri_of(const XsltTemplate* t) {
 /* #866: a template reachable through several name keys must be
  * considered once per dispatch — stamp it with the select call's
  * generation instead of keeping a seen-list. */
-static __thread unsigned xslt_dispatch_gen;
+static LEPTRIS_THREAD_LOCAL unsigned xslt_dispatch_gen;
 #define XSLT_DISPATCH_NEXT_GEN() (++xslt_dispatch_gen)
 
 static const XsltTemplate* xslt_select_next_match(
