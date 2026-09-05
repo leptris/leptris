@@ -4,6 +4,29 @@
 
 ### Added
 
+- **#659 — html5lib tree-construction corpus harness.** The
+  html5lib-tests snapshot is vendored at Nokogiri's pin (c67f90e —
+  the last upstream revision carrying tree-construction/; upstream
+  moved those tests to WPT). The harness runs every non-fragment
+  case through `leptris_parse_html_string` and compares against
+  the expected `|`-tree: 1753 cases, 193 passing, a 1369-entry
+  red-list snapshot (`test/html/html5lib-redlist.txt`), and a
+  falsifiable pass-count floor. The red-list shapes the next
+  slices: the implied-head / foster-parenting model is the biggest
+  bucket (865), not adoption agency. MSVC-safe (CMake-generated
+  corpus file list).
+
+### Fixed
+
+- **#659 — empty-shape HTML inputs.** Inputs that append nothing
+  (a stray end tag alone, doctype-only, a second doctype, an empty
+  string) hard-failed; in lenient HTML mode nothing-parsed is not
+  an error — the wrapper synthesis yields the empty Nokogiri
+  document shape.
+
+
+### Added
+
 - #659 - html5lib tree-construction corpus harness (slice 1) (html)
 
 ### Fixed
