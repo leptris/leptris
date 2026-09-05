@@ -4,6 +4,18 @@
 
 ### Added
 
+- **#659 — Nokogiri parity reference.** `nokogiri-tree-tests.dat`
+  records what `Nokogiri::HTML` produces for all 1555 runnable
+  html5lib corpus cases (same `|` dialect the harness parses;
+  committed, CI needs no ruby). The harness now meters BOTH goals:
+  WHATWG conformance (193/1555) and libxml2 parity — **372/1555
+  exact tree matches**, 1183-entry parity red-list, both floors
+  pinned and falsifiable. Direction recorded on #659: the target
+  is WHATWG conformance with HTML4 and HTML5 as distinct modes.
+
+
+### Added
+
 - #659 - Nokogiri parity reference: 372/1555 exact matches (html)
 
 ### Performance
