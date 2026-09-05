@@ -4,7 +4,22 @@
 
 ### Fixed
 
-- #846 - split constructed QNames; F+O namespace on analyze-string result (dom,xpath)
+- **#846 — namespace-aware constructed elements.** Constructed
+  elements (analyze-string results, xsl:element, copies) kept the
+  full lexical QName in `name` with no prefix, while every
+  namespace-aware name test compares the name against the test's
+  LOCAL part — so a prefixed test over `fn:analyze-string` output
+  could never match, and `namespace-uri()` was empty. QNames now
+  split at both creation paths (`leptris_elem_split_qname`,
+  parser-shape parity: prefix + local name + local hash/len);
+  `fn:analyze-string` declares `xmlns:fn` on the result root, so
+  `/fn:match` and `/fn:match/fn:group` select correctly under a
+  bound `fn` prefix and `name()` renders `fn:match`. Ripples:
+  `xsl:element`'s declaration hoisting reads the element prefix
+  instead of re-parsing the name; the HTML serializer applies
+  void/raw/break rules only to unprefixed names (a namespaced
+  `s:img` keeps its close tag — bug-117 parity); adding a
+  namespace declaration sets the document's `has_namespaces` flag.
 
 
 
