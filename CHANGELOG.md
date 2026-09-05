@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.91] - 2026-09-05
+
+### Added
+
+- #659 - Nokogiri parity reference: 372/1555 exact matches (html)
+
+### Performance
+
+- #659 - HTML parse throughput vs libxml2 (head-to-head) (bench)
+
+
+
 ## [1.9.90] - 2026-09-05
 
 ### Added
