@@ -2,6 +2,21 @@
 
 ## [1.9.88] - 2026-09-05
 
+### Changed
+
+- **#682 — template dispatch indexes.** Template-heavy stylesheets
+  paid O(templates) per named `call-template` and per
+  `apply-templates` dispatch, plus a document climb and pattern
+  ladder per candidate. Three semantics-preserving indexes now
+  cover the dominant shapes: an open-addressed named-template hash
+  (a hit is the last declaration — the same §11.6 winner the
+  linear scan produced), per-mode candidate buckets in sheet order,
+  and a bare-Name fast path (a lone unprefixed Name pattern is
+  `child::NAME`: plain name + no-namespace check). Template-heavy
+  dispatch fixture (120 templates / 2400 elements): 10.21 → 5.56 ms
+  per transform; the gap to in-process lxml/libxslt narrows 3.27x →
+  1.78x, and the 2000-book dispatch scorecard improves ~15%.
+
 ### Performance
 
 - #682 - dispatch indexes: named hash, mode buckets, bare-name fast path (xslt)
