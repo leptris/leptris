@@ -6,19 +6,24 @@ the numbered docs; this file is the index + the graph.
 
 ## A. In flight
 
-- **#846** — analyze-string namespaces. PR #854 (constructed-QName
-  split + F+O root declaration + op_element prefix + HTML sem flags
-  gate). Awaiting CI → rebase-merge → release v1.9.87 → close.
+- **v1.9.89 release** — #857 analyze-string group spans (subject-
+  relative offsets + exact nmatch). Merged via PR #861; release
+  workflow running.
+
+2026-09-05 shipped: v1.9.87 (#846 QName split), v1.9.88 (#682
+dispatch indexes: named hash + mode buckets + bare-Name fast path,
+3.27x → 1.78x vs lxml), #855 (heavy fixture), #860 (attr-index
+negative result banked).
 
 ## B. Open GitHub issues (leptris/leptris)
 
-- **#682** — XSLT dispatch ~2.6x behind in-process libxslt. Protocol
-  is fixture-first: build a 50+ template scorecard, re-profile (the
-  2000-book profile is diffuse by design), THEN pick levers. Banked
-  levers (TODO 13): per-eval nodeset/result allocator churn ~7%
-  (scratch pool touches the document-scoped ownership model — needs
-  a design conversation first), template name-keyed index for
-  op_call_template (matters for template-heavy sheets only).
+- **#682** — 1.78x behind in-process lxml after v1.9.88 (from
+  3.27x). Remaining is diffuse: TLS thunks (the per-thread
+  nodeset/result free-lists), per-result-element doc/pool climbs,
+  serializer, allocator — i.e. the TLS/allocator consolidation,
+  which touches document-scoped ownership and NEEDS A DESIGN
+  CONVERSATION before implementation (TODO 13). Measured-and-
+  discarded (do not retry): attr-index lazy registration.
 - **#659** — HTML parsing mode completion (lane 14 tail):
   1. html5lib tokenizer/tree corpus adoption (needs mode-gated
      adoption-agency + a JSON test harness; re-scoped away from
@@ -52,8 +57,10 @@ the numbered docs; this file is the index + the graph.
 
 ## D. Bindings (user-owned repos — PRs only, never release)
 
-- leptris-ruby #127 and leptris-py #71 target v1.9.86 — retarget to
-  v1.9.87 after the #846 release lands.
+- v1.9.88 lockstep: leptris-ruby#143 (open), leptris-py#82 (open,
+  retargeted). #142 (1.9.87) merged by user. After v1.9.89 lands:
+  bump both again (analyze-string correctness fix is user-visible
+  through the bindings).
 - After lane 15: new binding entries + parse_html_string exposure.
 
 ## E. External (Jing / metanorma-pdfa#98 follow-ups)
