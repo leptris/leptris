@@ -454,6 +454,20 @@ static int html_elem_flags_ci(const char* name, size_t len) {
     return html_elem_flags(lower, len);
 }
 
+/* HTML element semantics (void/raw/inline/block site rules) apply
+ * only to UNPREFIXED names: a namespaced s:img is a foreign
+ * element, not the HTML void img — it keeps its close tag and
+ * takes no break rules (bug-117). */
+static int html_elem_sem_flags(const LeptrisElement e) {
+    if (!e) return 0;
+    const char* pfx = leptris_element_get_prefix(e);
+    if (pfx && pfx[0]) return 0;
+    const char* n = e->name;
+    if (!n) return 0;
+    size_t nl = (e->name_len != 0xFF) ? (size_t)e->name_len : strlen(n);
+    return html_elem_flags_ci(n, nl);
+}
+
 /* ---- libxml2 XHTML serialization (xmlsave.c xhtmlNodeDumpOutput) ---- */
 
 #define LEPTRIS_XHTML_NS "http://www.w3.org/1999/xhtml"
@@ -1074,7 +1088,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                         ? (size_t)st[sp - 1].e->name_len
                         : (rn ? strlen(rn) : 0);
                     if (rn &&
-                        (html_elem_flags_ci(rn, rnl) & HTML_F_RAW)) {
+                        (html_elem_sem_flags(st[sp - 1].e) & HTML_F_RAW)) {
                         const char* tr = leptris_text_get_content(
                             (LeptrisTextNode*)cur);
                         if (tr) buffer_append(buf, tr);
@@ -1140,7 +1154,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             leptris_element_get_first_attribute(e) == NULL &&
             leptris_elem_namespaces(e) == NULL &&
             !(buf->html_method &&
-              (html_elem_flags_ci(name, nl) & HTML_F_RAW))) {
+              (html_elem_sem_flags(e) & HTML_F_RAW))) {
             LeptrisNode* fc0 = leptris_node_first_child_internal((LeptrisNode*)e);
             if (fc0 && fc0->type == LEPTRIS_NODE_TYPE_TEXT &&
                 leptris_node_get_next_sibling(fc0) == NULL) {
@@ -1190,8 +1204,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * after-close break rule (mixed is not a gate). */
                 int htrail0 = buf->html_method && !is_root_cur &&
                               html_break_after_elem(
-                                  e, name, nl,
-                                  html_elem_flags_ci(name, nl));
+                                  e, name, nl, html_elem_sem_flags(e));
                 /* #658: honor the indent unit here too — computing
                  * indent*indent_spaces directly lost the unit on
                  * every fused leaf (buffer_append_indent's #633
@@ -1494,7 +1507,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 goto advance;
             }
             if (buf->html_method) {
-                int hf = html_elem_flags_ci(name, nl);
+                int hf = html_elem_sem_flags(e);
                 if (hf & HTML_F_EMPTY) {
                     buffer_append(buf, ">");
                 } else {
@@ -1508,7 +1521,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             if (!is_root_cur && buf->indent_spaces > 0 &&
                 (buf->html_method
                      ? html_break_after_elem(e, name, nl,
-                                             html_elem_flags_ci(name, nl))
+                                             html_elem_sem_flags(e))
                      : !parent_mixed))
                 buffer_append_newline(buf);
             goto advance;
@@ -1532,7 +1545,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             /* §16.2 rawtext elements (script/style/…): the single
              * text child is VERBATIM under method=html. */
             if (buf->html_method &&
-                (html_elem_flags_ci(name, nl) & HTML_F_RAW)) {
+                (html_elem_sem_flags(e) & HTML_F_RAW)) {
                 const char* tr = leptris_text_get_content(
                     (LeptrisTextNode*)fc);
                 buffer_append_char(buf, '>');
@@ -1585,7 +1598,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 buffer_append_char(buf, '>');
                 if (buf->html_method) {
                     if (html_break_after_elem(e, name, nl,
-                                              html_elem_flags_ci(name, nl)))
+                                              html_elem_sem_flags(e)))
                         buffer_append_newline(buf);
                 } else if (!is_root_cur && !parent_mixed) {
                     /* is_root guard (#633): the document's last line
@@ -1626,7 +1639,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             /* §16.2: mixed is not a gate — the site rules own the
              * newlines. mixed=1 keeps ws-only text verbatim. */
             mixed = 1;
-            int hf = html_elem_flags_ci(name, nl);
+            int hf = html_elem_sem_flags(e);
             if (html_break_before_children(e, name, nl, hf))
                 buffer_append_newline(buf);
             close_brk = html_break_before_close(e, name, nl, hf);
@@ -1714,7 +1727,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 !(sp == 0 && (LeptrisNode*)pe == (LeptrisNode*)root_elem && is_root)) {
                 if (buf->html_method) {
                     if (html_break_after_elem(
-                            pe, pn, pnl2, html_elem_flags_ci(pn, pnl2)))
+                            pe, pn, pnl2, html_elem_sem_flags(pe)))
                         buffer_append_newline(buf);
                 } else if (buf->indent_spaces > 0) {
                     /* Formatter-owned separator between element

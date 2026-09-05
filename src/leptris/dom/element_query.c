@@ -1318,6 +1318,12 @@ LEPTRIS_API LeptrisStatus leptris_element_add_namespace_definition(
     }
     if (!ns) return LEPTRIS_ERROR_MEMORY;
 
+    /* #525: a declaration exists — unprefixed XPath name tests
+     * must consult the resolver from here on. */
+    {
+        struct leptris_document* d = leptris_element_get_document(elem);
+        if (d) d->has_namespaces = 1;
+    }
     leptris_element_add_namespace(elem, ns);
     return LEPTRIS_OK;
 }

@@ -171,6 +171,9 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                  * unresolvable until attached. Register is O(1) with
                  * the ROOTMAP_FLAG fast-out, so no measurable cost. */
                 leptris_root_doc_register(elem, doc);
+                /* Mut-block copy is writable: a QName splits in
+                 * place (#846). */
+                leptris_elem_split_qname(elem, doc->pool);
             } else {
                 /* Long name or block alloc failure: fall through to
                  * the pool path (registration follows below — pool

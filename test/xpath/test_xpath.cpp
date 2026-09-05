@@ -2242,6 +2242,52 @@ TEST(XPath20Ledger, AnalyzeString) {
     EXPECT_EQ(StrEval("string(analyze-string('abc', '[0-9]'))"), "abc");
 }
 
+TEST(XPath20Ledger, AnalyzeStringNamespace) {
+    /* #846: per F+O, the analyze-string result carries fn:match,
+     * fn:non-match and fn:group in the functions namespace; prefixed
+     * tests with fn bound must select them without local-name()
+     * workarounds. */
+    if (NumEval("count(analyze-string('a', '[0-9]'))") < 0) {
+        SUCCEED() << "analyze-string needs POSIX regex";
+        return;
+    }
+    LeptrisDocument doc = ParseWith(kBasic);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    EXPECT_EQ(leptris_xpath_ns_set_add(
+                  ns, "fn", "http://www.w3.org/2005/xpath-functions"),
+              LEPTRIS_OK);
+
+    LeptrisXPathResult r = leptris_xpath_eval_ns(doc, nullptr,
+        "count(analyze-string('a1b2c', '[0-9]')/fn:match)", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    char* cnt = leptris_xpath_result_string(r);
+    EXPECT_STREQ(cnt ? cnt : "", "2");
+    leptris_free_string(cnt);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval_ns(doc, nullptr,
+        "namespace-uri(analyze-string('a1b2c', '[0-9]')/*[1])", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    char* s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "http://www.w3.org/2005/xpath-functions");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+
+    r = leptris_xpath_eval_ns(doc, nullptr,
+        "count(analyze-string('2024-05', '([0-9]+)-([0-9]+)')"
+        "/fn:match/fn:group)", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    cnt = leptris_xpath_result_string(r);
+    EXPECT_STREQ(cnt ? cnt : "", "2");
+    leptris_free_string(cnt);
+    leptris_xpath_result_free(r);
+
+    leptris_xpath_ns_set_free(ns);
+    leptris_document_free(doc);
+}
+
 TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal((1,2), (1,2))"));
     EXPECT_FALSE(BoolEval("deep-equal((1,2), (1,3))"));
