@@ -89,3 +89,25 @@ Estimated slices: (a) scanner+expected parser+runner skeleton
 with pass-count spec ~ 1 PR; (b) fix fallout outside AA
 (misnesting corners the characterization gate already shapes);
 (c) AA implementation gated ON + red-list burn-down.
+
+## Status 2026-09-05 (later) — html5lib harness SHIPPED (slice 1)
+
+Vendored corpus (c67f90ea — Nokogiri's pin, the last upstream
+revision with tree-construction/; upstream moved to WPT after) +
+test_html5lib.cpp: .dat scanner (blank-line case separation — a
+#data after #document with NO blank line above is html5lib's
+fragment-pair continuation, skip), expected-tree parser (attr
+continuation lines like `id="foo"` attach to the nearest open
+element; html5lib's template `content` marker flattens — our
+template is an ordinary element), comparator (strict on names/ns/
+attrs/text/comments/doctype; documented divergences: expected
+EMPTY <head> optional, adjacent text coalesced).
+
+Baseline: total=1753, PASS=186, fail=1369, skip=198 (fragment
+mode 190 + script-on 8). Floor pinned at 186 — falsifiable.
+Red-list snapshot: test/html/html5lib-redlist.txt. Failure shape:
+666 child-count under text-bearing elems + 199 under html
+(implied-head/foster/misnesting class), 163 element-name, 69 text,
+30 parse-failed, 13 kind. NEXT slices by category, NOT adoption
+agency first: the child-count/html cluster is the implied-head +
+foster-parenting model — the biggest bucket.
