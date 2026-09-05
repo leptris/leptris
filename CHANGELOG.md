@@ -4,6 +4,22 @@
 
 ### Fixed
 
+- **#857 — fn:analyze-string group spans.** POSIX `pmatch` offsets
+  are relative to the subject string; they were applied from the
+  match start, so any match beginning at a non-zero offset read
+  past its end — single-group regexes leaked the following
+  non-match into the match and group values (`('ab12cd',
+  '([0-9]+)')` gave `12cd`/`cd` instead of `12`/`12`). Additionally
+  `regexec` was asked for 12 submatch slots regardless of the
+  pattern's group count — BSD leaves the excess untouched, so stale
+  stack data from a previous evaluate-string call read as phantom
+  groups, making results call-order dependent. Both fixed; specs
+  cover single-group, multi-group-after-single-group (the
+  contamination order from the report), and group-less regexes.
+
+
+### Fixed
+
 - #857 - analyze-string group spans are subject-relative (xpath)
 
 
