@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.93] - 2026-09-05
+
+### Fixed
+
+- use LEPTRIS_THREAD_LOCAL for the dispatch generation counter (MSVC)
+
+### Performance
+
+- #866 - dispatch name keys + literal @attr='value' index (xslt)
+
+
+
 ## [1.9.92] - 2026-09-05
 
 ### Fixed
