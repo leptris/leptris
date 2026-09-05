@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.86] - 2026-09-05
+
+### Fixed
+
+- #848 entity lookup via sorted index + binary search (was O(2032) scan per reference) (html)
+
+
+
 ## [1.9.85] - 2026-09-04
 ### Fixed
 
