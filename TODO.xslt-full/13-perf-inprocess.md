@@ -116,3 +116,28 @@ residual 1.78x gap is the diffuse remainder: TLS thunks (the
 nodeset/result free-lists), per-result-element doc/pool climbs,
 serializer, allocator - i.e. the consolidation item below, which
 needs the design conversation (document-scoped ownership).
+
+## 2x bar status (user directive 2026-09-06) + measured scorecard
+
+Bar: every XSLT bench >= 2x libxslt AND Saxon. References on
+byte-identical fixtures (best of 9): lxml in-process t=1.35ms
+l=2.72ms h=2.88ms p=32.1ms; xsltproc wall 7.3-9.9ms; Saxon-HE 12.5
+CLI wall ~500-600ms (JVM startup dominates; amortized-only
+comparisons need a persistent-JVM harness).
+
+Current (v1.9.93): transform 0.27ms = 5.0x AHEAD; pred 2.06ms =
+15.6x ahead; light 3.93ms = 0.69x BEHIND; heavy 5.13ms = 0.56x
+behind. Need ~3x on light+heavy.
+
+Light-bench profile today: node_get_next_sibling 143 (append tail
+walks on alternating fresh parents - the doc 64-slot cache still
+misses ~1/64 of ~6000 appends into a 1000-long chain), tlv_get_addr
+56 (TLS), malloc/free ~43. MEASURED-AND-REVERTED same day: exec-
+local two-entry append hint - neutral perf BUT orphaned nodes on
+include/attribute-heavy sheets (unrouted comment/PI/attr appends
+invalidate the hint; bug-107/129/195/196 in the 205-suite caught
+it; the 197-test unit suite did NOT). Any retry must route EVERY
+result append through the hint or invalidate on non-routed
+appends. Next levers: TLS consolidation (context-carried
+free-lists, authorized), serializer, per-result-element
+doc/pool climbs.
