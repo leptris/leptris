@@ -4,7 +4,16 @@
 
 ### Performance
 
-- #682 - skip ns-fixup walks on zero-declaration result trees (xslt)
+- **#682 — ns-fixup walks skip zero-declaration result trees.**
+  `result_ns_in_scope` and the default-namespace unbind walk climbed
+  every result ancestor on every literal/copy element; namespace-free
+  outputs (the common dispatch shape) always found nothing. Both
+  walks are now gated on the result document's `has_namespaces`
+  flag — the exact any-declaration gate the resolver already
+  consults — so the climbs are skipped outright when no declaration
+  can exist. Heavy dispatch bench (best of 9): 3.83 → 3.57 ms,
+  bringing the consolidation arc to 4.96 → 3.57 ms (−28%) across
+  v1.9.95–96. Full ctest 1293/1293.
 
 
 
