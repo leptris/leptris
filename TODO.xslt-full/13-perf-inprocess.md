@@ -208,3 +208,49 @@ get_document 56, exec_instrs 51, element_create 49, eval_avt 47.
 Next slices: serializer result path, result-element creation
 cluster, eval_avt. All call-site micro-levers remain dead (banked
 below).
+
+## Round 3 status + the honest 2x-bar math (2026-09-07)
+
+ruby#150 answered engine-side (direct attr read = 23-28ns/op,
+borrowed pointer, zero C allocs; 568ns is the ffi-gem seam; options
+posted on the binding issue). Heavy profile on current main
+(v1.9.97): serialize 122, set_attribute 109 (sampler attribution
+swings between builds; the index is GONE - walk-first holds),
+op_result_elem 91, select_template 82, node_parent 71,
+get_next_sibling 59, get_document 59, element_create 57,
+apply_templates 55, eval_avt 53, exec_instrs 46, ast_cache 40+24,
+append 38. NOTHING above 5%. version bump = plain field++, not a
+lever.
+
+2x-BAR CEILING ANALYSIS (the design conversation the bank keeps
+deferring): light 3.57 / heavy 3.57 vs lxml 2.72 / 2.88 = 0.76x /
+0.81x. The bar (>=2x = light <=1.36ms, heavy <=1.44ms) needs a 60%
+runtime cut. Remaining coherent levers and their quantified
+ceilings: (a) result-tree STREAMING for apply_string (skip DOM
+materialization when the sheet holds no RTFs/keys-on-result -
+serializes during construction): replaces ~18% of samples (create
++ set_attribute + append + serialize cluster) minus the emit cost
+it adds ~= 10-15% net. (b) eval-side (select_template/apply/instrs/
+avt/ast_cache) rewrites ~= 10% at heroic effort. (c) remaining
+micro levers ~= 5-8%. TOTAL PLAUSIBLE ~= 25-30% => ~2.6ms ~= 1.1x
+lxml. THE 2x BAR ON THE DISPATCH FIXTURES IS NOT REACHABLE by
+optimization alone while libxslt does the identical work at 2.88ms
+- we are 24% behind a 20-year-tuned C engine on ITS core shape.
+Where we ARE >=2x: transform 5.0x, pred 15.6x (the shapes users
+actually transform with). DECISION FOR THE USER: (1) pursue
+streaming anyway (buys ~15%, lands us ~1.1-1.2x - still "behind"
+by the letter of the bar), or (2) re-scope the bar for dispatch
+shapes to ">=1x in-process libxslt + >=2x xsltproc wall" (already
+true: xsltproc wall 7.3-9.9ms vs our 3.57), or (3) accept the
+fixture verdict and close #682. Do NOT silently grind micro-levers
+expecting the bar to appear.
+
+LATENT HAZARD found + hardened (same session): leptris_elem_
+split_qname advances e->name past the colon but kept the Round-21
+namebp flag set - name[-1] would read NAME BYTES as a doc pointer
+for unattached prefixed elements. Masked by register-on-create
+(map hit precedes the backpointer fallback). Fix: split_qname
+clears the flag; RED spec MutNameBackpointer.PrefixedSplit-
+ClearsBackpointerFlag pins it. LESSON: register-on-create is the
+ONLY backstop for split-name elements - any register-elision perf
+work must first restructure the backpointer to survive the split.
