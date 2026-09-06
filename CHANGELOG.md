@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.96] - 2026-09-06
+
+### Performance
+
+- #682 - skip ns-fixup walks on zero-declaration result trees (xslt)
+
+
+
 ## [1.9.95] - 2026-09-06
 
 ### Added
