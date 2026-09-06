@@ -65,6 +65,7 @@ typedef struct SerializeBuffer {
     const char* indent_unit; /* #633: unit string per level; NULL =
                               * indent_spaces spaces per level */
     int indent_text;   /* #129: formatter also owns text/mixed whitespace */
+    int expand_empty;  /* #882: empty elements emit <a></a> (XML method) */
     int ws_mixed;       /* XSLT: ws-only text children count as mixed */
     int at_line_start; /* last emitted byte was a newline (dedups
                         * consecutive newlines under indent_text) */
@@ -123,6 +124,7 @@ typedef struct {
     size_t cdata_element_count;
     int html_method;                     /* §16.2 method="html" */
     int indent_text;                     /* #129: indent text/mixed too */
+    int expand_empty;                    /* #882: <a></a> for empty elements */
     int ws_mixed;                         /* XSLT results: ws-only text
                                               children count as mixed
                                               (libxslt bug-98) */
@@ -146,6 +148,18 @@ LEPTRIS_API char* leptris_document_serialize_ext(
  * allocation stay zeroed instead of being read out of bounds. */
 LEPTRIS_API char* leptris_document_serialize_ext_sized(
     struct leptris_document* doc,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext,
+    size_t ext_size);
+
+/* #882: element-level twins. */
+LEPTRIS_API char* leptris_element_serialize_ext(
+    LeptrisElement elem,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext);
+
+LEPTRIS_API char* leptris_element_serialize_ext_sized(
+    LeptrisElement elem,
     const LeptrisSerializeOptions* options,
     const LeptrisSerializeExtOptions* ext,
     size_t ext_size);

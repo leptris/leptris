@@ -49,6 +49,7 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->indent_unit = NULL;   /* #633: callers opt in per unit string */
     buf->html_method = 0;
     buf->indent_text = 0;
+    buf->expand_empty = 0;
     buf->at_line_start = 0;
     /* Leave the xhtml mode OFF until a caller with extended options
      * enables it — an unset flag here otherwise serializes empties as
@@ -1515,6 +1516,10 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                     append_qualified_name(buf, epfx, name, nl);
                     buffer_append_char(buf, '>');
                 }
+            } else if (buf->expand_empty) {
+                buffer_append(buf, "></");
+                append_qualified_name(buf, epfx, name, nl);
+                buffer_append_char(buf, '>');
             } else {
                 buffer_append(buf, "/>");
             }
@@ -1902,8 +1907,43 @@ LEPTRIS_API char* leptris_document_serialize_ext_sized(
         if (ext_size >= offsetof(LeptrisSerializeExtOptions, indent_unit) +
                             sizeof(const char*))
             internal.indent_unit = ext->indent_unit;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, expand_empty) +
+                            sizeof(int))
+            internal.expand_empty = ext->expand_empty;
     }
     return leptris_document_serialize_ex(doc, options, &internal);
+}
+
+/* #882: element-level twins of the ext entries — the bridge logic
+ * duplicated here is exactly the document version's (one conversion
+ * site per entry point; the walker reads only buffer fields). */
+LEPTRIS_API char* leptris_element_serialize_ext(
+    LeptrisElement elem,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext) {
+    return leptris_element_serialize_ext_sized(
+        elem, options, ext, ext ? sizeof(*ext) : 0);
+}
+
+LEPTRIS_API char* leptris_element_serialize_ext_sized(
+    LeptrisElement elem,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext,
+    size_t ext_size) {
+    LeptrisSerializeExtended internal;
+    memset(&internal, 0, sizeof(internal));
+    if (ext) {
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, indent_text) +
+                            sizeof(int))
+            internal.indent_text = ext->indent_text;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, indent_unit) +
+                            sizeof(const char*))
+            internal.indent_unit = ext->indent_unit;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, expand_empty) +
+                            sizeof(int))
+            internal.expand_empty = ext->expand_empty;
+    }
+    return leptris_element_serialize_ex(elem, options, &internal);
 }
 
 /* Element-level twin of leptris_document_serialize_ex: the XSLT
@@ -1923,6 +1963,7 @@ char* leptris_element_serialize_ex(LeptrisElement elem,
         buf->cdata_count = extended->cdata_element_count;
         buf->html_method = extended->html_method != 0;
         buf->indent_text = extended->indent_text != 0;
+        buf->expand_empty = extended->expand_empty != 0;
         buf->indent_unit = extended->indent_unit;
         buf->ws_mixed = extended->ws_mixed != 0;
         buf->xhtml = extended->xhtml != 0;
@@ -1978,6 +2019,7 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
          * is a no-op at indent_spaces == 0. */
         buf->html_method = extended->html_method != 0;
         buf->indent_text = extended->indent_text != 0;
+        buf->expand_empty = extended->expand_empty != 0;
         buf->indent_unit = extended->indent_unit;
         buf->ws_mixed = extended->ws_mixed != 0;
         buf->xhtml = extended->xhtml != 0;

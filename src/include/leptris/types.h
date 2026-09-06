@@ -261,6 +261,11 @@ typedef struct {
      * Nokogiri indent_text). NULL = options->indent spaces per
      * level. Requires options->indent > 0. */
     const char* indent_unit;
+    /* 1 = emit <a></a> for empty elements instead of the short form
+     * <a/> (issue #882; the inverse of libxml2's XML_SAVE_NO_EMPTY).
+     * Applies to the XML method only — HTML void elements keep
+     * their HTML shapes. */
+    int expand_empty;
 } LeptrisSerializeExtOptions;
 
 /* ============================================================================
