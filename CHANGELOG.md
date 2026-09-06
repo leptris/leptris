@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.98] - 2026-09-06
+
+### Fixed
+
+- clear namebp flag when split_qname moves the name (dom)
+
+
+
 ## [1.9.97] - 2026-09-06
 
 ### Fixed
