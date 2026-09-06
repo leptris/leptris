@@ -126,16 +126,48 @@ struct leptris_document* leptris_root_doc_lookup(LeptrisElement root) {
     return NULL;
 }
 
+/* #682 2x lever: an ambient document hint set by the transform
+ * driver. Result-tree elements walk up to a root created in THIS
+ * document — when the hint matches, the root climb + TLS hash map
+ * are skipped entirely (get_document was 3.5% of the light bench).
+ * Hint is thread-local-scoped by construction (one transform per
+ * thread), validated by the root-walk fallback when it misses. */
+/* #682 2x lever (sound): last-hit (root, doc) memo. The climb to
+ * the root is unavoidable without a per-element field, but the TLS
+ * bucket-array walk is not — consecutive queries in a transform
+ * hit the same root, so one pointer compare replaces the hash
+ * bucket chain. One TLS access total (the memo pair), and the
+ * 1M-loop sentinel becomes a plain NULL check. */
+static LEPTRIS_THREAD_LOCAL LeptrisElement g_memo_root;
+static LEPTRIS_THREAD_LOCAL struct leptris_document* g_memo_doc;
+
+void leptris_root_doc_memo_invalidate(const struct leptris_document* doc) {
+    if (g_memo_doc == doc) {
+        g_memo_root = NULL;
+        g_memo_doc = NULL;
+    }
+}
+
 struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
     if (!elem) return NULL;
     LeptrisElement cur = elem;
+    for (;;) {
+        if (cur == g_memo_root) return g_memo_doc;
+        LeptrisElement parent = leptris_elem_parent(cur);
+        if (!parent) break;
+        cur = parent;
+    }
     for (int i = 0; i < 1000000; i++) {
         LeptrisElement parent = leptris_elem_parent(cur);
         if (!parent) break;
         cur = parent;
     }
     struct leptris_document* d = leptris_root_doc_lookup(cur);
-    if (d) return d;
+    if (d) {
+        g_memo_root = cur;
+        g_memo_doc = d;
+        return d;
+    }
     /* Round 21: unattached mutation elements carry their doc in the
      * name slot backpointer — a stateless fallback that replaced the
      * register-on-create / unregister-on-attach map pair. */

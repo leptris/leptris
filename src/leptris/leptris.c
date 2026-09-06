@@ -800,6 +800,11 @@ LEPTRIS_API void leptris_document_adopt_child(LeptrisDocument parent,
 }
 
 LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
+    {
+        extern void leptris_root_doc_memo_invalidate(
+            const struct leptris_document* doc);
+        leptris_root_doc_memo_invalidate(doc);
+    }
     if (!doc) return;
 
     /* Decrement reference count */
