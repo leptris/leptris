@@ -1,10 +1,17 @@
 ## [Unreleased]
 
-## [1.9.98] - 2026-09-06
+## [1.9.98] - 2026-09-07
 
 ### Fixed
 
-- clear namebp flag when split_qname moves the name (dom)
+- **namebp backpointer validity after QName split.** The Round-21
+  mutation backpointer (document pointer stored ahead of the name)
+  is only valid while `name` points at the carve slot; for prefixed
+  names, the #846 QName split advances `name` past the colon and the
+  flag must drop with it — otherwise an unattached `get_document`
+  with a root-map miss would read name bytes as a document pointer.
+  Unreachable today (register-on-create answers first); now pinned
+  by spec so future register-elision cannot trip it.
 
 
 
