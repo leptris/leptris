@@ -4,16 +4,41 @@
 
 ### Added
 
-- #882 - expand_empty ext option + element-level ext entries (serialize)
+- **#882 — `expand_empty` serializer option + element-level ext
+  entries.** `LeptrisSerializeExtOptions` grows `expand_empty` (the
+  inverse of libxml2's `XML_SAVE_NO_EMPTY`): empty elements emit
+  `<a></a>` instead of `<a/>` on the XML method, read through the
+  size-aware bridge so older FFI allocations are unaffected. New
+  public `leptris_element_serialize_ext`/`_sized` twins give
+  bindings the same option surface at element level, letting moxml
+  drop its full-output Ruby regex rewrite per serialize. Defaults
+  unchanged.
 
 ### Fixed
 
-- drop dead rnl local (warning-clean recompile) (serialize)
-- #881 - sort namespace declarations by prefix (default first) (c14n)
+- **#881 — C14N namespace declarations now sort by prefix.**
+  REC-xml-c14n section 2.2 orders namespace nodes lexicographically
+  by prefix with the default namespace first; the serializer emitted
+  document order, so canonical bytes diverged from libxml2/Java and
+  XML signatures did not interop. Declarations are collected and
+  sorted like the existing attribute path; emission order changes
+  only.
+- Dropped a dead local in the serializer walker (surfaced by a
+  forced recompile; keeps the build warning-clean).
 
 ### Performance
 
-- #682 - TLS free-list consolidation + walk-first attr dup check (xslt)
+- **#682 — TLS free-list consolidation + walk-first attr dup check.**
+  The four xpath thread-local free-list variables collapse into one
+  TLS struct (each separate `__thread` variable paid its own
+  `tlv_get_addr` thunk per access), and `leptris_element_set_attribute`
+  walks the hash-prefiltered attribute list for elements with ≤ 8
+  attrs instead of registering + probing the doc-level attr index —
+  XSLT result elements carry 1–3 attrs, so the index was pure
+  overhead on short-lived result trees. Elements that grow past the
+  threshold still lazily bulk-register (O(1) programmatic-build
+  contract preserved). Dispatch benches (best of 9): heavy
+  4.96 → 3.83 ms, light 3.83 → 3.57 ms. Full ctest 1293/1293.
 
 
 
