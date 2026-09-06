@@ -431,8 +431,17 @@ void xpath_context_init_from_document(XPathContext* context) {
  * pathological queries. The free-list owns XPathNodeSet structs only;
  * spilled nodes arrays are freed before push. */
 #define NODESET_FREE_LIST_CAP 64
-static LEPTRIS_THREAD_LOCAL XPathNodeSet* xpath_nodeset_free_list;
-static LEPTRIS_THREAD_LOCAL size_t xpath_nodeset_free_list_count;
+/* TLS consolidation (#682 lever 2): one thread-local object for
+ * all four free-list variables. Each separate __thread variable
+ * costs its own tlv_get_addr thunk per access; members of a single
+ * struct share one hoisted address per function. */
+static LEPTRIS_THREAD_LOCAL struct {
+    XPathNodeSet* nodeset_head;
+    size_t nodeset_count;
+    struct leptris_xpath_result* result_head;
+    size_t result_count;
+} g_xpath_tls;
+
 
 /* Thread-local free-list for leptris_xpath_result structs (TODO 162).
  * One result per leptris_xpath_eval call. Pattern matches the nodeset
@@ -440,8 +449,6 @@ static LEPTRIS_THREAD_LOCAL size_t xpath_nodeset_free_list_count;
  * slot while on the free-list (smaller than adding a real next field
  * to the struct). */
 #define XPATH_RESULT_FREE_LIST_CAP 32
-static LEPTRIS_THREAD_LOCAL struct leptris_xpath_result* xpath_result_free_list;
-static LEPTRIS_THREAD_LOCAL size_t xpath_result_free_list_count;
 
 XPathNodeSet* xpath_nodeset_new(void) {
     return xpath_nodeset_new_with_capacity(XPATH_NODESET_INLINE_CAPACITY);
@@ -452,19 +459,19 @@ XPathNodeSet* xpath_nodeset_new(void) {
  * keep their parked structs forever. leptris_thread_cleanup() calls
  * this from each worker thread before it exits. */
 void leptris_xpath_drain_thread_caches(void) {
-    while (xpath_nodeset_free_list) {
-        XPathNodeSet* next = (XPathNodeSet*)xpath_nodeset_free_list->inline_data[0];
-        LEPTRIS_FREE(xpath_nodeset_free_list);
-        xpath_nodeset_free_list = next;
+    while (g_xpath_tls.nodeset_head) {
+        XPathNodeSet* next = (XPathNodeSet*)g_xpath_tls.nodeset_head->inline_data[0];
+        LEPTRIS_FREE(g_xpath_tls.nodeset_head);
+        g_xpath_tls.nodeset_head = next;
     }
-    xpath_nodeset_free_list_count = 0;
-    while (xpath_result_free_list) {
+    g_xpath_tls.nodeset_count = 0;
+    while (g_xpath_tls.result_head) {
         struct leptris_xpath_result* next = (struct leptris_xpath_result*)
-            xpath_result_free_list->value.nodeset_value;
-        LEPTRIS_FREE(xpath_result_free_list);
-        xpath_result_free_list = next;
+            g_xpath_tls.result_head->value.nodeset_value;
+        LEPTRIS_FREE(g_xpath_tls.result_head);
+        g_xpath_tls.result_head = next;
     }
-    xpath_result_free_list_count = 0;
+    g_xpath_tls.result_count = 0;
 }
 
 XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
@@ -475,10 +482,10 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
      * work is the spill-array allocation when capacity > inline.
      * The next-pointer is stashed in inline_data[0] (a void* slot
      * that is unused while the struct is on the free-list). */
-    if (xpath_nodeset_free_list) {
-        nodeset = xpath_nodeset_free_list;
-        xpath_nodeset_free_list = (XPathNodeSet*)nodeset->inline_data[0];
-        xpath_nodeset_free_list_count--;
+    if (g_xpath_tls.nodeset_head) {
+        nodeset = g_xpath_tls.nodeset_head;
+        g_xpath_tls.nodeset_head = (XPathNodeSet*)nodeset->inline_data[0];
+        g_xpath_tls.nodeset_count--;
         nodeset->inline_data[0] = NULL;
     } else {
         nodeset = LEPTRIS_ALLOC(XPathNodeSet);
@@ -503,9 +510,9 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
         nodeset->nodes = LEPTRIS_ALLOC_N(void*, capacity);
         if (!nodeset->nodes) {
             /* On failure, push back to free-list instead of freeing. */
-            nodeset->inline_data[0] = (void*)xpath_nodeset_free_list;
-            xpath_nodeset_free_list = nodeset;
-            xpath_nodeset_free_list_count++;
+            nodeset->inline_data[0] = (void*)g_xpath_tls.nodeset_head;
+            g_xpath_tls.nodeset_head = nodeset;
+            g_xpath_tls.nodeset_count++;
             return NULL;
         }
         memset(nodeset->nodes, 0, sizeof(void*) * capacity);
@@ -577,16 +584,16 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
      * Cap prevents unbounded growth. inline_data[0] is reused as the
      * next-pointer for the singly-linked free-list; it is reset by
      * xpath_nodeset_new_with_capacity on pop. */
-    if (xpath_nodeset_free_list_count < NODESET_FREE_LIST_CAP) {
+    if (g_xpath_tls.nodeset_count < NODESET_FREE_LIST_CAP) {
         nodeset->count = 0;
         nodeset->capacity = 0;
         nodeset->owns_attributes = 0;
         nodeset->owns_namespaces = 0;
         nodeset->is_sequence = 0;
         nodeset->nodes = NULL;
-        nodeset->inline_data[0] = (void*)xpath_nodeset_free_list;
-        xpath_nodeset_free_list = nodeset;
-        xpath_nodeset_free_list_count++;
+        nodeset->inline_data[0] = (void*)g_xpath_tls.nodeset_head;
+        g_xpath_tls.nodeset_head = nodeset;
+        g_xpath_tls.nodeset_count++;
     } else {
         LEPTRIS_FREE(nodeset);
     }
@@ -694,11 +701,11 @@ struct leptris_xpath_result* xpath_result_new(XPathResultType type) {
      * value union is reused as the next-pointer slot while the
      * struct is on the free-list — its lifetime is finished and
      * no live value occupies the union. */
-    if (xpath_result_free_list) {
-        result = xpath_result_free_list;
-        xpath_result_free_list = (struct leptris_xpath_result*)
+    if (g_xpath_tls.result_head) {
+        result = g_xpath_tls.result_head;
+        g_xpath_tls.result_head = (struct leptris_xpath_result*)
             result->value.nodeset_value;  /* next pointer */
-        xpath_result_free_list_count--;
+        g_xpath_tls.result_count--;
     } else {
         result = LEPTRIS_ALLOC(struct leptris_xpath_result);
         if (!result) return NULL;
@@ -759,12 +766,12 @@ void xpath_result_free(struct leptris_xpath_result* result) {
     /* Push onto thread-local free-list (TODO 162). Cap prevents
      * unbounded growth. The CACHED sentinel parked in type makes a
      * repeat free a no-op (double-free spec). */
-    if (xpath_result_free_list_count < XPATH_RESULT_FREE_LIST_CAP) {
-        struct leptris_xpath_result* next = xpath_result_free_list;
+    if (g_xpath_tls.result_count < XPATH_RESULT_FREE_LIST_CAP) {
+        struct leptris_xpath_result* next = g_xpath_tls.result_head;
         result->type = XPATH_RESULT_CACHED;
         result->value.nodeset_value = (XPathNodeSet*)next;
-        xpath_result_free_list = result;
-        xpath_result_free_list_count++;
+        g_xpath_tls.result_head = result;
+        g_xpath_tls.result_count++;
     } else {
         LEPTRIS_FREE(result);
     }
