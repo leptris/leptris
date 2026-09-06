@@ -4,7 +4,18 @@
 
 ### Fixed
 
-- #875 - dispatch index overflow silently dropped templates (xslt)
+- **#875 — CRITICAL: dispatch index overflow silently dropped
+  templates.** The v1.9.88/#866 index builders capped insertion
+  (name keys 48, literal `@attr='value'` keys 96 per mode bucket)
+  with a bare `continue` — a pattern past the cap landed in no
+  dispatch list, so its template never fired: zero output, no
+  error. Stylesheets with more than ~48 distinct literal element
+  names or ~96 literal attr-value patterns were affected (the
+  Ruby and Python bindings pinned 1.9.92 as a workaround).
+  Overflowed patterns now route to the mode bucket's scanned
+  remainder list, which dispatch already evaluates — correct at
+  any pattern count, identical behavior under the caps. RED spec
+  pins both shapes at 120 templates. Full ctest 1294/1294.
 
 
 
