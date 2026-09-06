@@ -157,3 +157,13 @@ the empty-chain fast path: if !first_child return NULL - one branch
 in the CALLER), (2) TLS consolidation (context-carried free-lists),
 (3) malloc churn (result-tree text nodes). Next session starts with
 lever (1) - it is a 2-line change per call site with no invariants.
+
+## Lever-1 measured-and-discarded (same day): inline empty-chain fast path
+
+Patched both append miss paths to skip leptris_elem_last_child via a
+first_child_off check: suite green, light 3.99-4.11ms vs 3.89
+baseline = NEUTRAL. Both micro-levers (hot entry, inline fast path)
+are dead; the sampler's next_sibling weight is leaf-attribution
+noise. The light/heavy gap is TLS (11.6%) + malloc/free (10.6%) +
+diffuse eval serialization - the consolidation arc ONLY. Do not
+attempt further call-site micro-fixes; start at TLS.
