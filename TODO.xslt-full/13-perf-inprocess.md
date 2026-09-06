@@ -167,3 +167,44 @@ are dead; the sampler's next_sibling weight is leaf-attribution
 noise. The light/heavy gap is TLS (11.6%) + malloc/free (10.6%) +
 diffuse eval serialization - the consolidation arc ONLY. Do not
 attempt further call-site micro-fixes; start at TLS.
+
+## Consolidation arc round 2 (2026-09-06, v1.9.94→95 session)
+
+Frame-pointer profile build (buildprof, -fno-omit-frame-pointer +
+RelWithDebInfo) got real stacks where the default build collapsed
+to main. Heavy-bench self-time ladder BEFORE this round:
+set_attribute 229 + attr_index_rehash 73 (largest block),
+serialize_element_internal 67, node_parent 55, select_template 45.
+
+LANDED (PR #887): (1) TLS consolidation - the 4 xpath free-list
+__thread vars collapse into one g_xpath_tls struct; light 3.83→3.57,
+heavy 4.96→4.45 best. (2) Walk-first attr dup check - elements with
+<=8 attrs walk the hash-prefiltered list instead of doc-index
+register+probe+put (XSLT result elements carry 1-3 attrs; the index
+was pure overhead). Note: the earlier "lazy registration" discard
+predates the #866/#873 dispatch indexes - its neutral verdict was
+stale; walk-first measured 4.45→3.83 heavy. Elements >8 attrs still
+lazily bulk-register (2000-attr O(N^2) specs green).
+
+LANDED (PR #889): ns-fixup walk skip - result_ns_in_scope + the
+bug-130 default-ns climb gated on result-doc has_namespaces (the
+exact any-declaration gate). Heavy 3.83→3.57.
+
+MEASURED-AND-DISCARDED this round (do not re-try):
+- Two-slot (root, doc) memo ring in get_document: heavy 3.57→3.98
+  (8% REGRESSION) despite the source/result alternation theory.
+  Single-slot memo stays.
+- Contiguous text-create swap in leptris_text_node_create: C-side
+  already 15-18ns/op in BOTH shapes (borrowed+strdup vs contiguous).
+  ruby#149's 884ns is ~98% ffi-gem seam. Binding-side fix required
+  (batch entry or C-ext hot path); findings posted on leptris-ruby
+  #147/#149.
+
+Scorecard after v1.9.95 + #889 (best of 9): light 3.57 (lxml 2.72
+= 0.76x), heavy 3.57 (lxml 2.88 = 0.81x), transform 0.27 (5.0x),
+pred 2.06 (15.6x). Heavy profile now diffuse: serialize 111,
+select_template 87, op_result_elem 87, get_next_sibling 59,
+get_document 56, exec_instrs 51, element_create 49, eval_avt 47.
+Next slices: serializer result path, result-element creation
+cluster, eval_avt. All call-site micro-levers remain dead (banked
+below).
