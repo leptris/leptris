@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.94] - 2026-09-06
+
+### Performance
+
+- last-root memo in leptris_element_get_document (dom)
+
+
+
 ## [1.9.93] - 2026-09-05
 
 ### Changed
