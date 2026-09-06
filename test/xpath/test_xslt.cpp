@@ -4075,3 +4075,63 @@ TEST(Xslt30, RejectsXQueryOnlySyntaxInExpressions) {
         "(compile-failed)");
 }
 
+
+/* #875: the #866 dispatch indexes had hard capacity caps (name keys
+ * 48, literal @attr='value' keys 96 per mode bucket) with a silent
+ * `continue` — patterns past the cap vanished from dispatch entirely
+ * (120-template sheets: item[@k='N'] broke at 96, distinct names at
+ * 48; zero output, no error). Overflowed patterns must fall back to
+ * the scanned remainder list. */
+TEST(XsltFull, DispatchIndexOverflowFiresAllTemplates) {
+    /* Shape 1: 120 distinct names — the 48-cap name-key path. */
+    {
+        std::string body, xml = "<doc>";
+        std::string sheet =
+            "<xsl:template match='/'>"
+            "<xsl:apply-templates select='*'/></xsl:template>";
+        for (int i = 0; i < 120; i++) {
+            char t[256], e[64];
+            snprintf(t, sizeof(t),
+                     "<xsl:template match='t%d'>T%d</xsl:template>", i, i);
+            sheet += t;
+            snprintf(e, sizeof(e), "<t%d/>", i);
+            xml += e;
+        }
+        xml += "</doc>";
+        std::string out = run(sheet.c_str(), xml.c_str());
+        size_t prolog = out.find("?>");
+        if (prolog != std::string::npos) out = out.substr(prolog + 2);
+        size_t nz = out.find_first_not_of(" \t\r\n");
+        if (nz != std::string::npos) out = out.substr(nz);
+        while (!out.empty() && strchr(" \t\r\n", out.back())) out.pop_back();
+        std::string want;
+        for (int i = 0; i < 120; i++) want += "T" + std::to_string(i);
+        EXPECT_EQ(out, want);
+    }
+    /* Shape 2: 120 same-name attr literals — the 96-cap pkey path. */
+    {
+        std::string sheet =
+            "<xsl:template match='/'>"
+            "<xsl:apply-templates select='*'/></xsl:template>";
+        std::string xml = "<doc>";
+        for (int i = 0; i < 120; i++) {
+            char t[256], e[64];
+            snprintf(t, sizeof(t),
+                     "<xsl:template match=\"item[@k='%d']\">V%d"
+                     "</xsl:template>", i, i);
+            sheet += t;
+            snprintf(e, sizeof(e), "<item k='%d'/>", i);
+            xml += e;
+        }
+        xml += "</doc>";
+        std::string out = run(sheet.c_str(), xml.c_str());
+        size_t prolog = out.find("?>");
+        if (prolog != std::string::npos) out = out.substr(prolog + 2);
+        size_t nz = out.find_first_not_of(" \t\r\n");
+        if (nz != std::string::npos) out = out.substr(nz);
+        while (!out.empty() && strchr(" \t\r\n", out.back())) out.pop_back();
+        std::string want;
+        for (int i = 0; i < 120; i++) want += "V" + std::to_string(i);
+        EXPECT_EQ(out, want);
+    }
+}
