@@ -438,6 +438,11 @@ static inline void leptris_elem_split_qname(LeptrisElement e,
     *colon = '\0';
     leptris_elem_set_prefix(e, e->name, pool);
     e->name = colon + 1;
+    /* The name moved into the name bytes: the Round-21 backpointer
+     * slot at name[-1] is no longer the doc — reading it would
+     * interpret name characters as a pointer. Register-on-create
+     * covers resolution; the flag must not outlive the slot. */
+    e->header.flags &= (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
     size_t local_len = strlen(e->name);
     e->name_len = (local_len > 254) ? 0xFF : (uint8_t)local_len;
     e->name_hash = leptris_name_hash_compute(e->name);

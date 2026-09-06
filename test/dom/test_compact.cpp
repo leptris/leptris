@@ -12,6 +12,7 @@
 
 extern "C" {
 #include "compact.h"
+#include "element.h"
 }
 
 #include <cstring>
@@ -245,6 +246,35 @@ TEST(LeptrisCompact, OverflowTableGrowsCorrectly) {
     EXPECT_EQ(leptris_compact_overflow_get(t, keys[7]), sentinel);
 
     leptris_compact_overflow_table_destroy(t);
+}
+
+/* Round 21 namebp invariant: the mutation name-block backpointer is
+ * only valid while e->name still points at slot+8. leptris_elem_
+ * split_qname advances name past the colon for prefixed names —
+ * the flag must drop with it, or a later unattached get_document
+ * (root-map miss) reads name BYTES as a document pointer. Masked
+ * today by register-on-create; this pins the invariant for any
+ * future register-elision. */
+TEST(MutNameBackpointer, PrefixedSplitClearsBackpointerFlag) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisElement plain = leptris_element_create(doc, "local");
+    ASSERT_NE(plain, nullptr);
+    /* Colon-free: backpointer stays valid. */
+    EXPECT_TRUE(leptris_elem_has_namebp(plain));
+    EXPECT_EQ(leptris_elem_namebp_doc(plain), doc);
+
+    LeptrisElement prefixed = leptris_element_create(doc, "p:local");
+    ASSERT_NE(prefixed, nullptr);
+    /* Split moved name past the colon — the slot at name[-1] is
+     * name bytes now, so the flag must be gone. */
+    EXPECT_FALSE(leptris_elem_has_namebp(prefixed));
+    /* And document resolution must still be correct. */
+    EXPECT_EQ(leptris_element_get_document(prefixed), doc);
+
+    leptris_document_free(doc);
 }
 
 }  // namespace
