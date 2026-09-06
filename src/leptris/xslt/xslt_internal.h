@@ -585,6 +585,18 @@ typedef struct xslt_merge_side {
 } XsltMergeSide;
 
 typedef struct xslt_exec {
+    /* Result-tree append hint (#682 2x bar): the builder knows the
+     * pending parent AND its current last child — sequential
+     * construction appends in O(1) without the doc-level tail
+     * cache's collision walks. Compared BY VALUE: a different
+     * parent simply falls back to the generic append. */
+    LeptrisElement pend_last_parent;
+    LeptrisNodeRef pend_last_child;
+    /* Second entry: result construction alternates a persistent
+     * parent (the output root) with a fresh per-iteration parent —
+     * two entries cover the pattern without cache machinery. */
+    LeptrisElement pend2_last_parent;
+    LeptrisNodeRef pend2_last_child;
     const XsltStylesheet* sheet;
     LeptrisDocument sheet_doc;      /* stylesheet document —
                                        document('') (§12.1) resolves

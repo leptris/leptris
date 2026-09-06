@@ -14,6 +14,8 @@
 #include "../dtd/model.h"   /* leptris_dtd_apply_attribute_defaults (#606) */
 #include "../dom/text.h"
 #include "../dom/cdata.h"
+#include "../dom/comment.h"
+#include "../dom/pi.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -266,6 +268,68 @@ void xslt_pop_vars_to(XsltExec* ex, XsltVar* mark) {
 
 /* Place a created element into the result (root chain or parent),
  * preserving a source element's PREFIX and namespace URI. */
+/* #682 2x bar: sequential result construction appends through this
+ * hint — same invariants as leptris_element_append_child_internal
+ * (parent edge by kind, child_count for elements only, doc tail
+ * cache refreshed), but O(1) with no cache probe. */
+static void ex_append_child(XsltExec* ex, LeptrisElement parent,
+                            LeptrisNode* child) {
+    if (!parent || !child) return;
+    if (child->type < LEPTRIS_NODE_TYPE_ELEMENT ||
+        child->type > LEPTRIS_NODE_TYPE_PI) {
+        return;
+    }
+    LeptrisNode* after = NULL;
+    if (ex->pend_last_parent == parent && ex->pend_last_child) {
+        after = (LeptrisNode*)ex->pend_last_child;
+    } else if (ex->pend2_last_parent == parent && ex->pend2_last_child) {
+        after = (LeptrisNode*)ex->pend2_last_child;
+    } else {
+        /* Fall back to the generic append (its 64-slot doc cache
+         * handles depth; a manual walk here re-quadraticized
+         * alternating-parent construction). */
+        leptris_element_append_child_internal_doc(parent, child,
+                                                  ex->result);
+        ex->pend2_last_parent = ex->pend_last_parent;
+        ex->pend2_last_child = ex->pend_last_child;
+        ex->pend_last_parent = parent;
+        ex->pend_last_child = (LeptrisNodeRef)child;
+        return;
+    }
+    leptris_node_set_next_sibling((LeptrisNodeRef)after,
+                                  (LeptrisNodeRef)child);
+    if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+        leptris_element_set_parent((LeptrisElement)child, parent);
+        parent->child_count++;
+    } else {
+        switch (child->type) {
+            case LEPTRIS_NODE_TYPE_TEXT:
+                leptris_textnode_set_parent((LeptrisTextNode*)child, parent);
+                break;
+            case LEPTRIS_NODE_TYPE_COMMENT:
+                leptris_comment_set_parent((LeptrisCommentNode*)child, parent);
+                break;
+            case LEPTRIS_NODE_TYPE_CDATA:
+                leptris_cdata_set_parent((LeptrisCDATANode*)child, parent);
+                break;
+            case LEPTRIS_NODE_TYPE_PI:
+                leptris_pi_set_parent((LeptrisPINode*)child, parent);
+                break;
+            default:
+                break;
+        }
+    }
+    ex->pend_last_parent = parent;
+    ex->pend_last_child = (LeptrisNodeRef)child;
+    if (ex->result) {
+        struct leptris_mut_tail* slot =
+            &((struct leptris_document*)ex->result)
+                 ->mut_tail[(((uintptr_t)parent) >> 4) & 63];
+        slot->parent = parent;
+        slot->child = child;
+    }
+}
+
 static LeptrisElement out_place_elem(XsltExec* ex, LeptrisElement parent,
                                      LeptrisElement e) {
     if (!e) return NULL;
@@ -290,7 +354,7 @@ static LeptrisElement out_place_elem(XsltExec* ex, LeptrisElement parent,
             ex->root_sib_tail = (LeptrisNodeRef)e;
         }
     } else {
-        leptris_element_append_child(parent, e);
+        ex_append_child(ex, parent, (LeptrisNode*)e);
     }
     return e;
 }
@@ -342,7 +406,7 @@ static void out_append_text(XsltExec* ex, LeptrisElement parent,
     if (!text || !*text) return;
     if (parent) {
         LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
-        if (t) leptris_element_append_child(parent, (LeptrisElement)t);
+        if (t) ex_append_child(ex, parent, (LeptrisNode*)t);
         return;
     }
     /* No insertion point yet: fragment-level text. BEFORE the first
@@ -956,7 +1020,7 @@ static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
             LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
             if (t) {
                 ((LeptrisTextNode*)t)->base.raw = 1;
-                leptris_element_append_child(parent, (LeptrisElement)t);
+                ex_append_child(ex, parent, (LeptrisNode*)t);
             }
             free(tvt);
             return 0;
