@@ -6,9 +6,22 @@ the numbered docs; this file is the index + the graph.
 
 ## A. In flight
 
-- **v1.9.89 release** — #857 analyze-string group spans (subject-
-  relative offsets + exact nmatch). Merged via PR #861; release
-  workflow running.
+- **PR #891 / #875** — CRITICAL: dispatch index overflow dropped
+  templates past 48 name-keys / 96 literal-pkeys per mode bucket
+  (silent, zero output). Fix routes overflowed patterns to the
+  scanned remainder. RED spec at 120 patterns both shapes. After
+  merge: release, then bindings drop the 1.9.92 pin (ruby side has
+  a sentinel spec standing guard).
+
+2026-09-06/07 shipped: v1.9.94 (#883 last-root memo), v1.9.95
+(#881 C14N ns-order — the round's key find; #882 expand_empty +
+element-level serialize ext; #682 TLS consolidation + walk-first
+attr dup check: heavy 4.96→3.83), v1.9.96 (#682 ns-fixup walk skip:
+heavy →3.57, 0.81x lxml; light 3.57 = 0.76x). ruby#147/#149
+answered engine-side (findings + batch-entry/C-ext proposal on the
+binding repo — user decision pending). Discards banked: two-slot
+memo ring (8% regression), contiguous text-create (C already
+15-18ns/op; the 884ns is the ffi-gem seam).
 
 2026-09-05 shipped: v1.9.87 (#846 QName split), v1.9.88 (#682
 dispatch indexes: named hash + mode buckets + bare-Name fast path,
