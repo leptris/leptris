@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.97] - 2026-09-06
+
+### Fixed
+
+- #875 - dispatch index overflow silently dropped templates (xslt)
+
+
+
 ## [1.9.96] - 2026-09-06
 
 ### Performance
