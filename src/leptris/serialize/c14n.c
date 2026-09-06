@@ -128,6 +128,21 @@ static int compare_attributes(const void* a, const void* b) {
     return 0;
 }
 
+/**
+ * Compare function for sorting namespace declarations (for qsort).
+ * REC-xml-c14n section 2.2: namespace nodes sort lexicographically
+ * by prefix; the default namespace (no prefix) sorts first.
+ */
+static int compare_namespaces(const void* a, const void* b) {
+    const struct leptris_namespace* ns_a = *(const struct leptris_namespace**)a;
+    const struct leptris_namespace* ns_b = *(const struct leptris_namespace**)b;
+
+    if (!ns_a->prefix && !ns_b->prefix) return 0;
+    if (!ns_a->prefix) return -1;
+    if (!ns_b->prefix) return 1;
+    return strcmp(ns_a->prefix, ns_b->prefix);
+}
+
 /* Issue #183: thread-local with_comments flag for the extended API.
  * Default 0 = strip comments (matches C14N 1.0 canonical spec). The
  * _ex variants flip this around their call to the walk. */
@@ -192,17 +207,33 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
     len = snprintf(temp, sizeof(temp), "<%s", name ? name : "element");
     APPEND_STRING(temp, len);
 
-    /* Add namespace declarations */
-    struct leptris_namespace* ns = leptris_elem_namespaces(elem);
-    while (ns) {
-        /* Serialize namespace as xmlns:prefix="uri" or xmlns="uri" for default */
-        if (ns->prefix) {
-            len = snprintf(temp, sizeof(temp), " xmlns:%s=\"%s\"", ns->prefix, ns->uri);
-        } else {
-            len = snprintf(temp, sizeof(temp), " xmlns=\"%s\"", ns->uri);
+    /* Add namespace declarations, sorted by prefix with the default
+     * namespace first (REC-xml-c14n section 2.2, issue #881). */
+    size_t ns_count = 0;
+    for (struct leptris_namespace* n = leptris_elem_namespaces(elem); n; n = n->next) {
+        ns_count++;
+    }
+    if (ns_count > 0) {
+        struct leptris_namespace** sorted_ns =
+            (struct leptris_namespace**)malloc(ns_count * sizeof(struct leptris_namespace*));
+        if (sorted_ns) {
+            size_t ni = 0;
+            for (struct leptris_namespace* n = leptris_elem_namespaces(elem); n && ni < ns_count; n = n->next) {
+                sorted_ns[ni++] = n;
+            }
+            qsort(sorted_ns, ni, sizeof(struct leptris_namespace*), compare_namespaces);
+            for (size_t i = 0; i < ni; i++) {
+                struct leptris_namespace* ns = sorted_ns[i];
+                /* Serialize namespace as xmlns:prefix="uri" or xmlns="uri" for default */
+                if (ns->prefix) {
+                    len = snprintf(temp, sizeof(temp), " xmlns:%s=\"%s\"", ns->prefix, ns->uri);
+                } else {
+                    len = snprintf(temp, sizeof(temp), " xmlns=\"%s\"", ns->uri);
+                }
+                APPEND_STRING(temp, len);
+            }
+            free(sorted_ns);
         }
-        APPEND_STRING(temp, len);
-        ns = ns->next;
     }
 
     /* Add sorted attributes */

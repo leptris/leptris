@@ -17,6 +17,27 @@
 
 namespace {
 
+/* #881: REC-xml-c14n section 2.2 — namespace nodes sort
+ * lexicographically BY PREFIX (default ns first). The engine
+ * emitted document order; every conformant implementation
+ * (libxml2, Java) sorts, so canonical bytes and XML signatures
+ * did not interop. */
+TEST(C14nConformance, NamespaceDeclarationsSortedByPrefix) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<r xmlns:z=\"urn:z\" xmlns:a=\"urn:a\" xmlns=\"urn:d\""
+        " xmlns:m=\"urn:m\"/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out,
+        "xmlns=\"urn:d\" xmlns:a=\"urn:a\" xmlns:m=\"urn:m\""
+        " xmlns:z=\"urn:z\""), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
 TEST(C14N, IsAvailableAndDoesNotCrash) {
     const char xml[] = "<r a='1' b='2'><c/>text</r>";
     LeptrisStatus st;
