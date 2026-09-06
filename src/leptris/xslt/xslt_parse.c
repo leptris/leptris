@@ -1926,7 +1926,10 @@ void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
                                 if (!b->pkeys) continue;
                                 b->pkeycap = 128;
                             }
-                            if (b->npkeys >= 96) continue;
+                            /* #875: a full table must not make the
+                             * pattern unreachable — route it to the
+                             * scanned remainder so it still fires. */
+                            if (b->npkeys >= 96) { has_other = 1; continue; }
                             k2 = &b->pkeys[kh2];
                             k2->key = leptris_strdup(kb);
                             if (!k2->key) continue;
@@ -1955,7 +1958,9 @@ void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
                             if (!b->keys) continue;
                             b->keycap = 64;
                         }
-                        if (b->nkeys >= 48) continue;   /* near-full */
+                        /* #875: same routing on the name-key
+                         * table's near-full bound. */
+                        if (b->nkeys >= 48) { has_other = 1; continue; }
                         k = &b->keys[kh];
                         k->name = pa->leaf_name;
                         b->nkeys++;
