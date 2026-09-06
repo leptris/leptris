@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.95] - 2026-09-06
+
+### Added
+
+- #882 - expand_empty ext option + element-level ext entries (serialize)
+
+### Fixed
+
+- drop dead rnl local (warning-clean recompile) (serialize)
+- #881 - sort namespace declarations by prefix (default first) (c14n)
+
+### Performance
+
+- #682 - TLS free-list consolidation + walk-first attr dup check (xslt)
+
+
+
 ## [1.9.94] - 2026-09-06
 
 ### Performance
