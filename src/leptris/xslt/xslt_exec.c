@@ -308,6 +308,12 @@ static LeptrisElement out_append_elem(XsltExec* ex, LeptrisElement parent,
 static int result_ns_in_scope(LeptrisElement e, const char* prefix,
                               const char* uri) {
     const char* pf = prefix ? prefix : "";
+    /* Zero-declaration result tree: no ancestor can bind anything.
+     * has_namespaces is the exact any-declaration gate (the same one
+     * the resolver consults); namespace-free outputs skip the
+     * ancestor climb entirely. */
+    struct leptris_document* rd = leptris_element_get_document(e);
+    if (rd && !rd->has_namespaces) return 0;
     for (LeptrisElement a = leptris_node_parent((LeptrisNodeRef)e);
          a; a = leptris_node_parent((LeptrisNodeRef)a)) {
         for (struct leptris_namespace* ns = leptris_elem_namespaces(a);
@@ -788,7 +794,8 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
      * nearest ancestor declaration decides (bug-130's
      * imported-module <div> under a default-namespaced <html>). */
     if (!strchr(out_name ? out_name : "", ':') &&
-        (!in->ns_uri || !in->ns_uri[0])) {
+        (!in->ns_uri || !in->ns_uri[0]) &&
+        ex->result->has_namespaces) {
         for (LeptrisElement a = leptris_node_parent((LeptrisNodeRef)e);
              a; a = leptris_node_parent((LeptrisNodeRef)a)) {
             int decided = 0;
