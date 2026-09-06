@@ -2002,6 +2002,27 @@ LEPTRIS_API char* leptris_document_serialize_ext_sized(LeptrisDocument doc,
     const LeptrisSerializeExtOptions* ext,
     size_t ext_size);
 
+/**
+ * Extended element serialization (issue #882): the same option
+ * surface as leptris_document_serialize_ext — indent_text,
+ * indent_unit, expand_empty — at element level.
+ *
+ * @param elem Element subtree to serialize
+ * @param options Serialization options, or NULL for defaults
+ * @param ext Extended options, or NULL
+ * @return Serialized XML string (caller frees with
+ *         leptris_free_string), or NULL
+ */
+LEPTRIS_API char* leptris_element_serialize_ext(LeptrisElement elem,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext);
+
+/* Size-aware twin (issue #644 pattern). */
+LEPTRIS_API char* leptris_element_serialize_ext_sized(LeptrisElement elem,
+    const LeptrisSerializeOptions* options,
+    const LeptrisSerializeExtOptions* ext,
+    size_t ext_size);
+
 LEPTRIS_API size_t leptris_document_serialize_into(LeptrisDocument doc,
                                                    char* buf,
                                                    size_t capacity,

@@ -792,6 +792,81 @@ TEST(SerializeOptions, ExtSizedRespectsCallerLayout) {
     leptris_document_free(doc);
 }
 
+/* Issue #882: expand_empty — emit <a></a> instead of <a/> (the
+ * inverse of libxml2 XML_SAVE_NO_EMPTY), so bindings can drop the
+ * full-output Ruby rewrite. Default (0) keeps the short form. */
+TEST(SerializeOptions, ExpandEmptyEmitsLongForm) {
+    const char xml[] = "<r><a/><b x='1'/><c>t</c></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    LeptrisSerializeExtOptions ext = {0};
+    ext.expand_empty = 1;
+    char* s = leptris_document_serialize_ext(doc, &opts, &ext);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s),
+              "<r><a></a><b x=\"1\"></b><c>t</c></r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+/* Violation case for #882: a zeroed ext must keep the historical
+ * short form — expand_empty is opt-in only. */
+TEST(SerializeOptions, ExpandEmptyZeroKeepsShortForm) {
+    const char xml[] = "<r><a/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    LeptrisSerializeExtOptions ext = {0};
+    char* s = leptris_document_serialize_ext(doc, &opts, &ext);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s), "<r><a/></r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+/* #882 + pretty-print: the break after an expanded empty element
+ * must match the short-form layout rules. */
+TEST(SerializeOptions, ExpandEmptyWithIndent) {
+    const char xml[] = "<r><a/><b>t</b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    LeptrisSerializeExtOptions ext = {0};
+    ext.expand_empty = 1;
+    char* s = leptris_document_serialize_ext(doc, &opts, &ext);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s),
+              "<r>\n  <a></a>\n  <b>t</b>\n</r>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+/* #882 element twin: the ext entry must exist at element level too
+ * — moxml serializes empty-heavy subtrees per element. */
+TEST(SerializeOptions, ExpandEmptyOnElementSerialize) {
+    const char xml[] = "<r><a/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    LeptrisSerializeOptions opts = {0};
+    LeptrisSerializeExtOptions ext = {0};
+    ext.expand_empty = 1;
+    char* s = leptris_element_serialize_ext(a, &opts, &ext);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s), "<a></a>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
 /* Fresh-parse contract (python team, #550 re-verify): a document
  * straight out of leptris_parse_string serializes and evaluates
  * XPath with NO intermediate call — no "promote touch" may be
