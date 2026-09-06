@@ -4,7 +4,15 @@
 
 ### Performance
 
-- last-root memo in leptris_element_get_document (dom)
+- **TLS consolidation, lever 1 — last-root memo in
+  `leptris_element_get_document`.** The hot path climbed to the root
+  and then walked a thread-local bucket chain on every call; a
+  thread-local (root, doc) memo now answers consecutive same-tree
+  queries with a single pointer compare inside the climb, and the
+  map lookup only runs on a miss. `leptris_document_free`
+  invalidates the memo so a freed tree's address cannot be reused
+  against a stale hit. XSLT dispatch benches (best of 9): light
+  3.89→3.62–3.78ms, heavy 4.92→4.78–4.85ms. Full ctest 1288/1288.
 
 
 
