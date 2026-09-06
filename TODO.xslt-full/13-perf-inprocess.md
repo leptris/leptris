@@ -141,3 +141,19 @@ result append through the hint or invalidate on non-routed
 appends. Next levers: TLS consolidation (context-carried
 free-lists, authorized), serializer, per-result-element
 doc/pool climbs.
+
+## 2x arc instrumentation (2026-09-06, session tail)
+
+Measured with walk-counters + fresh profile: the light bench's
+next_sibling samples are NOT chain walks - 100k "walks" per 10
+transforms are all O(1) EMPTY-chain lookups (3 fresh-parent appends
+per book). The cost is CALL OVERHEAD + tlv_get_addr 437/3756 (11.6%)
++ malloc/free ~400 (10.6%). A doc-level repeated-parent hot entry
+(16B/doc, suite-green) measured NEUTRAL and was reverted to keep
+main pure - the thrash theory is DEAD; do not retry cache-shaped
+fixes. The remaining light/heavy gap = the consolidation arc and
+ONLY that: (1) per-call overhead in append/get_next_sibling (inline
+the empty-chain fast path: if !first_child return NULL - one branch
+in the CALLER), (2) TLS consolidation (context-carried free-lists),
+(3) malloc churn (result-tree text nodes). Next session starts with
+lever (1) - it is a 2-line change per call site with no invariants.
