@@ -628,6 +628,15 @@ LeptrisStatus leptris_element_set_text(LeptrisElement elem, const char* text) {
 
 #define ATTR_INDEX_INIT_CAP 16u
 
+/* Walk-first threshold: elements at or below this attr count use the
+ * hash-prefiltered list walk for the duplicate check instead of the
+ * doc-level index. XSLT result elements typically carry 1–3 attrs —
+ * register + probe + put costs more than walking a handful of nodes,
+ * and the index never re-pays for a short-lived result tree. Elements
+ * that grow past the threshold lazily bulk-register on their next
+ * mutation (attr_index_register inserts every existing attr). */
+#define ATTR_INDEX_WALK_MAX 8
+
 /* Index keys use the FULL 32-bit FNV of the name — independent of
  * the attr field's 15-bit lazy hash (round 20). The u15 field feeds
  * per-element walk pre-filters; the doc-level open-addressed index
@@ -809,11 +818,15 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
     struct leptris_document* set_doc = leptris_element_get_document(elem);
     struct leptris_attr_index* set_ix = NULL;
     size_t set_slot = (size_t)-1;
-    struct leptris_attribute* existing =
-        set_doc
-            ? attr_index_lookup(set_doc, elem, name, set_name_len,
-                                set_name_hash, &set_ix, &set_slot)
-            : leptris_element_get_attribute_by_name(elem, name);
+    struct leptris_attribute* existing;
+    if (set_doc && elem->attr_count > ATTR_INDEX_WALK_MAX) {
+        existing = attr_index_lookup(set_doc, elem, name, set_name_len,
+                                     set_name_hash, &set_ix, &set_slot);
+    } else {
+        /* Walk-first (small elements): set_ix stays NULL so the
+         * insert below skips the index put too. */
+        existing = leptris_element_get_attribute_by_name(elem, name);
+    }
     if (existing) {
         /* Update existing attribute's value */
         LeptrisMemoryPool* pool = NULL;
