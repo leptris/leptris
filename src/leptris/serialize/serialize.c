@@ -1085,9 +1085,6 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * script/style is verbatim under method=html. */
                 if (buf->html_method && sp > 0 && st[sp - 1].e) {
                     const char* rn = st[sp - 1].e->name;
-                    size_t rnl = (st[sp - 1].e->name_len != 0xFF)
-                        ? (size_t)st[sp - 1].e->name_len
-                        : (rn ? strlen(rn) : 0);
                     if (rn &&
                         (html_elem_sem_flags(st[sp - 1].e) & HTML_F_RAW)) {
                         const char* tr = leptris_text_get_content(
