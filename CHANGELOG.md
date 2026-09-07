@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.105] - 2026-09-07
+
+### Added
+
+- #659 - foster parenting (WHATWG entry only) (html)
+
+
+
 ## [1.9.104] - 2026-09-07
 
 ### Added
