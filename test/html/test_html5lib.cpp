@@ -544,8 +544,9 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 285 since the two-mode split (WHATWG in-head set; was 193). */
-    EXPECT_GE(passed, (size_t)285);
+     * 294 since foster parenting landed the top-chain splice (287
+     * first cut, 285 at the two-mode split, 193 before it). */
+    EXPECT_GE(passed, (size_t)294);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *

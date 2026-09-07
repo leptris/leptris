@@ -2257,6 +2257,11 @@ typedef struct {
      * shape (title/meta/link/base only — libxml2 leaves leading
      * script/style in body). */
     int whatwg_head_set;
+    /* #659 foster parenting: WHATWG 12.2.6.1 — text (and non-table
+     * elements) arriving with a table-context insertion point go
+     * BEFORE the table in its parent. libxml2 keeps them in the
+     * table; the html4 entry does not foster. Same mode arg. */
+    int whatwg_foster;
 } HBuilder;
 
 /* Pool a NUL-terminated ASCII-lowercased copy of [s, s+len). */
@@ -2275,10 +2280,112 @@ static void h_top_append(HBuilder* b, LeptrisNodeRef n) {
     b->top_tail = n;
 }
 
+static int h_ieq_raw(const char* a, const char* bname);
+
+/* WHATWG 12.2.6.1: only nodes NOT allowed in table context foster
+ * — table-structure elements stay, whitespace-only text stays in
+ * the table ("in table text"), comments stay. */
+static int h_fosterable(HBuilder* b, LeptrisNodeRef n) {
+    int ty = leptris_node_get_type(n);
+    if (ty == LEPTRIS_NODE_TYPE_COMMENT) return 0;
+    if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+        const char* t = leptris_text_get_content((LeptrisTextNode*)n);
+        if (!t) return 0;
+        for (const char* p = t; *p; p++)
+            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+                return 1;
+        return 0;   /* whitespace-only stays */
+    }
+    if (ty != LEPTRIS_NODE_TYPE_ELEMENT) return 0;
+    const char* nname = leptris_element_name((LeptrisElement)n);
+    return !(h_ieq_raw(nname, "table") || h_ieq_raw(nname, "tbody") ||
+             h_ieq_raw(nname, "thead") || h_ieq_raw(nname, "tfoot") ||
+             h_ieq_raw(nname, "tr") || h_ieq_raw(nname, "td") ||
+             h_ieq_raw(nname, "th") || h_ieq_raw(nname, "caption") ||
+             h_ieq_raw(nname, "col") || h_ieq_raw(nname, "colgroup") ||
+             h_ieq_raw(nname, "tbody") || h_ieq_raw(nname, "form") ||
+             h_ieq_raw(nname, "script") || h_ieq_raw(nname, "style") ||
+             h_ieq_raw(nname, "template") || h_ieq_raw(nname, "input"));
+}
+
+static int h_is_table_context(LeptrisElement e) {
+    const char* n = e ? leptris_element_name(e) : NULL;
+    return h_ieq_raw(n, "table") || h_ieq_raw(n, "tbody") ||
+           h_ieq_raw(n, "thead") || h_ieq_raw(n, "tfoot") ||
+           h_ieq_raw(n, "tr");
+}
+
+/* Insert n into parent's child chain BEFORE `before`. Same surgery
+ * pattern as the head-content lift (first_child + sibling links +
+ * element child_count). */
+static void h_insert_before(HBuilder* b, LeptrisElement parent,
+                            LeptrisElement before, LeptrisNodeRef n) {
+    LeptrisNodeRef first = leptris_node_first_child_internal(
+        (LeptrisNode*)parent);
+    if (first == (LeptrisNodeRef)before) {
+        leptris_elem_set_first_child(parent, (LeptrisNodeRef)n);
+    } else {
+        LeptrisNodeRef prev = first;
+        while (prev) {
+            LeptrisNodeRef nx = leptris_node_get_next_sibling(prev);
+            if (nx == (LeptrisNodeRef)before) break;
+            prev = nx;
+        }
+        if (prev) leptris_node_set_next_sibling(prev, n);
+        else { /* before not in chain (shouldn't happen): fall back
+                * to a plain append. */
+            leptris_element_append_child_internal_doc(parent, n, b->doc);
+            return;
+        }
+    }
+    leptris_node_set_next_sibling(n, (LeptrisNodeRef)before);
+    if (leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_ELEMENT)
+        parent->child_count++;
+}
+
 static void h_append(HBuilder* b, LeptrisNodeRef n) {
     if (b->depth > 0) {
-        leptris_element_append_child_internal_doc(
-            b->open[b->depth - 1], n, b->doc);
+        LeptrisElement top = b->open[b->depth - 1];
+        /* #659 foster (WHATWG only): text/elements in table context
+         * go before the nearest open table in ITS parent. */
+        if (b->whatwg_foster && h_is_table_context(top) &&
+            h_fosterable(b, n)) {
+            int ti = (int)b->depth - 1;
+            while (ti >= 0 && !h_ieq_raw(
+                       leptris_element_name(b->open[ti]), "table"))
+                ti--;
+            if (ti >= 1) {
+                LeptrisElement table = b->open[ti];
+                LeptrisElement tparent = b->open[ti - 1];
+                h_insert_before(b, tparent, table, n);
+                return;
+            }
+            if (ti == 0) {
+                /* Table sits directly on the top chain — splice n
+                 * into the chain BEFORE the table node. */
+                LeptrisElement table = b->open[0];
+                if (b->top_head == (LeptrisNodeRef)table) {
+                    leptris_node_set_next_sibling(
+                        n, b->top_head);
+                    b->top_head = n;
+                } else {
+                    LeptrisNodeRef prev = b->top_head;
+                    while (prev) {
+                        LeptrisNodeRef nx =
+                            leptris_node_get_next_sibling(prev);
+                        if (nx == (LeptrisNodeRef)table) break;
+                        prev = nx;
+                    }
+                    if (prev) {
+                        leptris_node_set_next_sibling(prev, n);
+                        leptris_node_set_next_sibling(
+                            n, (LeptrisNodeRef)table);
+                    }
+                }
+                return;
+            }
+        }
+        leptris_element_append_child_internal_doc(top, n, b->doc);
     } else {
         h_top_append(b, n);
     }
@@ -2359,6 +2466,7 @@ static LeptrisDocument html_parse_shared(
     b.doc = doc;
     b.pool = doc->pool;
     b.whatwg_head_set = whatwg;
+    b.whatwg_foster = whatwg;
 
     const char* p = buf;
     const char* end = buf + len;

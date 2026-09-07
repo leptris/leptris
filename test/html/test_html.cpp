@@ -423,3 +423,39 @@ TEST(HtmlTwoModes, LeadingScriptPlacement) {
     leptris_document_free(d5);
     leptris_document_free(d4);
 }
+
+/* #659 foster parenting (WHATWG entry only): text and non-table
+ * elements arriving in table context insert BEFORE the table in
+ * its parent; table-structure elements stay inside; whitespace
+ * stays in the table; the html4 entry keeps the libxml2 shape. */
+TEST(HtmlTwoModes, FosterParenting) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char html[] = "<table>x<tr><td>c</td></tr></table>";
+    LeptrisDocument d5 = leptris_parse_html_string(
+        html, sizeof(html) - 1, &st);
+    ASSERT_NE(d5, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d5, nullptr, "string(/html/body/text())");
+    ASSERT_NE(r, nullptr);
+    char* sv = leptris_xpath_result_string(r);
+    EXPECT_STREQ(sv ? sv : "", "x");
+    leptris_free_string(sv);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d5, nullptr, "count(/html/body/table/tr/td)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d5);
+
+    LeptrisDocument d4 = leptris_parse_html4_string(
+        html, sizeof(html) - 1, &st);
+    ASSERT_NE(d4, nullptr);
+    LeptrisXPathResult r4 = leptris_xpath_eval(
+        d4, nullptr, "string(/html/body/table/text())");
+    ASSERT_NE(r4, nullptr);
+    char* sv4 = leptris_xpath_result_string(r4);
+    EXPECT_STREQ(sv4 ? sv4 : "", "x");
+    leptris_free_string(sv4);
+    leptris_xpath_result_free(r4);
+    leptris_document_free(d4);
+}
