@@ -254,3 +254,32 @@ clears the flag; RED spec MutNameBackpointer.PrefixedSplit-
 ClearsBackpointerFlag pins it. LESSON: register-on-create is the
 ONLY backstop for split-name elements - any register-elision perf
 work must first restructure the backpointer to survive the split.
+## PARITY MANDATE + streaming design (2026-09-07, user decision)
+
+User: "We must beat it, at least we must reach parity now and
+improve speed later. Then start and finish HTML and RNG." PARITY
+TARGETS: heavy <= 2.88ms (now 3.59 after register-elision), light
+<= 2.72ms (now ~3.55). Remaining gap ~20%.
+
+THE DESIGNATED PATH: streaming result emission for apply_string.
+Key soundness fact: the XSLT data model forbids reading the
+principal result tree during execution - streaming it is ALWAYS
+spec-safe. Phase plan:
+- Phase 1: result-sink abstraction in xslt_exec (mode: TREE |
+  STREAM). STREAM = SerializeBuffer + open-element stack +
+  pending-tag buffer (xsl:attribute must land inside the open tag
+  before the first child - libxslt's pending-writer pattern).
+- Phase 2: element/text/attr fast-path emitters at the out_* funnels
+  (out_place_elem / out_append_elem / text appends); tree ops fall
+  back by flushing pending tags.
+- Phase 3: gate = sheet scan at parse time (xsl:variable/@select
+  RTF shapes don't matter - only the PRINCIPAL result streams;
+  disable for d-o-e edge shapes the 205-suite pins if any diverge).
+- Red zone: bug-98 ws_mixed, cdata-section-elements, character
+  maps, indent (depth tracking), html method. Each needs its
+  stream-side twin or the gate excludes the sheet.
+Expected: ~15% on dispatch shapes + register-elision's 4% ~= parity.
+LANDED this round: register-elision (PR #897, heavy ~4%); #869
+digest (PR #896) - orthogonal capability.
+NEXT SESSION ORDER: streaming phases 1-3 -> HTML #659 (implied head
+-> foster -> AA; the 865-case bucket) -> RNG #878 phases 1-4.
