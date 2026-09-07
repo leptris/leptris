@@ -4,7 +4,15 @@
 
 ### Performance
 
-- #682 - AVT brace-free fast path + AST-cache mutex skip (xslt)
+- **#682 — eval-side Phase 2 (two levers).**
+  - *AVT brace-free fast path.* `eval_avt` early-outs when the
+    template has no `{` or `}` — literal attributes (heavy: 7200
+    attrs/transform) skip the per-character malloc-grow loop.
+  - *XPath AST-cache mutex skip.* A single in-flight transform is
+    single-threaded; `xslt_transform_doc` claims ownership via a
+    TLS flag so the per-eval `xpath_ast_cache_get` / `_release`
+    pair (~14400 ops per heavy transform) drops the mutex
+    lock/unlock entirely. State restored on `xslt_exec_free`.
 
 
 
