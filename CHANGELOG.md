@@ -4,7 +4,20 @@
 
 ### Performance
 
-- #682 - streaming result emission Phase 1 (gated) (xslt)
+- **#682 — streaming result emission, Phase 1 (gated).** Sheets a
+  compile-time gate admits (v1.x, namespace-free literal elements,
+  text/value-of, literal comment/PI, select-only variables, control
+  flow) emit serialization bytes directly instead of materializing a
+  result DOM — spec-safe because the XSLT data model forbids reading
+  the principal result tree during execution. Everything else
+  (copy, xsl:element/attribute/namespace, sequences, attr-sets,
+  doctype, indent, cdata-section-elements, character maps, 3.0
+  built-in rules) keeps the result-tree path byte-identically.
+  Measured neutral on the dispatch benches — the eliminated
+  construction cluster was smaller in wall-clock than its profile
+  share; the remaining gap is the eval side, which Phase 2 targets
+  on this roadbed. Run-based emitters (`strcspn` + bulk append);
+  full ctest 1306/1306.
 
 
 
