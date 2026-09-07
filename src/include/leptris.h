@@ -596,6 +596,17 @@ LEPTRIS_API LeptrisDocument leptris_parse_html_string(const char* html,
                                                       size_t length,
                                                       LeptrisStatus* status);
 
+/* HTML4/libxml2-compatibility mode (#659): identical tolerant
+ * tokenizer and Nokogiri document shape, except leading
+ * script/style content stays in <body> (libxml2's shape —
+ * title/meta/link/base still lift into the implied head). Bindings
+ * that must match Nokogiri byte-for-byte pin this entry;
+ * leptris_parse_html_string is the WHATWG-conformant engine.
+ * Memory contract identical to leptris_parse_html_string. */
+LEPTRIS_API LeptrisDocument leptris_parse_html4_string(const char* html,
+                                                       size_t length,
+                                                       LeptrisStatus* status);
+
 
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
                                                     size_t length,

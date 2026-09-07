@@ -2250,6 +2250,13 @@ typedef struct {
     LeptrisElement root;        /* first top-level element */
     LeptrisNodeRef top_head;    /* top-level chain: text, comments, root */
     LeptrisNodeRef top_tail;
+    /* #659 two-mode split: leptris_parse_html_string is the WHATWG
+     * engine (full "in head" set: script/style/noscript/template
+     * ... lift into the implied head); the new
+     * leptris_parse_html4_string keeps the libxml2/Nokogiri compat
+     * shape (title/meta/link/base only — libxml2 leaves leading
+     * script/style in body). */
+    int whatwg_head_set;
 } HBuilder;
 
 /* Pool a NUL-terminated ASCII-lowercased copy of [s, s+len). */
@@ -2334,8 +2341,8 @@ static LeptrisElement h_new_child(HBuilder* b, LeptrisElement parent,
 }
 
 /* ---- tokenizer ---- */
-LEPTRIS_API LeptrisDocument leptris_parse_html_string(
-    const char* buf, size_t len, LeptrisStatus* status) {
+static LeptrisDocument html_parse_shared(
+    const char* buf, size_t len, LeptrisStatus* status, int whatwg) {
     if (status) *status = LEPTRIS_OK;
     if (!buf) {
         if (status) *status = LEPTRIS_ERROR_NULL_ARG;
@@ -2351,6 +2358,7 @@ LEPTRIS_API LeptrisDocument leptris_parse_html_string(
     memset(&b, 0, sizeof(b));
     b.doc = doc;
     b.pool = doc->pool;
+    b.whatwg_head_set = whatwg;
 
     const char* p = buf;
     const char* end = buf + len;
@@ -2665,8 +2673,23 @@ done:
                leptris_node_get_type(head_end) ==
                    LEPTRIS_NODE_TYPE_ELEMENT) {
             const char* hn = leptris_element_name((LeptrisElement)head_end);
-            if (!(h_ieq_raw(hn, "title") || h_ieq_raw(hn, "meta") ||
-                  h_ieq_raw(hn, "link") || h_ieq_raw(hn, "base")))
+            /* #659 two modes: WHATWG lifts the full "in head" set
+             * (tests16's 189-case shape); the html4-compat entry
+             * lifts only title/meta/link/base — libxml2 leaves
+             * leading script/style in body (Nokogiri parity). */
+            int head_el =
+                h_ieq_raw(hn, "title") || h_ieq_raw(hn, "meta") ||
+                h_ieq_raw(hn, "link") || h_ieq_raw(hn, "base");
+            if (b.whatwg_head_set)
+                head_el = head_el ||
+                    h_ieq_raw(hn, "basefont") ||
+                    h_ieq_raw(hn, "bgsound") ||
+                    h_ieq_raw(hn, "script") ||
+                    h_ieq_raw(hn, "style") ||
+                    h_ieq_raw(hn, "noframes") ||
+                    h_ieq_raw(hn, "noscript") ||
+                    h_ieq_raw(hn, "template");
+            if (!head_el)
                 break;
             head_end = leptris_node_get_next_sibling(head_end);
         }
@@ -2741,4 +2764,20 @@ done:
     doc->doc_children_head = (LeptrisNodeRef)b.top_head;
     doc->doc_children_tail = b.top_tail;
     return doc;
+}
+
+LEPTRIS_API LeptrisDocument leptris_parse_html_string(
+    const char* buf, size_t len, LeptrisStatus* status) {
+    /* #659: THE WHATWG ENGINE — the full "in head" set lifts into
+     * the implied head (script/style/noscript/template/...). The
+     * html5lib corpus is this entry's conformance meter. */
+    return html_parse_shared(buf, len, status, 1);
+}
+
+LEPTRIS_API LeptrisDocument leptris_parse_html4_string(
+    const char* buf, size_t len, LeptrisStatus* status) {
+    /* #659: libxml2/Nokogiri compatibility — leading script/style
+     * stay in body (title/meta/link/base still lift). The
+     * committed Nokogiri reference trees measure this entry. */
+    return html_parse_shared(buf, len, status, 0);
 }
