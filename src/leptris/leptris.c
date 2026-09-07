@@ -249,8 +249,10 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
         return LEPTRIS_ERROR_INVALID_ARG;
 
     /* Cross-document attach would dangle the source pool on free. */
-    extern struct leptris_document* leptris_root_doc_lookup(LeptrisElement root);
-    if (leptris_root_doc_lookup(root) != doc)
+    /* #682 register-elision: created elements may resolve via the
+     * namebp backpointer instead of the root map — validate through
+     * the unified resolver, not the map directly. */
+    if (leptris_element_get_document(root) != doc)
         return LEPTRIS_ERROR_INVALID_ARG;
 
     doc->root = root;
