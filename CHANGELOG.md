@@ -4,7 +4,15 @@
 
 ### Performance
 
-- #904 - prime the TLS last-root memo at yield (iterparse)
+- **#904 — iterparse yields prime the TLS last-root memo.** Each
+  yielded subtree is released before the next, so the (root, doc)
+  memo missed on every cold attribute read (climb + bucket walk
+  per call, ~1.4 µs residual vs the document case). New
+  `leptris_root_doc_memo_prime` lets a driver that knows the pair
+  set it directly; the iterparse yield path calls it. Sound under
+  the Round-20 register-on-create contract (v1.9.102 restored it
+  fully): the yielded root is map-registered and
+  `leptris_document_free` invalidates the memo.
 
 
 
