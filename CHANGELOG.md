@@ -4,7 +4,23 @@
 
 ### Added
 
-- #659 - foster parenting (WHATWG entry only) (html)
+- **#659 — foster parenting (WHATWG entry only).** Text and
+  non-table elements arriving with a table-context insertion point
+  insert **before the table** in its parent (WHATWG 12.2.6.1):
+  table-structure elements stay inside, whitespace-only text stays
+  in the table, comments stay. A table at the stack bottom splices
+  the top chain before the table node (during raw parse the stack
+  is just `[table]`). The html4 entry keeps the libxml2 shape.
+  html5lib corpus **285 → 294** (floor raised; 193 pre-split);
+  Nokogiri parity **372 held exactly**. Full ctest 1308/1308.
+
+### Fixed
+
+- **#910 — `leptris_node_child_count` header contract.** The count
+  is child **elements** (as the binding pins); the header claimed
+  "all node types". Documented the real contract with pointers to
+  the mixed-kind walk (`first_child`/`next_sibling`) and the batch
+  API (`leptris_node_children`). Behavior unchanged.
 
 
 
