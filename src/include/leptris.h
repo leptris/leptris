@@ -155,6 +155,24 @@ LEPTRIS_API LeptrisNodeRef leptris_node_previous_sibling(LeptrisNodeRef node);
  */
 LEPTRIS_API size_t leptris_node_child_count(LeptrisNodeRef node);
 
+/* On-demand Merkle digest of a subtree's CONTENT (issue #869):
+ * a stable, content-defined hash — element name/prefix/resolved
+ * namespace URI, attributes sorted by (namespace URI, local name)
+ * and deduplicated first-wins, children hashed recursively in
+ * document order; text/CDATA/comment/PI hash their content (target
+ * included for PIs). No pointers or addresses participate, so the
+ * value is stable across processes. Equality implies subtree
+ * equivalence under the flag semantics; inequality implies nothing
+ * (descend and decide). Zero cost when never called.
+ *
+ * @param node Subtree root (any node type; NULL hashes to 0)
+ * @param flags LEPTRIS_DIGEST_DROP_WS_TEXT skips whitespace-only
+ *              text nodes
+ * @return 64-bit content digest
+ */
+LEPTRIS_API uint64_t leptris_node_digest(LeptrisNodeRef node,
+                                         LeptrisDigestFlags flags);
+
 /**
  * Copy child node handles of ANY kind into a caller array (issue #535)
  *

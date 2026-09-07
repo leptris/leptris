@@ -22,6 +22,7 @@ set(LEPTRIS_SOURCES
     leptris/core.c
     # DOM nodes
     leptris/dom/node.c
+    leptris/dom/digest.c
     leptris/dom/node_vtable.c
     leptris/dom/document_node.c
     leptris/dom/node_public.c
