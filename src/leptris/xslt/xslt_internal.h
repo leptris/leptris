@@ -483,6 +483,7 @@ struct xslt_styles {
     char** out_cdata;         /* §16.1 cdata-section-elements QNames */
     size_t out_cdata_count;
     int out_omit_decl;
+    int can_stream;   /* #682: gate verdict for the stream emitters */
     const char* out_encoding;
     const char* out_version;
     const char* out_doctype_system;
@@ -621,6 +622,13 @@ typedef struct xslt_exec {
                                     * fragment buffers. */
     size_t rtf_text_len, rtf_text_cap;
     int rtf_capturing;
+
+    /* #682 parity: streaming result mode. sheet->can_stream admits
+     * only result shapes the stream emitters cover byte-exactly
+     * (Phase 1: ns-free literal elements, text/value-of, comment/
+     * PI + control flow; everything else keeps the result tree). */
+    struct SerializeBuffer* sbuf;
+    int streaming;
 
     /* current(): the node being processed by the template rule or
      * for-each in flight (§12.4) — distinct from the predicate
