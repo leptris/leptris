@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.101] - 2026-09-07
+
+### Performance
+
+- #682 - AVT brace-free fast path + AST-cache mutex skip (xslt)
+
+
+
 ## [1.9.100] - 2026-09-07
 
 ### Performance
