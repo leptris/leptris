@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.103] - 2026-09-07
+
+### Performance
+
+- #904 - prime the TLS last-root memo at yield (iterparse)
+
+
+
 ## [1.9.102] - 2026-09-07
 
 ### Fixed
