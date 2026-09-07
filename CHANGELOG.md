@@ -4,11 +4,28 @@
 
 ### Added
 
-- #869 - on-demand subtree structural digest (dom)
+- **#869 — on-demand subtree structural digest.**
+  `leptris_node_digest(node, flags)`: a content-defined Merkle hash
+  of a subtree — element prefix/resolved-URI/local name, attributes
+  as sorted, first-wins-deduplicated `(URI, local, value)` triples,
+  children Merkle-combined in document order; text/CDATA/comment/PI
+  hash content. Stable across processes (no pointers participate);
+  equality implies subtree equivalence under the flag semantics.
+  `LEPTRIS_DIGEST_DROP_WS_TEXT` skips whitespace-only text nodes.
+  Pure on-demand C walk — zero cost on parse/serialize/eval paths.
+  Comparator consumers (lutaml/canon) can gate descent on it and
+  skip identical subtrees entirely. 11 RED-first specs; ctest
+  1306/1306.
 
 ### Performance
 
-- #682 - elide create-time root-map registration for colon-free names (dom)
+- **#682 — register-elision for colon-free created elements.**
+  The Round-21 namebp backpointer resolves detached elements
+  without the root map (the v1.9.98 hardening made the boundary
+  exact); `leptris_element_create` now registers only prefixed
+  names, and `document_set_root` validates through the unified
+  resolver. Heavy dispatch: 3.77–3.95 → 3.59–3.69 ms (best-of-9
+  A/B). Ctest 1294/1294.
 
 
 
