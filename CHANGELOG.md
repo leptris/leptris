@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.99] - 2026-09-07
+
+### Added
+
+- #869 - on-demand subtree structural digest (dom)
+
+### Performance
+
+- #682 - elide create-time root-map registration for colon-free names (dom)
+
+
+
 ## [1.9.98] - 2026-09-07
 
 ### Fixed
