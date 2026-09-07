@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.104] - 2026-09-07
+
+### Added
+
+- #659 - two-mode split: WHATWG engine + html4 compat entry (html)
+
+
+
 ## [1.9.103] - 2026-09-07
 
 ### Performance
