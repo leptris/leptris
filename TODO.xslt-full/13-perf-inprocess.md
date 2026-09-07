@@ -283,3 +283,22 @@ LANDED this round: register-elision (PR #897, heavy ~4%); #869
 digest (PR #896) - orthogonal capability.
 NEXT SESSION ORDER: streaming phases 1-3 -> HTML #659 (implied head
 -> foster -> AA; the 865-case bucket) -> RNG #878 phases 1-4.
+
+## SAX binding-drain: kind-strip shipped, field-strip inconclusive (2026-09-07)
+
+PR leptris-ruby#156 MERGED (user-directed after repeated asks): cold
+bare Elem#[] 17.2 -> 4.0 allocs/read; SAX kind-strip (get_uint8 per
+event, no full-record copy/unpack) 24.2 -> 23.0ms quiet-window.
+FOLLOW-UP TRIED AND NOT SHIPPED: universal field strip (one unpack
+per chunk: kind + name_off/len + text_off/len per record, template
+"Cx7LLLLx#{STRIDE - NAME_OFF - 16}") — the tail skip is
+STRIDE - NAME_OFF - 16 (four Ls END at NAME_OFF+16); TEXT_LEN is an
+OFFSET not a size (first attempt overran; the arity spec caught
+it). Corrected version measured INCONCLUSIVE under load 30-100
+(fix 32.7-35.8 tight vs main 25.9-44.0 spread — windows not
+comparable): the ~300k-value unpack + array allocation costs
+roughly what the ~120k get_uint32 (~60ns each) saved. RETRY only on
+a quiet machine, best-of-20; if it loses again the drain residual
+is Ruby dispatch itself and the real lever is an ENGINE-side
+batched drain API (parallel arrays out of one call) — file as an
+issue when picked up.
