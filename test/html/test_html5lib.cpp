@@ -543,8 +543,9 @@ TEST(Html5LibCorpus, TreeConstruction) {
     for (auto& w : skip_why)
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
-    /* Falsifiable floor — each lane-14 slice must only raise it. */
-    EXPECT_GE(passed, (size_t)193);
+    /* Falsifiable floor — each lane-14 slice must only raise it.
+     * 285 since the two-mode split (WHATWG in-head set; was 193). */
+    EXPECT_GE(passed, (size_t)285);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
@@ -564,8 +565,11 @@ TEST(Html5LibCorpus, TreeConstruction) {
         for (auto& c : cs) {
             ptotal++;
             if (c.skip) { pskip++; continue; }
+            /* #659 two-mode split: parity is the html4-compat
+             * entry's contract; leptris_parse_html_string is the
+             * WHATWG engine (measured by the corpus above). */
             LeptrisStatus st = LEPTRIS_OK;
-            LeptrisDocument d = leptris_parse_html_string(
+            LeptrisDocument d = leptris_parse_html4_string(
                 c.data.c_str(), c.data.size(), &st);
             if (!d) {
                 pfailed++;

@@ -150,7 +150,7 @@ TEST(HtmlParse, ScriptAndStyleAreRawText) {
     LeptrisStatus st = LEPTRIS_OK;
     const char in[] = "<script>if (a < b) { x(); }</script>"
                       "<style>p > b { color: red }</style>";
-    LeptrisDocument doc = leptris_parse_html_string(in, std::strlen(in), &st);
+    LeptrisDocument doc = leptris_parse_html4_string(in, std::strlen(in), &st);
     ASSERT_NE(doc, nullptr);
     LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "//script");
     ASSERT_NE(r, nullptr);
@@ -166,9 +166,20 @@ TEST(HtmlParse, ScriptAndStyleAreRawText) {
     EXPECT_STREQ(leptris_element_text(stl), "p > b { color: red }");
     leptris_xpath_result_free(r2);
     leptris_document_free(doc);
-    /* Uppercase close still ends raw text. */
-    EXPECT_EQ(Html("<script>1<2</SCRIPT>after"),
-              "<script>1&lt;2</script>after");
+    /* Uppercase close still ends raw text (html4 entry: the
+     * leading-script-in-body libxml2 shape this spec pins). */
+    LeptrisStatus st2 = LEPTRIS_OK;
+    LeptrisDocument d2 = leptris_parse_html4_string(
+        "<script>1<2</SCRIPT>after", 27, &st2);
+    ASSERT_NE(d2, nullptr);
+    LeptrisXPathResult r3 =
+        leptris_xpath_eval(d2, nullptr, "string(/html/body/script)");
+    ASSERT_NE(r3, nullptr);
+    char* sv3 = leptris_xpath_result_string(r3);
+    EXPECT_STREQ(sv3 ? sv3 : "", "1<2");
+    leptris_free_string(sv3);
+    leptris_xpath_result_free(r3);
+    leptris_document_free(d2);
 }
 
 TEST(HtmlParse, EntitiesDecodeInTextAndValues) {
@@ -342,7 +353,7 @@ TEST(HtmlParse, HeadContentLift) {
  * it while chasing the html5lib corpus. */
 TEST(HtmlParse, TemplateAndMisnestingLibxml2Shape) {
     const char* h1 = "<template><b>x</b>text</template><p>after</p>";
-    LeptrisDocument d = leptris_parse_html_string(h1, strlen(h1), NULL);
+    LeptrisDocument d = leptris_parse_html4_string(h1, strlen(h1), NULL);
     ASSERT_NE(d, nullptr);
     LeptrisXPathResult r = leptris_xpath_eval(
         d, NULL, "count(/html/body/template/b)");
@@ -358,7 +369,7 @@ TEST(HtmlParse, TemplateAndMisnestingLibxml2Shape) {
     leptris_document_free(d);
 
     const char* h2 = "<b>1<i>2</b>3</i>";
-    d = leptris_parse_html_string(h2, strlen(h2), NULL);
+    d = leptris_parse_html4_string(h2, strlen(h2), NULL);
     ASSERT_NE(d, nullptr);
     r = leptris_xpath_eval(d, NULL, "count(/html/body/b/i)");
     ASSERT_NE(r, nullptr);
@@ -375,4 +386,40 @@ TEST(HtmlParse, TemplateAndMisnestingLibxml2Shape) {
     leptris_free_string(sv);
     leptris_xpath_result_free(r);
     leptris_document_free(d);
+}
+
+/* #659 two-mode split: leptris_parse_html_string is the WHATWG
+ * engine (leading script/style lift into the implied head —
+ * tests16's 189-case shape); leptris_parse_html4_string keeps the
+ * libxml2/Nokogiri compat shape (they stay in body). Both floors
+ * pin this: html5lib 285 / parity 372. */
+TEST(HtmlTwoModes, LeadingScriptPlacement) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char html[] = "<!DOCTYPE html><script>x</script><p>t</p>";
+    LeptrisDocument d5 = leptris_parse_html_string(
+        html, sizeof(html) - 1, &st);
+    ASSERT_NE(d5, nullptr);
+    LeptrisElement html5 = leptris_document_root(d5);
+    ASSERT_NE(html5, nullptr);
+    LeptrisElement head5 = leptris_element_first_child_any(html5);
+    ASSERT_NE(head5, nullptr);
+    EXPECT_STREQ(leptris_element_name(head5), "head");
+    EXPECT_EQ(leptris_element_child_count(head5), 1u);
+
+    LeptrisDocument d4 = leptris_parse_html4_string(
+        html, sizeof(html) - 1, &st);
+    ASSERT_NE(d4, nullptr);
+    LeptrisElement html4 = leptris_document_root(d4);
+    ASSERT_NE(html4, nullptr);
+    /* libxml2: no head content run -> no synthesized <head> (the
+     * no-empty-head rule); script stays first in body. */
+    LeptrisElement body4 = leptris_element_last_child(html4, NULL);
+    ASSERT_NE(body4, nullptr);
+    EXPECT_STREQ(leptris_element_name(body4), "body");
+    LeptrisElement first4 = leptris_element_first_child_any(body4);
+    ASSERT_NE(first4, nullptr);
+    EXPECT_STREQ(leptris_element_name(first4), "script");
+
+    leptris_document_free(d5);
+    leptris_document_free(d4);
 }
