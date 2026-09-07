@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.106] - 2026-09-07
+
+### Added
+
+- #659 - adoption agency (WHATWG entry only) (html)
+
+
+
 ## [1.9.105] - 2026-09-07
 
 ### Added
