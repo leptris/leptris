@@ -4,7 +4,19 @@
 
 ### Added
 
-- #659 - two-mode split: WHATWG engine + html4 compat entry (html)
+- **#659 — HTML two-mode split: WHATWG engine + html4 compat
+  entry.** `leptris_parse_html_string` is now the WHATWG-conformant
+  engine — the full "in head" set (`script`/`style`/`noscript`/
+  `template`/`basefont`/`bgsound`/`noframes` in a contiguous
+  leading run) lifts into the implied `<head>`. New
+  `leptris_parse_html4_string` keeps the libxml2/Nokogiri
+  compatibility shape (leading script/style stay in `<body>`;
+  title/meta/link/base still lift). Bindings that must match
+  Nokogiri byte-for-byte pin the html4 entry. Evidence: html5lib
+  corpus **193 → 285** (+48%, floor raised); Nokogiri parity **372
+  held exactly** (harness retargeted to the html4 entry). Full
+  ctest 1307/1307. Next #659 slices: foster parenting, adoption
+  agency.
 
 
 
