@@ -14,6 +14,7 @@
 #include "../serialize/serialize.h"  /* SerializeBuffer (#682 stream) */
 #include "../dtd/model.h"   /* leptris_dtd_apply_attribute_defaults (#606) */
 #include "../dom/text.h"
+#include "../xpath/xpath_internal.h"  /* xpath_ast_cache_owner_* (#682 Phase 2) */
 #include "../dom/cdata.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -506,6 +507,10 @@ static void xslt_avt_free(XsltExec* ex) {
  * concatenated; {{ and }} are literal braces (§7.1.1). */
 static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
     if (!tmpl) return leptris_strdup("");
+    /* #682 Phase 2: brace-free templates are the common literal
+     * case (every literal attribute on every result element) — one
+     * strpbrk replaces the per-char grow loop + malloc churn. */
+    if (!strpbrk(tmpl, "{}")) return leptris_strdup(tmpl);
     size_t cap = strlen(tmpl) + 32, len = 0;
     char* out = (char*)malloc(cap);
     if (!out) return NULL;
@@ -4696,6 +4701,10 @@ static void register_ops(void) {
 
 void xslt_exec_free(XsltExec* ex) {
     if (!ex) return;
+    if (ex->cache_owner_set) {
+        xpath_ast_cache_owner_end(ex->cache_owner_prev);
+        ex->cache_owner_set = 0;
+    }
     if (ex->sbuf) { buffer_free(ex->sbuf); ex->sbuf = NULL; }
     xslt_keys_free(ex);
     xslt_accs_free(ex);
@@ -4750,6 +4759,11 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
         ex->sbuf = buffer_create(0);
         if (ex->sbuf) ex->streaming = 1;
     }
+    /* #682 Phase 2: a single in-flight transform is single-threaded
+     * — claim the XPath AST cache so per-eval get/release skip the
+     * mutex (the heaviest hot-path pair in dispatch). */
+    ex->cache_owner_prev = xpath_ast_cache_owner_begin();
+    ex->cache_owner_set = 1;
 
     /* Install the function-bridge state on the SOURCE document for
      * the transform's duration: every XPath eval on this doc (both

@@ -81,6 +81,11 @@ extern const char* xpath_token_type_names[];
 /* AST cache (TODO 113 perf). Lookup/insert parsed expression ASTs
  * so repeated evaluations skip the parse phase. */
 XPathASTNode* xpath_ast_cache_lookup(const char* expr, size_t expr_len);
+/* #682 Phase 2: the calling thread claims exclusive cache access
+ * (single-threaded transform drivers skip the mutex on the hot
+ * get/release pair). Returns the previous state for restore. */
+int xpath_ast_cache_owner_begin(void);
+void xpath_ast_cache_owner_end(int prev);
 
 /* Insert returns the CANONICAL AST for the expression — use the
  * returned pointer, not the one passed in (a racing insert may have

@@ -61,6 +61,19 @@ static cache_graveyard* g_graveyard;  /* guarded by g_cache_mutex */
  * from pooled threads. Uncontended lock/unlock is ~20 ns; the
  * parse-once reuse win is preserved across threads. */
 static leptris_mutex_t g_cache_mutex = LEPTRIS_MUTEX_INIT;
+/* #682 Phase 2: xslt_exec is single-threaded within a transform;
+ * when the calling thread claims ownership of the cache the mutex
+ * is skipped entirely (hot path: every xpath_eval does get+release). */
+static LEPTRIS_THREAD_LOCAL int g_cache_owner_active;
+int xpath_ast_cache_owner_begin(void) {
+    int prev = g_cache_owner_active;
+    g_cache_owner_active = 1;
+    return prev;
+}
+void xpath_ast_cache_owner_end(int prev) {
+    g_cache_owner_active = prev;
+}
+#define XPATH_CACHE_OWNED (g_cache_owner_active)
 
 /* FNV-1a 32-bit hash. */
 static unsigned xpath_hash(const char* s, size_t len) {
@@ -260,6 +273,7 @@ static void cache_store_bc_locked(const char* expr, size_t expr_len,
 /* ---- Public entry points: mutex-guarded (TODO.concurrency/08) ---- */
 
 XPathASTNode* xpath_ast_cache_lookup(const char* expr, size_t expr_len) {
+    if (XPATH_CACHE_OWNED) return cache_lookup_locked(expr, expr_len);
     LEPTRIS_MUTEX_LOCK(&g_cache_mutex);
     XPathASTNode* r = cache_lookup_locked(expr, expr_len);
     LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex);
@@ -268,6 +282,7 @@ XPathASTNode* xpath_ast_cache_lookup(const char* expr, size_t expr_len) {
 
 int xpath_ast_cache_get(const char* expr, size_t expr_len,
                          XPathCacheEntry* out) {
+    if (XPATH_CACHE_OWNED) return cache_get_locked(expr, expr_len, out);
     LEPTRIS_MUTEX_LOCK(&g_cache_mutex);
     int r = cache_get_locked(expr, expr_len, out);
     LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex);
@@ -282,12 +297,14 @@ XPathASTNode* xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathAST
 }
 
 void xpath_ast_cache_release(XPathASTNode* ast) {
+    if (XPATH_CACHE_OWNED) { cache_release_locked(ast); return; }
     LEPTRIS_MUTEX_LOCK(&g_cache_mutex);
     cache_release_locked(ast);
     LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex);
 }
 
 LeptrisXPathBytecode* xpath_ast_cache_get_bc(const char* expr, size_t expr_len) {
+    if (XPATH_CACHE_OWNED) return cache_get_bc_locked(expr, expr_len);
     LEPTRIS_MUTEX_LOCK(&g_cache_mutex);
     LeptrisXPathBytecode* r = cache_get_bc_locked(expr, expr_len);
     LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex);
