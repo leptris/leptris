@@ -2,12 +2,19 @@
 
 ## [1.9.102] - 2026-09-07
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **#905 — hotfix: reverted the v1.9.99 register-elision.** The
+  elision changed reachability for detached colon-free elements
+  (document resolution fell to the namebp slot read alone, where
+  every element previously also carried a root-map entry). The
+  `fn:snapshot` detached-deep-copy path — SEGFAULT on macOS CI /
+  0 nodes on Linux CI at the 1.9.101 pin, green at 1.9.94 — is the
+  reported casualty; the revert restores the Round-20
+  register-on-create contract and the direct map-lookup validation
+  in `document_set_root`. The ~4% dispatch win is not worth a
+  crash class; the v1.9.98 namebp flag-clearing stays (it only
+  pins an already-masked invariant). Full ctest 1306/1306.
 
 
 ## [1.9.101] - 2026-09-07
