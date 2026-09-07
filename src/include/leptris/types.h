@@ -208,6 +208,16 @@ typedef enum {
     LEPTRIS_PARSE_DTDATTR     = 2u
 } LeptrisParseFlags;
 
+/* Subtree digest flags (issue #869). The digest is content-defined
+ * (no pointers/addresses — stable across processes); equality
+ * implies subtree equivalence under the flag semantics. */
+typedef enum {
+    LEPTRIS_DIGEST_DEFAULT     = 0,
+    /* Skip whitespace-only text nodes entirely (comparator's
+     * strip-profile default). */
+    LEPTRIS_DIGEST_DROP_WS_TEXT = 1u
+} LeptrisDigestFlags;
+
 typedef struct {
     LeptrisParseFlags flags;   /* passthrough to the parser */
     int strict_mode;           /* -1 = keep thread default (recommended),
