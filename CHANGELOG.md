@@ -1,10 +1,19 @@
 ## [Unreleased]
 
-## [1.9.106] - 2026-09-07
+## [1.9.106] - 2026-09-08
 
 ### Added
 
-- #659 - adoption agency (WHATWG entry only) (html)
+- **#659 — adoption agency (WHATWG entry only, simplified
+  8.2.5.4).** A formatting element closed out of order keeps its
+  scope for later content: the formatting elements open above the
+  close are cloned and reopened at the new insertion point
+  (`<b>1<i>2</b>3</i>` → `<b>1<i>2</i></b><i>3</i>`). Block closes
+  never reopen. The html4 entry keeps libxml2's pop-away shape
+  (stray-end spec migrated to `Html4()`). html5lib corpus **294 →
+  295** (floor raised; **193 → 295**, +53% since the two-mode
+  split); Nokogiri parity **372 held exactly**. Full ctest
+  1309/1309.
 
 
 
