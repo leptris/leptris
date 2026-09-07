@@ -319,6 +319,26 @@ LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                                      xslt->sheet_doc, source);
     if (!ex) return NULL;
     if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
+    if (ex->streaming) {
+        /* #682 stream mode: the result bytes are already in the
+         * buffer — wrap with the declaration the tree path's
+         * serializer would emit (same conditions as below). */
+        LeptrisElement peek = ex->result
+            ? leptris_document_root(ex->result) : NULL;
+        int html_m = effective_html_method(ex->sheet, peek);
+        const char* decl =
+            (!ex->sheet->out_method_text && !html_m &&
+             !ex->sheet->out_omit_decl) ? "<?xml version=\"1.0\"?>\n" : "";
+        size_t dl = strlen(decl);
+        size_t bl = ex->sbuf ? ex->sbuf->size : 0;
+        char* acc = (char*)malloc(dl + bl + 1);
+        if (!acc) { xslt_exec_free(ex); return NULL; }
+        memcpy(acc, decl, dl);
+        if (bl) memcpy(acc + dl, ex->sbuf->data, bl);
+        acc[dl + bl] = '\0';
+        xslt_exec_free(ex);
+        return acc;
+    }
     LeptrisDocument out = ex->result;
     ex->result = NULL;
 

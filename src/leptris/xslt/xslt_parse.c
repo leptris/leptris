@@ -2196,6 +2196,71 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
     free(sheet);
 }
 
+/* ---- #682 stream gate -------------------------------------------------
+ * Conservative instruction scan: only shapes the stream emitters
+ * reproduce byte-exactly. Anything tree-building, post-hoc, or
+ * namespace-bearing keeps the result-tree path. */
+static int stream_indent_on(const XsltStylesheet* sheet) {
+    return sheet->out_indent == 1;   /* xml default is no (−1) */
+}
+
+static int stream_instrs_ok(const XsltInstr* in) {
+    for (; in; in = in->next) {
+        switch (in->kind) {
+            case XSLT_INSTR_RESULT_ELEM:
+                if ((in->ns_uri && in->ns_uri[0]) ||
+                    in->ns_out_count || in->ns_out_default ||
+                    in->attr_set_count)
+                    return 0;
+                for (XsltLAttr* a = in->attrs; a; a = a->next)
+                    if (strchr(a->name, ':')) return 0;
+                break;
+            case XSLT_INSTR_TEXT:
+            case XSLT_INSTR_VALUE_OF:
+                if (in->doe) return 0;
+                break;
+            case XSLT_INSTR_COMMENT:
+            case XSLT_INSTR_PI:
+                if (in->child) return 0;
+                break;
+            case XSLT_INSTR_VARIABLE:
+            case XSLT_INSTR_WITH_PARAM:
+                if (in->child) return 0;   /* content form builds RTFs */
+                break;
+            case XSLT_INSTR_FOR_EACH:
+            case XSLT_INSTR_IF:
+            case XSLT_INSTR_CHOOSE:
+            case XSLT_INSTR_WHEN:
+            case XSLT_INSTR_OTHERWISE:
+            case XSLT_INSTR_CALL_TEMPLATE:
+            case XSLT_INSTR_APPLY_TEMPLATES:
+            case XSLT_INSTR_MESSAGE:
+            case XSLT_INSTR_NUMBER:
+            case XSLT_INSTR_APPLY_IMPORTS:
+            case XSLT_INSTR_ITERATE:
+            case XSLT_INSTR_NEXT_ITERATION:
+            case XSLT_INSTR_BREAK:
+            case XSLT_INSTR_FOR_EACH_GROUP:
+            case XSLT_INSTR_EVALUATE:
+            case XSLT_INSTR_ANALYZE_STRING:
+            case XSLT_INSTR_MATCHING_SUBSTRING:
+            case XSLT_INSTR_NONMATCHING_SUBSTRING:
+            case XSLT_INSTR_TRY:
+            case XSLT_INSTR_CATCH:
+            case XSLT_INSTR_ON_EMPTY:
+            case XSLT_INSTR_ON_NON_EMPTY:
+            case XSLT_INSTR_NEXT_MATCH:
+                break;
+            default:
+                return 0;   /* COPY/COPY_OF/ELEMENT/ATTRIBUTE/SEQUENCE/
+                             * NAMESPACE/DOCUMENT/FORK/ATTR_SET_REF/
+                             * WHERE_POPULATED/FUNC_RESULT/... */
+        }
+        if (in->child && !stream_instrs_ok(in->child)) return 0;
+    }
+    return 1;
+}
+
 XsltStylesheet* xslt_stylesheet_parse(LeptrisDocument doc) {
     if (!doc) return NULL;
     return xslt_stylesheet_parse_root(doc, leptris_document_root(doc));
@@ -2292,5 +2357,24 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
         return NULL;
     }
     xslt_sheet_build_dispatch(sheet);
+
+    /* #682 parity gate: admit only the result shapes the stream
+     * emitters cover byte-exactly. Every instruction in every
+     * template (and the globals) must be stream-safe; any tree-
+     * building or post-hoc op keeps the sheet on the result-tree
+     * path. Conservative by construction — unknown kinds reject. */
+    sheet->can_stream = !sheet->out_method_text && !sheet->out_method_html &&
+        !stream_indent_on(sheet) && sheet->out_cdata_count == 0 &&
+        sheet->charmap_count == 0 && sheet->out_standalone < 0 &&
+        !sheet->out_doctype_system && !sheet->out_doctype_public &&
+        sheet->version_major < 3 &&
+        (sheet->mode_on_no_match == 1 || sheet->mode_on_no_match == 6) &&
+        stream_instrs_ok(sheet->globals);
+    for (size_t i = 0; sheet->can_stream && i < sheet->mode_count; i++) {
+        for (size_t t = 0; sheet->can_stream && t < sheet->modes[i].n; t++) {
+            sheet->can_stream =
+                stream_instrs_ok(sheet->modes[i].list[t]->body);
+        }
+    }
     return sheet;
 }

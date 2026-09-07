@@ -11,6 +11,7 @@
  * text-method output accumulates string-values only. */
 #include "../common/port.h"
 #include "xslt_internal.h"
+#include "../serialize/serialize.h"  /* SerializeBuffer (#682 stream) */
 #include "../dtd/model.h"   /* leptris_dtd_apply_attribute_defaults (#606) */
 #include "../dom/text.h"
 #include "../dom/cdata.h"
@@ -343,8 +344,50 @@ static LeptrisElement out_copy_elem(XsltExec* ex, LeptrisElement parent,
 
 static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n);
 
+/* ---- #682 stream emitters ------------------------------------------
+ * Text escaping mirrors the serializer's text mode (& < >); attr
+ * values mirror serialize.c's attribute rules (apostrophe raw per
+ * bug-86; tab/newline/CR as character references). */
+/* Run-based emission: bulk-append the plain spans (strcspn finds
+ * the next special), then the escape — per-character appends ate
+ * the streaming win on first measurement. */
+static void stream_emit_text(struct SerializeBuffer* b, const char* t) {
+    if (!t) return;
+    for (const char* p = t; *p; ) {
+        size_t run = strcspn(p, "&<>");
+        if (run) buffer_append_len(b, p, run);
+        if (!p[run]) break;
+        buffer_append(b, p[run] == '&' ? "&amp;"
+                        : p[run] == '<' ? "&lt;" : "&gt;");
+        p += run + 1;
+    }
+}
+
+static void stream_emit_attr_value(struct SerializeBuffer* b, const char* t) {
+    if (!t) return;
+    for (const char* p = t; *p; ) {
+        size_t run = strcspn(p, "&<>\"\t\n\r");
+        if (run) buffer_append_len(b, p, run);
+        if (!p[run]) break;
+        switch (p[run]) {
+            case '&': buffer_append(b, "&amp;"); break;
+            case '<': buffer_append(b, "&lt;"); break;
+            case '>': buffer_append(b, "&gt;"); break;
+            case '"': buffer_append(b, "&quot;"); break;
+            case '\t': buffer_append(b, "&#9;"); break;
+            case '\n': buffer_append(b, "&#10;"); break;
+            default: buffer_append(b, "&#13;"); break;
+        }
+        p += run + 1;
+    }
+}
+
 static void out_append_text(XsltExec* ex, LeptrisElement parent,
                             const char* text) {
+    if (ex->streaming && !ex->rtf_capturing && text && *text) {
+        stream_emit_text(ex->sbuf, text);
+        return;
+    }
     if (!text || !*text) return;
     if (parent) {
         LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
@@ -786,6 +829,44 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
     }
     LeptrisElement parent = ex->pending_parent;
     const char* out_name = apply_ns_alias(ex->sheet, in->name);
+    if (ex->streaming) {
+        /* Gate guarantees: no namespaces, no attr-sets, no
+         * xsl:attribute children — the open tag is complete before
+         * the children run, so it emits whole and the empty case
+         * rewrites the trailing '>' to '/>'. */
+        buffer_append_char(ex->sbuf, '<');
+        buffer_append(ex->sbuf, out_name ? out_name : "element");
+        for (XsltLAttr* a = in->attrs; a; a = a->next) {
+            char* v = eval_avt(ex, a->value, node);
+            buffer_append_char(ex->sbuf, ' ');
+            buffer_append(ex->sbuf, a->name);
+            buffer_append(ex->sbuf, "=\"");
+            stream_emit_attr_value(ex->sbuf, v ? v : "");
+            buffer_append_char(ex->sbuf, '"');
+            free(v);
+        }
+        buffer_append_char(ex->sbuf, '>');
+        size_t mark = ex->sbuf->size;
+        int rc = xslt_exec_instrs(ex, in->child, node);
+        if (rc == 0 && mark == ex->sbuf->size) {
+            /* 3.0 §26.4 on-empty: element came back empty — run the
+             * on-empty child's content into it. */
+            for (const XsltInstr* c = in->child; c; c = c->next) {
+                if (c->kind != XSLT_INSTR_ON_EMPTY) continue;
+                rc = xslt_exec_instrs(ex, c->child, node);
+                break;
+            }
+        }
+        if (mark == ex->sbuf->size && ex->sbuf->size > 0) {
+            ex->sbuf->data[ex->sbuf->size - 1] = '/';
+            buffer_append_char(ex->sbuf, '>');
+        } else {
+            buffer_append(ex->sbuf, "</");
+            buffer_append(ex->sbuf, out_name ? out_name : "element");
+            buffer_append_char(ex->sbuf, '>');
+        }
+        return rc;
+    }
     LeptrisElement e = out_append_elem(ex, parent, out_name, in->ns_uri);
     if (!e) return -1;
     /* libxslt namespace fixup: an unprefixed literal with NO
@@ -955,6 +1036,13 @@ static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
      * content included — Saxon-verified). */
     char* tvt = in->tvt && in->text ? eval_avt(ex, in->text, node) : NULL;
     const char* text = tvt ? tvt : in->text;
+    if (ex->streaming && !ex->rtf_capturing) {
+        /* Gate rejects DOE in stream sheets; escaping matches the
+         * serializer's text mode. */
+        if (text) stream_emit_text(ex->sbuf, text);
+        free(tvt);
+        return 0;
+    }
     LeptrisElement parent = ex->pending_parent;
     if (parent) {
         if (in->doe && text) {
@@ -3797,6 +3885,12 @@ static int op_comment(XsltExec* ex, const XsltInstr* in,
                       LeptrisElement node) {
     /* Literal comment (template content): in->text carries the
      * content verbatim — no instruction children. */
+    if (ex->streaming && !in->child && in->text) {
+        buffer_append(ex->sbuf, "<!--");
+        buffer_append(ex->sbuf, in->text);
+        buffer_append(ex->sbuf, "-->");
+        return 0;
+    }
     if (!in->child && in->text) {
         LeptrisNodeRef cm = leptris_comment_node_create(ex->result,
                                                         in->text);
@@ -3823,6 +3917,17 @@ static int op_pi(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     char* nm = in->name && strchr(in->name, '{')
                    ? eval_avt(ex, in->name, node)
                    : (in->name ? leptris_strdup(in->name) : NULL);
+    if (ex->streaming && !in->child && nm) {
+        buffer_append(ex->sbuf, "<?");
+        buffer_append(ex->sbuf, nm);
+        if (in->text && *in->text) {
+            buffer_append_char(ex->sbuf, ' ');
+            buffer_append(ex->sbuf, in->text);
+        }
+        buffer_append(ex->sbuf, "?>");
+        free(nm);
+        return 0;
+    }
     /* Literal PI (template content). */
     if (!in->child && nm) {
         LeptrisNodeRef pi = leptris_pi_node_create(
@@ -4591,6 +4696,7 @@ static void register_ops(void) {
 
 void xslt_exec_free(XsltExec* ex) {
     if (!ex) return;
+    if (ex->sbuf) { buffer_free(ex->sbuf); ex->sbuf = NULL; }
     xslt_keys_free(ex);
     xslt_accs_free(ex);
     xslt_docs_free(ex);
@@ -4640,6 +4746,10 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     ex->current_size = 1;  /* last() default context size */
     ex->result = leptris_document_create();
     if (!ex->result) { xslt_exec_free(ex); return NULL; }
+    if (sheet->can_stream) {
+        ex->sbuf = buffer_create(0);
+        if (ex->sbuf) ex->streaming = 1;
+    }
 
     /* Install the function-bridge state on the SOURCE document for
      * the transform's duration: every XPath eval on this doc (both
