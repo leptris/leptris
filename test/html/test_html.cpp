@@ -43,6 +43,38 @@ std::string Html(const char* in) {
     }
     return r;
 }
+std::string Html4(const char* in) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_html4_string(in, std::strlen(in), &st);
+    if (!doc) return "(parse-failed)";
+    char* out = leptris_document_serialize(doc, nullptr);
+    std::string r = out ? out : "(null)";
+    leptris_free_string(out);
+    leptris_document_free(doc);
+    /* Strip the declaration for shape comparisons. */
+    const char* decl = "<?xml version=\"1.0\"?>";
+    if (r.compare(0, std::strlen(decl), decl) == 0) {
+        size_t rest = std::strlen(decl);
+        if (rest < r.size() && r[rest] == '\n') rest++;
+        r = r.substr(rest);
+    }
+    /* The parser synthesizes the Nokogiri document shape
+     * <html><body>...</body></html> (no empty <head> — Nokogiri
+     * omits it without head content); the specs below pin the BODY
+     * content (the tolerant-parsing behaviors under test). */
+    const char* open_w = "<html><body>";
+    const char* close_w = "</body></html>";
+    if (r.compare(0, std::strlen(open_w), open_w) == 0 &&
+        r.size() >= std::strlen(open_w) + std::strlen(close_w) &&
+        r.compare(r.size() - std::strlen(close_w), std::strlen(close_w),
+                  close_w) == 0) {
+        return r.substr(std::strlen(open_w),
+                        r.size() - std::strlen(open_w) -
+                            std::strlen(close_w));
+    }
+    return r;
+}
+
 
 /* #659 (html5lib corpus fallout): inputs that append NOTHING
  * (stray end tag only, a doctype-only document, a second doctype,
@@ -219,7 +251,9 @@ TEST(HtmlParse, CommentsAndDoctypeSurvive) {
 }
 
 TEST(HtmlParse, StrayEndTagsAreIgnoredOrPop) {
-    EXPECT_EQ(Html("<b><i>x</b></i>"), "<b><i>x</i></b>");
+    /* libxml2 shape (stray </i> ignored, no clone) — the WHATWG
+     * entry keeps the adopted empty <i> (adoption agency). */
+    EXPECT_EQ(Html4("<b><i>x</b></i>"), "<b><i>x</i></b>");
     EXPECT_EQ(Html("</p>x"), "x");
     EXPECT_EQ(Html("<ul><li>a</ul></li>"), "<ul><li>a</li></ul>");
 }
@@ -458,4 +492,14 @@ TEST(HtmlTwoModes, FosterParenting) {
     leptris_free_string(sv4);
     leptris_xpath_result_free(r4);
     leptris_document_free(d4);
+}
+
+/* #659 adoption agency (WHATWG entry only): a formatting element
+ * closed out of order keeps its scope for later content — the
+ * inner open formatting elements are cloned at the new insertion
+ * point (<b>1<i>2</b>3</i> -> <b>1<i>2</i></b><i>3</i>). The html4
+ * entry keeps libxml2's pop-away shape. */
+TEST(HtmlTwoModes, AdoptionAgency) {
+    EXPECT_EQ(Html("<b>1<i>2</b>3</i>"), "<b>1<i>2</i></b><i>3</i>");
+    EXPECT_EQ(Html4("<b>1<i>2</b>3</i>"), "<b>1<i>2</i></b>3");
 }
