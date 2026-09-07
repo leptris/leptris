@@ -629,6 +629,7 @@ typedef struct xslt_exec {
      * PI + control flow; everything else keeps the result tree). */
     struct SerializeBuffer* sbuf;
     int streaming;
+    int cache_owner_set; int cache_owner_prev;
 
     /* current(): the node being processed by the template rule or
      * for-each in flight (§12.4) — distinct from the predicate
