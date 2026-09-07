@@ -148,10 +148,14 @@ LEPTRIS_API LeptrisNodeRef leptris_node_next_sibling(LeptrisNodeRef node);
 LEPTRIS_API LeptrisNodeRef leptris_node_previous_sibling(LeptrisNodeRef node);
 
 /**
- * Get child count (all node types)
+ * Get child ELEMENT count (issue #910: the count covers elements
+ * only; the mixed-kind child chain — text, comments, CDATA, PIs —
+ * is walked via leptris_node_first_child/next_sibling, or sized
+ * and copied in one call by leptris_node_children(parent, NULL, 0)
+ * followed by the copy call).
  *
  * @param node Parent node
- * @return Number of child nodes
+ * @return Number of child elements (0 for non-element nodes)
  */
 LEPTRIS_API size_t leptris_node_child_count(LeptrisNodeRef node);
 
