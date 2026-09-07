@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.100] - 2026-09-07
+
+### Performance
+
+- #682 - streaming result emission Phase 1 (gated) (xslt)
+
+
+
 ## [1.9.99] - 2026-09-07
 
 ### Added
