@@ -15,6 +15,10 @@ void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc
 void leptris_root_doc_unregister(LeptrisElement root);
 struct leptris_document* leptris_root_doc_lookup(LeptrisElement root);
 void leptris_root_doc_memo_invalidate(const struct leptris_document* doc);
+/* #904: prime the TLS (root, doc) memo from a driver that knows
+ * the pair (iterparse yields). Root must be registered. */
+void leptris_root_doc_memo_prime(LeptrisElement root,
+                                 struct leptris_document* doc);
 
 struct leptris_document* leptris_element_get_document(LeptrisElement elem);
 LeptrisMemoryPool* leptris_element_get_pool(LeptrisElement elem);

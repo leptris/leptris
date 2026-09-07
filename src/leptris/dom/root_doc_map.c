@@ -141,6 +141,19 @@ struct leptris_document* leptris_root_doc_lookup(LeptrisElement root) {
 static LEPTRIS_THREAD_LOCAL LeptrisElement g_memo_root;
 static LEPTRIS_THREAD_LOCAL struct leptris_document* g_memo_doc;
 
+/* #904: prime the TLS last-root memo from a driver that already
+ * knows the (root, doc) pair — the iterparse yield path hands out
+ * a subtree that is released before the next, so the memo misses
+ * on every cold read and each pays the climb + bucket walk. The
+ * caller must pass a REGISTERED root (register-on-create contract
+ * guarantees created subtree roots are); free invalidates. */
+void leptris_root_doc_memo_prime(LeptrisElement root,
+                                 struct leptris_document* doc) {
+    if (!root || !doc) return;
+    g_memo_root = root;
+    g_memo_doc = doc;
+}
+
 void leptris_root_doc_memo_invalidate(const struct leptris_document* doc) {
     if (g_memo_doc == doc) {
         g_memo_root = NULL;

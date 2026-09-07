@@ -15,6 +15,7 @@
 #include "../../include/leptris.h"
 #include "../../include/leptris/sax/sax.h"
 #include "../dom/element.h"   /* leptris_element_set_prefix (internal) */
+#include "../dom/root_doc_map.h"  /* memo prime (#904) */
 #include "../memory/arena.h"  /* subtree arena reuse (#563) */
 #include <stdlib.h>
 #include <stdio.h>
@@ -367,6 +368,11 @@ LEPTRIS_API LeptrisElement leptris_iterparse_next(LeptrisIterparse it) {
                 if (yield) {
                     it->done = complete;
                     it->done_depth = complete_depth;
+                    /* #904: prime the last-root memo — yielded
+                     * subtrees are released before the next, so
+                     * cold reads on this subtree would otherwise
+                     * pay the climb + bucket walk every call. */
+                    leptris_root_doc_memo_prime(complete, it->doc);
                     return it->done;
                 }
                 break;
