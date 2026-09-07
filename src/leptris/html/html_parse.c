@@ -2262,6 +2262,12 @@ typedef struct {
      * BEFORE the table in its parent. libxml2 keeps them in the
      * table; the html4 entry does not foster. Same mode arg. */
     int whatwg_foster;
+    /* #659 adoption agency (simplified 8.2.5.4): formatting
+     * elements open ABOVE a matched close are cloned and reopened
+     * at the new insertion point, so misnested content keeps its
+     * formatting scope (<b>1<i>2</b>3</i> -> <b>1<i>2</i></b><i>3
+     * </i>). libxml2 pops them away; html4 keeps that shape. */
+    int whatwg_adopt;
 } HBuilder;
 
 /* Pool a NUL-terminated ASCII-lowercased copy of [s, s+len). */
@@ -2306,6 +2312,17 @@ static int h_fosterable(HBuilder* b, LeptrisNodeRef n) {
              h_ieq_raw(nname, "tbody") || h_ieq_raw(nname, "form") ||
              h_ieq_raw(nname, "script") || h_ieq_raw(nname, "style") ||
              h_ieq_raw(nname, "template") || h_ieq_raw(nname, "input"));
+}
+
+/* WHATWG formatting elements (the adoption agency's subject). */
+static int h_is_formatting(const char* n) {
+    return h_ieq_raw(n, "a") || h_ieq_raw(n, "b") ||
+           h_ieq_raw(n, "big") || h_ieq_raw(n, "code") ||
+           h_ieq_raw(n, "em") || h_ieq_raw(n, "font") ||
+           h_ieq_raw(n, "i") || h_ieq_raw(n, "nobr") ||
+           h_ieq_raw(n, "s") || h_ieq_raw(n, "small") ||
+           h_ieq_raw(n, "strike") || h_ieq_raw(n, "strong") ||
+           h_ieq_raw(n, "tt") || h_ieq_raw(n, "u");
 }
 
 static int h_is_table_context(LeptrisElement e) {
@@ -2467,6 +2484,7 @@ static LeptrisDocument html_parse_shared(
     b.pool = doc->pool;
     b.whatwg_head_set = whatwg;
     b.whatwg_foster = whatwg;
+    b.whatwg_adopt = whatwg;
 
     const char* p = buf;
     const char* end = buf + len;
@@ -2555,7 +2573,33 @@ static LeptrisDocument html_parse_shared(
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
                         if (on && strcmp(on, lname) == 0) {
+                            /* #659 adoption agency (WHATWG, simplified
+                             * 8.2.5.4 steps): formatting elements open
+                             * ABOVE the match are cloned and reopened
+                             * at the new insertion point — misnested
+                             * content keeps its formatting scope. */
+                            char clones[16][24];
+                            size_t nclones = 0;
+                            if (b.whatwg_adopt && h_is_formatting(lname)) {
+                                for (size_t k = d; k < b.depth && nclones < 16;
+                                     k++) {
+                                    const char* fn =
+                                        leptris_element_name(b.open[k]);
+                                    if (fn && h_is_formatting(fn)) {
+                                        size_t fl = strlen(fn);
+                                        if (fl < sizeof(clones[0])) {
+                                            memcpy(clones[nclones], fn, fl + 1);
+                                            nclones++;
+                                        }
+                                    }
+                                }
+                            }
                             h_pop_to(&b, d - 1);
+                            for (size_t k = 0; k < nclones; k++) {
+                                LeptrisElement c =
+                                    h_open_element(&b, clones[k]);
+                                (void)c;
+                            }
                             break;
                         }
                     }
