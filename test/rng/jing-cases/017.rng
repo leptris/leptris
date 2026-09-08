@@ -1,0 +1,1 @@
+<grammar xmlns='http://relaxng.org/ns/structure/1.0'><start><element name='a'><attribute name='k'><value>v</value></attribute></element></start></grammar>

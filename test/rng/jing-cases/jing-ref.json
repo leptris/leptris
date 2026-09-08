@@ -1,0 +1,192 @@
+{
+ "000.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "000.bad": {
+  "rc": 1,
+  "out": "000.bad.xml:1:5: error: element \"a\" missing required attribute \"x\"",
+  "err": ""
+ },
+ "001.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "001.bad": {
+  "rc": 1,
+  "out": "001.bad.xml:1:11: error: found attribute \"x\", but no attributes allowed here",
+  "err": ""
+ },
+ "002.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "002.bad": {
+  "rc": 1,
+  "out": "002.bad.xml:1:5: error: element \"b\" not allowed anywhere; expected element \"a\"",
+  "err": ""
+ },
+ "003.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "003.bad": {
+  "rc": 1,
+  "out": "003.bad.xml:1:8: error: element \"c\" not allowed anywhere; expected element \"a\" or \"b\"\n003.bad.xml:1:12: error: element \"r\" incomplete; expected element \"a\" or \"b\"",
+  "err": ""
+ },
+ "004.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "004.bad": {
+  "rc": 1,
+  "out": "004.bad.xml:1:12: error: element \"a\" not allowed here; expected the element end-tag",
+  "err": ""
+ },
+ "005.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "005.bad": {
+  "rc": 1,
+  "out": "005.bad.xml:1:5: error: element \"r\" incomplete; missing required element \"a\"",
+  "err": ""
+ },
+ "006.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "006.bad": {
+  "rc": 1,
+  "out": "006.bad.xml:1:8: error: element \"b\" not allowed yet; missing required element \"a\"\n006.bad.xml:1:12: error: element \"a\" not allowed here; expected the element end-tag",
+  "err": ""
+ },
+ "007.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "007.bad": {
+  "rc": 1,
+  "out": "007.bad.xml:1:12: error: element \"a\" not allowed here; expected element \"b\"\n007.bad.xml:1:16: error: element \"r\" incomplete; missing required element \"b\"",
+  "err": ""
+ },
+ "008.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "008.bad": {
+  "rc": 1,
+  "out": "008.bad.xml:1:8: error: element \"x\" not allowed anywhere; expected the element end-tag or text",
+  "err": ""
+ },
+ "009.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "009.bad": {
+  "rc": 1,
+  "out": "009.bad.xml:1:9: error: character content of element \"n\" invalid; must be an integer",
+  "err": ""
+ },
+ "010.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "010.bad": {
+  "rc": 1,
+  "out": "010.bad.xml:1:10: error: character content of element \"v\" invalid; must be equal to \"yes\"",
+  "err": ""
+ },
+ "011.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "011.bad": {
+  "rc": 1,
+  "out": "011.bad.xml:1:11: error: character content of element \"l\" invalid; token \"x\" invalid; must be an integer",
+  "err": ""
+ },
+ "012.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "012.bad": {
+  "rc": 1,
+  "out": "012.bad.xml:1:7: error: element \"b\" not allowed anywhere; expected the element end-tag, text or element \"em\"",
+  "err": ""
+ },
+ "013.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "013.bad": {
+  "rc": 1,
+  "out": "013.bad.xml:1:5: error: element \"f\" not allowed anywhere; expected element \"e\"",
+  "err": ""
+ },
+ "014.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "014.bad": {
+  "rc": 1,
+  "out": "014.bad.xml:1:15: error: element \"other\" not allowed anywhere; expected the element end-tag or element \"item\"",
+  "err": ""
+ },
+ "015.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "015.bad": {
+  "rc": 1,
+  "out": "015.bad.xml:1:5: error: element \"z\" not allowed anywhere; expected element \"x\" or \"y\"",
+  "err": ""
+ },
+ "016.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "016.bad": {
+  "rc": 1,
+  "out": "016.bad.xml:1:15: error: element \"author\" not allowed yet; missing required element \"title\"\n016.bad.xml:1:32: error: element \"title\" not allowed here; expected the element end-tag or element \"author\"",
+  "err": ""
+ },
+ "017.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "017.bad": {
+  "rc": 1,
+  "out": "017.bad.xml:1:11: error: value of attribute \"k\" is invalid; must be equal to \"v\"",
+  "err": ""
+ },
+ "018.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "018.bad": {
+  "rc": 1,
+  "out": "018.bad.xml:1:11: error: element \"a\" missing required attribute \"q\"",
+  "err": ""
+ }
+}
