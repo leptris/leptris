@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.115] - 2026-09-08
+
+### Added
+
+- **#878 RNG schema errors publish to `leptris_last_error`.**
+  `leptris_rng_parse` previously returned NULL with only a status
+  code — the schema error detail lived on the dying handle. Parse
+  and file failures now publish to the thread-global channel (the
+  same one `leptris_parse_string` uses), so bindings can raise
+  with detail: schema errors carry the parse message (`unknown
+  pattern element: ...`; include chains inline their href), missing
+  files say `cannot open schema file '...'`, non-well-formed schema
+  files say so. Groundwork for the `Leptris::XML::RelaxNG` Ruby
+  binding. 2 RED-first specs; RNG suite 41/41, corpus gate 38/38.
+
+
+
 ## [1.9.114] - 2026-09-08
 
 ### Added
