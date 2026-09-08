@@ -238,6 +238,45 @@ TEST(C14N, DeepNestingRoundTrips) {
     leptris_document_free(doc);
 }
 
+/* #919: REC-xml-c14n section 2.3 — attribute nodes sort by
+ * namespace URI (empty/no-namespace FIRST), then local name.
+ * Namespaced attributes come after ALL bare ones. */
+TEST(C14nConformance, AttributesSortedByUriThenLocal) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<doc xmlns:p='urn:p' xmlns:z='urn:z'"
+        " xmlns='urn:d' b='2' a='1'><e p:x='v' z:w='w' c='k' a='m'>t</e></doc>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_0, 0);
+    ASSERT_NE(out, nullptr);
+    /* Bare attrs (no namespace) first, sorted: a, b on doc; a, c on
+     * e; then namespaced, URI 'urn:p' < 'urn:z': p:x before z:w. */
+    std::string s(out);
+    size_t doc_at = s.find("<doc");
+    size_t e_at = s.find("<e ");
+    ASSERT_NE(doc_at, std::string::npos);
+    ASSERT_NE(e_at, std::string::npos);
+    size_t a_pos = s.find("a=\"1\"", doc_at);
+    size_t b_pos = s.find("b=\"2\"", doc_at);
+    ASSERT_NE(a_pos, std::string::npos);
+    ASSERT_NE(b_pos, std::string::npos);
+    EXPECT_LT(a_pos, b_pos);
+    size_t ea_pos = s.find("a=\"m\"", e_at);
+    size_t ec_pos = s.find("c=\"k\"", e_at);
+    size_t px_pos = s.find("p:x=\"v\"", e_at);
+    size_t zw_pos = s.find("z:w=\"w\"", e_at);
+    ASSERT_NE(ea_pos, std::string::npos);
+    ASSERT_NE(ec_pos, std::string::npos);
+    ASSERT_NE(px_pos, std::string::npos);
+    ASSERT_NE(zw_pos, std::string::npos);
+    EXPECT_LT(ea_pos, ec_pos);
+    EXPECT_LT(ec_pos, px_pos);   /* bare before namespaced */
+    EXPECT_LT(px_pos, zw_pos);   /* urn:p < urn:z */
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
 }  // namespace
 
 // ---- TODO 85: C14N 1.1 + exclusive canonicalization -------------------
