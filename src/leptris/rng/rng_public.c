@@ -1,5 +1,6 @@
 /* rng/rng_public.c — public RELAX NG entries (#878 phase 1). */
 #include "rng_internal.h"
+#include "../leptris_internal.h"
 #include <stdlib.h>
 
 LEPTRIS_API LeptrisRelaxNG leptris_rng_parse(const char* schema,
@@ -19,6 +20,7 @@ LEPTRIS_API LeptrisRelaxNG leptris_rng_parse(const char* schema,
         return NULL;
     }
     if (rng->error) {
+        leptris_set_error(LEPTRIS_ERROR_PARSE_FAILED, rng->error);
         leptris_rng_free((LeptrisRelaxNG)rng);
         if (status) *status = LEPTRIS_ERROR_PARSE;
         return NULL;

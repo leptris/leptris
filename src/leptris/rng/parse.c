@@ -8,6 +8,7 @@
  */
 #include "rng_internal.h"
 #include "../dom/element.h"
+#include "../leptris_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -583,11 +584,20 @@ struct leptris_relaxng* rng_parse_file(const char* path) {
     if (!path) return NULL;
     size_t len = 0;
     char* buf = slurp_file(path, &len);
-    if (!buf) return NULL;
+    if (!buf) {
+        char msg[600];
+        snprintf(msg, sizeof(msg), "cannot open schema file '%s'", path);
+        leptris_set_error(LEPTRIS_ERROR_PARSE_FAILED, msg);
+        return NULL;
+    }
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(buf, len, &st);
     free(buf);
-    if (!doc) return NULL;
+    if (!doc) {
+        leptris_set_error(LEPTRIS_ERROR_PARSE_FAILED,
+                          "schema file is not well-formed XML");
+        return NULL;
+    }
 
     /* Include hrefs resolve relative to the schema file's directory. */
     char base[512];
