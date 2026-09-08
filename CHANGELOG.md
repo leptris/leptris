@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.111] - 2026-09-08
+
+### Added
+
+- #878 phase 3 - backtracking fold, list tokens, mixed, ref guards (rng)
+
+
+
 ## [1.9.110] - 2026-09-08
 
 ### Added
