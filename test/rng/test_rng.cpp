@@ -291,3 +291,46 @@ TEST(RngValidate, ErrorCarriesJingShape) {
     leptris_document_free(d);
     leptris_rng_free(rng);
 }
+
+/* ---- phase 3: list tokens, mixed text, ref-cycle safety ------- */
+
+TEST(RngValidate, ListTokenizesWhitespaceSeparatedTokens) {
+    const char* sch =
+        "<start><element name='r'><list><oneOrMore>"
+        "<data type='integer'/>"
+        "</oneOrMore></list></element></start>";
+    EXPECT_EQ(validates(sch, "<r>1 2 3</r>"), 1);
+    EXPECT_EQ(validates(sch, "<r>1 x 3</r>"), 0);
+    EXPECT_EQ(validates(sch, "<r>  </r>"), 0);
+}
+
+TEST(RngValidate, ListValueTokens) {
+    EXPECT_EQ(validates(
+        "<start><element name='r'><list><value>a</value><value>b</value>"
+        "</list></element></start>",
+        "<r>a b</r>"), 1);
+    EXPECT_EQ(validates(
+        "<start><element name='r'><list><value>a</value><value>b</value>"
+        "</list></element></start>",
+        "<r>b a</r>"), 0);
+}
+
+TEST(RngValidate, MixedAllowsTextAroundElements) {
+    EXPECT_EQ(validates(
+        "<start><element name='p'><mixed>"
+        "<zeroOrMore><element name='em'><text/></element></zeroOrMore>"
+        "</mixed></element></start>",
+        "<p>hello <em>x</em> world</p>"), 1);
+}
+
+TEST(RngValidate, RefRecursionIsGuarded) {
+    /* A cyclic define (item -> item*) over a non-recursive document:
+     * must terminate with a verdict, not hang. */
+    EXPECT_EQ(validates(
+        "<start><ref name='i'/></start>"
+        "<define name='i'>"
+        "<element name='item'>"
+        "<choice><empty/><ref name='i'/></choice>"
+        "</element></define>",
+        "<item><item><item/></item></item>"), 1);
+}
