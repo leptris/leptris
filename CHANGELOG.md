@@ -4,7 +4,17 @@
 
 ### Added
 
-- #878 phase 2 - core validator + Jing-shaped errors (rng)
+- **#878 phase 2 — RELAX NG core validator + Jing-shaped
+  errors.** `leptris_rng_validate(rng, doc)` matches instance
+  documents against the pattern IR (simplified core-subset
+  semantics): element with **exact attribute closure** (every
+  instance attribute consumed, every required one present),
+  attribute/text/data(string, integer)/value leaves, choice,
+  group, interleave (any-order), optional/zeroOrMore/oneOrMore,
+  mixed, ref, empty. On failure `leptris_rng_error` returns the
+  first violation in Jing's `line:col: error: message` shape —
+  the drop-in contract for the ruby-jing migration. 8 new specs
+  (16 total in the RNG suite); full ctest 1327/1327.
 
 
 
