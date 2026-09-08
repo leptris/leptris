@@ -4,7 +4,14 @@
 
 ### Fixed
 
-- #919 - attribute nodes sort by namespace URI then local (c14n)
+- **#919 — C14N attributes sort by namespace URI, then local
+  name.** Completes the #881 fix: attribute nodes now follow
+  REC-xml-c14n §2.3 — namespace URI first (no-namespace = empty =
+  first), then local name, with URIs resolved through the owner
+  element's in-scope declarations. A prefixed attribute placed
+  before bare ones in the source now reorders correctly; canonical
+  bytes match the reference implementations on mixed elements. RED
+  spec `AttributesSortedByUriThenLocal`; full ctest 1311/1311.
 
 
 
