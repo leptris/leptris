@@ -627,6 +627,21 @@ LEPTRIS_API LeptrisDocument leptris_parse_html4_string(const char* html,
 LEPTRIS_API LeptrisRelaxNG leptris_rng_parse(const char* schema,
                                               size_t len,
                                               LeptrisStatus* status);
+
+/* Parse a RELAX NG schema from a file. <include href="..."> resolves
+ * relative to the file's directory; a <start>/<define> nested inside
+ * an <include> replaces the included grammar's matching declaration
+ * (which must exist). Include cycles are detected and rejected.
+ *
+ * @param path   schema file path
+ * @param status LEPTRIS_OK, or LEPTRIS_ERROR_PARSE (missing file,
+ *               not well-formed, schema error, bad include)
+ * @return compiled schema, or NULL (status says why)
+ *
+ * Memory: free with leptris_rng_free.
+ */
+LEPTRIS_API LeptrisRelaxNG leptris_rng_parse_file(const char* path,
+                                                  LeptrisStatus* status);
 LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
 /* Validate an instance document against the parsed schema
  * (phase-2 core subset: element/attribute/text/data/value/

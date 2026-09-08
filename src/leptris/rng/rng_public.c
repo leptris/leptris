@@ -34,6 +34,26 @@ LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng) {
     free(r);
 }
 
+LEPTRIS_API LeptrisRelaxNG leptris_rng_parse_file(const char* path,
+                                                  LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!path) {
+        if (status) *status = LEPTRIS_ERROR_NULL_ARG;
+        return NULL;
+    }
+    struct leptris_relaxng* rng = rng_parse_file(path);
+    if (!rng) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        return NULL;
+    }
+    if (rng->error) {
+        leptris_rng_free((LeptrisRelaxNG)rng);
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        return NULL;
+    }
+    return (LeptrisRelaxNG)rng;
+}
+
 LEPTRIS_API int leptris_rng_validate(LeptrisRelaxNG rng,
                                       LeptrisDocument doc) {
     if (!rng || !doc) return 0;
