@@ -1,0 +1,1 @@
+<grammar xmlns='http://relaxng.org/ns/structure/1.0'><start><element name='r'><choice><element name='a'><empty/></element><element name='b'><empty/></element></choice></element></start></grammar>

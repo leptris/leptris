@@ -271,6 +271,25 @@ TEST(RngValidate, DataAndValueLeaves) {
         "<n>no</n>"), 0);
 }
 
+TEST(RngValidate, TextAndDataStringAcceptEmptyContent) {
+    /* RELAX NG: <text/> and <data type='string'/> match zero-length
+     * and whitespace-only content; integer does not (Jing-confirmed). */
+    const char* text_sch =
+        "<start><element name='t'><text/></element></start>";
+    EXPECT_EQ(validates(text_sch, "<t/>"), 1);
+    EXPECT_EQ(validates(text_sch, "<t>  </t>"), 1);
+    EXPECT_EQ(validates(text_sch, "<t><x/></t>"), 0);
+    const char* str_sch =
+        "<start><element name='n'><data type='string'/></element></start>";
+    EXPECT_EQ(validates(str_sch, "<n/>"), 1);
+    EXPECT_EQ(validates(str_sch, "<n>  </n>"), 1);
+    const char* int_sch =
+        "<start><element name='n'><data type='integer'/></element></start>";
+    EXPECT_EQ(validates(int_sch, "<n/>"), 0);
+    EXPECT_EQ(validates(int_sch, "<n>  </n>"), 0);
+    EXPECT_EQ(validates(int_sch, "<n>5</n>"), 1);
+}
+
 TEST(RngValidate, ErrorCarriesJingShape) {
     LeptrisStatus st = LEPTRIS_OK;
     const char sch[] =
@@ -333,4 +352,68 @@ TEST(RngValidate, RefRecursionIsGuarded) {
         "<choice><empty/><ref name='i'/></choice>"
         "</element></define>",
         "<item><item><item/></item></item>"), 1);
+}
+
+/* ---- phase 4: Jing-corpus conformance fixes --------------------- */
+
+TEST(RngValidate, InterleaveConsumesEachChildOnceAndRequiresAll) {
+    const char* sch =
+        "<start><element name='r'><interleave>"
+        "<element name='a'><empty/></element>"
+        "<element name='b'><empty/></element>"
+        "</interleave></element></start>";
+    EXPECT_EQ(validates(sch, "<r><a/><b/></r>"), 1);
+    EXPECT_EQ(validates(sch, "<r><b/><a/></r>"), 1);
+    EXPECT_EQ(validates(sch, "<r><a/><a/></r>"), 0);
+    EXPECT_EQ(validates(sch, "<r><a/></r>"), 0);
+}
+
+TEST(RngValidate, ListRejectsTokensNoLeafAccepts) {
+    const char* sch =
+        "<start><element name='l'><list><oneOrMore>"
+        "<data type='integer'/>"
+        "</oneOrMore></list></element></start>";
+    EXPECT_EQ(validates(sch, "<l>1 2 3</l>"), 1);
+    EXPECT_EQ(validates(sch, "<l>1 x</l>"), 0);
+    EXPECT_EQ(validates(sch, "<l>x 1</l>"), 0);
+}
+
+TEST(RngValidate, StartChoiceFromCombinedDefine) {
+    const char* sch =
+        "<start><ref name='c'/></start>"
+        "<define name='c'><element name='x'><empty/></element></define>"
+        "<define name='c' combine='choice'>"
+        "<element name='y'><empty/></element></define>";
+    EXPECT_EQ(validates(sch, "<x/>"), 1);
+    EXPECT_EQ(validates(sch, "<y/>"), 1);
+    EXPECT_EQ(validates(sch, "<z/>"), 0);
+}
+
+TEST(RngValidate, InvalidVerdictAlwaysCarriesAnError) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char sch[] =
+        "<grammar xmlns='" RNGNS "'>"
+        "<start><ref name='c'/></start>"
+        "<define name='c'><element name='x'><empty/></element></define>"
+        "<define name='c' combine='choice'>"
+        "<element name='y'><empty/></element></define>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    const char doc[] = "<z/>";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    EXPECT_NE(leptris_rng_error(rng), nullptr);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(RngValidate, AttributeValueConstraint) {
+    const char* sch =
+        "<start><element name='a'>"
+        "<attribute name='k'><value>v</value></attribute>"
+        "</element></start>";
+    EXPECT_EQ(validates(sch, "<a k='v'/>"), 1);
+    EXPECT_EQ(validates(sch, "<a k='w'/>"), 0);
 }
