@@ -186,3 +186,108 @@ TEST(RngParse, BareElementRoot) {
 }
 
 }  // namespace
+
+/* ---- phase 2: the core validator ------------------------------ */
+
+static int validates(const char* schema_body, const char* doc) {
+    LeptrisStatus st = LEPTRIS_OK;
+    char sch[2048];
+    snprintf(sch, sizeof(sch), "<grammar xmlns='%s'>%s</grammar>",
+             RNGNS, schema_body);
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    if (!rng) return -1;
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    if (!d) { leptris_rng_free(rng); return -2; }
+    int ok = leptris_rng_validate(rng, d);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+    return ok;
+}
+
+TEST(RngValidate, AcceptsAMatchingDocument) {
+    EXPECT_EQ(validates(
+        "<start><element name='book'>"
+        "<attribute name='id'/>"
+        "<oneOrMore><element name='author'><text/></element></oneOrMore>"
+        "</element></start>",
+        "<book id='b1'><author>A</author><author>B</author></book>"), 1);
+}
+
+TEST(RngValidate, RejectsWrongRootName) {
+    EXPECT_EQ(validates(
+        "<start><element name='book'><empty/></element></start>",
+        "<chapter/>"), 0);
+}
+
+TEST(RngValidate, RejectsMissingRequiredAttribute) {
+    EXPECT_EQ(validates(
+        "<start><element name='e'><attribute name='id'/></element></start>",
+        "<e/>"), 0);
+}
+
+TEST(RngValidate, RejectsUndeclaredAttribute) {
+    EXPECT_EQ(validates(
+        "<start><element name='e'><empty/></element></start>",
+        "<e id='x'/>"), 0);
+}
+
+TEST(RngValidate, ChoiceAcceptsEitherAlternative) {
+    const char* sch =
+        "<start><element name='r'><choice>"
+        "<element name='a'><empty/></element>"
+        "<element name='b'><empty/></element>"
+        "</choice></element></start>";
+    EXPECT_EQ(validates(sch, "<r><a/></r>"), 1);
+    EXPECT_EQ(validates(sch, "<r><b/></r>"), 1);
+    EXPECT_EQ(validates(sch, "<r><c/></r>"), 0);
+}
+
+TEST(RngValidate, RepeatsEnforceCardinality) {
+    const char* one =
+        "<start><element name='r'><oneOrMore>"
+        "<element name='i'><empty/></element>"
+        "</oneOrMore></element></start>";
+    EXPECT_EQ(validates(one, "<r><i/></r>"), 1);
+    EXPECT_EQ(validates(one, "<r/>"), 0);
+    const char* zero =
+        "<start><element name='r'><zeroOrMore>"
+        "<element name='i'><empty/></element>"
+        "</zeroOrMore></element></start>";
+    EXPECT_EQ(validates(zero, "<r/>"), 1);
+}
+
+TEST(RngValidate, DataAndValueLeaves) {
+    EXPECT_EQ(validates(
+        "<start><element name='n'><data type='integer'/></element></start>",
+        "<n>42</n>"), 1);
+    EXPECT_EQ(validates(
+        "<start><element name='n'><data type='integer'/></element></start>",
+        "<n>x</n>"), 0);
+    EXPECT_EQ(validates(
+        "<start><element name='n'><value>yes</value></element></start>",
+        "<n>yes</n>"), 1);
+    EXPECT_EQ(validates(
+        "<start><element name='n'><value>yes</value></element></start>",
+        "<n>no</n>"), 0);
+}
+
+TEST(RngValidate, ErrorCarriesJingShape) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char sch[] =
+        "<grammar xmlns='" RNGNS "'>"
+        "<start><element name='e'><attribute name='id'/></element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    const char doc[] = "<e/>\n";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const char* err = leptris_rng_error(rng);
+    ASSERT_NE(err, nullptr);
+    /* Jing shape: "line:col: error: message". */
+    EXPECT_NE(strstr(err, "1:0: error:"), nullptr) << err;
+    EXPECT_NE(strstr(err, "attribute"), nullptr) << err;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}

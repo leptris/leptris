@@ -34,6 +34,14 @@ LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng) {
     free(r);
 }
 
+LEPTRIS_API int leptris_rng_validate(LeptrisRelaxNG rng,
+                                      LeptrisDocument doc) {
+    if (!rng || !doc) return 0;
+    free(((struct leptris_relaxng*)rng)->error);
+    ((struct leptris_relaxng*)rng)->error = NULL;
+    return rng_validate_document((struct leptris_relaxng*)rng, doc);
+}
+
 LEPTRIS_API const char* leptris_rng_error(LeptrisRelaxNG rng) {
     struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
     return r ? r->error : NULL;

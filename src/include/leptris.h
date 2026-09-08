@@ -628,6 +628,14 @@ LEPTRIS_API LeptrisRelaxNG leptris_rng_parse(const char* schema,
                                               size_t len,
                                               LeptrisStatus* status);
 LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
+/* Validate an instance document against the parsed schema
+ * (phase-2 core subset: element/attribute/text/data/value/
+ * choice/group/interleave/repeats/ref). Returns 1 valid; on 0,
+ * leptris_rng_error carries the first failure in Jing's
+ * "line:col: error: message" shape (column always 0 in this
+ * phase; the instance's line numbers). */
+LEPTRIS_API int leptris_rng_validate(LeptrisRelaxNG rng,
+                                     LeptrisDocument doc);
 /* Last parse error detail (NULL when the handle is valid). */
 LEPTRIS_API const char* leptris_rng_error(LeptrisRelaxNG rng);
 
