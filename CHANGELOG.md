@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.112] - 2026-09-08
+
+### Added
+
+- #878 Jing conformance corpus — 38/38 verdict agreement (rng)
+
+### Fixed
+
+- html4 script spec passed 27 for a 25-byte literal (test)
+
+
+
 ## [1.9.111] - 2026-09-08
 
 ### Added
