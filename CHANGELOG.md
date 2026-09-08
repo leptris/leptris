@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.110] - 2026-09-08
+
+### Added
+
+- #878 phase 2 - core validator + Jing-shaped errors (rng)
+
+
+
 ## [1.9.109] - 2026-09-08
 
 ### Added
