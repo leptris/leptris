@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.107] - 2026-09-08
+
+### Added
+
+- #659 - adoption agency clones carry attributes (8.2.5.4 step 5) (html)
+
+
+
 ## [1.9.106] - 2026-09-08
 
 ### Added
