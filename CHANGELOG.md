@@ -4,7 +4,16 @@
 
 ### Added
 
-- #878 phase 3 - backtracking fold, list tokens, mixed, ref guards (rng)
+- **#878 phase 3 — validator correctness: backtracking fold,
+  `list` tokens, mixed, ref guards.** The content model now folds
+  with backtracking — a choice whose trivially-succeeding
+  alternative (`<empty/>`) starved later patterns is retried, and
+  the fold tail requires exhaustive child consumption.
+  `<list>` tokenizes element text on whitespace and matches leaves
+  **positionally** (RELAX NG list is a sequence — order matters)
+  with repeat cardinality. Mixed content validates; recursive
+  defines are depth-guarded and `<start><ref/>` chains resolve.
+  4 new specs (20 in the RNG suite); full ctest 1331/1331.
 
 
 
