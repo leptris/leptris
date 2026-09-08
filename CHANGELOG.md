@@ -4,7 +4,19 @@
 
 ### Added
 
-- #878 phase 1 - RELAX NG XML syntax to pattern IR (rng)
+- **#878 phase 1 — RELAX NG XML syntax → pattern IR.** New
+  `src/leptris/rng/` subsystem (the Jing-replacement epic's
+  foundation): the XML-syntax schema parses through the standard
+  engine and lowers into a 20-kind pattern IR — element,
+  attribute, choice, interleave, group, optional, zeroOrMore,
+  oneOrMore, list, mixed, data(+param/except), value, empty,
+  notAllowed, text, ref — plus the grammar layer (`<start>`
+  merging, `<define>` with `@combine` on either declaration,
+  bare-element roots). Public entries `leptris_rng_parse` /
+  `leptris_rng_free` / `leptris_rng_error` with an opaque
+  `LeptrisRelaxNG` handle (ABI-additive). 8 RED-first specs;
+  full ctest 1319/1319. Phase 2 (core validator + Jing-shaped
+  errors) next.
 
 
 
