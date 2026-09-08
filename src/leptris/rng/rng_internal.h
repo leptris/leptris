@@ -74,6 +74,12 @@ struct leptris_relaxng {
 };
 
 /* parse.c */
+struct leptris_document;
+
+/* validate.c — returns 1 valid, 0 invalid (rng->error carries the
+ * Jing-shaped first failure). Phase-2 subset. */
+int rng_validate_document(struct leptris_relaxng* rng,
+                          struct leptris_document* doc);
 struct leptris_relaxng* rng_parse_document(LeptrisDocument doc);
 
 /* free.c duties are inline in the public entry */
