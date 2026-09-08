@@ -19,6 +19,7 @@ typedef struct {
     RngGrammar* g;
     char err[512];
     int failed;
+    int depth;   /* ref-recursion guard (cyclic defines) */
 } RngVal;
 
 static void fail(RngVal* v, LeptrisElement e, const char* fmt,
@@ -150,6 +151,8 @@ static int match_attrs(RngVal* v, RngPattern* content, LeptrisElement e) {
 /* --- sequence matching ------------------------------------------- */
 
 static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e);
+static size_t fold_list(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
+                        size_t n, size_t idx);
 
 /* Try to match `p` against the element child window [idx, n).
  * On success return the next index; on failure return (size_t)-1. */
@@ -281,7 +284,15 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
                 fail(v, NULL, "reference to undefined pattern", p->name, NULL);
                 return (size_t)-1;
             }
-            return match_seq(v, d->body, kids, n, idx);
+            if (v->depth > 200) {
+                fail(v, NULL, "reference \"%s\" recursion too deep",
+                     p->name, NULL);
+                return (size_t)-1;
+            }
+            v->depth++;
+            size_t r = match_seq(v, d->body, kids, n, idx);
+            v->depth--;
+            return r;
         }
         case RNG_MIXED: {
             /* mixed = interleave(content, text*) — phase 2: any order. */
@@ -322,6 +333,124 @@ static int has_element_patterns(RngPattern* content) {
     return 0;
 }
 
+/* <list>: the element text tokenizes on whitespace; every token
+ * must match the child leaves (data/value), with oneOrMore/etc.
+ * inside handled as at-least-one-token. */
+static int token_matches_leaf(const char* tok, RngPattern* leaf) {
+    if (!leaf) return 0;
+    if (leaf->kind == RNG_TEXT) return 1;
+    if (leaf->kind == RNG_VALUE)
+        return leaf->value && strcmp(leaf->value, tok) == 0;
+    if (leaf->kind == RNG_DATA) {
+        if (leaf->datatype && strcmp(leaf->datatype, "integer") == 0) {
+            const char* r = tok;
+            if (*r == '-' || *r == '+') r++;
+            if (!*r) return 0;
+            for (; *r; r++)
+                if (!isdigit((unsigned char)*r)) return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* <list>: tokens (whitespace-split) match the child leaves
+ * POSITIONALLY - RELAX NG list is a sequence, order matters.
+ * Repeat wrappers consume greedily. */
+static int list_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
+    const char* t = leptris_element_text(e);
+    if (!t) return 0;
+
+    RngPattern* leaves[32];
+    size_t nl = 0;
+    for (RngPattern* c = p->first_child; c && nl < 32; c = c->next)
+        leaves[nl++] = c;
+
+    const char* q = t;
+    size_t li = 0;
+    size_t tokens = 0;
+    int consumed_any[32] = {0};
+    for (;;) {
+        while (*q && isspace((unsigned char)*q)) q++;
+        if (!*q) break;
+        const char* start = q;
+        while (*q && !isspace((unsigned char)*q)) q++;
+        size_t len = (size_t)(q - start);
+        char tok[128];
+        if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+        memcpy(tok, start, len);
+        tok[len] = 0;
+        tokens++;
+
+        /* Skip zero-width wrappers (optional with zero tokens). */
+        while (li < nl && leaves[li]->kind == RNG_ZERO_OR_MORE &&
+               !token_matches_leaf(tok, leaves[li]->first_child))
+            li++;
+
+        if (li >= nl) {
+            fail(v, e, "list token \"%s\" not allowed", tok, NULL);
+            return 0;
+        }
+        RngPattern* c = leaves[li];
+        RngPattern* leaf =
+            (c->kind == RNG_ONE_OR_MORE || c->kind == RNG_ZERO_OR_MORE ||
+             c->kind == RNG_OPTIONAL)
+                ? c->first_child : c;
+        if (!token_matches_leaf(tok, leaf)) {
+            if (c->kind == RNG_ONE_OR_MORE || c->kind == RNG_OPTIONAL ||
+                c->kind == RNG_ZERO_OR_MORE) {
+                li++;   /* close the repeat, try the next leaf */
+                continue;
+            }
+            fail(v, e, "list token \"%s\" does not match", tok, NULL);
+            return 0;
+        }
+        consumed_any[li] = 1;
+        /* Plain leaf consumed one token -> advance. */
+        if (c->kind != RNG_ONE_OR_MORE && c->kind != RNG_ZERO_OR_MORE)
+            li++;
+    }
+    /* Trailing required leaves (non-optional) must not remain. */
+    for (size_t k = 0; k < nl; k++) {
+        RngPattern* c = leaves[k];
+        if (c->kind == RNG_ONE_OR_MORE && !consumed_any[k]) {
+            fail(v, e, "list: a oneOrMore leaf requires at least one token",
+                 NULL, NULL);
+            return 0;
+        }
+        /* Plain leaves past the consumed point are missing tokens. */
+        if (c->kind != RNG_ONE_OR_MORE && c->kind != RNG_ZERO_OR_MORE &&
+            c->kind != RNG_OPTIONAL && !consumed_any[k]) {
+            fail(v, e, "list: missing token for a required leaf", NULL, NULL);
+            return 0;
+        }
+    }
+    return tokens > 0;
+}
+
+/* Backtracking fold over the sibling pattern list: a CHOICE whose
+ * trivially-succeeding alternative (empty) starves later patterns
+ * retries its other alternatives (phase-3 correctness). */
+static size_t fold_list(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
+                        size_t n, size_t idx) {
+    if (!p) return idx == n ? idx : (size_t)-1;
+    if (p->kind == RNG_CHOICE) {
+        for (RngPattern* a = p->first_child; a; a = a->next) {
+            size_t r = match_seq(v, a, kids, n, idx);
+            v->failed = 0;
+            v->err[0] = 0;
+            if (r != (size_t)-1) {
+                size_t rr = fold_list(v, p->next, kids, n, r);
+                if (rr != (size_t)-1) return rr;
+            }
+        }
+        return (size_t)-1;
+    }
+    size_t r = match_seq(v, p, kids, n, idx);
+    if (r == (size_t)-1) return (size_t)-1;
+    return fold_list(v, p->next, kids, n, r);
+}
+
 static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     if (!names_match(p, e)) return 0;
     if (!match_attrs(v, p, e)) return 0;
@@ -330,6 +459,10 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
         /* Text-level content: each non-attribute child is a leaf. */
         for (RngPattern* c = p->first_child; c; c = c->next) {
             if (c->kind == RNG_ATTRIBUTE) continue;
+            if (c->kind == RNG_LIST) {
+                if (!list_ok(v, c, e)) return 0;
+                continue;
+            }
             if (c->kind == RNG_EMPTY) {
                 if (!all_text_ws(e)) {
                     fail(v, e, "element \"%s\" must be empty", p->name, NULL);
@@ -370,12 +503,8 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
 
     LeptrisNodeRef kids[64];
     size_t n = elem_children(e, kids, 64);
-    /* The content model is a sibling LIST — fold each pattern. */
-    size_t r = 0;
-    for (RngPattern* c = p->first_child; c; c = c->next) {
-        r = match_seq(v, c, kids, n, r);
-        if (r == (size_t)-1) return 0;
-    }
+    /* The content model is a sibling LIST with backtracking. */
+    size_t r = fold_list(v, p->first_child, kids, n, 0);
     if (r == (size_t)-1) return 0;
     if (r != n) {
         fail(v, (LeptrisElement)kids[r],
@@ -396,10 +525,23 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
     if (!root) return 0;
 
     RngPattern* start = rng->grammar->start;
-    /* Unwrap the implicit GROUP wrapper. */
-    if (start->kind == RNG_GROUP && start->first_child &&
-        !start->first_child->next)
-        start = start->first_child;
+    /* Unwrap the implicit GROUP wrapper and follow REF chains. */
+    while ((start->kind == RNG_GROUP && start->first_child &&
+            !start->first_child->next) ||
+           start->kind == RNG_REF) {
+        if (start->kind == RNG_REF) {
+            RngDefine* d = find_define(v.g, start->name);
+            if (!d || !d->body) {
+                fail(&v, root, "reference to undefined pattern",
+                     start->name, NULL);
+                rng->error = v.failed ? leptris_strdup(v.err) : NULL;
+                return 0;
+            }
+            start = d->body;
+        } else {
+            start = start->first_child;
+        }
+    }
     if (start->kind != RNG_ELEMENT) return 0;   /* phase-2 subset */
 
     int ok = element_ok(&v, start, root);
