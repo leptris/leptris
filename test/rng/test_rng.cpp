@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "leptris.h"
+#include "leptris/error.h"
 #include "rng_internal.h"
 
 #include <cstring>
@@ -584,4 +585,25 @@ TEST(RngParse, RejectsUnsupportedPatternConstruct) {
     LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
     EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
     EXPECT_EQ(rng, nullptr);
+}
+
+TEST(RngParse, SchemaErrorsPublishToLastError) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char sch[] = SCHEMA(
+        "<start><element name='e'><bogus/></element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
+    EXPECT_EQ(rng, nullptr);
+    const char* err = leptris_last_error();
+    ASSERT_NE(err, nullptr);
+    EXPECT_NE(strstr(err, "unknown pattern"), nullptr) << err;
+}
+
+TEST(RngParse, FileErrorsPublishToLastError) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng =
+        leptris_rng_parse_file("/nonexistent/leptris-spec.rng", &st);
+    EXPECT_EQ(rng, nullptr);
+    const char* err = leptris_last_error();
+    ASSERT_NE(err, nullptr);
+    EXPECT_NE(strstr(err, "open"), nullptr) << err;
 }
