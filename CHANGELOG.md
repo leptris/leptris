@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.113] - 2026-09-08
+
+### Added
+
+- #878 <include> support via leptris_rng_parse_file (rng)
+
+
+
 ## [1.9.112] - 2026-09-08
 
 ### Added
