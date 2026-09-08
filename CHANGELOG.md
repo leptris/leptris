@@ -4,7 +4,11 @@
 
 ### Added
 
-- #659 - adoption agency clones carry attributes (8.2.5.4 step 5) (html)
+- **#659 — adoption agency clones carry attributes** (8.2.5.4
+  step 5). The reopened formatting-element clone copies the
+  original's attributes: `<a href="h">1<i>2</a>3</i>` keeps the
+  link on both spans. Corpus-neutral (295 holds, parity 372 held);
+  spec-pinned.
 
 
 
