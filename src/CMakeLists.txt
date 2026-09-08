@@ -25,6 +25,7 @@ set(LEPTRIS_SOURCES
     leptris/dom/digest.c
     leptris/rng/parse.c
     leptris/rng/rng_public.c
+    leptris/rng/rng_regex.c
     leptris/rng/validate.c
     leptris/dom/node_vtable.c
     leptris/dom/document_node.c

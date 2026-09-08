@@ -83,6 +83,12 @@ int rng_validate_document(struct leptris_relaxng* rng,
 struct leptris_relaxng* rng_parse_document(LeptrisDocument doc);
 struct leptris_relaxng* rng_parse_file(const char* path);
 
+/* rng_regex.c — XSD pattern facet subset (see the .c header).
+ * supported() validates at schema-parse time; matches() requires a
+ * full-value match. */
+int rng_regex_supported(const char* pat);
+int rng_regex_matches(const char* pat, const char* text);
+
 /* free.c duties are inline in the public entry */
 void rng_pattern_free(RngPattern* p);
 void rng_grammar_free(RngGrammar* g);

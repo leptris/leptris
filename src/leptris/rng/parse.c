@@ -105,6 +105,37 @@ static RngPattern* parse_pattern(RngGrammar* g, LeptrisElement e,
         p->datatype = dup_attr(e, "type");
         p->datatype_lib = dup_attr(e, "datatypeLibrary");
         if (!p->datatype) p->datatype = leptris_strdup("string");
+        parse_children_into(g, e, p, err, errsz);
+        if (err[0] && !p) return NULL;
+        for (RngPattern* c = p->first_child; c; c = c->next) {
+            if (c->kind != RNG_PARAM) continue;
+            if (!c->name) {
+                snprintf(err, errsz, "param: missing @name");
+                rng_pattern_free(p);
+                return NULL;
+            }
+            static const char* const known[] = {
+                "pattern",     "minInclusive", "maxInclusive",
+                "minExclusive", "maxExclusive", "minLength",
+                "maxLength",   "length",       NULL};
+            int ok_name = 0;
+            for (int i = 0; known[i]; i++)
+                if (strcmp(c->name, known[i]) == 0) ok_name = 1;
+            if (!ok_name) {
+                snprintf(err, errsz, "invalid parameter: %s", c->name);
+                rng_pattern_free(p);
+                return NULL;
+            }
+            if (strcmp(c->name, "pattern") == 0 &&
+                !rng_regex_supported(c->value ? c->value : "")) {
+                snprintf(err, errsz,
+                         "pattern: unsupported construct in \"%s\"",
+                         c->value ? c->value : "");
+                rng_pattern_free(p);
+                return NULL;
+            }
+        }
+        return p;
     } else if (is_rng(e, "value")) {
         p = pat_new(RNG_VALUE);
         p->datatype = dup_attr(e, "type");
