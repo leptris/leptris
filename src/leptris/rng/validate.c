@@ -40,6 +40,56 @@ static RngDefine* find_define(RngGrammar* g, const char* name) {
     return NULL;
 }
 
+/* --- data leaves + <param> facets ------------------------------- */
+
+/* XSD length is in characters, not bytes. */
+static size_t utf8_len(const char* s) {
+    size_t n = 0;
+    for (; *s; s++)
+        if ((*s & 0xC0) != 0x80) n++;
+    return n;
+}
+
+static int data_lexical_ok(const RngPattern* data, const char* t) {
+    if (data->datatype && strcmp(data->datatype, "integer") == 0) {
+        const char* q = t;
+        if (*q == '-' || *q == '+') q++;
+        if (!*q) return 0;
+        for (; *q; q++)
+            if (!isdigit((unsigned char)*q)) return 0;
+    }
+    return 1;
+}
+
+static int param_ok(const RngPattern* prm, const char* t) {
+    const char* name = prm->name ? prm->name : "";
+    const char* val = prm->value ? prm->value : "";
+    if (strcmp(name, "pattern") == 0)
+        return rng_regex_matches(val, t);
+    if (strcmp(name, "minLength") == 0)
+        return utf8_len(t) >= (size_t)atol(val);
+    if (strcmp(name, "maxLength") == 0)
+        return utf8_len(t) <= (size_t)atol(val);
+    if (strcmp(name, "length") == 0)
+        return utf8_len(t) == (size_t)atol(val);
+    if (strcmp(name, "minInclusive") == 0)
+        return strtod(t, NULL) >= strtod(val, NULL);
+    if (strcmp(name, "maxInclusive") == 0)
+        return strtod(t, NULL) <= strtod(val, NULL);
+    if (strcmp(name, "minExclusive") == 0)
+        return strtod(t, NULL) > strtod(val, NULL);
+    if (strcmp(name, "maxExclusive") == 0)
+        return strtod(t, NULL) < strtod(val, NULL);
+    return 1;
+}
+
+static int data_matches(const RngPattern* data, const char* t) {
+    if (!data_lexical_ok(data, t)) return 0;
+    for (const RngPattern* c = data->first_child; c; c = c->next)
+        if (c->kind == RNG_PARAM && !param_ok(c, t)) return 0;
+    return 1;
+}
+
 static int ws_only(const char* s) {
     for (; s && *s; s++)
         if (!isspace((unsigned char)*s)) return 0;
@@ -200,16 +250,8 @@ static int text_leaf_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
             return 1;
         case RNG_VALUE:
             return strcmp(t, p->value ? p->value : "") == 0;
-        case RNG_DATA: {
-            if (p->datatype && strcmp(p->datatype, "integer") == 0) {
-                const char* q = t;
-                if (*q == '-' || *q == '+') q++;
-                if (!*q) return 0;
-                for (; *q; q++)
-                    if (!isdigit((unsigned char)*q)) return 0;
-            }
-            return 1;
-        }
+        case RNG_DATA:
+            return data_matches(p, t);
         default:
             return 0;
     }
@@ -366,16 +408,8 @@ static int token_matches_leaf(const char* tok, RngPattern* leaf) {
     if (leaf->kind == RNG_TEXT) return 1;
     if (leaf->kind == RNG_VALUE)
         return leaf->value && strcmp(leaf->value, tok) == 0;
-    if (leaf->kind == RNG_DATA) {
-        if (leaf->datatype && strcmp(leaf->datatype, "integer") == 0) {
-            const char* r = tok;
-            if (*r == '-' || *r == '+') r++;
-            if (!*r) return 0;
-            for (; *r; r++)
-                if (!isdigit((unsigned char)*r)) return 0;
-        }
-        return 1;
-    }
+    if (leaf->kind == RNG_DATA)
+        return data_matches(leaf, tok);
     return 0;
 }
 

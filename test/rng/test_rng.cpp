@@ -477,3 +477,111 @@ TEST(RngInclude, MissingHrefIsAnError) {
 TEST(RngInclude, MissingFileIsAnError) {
     EXPECT_EQ(parse_file("does-not-exist.rng"), nullptr);
 }
+
+/* ---- phase 6: <param> datatype facets ---------------------------- */
+
+TEST(RngValidate, DataFacetNumericBounds) {
+    const char* min_sch =
+        "<start><element name='n'><data type='integer'>"
+        "<param name='minInclusive'>5</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(min_sch, "<n>5</n>"), 1);
+    EXPECT_EQ(validates(min_sch, "<n>4</n>"), 0);
+    EXPECT_EQ(validates(min_sch, "<n>10</n>"), 1);
+    const char* max_sch =
+        "<start><element name='n'><data type='integer'>"
+        "<param name='maxInclusive'>10</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(max_sch, "<n>10</n>"), 1);
+    EXPECT_EQ(validates(max_sch, "<n>11</n>"), 0);
+    const char* minx_sch =
+        "<start><element name='n'><data type='integer'>"
+        "<param name='minExclusive'>5</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(minx_sch, "<n>5</n>"), 0);
+    EXPECT_EQ(validates(minx_sch, "<n>6</n>"), 1);
+}
+
+TEST(RngValidate, DataFacetLengthBounds) {
+    /* XSD string length counts raw characters (whitespace counts). */
+    const char* min_sch =
+        "<start><element name='n'><data type='string'>"
+        "<param name='minLength'>2</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(min_sch, "<n>ab</n>"), 1);
+    EXPECT_EQ(validates(min_sch, "<n>a</n>"), 0);
+    EXPECT_EQ(validates(min_sch, "<n> a</n>"), 1);
+    const char* len_sch =
+        "<start><element name='n'><data type='string'>"
+        "<param name='length'>3</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(len_sch, "<n>abc</n>"), 1);
+    EXPECT_EQ(validates(len_sch, "<n>ab</n>"), 0);
+}
+
+TEST(RngValidate, DataFacetPattern) {
+    /* XSD patterns match the WHOLE value. */
+    const char* plus_sch =
+        "<start><element name='n'><data type='string'>"
+        "<param name='pattern'>[ab]+</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(plus_sch, "<n>aba</n>"), 1);
+    EXPECT_EQ(validates(plus_sch, "<n>abc</n>"), 0);
+    const char* quant_sch =
+        "<start><element name='n'><data type='string'>"
+        "<param name='pattern'>[0-9]{2,4}</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(quant_sch, "<n>12</n>"), 1);
+    EXPECT_EQ(validates(quant_sch, "<n>12345</n>"), 0);
+    EXPECT_EQ(validates(quant_sch, "<n>1</n>"), 0);
+    const char* alt_sch =
+        "<start><element name='n'><data type='string'>"
+        "<param name='pattern'>cat|dog</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(alt_sch, "<n>cat</n>"), 1);
+    EXPECT_EQ(validates(alt_sch, "<n>catdog</n>"), 0);
+    const char* dot_sch =
+        "<start><element name='n'><data type='string'>"
+        "<param name='pattern'>a.c</param></data>"
+        "</element></start>";
+    EXPECT_EQ(validates(dot_sch, "<n>abc</n>"), 1);
+    EXPECT_EQ(validates(dot_sch, "<n>ac</n>"), 0);
+}
+
+TEST(RngValidate, DataFacetsApplyInListAndAttributeContexts) {
+    const char* list_sch =
+        "<start><element name='l'><list><oneOrMore>"
+        "<data type='integer'><param name='maxInclusive'>3</param></data>"
+        "</oneOrMore></list></element></start>";
+    EXPECT_EQ(validates(list_sch, "<l>1 2 3</l>"), 1);
+    EXPECT_EQ(validates(list_sch, "<l>1 5</l>"), 0);
+    const char* attr_sch =
+        "<start><element name='a'>"
+        "<attribute name='k'><data type='string'>"
+        "<param name='pattern'>[0-9]+</param></data></attribute>"
+        "</element></start>";
+    EXPECT_EQ(validates(attr_sch, "<a k='123'/>"), 1);
+    EXPECT_EQ(validates(attr_sch, "<a k='x9'/>"), 0);
+}
+
+TEST(RngParse, RejectsIllegalParamName) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char sch[] = SCHEMA(
+        "<start><element name='n'><data type='string'>"
+        "<param name='enumeration'>a</param></data>"
+        "</element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+    EXPECT_EQ(rng, nullptr);
+}
+
+TEST(RngParse, RejectsUnsupportedPatternConstruct) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char sch[] = SCHEMA(
+        "<start><element name='n'><data type='string'>"
+        "<param name='pattern'>\\p{L}+</param></data>"
+        "</element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+    EXPECT_EQ(rng, nullptr);
+}
