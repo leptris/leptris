@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.108] - 2026-09-08
+
+### Fixed
+
+- #919 - attribute nodes sort by namespace URI then local (c14n)
+
+
+
 ## [1.9.107] - 2026-09-08
 
 ### Added
