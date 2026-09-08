@@ -202,7 +202,8 @@ TEST(HtmlParse, ScriptAndStyleAreRawText) {
      * leading-script-in-body libxml2 shape this spec pins). */
     LeptrisStatus st2 = LEPTRIS_OK;
     LeptrisDocument d2 = leptris_parse_html4_string(
-        "<script>1<2</SCRIPT>after", 27, &st2);
+        "<script>1<2</SCRIPT>after",
+        sizeof("<script>1<2</SCRIPT>after") - 1, &st2);
     ASSERT_NE(d2, nullptr);
     LeptrisXPathResult r3 =
         leptris_xpath_eval(d2, nullptr, "string(/html/body/script)");
