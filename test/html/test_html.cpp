@@ -503,3 +503,9 @@ TEST(HtmlTwoModes, AdoptionAgency) {
     EXPECT_EQ(Html("<b>1<i>2</b>3</i>"), "<b>1<i>2</i></b><i>3</i>");
     EXPECT_EQ(Html4("<b>1<i>2</b>3</i>"), "<b>1<i>2</i></b>3");
 }
+
+/* #659 AA step 5: the clone carries the original's attributes. */
+TEST(HtmlTwoModes, AdoptionAgencyCloneKeepsAttributes) {
+    EXPECT_EQ(Html(R"(<a href="h">1<i>2</a>3</i>)"),
+              R"(<a href="h">1<i>2</i></a><i>3</i>)");
+}

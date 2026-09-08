@@ -2579,6 +2579,7 @@ static LeptrisDocument html_parse_shared(
                              * at the new insertion point — misnested
                              * content keeps its formatting scope. */
                             char clones[16][24];
+                            LeptrisElement src[16];
                             size_t nclones = 0;
                             if (b.whatwg_adopt && h_is_formatting(lname)) {
                                 for (size_t k = d; k < b.depth && nclones < 16;
@@ -2589,6 +2590,7 @@ static LeptrisDocument html_parse_shared(
                                         size_t fl = strlen(fn);
                                         if (fl < sizeof(clones[0])) {
                                             memcpy(clones[nclones], fn, fl + 1);
+                                            src[nclones] = b.open[k];
                                             nclones++;
                                         }
                                     }
@@ -2598,7 +2600,17 @@ static LeptrisDocument html_parse_shared(
                             for (size_t k = 0; k < nclones; k++) {
                                 LeptrisElement c =
                                     h_open_element(&b, clones[k]);
-                                (void)c;
+                                /* The clone carries the original's
+                                 * attributes (8.2.5.4 step 5). */
+                                if (c && src[k]) {
+                                    for (struct leptris_attribute* a =
+                                             leptris_element_get_first_attribute(
+                                                 src[k]);
+                                         a; a = leptris_attr_next(a)) {
+                                        leptris_element_set_attribute(
+                                            c, attr_cname(a), attr_cvalue(a));
+                                    }
+                                }
                             }
                             break;
                         }
