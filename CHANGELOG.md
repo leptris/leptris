@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.114] - 2026-09-08
+
+### Added
+
+- #878 <param> datatype facets + pattern subset matcher (rng)
+
+
+
 ## [1.9.113] - 2026-09-08
 
 ### Added
