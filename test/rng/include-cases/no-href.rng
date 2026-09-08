@@ -1,0 +1,4 @@
+<grammar xmlns='http://relaxng.org/ns/structure/1.0'>
+  <include/>
+  <start><empty/></start>
+</grammar>

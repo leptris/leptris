@@ -46,6 +46,9 @@ static int is_rng(LeptrisElement e, const char* local) {
 
 static RngPattern* parse_pattern(RngGrammar* g, LeptrisElement e,
                                  char* err, size_t errsz);
+static char* slurp_file(const char* path, size_t* out_len);
+static struct leptris_relaxng* rng_parse_doc(LeptrisDocument doc,
+                                             const char* base_dir);
 
 /* Parse the children of `e` as a pattern list into fresh `wrap`. */
 static void parse_children_into(RngGrammar* g, LeptrisElement e,
@@ -143,8 +146,258 @@ static RngPattern* parse_pattern(RngGrammar* g, LeptrisElement e,
     return p;
 }
 
+/* Merge a <start> body (GROUP-wrapped) into the grammar; multiple
+ * starts merge as an implicit choice. */
+static void merge_start(RngGrammar* g, RngPattern* body) {
+    if (!g->start) {
+        g->start = body;
+        return;
+    }
+    RngPattern* ch = pat_new(RNG_CHOICE);
+    pat_append(ch, g->start);
+    pat_append(ch, body->first_child);
+    body->first_child = NULL;
+    rng_pattern_free(body);
+    g->start = ch;
+}
+
+/* Add/merge a <define>. Takes ownership of name, combine and the
+ * GROUP wrapper body. Returns 0 with err set on an uncombined
+ * redefinition. */
+static int add_define(RngGrammar* g, char* name, char* combine,
+                      RngPattern* body, char* err, size_t errsz) {
+    RngDefine* d = g->defines;
+    while (d && strcmp(d->name, name) != 0) d = d->next;
+    if (!d) {
+        d = (RngDefine*)calloc(1, sizeof(*d));
+        if (!d) {
+            free(name);
+            free(combine);
+            rng_pattern_free(body);
+            snprintf(err, errsz, "out of memory");
+            return 0;
+        }
+        d->name = name;
+        d->combine = combine;
+        d->body = body->first_child;
+        body->first_child = NULL;
+        rng_pattern_free(body);
+        d->next = g->defines;
+        g->defines = d;
+        return 1;
+    }
+    free(name);
+    /* @combine may sit on either declaration. */
+    if (!combine) combine = d->combine;
+    free(d->combine);
+    d->combine = combine;
+    /* Redefinition without combine on either is an error; with it,
+     * merge into choice/interleave. */
+    if (!d->combine) {
+        snprintf(err, errsz, "define %s: redefined without combine",
+                 d->name);
+        rng_pattern_free(body);
+        return 0;
+    }
+    RngPattern* wrap =
+        pat_new(strcmp(d->combine, "interleave") == 0 ? RNG_INTERLEAVE
+                                                      : RNG_CHOICE);
+    pat_append(wrap, d->body);
+    pat_append(wrap, body->first_child);
+    body->first_child = NULL;
+    rng_pattern_free(body);
+    d->body = wrap;
+    return 1;
+}
+
+static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
+                              const char* base_dir, unsigned depth,
+                              char* err, size_t errsz);
+
+/* <include href="...">: parse the included grammar, apply the
+ * include element's nested <start>/<define> as replacements, then
+ * merge everything into `g`. */
+static int handle_include(RngGrammar* g, LeptrisElement inc,
+                          const char* base_dir, unsigned depth,
+                          char* err, size_t errsz) {
+    const char* href = leptris_element_attribute(inc, "href");
+    if (!href || !*href) {
+        snprintf(err, errsz, "include: missing @href");
+        return 0;
+    }
+    if (!base_dir) {
+        snprintf(err, errsz,
+                 "include %s: no base URI (use leptris_rng_parse_file)",
+                 href);
+        return 0;
+    }
+    if (depth >= 8) {
+        snprintf(err, errsz, "include %s: too deep (cycle?)", href);
+        return 0;
+    }
+
+    char path[1024];
+    if (href[0] == '/')
+        snprintf(path, sizeof(path), "%s", href);
+    else
+        snprintf(path, sizeof(path), "%s/%s", base_dir, href);
+
+    size_t len = 0;
+    char* buf = slurp_file(path, &len);
+    if (!buf) {
+        snprintf(err, errsz, "include %s: cannot open", href);
+        return 0;
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(buf, len, &st);
+    free(buf);
+    if (!doc) {
+        snprintf(err, errsz, "include %s: not well-formed XML", href);
+        return 0;
+    }
+    LeptrisElement root = leptris_document_root(doc);
+    if (!root || !is_rng(root, "grammar")) {
+        snprintf(err, errsz,
+                 "include %s: root is not a RELAX NG grammar", href);
+        leptris_document_free(doc);
+        return 0;
+    }
+
+    RngGrammar* ig = (RngGrammar*)calloc(1, sizeof(RngGrammar));
+    if (!ig) {
+        leptris_document_free(doc);
+        snprintf(err, errsz, "out of memory");
+        return 0;
+    }
+    char nbase[1024];
+    snprintf(nbase, sizeof(nbase), "%s", path);
+    char* slash = strrchr(nbase, '/');
+    if (slash) *slash = 0;
+
+    char ierr[256];
+    ierr[0] = 0;
+    int ok = parse_grammar_body(ig, root, nbase, depth + 1, ierr,
+                                sizeof(ierr));
+    leptris_document_free(doc);
+    if (!ok) {
+        snprintf(err, errsz, "include %s: %s", href,
+                 ierr[0] ? ierr : "grammar parse failed");
+        rng_grammar_free(ig);
+        return 0;
+    }
+
+    /* Nested <start>/<define> replace the included grammar's
+     * matching declaration, which must exist. */
+    for (LeptrisNodeRef c = leptris_node_first_child((LeptrisNodeRef)inc);
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        LeptrisElement ce = (LeptrisElement)c;
+        if (is_rng(ce, "start")) {
+            if (!ig->start) {
+                snprintf(err, errsz,
+                         "include %s: \"start\" does not override anything",
+                         href);
+                rng_grammar_free(ig);
+                return 0;
+            }
+            RngPattern* body = pat_new(RNG_GROUP);
+            parse_children_into(g, ce, body, err, errsz);
+            if (err[0] && !body->first_child) {
+                rng_pattern_free(body);
+                rng_grammar_free(ig);
+                return 0;
+            }
+            rng_pattern_free(ig->start);
+            ig->start = body;
+        } else if (is_rng(ce, "define")) {
+            char* name = dup_attr(ce, "name");
+            if (!name) {
+                snprintf(err, errsz, "include %s: define missing @name",
+                         href);
+                rng_grammar_free(ig);
+                return 0;
+            }
+            RngDefine* d = ig->defines;
+            while (d && strcmp(d->name, name) != 0) d = d->next;
+            if (!d) {
+                snprintf(err, errsz,
+                         "include %s: define \"%s\" does not override "
+                         "anything",
+                         href, name);
+                free(name);
+                rng_grammar_free(ig);
+                return 0;
+            }
+            free(name);
+            RngPattern* body = pat_new(RNG_GROUP);
+            parse_children_into(g, ce, body, err, errsz);
+            if (err[0] && !body->first_child) {
+                rng_pattern_free(body);
+                rng_grammar_free(ig);
+                return 0;
+            }
+            rng_pattern_free(d->body);
+            d->body = body->first_child;
+            body->first_child = NULL;
+            rng_pattern_free(body);
+        } else {
+            snprintf(err, errsz, "include %s: unexpected <%s>", href,
+                     leptris_element_name(ce));
+            rng_grammar_free(ig);
+            return 0;
+        }
+    }
+
+    /* Merge the included grammar into ours. */
+    if (ig->start) {
+        merge_start(g, ig->start);
+        ig->start = NULL;
+    }
+    RngDefine* d = ig->defines;
+    while (d) {
+        RngDefine* next = d->next;
+        RngPattern* wrap = pat_new(RNG_GROUP);
+        wrap->first_child = d->body;
+        if (!add_define(g, leptris_strdup(d->name),
+                        d->combine ? leptris_strdup(d->combine) : NULL,
+                        wrap, err, errsz)) {
+            free(d->name);
+            free(d->combine);
+            free(d);
+            while (next) {
+                RngDefine* n2 = next->next;
+                free(next->name);
+                free(next->combine);
+                free(next);
+                next = n2;
+            }
+            free(ig->default_ns);
+            free(ig->default_lib);
+            free(ig);
+            return 0;
+        }
+        free(d->name);
+        free(d->combine);
+        free(d);
+        d = next;
+    }
+    if (!g->default_ns && ig->default_ns) {
+        g->default_ns = ig->default_ns;
+        ig->default_ns = NULL;
+    }
+    if (!g->default_lib && ig->default_lib) {
+        g->default_lib = ig->default_lib;
+        ig->default_lib = NULL;
+    }
+    free(ig->default_ns);
+    free(ig->default_lib);
+    free(ig);
+    return 1;
+}
+
 /* <grammar><start/>...<define/>...</grammar> */
 static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
+                              const char* base_dir, unsigned depth,
                               char* err, size_t errsz) {
     g->default_ns = dup_attr(grammar, "ns");
     g->default_lib = dup_attr(grammar, "datatypeLibrary");
@@ -161,16 +414,8 @@ static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
             if (err[0]) { rng_pattern_free(body); return 0; }
             if (!body->first_child) {
                 rng_pattern_free(body);
-            } else if (!g->start) {
-                g->start = body;
             } else {
-                /* Multiple <start> = implicit choice. */
-                RngPattern* ch = pat_new(RNG_CHOICE);
-                pat_append(ch, g->start);
-                pat_append(ch, body->first_child);
-                body->first_child = NULL;
-                rng_pattern_free(body);
-                g->start = ch;
+                merge_start(g, body);
             }
         } else if (is_rng(ce, "define")) {
             char* name = dup_attr(ce, "name");
@@ -187,56 +432,24 @@ static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
                 rng_pattern_free(body);
                 return 0;
             }
-            RngDefine* d = g->defines;
-            while (d && strcmp(d->name, name) != 0) d = d->next;
-            if (!d) {
-                d = (RngDefine*)calloc(1, sizeof(*d));
-                if (!d) { free(name); free(combine);
-                          rng_pattern_free(body); return 0; }
-                d->name = name;
-                d->combine = combine;
-                d->body = body->first_child;
-                body->first_child = NULL;
-                rng_pattern_free(body);
-                d->next = g->defines;
-                g->defines = d;
-            } else {
-                free(name);
-                /* @combine may sit on either declaration. */
-                if (!combine) combine = d->combine;
-                free(d->combine);
-                d->combine = combine;
-                /* Redefinition without combine on either is an
-                 * error; with it, merge into choice/interleave. */
-                if (!d->combine) {
-                    snprintf(err, errsz,
-                             "define %s: redefined without combine",
-                             d->name);
-                    rng_pattern_free(body);
-                    return 0;
-                }
-                RngPattern* wrap =
-                    pat_new(strcmp(d->combine, "interleave") == 0
-                                ? RNG_INTERLEAVE : RNG_CHOICE);
-                pat_append(wrap, d->body);
-                pat_append(wrap, body->first_child);
-                body->first_child = NULL;
-                rng_pattern_free(body);
-                d->body = wrap;
-            }
+            if (!add_define(g, name, combine, body, err, errsz))
+                return 0;
         } else if (is_rng(ce, "include")) {
-            snprintf(err, errsz, "include: not supported in phase 1");
-            return 0;
+            if (!handle_include(g, ce, base_dir, depth, err, errsz))
+                return 0;
         }
     }
-    if (!g->start) {
-        snprintf(err, errsz, "grammar: no <start>");
-        return 0;
-    }
+    /* Only the final assembled grammar needs a start — an included
+     * grammar may contribute defines alone. */
     return 1;
 }
 
 struct leptris_relaxng* rng_parse_document(LeptrisDocument doc) {
+    return rng_parse_doc(doc, NULL);
+}
+
+static struct leptris_relaxng* rng_parse_doc(LeptrisDocument doc,
+                                             const char* base_dir) {
     if (!doc) return NULL;
     LeptrisElement root = leptris_document_root(doc);
     if (!root) return NULL;
@@ -255,8 +468,11 @@ struct leptris_relaxng* rng_parse_document(LeptrisDocument doc) {
     char err[256];
     err[0] = 0;
     if (is_rng(root, "grammar")) {
-        if (!parse_grammar_body(rng->grammar, root, err, sizeof(err))) {
+        if (!parse_grammar_body(rng->grammar, root, base_dir, 0, err,
+                                sizeof(err))) {
             rng->error = leptris_strdup(err[0] ? err : "grammar parse failed");
+        } else if (!rng->grammar->start) {
+            rng->error = leptris_strdup("grammar: no <start>");
         }
         return rng;
     }
@@ -300,4 +516,59 @@ void rng_grammar_free(RngGrammar* g) {
     free(g->default_ns);
     free(g->default_lib);
     free(g);
+}
+
+/* ---- <include> (leptris_rng_parse_file) ------------------------- */
+
+static char* slurp_file(const char* path, size_t* out_len) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    long sz = ftell(f);
+    if (sz < 0 || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    char* buf = (char*)malloc((size_t)sz + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+    size_t rd = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    if (rd != (size_t)sz) {
+        free(buf);
+        return NULL;
+    }
+    buf[sz] = 0;
+    *out_len = (size_t)sz;
+    return buf;
+}
+
+struct leptris_relaxng* rng_parse_file(const char* path) {
+    if (!path) return NULL;
+    size_t len = 0;
+    char* buf = slurp_file(path, &len);
+    if (!buf) return NULL;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(buf, len, &st);
+    free(buf);
+    if (!doc) return NULL;
+
+    /* Include hrefs resolve relative to the schema file's directory. */
+    char base[512];
+    snprintf(base, sizeof(base), "%s", path);
+    char* slash = strrchr(base, '/');
+    if (slash)
+        *slash = 0;
+    else
+        base[0] = 0;
+
+    struct leptris_relaxng* rng =
+        rng_parse_doc(doc, base[0] ? base : NULL);
+    leptris_document_free(doc);
+    return rng;
 }

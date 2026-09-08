@@ -81,6 +81,7 @@ struct leptris_document;
 int rng_validate_document(struct leptris_relaxng* rng,
                           struct leptris_document* doc);
 struct leptris_relaxng* rng_parse_document(LeptrisDocument doc);
+struct leptris_relaxng* rng_parse_file(const char* path);
 
 /* free.c duties are inline in the public entry */
 void rng_pattern_free(RngPattern* p);

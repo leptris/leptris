@@ -1,0 +1,5 @@
+<grammar xmlns='http://relaxng.org/ns/structure/1.0'>
+  <include href='lib.rng'>
+    <start><ref name='content'/></start>
+  </include>
+</grammar>

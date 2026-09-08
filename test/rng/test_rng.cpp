@@ -417,3 +417,63 @@ TEST(RngValidate, AttributeValueConstraint) {
     EXPECT_EQ(validates(sch, "<a k='v'/>"), 1);
     EXPECT_EQ(validates(sch, "<a k='w'/>"), 0);
 }
+
+/* ---- phase 5: <include> via leptris_rng_parse_file -------------- */
+
+#ifndef LEPTRIS_RNG_INCLUDE_DIR
+#define LEPTRIS_RNG_INCLUDE_DIR "test/rng/include-cases"
+#endif
+
+static LeptrisRelaxNG parse_file(const char* name) {
+    LeptrisStatus st = LEPTRIS_OK;
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", LEPTRIS_RNG_INCLUDE_DIR, name);
+    return leptris_rng_parse_file(path, &st);
+}
+
+static int file_validates(const char* schema_name, const char* doc) {
+    LeptrisRelaxNG rng = parse_file(schema_name);
+    if (!rng) return -1;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    if (!d) {
+        leptris_rng_free(rng);
+        return -2;
+    }
+    int ok = leptris_rng_validate(rng, d);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+    return ok;
+}
+
+TEST(RngInclude, MergesDefinesFromIncludedGrammar) {
+    EXPECT_EQ(file_validates("main.rng", "<e/>"), 1);
+    EXPECT_EQ(file_validates("main.rng", "<x/>"), 0);
+}
+
+TEST(RngInclude, NestedDefineOverridesIncluded) {
+    EXPECT_EQ(file_validates("override.rng", "<f/>"), 1);
+    EXPECT_EQ(file_validates("override.rng", "<e/>"), 0);
+}
+
+TEST(RngInclude, NestedStartOverridesIncluded) {
+    EXPECT_EQ(file_validates("start-override.rng", "<e/>"), 1);
+    EXPECT_EQ(file_validates("start-override.rng", "<g/>"), 0);
+}
+
+TEST(RngInclude, OverrideMustTargetSomething) {
+    EXPECT_EQ(parse_file("bad-override.rng"), nullptr);
+    EXPECT_EQ(parse_file("bad-start-override.rng"), nullptr);
+}
+
+TEST(RngInclude, CyclicIncludeTerminates) {
+    EXPECT_EQ(parse_file("self-include.rng"), nullptr);
+}
+
+TEST(RngInclude, MissingHrefIsAnError) {
+    EXPECT_EQ(parse_file("no-href.rng"), nullptr);
+}
+
+TEST(RngInclude, MissingFileIsAnError) {
+    EXPECT_EQ(parse_file("does-not-exist.rng"), nullptr);
+}
