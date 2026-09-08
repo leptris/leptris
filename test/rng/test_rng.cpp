@@ -1,0 +1,188 @@
+// test/rng/test_rng.cpp — RELAX NG phase-1 specs (#878): the
+// XML-syntax schema lowers into the pattern IR with the right
+// shapes; errors reject bad schemas.
+
+#include <gtest/gtest.h>
+
+#include "leptris.h"
+#include "rng_internal.h"
+
+#include <cstring>
+
+namespace {
+
+#define RNGNS "http://relaxng.org/ns/structure/1.0"
+
+#define SCHEMA(body) \
+    ("<grammar xmlns='" RNGNS "'>" body "</grammar>")
+
+size_t count_kind(const RngPattern* p, RngPatternKind k) {
+    if (!p) return 0;
+    return (p->kind == k ? 1u : 0u) + count_kind(p->first_child, k) +
+           count_kind(p->next, k);
+}
+
+size_t total_patterns(const RngPattern* p) {
+    if (!p) return 0;
+    return 1 + total_patterns(p->first_child) + total_patterns(p->next);
+}
+
+TEST(RngParse, LowersASimpleSchema) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><element name='book'>"
+        "<attribute name='id'/>"
+        "<oneOrMore><element name='author'><text/></element></oneOrMore>"
+        "</element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+
+    const RngGrammar* g = ((struct leptris_relaxng*)rng)->grammar;
+    ASSERT_NE(g->start, nullptr);
+    EXPECT_EQ(count_kind(g->start, RNG_ELEMENT), 2u);
+    EXPECT_EQ(count_kind(g->start, RNG_ATTRIBUTE), 1u);
+    EXPECT_EQ(count_kind(g->start, RNG_ONE_OR_MORE), 1u);
+    EXPECT_EQ(count_kind(g->start, RNG_TEXT), 1u);
+    /* start wrapper (GROUP) + 2 element + attr + repeat + text */
+    EXPECT_EQ(total_patterns(g->start), 6u);
+
+    /* The root element pattern carries its name. */
+    const RngPattern* book = g->start->first_child;
+    ASSERT_NE(book, nullptr);
+    EXPECT_EQ(book->kind, RNG_ELEMENT);
+    EXPECT_STREQ(book->name, "book");
+
+    leptris_rng_free(rng);
+}
+
+TEST(RngParse, RefsAndDefines) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><ref name='content'/></start>"
+        "<define name='content'>"
+        "<element name='e'><text/></element>"
+        "</define>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+
+    const RngGrammar* g = ((struct leptris_relaxng*)rng)->grammar;
+    EXPECT_EQ(count_kind(g->start, RNG_REF), 1u);
+    const RngPattern* ref = g->start->first_child;
+    ASSERT_NE(ref, nullptr);
+    EXPECT_EQ(ref->kind, RNG_REF);
+    EXPECT_STREQ(ref->name, "content");
+
+    const RngDefine* d = g->defines;
+    ASSERT_NE(d, nullptr);
+    EXPECT_STREQ(d->name, "content");
+    ASSERT_NE(d->body, nullptr);
+    EXPECT_EQ(d->body->kind, RNG_ELEMENT);
+
+    leptris_rng_free(rng);
+}
+
+TEST(RngParse, CombineMergesDefines) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><ref name='c'/></start>"
+        "<define name='c'><element name='x'><empty/></element></define>"
+        "<define name='c' combine='choice'>"
+        "<element name='y'><empty/></element></define>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+
+    const RngDefine* d = ((struct leptris_relaxng*)rng)->grammar->defines;
+    ASSERT_NE(d, nullptr);
+    ASSERT_NE(d->body, nullptr);
+    EXPECT_EQ(d->body->kind, RNG_CHOICE);
+    EXPECT_EQ(count_kind(d->body, RNG_ELEMENT), 2u);
+
+    leptris_rng_free(rng);
+}
+
+TEST(RngParse, DataValueParamExceptListMixed) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><element name='r'>"
+        "<data type='integer'><param name='minInclusive'>0</param>"
+        "<except><value>5</value></except></data>"
+        "<list><data type='token'/></list>"
+        "<mixed><element name='m'><empty/></element></mixed>"
+        "<value ns='urn:x'>vx</value>"
+        "</element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+
+    const RngPattern* root =
+        ((struct leptris_relaxng*)rng)->grammar->start->first_child;
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(count_kind(root, RNG_DATA), 2u);
+    EXPECT_EQ(count_kind(root, RNG_PARAM), 1u);
+    EXPECT_EQ(count_kind(root, RNG_EXCEPT), 1u);
+    EXPECT_EQ(count_kind(root, RNG_LIST), 1u);
+    EXPECT_EQ(count_kind(root, RNG_MIXED), 1u);
+    /* Two VALUE nodes: <except><value>5</value></except> and the
+     * direct <value ns='urn:x'>vx</value>. */
+    EXPECT_EQ(count_kind(root, RNG_VALUE), 2u);
+
+    /* Find the direct value node and check its content + ns. */
+    const RngPattern* v = root->first_child;
+    while (v && v->kind != RNG_VALUE) {
+        v = v->next;
+    }
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->value, "vx");
+    EXPECT_STREQ(v->ns, "urn:x");
+
+    leptris_rng_free(rng);
+}
+
+TEST(RngParse, RejectsWrongRootNamespace) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] =
+        "<grammar xmlns='http://example.com/wrong'><start/></grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+    EXPECT_EQ(rng, nullptr);
+}
+
+TEST(RngParse, RejectsUnknownPatternElement) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><element name='e'><bogus/></element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+    EXPECT_EQ(rng, nullptr);
+}
+
+TEST(RngParse, RejectsUncombinedRedefinition) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><ref name='c'/></start>"
+        "<define name='c'><empty/></define>"
+        "<define name='c'><empty/></define>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+    EXPECT_EQ(rng, nullptr);
+}
+
+TEST(RngParse, BareElementRoot) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] =
+        "<element name='r' xmlns='" RNGNS "'><text/></element>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+    const RngPattern* start =
+        ((struct leptris_relaxng*)rng)->grammar->start;
+    ASSERT_NE(start, nullptr);
+    EXPECT_EQ(start->kind, RNG_ELEMENT);
+    EXPECT_STREQ(start->name, "r");
+    leptris_rng_free(rng);
+}
+
+}  // namespace

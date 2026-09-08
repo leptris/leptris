@@ -611,6 +611,26 @@ LEPTRIS_API LeptrisDocument leptris_parse_html4_string(const char* html,
                                                        size_t length,
                                                        LeptrisStatus* status);
 
+/* ---- RELAX NG (#878) ------------------------------------------------
+ * Phase 1: parse a RELAX NG XML-syntax schema into the compiled
+ * pattern representation. Validation arrives in phase 2.
+ *
+ * @param schema RELAX NG XML-syntax schema text
+ * @param len    schema byte length
+ * @param status LEPTRIS_OK, or LEPTRIS_ERROR_PARSE on a schema
+ *               error (wrong root namespace, unknown pattern
+ *               element, missing @name, unsupported construct)
+ * @return compiled schema, or NULL (status says why)
+ *
+ * Memory: free with leptris_rng_free.
+ */
+LEPTRIS_API LeptrisRelaxNG leptris_rng_parse(const char* schema,
+                                              size_t len,
+                                              LeptrisStatus* status);
+LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
+/* Last parse error detail (NULL when the handle is valid). */
+LEPTRIS_API const char* leptris_rng_error(LeptrisRelaxNG rng);
+
 
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
                                                     size_t length,

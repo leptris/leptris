@@ -33,6 +33,7 @@ typedef struct leptris_attribute*    LeptrisAttribute;
 typedef struct leptris_doctype*      LeptrisDoctype;
 typedef const char*                 LeptrisNamespace;
 typedef struct leptris_xpath_result* LeptrisXPathResult;
+typedef struct leptris_relaxng*    LeptrisRelaxNG;
 #endif
 
 /* ============================================================================

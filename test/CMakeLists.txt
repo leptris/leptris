@@ -44,6 +44,8 @@ function(leptris_add_test name)
         ${PROJECT_SOURCE_DIR}/src/leptris/common
         # DOM internals — used by vtable specs.
         ${PROJECT_SOURCE_DIR}/src/leptris/dom
+        # RNG internals — pattern-IR specs (#878).
+        ${PROJECT_SOURCE_DIR}/src/leptris/rng
         # Flat doc internals — used by flat parse specs (TODO 139).
         ${PROJECT_SOURCE_DIR}/src/leptris/flat)
     target_compile_features(${name} PRIVATE cxx_std_11)
@@ -88,6 +90,7 @@ leptris_add_test(test_vtable     dom/test_vtable.cpp)
 leptris_add_test(test_text_borrowed dom/test_text_borrowed.cpp)
 leptris_add_test(test_compact    dom/test_compact.cpp)
 leptris_add_test(test_digest     dom/test_digest.cpp)
+leptris_add_test(test_rng        rng/test_rng.cpp)
 leptris_add_test(test_simd_text  common/test_simd_text.cpp)
 leptris_add_test(test_simd_spans common/test_simd_spans.cpp)
 leptris_add_test(test_pool       memory/test_pool.cpp)
