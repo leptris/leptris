@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.115] - 2026-09-08
+
+### Added
+
+- #878 schema errors publish to leptris_last_error (rng)
+
+
+
 ## [1.9.114] - 2026-09-08
 
 ### Added
