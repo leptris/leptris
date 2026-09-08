@@ -4,7 +4,19 @@
 
 ### Added
 
-- #878 <param> datatype facets + pattern subset matcher (rng)
+- **#878 `<param>` datatype facets on `<data>`.** minInclusive/
+  maxInclusive/minExclusive/maxExclusive, minLength/maxLength/
+  length (raw characters — XSD string preserves whitespace), and
+  `pattern` with full-value anchoring. All semantics Jing-probed
+  first; facets apply in element-text, `<list>` token, and
+  attribute-value contexts via one shared `data_matches()`. The
+  pattern engine is a new portable self-contained matcher
+  (`rng/rng_regex.c`) — the XPath POSIX regex trio is compiled out
+  everywhere, so the validator ships its own subset engine.
+  Schema-parse validation matches Jing: unknown param names are
+  rejected (`invalid parameter:` — e.g. `enumeration`, which is
+  illegal in RELAX NG), and pattern constructs outside the subset
+  fail loudly at parse time. RNG suite 39/39, corpus gate 38/38.
 
 
 
