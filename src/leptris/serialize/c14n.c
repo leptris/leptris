@@ -113,15 +113,29 @@ static int compare_attributes(const void* a, const void* b) {
     const struct leptris_attribute* attr_a = *(const struct leptris_attribute**)a;
     const struct leptris_attribute* attr_b = *(const struct leptris_attribute**)b;
 
-    /* Get attribute names (single representation) */
+    /* #919: REC-xml-c14n section 2.3 — attribute nodes sort by
+     * namespace URI (no-namespace = empty URI, sorts FIRST), then
+     * by local name. The URI resolves through the OWNER element's
+     * in-scope declarations (#542 semantics). */
+    const char* uri_a = leptris_attribute_namespace_uri(
+        (LeptrisAttribute)attr_a);
+    const char* uri_b = leptris_attribute_namespace_uri(
+        (LeptrisAttribute)attr_b);
+    int cmp = strcmp(uri_a ? uri_a : "", uri_b ? uri_b : "");
+    if (cmp != 0) return cmp;
+
+    /* Same URI: local name (the part after any colon). */
     const char* name_a = attr_a->name_view.data;
     const char* name_b = attr_b->name_view.data;
     size_t len_a = attr_a->name_view.length;
     size_t len_b = attr_b->name_view.length;
+    const char* colon_a = name_a ? memchr(name_a, ':', len_a) : NULL;
+    const char* colon_b = name_b ? memchr(name_b, ':', len_b) : NULL;
+    if (colon_a) { len_a -= (size_t)(colon_a - name_a) + 1; name_a = colon_a + 1; }
+    if (colon_b) { len_b -= (size_t)(colon_b - name_b) + 1; name_b = colon_b + 1; }
 
-    /* Lexicographic comparison */
     size_t min_len = len_a < len_b ? len_a : len_b;
-    int cmp = memcmp(name_a, name_b, min_len);
+    cmp = memcmp(name_a, name_b, min_len);
     if (cmp != 0) return cmp;
     if (len_a < len_b) return -1;
     if (len_a > len_b) return 1;
