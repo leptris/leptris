@@ -1,5 +1,38 @@
 ## [Unreleased]
 
+## [1.9.112] - 2026-09-08
+
+### Added
+
+- **#878 Jing conformance corpus — the RNG validator's falsifiable
+  gate.** 19 Jing-verified schema/instance triples vendored in
+  `test/rng/jing-cases/` (attributes, element names, choice,
+  optional, oneOrMore, group/interleave order, text, data types,
+  value, list, mixed, ref/recursion, combine) with reference
+  verdicts recorded from Jing (`jing-ref.json`; regen steps in the
+  cases README). `test_rng_corpus` is a black-box gate (public API
+  only) requiring **exact** agreement — 38/38, every future
+  divergence is an immediate red.
+
+### Fixed
+
+- **Five validator divergences the corpus exposed** (#878):
+  `<text/>` and `<data type='string'>` now accept empty and
+  whitespace-only content (Jing-confirmed; the blanket rejection
+  was wrong — integer still rejects via its digit check);
+  `<interleave>` child patterns are single-use (`<a/><a/>` no
+  longer reuses the `a` pattern and drops a required `b`);
+  `<list>` closing a repeat wrapper no longer swallows the current
+  token (`<l>1 x</l>` is invalid again); a CHOICE at `start` (from
+  combined `@combine='choice'` defines) resolves each element
+  alternative instead of rejecting every document; `<attribute>`
+  value/data leaves constrain the instance value. Invalid verdicts
+  now always carry an error — `leptris_rng_error` is never NULL
+  after a 0 return.
+- html4 script spec passed 27 for a 25-byte literal (test)
+
+
+
 ## [1.9.111] - 2026-09-08
 
 ### Added
