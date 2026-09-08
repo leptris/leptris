@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+## [1.9.113] - 2026-09-08
+
+### Added
+
+- **#878 `<include>` support — `leptris_rng_parse_file(path, status)`.**
+  The new public entry parses a schema from a file and resolves
+  `<include href="...">` relative to the file's directory (the
+  in-memory `leptris_rng_parse` has no base URI and rejects includes
+  with a pointer to the file entry). Include semantics match Jing: a
+  `<start>`/`<define>` nested inside `<include>` **replaces** the
+  included grammar's matching declaration and must target something
+  that exists; remaining defines merge under the usual `@combine`
+  rules; only the final assembled grammar requires a `<start>`;
+  cycles are depth-guarded. 7 specs over Jing-verified fixtures in
+  `test/rng/include-cases/` (RNG suite now 33/33, corpus gate still
+  38/38).
+
+
+
 ## [1.9.112] - 2026-09-08
 
 ### Added
