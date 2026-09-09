@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.120] - 2026-09-09
+
+### Added
+
+- #659 in-table wrapper synthesis — WHATWG 755→792, parity 783 held (html)
+
+
+
 ## [1.9.119] - 2026-09-09
 
 ### Added
