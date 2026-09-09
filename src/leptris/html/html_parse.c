@@ -2612,8 +2612,22 @@ static LeptrisDocument html_parse_shared(
                     p = (q < end) ? q + 1 : end;
 
                     if (nlen) {
+                        /* WHATWG lowercases the doctype name;
+                         * libxml2 (the html4/parity mode) preserves
+                         * the case as written. */
+                        const char* dname = nstart;
+                        char lname[64];
+                        if (b.whatwg_head_set) {
+                            size_t ln = nlen;
+                            if (ln >= sizeof(lname)) ln = sizeof(lname) - 1;
+                            for (size_t i = 0; i < ln; i++)
+                                lname[i] = h_lower(nstart[i]);
+                            lname[ln] = 0;
+                            dname = lname;
+                            nlen = ln;
+                        }
                         LeptrisDoctypeNode* dt = leptris_doctype_create(
-                            nstart, nlen, b.pool);
+                            dname, nlen, b.pool);
                         if (dt) {
                             if (pub[0])
                                 leptris_doctype_set_public_id(
