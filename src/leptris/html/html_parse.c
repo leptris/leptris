@@ -2281,6 +2281,17 @@ typedef struct {
     /* #659 master mode flag (the per-slice flags below derive from
      * the same html_parse_shared arg). */
     int whatwg;
+    /* #659 frameset mode (WHATWG): a <frameset> before any body
+     * content REPLACES the body — the commit synthesis emits
+     * html > [head, frameset]. */
+    int frameset;
+    /* #659: structural <head>/<body> tags are dropped but their
+     * ATTRIBUTES land on the synthesized elements (name/value
+     * pool-string pairs). */
+    char* head_attrs[32];
+    int head_attr_n;
+    char* body_attrs[32];
+    int body_attr_n;
     /* #659 two-mode split: leptris_parse_html_string is the WHATWG
      * engine (full "in head" set: script/style/noscript/template
      * ... lift into the implied head); the new
@@ -2323,6 +2334,97 @@ static void h_top_append(HBuilder* b, LeptrisNodeRef n) {
 }
 
 static int h_ieq_raw(const char* a, const char* bname);
+
+/* #659: is the top chain still nothing but head-liftable
+ * content (so a <frameset> may still replace the body)? */
+static int h_body_still_empty(HBuilder* b) {
+    for (LeptrisNodeRef n = b->top_head; n;
+         n = leptris_node_get_next_sibling(n)) {
+        int ty = leptris_node_get_type(n);
+        if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
+            const char* nm = leptris_element_name((LeptrisElement)n);
+            if (!(h_ieq_raw(nm, "title") || h_ieq_raw(nm, "meta") ||
+                  h_ieq_raw(nm, "link") || h_ieq_raw(nm, "base") ||
+                  h_ieq_raw(nm, "basefont") ||
+                  h_ieq_raw(nm, "bgsound") ||
+                  h_ieq_raw(nm, "script") || h_ieq_raw(nm, "style") ||
+                  h_ieq_raw(nm, "noscript") ||
+                  h_ieq_raw(nm, "noframes") ||
+                  h_ieq_raw(nm, "template")))
+                return 0;
+        } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+            const char* t = leptris_text_node_get_content(n);
+            if (t)
+                for (const char* p = t; *p; p++)
+                    if (*p != ' ' && *p != '\t' && *p != '\n' &&
+                        *p != '\r')
+                        return 0;
+        }
+        /* comments/PIs are neutral */
+    }
+    return 1;
+}
+
+/* #659: stash the attributes of a dropped structural tag —
+ * pool-owned flat name/value pairs, applied to the synthesized
+ * element at commit. */
+static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
+                          char** attrs, int* n) {
+    while (q < end && *q != '>' && *n + 1 < 32) {
+        while (q < end && h_is_ws(*q)) q++;
+        if (q >= end || *q == '>') break;
+        if (*q == '/') {
+            q++;
+            continue;
+        }
+        const char* as = q;
+        while (q < end && !h_is_ws(*q) && *q != '=' && *q != '>' &&
+               *q != '/')
+            q++;
+        size_t alen = (size_t)(q - as);
+        if (!alen) {
+            q++;
+            continue;
+        }
+        char* aname = h_pooled_lower(b->pool, as, alen);
+        const char* vs = NULL;
+        size_t vlen = 0;
+        const char* scan = q;
+        while (scan < end && h_is_ws(*scan)) scan++;
+        if (scan < end && *scan == '=') {
+            scan++;
+            while (scan < end && h_is_ws(*scan)) scan++;
+            if (scan < end && (*scan == '\'' || *scan == '"')) {
+                char quote = *scan++;
+                vs = scan;
+                while (scan < end && *scan != quote) scan++;
+                vlen = (size_t)(scan - vs);
+                if (scan < end) scan++;
+            } else {
+                vs = scan;
+                while (scan < end && !h_is_ws(*scan) && *scan != '>')
+                    scan++;
+                vlen = (size_t)(scan - vs);
+            }
+            q = scan;
+        }
+        char* aval = vs ? h_decode(b->pool, vs, vs + vlen) : (char*)"";
+        if (aname && aval) {
+            attrs[(*n)++] = aname;
+            attrs[(*n)++] = aval;
+        }
+    }
+}
+
+/* Apply stashed structural attributes to a synthesized element. */
+static void h_apply_attrs(HBuilder* b, LeptrisElement e, char** attrs,
+                          int n) {
+    for (int i = 0; i + 1 < n; i += 2)
+        leptris_element_add_attribute(
+            e, leptris_sv_from_cstr(attrs[i]),
+            leptris_sv_from_cstr(attrs[i + 1]), b->pool);
+}
+
 
 /* WHATWG 12.2.6.1: only nodes NOT allowed in table context foster
  * — table-structure elements stay, whitespace-only text stays in
@@ -2868,8 +2970,10 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
         }
     }
 
-    /* <body> owns the rest, then links in as html's last child. */
-    LeptrisElement body = h_create_unattached(b, "body");
+    /* <body> (or <frameset>, #659) owns the rest, then links in
+     * as html's last child. */
+    LeptrisElement body = h_create_unattached(
+        b, b->frameset ? "frameset" : "body");
     if (!body) return;
     size_t elems = 0;
     LeptrisNodeRef last = NULL;
@@ -3285,13 +3389,55 @@ static LeptrisDocument html_parse_shared(
          * WHATWG's implicit head/body phases — the commit-time
          * synthesis provides the real elements, so the bare tags
          * themselves disappear. Inside an explicit <html> they are
-         * ordinary elements (honored as-is). */
-        if (b.depth == 0 &&
+         * ordinary elements (honored as-is). Their ATTRIBUTES are
+         * stashed and land on the synthesized elements. */
+        if (b.depth == 0 && !b.frameset &&
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
             if (strcmp(name, "body") == 0) {
                 b.lift_closed = 1;
                 if (!b.lift_boundary) b.lift_boundary = b.top_tail;
             }
+            if (b.whatwg)
+                h_stash_attrs(&b, q, end,
+                              strcmp(name, "head") == 0
+                                  ? b.head_attrs
+                                  : b.body_attrs,
+                              strcmp(name, "head") == 0
+                                  ? &b.head_attr_n
+                                  : &b.body_attr_n);
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+
+        /* #659 frameset mode (WHATWG): a <frameset> before any
+         * body content replaces the body; after content it is
+         * ignored. Inside an open frameset it nests. html/head/
+         * body tokens in frameset context are dropped. */
+        if (b.whatwg && strcmp(name, "frameset") == 0) {
+            if (!b.frameset && b.depth == 0 && h_body_still_empty(&b)) {
+                b.frameset = 1;
+                /* falls through: the normal open pushes it */
+            } else if (!(b.frameset && b.depth > 0)) {
+                /* Dropped token: flush pending text first. */
+                if (text < p) {
+                    char* dec = h_decode(b.pool, text, p);
+                    if (dec && *dec) {
+                        LeptrisTextNode* t = leptris_text_create(
+                            dec, strlen(dec), b.pool);
+                        if (t) h_append(&b, (LeptrisNodeRef)t);
+                    }
+                }
+                while (q < end && *q != '>') q++;
+                p = (q < end) ? q + 1 : end;
+                text = p;
+                continue;
+            }
+        } else if (b.whatwg && b.frameset &&
+                   (strcmp(name, "html") == 0 ||
+                    strcmp(name, "head") == 0 ||
+                    strcmp(name, "body") == 0)) {
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;
@@ -3582,10 +3728,11 @@ done:
             const char* cn = leptris_element_name((LeptrisElement)c);
             if (h_ieq_raw(cn, "head"))
                 has_head = 1;
-            else if (h_ieq_raw(cn, "body"))
+            else if (h_ieq_raw(cn, "body") || h_ieq_raw(cn, "frameset"))
                 has_body = 1;
         }
-        if (!has_body) h_new_child(&b, b.root, "body");
+        if (!has_body)
+            h_new_child(&b, b.root, b.frameset ? "frameset" : "body");
         if (!has_head) {
             /* Create WITHOUT attaching (h_open_named appends to the
              * top chain) — head splices in as the FIRST child. */
@@ -3604,6 +3751,25 @@ done:
                 leptris_element_set_parent(head, b.root);
                 b.root->child_count++;
             }
+        }
+    }
+    /* #659: the dropped structural <head>/<body> tags' attrs land
+     * on the synthesized elements. */
+    if (b.whatwg && b.root &&
+        h_ieq_raw(leptris_element_name(b.root), "html")) {
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child((LeptrisNodeRef)b.root);
+             c; c = leptris_node_get_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            const char* cn = leptris_element_name((LeptrisElement)c);
+            if (b.head_attr_n && h_ieq_raw(cn, "head"))
+                h_apply_attrs(&b, (LeptrisElement)c, b.head_attrs,
+                              b.head_attr_n);
+            else if (b.body_attr_n &&
+                     (h_ieq_raw(cn, "body") || h_ieq_raw(cn, "frameset")))
+                h_apply_attrs(&b, (LeptrisElement)c, b.body_attrs,
+                              b.body_attr_n);
         }
     }
     doc->new_dom_root = b.root;
