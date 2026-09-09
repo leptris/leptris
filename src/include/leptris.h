@@ -177,6 +177,56 @@ LEPTRIS_API size_t leptris_node_child_count(LeptrisNodeRef node);
 LEPTRIS_API uint64_t leptris_node_digest(LeptrisNodeRef node,
                                          LeptrisDigestFlags flags);
 
+/* ============================================================================
+ * Schematron (lane 16) — the third validation pillar
+ * ========================================================================== */
+
+typedef struct leptris_schematron* LeptrisSchematron;
+
+/**
+ * Parse a Schematron schema (ISO/2025 vocabulary: schema/pattern/
+ * rule/assert/report with @context/@test; queryBinding xslt).
+ *
+ * @param schema Schema text
+ * @param len Length
+ * @param status Optional status out-param
+ * @return Schema handle, or NULL on error (detail via
+ *         leptris_schematron_error / leptris_last_error)
+ * Memory: Caller owns (leptris_schematron_free).
+ */
+LEPTRIS_API LeptrisSchematron leptris_schematron_parse(
+    const char* schema, size_t len, LeptrisStatus* status);
+
+/** Parse a Schematron schema from a file path. */
+LEPTRIS_API LeptrisSchematron leptris_schematron_parse_file(
+    const char* path, LeptrisStatus* status);
+
+/** Free a schema handle. */
+LEPTRIS_API void leptris_schematron_free(LeptrisSchematron sch);
+
+/**
+ * Validate an instance document. Validity = zero failed asserts
+ * (successful-report entries do not invalidate).
+ *
+ * @return 1 valid, 0 invalid (or bad args)
+ */
+LEPTRIS_API int leptris_schematron_valid(LeptrisSchematron sch,
+                                         LeptrisDocument doc);
+
+/**
+ * Validate and return the SVRL report document (svrl:
+ * schematron-output with failed-assert / successful-report
+ * entries carrying @test, @location and svrl:text).
+ *
+ * @return SVRL document (caller frees), or NULL on error
+ */
+LEPTRIS_API LeptrisDocument leptris_schematron_validate(
+    LeptrisSchematron sch, LeptrisDocument doc);
+
+/** Last schema-level error message, or NULL. */
+LEPTRIS_API const char* leptris_schematron_error(
+    LeptrisSchematron sch);
+
 /**
  * Copy child node handles of ANY kind into a caller array (issue #535)
  *
