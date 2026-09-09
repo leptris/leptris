@@ -2480,6 +2480,30 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
 );
 
 /**
+ * Evaluate an XPath expression under a pinned language version
+ * (lane 15). LEPTRIS_XPATH_10 keeps the strict XPath 1.0 surface
+ * (3.x-only syntax — arrow, bang, lookup, let, inline functions,
+ * string templates — is rejected with LEPTRIS_ERROR_INVALID_ARG);
+ * LEPTRIS_XPATH_31 evaluates the full grammar (identical to
+ * leptris_xpath_eval).
+ *
+ * @param doc Document to evaluate against
+ * @param context Context element (NULL = document root)
+ * @param expression Expression text
+ * @param version LEPTRIS_XPATH_10 or LEPTRIS_XPATH_31
+ * @param status Optional status out-param
+ * @return Result handle, or NULL on error
+ * Memory: Caller owns the result (leptris_xpath_result_free).
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_versioned(
+    LeptrisDocument doc,
+    LeptrisElement context,
+    const char* expression,
+    LeptrisXPathVersion version,
+    LeptrisStatus* status
+);
+
+/**
  * Compile an XPath expression once, evaluate many times
  *
  * Skips the per-call expression hash + cache probe that

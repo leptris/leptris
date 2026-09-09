@@ -69,6 +69,15 @@ typedef enum {
 } LeptrisXPathResultType;
 
 /* ============================================================================
+ * XPath Language Version (lane 15: versioned eval)
+ * ========================================================================== */
+
+typedef enum {
+    LEPTRIS_XPATH_10 = 1,   /* strict XPath 1.0: 3.x surface off */
+    LEPTRIS_XPATH_31 = 3    /* full 3.1 grammar */
+} LeptrisXPathVersion;
+
+/* ============================================================================
  * Node Kinds
  * ============================================================================ */
 
