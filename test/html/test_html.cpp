@@ -878,3 +878,81 @@ TEST(HtmlTwoModes, CommentInteriorWhitespacePreserved) {
     EXPECT_EQ(Html("<table>abc<!--foo-->"),
               "abc<table><!--foo--></table>");
 }
+
+
+/* ---- #659 frameset mode + structural-tag attributes (WHATWG) ---- */
+
+/* A <frameset> arriving before any body content REPLACES the
+ * would-be body: html > [head, frameset]. Content after is
+ * frameset content (<frame> is void). html4 keeps libxml2's
+ * ordinary-element shape. */
+TEST(HtmlTwoModes, FramesetReplacesEmptyBody) {
+    /* The frameset is html's SECOND child — no body exists. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<frameset><frame src=a>";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "count(/html/body)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 0.0);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, nullptr,
+                           "name(/html/*[2])");
+    ASSERT_NE(r, nullptr);
+    char* ns_ = leptris_xpath_result_string(r);
+    EXPECT_STREQ(ns_ ? ns_ : "", "frameset");
+    leptris_free_string(ns_);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+    /* html4 entry: ordinary elements inside a body. */
+    LeptrisDocument d4 = leptris_parse_html4_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d4, nullptr);
+    /* html4: ordinary elements inside the body (html > body). */
+    LeptrisXPathResult r4 = leptris_xpath_eval(
+        d4, nullptr, "name(/html/*[1])");
+    ASSERT_NE(r4, nullptr);
+    char* n4 = leptris_xpath_result_string(r4);
+    EXPECT_STREQ(n4 ? n4 : "", "body");
+    leptris_free_string(n4);
+    leptris_xpath_result_free(r4);
+    leptris_document_free(d4);
+}
+
+/* <frameset> AFTER body content is ignored (body wins). */
+TEST(HtmlTwoModes, FramesetAfterContentIsIgnored) {
+    EXPECT_EQ(Html("<p>x<frameset></frameset>"),
+              "<p>x</p>");
+}
+
+/* Structural <head> start tags keep their ATTRIBUTES on the
+ * synthesized head. */
+TEST(HtmlTwoModes, StructuralHeadKeepsAttributes) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<head profile=\"p1\"><title>t";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "string(/html/head/@profile)");
+    ASSERT_NE(r, nullptr);
+    char* s2 = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s2 ? s2 : "", "p1");
+    leptris_free_string(s2);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
+
+TEST(HtmlTwoModes, StructuralBodyAttributesLandOnBody) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<body bgcolor=\"red\" onload='f()'><p>x";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "string(/html/body/@bgcolor)");
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "red");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
