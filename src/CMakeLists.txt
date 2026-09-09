@@ -24,7 +24,7 @@ set(LEPTRIS_SOURCES
     leptris/dom/node.c
     leptris/dom/digest.c
     leptris/sch/schematron.c
-    leptris/sch/schematron.c
+    leptris/diff/diff.c b8d51d6f (feat(diff): lane 17 native XML diff — engine, public API, CLI)
     leptris/rng/parse.c
     leptris/rng/rng_public.c
     leptris/rng/rng_regex.c

@@ -235,6 +235,78 @@ LEPTRIS_API LeptrisDocument leptris_schematron_validate(
 /** Last schema-level error message, or NULL. */
 LEPTRIS_API const char* leptris_schematron_error(
     LeptrisSchematron sch);
+ * XML Diff (lane 17) — digest-pruned ordered edit script
+ * ========================================================================== */
+
+typedef struct leptris_diff* LeptrisDiff;
+
+/**
+ * Compute a tree diff between two documents.
+ *
+ * Equal subtrees (by the #869 content-defined Merkle digest)
+ * prune in O(1); diverging regions align via an LCS on child
+ * digests, then same-named elements recurse. Attribute add and
+ * remove are UPDATE_ATTR ops with an empty side.
+ *
+ * @param a First document (the "before")
+ * @param b Second document (the "after")
+ * @param flags LEPTRIS_DIFF_DEFAULT or LEPTRIS_DIFF_IGNORE_WS_TEXT
+ * @param status Optional status out-param
+ * @return Opaque diff handle, or NULL on error
+ * Memory: Caller owns the handle (leptris_diff_free).
+ */
+LEPTRIS_API LeptrisDiff leptris_diff(LeptrisDocument a,
+                                     LeptrisDocument b,
+                                     LeptrisDiffFlags flags,
+                                     LeptrisStatus* status);
+
+/** Free a diff handle (all op strings are owned by it). */
+LEPTRIS_API void leptris_diff_free(LeptrisDiff diff);
+
+/** Number of ops in the edit script. */
+LEPTRIS_API size_t leptris_diff_op_count(LeptrisDiff diff);
+
+/** Op kind at @p index (0-based; out of range -> 0). */
+LEPTRIS_API LeptrisDiffOpType leptris_diff_op_type(LeptrisDiff diff,
+                                                   size_t index);
+
+/**
+ * Op path at @p index: root-relative, e.g. "/r/i[2]". Children
+ * named uniquely carry no suffix; INSERT/DELETE paths always
+ * carry the 1-based same-name position. Document-owned.
+ */
+LEPTRIS_API const char* leptris_diff_op_path(LeptrisDiff diff,
+                                             size_t index);
+
+/**
+ * Op name at @p index: the attribute name for UPDATE_ATTR, the
+ * element name for INSERT/DELETE, "" for UPDATE_TEXT.
+ * Document-owned.
+ */
+LEPTRIS_API const char* leptris_diff_op_name(LeptrisDiff diff,
+                                             size_t index);
+
+/** Before payload (attribute value / text), "" when none.
+ * Document-owned. */
+LEPTRIS_API const char* leptris_diff_op_before(LeptrisDiff diff,
+                                               size_t index);
+
+/** After payload (attribute value / text), "" when none.
+ * Document-owned. */
+LEPTRIS_API const char* leptris_diff_op_after(LeptrisDiff diff,
+                                              size_t index);
+
+/**
+ * Serialize the edit script to a line-per-op text form:
+ *   '- <path> @<attr> "<before>" -> "<after>"'  (UPDATE_ATTR)
+ *   '~ <path> "<before>" -> "<after>"'          (UPDATE_TEXT)
+ *   '+ <path> <<name>>'                          (INSERT)
+ *   'x <path> <<name>>'                          (DELETE)
+ *
+ * @return Malloc'd string (free with leptris_free_string)
+ */
+LEPTRIS_API char* leptris_diff_serialize(LeptrisDiff diff);
+ b8d51d6f (feat(diff): lane 17 native XML diff — engine, public API, CLI)
 
 /**
  * Copy child node handles of ANY kind into a caller array (issue #535)

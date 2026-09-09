@@ -215,6 +215,36 @@ TEST(CliParse, RejectsDeepNesting) {
     EXPECT_NE(r.exit_code, 139);
 }
 
+static void write_file(const char* path, const char* content) {
+    FILE* fp = std::fopen(path, "wb");
+    if (fp) {
+        std::fwrite(content, 1, std::strlen(content), fp);
+        std::fclose(fp);
+    }
+}
+
+
+
+// ---- diff (lane 17) -------------------------------------------------------
+
+TEST(CliDiff, ReportsOpsAndExitsZero) {
+    write_file("/tmp/leptris_cli_diff_a.xml", "<r><i id='1'>old</i></r>");
+    write_file("/tmp/leptris_cli_diff_b.xml", "<r><i id='2'>new</i></r>");
+    auto r = run_cli({"diff", "/tmp/leptris_cli_diff_a.xml",
+                      "/tmp/leptris_cli_diff_b.xml"});
+    EXPECT_EQ(r.exit_code, 0);
+    EXPECT_NE(r.out.find("@id \"1\" -> \"2\""), std::string::npos);
+    EXPECT_NE(r.out.find("\"old\" -> \"new\""), std::string::npos);
+}
+
+TEST(CliDiff, IdenticalDocumentsSaySo) {
+    write_file("/tmp/leptris_cli_diff_c.xml", "<r><a/></r>");
+    auto r = run_cli({"diff", "/tmp/leptris_cli_diff_c.xml",
+                      "/tmp/leptris_cli_diff_c.xml"});
+    EXPECT_EQ(r.exit_code, 0);
+    EXPECT_NE(r.out.find("identical"), std::string::npos);
+}
+
 }  // namespace
 
 // ---- xquery ----------------------------------------------------------------
