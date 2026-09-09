@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.118] - 2026-09-09
+
+### Added
+
+- #659 <template> placement — WHATWG 623→652, parity 777→783 (html)
+
+
+
 ## [1.9.117] - 2026-09-09
 
 ### Added
