@@ -148,7 +148,11 @@ TEST(HtmlParse, VoidElementsNeverNest) {
 TEST(HtmlParse, ImpliedEndTagsForListsAndCells) {
     EXPECT_EQ(Html("<ul><li>one<li>two</ul>"),
               "<ul><li>one</li><li>two</li></ul>");
+    /* WHATWG implies tbody; the html4 entry keeps it bare. */
     EXPECT_EQ(Html("<table><tr><td>a<td>b<tr><td>c</table>"),
+              "<table><tbody><tr><td>a</td><td>b</td></tr>"
+              "<tr><td>c</td></tr></tbody></table>");
+    EXPECT_EQ(Html4("<table><tr><td>a<td>b<tr><td>c</table>"),
               "<table><tr><td>a</td><td>b</td></tr>"
               "<tr><td>c</td></tr></table>");
     /* <p> closes on block-level starts. */
@@ -486,7 +490,8 @@ TEST(HtmlTwoModes, FosterParenting) {
     EXPECT_STREQ(sv ? sv : "", "x");
     leptris_free_string(sv);
     leptris_xpath_result_free(r);
-    r = leptris_xpath_eval(d5, nullptr, "count(/html/body/table/tr/td)");
+    r = leptris_xpath_eval(d5, nullptr,
+                           "count(/html/body/table/tbody/tr/td)");
     ASSERT_NE(r, nullptr);
     EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
     leptris_xpath_result_free(r);
@@ -788,4 +793,45 @@ TEST(HtmlForeign, Html4EntryStaysPlainHtml) {
     EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"svg\"])"), "");
     EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"g\"])"), "");
     leptris_document_free(d);
+}
+
+
+/* ---- #659 in-table insertion modes (WHATWG only) ----
+ *
+ * WHATWG 12.2.6.4: cells/rows/cols arriving where a wrapper is
+ * missing get it synthesized — tr under table implies tbody;
+ * td/th under table implies tbody>tr; col under table implies
+ * colgroup. The html4 entry keeps libxml2/Nokogiri's
+ * no-implied-tbody shape (the committed parity reference). */
+TEST(HtmlTwoModes, WhatwgImpliesTbodyForBareRows) {
+    EXPECT_EQ(Html("<table><tr><td>a</table>"),
+              "<table><tbody><tr><td>a</td></tr></tbody></table>");
+    EXPECT_EQ(Html4("<table><tr><td>a</table>"),
+              "<table><tr><td>a</td></tr></table>");
+}
+
+TEST(HtmlTwoModes, WhatwgImpliesRowForBareCells) {
+    EXPECT_EQ(Html("<table><td>x<td>y</table>"),
+              "<table><tbody><tr><td>x</td><td>y</td>"
+              "</tr></tbody></table>");
+    EXPECT_EQ(Html4("<table><td>x<td>y</table>"),
+              "<table><td>x</td><td>y</td></table>");
+}
+
+TEST(HtmlTwoModes, WhatwgImpliesColgroupForBareCols) {
+    EXPECT_EQ(Html("<table><col></table>"),
+              "<table><colgroup><col/></colgroup></table>");
+    EXPECT_EQ(Html4("<table><col></table>"),
+              "<table><col/></table>");
+}
+
+TEST(HtmlTwoModes, WhatwgSecondRowReusesTbody) {
+    EXPECT_EQ(Html("<table><tr><td>a<tr><td>b</table>"),
+              "<table><tbody><tr><td>a</td></tr>"
+              "<tr><td>b</td></tr></tbody></table>");
+}
+
+TEST(HtmlTwoModes, WhatwgExplicitTbodyNotDuplicated) {
+    EXPECT_EQ(Html("<table><tbody><tr><td>a</table>"),
+              "<table><tbody><tr><td>a</td></tr></tbody></table>");
 }

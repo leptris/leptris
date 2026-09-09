@@ -3306,6 +3306,33 @@ static LeptrisDocument html_parse_shared(
             }
         }
 
+        /* #659 in-table wrapper synthesis (WHATWG 12.2.6.4, WHATWG
+         * mode only): rows/cells/cols arriving directly under a
+         * table get their tbody/tr/colgroup wrapper. libxml2/
+         * Nokogiri keeps them bare — the html4 entry's parity
+         * shape, unchanged here. */
+        if (b.whatwg && elem_ns == H_NS_HTML && b.depth > 0) {
+            const char* tn = leptris_element_name(b.open[b.depth - 1]);
+            int is_body = h_ieq_raw(tn, "tbody") ||
+                          h_ieq_raw(tn, "thead") ||
+                          h_ieq_raw(tn, "tfoot");
+            if (h_ieq_raw(tn, "table")) {
+                if (strcmp(name, "tr") == 0) {
+                    h_open_element(&b, "tbody");
+                } else if (strcmp(name, "td") == 0 ||
+                           strcmp(name, "th") == 0) {
+                    h_open_element(&b, "tbody");
+                    h_open_element(&b, "tr");
+                } else if (strcmp(name, "col") == 0) {
+                    h_open_element(&b, "colgroup");
+                }
+            } else if (is_body &&
+                       (strcmp(name, "td") == 0 ||
+                        strcmp(name, "th") == 0)) {
+                h_open_element(&b, "tr");
+            }
+        }
+
         LeptrisElement e = (elem_ns != H_NS_HTML)
                                ? h_open_foreign(&b, name, elem_ns)
                                : h_open_element(&b, name);
