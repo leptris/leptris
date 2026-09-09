@@ -1,5 +1,32 @@
 ## [Unreleased]
 
+## [1.9.116] - 2026-09-09
+
+### Added
+
+- **#659 — HTML mode records the DOCTYPE.** The HTML modes skipped
+  `<!doctype ...>` entirely; `leptris_document_internal_subset`
+  returned NULL for every HTML document, and both corpus gates
+  failed at document level on every doctype-bearing case. The first
+  doctype is now recorded like the XML path records it — name,
+  legacy PUBLIC/SYSTEM ids, stray later doctypes ignored — with the
+  two-mode case rule: WHATWG lowercases the name, the html4/libxml2
+  mode preserves it. Corpus meters: **html5lib WHATWG 295 → 556
+  (+88%), Nokogiri parity 372 → 649 (+75%)**; both floors raised.
+
+### Fixed
+
+- **#930 — CLI tests race under `ctest -j4`**: `run_cli` wrote
+  subprocess stdout/stderr to fixed `/tmp/leptris_cli_*` paths, so
+  concurrent ctest entries overwrote each other's captures
+  (intermittent CliXpath/CliXquery reds, serially green). Paths are
+  now pid-suffixed per process and removed after read;
+  stress-verified 0/10 concurrent failures. The release also
+  refreshes `TODO.xslt-full/REMAINING.md` (30 releases stale) to
+  the current open set and graph.
+
+
+
 ## [1.9.115] - 2026-09-08
 
 ### Added
