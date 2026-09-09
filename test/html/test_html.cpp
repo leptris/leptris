@@ -956,3 +956,92 @@ TEST(HtmlTwoModes, StructuralBodyAttributesLandOnBody) {
     leptris_xpath_result_free(r);
     leptris_document_free(d);
 }
+
+
+/* ---- #659 "in head noscript" (scripting off) ----
+ *
+ * <noscript> opened in head phase: comments and head content
+ * stay inside; the first body-ish token pops it (reprocessed at
+ * body level); <html> attrs merge onto the html element;
+ * </br> means <br>; <noframes> is RAWTEXT. */
+TEST(HtmlTwoModes, NoscriptInHeadPopsOnBodyTag) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<head><noscript><p>x</noscript>";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "name(/html/head/*[1])");
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "noscript");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, nullptr,
+                           "count(/html/head/noscript/*)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 0.0);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, nullptr, "string(/html/body/p)");
+    ASSERT_NE(r, nullptr);
+    s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "x");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
+
+TEST(HtmlTwoModes, NoscriptInHeadKeepsComments) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<head><noscript><!--foo--></noscript>";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "count(/html/head/noscript/comment())");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
+
+TEST(HtmlTwoModes, NoscriptHtmlAttrsMerge) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<head><noscript><html class=foo></noscript>";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "string(/html/@class)");
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "foo");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
+
+TEST(HtmlTwoModes, EndBrMeansBrStart) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<div>a</br>";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "count(/html/body/div/br)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
+
+TEST(HtmlTwoModes, NoframesIsRawText) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<noframes>XXX</noscript></noframes>";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "string(/html/head/noframes)");
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "XXX</noscript>");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
