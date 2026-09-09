@@ -27,19 +27,22 @@ std::string Html(const char* in) {
         if (rest < r.size() && r[rest] == '\n') rest++;
         r = r.substr(rest);
     }
-    /* The parser synthesizes the Nokogiri document shape
-     * <html><body>...</body></html> (no empty <head> — Nokogiri
-     * omits it without head content); the specs below pin the BODY
-     * content (the tolerant-parsing behaviors under test). */
+    /* WHATWG shape is <html><head/><body>...</body></html> (head
+     * always present, possibly empty) — strip the EMPTY head with
+     * the wrapper so content specs stay shape-agnostic. Non-empty
+     * heads (HeadContentLift) keep the full form. */
+    const char* open_wh = "<html><head/><body>";
     const char* open_w = "<html><body>";
     const char* close_w = "</body></html>";
-    if (r.compare(0, std::strlen(open_w), open_w) == 0 &&
-        r.size() >= std::strlen(open_w) + std::strlen(close_w) &&
-        r.compare(r.size() - std::strlen(close_w), std::strlen(close_w),
-                  close_w) == 0) {
-        return r.substr(std::strlen(open_w),
-                        r.size() - std::strlen(open_w) -
-                            std::strlen(close_w));
+    for (const char* ow : {open_wh, open_w}) {
+        if (r.compare(0, std::strlen(ow), ow) == 0 &&
+            r.size() >= std::strlen(ow) + std::strlen(close_w) &&
+            r.compare(r.size() - std::strlen(close_w),
+                      std::strlen(close_w), close_w) == 0) {
+            return r.substr(std::strlen(ow),
+                            r.size() - std::strlen(ow) -
+                                std::strlen(close_w));
+        }
     }
     return r;
 }
@@ -100,9 +103,11 @@ TEST(HtmlParse, EmptyShapeInputsAreDocuments) {
 }
 
 TEST(HtmlParse, SynthesizesNokogiriDocumentShape) {
+    /* Nokogiri/libxml2 shape is the html4 entry's contract; the
+     * WHATWG entry always has a head (StructuralHeadBodyTags). */
     LeptrisStatus st = LEPTRIS_OK;
     const char in[] = "<p>x</p>";
-    LeptrisDocument doc = leptris_parse_html_string(in, std::strlen(in), &st);
+    LeptrisDocument doc = leptris_parse_html4_string(in, std::strlen(in), &st);
     ASSERT_NE(doc, nullptr);
     LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
@@ -124,7 +129,7 @@ TEST(HtmlParse, SynthesizesNokogiriDocumentShape) {
 TEST(HtmlParse, ExplicitHtmlElementIsHonored) {
     LeptrisStatus st = LEPTRIS_OK;
     const char in[] = "<html><body><p>x</p></body></html>";
-    LeptrisDocument doc = leptris_parse_html_string(in, std::strlen(in), &st);
+    LeptrisDocument doc = leptris_parse_html4_string(in, std::strlen(in), &st);
     ASSERT_NE(doc, nullptr);
     LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
@@ -284,10 +289,14 @@ TEST(HtmlParse, ProcessingInstructionAndBogus) {
         "<div>a<?foo bar?>b</div>",
         strlen("<div>a<?foo bar?>b</div>"), NULL);
     ASSERT_NE(d, nullptr);
-    LeptrisElement div = leptris_document_root(d) ? nullptr : nullptr;
     LeptrisElement root = leptris_document_root(d);
     ASSERT_NE(root, nullptr);
-    LeptrisElement body = leptris_element_first_child_any(root);
+    /* WHATWG shape is html>[head, body] — find body by name. */
+    LeptrisElement body = (LeptrisElement)leptris_node_first_child(
+        (LeptrisNodeRef)root);
+    while (body && strcmp(leptris_element_name(body), "body") != 0)
+        body = (LeptrisElement)leptris_node_next_sibling(
+            (LeptrisNodeRef)body);
     ASSERT_NE(body, nullptr);
     LeptrisElement dv = leptris_element_first_child_any(body);
     ASSERT_NE(dv, nullptr);
@@ -353,11 +362,12 @@ TEST(HtmlParse, HeadContentLift) {
     leptris_xpath_result_free(r);
     leptris_document_free(d);
 
-    /* title after body content does NOT lift */
+    /* title after body content does NOT lift — it stays in body.
+     * (The WHATWG entry now always has a head, possibly empty.) */
     const char* h2 = "<p>x</p><title>after</title>";
     d = leptris_parse_html_string(h2, strlen(h2), NULL);
     ASSERT_NE(d, nullptr);
-    r = leptris_xpath_eval(d, NULL, "count(/html/head)");
+    r = leptris_xpath_eval(d, NULL, "count(/html/head/*)");
     ASSERT_NE(r, nullptr);
     EXPECT_EQ(leptris_xpath_result_number(r), 0.0);
     leptris_xpath_result_free(r);
@@ -553,4 +563,64 @@ TEST(HtmlTwoModes, DoctypeIsRecorded) {
     ASSERT_NE(dt4, nullptr);
     EXPECT_STREQ(leptris_doctype_get_root_name(dt4), "html");
     leptris_document_free(d4);
+}
+
+/* #659: WHATWG insertion modes — every document is html>[head,
+ * body] whatever the bare structural tags look like; the html4
+ * entry keeps libxml2's shape (no empty head). */
+TEST(HtmlTwoModes, StructuralHeadBodyTags) {
+    /* All these WHATWG-entry shapes must be html>[head, body]. */
+    const char* cases[] = {
+        "<html>", "<head>", "<body>", "<html><head>",
+        "<html><head></head>", "<html><head></head><body>",
+        "<html><body></html>", "<head></html>",
+        "<html><head></body></html>",
+    };
+    for (const char* c : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_html_string(c, strlen(c), &st);
+        ASSERT_NE(d, nullptr) << c;
+        LeptrisElement root = leptris_document_root(d);
+        ASSERT_NE(root, nullptr) << c;
+        EXPECT_STREQ(leptris_element_name(root), "html") << c;
+        LeptrisElement first =
+            (LeptrisElement)leptris_node_first_child((LeptrisNodeRef)root);
+        LeptrisElement second = first
+            ? (LeptrisElement)leptris_node_next_sibling((LeptrisNodeRef)first)
+            : nullptr;
+        ASSERT_NE(first, nullptr) << c;
+        ASSERT_NE(second, nullptr) << c;
+        EXPECT_STREQ(leptris_element_name(first), "head") << c;
+        EXPECT_STREQ(leptris_element_name(second), "body") << c;
+        EXPECT_EQ(leptris_node_next_sibling((LeptrisNodeRef)second),
+                  nullptr) << c;
+        leptris_document_free(d);
+    }
+}
+
+TEST(HtmlTwoModes, StructuralTagsKeepContentPlacement) {
+    /* Bare head/body tags with content: title lifts to head, the
+     * rest stays in body — no nested head/body elements. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<head><title>t</title></head><body><p>x</p>";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_document_root(d);
+    LeptrisElement head =
+        (LeptrisElement)leptris_node_first_child((LeptrisNodeRef)root);
+    LeptrisElement body =
+        (LeptrisElement)leptris_node_next_sibling((LeptrisNodeRef)head);
+    ASSERT_NE(head, nullptr);
+    ASSERT_NE(body, nullptr);
+    EXPECT_STREQ(leptris_element_name(head), "head");
+    EXPECT_STREQ(leptris_element_name(body), "body");
+    EXPECT_STREQ(leptris_element_name(
+                     (LeptrisElement)leptris_node_first_child(
+                         (LeptrisNodeRef)head)),
+                 "title");
+    EXPECT_STREQ(leptris_element_name(
+                     (LeptrisElement)leptris_node_first_child(
+                         (LeptrisNodeRef)body)),
+                 "p");
+    leptris_document_free(d);
 }

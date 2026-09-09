@@ -374,15 +374,18 @@ void Coalesce(ONode* n) {
     n->children.swap(out);
 }
 
-/* Drop an EMPTY expected <head> (documented shape divergence) and
- * flatten html5lib's template `content` markers: our template is
+/* Flatten html5lib's template `content` markers: our template is
  * an ordinary element whose children sit directly under it (the
- * pinned libxml2 characterization). */
-void NormalizeExpected(XNode* n) {
+ * pinned libxml2 characterization). For the html4/parity meter,
+ * also drop an EMPTY expected <head> (Nokogiri omits it) — the
+ * WHATWG meter compares heads for real (the engine always makes
+ * one now). */
+void NormalizeExpected(XNode* n, int optional_empty_head) {
     std::vector<XNode> out;
     for (auto& c : n->children) {
-        NormalizeExpected(&c);
-        if (c.kind == XNode::ELEM && c.name == "head" && c.ns.empty() &&
+        NormalizeExpected(&c, optional_empty_head);
+        if (optional_empty_head &&
+            c.kind == XNode::ELEM && c.name == "head" && c.ns.empty() &&
             c.children.empty())
             continue;
         if (c.kind == XNode::MARKER) {
@@ -507,7 +510,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
             }
             ONode ours = CollectDocument(d);
             Coalesce(&ours);
-            NormalizeExpected(&c.doc);
+            NormalizeExpected(&c.doc, 0);
             std::string why;
             if (getenv("H5DBG") && c.id == "tests1.dat:1") {
                 printf("[dbg] expected kind=%d nchild=%zu | ours kind=%d nchild=%zu\n",
@@ -544,10 +547,9 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 556 since DOCTYPE recording + WHATWG doctype-name
-     * lowercasing (295 adoption agency, 294 foster, 285 two-mode
-     * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)556);
+     * 623 since structural head/body (556 DOCTYPE, 295 adoption
+     * agency, 294 foster, 285 two-mode split, 193 before it). */
+    EXPECT_GE(passed, (size_t)623);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
@@ -580,7 +582,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
             }
             ONode ours = CollectDocument(d);
             Coalesce(&ours);
-            NormalizeExpected(&c.doc);
+            NormalizeExpected(&c.doc, 1);
             std::string why;
             if (Compare(c.doc, ours, &why)) {
                 ppassed++;
@@ -602,6 +604,6 @@ TEST(Html5LibCorpus, TreeConstruction) {
             printf("  PARITY-FAIL %s\n", pfails[i].c_str());
         EXPECT_GT(ptotal, (size_t)1400);
         /* Parity floor — the true #659 metric; only raises. */
-        EXPECT_GE(ppassed, (size_t)649);
+        EXPECT_GE(ppassed, (size_t)777);
     }
 }
