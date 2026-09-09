@@ -154,13 +154,14 @@ TEST(Schematron, LoudRefusals) {
 }
 
 TEST(Schematron, ParseFileEntry) {
-    FILE* fp = fopen("/tmp/leptris_sch_test.sch", "wb");
+    /* Build-dir-relative: /tmp does not exist on Windows. */
+    FILE* fp = fopen("leptris_sch_test.tmp", "wb");
     ASSERT_NE(fp, nullptr);
     fwrite(kSchema, 1, strlen(kSchema), fp);
     fclose(fp);
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisSchematron sch =
-        leptris_schematron_parse_file("/tmp/leptris_sch_test.sch",
+        leptris_schematron_parse_file("leptris_sch_test.tmp",
                                       &st);
     EXPECT_NE(sch, nullptr);
     if (sch) leptris_schematron_free(sch);
