@@ -2258,6 +2258,11 @@ typedef struct {
      * shape (title/meta/link/base only — libxml2 leaves leading
      * script/style in body). */
     int whatwg_head_set;
+    /* #659: a structural <body> was seen (lift_closed) — the
+     * head-lift run may not extend past lift_boundary, the last
+     * node appended before it (NULL = nothing was). */
+    int lift_closed;
+    LeptrisNodeRef lift_boundary;
     /* #659 foster parenting: WHATWG 12.2.6.1 — text (and non-table
      * elements) arriving with a table-context insertion point go
      * BEFORE the table in its parent. libxml2 keeps them in the
@@ -2463,6 +2468,131 @@ static LeptrisElement h_new_child(HBuilder* b, LeptrisElement parent,
     leptris_element_append_child_internal_doc(parent, (LeptrisNodeRef)e,
                                               b->doc);
     return e;
+}
+
+
+/* #659 head/body split over `html`'s current child chain: lift
+ * the leading head run (bounded by the structural-body marker)
+ * into a <head> spliced in as first child; move the rest into a
+ * <body> appended last — unless an explicit <body> element is
+ * already among the rest (explicit html), where the rest stays.
+ * The chain stays attached throughout (no detach/reattach). */
+static LeptrisElement h_create_unattached(HBuilder* b, const char* name) {
+    LeptrisStringView nv = leptris_sv_from_cstr(name);
+    LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
+    if (e) leptris_root_doc_register(e, b->doc);
+    return e;
+}
+
+static void h_split_head_body(HBuilder* b, LeptrisElement html,
+                              LeptrisNodeRef orig_head) {
+    LeptrisNodeRef head_end = orig_head;   /* first non-head node */
+    if (!(b->lift_closed && !b->lift_boundary)) {
+        while (head_end &&
+               leptris_node_get_type(head_end) ==
+                   LEPTRIS_NODE_TYPE_ELEMENT) {
+            const char* hn = leptris_element_name((LeptrisElement)head_end);
+            /* #659 two modes: WHATWG lifts the full "in head" set;
+             * the html4-compat entry lifts only title/meta/link/
+             * base (libxml2 leaves leading script/style in body). */
+            int head_el =
+                h_ieq_raw(hn, "title") || h_ieq_raw(hn, "meta") ||
+                h_ieq_raw(hn, "link") || h_ieq_raw(hn, "base");
+            if (b->whatwg_head_set)
+                head_el = head_el || h_ieq_raw(hn, "basefont") ||
+                          h_ieq_raw(hn, "bgsound") ||
+                          h_ieq_raw(hn, "script") ||
+                          h_ieq_raw(hn, "style") ||
+                          h_ieq_raw(hn, "noframes") ||
+                          h_ieq_raw(hn, "noscript") ||
+                          h_ieq_raw(hn, "template");
+            if (!head_el)
+                break;
+            head_end = leptris_node_get_next_sibling(head_end);
+            /* A structural <body> ends the head phase. */
+            if (b->lift_boundary && head_end == b->lift_boundary) {
+                head_end = leptris_node_get_next_sibling(head_end);
+                break;
+            }
+        }
+    }
+    /* A non-empty run hands the tail to the body (possibly NULL
+     * when the run consumed everything); an empty run keeps the
+     * whole chain as the rest. */
+    LeptrisNodeRef rest = (head_end == orig_head) ? orig_head : head_end;
+
+    /* An explicit <body> among the rest keeps the rest in place. */
+    for (LeptrisNodeRef c = rest; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT &&
+            h_ieq_raw(leptris_element_name((LeptrisElement)c), "body"))
+            return;
+    }
+
+    /* <head> spliced in as the first child, owning the run. */
+    LeptrisElement html_first_new = NULL;
+    int head_spliced = 0;
+    if (head_end != orig_head) {
+        LeptrisElement head = h_create_unattached(b, "head");
+        if (head) {
+            head_spliced = 1;
+            html_first_new = head;
+            size_t hn = 0;
+            LeptrisNodeRef hlast = NULL;
+            for (LeptrisNodeRef c = orig_head; c && c != head_end; ) {
+                LeptrisNodeRef next = leptris_node_get_next_sibling(c);
+                leptris_element_set_parent((LeptrisElement)c, head);
+                hlast = c;
+                hn++;
+                c = next;
+            }
+            leptris_elem_set_first_child(head, orig_head);
+            leptris_elem_set_last_child(head, hlast);
+            head->child_count = hn;
+            if (hlast) leptris_node_set_next_sibling(hlast, NULL);
+            leptris_node_set_next_sibling((LeptrisNodeRef)head, rest);
+            leptris_elem_set_first_child(html, head);
+            leptris_element_set_parent(head, html);
+        }
+    }
+
+    /* <body> owns the rest, then links in as html's last child. */
+    LeptrisElement body = h_create_unattached(b, "body");
+    if (!body) return;
+    size_t elems = 0;
+    LeptrisNodeRef last = NULL;
+    for (LeptrisNodeRef c = rest; c; ) {
+        LeptrisNodeRef next = leptris_node_get_next_sibling(c);
+        int ty = leptris_node_get_type(c);
+        if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
+            leptris_element_set_parent((LeptrisElement)c, body);
+            elems++;
+        } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+            leptris_textnode_set_parent((LeptrisTextNode*)c, body);
+        } else if (ty == LEPTRIS_NODE_TYPE_COMMENT) {
+            leptris_comment_set_parent((LeptrisCommentNode*)c, body);
+        } else if (ty == LEPTRIS_NODE_TYPE_CDATA) {
+            leptris_cdata_set_parent((LeptrisCDATANode*)c, body);
+        } else if (ty == LEPTRIS_NODE_TYPE_PI) {
+            leptris_pi_set_parent((LeptrisPINode*)c, body);
+        }
+        last = c;
+        c = next;
+    }
+    leptris_elem_set_first_child(body, rest);
+    body->child_count = elems;
+    if (last) leptris_node_set_next_sibling(last, NULL);
+    /* html's chain is now exactly [head?, body] — the rest left
+     * html when it moved into body. */
+    if (head_spliced)
+        leptris_node_set_next_sibling((LeptrisNodeRef)html_first_new,
+                                      (LeptrisNodeRef)body);
+    else
+        leptris_elem_set_first_child(html, body);
+    leptris_element_set_parent(body, html);
+    html->child_count = 0;
+    if (head_spliced) html->child_count++;
+    html->child_count++;
 }
 
 /* ---- tokenizer ---- */
@@ -2786,6 +2916,10 @@ static LeptrisDocument html_parse_shared(
          * ordinary elements (honored as-is). */
         if (b.depth == 0 &&
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
+            if (strcmp(name, "body") == 0) {
+                b.lift_closed = 1;
+                if (!b.lift_boundary) b.lift_boundary = b.top_tail;
+            }
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;
@@ -2940,95 +3074,18 @@ done:
     }
     if (!has_html) {
         /* EOF closes every open element (never fails the parse),
-         * and the parsed chain moves under a fresh body. */
+         * and the parsed chain moves under a fresh <html>. */
         b.depth = 0;
         LeptrisNodeRef orig_head = b.top_head;
-        LeptrisNodeRef orig_tail = b.top_tail;
         b.top_head = NULL;
         b.top_tail = NULL;
         LeptrisElement html = h_open_named(&b, "html", 0);
-        /* Head-content lift (#659, libxml2 shape): a contiguous
-         * leading run of title/meta/link/base ELEMENTS moves into a
-         * synthesized <head> placed before <body>; only synthesize
-         * <head> when the run is non-empty (the no-empty-head rule).
-         * Anything after body content starts stays put. */
-        LeptrisNodeRef head_end = orig_head;   /* first non-head node */
-        while (head_end &&
-               leptris_node_get_type(head_end) ==
-                   LEPTRIS_NODE_TYPE_ELEMENT) {
-            const char* hn = leptris_element_name((LeptrisElement)head_end);
-            /* #659 two modes: WHATWG lifts the full "in head" set
-             * (tests16's 189-case shape); the html4-compat entry
-             * lifts only title/meta/link/base — libxml2 leaves
-             * leading script/style in body (Nokogiri parity). */
-            int head_el =
-                h_ieq_raw(hn, "title") || h_ieq_raw(hn, "meta") ||
-                h_ieq_raw(hn, "link") || h_ieq_raw(hn, "base");
-            if (b.whatwg_head_set)
-                head_el = head_el ||
-                    h_ieq_raw(hn, "basefont") ||
-                    h_ieq_raw(hn, "bgsound") ||
-                    h_ieq_raw(hn, "script") ||
-                    h_ieq_raw(hn, "style") ||
-                    h_ieq_raw(hn, "noframes") ||
-                    h_ieq_raw(hn, "noscript") ||
-                    h_ieq_raw(hn, "template");
-            if (!head_el)
-                break;
-            head_end = leptris_node_get_next_sibling(head_end);
-        }
-        LeptrisElement head = NULL;
-        if (head_end != orig_head) {
-            head = h_new_child(&b, html, "head");
-            if (head) {
-                size_t hn = 0;
-                LeptrisNodeRef hlast = NULL;
-                for (LeptrisNodeRef c = orig_head; c && c != head_end; ) {
-                    LeptrisNodeRef next =
-                        leptris_node_get_next_sibling(c);
-                    leptris_element_set_parent((LeptrisElement)c, head);
-                    hlast = c;
-                    hn++;
-                    c = next;
-                }
-                leptris_elem_set_first_child(head, orig_head);
-                leptris_elem_set_last_child(head, hlast);
-                head->child_count = hn;
-                /* sever the two chains at the lift boundary */
-                if (hlast) leptris_node_set_next_sibling(hlast, NULL);
-            }
-        }
-        LeptrisElement body = h_new_child(&b, html, "body");
-        if (!html || !body) {
+        if (!html) {
             if (status) *status = LEPTRIS_ERROR_MEMORY;
             leptris_document_free(doc);
             return NULL;
         }
-        /* Move the parsed chain under <body>: nodes keep their
-         * sibling links; reparent and re-anchor. */
-        size_t elems = 0;
-        LeptrisNodeRef last = NULL;
-        for (LeptrisNodeRef c = head_end ? head_end : orig_head; c; ) {
-            LeptrisNodeRef next = leptris_node_get_next_sibling(c);
-            int ty = leptris_node_get_type(c);
-            if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
-                leptris_element_set_parent((LeptrisElement)c, body);
-                elems++;
-            } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
-                leptris_textnode_set_parent((LeptrisTextNode*)c, body);
-            } else if (ty == LEPTRIS_NODE_TYPE_COMMENT) {
-                leptris_comment_set_parent((LeptrisCommentNode*)c, body);
-            } else if (ty == LEPTRIS_NODE_TYPE_CDATA) {
-                leptris_cdata_set_parent((LeptrisCDATANode*)c, body);
-            } else if (ty == LEPTRIS_NODE_TYPE_PI) {
-                leptris_pi_set_parent((LeptrisPINode*)c, body);
-            }
-            last = c;
-            c = next;
-        }
-        leptris_elem_set_first_child(body, head ? head_end : orig_head);
-        leptris_elem_set_last_child(body, last ? last : orig_tail);
-        body->child_count = elems;
+        h_split_head_body(&b, html, orig_head);
         b.top_head = (LeptrisNodeRef)html;
         b.top_tail = (LeptrisNodeRef)html;
         b.root = html;
@@ -3041,6 +3098,18 @@ done:
                 b.root = (LeptrisElement)c;
                 break;
             }
+        }
+        /* #659 WHATWG: the same head/body split applies inside an
+         * explicit <html> — lift the leading head run, wrap the
+         * rest (an explicit <head>/<body> child keeps the rest in
+         * place; the ensure step below adds what is missing).
+         * libxml2 keeps explicit-html children untouched. */
+        if (b.whatwg_head_set && b.root &&
+            h_ieq_raw(leptris_element_name(b.root), "html") &&
+            leptris_node_first_child((LeptrisNodeRef)b.root)) {
+            h_split_head_body(&b, b.root,
+                              leptris_node_first_child(
+                                  (LeptrisNodeRef)b.root));
         }
     }
 
