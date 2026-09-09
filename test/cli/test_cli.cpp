@@ -12,7 +12,28 @@
 #include <string>
 #include <array>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace {
+
+/* Subprocess temp paths are PER-PROCESS (pid-suffixed): under
+ * `ctest -j4` each ctest entry runs this binary filtered to one
+ * test, and fixed paths made concurrent CLI runs read each
+ * other's stdout/stderr (#930). */
+static const std::string& tmp_prefix() {
+    static const std::string prefix = [] {
+#ifdef _WIN32
+        return std::string("/tmp/leptris_cli_") + std::to_string(_getpid());
+#else
+        return std::string("/tmp/leptris_cli_") + std::to_string(getpid());
+#endif
+    }();
+    return prefix;
+}
 
 /* Run the CLI with the given args, feeding optional stdin.
  * Returns (exit_code, stdout, stderr). */
@@ -35,7 +56,7 @@ RunResult run_cli(const std::vector<std::string>& args,
                   const std::string& stdin_data = "") {
     /* Build the command.  Use a temp file for stdin to avoid heredoc
      * quoting pitfalls with embedded quotes/special chars. */
-    std::string stdin_path = "/tmp/leptris_cli_stdin";
+    std::string stdin_path = tmp_prefix() + "_stdin";
     if (!stdin_data.empty()) {
         FILE* fp = std::fopen(stdin_path.c_str(), "w");
         if (fp) {
@@ -56,13 +77,15 @@ RunResult run_cli(const std::vector<std::string>& args,
     if (!stdin_data.empty()) {
         cmd += " < " + stdin_path;
     }
-    cmd += " > /tmp/leptris_cli_stdout 2> /tmp/leptris_cli_stderr";
+    const std::string out_path = tmp_prefix() + "_stdout";
+    const std::string err_path = tmp_prefix() + "_stderr";
+    cmd += " > " + out_path + " 2> " + err_path;
 
     int rc = std::system(cmd.c_str());
 
     std::array<char, 4096> buf;
     std::string out;
-    FILE* fp = std::fopen("/tmp/leptris_cli_stdout", "r");
+    FILE* fp = std::fopen(out_path.c_str(), "r");
     if (fp) {
         while (size_t n = std::fread(buf.data(), 1, buf.size(), fp)) {
             out.append(buf.data(), n);
@@ -70,13 +93,16 @@ RunResult run_cli(const std::vector<std::string>& args,
         std::fclose(fp);
     }
     std::string err;
-    fp = std::fopen("/tmp/leptris_cli_stderr", "r");
+    fp = std::fopen(err_path.c_str(), "r");
     if (fp) {
         while (size_t n = std::fread(buf.data(), 1, buf.size(), fp)) {
             err.append(buf.data(), n);
         }
         std::fclose(fp);
     }
+    std::remove(out_path.c_str());
+    std::remove(err_path.c_str());
+    if (!stdin_data.empty()) std::remove(stdin_path.c_str());
 
     return {rc, out, err};
 }
