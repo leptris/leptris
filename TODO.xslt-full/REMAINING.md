@@ -1,111 +1,114 @@
-# REMAINING — the complete open-work ledger (2026-09-05)
+# REMAINING — the complete open-work ledger
 
-SSOT for everything still open after v1.9.86. Update entries as
-work ships; delete entries as they close. Per-lane details live in
-the numbered docs; this file is the index + the graph.
+SSOT for everything still open after v1.9.115 (2026-09-09).
+Update entries as work ships; delete entries as they close.
+Per-lane details live in the numbered docs; this file is the index
++ the graph.
 
 ## A. In flight
 
-- **PR #891 / #875** — CRITICAL: dispatch index overflow dropped
-  templates past 48 name-keys / 96 literal-pkeys per mode bucket
-  (silent, zero output). Fix routes overflowed patterns to the
-  scanned remainder. RED spec at 120 patterns both shapes. After
-  merge: release, then bindings drop the 1.9.92 pin (ruby side has
-  a sentinel spec standing guard).
-
-2026-09-06/07 shipped: v1.9.94 (#883 last-root memo), v1.9.95
-(#881 C14N ns-order — the round's key find; #882 expand_empty +
-element-level serialize ext; #682 TLS consolidation + walk-first
-attr dup check: heavy 4.96→3.83), v1.9.96 (#682 ns-fixup walk skip:
-heavy →3.57, 0.81x lxml; light 3.57 = 0.76x). ruby#147/#149
-answered engine-side (findings + batch-entry/C-ext proposal on the
-binding repo — user decision pending). Discards banked: two-slot
-memo ring (8% regression), contiguous text-create (C already
-15-18ns/op; the 884ns is the ffi-gem seam).
-
-2026-09-05 shipped: v1.9.87 (#846 QName split), v1.9.88 (#682
-dispatch indexes: named hash + mode buckets + bare-Name fast path,
-3.27x → 1.78x vs lxml), #855 (heavy fixture), #860 (attr-index
-negative result banked).
+- **leptris-ruby PR #165** — `Leptris::XML::RelaxNG` (user merges;
+  requires libleptris >= 1.9.115, which is released). After merge:
+  the metanorma-standoc migration off Jing (prompt on #878).
 
 ## B. Open GitHub issues (leptris/leptris)
 
-- **#682** — 1.78x behind in-process lxml after v1.9.88 (from
-  3.27x). Remaining is diffuse: TLS thunks (the per-thread
-  nodeset/result free-lists), per-result-element doc/pool climbs,
-  serializer, allocator — i.e. the TLS/allocator consolidation,
-  which touches document-scoped ownership and NEEDS A DESIGN
-  CONVERSATION before implementation (TODO 13). Measured-and-
-  discarded (do not retry): attr-index lazy registration.
-- **#659** — HTML parsing mode completion (lane 14 tail):
-  1. html5lib tokenizer/tree corpus adoption (needs mode-gated
-     adoption-agency + a JSON test harness; re-scoped away from
-     Nokogiri-parity because implementing full AA would regress the
-     libxml2-shape characterization specs).
-  2. Nokogiri crawl-parity corpus on a real sample.
-  3. Bindings: expose leptris_parse_html_string (ruby + python).
+- **#878** (nearly closed) — native RELAX NG validation. SHIPPED:
+  pattern IR + validator + backtracking fold (v1.9.109-111), Jing
+  conformance corpus gate 38/38 (v1.9.112), `<include>` via
+  leptris_rng_parse_file (v1.9.113), `<param>` facets + portable
+  pattern matcher (v1.9.114), schema errors on leptris_last_error
+  (v1.9.115), Ruby binding (PR leptris-ruby#165). REMAINING: merge
+  #165 → standoc migration off Jing (drafted on the issue) → close.
+- **#682** (banked, USER SCOPE CALL pending) — in-process dispatch
+  heavy 0.80x / light 0.76x vs lxml after the shipped levers
+  (hash+mode-bucket dispatch, TLS consolidation, walk-first attr
+  dup, AVT fast path, AST-cache TLS claim, streaming phase 1).
+  Ceiling analysis (TODO 13): streaming remainder (~15%) + eval
+  rewrites (~10%) + micro (~5-8%) tops out ~1.1x in-process —
+  the >=2x bar is unreachable there while libxslt does identical
+  work. Bars HELD: transform 5x, predicate 15.6x, xsltproc wall
+  >=2x. Options on the issue; do not micro-grind awaiting the call.
+- **#659** (the last open engine lane) — WHATWG floor 295/1753
+  (from 193, +53%), Nokogiri parity 372/1555 held throughout.
+  Shipped: two-mode split (html5 vs html4 entries), implied-head
+  lift, foster parenting, simplified adoption agency + attr-carry
+  clones, entity perf at/over par (2.9x libxml2 throughput).
+  REMAINING slices: full AFE-list machinery (adoption01.dat
+  table-interleaved variants), in-table insertion modes, the 23
+  deep tokenizer-edge parse-fails, then re-run both floors.
+- **#930** — CLI tests race on fixed /tmp/leptris_cli_stdout|
+  stderr paths under `ctest -j4` (intermittent CliXpath/CliXquery
+  reds; serially green). Fix: per-process paths or a lock.
 
 ## C. TODO.xslt-full lanes — residual items
 
-- **04 (strings/QName/URI)**: analyze-string namespace resolution
-  ships with #854 — this lane is then CLOSED.
-- **05 (dates)**: value-level gaps, non-blocking: adjust-*-to-
-  timezone (needs a timezone model), format-date/time/dateTime,
-  current-dateTime/date/time.
+- **01/03/04/06/08/09/10** — CLOSED.
+- **05 (dates) tail**: value-level gaps, non-blocking:
+  adjust-*-to-timezone (needs a timezone model), format-date/
+  time/dateTime, current-dateTime/date/time.
 - **07 (function items) tail**: fn:sort with key/collation arity,
-  for-each-pair uneven inputs past the zip. PUBLIC XPathResultType
-  change for typed function items was the other item — verify
-  whether #683's entry surface covered it; if not it stays open.
-- **08 (maps/arrays)**: CLOSED (v1.9.57).
+  for-each-pair uneven inputs past the zip; verify whether the
+  public typed-function-item surface landed with #683.
 - **11 (XQuery core) tail**: qt3tests 1.0 subset adoption, Windows
   CLI harness for the XQuery driver.
 - **12 (XQuery 3.1) tail**: qt3tests 3.1 subset adoption (language
   surface complete).
-- **13 (perf)**: see #682 above — same workstream.
-- **14 (HTML)**: see #659 above — same workstream.
-- **15 (binding entries)**: leptris_xpath_eval_versioned (1.0-strict
-  vs 3.x surface gating), xquery entries from 11, result-type
-  extensions from 07 mirrored into both bindings. Gate: abi spec +
-  mirrors drift check.
+- **13 (perf)**: = #682 (banked). SAX binding-drain residual: the
+  batched field-strip measured inconclusive; retry quiet-machine
+  best-of-20, else engine-side batched-drain API (file when picked
+  up). Registered lessons: benchmark fresh dirs + identical build
+  type; quiet-window A/B only; CI is the gate.
+- **14 (HTML)**: = #659 (the slices above).
+- **15 (binding entries)**: leptris_xpath_eval_versioned (1.0-
+  strict vs 3.x surface gating), result-type extensions from 07
+  mirrored into both bindings. Gate: abi spec + mirrors drift
+  check. NOTE: RelaxNG entries already shipped (leptris-ruby#165).
 
 ## D. Bindings (user-owned repos — PRs only, never release)
 
-- v1.9.88 lockstep: leptris-ruby#143 (open), leptris-py#82 (open,
-  retargeted). #142 (1.9.87) merged by user. After v1.9.89 lands:
-  bump both again (analyze-string correctness fix is user-visible
-  through the bindings).
-- After lane 15: new binding entries + parse_html_string exposure.
+- leptris-ruby#165 (RelaxNG) open, ready.
+- moxml perf rows: parse 2.6-2.8x, serialize 2.4x, e2e 2.15x,
+  xpath 31x, HTML 3.6-11x, C14N 23x AHEAD of Nokogiri; both 0.7x
+  rows (bare reads, SAX drain) fixed via leptris-ruby#154/#156.
 
 ## E. External (Jing / metanorma-pdfa#98 follow-ups)
 
-- sshaw/ruby-jing#6 (banner filter + java_opts clobber fix) —
-  upstream dormant since 2022; if no response in ~1 week, fork under
-  the metanorma org and cut a release from there (user decision).
-- metanorma/metanorma-standoc#1244 (java_opts JVM props, drops
-  _JAVA_OPTIONS mutation) — user review/merge.
-- metanorma/mnconvert-ruby#40 (jdk.xml entity limits) — user
-  review/merge.
-- Strategic: JVM-free validation — revive lutaml/prax or native
-  RELAX NG validation in libleptris (fits the parser+DTD+XPath/XSLT
-  stack; removes Java-version limits + banner class of bugs).
+- sshaw/ruby-jing#6 upstream dormant; fork-under-metanorma decision
+  is the user's (the strategic fix is #878 itself — now shipped).
+- metanorma/standoc#1244 + mnconvert-ruby#40 — user review/merge.
+- **Strategic: JVM-free validation is now REAL** — libleptris
+  carries a Jing-parity RELAX NG validator since v1.9.115; the
+  standoc migration is the remaining step (prompt on #878).
 
 ## F. Housekeeping
 
-- ~20 stale local build* dirs (user's call to consolidate; the Mac
-  crash memory says one build dir discipline going forward).
-- Pre-existing warning at html_parse.c:2160 (h_ent_index pointer
-  typing from #848) visible under this build dir's flag set only.
+- ~20 stale local build* dirs (user's call; one-build-dir
+  discipline going forward — Mac crash memory).
+- Pre-existing warnings on main: html_parse.c:2160 (dual anonymous
+  entity-table struct types, from #848) + sax/pull.c:447 (const
+  discard in pull events). Both benign; fix in a cleanup PR.
 
 ## Graph to success
 
 ```
-#846 (PR #854) ──merge──> release v1.9.87 ──> retarget ruby#127/py#71
+leptris-ruby#165 ──user merge──> standoc migration off Jing (prompt on #878) ──> #878 CLOSED, pdfa#98 JVM-free
      │
-     ├─> #682 fixture-first profile ──> allocator/template-index levers ──> XSLT speed gate
+#930 (per-process CLI temp paths) ──> PR ──> release
      │
-     └─> #659 lane 14: html5lib corpus + harness ──> crawl corpus ──> bindings expose parse_html_string
-                                                                                      │
-qt3tests 1.0/3.1 subsets (11/12) ──> lane 15 versioned entries ────────────────────┴─> bindings wave
-Jing: standoc#1244 + mnconvert-ruby#40 + ruby-jing#6 merge ──> (fork if dormant) ──> pdfa#98 closed
-Strategic: native RELAX NG validator (or PRAX revival) ──> JVM-free MN validation
+#659: corpus re-run ──> full AFE list + in-table modes + 23 tokenizer edges
+      ──> WHATWG floor up, parity 372 held ──> bindings expose html entries ──> #659 CLOSED
+     │
+#682: USER CALL on scope (in-process ~1.1x ceiling vs wall-clock bars held)
+      ──> close as-is OR one more streaming phase ──> lane 13 closed
+     │
+05/07/11/12 tails (non-blocking) + lane 15 versioned entries ──> bindings wave
+     │
+F: warnings cleanup + build-dir consolidation (user call)
 ```
+
+XSLT speed vs the field (current, gated): transform 5x, predicate
+15.6x, xsltproc wall >=2x, HTML parse 2.9x, C14N 23x binding-armed
+— every USER-VISIBLE feature is ahead; the only sub-parity row is
+in-process dispatch-heavy (0.80x, ceiling-analyzed, awaiting the
+user's scope call on #682).
