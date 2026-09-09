@@ -2199,6 +2199,18 @@ static uint32_t h_entity_lookup(const char* name, size_t len) {
     }
     return 0;
 }
+/* Text-context decode (no attribute literal guard). */
+static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
+                         const char* e, int in_attr, int whatwg);
+static char* h_decode_ww(LeptrisMemoryPool* pool, const char* s,
+                         const char* e, int in_attr, int whatwg) {
+    return h_decode_ex(pool, s, e, in_attr, whatwg);
+}
+static char* h_decode(LeptrisMemoryPool* pool, const char* s,
+                      const char* e) {
+    return h_decode_ex(pool, s, e, 0, 0);
+}
+
 static size_t h_utf8_encode(uint32_t cp, char* out) {
     if (cp < 0x80) { out[0] = (char)cp; return 1; }
     if (cp < 0x800) {
@@ -2221,41 +2233,125 @@ static size_t h_utf8_encode(uint32_t cp, char* out) {
 
 /* Decode entities in [s, e) into a pooled NUL-terminated copy.
  * Unknown references pass through verbatim (HTML is lenient). */
-static char* h_decode(LeptrisMemoryPool* pool, const char* s,
-                      const char* e) {
+/* WHATWG 12.2.5.73: the legacy HTML4 references that are
+ * valid WITHOUT the trailing ';'. */
+static const char* const k_legacy_ent[] = {
+    "AElig", "AMP",   "Aacute", "Acirc",  "Agrave", "Atilde",
+    "Auml",  "COPY",  "Ccedil", "ETH",    "Eacute", "Ecirc",
+    "Egrave", "Euml", "GT",     "Iacute", "Icirc",  "Igrave",
+    "Iuml",  "Ntilde", "Oacute", "Ocirc", "Ograve", "Oslash",
+    "Otilde", "Ouml", "QUOT",   "REG",    "THORN",  "Uacute",
+    "Ucirc", "Ugrave", "Uuml",  "Yacute", "aacute", "acirc",
+    "acute", "aelig", "agrave", "amp",    "aring",  "atilde",
+    "auml",  "brvbar", "ccedil", "cedil", "cent",   "copy",
+    "curren", "deg",  "divide", "eacute", "ecirc",  "egrave",
+    "eth",   "euml",  "frac12", "frac14", "frac34", "gt",
+    "iacute", "icirc", "iexcl", "igrave", "iquest", "iuml",
+    "laquo", "lt",    "macr",   "micro",  "middot", "nbsp",
+    "not",   "ntilde", "oacute", "ocirc", "ograve", "ordf",
+    "ordm",  "oslash", "otilde", "ouml",  "para",   "plusmn",
+    "pound", "quot",  "raquo",  "reg",    "sect",   "shy",
+    "sup1",  "sup2",  "sup3",   "szlig",  "thorn",  "times",
+    "uacute", "ucirc", "ugrave", "uml",   "uuml",   "yacute",
+    "yen",   "yuml",  NULL};
+static int h_is_legacy_ent(const char* s, size_t n) {
+    for (int i = 0; k_legacy_ent[i]; i++) {
+        const char* t = k_legacy_ent[i];
+        size_t tl = strlen(t);
+        if (tl == n) {
+            size_t j = 0;
+            for (; j < n; j++)
+                if (s[j] != t[j]) break;
+            if (j == n) return 1;
+        }
+    }
+    return 0;
+}
+
+static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
+                         const char* e, int in_attr, int whatwg) {
     size_t cap = (size_t)(e - s) + 8;
     char* out = (char*)leptris_pool_alloc(pool, cap);
     if (!out) return NULL;
     size_t len = 0;
     while (s < e) {
         if (*s == '&') {
-            /* Longest named reference is ~32 chars. */
-            const char* sc = s + 1;
-            size_t probe = 0;
-            while (sc < e && *sc != ';' && probe < 40 &&
-                   (h_isalnum(*sc) || *sc == '#')) {
-                sc++;
-                probe++;
-            }
             uint32_t cp = 0;
-            if (sc < e && *sc == ';' && probe > 0) {
-                const char* body = s + 1;
-                size_t blen = probe;
-                if (body[0] == '#') {
-                    char* endp = NULL;
-                    long v = (body[1] == 'x' || body[1] == 'X')
-                                 ? strtol(body + 2, &endp, 16)
-                                 : strtol(body + 1, &endp, 10);
-                    if (endp == body + blen && v > 0 && v <= 0x10FFFF)
+            const char* adv = NULL;
+            /* WHATWG 12.2.5.78: numeric references decode with
+             * or without the ';' (html4/libxml2 mode keeps the
+             * strict ';' form). */
+            if (s + 1 < e && s[1] == '#') {
+                const char* q = s + 2;
+                int hex = 0;
+                if (q < e && (*q == 'x' || *q == 'X')) {
+                    hex = 1;
+                    q++;
+                }
+                const char* ds = q;
+                while (q < e &&
+                       (hex ? ((*q >= '0' && *q <= '9') ||
+                               (*q >= 'a' && *q <= 'f') ||
+                               (*q >= 'A' && *q <= 'F'))
+                            : (*q >= '0' && *q <= '9')))
+                    q++;
+                if (q > ds) {
+                    char buf[16];
+                    size_t dn = (size_t)(q - ds);
+                    if (dn > sizeof(buf) - 1) dn = sizeof(buf) - 1;
+                    memcpy(buf, ds, dn);
+                    buf[dn] = 0;
+                    long v = strtol(buf, NULL, hex ? 16 : 10);
+                    int ok = v > 0 && v <= 0x10FFFF;
+                    if (!whatwg)
+                        ok = ok && q < e && *q == ';';   /* ';' required */
+                    if (ok) {
                         cp = (uint32_t)v;
-                } else {
-                    cp = h_entity_lookup(body, blen);
+                        adv = q;
+                        if (adv < e && *adv == ';') adv++;
+                    }
+                }
+            } else {
+                /* WHATWG 12.2.5.73: longest-prefix named match.
+                 * With the ';' any table name matches; without it
+                 * only the legacy subset — and in attributes not
+                 * when '=' or an alphanumeric follows. */
+                const char* sc = s + 1;
+                size_t probe = 0;
+                while (sc < e && *sc != ';' && probe < 40 &&
+                       h_isalnum(*sc)) {
+                    sc++;
+                    probe++;
+                }
+                int semi = (sc < e && *sc == ';');
+                if (!whatwg) {
+                    /* html4/libxml2 compat: ';' required, whole
+                     * run exact. */
+                    if (semi)
+                        cp = h_entity_lookup(s + 1, probe);
+                    if (cp) adv = sc + 1;
+                }
+                for (size_t tl = probe; tl > 0 && !cp; tl--) {
+                    if (tl == probe && semi) {
+                        cp = h_entity_lookup(s + 1, tl);
+                        if (cp) adv = sc + 1;
+                    }
+                    if (whatwg && !cp && !(tl == probe && semi) &&
+                        h_is_legacy_ent(s + 1, tl)) {
+                        const char* nx = s + 1 + tl;
+                        if (!in_attr ||
+                            !(nx < e &&
+                              (*nx == '=' || h_isalnum(*nx)))) {
+                            cp = h_entity_lookup(s + 1, tl);
+                            if (cp) adv = nx;
+                        }
+                    }
                 }
             }
-            if (cp) {
-                if (len + 4 >= cap) { /* bounded: probe ≤ 40 bytes */ }
+            if (cp && adv) {
+                if (len + 4 >= cap) { /* bounded: probe <= 40 bytes */ }
                 len += h_utf8_encode(cp, out + len);
-                s = sc + 1;
+                s = adv;
                 continue;
             }
         }
@@ -2419,7 +2515,9 @@ static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
             }
             q = scan;
         }
-        char* aval = vs ? h_decode(b->pool, vs, vs + vlen) : (char*)"";
+        char* aval = vs ? h_decode_ex(b->pool, vs, vs + vlen, 1,
+                                      b->whatwg)
+                        : (char*)"";
         if (aname && aval) {
             attrs[(*n)++] = aname;
             attrs[(*n)++] = aval;
@@ -3059,7 +3157,7 @@ static LeptrisDocument html_parse_shared(
         if (k1 == '!') {
             /* Flush pending text first. */
             if (text < p) {
-                char* dec = h_decode(b.pool, text, p);
+                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, strlen(dec), b.pool);
@@ -3240,7 +3338,7 @@ static LeptrisDocument html_parse_shared(
             if (q < end) q++;
             /* Flush pending text before closing. */
             if (text < p) {
-                char* dec = h_decode(b.pool, text, p);
+                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, strlen(dec), b.pool);
@@ -3360,7 +3458,7 @@ static LeptrisDocument html_parse_shared(
              * libxml2 keeps a PI node whose data INCLUDES the
              * trailing '?' — content runs to the first '>'. */
             if (text < p) {
-                char* dec = h_decode(b.pool, text, p);
+                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, strlen(dec), b.pool);
@@ -3442,7 +3540,7 @@ static LeptrisDocument html_parse_shared(
             } else if (!(b.frameset && b.depth > 0)) {
                 /* Dropped token: flush pending text first. */
                 if (text < p) {
-                    char* dec = h_decode(b.pool, text, p);
+                    char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
                     if (dec && *dec) {
                         LeptrisTextNode* t = leptris_text_create(
                             dec, strlen(dec), b.pool);
@@ -3466,7 +3564,7 @@ static LeptrisDocument html_parse_shared(
 
         /* Flush pending text before the element. */
         if (text < p) {
-            char* dec = h_decode(b.pool, text, p);
+            char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
             if (dec && *dec) {
                 LeptrisTextNode* t =
                     leptris_text_create(dec, strlen(dec), b.pool);
@@ -3635,7 +3733,8 @@ static LeptrisDocument html_parse_shared(
             }
             char* aval;
             if (vs) {
-                aval = h_decode(b.pool, vs, vs + vlen);
+                aval = h_decode_ex(b.pool, vs, vs + vlen, 1,
+                                   b.whatwg);
             } else {
                 /* Minimized (boolean) attribute: value is the EMPTY
                  * string (html5lib/Nokogiri DOM: checked=""). */
@@ -3700,7 +3799,7 @@ static LeptrisDocument html_parse_shared(
 
     /* Trailing text. */
     if (text < end) {
-        char* dec = h_decode(b.pool, text, end);
+        char* dec = h_decode_ww(b.pool, text, end, 0, b.whatwg);
         if (dec && *dec) {
             LeptrisTextNode* t =
                 leptris_text_create(dec, strlen(dec), b.pool);
