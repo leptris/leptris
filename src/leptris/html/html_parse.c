@@ -2247,10 +2247,16 @@ typedef struct {
     struct leptris_document* doc;
     LeptrisMemoryPool* pool;
     LeptrisElement open[256];
+    /* #659 foreign content: per-slot namespace of the open stack
+     * (0 HTML, 1 SVG, 2 MathML) — parallel to open[]. */
+    uint8_t open_ns[256];
     size_t depth;
     LeptrisElement root;        /* first top-level element */
     LeptrisNodeRef top_head;    /* top-level chain: text, comments, root */
     LeptrisNodeRef top_tail;
+    /* #659 master mode flag (the per-slice flags below derive from
+     * the same html_parse_shared arg). */
+    int whatwg;
     /* #659 two-mode split: leptris_parse_html_string is the WHATWG
      * engine (full "in head" set: script/style/noscript/template
      * ... lift into the implied head); the new
@@ -2329,6 +2335,256 @@ static int h_is_formatting(const char* n) {
            h_ieq_raw(n, "s") || h_ieq_raw(n, "small") ||
            h_ieq_raw(n, "strike") || h_ieq_raw(n, "strong") ||
            h_ieq_raw(n, "tt") || h_ieq_raw(n, "u");
+}
+
+/* ---- #659 foreign content (WHATWG 12.2.6.5) ---- */
+
+#define H_NS_HTML 0
+#define H_NS_SVG 1
+#define H_NS_MATH 2
+
+static const char H_SVG_URI[] = "http://www.w3.org/2000/svg";
+static const char H_MATH_URI[] = "http://www.w3.org/1998/Math/MathML";
+
+/* HTML breakout tags: a start tag with one of these names (font
+ * only with color/face/size — checked by the caller) pops the
+ * foreign scope and is reprocessed under HTML rules. */
+static int h_is_breakout(const char* n) {
+    static const char* const k[] = {
+        "b",      "big",   "blockquote", "body", "br",    "center",
+        "code",   "dd",    "div",        "dl",   "dt",    "em",
+        "embed",  "h1",    "h2",         "h3",   "h4",    "h5",
+        "h6",     "head",  "hr",         "i",    "img",   "li",
+        "listing", "menu", "meta",       "nobr", "ol",    "p",
+        "pre",    "ruby",  "s",          "small", "span", "strong",
+        "strike", "sub",   "sup",        "table", "tt",   "u",
+        "ul",     "var",   NULL};
+    for (int i = 0; k[i]; i++)
+        if (strcmp(n, k[i]) == 0) return 1;
+    return 0;
+}
+
+/* SVG element-name adjustment (lowercased source -> camelCase). */
+static const char* h_svg_name(const char* n) {
+    static const struct {
+        const char *lo, *adj;
+    } k[] = {
+        {"altglyph", "altGlyph"},
+        {"altglyphdef", "altGlyphDef"},
+        {"altglyphitem", "altGlyphItem"},
+        {"animatecolor", "animateColor"},
+        {"animatemotion", "animateMotion"},
+        {"animatetransform", "animateTransform"},
+        {"clippath", "clipPath"},
+        {"feblend", "feBlend"},
+        {"fecolormatrix", "feColorMatrix"},
+        {"fecomponenttransfer", "feComponentTransfer"},
+        {"fecomposite", "feComposite"},
+        {"feconvolvematrix", "feConvolveMatrix"},
+        {"fediffuselighting", "feDiffuseLighting"},
+        {"fedisplacementmap", "feDisplacementMap"},
+        {"fedistantlight", "feDistantLight"},
+        {"fedropshadow", "feDropShadow"},
+        {"feflood", "feFlood"},
+        {"fefunca", "feFuncA"},
+        {"fefuncb", "feFuncB"},
+        {"fefuncg", "feFuncG"},
+        {"fefuncr", "feFuncR"},
+        {"fegaussianblur", "feGaussianBlur"},
+        {"feimage", "feImage"},
+        {"femerge", "feMerge"},
+        {"femergenode", "feMergeNode"},
+        {"femorphology", "feMorphology"},
+        {"feoffset", "feOffset"},
+        {"fepointlight", "fePointLight"},
+        {"fespecularlighting", "feSpecularLighting"},
+        {"fespotlight", "feSpotLight"},
+        {"fetile", "feTile"},
+        {"feturbulence", "feTurbulence"},
+        {"foreignobject", "foreignObject"},
+        {"glyphref", "glyphRef"},
+        {"lineargradient", "linearGradient"},
+        {"radialgradient", "radialGradient"},
+        {"textpath", "textPath"},
+        {NULL, NULL}};
+    for (int i = 0; k[i].lo; i++)
+        if (strcmp(n, k[i].lo) == 0) return k[i].adj;
+    return NULL;
+}
+
+/* Attribute-name adjustment (MathML definitionURL + the SVG
+ * table); NULL = keep the lowercased source name. */
+static const char* h_attr_name(int ns, const char* n) {
+    static const struct {
+        const char *lo, *adj;
+    } k[] = {
+        {"attributename", "attributeName"},
+        {"attribution", "attributeType"},
+        {"basefrequency", "baseFrequency"},
+        {"baseprofile", "baseProfile"},
+        {"calcmode", "calcMode"},
+        {"clippathunits", "clipPathUnits"},
+        {"diffuseconstant", "diffuseConstant"},
+        {"edgemode", "edgeMode"},
+        {"filterunits", "filterUnits"},
+        {"glyphref", "glyphRef"},
+        {"gradienttransform", "gradientTransform"},
+        {"gradientunits", "gradientUnits"},
+        {"kernelmatrix", "kernelMatrix"},
+        {"kernelunitlength", "kernelUnitLength"},
+        {"keypoints", "keyPoints"},
+        {"keysplines", "keySplines"},
+        {"keytimes", "keyTimes"},
+        {"lengthadjust", "lengthAdjust"},
+        {"limitingconeangle", "limitingConeAngle"},
+        {"markerheight", "markerHeight"},
+        {"markerunits", "markerUnits"},
+        {"markerwidth", "markerWidth"},
+        {"maskcontentunits", "maskContentUnits"},
+        {"maskunits", "maskUnits"},
+        {"numoctaves", "numOctaves"},
+        {"pathlength", "pathLength"},
+        {"patterncontentunits", "patternContentUnits"},
+        {"patterntransform", "patternTransform"},
+        {"patternunits", "patternUnits"},
+        {"pointsatx", "pointsAtX"},
+        {"pointsaty", "pointsAtY"},
+        {"pointsatz", "pointsAtZ"},
+        {"preservealpha", "preserveAlpha"},
+        {"preserveaspectratio", "preserveAspectRatio"},
+        {"primitiveunits", "primitiveUnits"},
+        {"refx", "refX"},
+        {"refy", "refY"},
+        {"repeatcount", "repeatCount"},
+        {"repeatdur", "repeatDur"},
+        {"requiredextensions", "requiredExtensions"},
+        {"requiredfeatures", "requiredFeatures"},
+        {"specularconstant", "specularConstant"},
+        {"specularexponent", "specularExponent"},
+        {"spreadmethod", "spreadMethod"},
+        {"startoffset", "startOffset"},
+        {"stddeviation", "stdDeviation"},
+        {"stitchtiles", "stitchTiles"},
+        {"surfacescale", "surfaceScale"},
+        {"systemlanguage", "systemLanguage"},
+        {"tablevalues", "tableValues"},
+        {"targetx", "targetX"},
+        {"targety", "targetY"},
+        {"textlength", "textLength"},
+        {"viewbox", "viewBox"},
+        {"viewtarget", "viewTarget"},
+        {"xchannelselector", "xChannelSelector"},
+        {"ychannelselector", "yChannelSelector"},
+        {"zoomandpan", "zoomAndPan"},
+        {NULL, NULL}};
+    if (ns == H_NS_MATH)
+        return strcmp(n, "definitionurl") == 0 ? "definitionURL" : NULL;
+    if (ns != H_NS_SVG) return NULL;
+    for (int i = 0; k[i].lo; i++)
+        if (strcmp(n, k[i].lo) == 0) return k[i].adj;
+    return NULL;
+}
+
+/* Namespace a start tag with this name lands in, given the open
+ * stack: integration points resume HTML rules (12.2.6.5); math
+ * text-integration keeps mglyph/malignmark MathML. */
+static int h_start_ns(HBuilder* b, const char* name) {
+    if (b->depth == 0) return H_NS_HTML;
+    int top = b->open_ns[b->depth - 1];
+    if (top == H_NS_HTML) return H_NS_HTML;
+    const char* tn = leptris_element_name(b->open[b->depth - 1]);
+    if (top == H_NS_MATH) {
+        if (h_ieq_raw(tn, "mi") || h_ieq_raw(tn, "mo") ||
+            h_ieq_raw(tn, "mn") || h_ieq_raw(tn, "ms") ||
+            h_ieq_raw(tn, "mtext")) {
+            if (strcmp(name, "mglyph") == 0 ||
+                strcmp(name, "malignmark") == 0)
+                return H_NS_MATH;
+            return H_NS_HTML;   /* MathML text integration point */
+        }
+        if (h_ieq_raw(tn, "annotation-xml")) {
+            /* HTML integration point iff encoding=text/html or
+             * application/xhtml+xml (case-insensitive). */
+            for (struct leptris_attribute* a =
+                     leptris_element_get_first_attribute(
+                         b->open[b->depth - 1]);
+                 a; a = leptris_attr_next(a)) {
+                const char* cn = attr_cname(a);
+                if (cn && strcmp(cn, "encoding") == 0) {
+                    const char* v = attr_cvalue(a);
+                    if (h_ieq_raw(v, "text/html") ||
+                        h_ieq_raw(v, "application/xhtml+xml"))
+                        return H_NS_HTML;
+                }
+            }
+            return H_NS_MATH;
+        }
+        return H_NS_MATH;
+    }
+    /* h_ieq_raw's second arg is lowercase by convention — the
+     * stored SVG name is camelCase (foreignObject). */
+    if (h_ieq_raw(tn, "foreignobject") || h_ieq_raw(tn, "desc") ||
+        h_ieq_raw(tn, "title"))
+        return H_NS_HTML;   /* SVG HTML integration points */
+    return H_NS_SVG;
+}
+
+/* Namespace of the CURRENT insertion point (text/CDATA routing):
+ * foreign iff the top is foreign and not an integration point. */
+static int h_cur_ns(HBuilder* b) {
+    return h_start_ns(b, "");
+}
+
+/* An open <select> swallows svg/math start tags (in-select mode
+ * ignores unknown start tags; the html4 entry keeps libxml2's
+ * keep-everything shape). */
+static int h_in_select(HBuilder* b) {
+    for (size_t i = b->depth; i > 0; i--) {
+        const char* on = leptris_element_name(b->open[i - 1]);
+        if (on && strcmp(on, "select") == 0) return 1;
+    }
+    return 0;
+}
+
+/* font breaks out of foreign content only when it carries a
+ * color/face/size attribute — peek the raw tag span [q, '>')
+ * without consuming. */
+static int h_font_break(const char* q, const char* end) {
+    while (q < end && *q != '>') {
+        while (q < end && (h_is_ws(*q) || *q == '/')) q++;
+        const char* as = q;
+        while (q < end && !h_is_ws(*q) && *q != '=' && *q != '>' &&
+               *q != '/')
+            q++;
+        size_t alen = (size_t)(q - as);
+        if (alen == 5 &&
+            (memcmp(as, "color", 5) == 0 ||
+             memcmp(as, "COLOR", 5) == 0))
+            return 1;
+        if (alen == 4 &&
+            (memcmp(as, "face", 4) == 0 || memcmp(as, "FACE", 4) == 0))
+            return 1;
+        if (alen == 4 &&
+            (memcmp(as, "size", 4) == 0 || memcmp(as, "SIZE", 4) == 0))
+            return 1;
+        /* Skip any value. */
+        const char* scan = q;
+        while (scan < end && h_is_ws(*scan)) scan++;
+        if (scan < end && *scan == '=') {
+            scan++;
+            while (scan < end && h_is_ws(*scan)) scan++;
+            if (scan < end && (*scan == '\'' || *scan == '"')) {
+                char quote = *scan++;
+                while (scan < end && *scan != quote) scan++;
+                if (scan < end) scan++;
+            } else {
+                while (scan < end && !h_is_ws(*scan) && *scan != '>')
+                    scan++;
+            }
+            q = scan;
+        }
+    }
+    return 0;
 }
 
 static int h_is_table_context(LeptrisElement e) {
@@ -2419,6 +2675,30 @@ static void h_pop_to(HBuilder* b, size_t d) {
     b->depth = d;
 }
 
+/* Create + attach a foreign element (SVG/MathML namespace URI,
+ * case-adjusted name), foster-aware via h_append. */
+static LeptrisElement h_open_foreign(HBuilder* b, const char* name,
+                                     int ns) {
+    const char* store = name;
+    const char* adj = (ns == H_NS_SVG) ? h_svg_name(name) : NULL;
+    if (adj) store = adj;
+    LeptrisStringView nv = leptris_sv_from_cstr(store);
+    LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
+    if (!e) return NULL;
+    leptris_root_doc_register(e, b->doc);
+    leptris_element_set_namespace_uri_view(
+        e, leptris_sv_from_cstr(
+               ns == H_NS_SVG ? H_SVG_URI : H_MATH_URI));
+    h_append(b, (LeptrisNodeRef)e);
+    if (b->depth == 0 && !b->root) b->root = e;
+    if (b->depth < 256) {
+        b->open[b->depth] = e;
+        b->open_ns[b->depth] = (uint8_t)ns;
+        b->depth++;
+    }
+    return e;
+}
+
 static LeptrisElement h_open_element(HBuilder* b, const char* name) {
     LeptrisStringView nv = leptris_sv_from_cstr(name);
     LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
@@ -2429,7 +2709,11 @@ static LeptrisElement h_open_element(HBuilder* b, const char* name) {
     leptris_root_doc_register(e, b->doc);
     h_append(b, (LeptrisNodeRef)e);
     if (b->depth == 0 && !b->root) b->root = e;
-    if (b->depth < 256) b->open[b->depth++] = e;
+    if (b->depth < 256) {
+        b->open[b->depth] = e;
+        b->open_ns[b->depth] = H_NS_HTML;
+        b->depth++;
+    }
     return e;
 }
 
@@ -2453,7 +2737,11 @@ static LeptrisElement h_open_named(HBuilder* b, const char* name,
     leptris_root_doc_register(e, b->doc);
     h_append(b, (LeptrisNodeRef)e);
     if (b->depth == 0 && !b->root) b->root = e;
-    if (push && b->depth < 256) b->open[b->depth++] = e;
+    if (push && b->depth < 256) {
+        b->open[b->depth] = e;
+        b->open_ns[b->depth] = H_NS_HTML;
+        b->depth++;
+    }
     return e;
 }
 
@@ -2551,7 +2839,7 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             head->child_count = hn;
             if (hlast) leptris_node_set_next_sibling(hlast, NULL);
             leptris_node_set_next_sibling((LeptrisNodeRef)head, rest);
-            leptris_elem_set_first_child(html, head);
+            leptris_elem_set_first_child(html, (LeptrisNodeRef)head);
             leptris_element_set_parent(head, html);
         }
     }
@@ -2588,7 +2876,7 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
         leptris_node_set_next_sibling((LeptrisNodeRef)html_first_new,
                                       (LeptrisNodeRef)body);
     else
-        leptris_elem_set_first_child(html, body);
+        leptris_elem_set_first_child(html, (LeptrisNodeRef)body);
     leptris_element_set_parent(body, html);
     html->child_count = 0;
     if (head_spliced) html->child_count++;
@@ -2613,6 +2901,7 @@ static LeptrisDocument html_parse_shared(
     memset(&b, 0, sizeof(b));
     b.doc = doc;
     b.pool = doc->pool;
+    b.whatwg = whatwg;
     b.whatwg_head_set = whatwg;
     b.whatwg_foster = whatwg;
     b.whatwg_adopt = whatwg;
@@ -2771,10 +3060,31 @@ static LeptrisDocument html_parse_shared(
                     text = p;
                     continue;
                 }
-                /* CDATA-ish bogus: skip to '>'. */
-                const char* q2 = p + 2;
-                while (q2 < end && *q2 != '>') q2++;
-                p = (q2 < end) ? q2 + 1 : end;
+                /* #659: CDATA in foreign content is TEXT (raw, no
+                 * entity decoding); in HTML content it stays the
+                 * bogus-comment skip below. */
+                if (b.whatwg && h_cur_ns(&b) != H_NS_HTML) {
+                    const char* cs = p + 9;   /* past "<![CDATA[" */
+                    const char* ce = cs;
+                    while (ce + 3 <= end && !(ce[0] == ']' &&
+                                              ce[1] == ']' &&
+                                              ce[2] == '>'))
+                        ce++;
+                    size_t clen = (ce + 3 <= end)
+                                      ? (size_t)(ce - cs)
+                                      : (size_t)(end - cs);
+                    if (clen) {
+                        LeptrisTextNode* t = leptris_text_create(
+                            cs, clen, b.pool);
+                        if (t) h_append(&b, (LeptrisNodeRef)t);
+                    }
+                    p = (ce + 3 <= end) ? ce + 3 : end;
+                } else {
+                    /* CDATA-ish bogus: skip to '>'. */
+                    const char* q2 = p + 2;
+                    while (q2 < end && *q2 != '>') q2++;
+                    p = (q2 < end) ? q2 + 1 : end;
+                }
             }
             text = p;
             continue;
@@ -2809,7 +3119,25 @@ static LeptrisDocument html_parse_shared(
                 if (!h_is_void(lname)) {
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
-                        if (on && strcmp(on, lname) == 0) {
+                        /* #659: foreign slots store the
+                         * case-ADJUSTED name (foreignObject) —
+                         * match the raw source case-insensitively;
+                         * HTML slots stay exact lowercase. */
+                        int tag_match = 0;
+                        if (on) {
+                            if (b.open_ns[d - 1] != H_NS_HTML) {
+                                size_t ol = strlen(on);
+                                tag_match = ol == nlen;
+                                for (size_t i = 0;
+                                     tag_match && i < nlen; i++)
+                                    if (h_lower(ns[i]) !=
+                                        h_lower(on[i]))
+                                        tag_match = 0;
+                            } else {
+                                tag_match = strcmp(on, lname) == 0;
+                            }
+                        }
+                        if (on && tag_match) {
                             /* #659 adoption agency (WHATWG, simplified
                              * 8.2.5.4 steps): formatting elements open
                              * ABOVE the match are cloned and reopened
@@ -2936,14 +3264,51 @@ static LeptrisDocument html_parse_shared(
             }
         }
 
-        /* Implied end tags this start tag triggers. */
-        while (b.depth > 0) {
-            const char* on = leptris_element_name(b.open[b.depth - 1]);
-            if (on && h_closes(on, name)) b.depth--;
-            else break;
+        /* #659 foreign content (WHATWG 12.2.6.5). elem_ns is the
+         * namespace the element this tag creates lands in. */
+        int elem_ns = H_NS_HTML;
+        if (b.whatwg) {
+            /* An open <select> swallows foreign roots (in-select
+             * ignores unknown start tags). */
+            if ((strcmp(name, "svg") == 0 || strcmp(name, "math") == 0) &&
+                h_in_select(&b)) {
+                while (q < end && *q != '>') q++;
+                p = (q < end) ? q + 1 : end;
+                text = p;
+                continue;
+            }
+            int sns = h_start_ns(&b, name);
+            if (sns != H_NS_HTML) {
+                if (h_is_breakout(name) ||
+                    (strcmp(name, "font") == 0 && h_font_break(q, end))) {
+                    /* Breakout: pop the foreign scope, reprocess
+                     * under HTML rules below. */
+                    while (b.depth > 0 &&
+                           b.open_ns[b.depth - 1] != H_NS_HTML)
+                        b.depth--;
+                } else {
+                    elem_ns = sns;
+                }
+            } else if (strcmp(name, "svg") == 0) {
+                elem_ns = H_NS_SVG;
+            } else if (strcmp(name, "math") == 0) {
+                elem_ns = H_NS_MATH;
+            }
         }
 
-        LeptrisElement e = h_open_element(&b, name);
+        /* Implied end tags this start tag triggers (HTML rules
+         * only — foreign content has none). */
+        if (elem_ns == H_NS_HTML) {
+            while (b.depth > 0) {
+                const char* on = leptris_element_name(b.open[b.depth - 1]);
+                if (on && h_closes(on, name)) b.depth--;
+                else break;
+            }
+        }
+
+        LeptrisElement e = (elem_ns != H_NS_HTML)
+                               ? h_open_foreign(&b, name, elem_ns)
+                               : h_open_element(&b, name);
         if (!e) goto done;
 
         /* Attributes. */
@@ -3003,14 +3368,22 @@ static LeptrisDocument html_parse_shared(
                  * string (html5lib/Nokogiri DOM: checked=""). */
                 aval = (char*)"";
             }
-            if (aval)
+            if (aval) {
+                /* #659: foreign attribute-name adjustment
+                 * (viewBox, definitionURL, ...). */
+                const char* aadj =
+                    elem_ns != H_NS_HTML ? h_attr_name(elem_ns, aname)
+                                         : NULL;
                 leptris_element_add_attribute(
-                    e, leptris_sv_from_cstr(aname),
+                    e, leptris_sv_from_cstr(aadj ? aadj : aname),
                     leptris_sv_from_cstr(aval), b.pool);
+            }
         }
 
-        /* Raw-text elements consume until their close tag. */
-        if (h_is_raw(name) && !self_closing) {
+        /* Raw-text elements consume until their close tag (HTML
+         * tokenizer switch only — foreign <script>/<style> are
+         * ordinary foreign elements). */
+        if (h_is_raw(name) && !self_closing && elem_ns == H_NS_HTML) {
             const char* rs = q;
             while (rs < end) {
                 if (rs + 2 + nlen + 1 <= end && rs[0] == '<' &&
@@ -3145,8 +3518,8 @@ done:
                     leptris_node_set_next_sibling((LeptrisNodeRef)head,
                                                   first);
                 else
-                    leptris_elem_set_last_child(b.root, head);
-                leptris_elem_set_first_child(b.root, head);
+                    leptris_elem_set_last_child(b.root, (LeptrisNodeRef)head);
+                leptris_elem_set_first_child(b.root, (LeptrisNodeRef)head);
                 leptris_element_set_parent(head, b.root);
                 b.root->child_count++;
             }

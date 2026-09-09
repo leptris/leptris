@@ -668,3 +668,124 @@ TEST(HtmlTwoModes, TemplatePlacement) {
         leptris_document_free(d);
     }
 }
+
+
+/* ---- #659 foreign content (WHATWG 12.2.6.5) ----
+ *
+ * svg/math roots and their descendants carry the SVG / MathML
+ * namespace URI (exposed via namespace-uri()), element names get
+ * the SVG camelCase adjustment (foreignObject, viewBox), HTML
+ * integration points resume HTML rules, breakout tags pop the
+ * foreign scope, CDATA in foreign content is TEXT, and a select
+ * swallows foreign start tags. The html4 entry keeps everything
+ * plain-HTML (libxml2 knows no foreign content). */
+
+static std::string XQ(LeptrisDocument d, const char* path) {
+    LeptrisXPathResult r = leptris_xpath_eval(d, nullptr, path);
+    if (!r) return std::string("(null)");
+    char* s = leptris_xpath_result_string(r);
+    std::string out = s ? s : "";
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    return out;
+}
+
+static LeptrisDocument ForeignDoc(const char* in) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_html_string(in, strlen(in), &st);
+    return d;
+}
+
+TEST(HtmlForeign, SvgRootAndChildrenCarryNamespace) {
+    LeptrisDocument d = ForeignDoc(
+        "<svg viewBox=\"0 0 1 1\"><circle/></svg>");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"svg\"])"),
+              "http://www.w3.org/2000/svg");
+    EXPECT_EQ(XQ(d, "count(/html/body/*[name(.)=\"svg\"]/*[namespace-uri(.)="
+                    "'http://www.w3.org/2000/svg'])"),
+              "1");
+    /* Self-closed circle: no children, svg has exactly it. */
+    EXPECT_EQ(XQ(d, "count(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"circle\"]/*)"), "0");
+    /* Attribute-name case adjustment (viewBox, not viewbox). */
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"svg\"]/@viewBox)"), "0 0 1 1");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, SvgCamelCaseNameAdjustment) {
+    LeptrisDocument d = ForeignDoc(
+        "<svg><foreignObject>x</foreignObject></svg>");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(XQ(d, "name(/html/body/*[name(.)=\"svg\"]/*[1])"), "foreignObject");
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"foreignObject\"])"), "x");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, MathmlNamespaceAndTextIntegration) {
+    LeptrisDocument d = ForeignDoc("<math><mi><b>x</b></mi></math>");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"math\"])"),
+              "http://www.w3.org/1998/Math/MathML");
+    /* mi is a MathML text integration point: <b> is HTML inside. */
+    EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"math\"]/*[name(.)=\"mi\"]/*[name(.)=\"b\"])"), "");
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"math\"]/*[name(.)=\"mi\"]/*[name(.)=\"b\"])"), "x");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, ForeignObjectIsHtmlIntegrationPoint) {
+    LeptrisDocument d = ForeignDoc(
+        "<svg><foreignObject><div>a</div></foreignObject></svg>");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(XQ(d, "name(/html/body/*[name(.)=\"svg\"]/*[1])"), "foreignObject");
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"foreignObject\"]/*[name(.)=\"div\"])"), "a");
+    EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"foreignObject\"]/*[name(.)=\"div\"])"),
+              "");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, BreakoutTagPopsForeignScope) {
+    LeptrisDocument d = ForeignDoc("<svg><p>x</p></svg>");
+    ASSERT_NE(d, nullptr);
+    /* <p> is a breakout tag: svg scope popped, p is an HTML
+     * sibling AFTER the (now childless) svg. */
+    EXPECT_EQ(XQ(d, "count(/html/body/*)"), "2");
+    EXPECT_EQ(XQ(d, "count(/html/body/*[name(.)=\"svg\"]/*)"), "0");
+    EXPECT_EQ(XQ(d, "string(/html/body/p)"), "x");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, ForeignEndTagScopesByMatch) {
+    LeptrisDocument d = ForeignDoc("<svg><g>a</g>b</svg>");
+    ASSERT_NE(d, nullptr);
+    /* </g> closes g; text b stays INSIDE svg (</svg> closes it). */
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"g\"])"), "a");
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"svg\"])"), "ab");
+    EXPECT_EQ(XQ(d, "count(/html/body/*)"), "1");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, CdataInForeignContentIsText) {
+    LeptrisDocument d = ForeignDoc("<svg><![CDATA[x<y]]></svg>");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"svg\"]/text())"), "x<y");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, SelectSwallowsForeignStartTag) {
+    LeptrisDocument d = ForeignDoc("<select><svg></svg></select>");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(XQ(d, "count(/html/body/select/*)"), "0");
+    leptris_document_free(d);
+}
+
+TEST(HtmlForeign, Html4EntryStaysPlainHtml) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<svg><g>a</g></svg>";
+    LeptrisDocument d = leptris_parse_html4_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    /* libxml2/Nokogiri shape: plain lowercase names, no ns. */
+    EXPECT_EQ(XQ(d, "string(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"g\"])"), "a");
+    EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"svg\"])"), "");
+    EXPECT_EQ(XQ(d, "namespace-uri(/html/body/*[name(.)=\"svg\"]/*[name(.)=\"g\"])"), "");
+    leptris_document_free(d);
+}
