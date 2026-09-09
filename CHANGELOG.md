@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.122] - 2026-09-09
+
+### Added
+
+- #659 frameset mode + structural-tag attributes — WHATWG 859→887, parity 783 held (html)
+
+
+
 ## [1.9.121] - 2026-09-09
 
 ### Added
