@@ -81,6 +81,7 @@ function(leptris_add_cli_test name)
 endfunction()
 
 leptris_add_test(test_smoke      smoke/test_smoke.cpp)
+leptris_add_test(test_sch        sch/test_schematron.cpp)
 leptris_add_test(test_parser     parser/test_parser.cpp)
 leptris_add_test(test_large_docs parser/test_large_documents.cpp)
 leptris_add_test(test_encoding   parser/test_encoding.cpp)
