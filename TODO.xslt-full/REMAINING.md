@@ -1,6 +1,6 @@
 # REMAINING — the complete open-work ledger
 
-SSOT for everything still open after v1.9.117 (2026-09-09).
+SSOT for everything still open after v1.9.119 (2026-09-09).
 Update entries as work ships; delete entries as they close.
 Per-lane details live in the numbered docs; this file is the index
 + the graph.
@@ -29,18 +29,20 @@ Per-lane details live in the numbered docs; this file is the index
   the >=2x bar is unreachable there while libxslt does identical
   work. Bars HELD: transform 5x, predicate 15.6x, xsltproc wall
   >=2x. Options on the issue; do not micro-grind awaiting the call.
-- **#659** (the last open engine lane) — v1.9.116/117 jumps:
-  DOCTYPE recording (WHATWG 295 -> 556, parity 372 -> 649) +
+- **#659** (the last open engine lane) — v1.9.116-119 jumps:
+  DOCTYPE recording (WHATWG 295 -> 556, parity 372 -> 649),
   structural head/body + html>[head,body] ensuring in WHATWG mode
-  (WHATWG -> 623, parity -> 777). The comparator now compares
-  heads for real on the WHATWG meter (optional-empty-head is
-  parity-only). Shipped cumulative: two-mode split, implied-head
-  lift, foster parenting, simplified adoption agency + attr
-  clones, doctype recording, structural head/body, entity perf
-  (2.9x libxml2). REMAINING slices (fresh red-list, ranked):
-  <template> placement (64), MathML/SVG foreign content (85),
-  in-table insertion modes (tests19 residue), comment whitespace
-  fidelity, entity edges, full AFE-list machinery.
+  (WHATWG -> 623, parity -> 777), template placement (652/783),
+  MathML/SVG foreign content incl. integration points + breakout
+  (755/783), in-table tbody/tr/colgroup synthesis (792/783). The
+  comparator compares heads for real on the WHATWG meter
+  (optional-empty-head is parity-only). Shipped cumulative:
+  two-mode split, implied-head lift, foster parenting, simplified
+  adoption agency + attr clones, doctype recording, structural
+  head/body, entity perf (2.9x libxml2). REMAINING slices (fresh
+  red-list, ranked): ruby rb/rt/rp (tests19), select-in-table
+  residue, comment whitespace fidelity, entity edges, full
+  AFE-list machinery.
 - **#930** — CLOSED (v1.9.117): per-process pid-suffixed CLI temp
   paths.
 
