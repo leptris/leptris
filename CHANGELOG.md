@@ -4,7 +4,13 @@
 
 ### Added
 
-- #659 comment close forms + foreign-attr comparator — WHATWG 914→928, parity 784 (html)
+- HTML: comment tokenizer close forms per WHATWG 12.2.5.5x
+  (#659). Comments close at `-->` or the abrupt `--!>` form;
+  `<!-->` and `<!--->` are empty comments; unterminated comments
+  run to EOF with their data verbatim (both parse modes — libxml2
+  honors `--!>` too). The html5lib comparator maps the reference
+  serializer's space-form foreign attribute names ("xlink href")
+  to our colon form. Corpus: WHATWG 914 → 928; parity 783 → 784.
 
 
 
