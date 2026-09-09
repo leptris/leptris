@@ -2292,6 +2292,8 @@ typedef struct {
     int head_attr_n;
     char* body_attrs[32];
     int body_attr_n;
+    char* html_attrs[32];
+    int html_attr_n;
     /* #659 two-mode split: leptris_parse_html_string is the WHATWG
      * engine (full "in head" set: script/style/noscript/template
      * ... lift into the implied head); the new
@@ -2363,6 +2365,15 @@ static int h_body_still_empty(HBuilder* b) {
         /* comments/PIs are neutral */
     }
     return 1;
+}
+
+/* #659: <noscript> opened in the head phase (scripting off) —
+ * WHATWG 12.2.6.4.5 "in head noscript": head content and
+ * comments stay inside; the first body-ish token pops it. */
+static int h_in_head_noscript(HBuilder* b) {
+    return b->whatwg && b->depth == 1 && !b->lift_closed &&
+           h_ieq_raw(leptris_element_name(b->open[0]), "noscript") &&
+           h_body_still_empty(b);
 }
 
 /* #659: stash the attributes of a dropped structural tag —
@@ -3088,7 +3099,8 @@ static LeptrisDocument html_parse_shared(
                  * just skipped. */
                 const char* q = p + 2;
                 int is_dt = 0;
-                if (end - q >= 7 && !doc->doctype) {
+                if (end - q >= 7 && !doc->doctype &&
+                    !h_in_head_noscript(&b)) {
                     static const char kw[] = "doctype";
                     is_dt = 1;
                     for (int i = 0; i < 7; i++) {
@@ -3244,6 +3256,14 @@ static LeptrisDocument html_parse_shared(
                 for (size_t i = 0; i < cl; i++)
                     lname[i] = h_lower(ns[i]);
                 lname[cl] = 0;
+                /* #659 (WHATWG): </br> is treated as <br>. */
+                if (b.whatwg && strcmp(lname, "br") == 0) {
+                    h_open_element(&b, "br");
+                    b.depth--;   /* br is void */
+                    p = q;
+                    text = p;
+                    continue;
+                }
                 if (!h_is_void(lname)) {
                     /* #659 (WHATWG): heading end tags pop through
                      * the NEAREST heading (any h1-h6), not just
@@ -3454,6 +3474,39 @@ static LeptrisDocument html_parse_shared(
             }
         }
 
+        /* #659 "in head noscript" (scripting off): head content
+         * stays inside the noscript; the first body-ish token
+         * pops it and reprocesses at top level. */
+        if (h_in_head_noscript(&b)) {
+            if (strcmp(name, "html") == 0) {
+                /* <html> inside head-noscript: attrs merge onto
+                 * the html element; the tag is dropped. */
+                h_stash_attrs(&b, q, end, b.html_attrs,
+                              &b.html_attr_n);
+                while (q < end && *q != '>') q++;
+                p = (q < end) ? q + 1 : end;
+                text = p;
+                continue;
+            }
+            if (strcmp(name, "head") == 0 ||
+                strcmp(name, "noscript") == 0) {
+                while (q < end && *q != '>') q++;
+                p = (q < end) ? q + 1 : end;
+                text = p;
+                continue;
+            }
+            int ns_ok = strcmp(name, "link") == 0 ||
+                        strcmp(name, "meta") == 0 ||
+                        strcmp(name, "style") == 0 ||
+                        strcmp(name, "base") == 0 ||
+                        strcmp(name, "basefont") == 0 ||
+                        strcmp(name, "bgsound") == 0 ||
+                        strcmp(name, "template") == 0 ||
+                        strcmp(name, "script") == 0 ||
+                        strcmp(name, "noframes") == 0;
+            if (!ns_ok) b.depth--;   /* pop; reprocess below */
+        }
+
         /* #659 foreign content (WHATWG 12.2.6.5). elem_ns is the
          * namespace the element this tag creates lands in. */
         int elem_ns = H_NS_HTML;
@@ -3605,7 +3658,9 @@ static LeptrisDocument html_parse_shared(
          * ordinary foreign elements). #659: <plaintext> is
          * raw-to-EOF (WHATWG — it has no close form). */
         int raw_name = h_is_raw(name) ||
-                       (b.whatwg && strcmp(name, "plaintext") == 0);
+                       (b.whatwg &&
+                        (strcmp(name, "plaintext") == 0 ||
+                         strcmp(name, "noframes") == 0));
         if (raw_name && !self_closing && elem_ns == H_NS_HTML) {
             const char* rs = q;
             if (strcmp(name, "plaintext") == 0) {
@@ -3754,9 +3809,12 @@ done:
         }
     }
     /* #659: the dropped structural <head>/<body> tags' attrs land
-     * on the synthesized elements. */
+     * on the synthesized elements; <html> attrs (from a structural
+     * or head-noscript <html> token) land on the root. */
     if (b.whatwg && b.root &&
         h_ieq_raw(leptris_element_name(b.root), "html")) {
+        if (b.html_attr_n)
+            h_apply_attrs(&b, b.root, b.html_attrs, b.html_attr_n);
         for (LeptrisNodeRef c =
                  leptris_node_first_child((LeptrisNodeRef)b.root);
              c; c = leptris_node_get_next_sibling(c)) {
