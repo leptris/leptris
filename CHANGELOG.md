@@ -4,7 +4,13 @@
 
 ### Added
 
-- #659 frameset mode + structural-tag attributes — WHATWG 859→887, parity 783 held (html)
+- HTML (WHATWG mode): frameset mode (#659). A `<frameset>`
+  before any body content replaces the body (html >
+  [head, frameset]); after content it is dropped; nested
+  framesets and `<frame>` children work. Structural
+  `<head>`/`<body>` start tags now keep their ATTRIBUTES —
+  they land on the synthesized elements. html5lib corpus:
+  WHATWG 859 → 887; Nokogiri parity 783 held exactly.
 
 
 
