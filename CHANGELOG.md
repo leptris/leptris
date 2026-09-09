@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.125] - 2026-09-09
+
+### Added
+
+- HTML: comment tokenizer close forms per WHATWG 12.2.5.5x
+  (#659). Comments close at `-->` or the abrupt `--!>` form;
+  `<!-->` and `<!--->` are empty comments; unterminated comments
+  run to EOF with their data verbatim (both parse modes — libxml2
+  honors `--!>` too). The html5lib comparator maps the reference
+  serializer's space-form foreign attribute names ("xlink href")
+  to our colon form. Corpus: WHATWG 914 → 928; parity 783 → 784.
+
+
+
 ## [1.9.124] - 2026-09-09
 
 ### Added
