@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+## [1.9.119] - 2026-09-09
+
+### Added
+
+- HTML (WHATWG mode): MathML/SVG foreign content per WHATWG
+  12.2.6.5 (#659). svg/math roots and descendants carry the SVG /
+  MathML namespace URI (readable via namespace-uri()); SVG
+  element-name case adjustment (foreignObject, clipPath, ...);
+  MathML definitionURL and the SVG attribute-name table (viewBox,
+  ...); HTML integration points (foreignObject/desc/title,
+  MathML text integration points, annotation-xml with HTML
+  encoding) resume HTML rules; breakout tags pop the foreign
+  scope; foreign end tags match case-adjusted names; CDATA in
+  foreign content is a text node; an open <select> swallows
+  foreign start tags; foreign start tags foster-parent out of
+  table context. The html4/Nokogiri-compat entry stays
+  plain-HTML. html5lib corpus: WHATWG 652 → 755 (+103, the
+  lane's largest slice); Nokogiri parity 783 held exactly.
+
+
+
 ## [1.9.118] - 2026-09-09
 
 ### Added
