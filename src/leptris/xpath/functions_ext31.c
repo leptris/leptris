@@ -1564,69 +1564,77 @@ static const char* const k_day_names[] = {
                                        &se, &off, &has_off)) {       \
             free(in); free(pic); return out;                         \
         }                                                            \
-        char* res = (char*)malloc(strlen(pic) * 4 + 64);             \
-        size_t rl = 0;                                                \
-        for (const char* p = pic; *p;) {                             \
-            if (*p != '[') { res[rl++] = *p++; continue; }           \
-            const char* close = strchr(p, ']');                      \
-            if (!close) { res[rl++] = *p++; continue; }              \
-            char mark[16];                                           \
-            size_t ml = (size_t)(close - p - 1);                     \
-            if (ml >= sizeof mark) ml = sizeof mark - 1;             \
-            memcpy(mark, p + 1, ml);                                 \
-            mark[ml] = 0;                                            \
-            p = close + 1;                                           \
-            const char* mod = mark + 1;   /* after the letter */      \
-            char tmp[24];                                            \
-            if (mark[0] == 'Y') {                                    \
-                int w = mod[0] ? (int)strlen(mod) : 1;               \
-                snprintf(tmp, sizeof tmp, "%0*d", w, y);             \
-                res[rl++] = '\0';                                    \
-                strcat(res, tmp); rl = strlen(res);                  \
-            } else if (mark[0] == 'M' && strstr(mark, "Nn")) {       \
-                rl += (size_t)snprintf(res + rl, 16, "%s",           \
-                                      k_month_names[mo >= 1 &&       \
-                                      mo <= 12 ? mo - 1 : 0]);       \
-            } else if (mark[0] == 'M') {                             \
-                int w = mod[0] ? (int)strlen(mod) : 1;               \
-                snprintf(tmp, sizeof tmp, "%0*d", w, mo);            \
-                strcat(res, tmp); rl = strlen(res);                  \
-            } else if (mark[0] == 'D' && strstr(mark, "Nn")) {       \
-                int dow = (int)((h_days_from_civil(y, mo, d) + 4 +   \
-                                 7) % 7);                            \
-                rl += (size_t)snprintf(res + rl, 16, "%s",           \
-                                      k_day_names[dow]);             \
-            } else if (mark[0] == 'D') {                             \
-                int w = mod[0] ? (int)strlen(mod) : 1;               \
-                snprintf(tmp, sizeof tmp, "%0*d", w, d);             \
-                strcat(res, tmp); rl = strlen(res);                  \
-            } else if (mark[0] == 'H') {                             \
-                int w = mod[0] ? (int)strlen(mod) : 1;               \
-                snprintf(tmp, sizeof tmp, "%0*d", w, h);             \
-                strcat(res, tmp); rl = strlen(res);                  \
-            } else if (mark[0] == 'h') {                             \
-                int hh = h % 12;                                     \
-                if (hh == 0) hh = 12;                                \
-                int w = mod[0] ? (int)strlen(mod) : 1;               \
-                snprintf(tmp, sizeof tmp, "%0*d", w, hh);            \
-                strcat(res, tmp); rl = strlen(res);                  \
-            } else if (mark[0] == 'm') {                             \
-                int w = mod[0] ? (int)strlen(mod) : 1;               \
-                snprintf(tmp, sizeof tmp, "%0*d", w, mi);            \
-                strcat(res, tmp); rl = strlen(res);                  \
-            } else if (mark[0] == 's') {                             \
-                int w = mod[0] ? (int)strlen(mod) : 1;               \
-                snprintf(tmp, sizeof tmp, "%0*d", w, (int)se);       \
-                strcat(res, tmp); rl = strlen(res);                  \
-            } else if (mark[0] == 'Z') {                             \
-                char ob[8];                                          \
-                h_off_str(off, ob, sizeof ob);                        \
-                strcat(res, ob); rl = strlen(res);                   \
-            } else {                                                 \
-                rl += (size_t)snprintf(res + rl, 20, "[%s]", mark);  \
-            }                                                        \
-        }                                                            \
-        res[rl] = 0;                                                 \
+        size_t rcap = strlen(pic) * 4 + 64;                             \
+        char* res = (char*)calloc(rcap, 1);                            \
+        size_t rl = 0;                                                 \
+        for (const char* p = pic; *p;) {                               \
+            int nw = 0;                                                \
+            if (*p != '[') {                                           \
+                nw = snprintf(res + rl, rcap - rl, "%c", *p);          \
+                p++;                                                   \
+            } else {                                                   \
+                const char* close = strchr(p, ']');                    \
+                if (!close) {                                          \
+                    nw = snprintf(res + rl, rcap - rl, "%c", *p);      \
+                    p++;                                               \
+                } else {                                               \
+                    char mark[16];                                     \
+                    size_t ml = (size_t)(close - p - 1);               \
+                    if (ml >= sizeof mark) ml = sizeof mark - 1;       \
+                    memcpy(mark, p + 1, ml);                           \
+                    mark[ml] = 0;                                      \
+                    p = close + 1;                                     \
+                    const char* mod = mark + 1;                        \
+                    char letter = mark[0];                             \
+                    int w = mod[0] ? (int)strlen(mod) : 1;             \
+                    if (letter == 'Y') {                               \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "%0*d", w, y);                   \
+                    } else if (letter == 'M' &&                        \
+                               strstr(mark, "Nn")) {                   \
+                        nw = snprintf(res + rl, rcap - rl, "%s",       \
+                                      k_month_names[mo >= 1 &&         \
+                                        mo <= 12 ? mo - 1 : 0]);       \
+                    } else if (letter == 'M') {                        \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "%0*d", w, mo);                  \
+                    } else if (letter == 'D' &&                        \
+                               strstr(mark, "Nn")) {                   \
+                        long dse = h_days_from_civil(y, mo, d);        \
+                        int dow = (int)(((dse % 7) + 7 + 4) % 7);      \
+                        nw = snprintf(res + rl, rcap - rl, "%s",       \
+                                      k_day_names[dow]);               \
+                    } else if (letter == 'D') {                        \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "%0*d", w, d);                   \
+                    } else if (letter == 'H') {                        \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "%0*d", w, h);                   \
+                    } else if (letter == 'h') {                        \
+                        int hh = h % 12;                               \
+                        if (hh == 0) hh = 12;                          \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "%0*d", w, hh);                  \
+                    } else if (letter == 'm') {                        \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "%0*d", w, mi);                  \
+                    } else if (letter == 's') {                        \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "%0*d", w, (int)se);             \
+                    } else if (letter == 'Z') {                        \
+                        char ob[8];                                    \
+                        h_off_str(off, ob, sizeof ob);                 \
+                        nw = snprintf(res + rl, rcap - rl, "%s", ob);  \
+                    } else {                                           \
+                        nw = snprintf(res + rl, rcap - rl,             \
+                                      "[%s]", mark);                   \
+                    }                                                  \
+                }                                                      \
+            }                                                          \
+            if (nw > 0 && rl + (size_t)nw < rcap) rl += (size_t)nw;    \
+            else if (rl + 1 < rcap) rl = rcap - 1;                     \
+        }                                                              \
+        res[rl] = 0;                                                   \
         free(out->value.string_value);                               \
         out->value.string_value = leptris_strdup(res);               \
         free(res);                                                   \
@@ -1640,15 +1648,25 @@ FORMAT_DATE_FN(format_dtetz, 2)
 FORMAT_DATE_FN(format_ttz, 3)
 
 /* current-* : UTC wall clock, Saxon lexical forms. */
+/* UTC wall clock, portable (MSVC has no gmtime_r). */
+static struct tm h_utc_now(void) {
+    time_t now = time(NULL);
+    struct tm tmv;
+#ifdef _WIN32
+    gmtime_s(&tmv, &now);
+#else
+    gmtime_r(&now, &tmv);
+#endif
+    return tmv;
+}
+
 #define CURRENT_FN(NAME, FORM)                                       \
     static struct leptris_xpath_result* fn_##NAME(                   \
             XPathContext* ctx, XPathASTNode** a, size_t n) {         \
         struct leptris_xpath_result* out =                            \
             xpath_result_new(XPATH_RESULT_STRING);                   \
         if (!out) return NULL;                                       \
-        time_t now = time(NULL);                                     \
-        struct tm tmv;                                               \
-        gmtime_r(&now, &tmv);                                        \
+        struct tm tmv = h_utc_now();                                 \
         char buf[40];                                                \
         strftime(buf, sizeof buf, FORM, &tmv);                       \
         out->value.string_value = leptris_strdup(buf);               \
