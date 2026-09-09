@@ -4,7 +4,14 @@
 
 ### Added
 
-- #659 tests19 insertion-mode edges — WHATWG 792→859, parity 783 held (html)
+- HTML (WHATWG mode): tests19 insertion-mode edges (#659).
+  Heading end tags pop through the nearest heading (any h1-h6,
+  not just the same name). Ruby annotations nest as siblings
+  (rb closes rb; rt/rp close rt/rb/rp; rb/rt/rp, listing and
+  plaintext close an open p). `<plaintext>` is raw-text-to-EOF.
+  The html4/Nokogiri-compat entry pins libxml2's shapes
+  unchanged. html5lib corpus: WHATWG 792 → 859 (+67); Nokogiri
+  parity 783 held exactly.
 
 
 
