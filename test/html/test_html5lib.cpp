@@ -544,9 +544,9 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 295 since the adoption agency (294 foster, 285 two-mode
-     * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)295);
+     * 546 since DOCTYPE recording (295 adoption agency, 294 foster,
+     * 285 two-mode split, 193 before it). */
+    EXPECT_GE(passed, (size_t)546);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
@@ -601,6 +601,6 @@ TEST(Html5LibCorpus, TreeConstruction) {
             printf("  PARITY-FAIL %s\n", pfails[i].c_str());
         EXPECT_GT(ptotal, (size_t)1400);
         /* Parity floor — the true #659 metric; only raises. */
-        EXPECT_GE(ppassed, (size_t)372);
+        EXPECT_GE(ppassed, (size_t)649);
     }
 }
