@@ -510,3 +510,47 @@ TEST(HtmlTwoModes, AdoptionAgencyCloneKeepsAttributes) {
     EXPECT_EQ(Html(R"(<a href="h">1<i>2</a>3</i>)"),
               R"(<a href="h">1<i>2</i></a><i>3</i>)");
 }
+
+/* #659: the HTML modes record the DOCTYPE (name + legacy PUBLIC/
+ * SYSTEM ids) on the document like the XML path — the corpus
+ * comparator reads it via leptris_document_internal_subset. */
+TEST(HtmlTwoModes, DoctypeIsRecorded) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<!doctype html><p>x";
+    LeptrisDocument doc = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisDoctype dt = leptris_document_internal_subset(doc);
+    ASSERT_NE(dt, nullptr);
+    EXPECT_STREQ(leptris_doctype_get_root_name(dt), "html");
+    leptris_document_free(doc);
+
+    const char in2[] =
+        "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\""
+        " \"http://www.w3.org/TR/html4/strict.dtd\"><p>x";
+    LeptrisDocument d2 = leptris_parse_html_string(in2, sizeof(in2) - 1, &st);
+    ASSERT_NE(d2, nullptr);
+    LeptrisDoctype dt2 = leptris_document_internal_subset(d2);
+    ASSERT_NE(dt2, nullptr);
+    EXPECT_STREQ(leptris_doctype_get_root_name(dt2), "HTML");
+    EXPECT_STREQ(leptris_doctype_get_public_id(dt2),
+                 "-//W3C//DTD HTML 4.01//EN");
+    EXPECT_STREQ(leptris_doctype_get_system_id(dt2),
+                 "http://www.w3.org/TR/html4/strict.dtd");
+    leptris_document_free(d2);
+
+    /* No doctype -> none recorded; a second doctype does not
+     * replace the first (WHATWG ignores stray doctypes in body). */
+    const char in3[] = "<p>x";
+    LeptrisDocument d3 = leptris_parse_html_string(in3, sizeof(in3) - 1, &st);
+    ASSERT_NE(d3, nullptr);
+    EXPECT_EQ(leptris_document_internal_subset(d3), nullptr);
+    leptris_document_free(d3);
+
+    const char in4[] = "<!doctype html><p>x<!doctype html2>";
+    LeptrisDocument d4 = leptris_parse_html_string(in4, sizeof(in4) - 1, &st);
+    ASSERT_NE(d4, nullptr);
+    LeptrisDoctype dt4 = leptris_document_internal_subset(d4);
+    ASSERT_NE(dt4, nullptr);
+    EXPECT_STREQ(leptris_doctype_get_root_name(dt4), "html");
+    leptris_document_free(d4);
+}

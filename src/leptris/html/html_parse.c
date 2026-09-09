@@ -15,6 +15,7 @@
 #include "../dom/element.h"
 #include "../dom/text.h"
 #include "../dom/comment.h"
+#include "../dom/doctype.h"
 #include "../dom/root_doc_map.h"
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
@@ -2534,10 +2535,102 @@ static LeptrisDocument html_parse_shared(
                     h_append(&b, (LeptrisNodeRef)c);
                 }
             } else {
-                /* DOCTYPE / CDATA-ish bogus: skip to '>'. */
+                /* First <!doctype ...> is recorded on the document
+                 * (name + legacy PUBLIC/SYSTEM ids), like the XML
+                 * path; later ones and other <!...> constructs are
+                 * just skipped. */
                 const char* q = p + 2;
-                while (q < end && *q != '>') q++;
-                p = (q < end) ? q + 1 : end;
+                int is_dt = 0;
+                if (end - q >= 7 && !doc->doctype) {
+                    static const char kw[] = "doctype";
+                    is_dt = 1;
+                    for (int i = 0; i < 7; i++) {
+                        if (h_lower(q[i]) != kw[i]) {
+                            is_dt = 0;
+                            break;
+                        }
+                    }
+                }
+                if (is_dt) {
+                    q += 7;
+                    while (q < end && h_is_ws(*q)) q++;
+                    const char* nstart = q;
+                    while (q < end && !h_is_ws(*q) && *q != '>') q++;
+                    size_t nlen = (size_t)(q - nstart);
+
+                    /* Legacy external ids: keyword, then one
+                     * (SYSTEM) or two (PUBLIC) quoted strings. */
+                    char pub[256] = {0};
+                    char sys[256] = {0};
+                    int last_kw = 0;   /* 1 = PUBLIC, 2 = SYSTEM */
+                    const char* s = q;
+                    while (s < end && *s != '>') {
+                        if (h_is_ws(*s)) {
+                            s++;
+                            continue;
+                        }
+                        if (end - s >= 6) {
+                            int pub_kw = 1, sys_kw = 1;
+                            static const char pkw[] = "public";
+                            static const char skw[] = "system";
+                            for (int i = 0; i < 6; i++) {
+                                if (h_lower(s[i]) != pkw[i]) pub_kw = 0;
+                                if (h_lower(s[i]) != skw[i]) sys_kw = 0;
+                            }
+                            if (pub_kw) {
+                                last_kw = 1;
+                                s += 6;
+                                continue;
+                            }
+                            if (sys_kw) {
+                                last_kw = 2;
+                                s += 6;
+                                continue;
+                            }
+                        }
+                        if ((*s == '"' || *s == '\'') && last_kw) {
+                            char quote = *s++;
+                            const char* vs = s;
+                            while (s < end && *s != quote) s++;
+                            size_t vl = (size_t)(s - vs);
+                            if (s < end) s++;
+                            if (last_kw == 1 && !pub[0] &&
+                                vl < sizeof(pub)) {
+                                memcpy(pub, vs, vl);
+                                pub[vl] = 0;
+                                last_kw = 2;   /* 2nd quoted = system */
+                            } else if (!sys[0] && vl < sizeof(sys)) {
+                                memcpy(sys, vs, vl);
+                                sys[vl] = 0;
+                                last_kw = 0;
+                            }
+                            continue;
+                        }
+                        s++;
+                    }
+                    while (q < end && *q != '>') q++;
+                    p = (q < end) ? q + 1 : end;
+
+                    if (nlen) {
+                        LeptrisDoctypeNode* dt = leptris_doctype_create(
+                            nstart, nlen, b.pool);
+                        if (dt) {
+                            if (pub[0])
+                                leptris_doctype_set_public_id(
+                                    dt, pub, b.pool);
+                            if (sys[0])
+                                leptris_doctype_set_system_id(
+                                    dt, sys, b.pool);
+                            doc->doctype = dt;
+                        }
+                    }
+                    text = p;
+                    continue;
+                }
+                /* CDATA-ish bogus: skip to '>'. */
+                const char* q2 = p + 2;
+                while (q2 < end && *q2 != '>') q2++;
+                p = (q2 < end) ? q2 + 1 : end;
             }
             text = p;
             continue;
