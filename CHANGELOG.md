@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.125] - 2026-09-09
+
+### Added
+
+- #659 comment close forms + foreign-attr comparator — WHATWG 914→928, parity 784 (html)
+
+
+
 ## [1.9.124] - 2026-09-09
 
 ### Added
