@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.116] - 2026-09-09
+
+### Added
+
+- #659 WHATWG lowercases doctype names (html4 mode preserves) (html)
+- #659 record the DOCTYPE in HTML mode (html)
+
+### Fixed
+
+- per-process CLI temp paths close the ctest -j4 race (#930) (test)
+
+
+
 ## [1.9.115] - 2026-09-08
 
 ### Added
