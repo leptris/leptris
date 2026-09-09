@@ -444,8 +444,13 @@ bool Compare(const XNode& x, const ONode& o, std::string* why) {
         }
         for (auto& xa : x.attrs) {
             bool found = false;
+            /* html5lib prints foreign attrs with a space
+             * ("xlink href"); our DOM stores the colon form. */
+            std::string xan = xa.first;
+            size_t sp2 = xan.find(' ');
+            if (sp2 != std::string::npos) xan[sp2] = ':';
             for (auto& oa : o.attrs) {
-                if (oa.first == xa.first) {
+                if (oa.first == xan) {
                     if (oa.second != xa.second) {
                         *why = "@" + xa.first + "='" + oa.second +
                                "' != '" + xa.second + "'";
@@ -580,7 +585,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
      * content, 652 <template> placement, 623 structural head/body,
      * 556 DOCTYPE, 295 adoption agency, 294 foster, 285 two-mode
      * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)914);
+    EXPECT_GE(passed, (size_t)928);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
@@ -635,6 +640,6 @@ TEST(Html5LibCorpus, TreeConstruction) {
             printf("  PARITY-FAIL %s\n", pfails[i].c_str());
         EXPECT_GT(ptotal, (size_t)1400);
         /* Parity floor — the true #659 metric; only raises. */
-        EXPECT_GE(ppassed, (size_t)783);
+        EXPECT_GE(ppassed, (size_t)784);
     }
 }

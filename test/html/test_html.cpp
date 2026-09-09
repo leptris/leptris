@@ -1096,3 +1096,18 @@ TEST(HtmlParse, NumericRefDecodesWithoutSemicolon) {
     EXPECT_EQ(Html("FOO&#41BAR"), "FOO)BAR");
     EXPECT_EQ(Html("FOO&#x41BAR"), "FOO\xE4\x86\xBA" "R");
 }
+
+
+/* ---- #659 comment tokenizer edges (WHATWG 12.2.5.x) ---- */
+TEST(HtmlParse, CommentCloseForms) {
+    EXPECT_EQ(Html("FOO<!-- BAR --!>BAZ"), "FOO<!-- BAR -->BAZ");
+    EXPECT_EQ(Html("FOO<!-- BAR -- <QUX> -- MUX --!>BAZ"),
+              "FOO<!-- BAR -- <QUX> -- MUX -->BAZ");
+    /* EOF inside a comment: data runs to the end, verbatim. */
+    EXPECT_EQ(Html("FOO<!-- BAR --!"), "FOO<!-- BAR --!-->");
+}
+
+TEST(HtmlParse, EmptyCommentForms) {
+    EXPECT_EQ(Html("FOO<!--->BAZ"), "FOO<!---->BAZ");
+    EXPECT_EQ(Html("FOO<!-->BAZ"), "FOO<!---->BAZ");
+}

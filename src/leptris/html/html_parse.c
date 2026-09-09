@@ -3165,25 +3165,39 @@ static LeptrisDocument html_parse_shared(
                 }
             }
             if (p + 3 < end && p[2] == '-' && p[3] == '-') {
-                /* Comment: to --> (lenient to EOF). */
+                /* #659 WHATWG 12.2.5.5x: comments close at -->
+                 * OR the abrupt form --!>; unterminated comments
+                 * run to EOF (data verbatim). <!--> and <!--->
+                 * are empty comments. */
                 const char* cs = p + 4;
                 const char* ce = cs;
-                while (ce + 2 < end + 1) {
-                    if (ce + 2 < end + 1 && ce[0] == '-' &&
-                        ce[1] == '-' && ce[2] == '>')
-                        break;
-                    ce++;
-                    if (ce >= end - 1) { ce = end; break; }
-                }
-                size_t clen = 0;
-                if (ce + 2 < end + 1 && ce[0] == '-' && ce[1] == '-' &&
-                    ce[2] == '>') {
-                    clen = (size_t)(ce - cs);
-                    p = ce + 3;
+                size_t cclose = 0;   /* close-marker length */
+                if (cs < end && *cs == '>') {
+                    cclose = 1;   /* <!--> */
+                } else if (cs + 1 < end && cs[0] == '-' &&
+                           cs[1] == '>') {
+                    cclose = 2;   /* <!---> */
                 } else {
-                    clen = (size_t)(end - cs);
-                    p = end;
+                    while (ce + 3 <= end) {
+                        if (ce[0] == '-' && ce[1] == '-') {
+                            if (ce[2] == '>') {
+                                cclose = 3;
+                                break;
+                            }
+                            if (ce + 3 < end && ce[2] == '!' &&
+                                ce[3] == '>') {
+                                cclose = 4;   /* --!> */
+                                break;
+                            }
+                        }
+                        ce++;
+                    }
+                    if (!cclose) ce = end;   /* unterminated */
                 }
+                size_t clen = cclose
+                                  ? (size_t)(ce - cs)
+                                  : (size_t)(end - cs);
+                p = cclose ? ce + cclose : end;
                 LeptrisCommentNode* c = leptris_comment_create(
                     cs, clen, b.pool);
                 if (c) {
