@@ -531,7 +531,7 @@ TEST(HtmlTwoModes, DoctypeIsRecorded) {
     ASSERT_NE(d2, nullptr);
     LeptrisDoctype dt2 = leptris_document_internal_subset(d2);
     ASSERT_NE(dt2, nullptr);
-    EXPECT_STREQ(leptris_doctype_get_root_name(dt2), "HTML");
+    EXPECT_STREQ(leptris_doctype_get_root_name(dt2), "html");
     EXPECT_STREQ(leptris_doctype_get_public_id(dt2),
                  "-//W3C//DTD HTML 4.01//EN");
     EXPECT_STREQ(leptris_doctype_get_system_id(dt2),
