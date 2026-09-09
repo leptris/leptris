@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.126] - 2026-09-09
+
+### Added
+
+- lanes 05/07/15 tails — adjust-tz, format-date, current-*, fn:sort, eval_versioned (xpath)
+
+### Fixed
+
+- ASAN strcat overflow in format-date + portable gmtime
+
+
+
 ## [1.9.125] - 2026-09-09
 
 ### Added
