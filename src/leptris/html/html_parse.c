@@ -2091,6 +2091,30 @@ static int h_is_raw(const char* name) {
     return strcmp(name, "script") == 0 || strcmp(name, "style") == 0;
 }
 
+static int h_is_heading(const char* n) {
+    return n[0] == 'h' && n[1] >= '1' && n[1] <= '6' && n[2] == 0;
+}
+
+/* #659 WHATWG-only implied ends (12.2.6.4 "in body"): ruby
+ * annotations (rb closes rb; rt/rp close rt/rb/rp — annotations
+ * become siblings) plus rb/rt/rp/listing/plaintext closing an
+ * open p. libxml2 keeps nesting; the html4 entry stays bare. */
+static int h_closes_ww(const char* open, const char* start) {
+    int is_ruby_start = strcmp(start, "rb") == 0 ||
+                        strcmp(start, "rt") == 0 ||
+                        strcmp(start, "rp") == 0;
+    if (is_ruby_start || strcmp(start, "listing") == 0 ||
+        strcmp(start, "plaintext") == 0) {
+        if (strcmp(open, "p") == 0) return 1;
+        if (!is_ruby_start) return 0;
+        if (strcmp(open, "rb") == 0) return 1;
+        if (strcmp(start, "rb") == 0) return 0;
+        if (strcmp(open, "rt") == 0 || strcmp(open, "rp") == 0)
+            return 1;
+    }
+    return 0;
+}
+
 /* Implied-end sets: a start tag in `closes` closes any open
  * element named `name` (HTML4 §7.5.4 / table model). */
 static const char* const k_p_closers[] = {
@@ -3117,6 +3141,26 @@ static LeptrisDocument html_parse_shared(
                     lname[i] = h_lower(ns[i]);
                 lname[cl] = 0;
                 if (!h_is_void(lname)) {
+                    /* #659 (WHATWG): heading end tags pop through
+                     * the NEAREST heading (any h1-h6), not just
+                     * the same name — the rest is normal matching. */
+                    if (b.whatwg && h_is_heading(lname)) {
+                        int popped = 0;
+                        for (size_t d = b.depth; d > 0; d--) {
+                            const char* hn =
+                                leptris_element_name(b.open[d - 1]);
+                            if (hn && h_is_heading(hn)) {
+                                h_pop_to(&b, d - 1);
+                                popped = 1;
+                                break;
+                            }
+                        }
+                        if (popped) {
+                            p = q;
+                            text = p;
+                            continue;
+                        }
+                    }
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
                         /* #659: foreign slots store the
@@ -3301,7 +3345,10 @@ static LeptrisDocument html_parse_shared(
         if (elem_ns == H_NS_HTML) {
             while (b.depth > 0) {
                 const char* on = leptris_element_name(b.open[b.depth - 1]);
-                if (on && h_closes(on, name)) b.depth--;
+                if (on &&
+                    (h_closes(on, name) ||
+                     (b.whatwg && h_closes_ww(on, name))))
+                    b.depth--;
                 else break;
             }
         }
@@ -3409,18 +3456,25 @@ static LeptrisDocument html_parse_shared(
 
         /* Raw-text elements consume until their close tag (HTML
          * tokenizer switch only — foreign <script>/<style> are
-         * ordinary foreign elements). */
-        if (h_is_raw(name) && !self_closing && elem_ns == H_NS_HTML) {
+         * ordinary foreign elements). #659: <plaintext> is
+         * raw-to-EOF (WHATWG — it has no close form). */
+        int raw_name = h_is_raw(name) ||
+                       (b.whatwg && strcmp(name, "plaintext") == 0);
+        if (raw_name && !self_closing && elem_ns == H_NS_HTML) {
             const char* rs = q;
-            while (rs < end) {
-                if (rs + 2 + nlen + 1 <= end && rs[0] == '<' &&
-                    rs[1] == '/') {
-                    size_t i = 0;
-                    for (; i < nlen; i++)
-                        if (h_lower(rs[2 + i]) != name[i]) break;
-                    if (i == nlen) break;
+            if (strcmp(name, "plaintext") == 0) {
+                rs = end;   /* eats the rest of the input */
+            } else {
+                while (rs < end) {
+                    if (rs + 2 + nlen + 1 <= end && rs[0] == '<' &&
+                        rs[1] == '/') {
+                        size_t i = 0;
+                        for (; i < nlen; i++)
+                            if (h_lower(rs[2 + i]) != name[i]) break;
+                        if (i == nlen) break;
+                    }
+                    rs++;
                 }
-                rs++;
             }
             if (rs > q) {
                 LeptrisTextNode* t =

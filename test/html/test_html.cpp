@@ -835,3 +835,46 @@ TEST(HtmlTwoModes, WhatwgExplicitTbodyNotDuplicated) {
     EXPECT_EQ(Html("<table><tbody><tr><td>a</table>"),
               "<table><tbody><tr><td>a</td></tr></tbody></table>");
 }
+
+
+/* ---- #659 tests19 insertion-mode edges (WHATWG only) ---- */
+
+/* Heading END tags pop through the NEAREST heading (any of
+ * h1-h6), not just the same name — </h1> with an open h3 above
+ * pops to the h3's position; content after lands in the h3's
+ * parent. html4 keeps exact-name matching. */
+TEST(HtmlTwoModes, HeadingEndTagPopsNearestHeading) {
+    EXPECT_EQ(Html("<h1><div><h3><span></h1>foo"),
+              "<h1><div><h3><span/></h3>foo</div></h1>");
+    EXPECT_EQ(Html("<h3><li>abc</h2>foo"),
+              "<h3><li>abc</li></h3>foo");
+    EXPECT_EQ(Html4("<h1><div><h3><span></h1>foo"),
+              "<h1><div><h3><span/></h3></div></h1>foo");
+}
+
+/* Ruby annotation structure: rb/rt/rp close an open p like any
+ * block; rt/rp close an open rb/rt/rp so annotations become
+ * siblings; rb closes rb. */
+TEST(HtmlTwoModes, RubyAnnotationsNestAsSiblings) {
+    EXPECT_EQ(Html("<ruby>a<rb>b<rt></ruby>"),
+              "<ruby>a<rb>b</rb><rt/></ruby>");
+    EXPECT_EQ(Html("<ruby><p><rp>x"),
+              "<ruby><p/><rp>x</rp></ruby>");
+    EXPECT_EQ(Html("<ruby><rb>a<rb>b</ruby>"),
+              "<ruby><rb>a</rb><rb>b</rb></ruby>");
+}
+
+/* plaintext closes p and consumes the rest of the input as raw
+ * text (RAWTEXT to EOF). */
+TEST(HtmlTwoModes, PlaintextClosesPAndEatsRest) {
+    EXPECT_EQ(Html("<p><plaintext><b>x"),
+              "<p/><plaintext>&lt;b&gt;x</plaintext>");
+}
+
+/* html5lib's tree serialization writes comments as
+ * "<!-- data -->" with wrapping spaces — the comparator strips
+ * that convention (our DOM keeps the data verbatim). */
+TEST(HtmlTwoModes, CommentInteriorWhitespacePreserved) {
+    EXPECT_EQ(Html("<table>abc<!--foo-->"),
+              "abc<table><!--foo--></table>");
+}

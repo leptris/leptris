@@ -397,6 +397,16 @@ void Coalesce(ONode* n) {
  * WHATWG meter compares heads for real (the engine always makes
  * one now). */
 void NormalizeExpected(XNode* n, int optional_empty_head) {
+    /* optional_empty_head != 0 marks the PARITY meter; the
+     * html5lib (WHATWG) meter additionally strips the reference
+     * serializer's comment convention ("<!-- data -->" wraps the
+     * data with one space each side — the parity reference, like
+     * our DOM, stores comment data verbatim). */
+    int h5_dialect = !optional_empty_head;
+    if (h5_dialect && n->kind == XNode::COMMENT &&
+        n->text.size() >= 2 && n->text.front() == ' ' &&
+        n->text.back() == ' ')
+        n->text = n->text.substr(1, n->text.size() - 2);
     std::vector<XNode> out;
     for (auto& c : n->children) {
         NormalizeExpected(&c, optional_empty_head);
@@ -563,11 +573,12 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 792 since in-table wrapper synthesis (755 MathML/SVG
-     * foreign content, 652 <template> placement, 623 structural
-     * head/body, 556 DOCTYPE, 295 adoption agency, 294 foster,
-     * 285 two-mode split, 193 before it). */
-    EXPECT_GE(passed, (size_t)792);
+     * 859 since the tests19 insertion-mode edges (792 in-table
+     * wrapper synthesis, 755 MathML/SVG foreign content, 652
+     * <template> placement, 623 structural head/body, 556 DOCTYPE,
+     * 295 adoption agency, 294 foster, 285 two-mode split, 193
+     * before it). */
+    EXPECT_GE(passed, (size_t)859);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
