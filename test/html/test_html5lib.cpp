@@ -573,13 +573,14 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 897 since "in head noscript" (887 frameset mode +
+     * 914 since WHATWG character-reference decoding (897
+     * "in head noscript", 887 frameset mode +
      * structural-tag attributes, 859 tests19 insertion-mode edges,
      * 792 in-table wrapper synthesis, 755 MathML/SVG foreign
      * content, 652 <template> placement, 623 structural head/body,
      * 556 DOCTYPE, 295 adoption agency, 294 foster, 285 two-mode
      * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)897);
+    EXPECT_GE(passed, (size_t)914);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *

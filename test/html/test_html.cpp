@@ -1045,3 +1045,54 @@ TEST(HtmlTwoModes, NoframesIsRawText) {
     leptris_xpath_result_free(r);
     leptris_document_free(d);
 }
+
+
+/* ---- #659 character-reference decoding (WHATWG 12.2.5.72-78) ----
+ *
+ * Legacy references decode WITHOUT the semicolon (longest
+ * prefix); in attributes a missing ';' followed by '=' or an
+ * alphanumeric stays literal; numeric references decode with or
+ * without the ';'. */
+TEST(HtmlParse, LegacyEntityDecodesWithoutSemicolon) {
+    EXPECT_EQ(Html("FOO&gtBAR"), "FOO&gt;BAR");
+    EXPECT_EQ(Html("FOO&amp x"), "FOO&amp; x");
+}
+
+TEST(HtmlParse, LongestPrefixMatch) {
+    /* "notit;" is not an entity; the longest match "not" wins. */
+    EXPECT_EQ(Html("I&apos;m &notit; I tell you"),
+              "I'm \xC2\xACit; I tell you");
+}
+
+TEST(HtmlParse, AttrEntityLiteralGuard) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<div bar=\"ZZ&pound_id=23\" b2=\"ZZ&pound=23\""
+                      " b3=\"ZZ&gt YY\">";
+    LeptrisDocument d = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisXPathResult r = leptris_xpath_eval(
+        d, nullptr, "string(/html/body/div/@bar)");
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "ZZ\xC2\xA3_id=23");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, nullptr, "string(/html/body/div/@b2)");
+    ASSERT_NE(r, nullptr);
+    s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "ZZ&pound=23");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(d, nullptr, "string(/html/body/div/@b3)");
+    ASSERT_NE(r, nullptr);
+    s = leptris_xpath_result_string(r);
+    EXPECT_STREQ(s ? s : "", "ZZ> YY");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}
+
+TEST(HtmlParse, NumericRefDecodesWithoutSemicolon) {
+    EXPECT_EQ(Html("FOO&#41BAR"), "FOO)BAR");
+    EXPECT_EQ(Html("FOO&#x41BAR"), "FOO\xE4\x86\xBA" "R");
+}
