@@ -228,19 +228,21 @@ static void write_file(const char* path, const char* content) {
 // ---- diff (lane 17) -------------------------------------------------------
 
 TEST(CliDiff, ReportsOpsAndExitsZero) {
-    write_file("/tmp/leptris_cli_diff_a.xml", "<r><i id='1'>old</i></r>");
-    write_file("/tmp/leptris_cli_diff_b.xml", "<r><i id='2'>new</i></r>");
-    auto r = run_cli({"diff", "/tmp/leptris_cli_diff_a.xml",
-                      "/tmp/leptris_cli_diff_b.xml"});
+    /* Build-dir-relative fixtures: /tmp does not exist on
+     * Windows runners. */
+    write_file("leptris_cli_diff_a.tmp", "<r><i id='1'>old</i></r>");
+    write_file("leptris_cli_diff_b.tmp", "<r><i id='2'>new</i></r>");
+    auto r = run_cli({"diff", "leptris_cli_diff_a.tmp",
+                      "leptris_cli_diff_b.tmp"});
     EXPECT_EQ(r.exit_code, 0);
     EXPECT_NE(r.out.find("@id \"1\" -> \"2\""), std::string::npos);
     EXPECT_NE(r.out.find("\"old\" -> \"new\""), std::string::npos);
 }
 
 TEST(CliDiff, IdenticalDocumentsSaySo) {
-    write_file("/tmp/leptris_cli_diff_c.xml", "<r><a/></r>");
-    auto r = run_cli({"diff", "/tmp/leptris_cli_diff_c.xml",
-                      "/tmp/leptris_cli_diff_c.xml"});
+    write_file("leptris_cli_diff_c.tmp", "<r><a/></r>");
+    auto r = run_cli({"diff", "leptris_cli_diff_c.tmp",
+                      "leptris_cli_diff_c.tmp"});
     EXPECT_EQ(r.exit_code, 0);
     EXPECT_NE(r.out.find("identical"), std::string::npos);
 }
