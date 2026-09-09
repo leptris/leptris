@@ -114,20 +114,36 @@ bool ParseExpected(const std::vector<std::string>& lines, XNode* doc,
             n.kind = XNode::ELEM;
             size_t e = 1;
             while (e < c.size() && c[e] != ' ' && c[e] != '>') e++;
-            std::string qname = c.substr(1, e - 1);
+            std::string tok1 = c.substr(1, e - 1);
+            size_t rest_off = e;
             /* Foreign content: "svg circle" / "math mrow" (and the
-             * root foreign element itself, "svg svg" / "math math"). */
-            size_t sp = qname.find(' ');
-            if (sp != std::string::npos) {
-                std::string pfx = qname.substr(0, sp);
-                n.name = qname.substr(sp + 1);
-                n.ns = pfx == "svg" ? "http://www.w3.org/2000/svg"
-                                    : "http://www.w3.org/1998/Math/MathML";
+             * root foreign element itself, "svg svg" / "math math")
+             * — the namespace marker is its OWN token, followed by
+             * the local name, then attributes. */
+            if ((tok1 == "svg" || tok1 == "math") && rest_off < c.size() &&
+                c[rest_off] == ' ') {
+                size_t s2 = rest_off + 1;
+                size_t e2 = s2;
+                while (e2 < c.size() && c[e2] != ' ' && c[e2] != '>' &&
+                       c[e2] != '=')
+                    e2++;
+                /* '=' right after the second word means it is an
+                 * ATTRIBUTE (plain <svg viewBox=...>), not the
+                 * foreign local-name form (<svg g>). */
+                if (e2 < c.size() && c[e2] == '=') {
+                    n.name = tok1;
+                } else {
+                    n.name = c.substr(s2, e2 - s2);
+                    n.ns = tok1 == "svg"
+                               ? "http://www.w3.org/2000/svg"
+                               : "http://www.w3.org/1998/Math/MathML";
+                    rest_off = e2;
+                }
             } else {
-                n.name = qname;
+                n.name = tok1;
             }
             /* Attributes: name="quoted" or name=bare, up to '>'. */
-            std::string rest = c.substr(e);
+            std::string rest = c.substr(rest_off);
             if (!rest.empty() && rest[0] == '>') rest.clear();
             size_t p = 0;
             while (p < rest.size()) {
@@ -547,10 +563,11 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 652 since <template> placement (623 structural head/body,
-     * 556 DOCTYPE, 295 adoption agency, 294 foster, 285 two-mode
-     * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)652);
+     * 755 since MathML/SVG foreign content (652 <template>
+     * placement, 623 structural head/body, 556 DOCTYPE, 295
+     * adoption agency, 294 foster, 285 two-mode split, 193 before
+     * it). */
+    EXPECT_GE(passed, (size_t)755);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
