@@ -624,3 +624,47 @@ TEST(HtmlTwoModes, StructuralTagsKeepContentPlacement) {
                  "p");
     leptris_document_free(d);
 }
+
+/* #659: <template> placement — leading (before any structural
+ * <body>) is a HEAD element; after a structural <body> or inside
+ * content it stays in place; inside an explicit <html> the same
+ * head/body split applies. Comparator flattens the WHATWG content
+ * marker, so children sit directly under <template>. */
+TEST(HtmlTwoModes, TemplatePlacement) {
+    auto first_name = [](LeptrisDocument d, const char* path) {
+        LeptrisXPathResult r = leptris_xpath_eval(d, nullptr, path);
+        if (!r) return std::string("(null)");
+        char* s = leptris_xpath_result_string(r);
+        std::string out = s ? s : "";
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        return out;
+    };
+    struct {
+        const char* in;
+        const char* head_tpl;   /* "name(/html/head/*[1])" or "" */
+        const char* body_tpl;   /* "name(/html/body/*[1])" or "" */
+    } cases[] = {
+        {"<body><template>Hello</template>", "", "template"},
+        {"<template>Hello</template>", "template", ""},
+        {"<html><template>Hello</template>", "template", ""},
+        {"<div><template></div>Hello", "", "div"},
+    };
+    for (const auto& c : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d =
+            leptris_parse_html_string(c.in, strlen(c.in), &st);
+        ASSERT_NE(d, nullptr) << c.in;
+        if (c.head_tpl[0]) {
+            EXPECT_EQ(first_name(d, "name(/html/head/*[1])"),
+                      c.head_tpl) << c.in;
+        } else {
+            EXPECT_EQ(first_name(d, "count(/html/head/*)"), "0") << c.in;
+        }
+        if (c.body_tpl[0]) {
+            EXPECT_EQ(first_name(d, "name(/html/body/*[1])"),
+                      c.body_tpl) << c.in;
+        }
+        leptris_document_free(d);
+    }
+}
