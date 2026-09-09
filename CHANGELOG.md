@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.119] - 2026-09-09
+
+### Added
+
+- #659 MathML/SVG foreign content — WHATWG 652→755, parity 783 held (html)
+
+
+
 ## [1.9.118] - 2026-09-09
 
 ### Added
