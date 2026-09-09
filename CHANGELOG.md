@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+## [1.9.126] - 2026-09-09
+
+### Added
+
+- XPath/XSLT: the lane 05/07 catalog tails (#691). adjust-
+  {dateTime,date,time}-to-timezone (fixed-offset instant math;
+  empty $tz removes the offset; implicit timezone = UTC),
+  format-{dateTime,date,time} picture subset ([Y/M/D/H/h/m/s]
+  widths, [MNn]/[DNn] names, [Z]), current-{dateTime,date,time},
+  implicit-timezone(), fn:sort(seq, key?, collation?) with a
+  stable codepoint order and optional key function. Lane 15:
+  leptris_xpath_eval_versioned with the LeptrisXPathVersion enum
+  (LEPTRIS_XPATH_10 rejects 3.x-only syntax, LEPTRIS_XPATH_31 is
+  the full grammar; ABI append-only).
+
+### Fixed
+
+- ASAN strcat overflow in format-date + portable gmtime
+
+
+
 ## [1.9.125] - 2026-09-09
 
 ### Added
