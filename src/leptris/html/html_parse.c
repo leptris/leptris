@@ -2779,6 +2779,19 @@ static LeptrisDocument html_parse_shared(
         char* name = h_pooled_lower(b.pool, ns, nlen);
         if (!name) goto done;
 
+        /* Structural tags at top level (no explicit <html> open):
+         * WHATWG's implicit head/body phases — the commit-time
+         * synthesis provides the real elements, so the bare tags
+         * themselves disappear. Inside an explicit <html> they are
+         * ordinary elements (honored as-is). */
+        if (b.depth == 0 &&
+            (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+
         /* Flush pending text before the element. */
         if (text < p) {
             char* dec = h_decode(b.pool, text, p);
@@ -3027,6 +3040,46 @@ done:
             if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
                 b.root = (LeptrisElement)c;
                 break;
+            }
+        }
+    }
+
+    /* #659 WHATWG: every document is html>[head, body] — head
+     * possibly empty — whatever the bare structural tags looked
+     * like. The html4/libxml2 mode keeps its shape (no empty
+     * head/body; Nokogiri's <html></html>). */
+    if (b.whatwg_head_set && b.root &&
+        h_ieq_raw(leptris_element_name(b.root), "html")) {
+        int has_head = 0, has_body = 0;
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child((LeptrisNodeRef)b.root);
+             c; c = leptris_node_get_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            const char* cn = leptris_element_name((LeptrisElement)c);
+            if (h_ieq_raw(cn, "head"))
+                has_head = 1;
+            else if (h_ieq_raw(cn, "body"))
+                has_body = 1;
+        }
+        if (!has_body) h_new_child(&b, b.root, "body");
+        if (!has_head) {
+            /* Create WITHOUT attaching (h_open_named appends to the
+             * top chain) — head splices in as the FIRST child. */
+            LeptrisStringView nv = leptris_sv_from_cstr("head");
+            LeptrisElement head = leptris_element_create_with_view(nv, b.pool);
+            if (head) {
+                leptris_root_doc_register(head, b.doc);
+                LeptrisNodeRef first =
+                    leptris_node_first_child((LeptrisNodeRef)b.root);
+                if (first)
+                    leptris_node_set_next_sibling((LeptrisNodeRef)head,
+                                                  first);
+                else
+                    leptris_elem_set_last_child(b.root, head);
+                leptris_elem_set_first_child(b.root, head);
+                leptris_element_set_parent(head, b.root);
+                b.root->child_count++;
             }
         }
     }
