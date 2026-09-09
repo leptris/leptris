@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+## [1.9.117] - 2026-09-09
+
+### Added
+
+- **#659 — structural `<head>`/`<body>` tags; every WHATWG
+  document is `html>[head, body]`.** Bare head/body start tags at
+  top level are structural (the tag itself disappears; the commit
+  synthesis provides the real elements), and the WHATWG commit
+  splices in a missing head and appends a missing body. The
+  html4/libxml2 mode keeps its shape (no empty head — Nokogiri's
+  `<html></html>`). The corpus comparator now compares heads for
+  real on the WHATWG meter (the "optional empty head" divergence
+  stays parity-only). Corpus meters: **html5lib WHATWG 556 → 623,
+  Nokogiri parity 649 → 777** (+128 — libxml2 also treats bare
+  head/body structurally). Full ctest 1357/1357.
+
+
+
 ## [1.9.116] - 2026-09-09
 
 ### Added
