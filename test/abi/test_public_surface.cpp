@@ -409,3 +409,53 @@ TEST(PublicSurface, RecoverReturnsEmptyDocument) {
         leptris_xpath_eval(d, nullptr, "count(//node())")), 0);
     leptris_document_free(d);
 }
+
+
+/* ---- lane 15: versioned XPath eval ----
+ * leptris_xpath_eval_versioned(doc, ctx, expr, version, status):
+ * LEPTRIS_XPATH_10 gates the 3.x surface OFF (arrow, maps, let,
+ * bang), LEPTRIS_XPATH_31 keeps the full grammar. Plain XPath
+ * 1.0 works under both. */
+TEST(PublicSurface, VersionedXPathEval) {
+    LeptrisDocument d = parse_doc();
+    ASSERT_NE(d, nullptr);
+
+    /* 1.0 grammar works under both versions. */
+    LeptrisXPathResult r = leptris_xpath_eval_versioned(
+        d, nullptr, "count(//b)", LEPTRIS_XPATH_10, nullptr);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 2.0);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval_versioned(
+        d, nullptr, "count(//b)", LEPTRIS_XPATH_31, nullptr);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 2.0);
+    leptris_xpath_result_free(r);
+
+    /* 3.x-only constructs: rejected under 1.0, full under 3.1. */
+    const char* v31_only[] = {
+        "let $x := 1 return $x + 1",
+        "map{'a':1}?a",
+        "//b ! string()",
+        "//b => count()",
+    };
+    for (const char* e : v31_only) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisXPathResult r10 = leptris_xpath_eval_versioned(
+            d, nullptr, e, LEPTRIS_XPATH_10, &st);
+        EXPECT_EQ(r10, nullptr) << e;
+        EXPECT_NE(st, LEPTRIS_OK) << e;
+        LeptrisXPathResult r31 = leptris_xpath_eval_versioned(
+            d, nullptr, e, LEPTRIS_XPATH_31, nullptr);
+        EXPECT_NE(r31, nullptr) << e;
+        if (r31) leptris_xpath_result_free(r31);
+    }
+
+    /* Invalid version is an error, not a crash. */
+    LeptrisStatus st2 = LEPTRIS_OK;
+    EXPECT_EQ(leptris_xpath_eval_versioned(
+                  d, nullptr, "//b", (LeptrisXPathVersion)99, &st2),
+              nullptr);
+    EXPECT_NE(st2, LEPTRIS_OK);
+    leptris_document_free(d);
+}

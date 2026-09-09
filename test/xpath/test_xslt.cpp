@@ -1,6 +1,8 @@
 /* TODO.transform — XSLT 1.0 core engine specs. Each case: compile
  * the stylesheet once, apply, compare the serialized result. */
 #include <gtest/gtest.h>
+#include <regex>
+#include <string>
 extern "C" {
 #ifndef _WIN32
 #include <unistd.h>
@@ -3250,6 +3252,81 @@ TEST(Xslt30, FnDates) {
         "<r/>")),
         "[2026-09-02 2026-09-02T10:30:00 10:30:00 P1D]"
         "[2026 9 2 10 30 45][2 3]");
+}
+
+
+
+/* Lane 05 tail (2026-09-09): implicit-timezone, adjust-*-to-
+ * timezone (fixed-offset instant math), format-date/time/
+ * dateTime picture subset, current-* shapes. Saxon-HE lexical
+ * forms: zero offset renders Z, else +/-HH:MM. */
+TEST(Xslt30, FnAdjustTimezone) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"implicit-timezone()\"/>]"
+        "[<xsl:value-of select=\"adjust-dateTime-to-timezone("
+        "xs:dateTime('2026-01-01T00:30:00+05:00'), "
+        "xs:dayTimeDuration('-PT8H'))\"/>]"
+        "[<xsl:value-of select=\"adjust-time-to-timezone("
+        "xs:time('10:30:00+02:00'), "
+        "xs:dayTimeDuration('PT0S'))\"/>]"
+        "[<xsl:value-of select=\"adjust-dateTime-to-timezone("
+        "xs:dateTime('2026-01-01T00:30:00+05:00'))\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[PT0S][2025-12-31T11:30:00-08:00][08:30:00Z]"
+        "[2025-12-31T19:30:00Z]");
+}
+
+TEST(Xslt30, FnFormatDate) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"format-dateTime("
+        "xs:dateTime('2026-09-02T10:30:00'), "
+        "'[Y]-[M01]-[D01] [H01]:[m01]')\"/>]"
+        "[<xsl:value-of select=\"format-date("
+        "xs:date('2026-09-02'), '[MNn] [D], [Y0001]')\"/>]"
+        "[<xsl:value-of select=\"format-time("
+        "xs:time('10:30:00+05:00'), '[h01]:[m01] [Z]')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[2026-09-02 10:30][September 2, 2026][10:30 +05:00]");
+}
+
+TEST(Xslt30, FnCurrentDateTimeShape) {
+    std::string out = body(run30(
+        "<xsl:template match='/'>"
+        "<xsl:value-of select='current-dateTime()'/>|"
+        "<xsl:value-of select='current-date()'/>|"
+        "<xsl:value-of select='current-time()'/>"
+        "</xsl:template>",
+        "<r/>"));
+    std::regex shape(
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+        "(Z|[+-][0-9]{2}:[0-9]{2})\\|"
+        "[0-9]{4}-[0-9]{2}-[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})\\|"
+        "[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$");
+    EXPECT_TRUE(std::regex_match(out, shape)) << out;
+}
+
+
+
+/* Lane 07 tail: fn:sort(seq, key?, collation?) — codepoint order,
+ * optional key function; the collation argument is accepted and
+ * ignored (codepoint). for-each-pair uneven inputs already zip to
+ * the shorter (pinned below). */
+TEST(Xslt30, FnSortWithKey) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"sort(('b','a','c'))\"/>]"
+        "[<xsl:value-of select=\"sort(('bx','ay','cz'), "
+        "function($x){substring($x,1,1)})\"/>]"
+        "[<xsl:value-of select=\"sort((3,1,2))\"/>]"
+        "[<xsl:value-of select=\"for-each-pair((1,2,3),('x','y'), "
+        "concat#2)\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[a b c][ay bx cz][1 2 3][1x 2y]");
 }
 
 TEST(Xslt30, WherePopulatedOnNonEmptyNextMatch) {

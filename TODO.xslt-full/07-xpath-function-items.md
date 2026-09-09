@@ -116,6 +116,9 @@ seam makes them cheap; then lane 11/12 (XQuery).
   SystemError; also un-pinned #744's element() pin).
 - Specs: Xslt30.HofPairsApplyAndArrayCombinators (8),
   XPathResultTypes.FunctionItemsReportFunctionType; oracle
-  /tmp/probe9/l07b/t5.xsl. Remaining from the lane brief (fn:sort
-  with key/ Collation arity, fn:for-each-pair over uneven inputs
-  past the zip): fold into the #691 catalog tail, not blockers.
+  /tmp/probe9/l07b/t5.xsl. ## CLOSED 2026-09-10 — tail filled
+
+fn:sort(seq, key?, collation?) shipped: stable codepoint order,
+optional key function item, collation accepted-and-ignored
+(codepoint). for-each-pair uneven inputs zip to the shorter
+(pinned in FnSortWithKey). Lane 07 fully closed.

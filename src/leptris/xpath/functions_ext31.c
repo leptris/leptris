@@ -18,6 +18,8 @@
 #include "../dom/element.h"
 #include "../common/format_number.h"
 #include "../unicode/unicode.h"
+#include <time.h>
+#include <limits.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -539,6 +541,9 @@ static char* re_pattern_for(const char* pat, const char* flags) {
     out[o] = 0;
     return out;
 }
+
+static char* re_str_arg_opt(XPathContext* ctx, XPathASTNode** args,
+                            size_t i);
 
 static char* re_str_arg(XPathContext* ctx, XPathASTNode** args, size_t i) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
@@ -1330,6 +1335,340 @@ DATE_FIELD(hours_from_dur, 8)
 DATE_FIELD(minutes_from_dur, 9)
 DATE_FIELD(seconds_from_dur, 10)
 
+
+
+/* ---- Lane 05 tail: timezone model + current-* + format-date
+ * family (2026-09-09). Lexical value model: the date/time values
+ * are ISO strings; adjust-* does real instant math via the civil
+ * days algorithm; implicit timezone is fixed UTC (Saxon-HE
+ * parity needs implicit TZ only). ---- */
+
+static long h_days_from_civil(int y, int m, int d) {
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (unsigned)((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 +
+                              d - 1);
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097L + (long)doe - 719468L;
+}
+
+static void h_civil_from_days(long z, int* y, int* m, int* d) {
+    z += 719468L;
+    long era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned doe = (unsigned)(z - era * 146097);
+    unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long yy = (long)yoe + era * 400;
+    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    unsigned mp = (5 * doy + 2) / 153;
+    unsigned dd = doy - (153 * mp + 2) / 5 + 1;
+    unsigned mm = mp + (mp < 10 ? 3 : -9);
+    *y = (int)(yy + (mm <= 2));
+    *m = (int)mm;
+    *d = (int)dd;
+}
+
+/* Parse a lexical date/time: fields found set the out flags. */
+static int h_dt_parse(const char* in, int* y, int* mo, int* d,
+                      int* h, int* mi, double* se, long* off_min,
+                      int* has_off) {
+    *y = *mo = *d = 0;
+    *h = *mi = 0;
+    *se = 0;
+    *off_min = 0;
+    *has_off = 0;
+    const char* t = strstr(in, "T");
+    if (sscanf(in, "%d-%d-%d", y, mo, d) == 3) {
+        if (t) sscanf(t, "T%d:%d:%lf", h, mi, se);
+    } else if (sscanf(in, "%d:%d:%lf", h, mi, se) != 3) {
+        return 0;
+    }
+    const char* z = strrchr(in, 'Z');
+    if (z && !isdigit((unsigned char)z[1])) {
+        *has_off = 1;
+    } else {
+        const char* p = in;
+        while (*p) {
+            if (*p == 'T' || isdigit((unsigned char)*p) ||
+                *p == '-' || *p == ':' || *p == '.') {
+                p++;
+                continue;
+            }
+            break;
+        }
+        if ((*p == '+' || *p == '-') && strlen(p) >= 6 &&
+            p[3] == ':') {
+            int oh = 0, om = 0;
+            if (sscanf(p + 1, "%d:%d", &oh, &om) == 2) {
+                *off_min = (*p == '-') ? -(oh * 60 + om)
+                                       : (oh * 60 + om);
+                *has_off = 1;
+            }
+        }
+    }
+    return 1;
+}
+
+static void h_off_str(long off_min, char* buf, size_t cap) {
+    if (off_min == 0) {
+        snprintf(buf, cap, "Z");
+    } else {
+        snprintf(buf, cap, "%c%02ld:%02ld", off_min < 0 ? '-' : '+',
+                 labs(off_min) / 60, labs(off_min) % 60);
+    }
+}
+
+/* Parse a dayTimeDuration lexical form to offset minutes (an
+ * error returns LONG_MIN). */
+static long h_tz_duration_min(const char* in) {
+    const char* q = in;
+    int neg = 0;
+    if (*q == '-') { neg = 1; q++; }
+    if (*q != 'P') return LONG_MIN;
+    q++;
+    if (*q != 'T') return LONG_MIN;
+    q++;
+    long h = 0, m = 0;
+    double sec = 0;
+    while (*q) {
+        char* end = NULL;
+        double num = strtod(q, &end);
+        if (end == q) return LONG_MIN;
+        if (*end == 'H') h = (long)num;
+        else if (*end == 'M') m = (long)num;
+        else if (*end == 'S') sec = num;
+        else return LONG_MIN;
+        q = end + 1;
+    }
+    if (sec != 0) return LONG_MIN;   /* offsets have no seconds */
+    long total = h * 60 + m;
+    if (total > 14 * 60) return LONG_MIN;
+    return neg ? -total : total;
+}
+
+#define ADJUST_TZ(NAME, WHICH)                                       \
+    static struct leptris_xpath_result* fn_##NAME(                   \
+            XPathContext* ctx, XPathASTNode** a, size_t n) {         \
+        char* in = re_str_arg(ctx, a, 0);                            \
+        struct leptris_xpath_result* out =                            \
+            xpath_result_new(XPATH_RESULT_STRING);                   \
+        if (!out) { free(in); return NULL; }                         \
+        out->value.string_value = leptris_strdup("");                \
+        if (!in) return out;                                         \
+        int y, mo, d, h, mi;                                          \
+        double se;                                                    \
+        long off;                                                     \
+        int has_off;                                                  \
+        if (!h_dt_parse(in, &y, &mo, &d, &h, &mi, &se, &off,         \
+                        &has_off)) { free(in); return out; }         \
+        long target = 0;                                              \
+        int remove = 0;                                               \
+        if (n >= 2) {                                                 \
+            char* tzs = re_str_arg_opt(ctx, a, 1);                   \
+            if (!tzs) {                                              \
+                remove = 1;                                          \
+            } else {                                                 \
+                target = h_tz_duration_min(tzs);                     \
+                free(tzs);                                           \
+                if (target == LONG_MIN) { free(in); return out; }    \
+            }                                                        \
+        }                                                            \
+        char buf[64];                                                \
+        if (WHICH == 3) {                                             \
+            /* time: shift modulo the day */                          \
+            long tot = h * 3600L + mi * 60L + (long)se;              \
+            long shifted = tot + (target - off) * 60;                     \
+            long day = shifted / 86400;                              \
+            shifted %= 86400;                                        \
+            if (shifted < 0) { shifted += 86400; day--; }            \
+            (void)day;                                               \
+            if (remove)                                              \
+                snprintf(buf, sizeof buf, "%02d:%02d:%02d",          \
+                         (int)(shifted / 3600),                      \
+                         (int)(shifted % 3600 / 60),                 \
+                         (int)(shifted % 60));                        \
+            else {                                                   \
+                char ob[8];                                          \
+                h_off_str(target, ob, sizeof ob);                     \
+                snprintf(buf, sizeof buf, "%02d:%02d:%02d%s",        \
+                         (int)(shifted / 3600),                      \
+                         (int)(shifted % 3600 / 60),                 \
+                         (int)(shifted % 60), ob);                    \
+            }                                                        \
+        } else {                                                      \
+            /* date / dateTime: instant shift with day rollover */    \
+            long days = (WHICH == 2 || strstr(in, "T") == NULL)       \
+                            ? h_days_from_civil(y, mo, d)             \
+                            : h_days_from_civil(y, mo, d);            \
+            long base = days * 86400L + h * 3600L + mi * 60L +       \
+                        (long)se - off * 60;                         \
+            base += target * 60;                                     \
+            long nd = base / 86400;                                  \
+            long rem = base % 86400;                                 \
+            if (rem < 0) { rem += 86400; nd--; }                      \
+            int ny, nm, ndd;                                          \
+            h_civil_from_days(nd, &ny, &nm, &ndd);                    \
+            if (WHICH == 2 && !strstr(in, "T"))                       \
+                snprintf(buf, sizeof buf, "%04d-%02d-%02d",           \
+                         ny, nm, ndd);                                \
+            else if (remove)                                          \
+                snprintf(buf, sizeof buf,                             \
+                         "%04d-%02d-%02dT%02d:%02d:%02d",            \
+                         ny, nm, ndd, (int)(rem / 3600),              \
+                         (int)(rem % 3600 / 60), (int)(rem % 60));    \
+            else {                                                   \
+                char ob[8];                                          \
+                h_off_str(target, ob, sizeof ob);                     \
+                snprintf(buf, sizeof buf,                             \
+                         "%04d-%02d-%02dT%02d:%02d:%02d%s",          \
+                         ny, nm, ndd, (int)(rem / 3600),              \
+                         (int)(rem % 3600 / 60), (int)(rem % 60),     \
+                         ob);                                        \
+            }                                                        \
+        }                                                            \
+        free(out->value.string_value);                               \
+        out->value.string_value = leptris_strdup(buf);               \
+        free(in);                                                    \
+        return out;                                                  \
+    }
+
+ADJUST_TZ(adjust_dttz, 1)
+ADJUST_TZ(adjust_dtetz, 2)
+ADJUST_TZ(adjust_ttz, 3)
+
+static const char* const k_month_names[] = {
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December"};
+static const char* const k_day_names[] = {
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
+    "Friday", "Saturday"};
+
+/* format-date/time/dateTime picture subset (XPath 3.1 9.7):
+ * [Y|M|D|d|H|h|m|s] with numeric presentation modifiers (width
+ * from the modifier digits, e.g. 01 / 0001), [MNn]/[DNn] names,
+ * [Z] timezone offset. Unknown markers pass through verbatim. */
+#define FORMAT_DATE_FN(NAME, WHICH)                                  \
+    static struct leptris_xpath_result* fn_##NAME(                   \
+            XPathContext* ctx, XPathASTNode** a, size_t n) {         \
+        char* in = re_str_arg(ctx, a, 0);                            \
+        char* pic = re_str_arg(ctx, a, 1);                           \
+        struct leptris_xpath_result* out =                            \
+            xpath_result_new(XPATH_RESULT_STRING);                   \
+        if (!out) { free(in); free(pic); return NULL; }              \
+        out->value.string_value = leptris_strdup("");                \
+        int y, mo, d, h, mi;                                          \
+        double se;                                                    \
+        long off;                                                     \
+        int has_off;                                                  \
+        if (!in || !pic || !h_dt_parse(in, &y, &mo, &d, &h, &mi,    \
+                                       &se, &off, &has_off)) {       \
+            free(in); free(pic); return out;                         \
+        }                                                            \
+        char* res = (char*)malloc(strlen(pic) * 4 + 64);             \
+        size_t rl = 0;                                                \
+        for (const char* p = pic; *p;) {                             \
+            if (*p != '[') { res[rl++] = *p++; continue; }           \
+            const char* close = strchr(p, ']');                      \
+            if (!close) { res[rl++] = *p++; continue; }              \
+            char mark[16];                                           \
+            size_t ml = (size_t)(close - p - 1);                     \
+            if (ml >= sizeof mark) ml = sizeof mark - 1;             \
+            memcpy(mark, p + 1, ml);                                 \
+            mark[ml] = 0;                                            \
+            p = close + 1;                                           \
+            const char* mod = mark + 1;   /* after the letter */      \
+            char tmp[24];                                            \
+            if (mark[0] == 'Y') {                                    \
+                int w = mod[0] ? (int)strlen(mod) : 1;               \
+                snprintf(tmp, sizeof tmp, "%0*d", w, y);             \
+                res[rl++] = '\0';                                    \
+                strcat(res, tmp); rl = strlen(res);                  \
+            } else if (mark[0] == 'M' && strstr(mark, "Nn")) {       \
+                rl += (size_t)snprintf(res + rl, 16, "%s",           \
+                                      k_month_names[mo >= 1 &&       \
+                                      mo <= 12 ? mo - 1 : 0]);       \
+            } else if (mark[0] == 'M') {                             \
+                int w = mod[0] ? (int)strlen(mod) : 1;               \
+                snprintf(tmp, sizeof tmp, "%0*d", w, mo);            \
+                strcat(res, tmp); rl = strlen(res);                  \
+            } else if (mark[0] == 'D' && strstr(mark, "Nn")) {       \
+                int dow = (int)((h_days_from_civil(y, mo, d) + 4 +   \
+                                 7) % 7);                            \
+                rl += (size_t)snprintf(res + rl, 16, "%s",           \
+                                      k_day_names[dow]);             \
+            } else if (mark[0] == 'D') {                             \
+                int w = mod[0] ? (int)strlen(mod) : 1;               \
+                snprintf(tmp, sizeof tmp, "%0*d", w, d);             \
+                strcat(res, tmp); rl = strlen(res);                  \
+            } else if (mark[0] == 'H') {                             \
+                int w = mod[0] ? (int)strlen(mod) : 1;               \
+                snprintf(tmp, sizeof tmp, "%0*d", w, h);             \
+                strcat(res, tmp); rl = strlen(res);                  \
+            } else if (mark[0] == 'h') {                             \
+                int hh = h % 12;                                     \
+                if (hh == 0) hh = 12;                                \
+                int w = mod[0] ? (int)strlen(mod) : 1;               \
+                snprintf(tmp, sizeof tmp, "%0*d", w, hh);            \
+                strcat(res, tmp); rl = strlen(res);                  \
+            } else if (mark[0] == 'm') {                             \
+                int w = mod[0] ? (int)strlen(mod) : 1;               \
+                snprintf(tmp, sizeof tmp, "%0*d", w, mi);            \
+                strcat(res, tmp); rl = strlen(res);                  \
+            } else if (mark[0] == 's') {                             \
+                int w = mod[0] ? (int)strlen(mod) : 1;               \
+                snprintf(tmp, sizeof tmp, "%0*d", w, (int)se);       \
+                strcat(res, tmp); rl = strlen(res);                  \
+            } else if (mark[0] == 'Z') {                             \
+                char ob[8];                                          \
+                h_off_str(off, ob, sizeof ob);                        \
+                strcat(res, ob); rl = strlen(res);                   \
+            } else {                                                 \
+                rl += (size_t)snprintf(res + rl, 20, "[%s]", mark);  \
+            }                                                        \
+        }                                                            \
+        res[rl] = 0;                                                 \
+        free(out->value.string_value);                               \
+        out->value.string_value = leptris_strdup(res);               \
+        free(res);                                                   \
+        free(in); free(pic);                                         \
+        (void)n;                                                     \
+        return out;                                                  \
+    }
+
+FORMAT_DATE_FN(format_dttz, 1)
+FORMAT_DATE_FN(format_dtetz, 2)
+FORMAT_DATE_FN(format_ttz, 3)
+
+/* current-* : UTC wall clock, Saxon lexical forms. */
+#define CURRENT_FN(NAME, FORM)                                       \
+    static struct leptris_xpath_result* fn_##NAME(                   \
+            XPathContext* ctx, XPathASTNode** a, size_t n) {         \
+        struct leptris_xpath_result* out =                            \
+            xpath_result_new(XPATH_RESULT_STRING);                   \
+        if (!out) return NULL;                                       \
+        time_t now = time(NULL);                                     \
+        struct tm tmv;                                               \
+        gmtime_r(&now, &tmv);                                        \
+        char buf[40];                                                \
+        strftime(buf, sizeof buf, FORM, &tmv);                       \
+        out->value.string_value = leptris_strdup(buf);               \
+        (void)ctx; (void)a; (void)n;                                 \
+        return out;                                                  \
+    }
+
+CURRENT_FN(current_dt, "%Y-%m-%dT%H:%M:%SZ")
+CURRENT_FN(current_date, "%Y-%m-%dZ")
+CURRENT_FN(current_time, "%H:%M:%SZ")
+
+static struct leptris_xpath_result* fn_implicit_tz(
+        XPathContext* ctx, XPathASTNode** a, size_t n) {
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) return NULL;
+    out->value.string_value = leptris_strdup("PT0S");
+    (void)ctx; (void)a; (void)n;
+    return out;
+}
 
 /* ---- xs: atomic constructors (TODO.xslt-full/06; Saxon-HE 12.7
  * ground truth banked /tmp/probe9/g6.xsl) ---- value-level casts:
@@ -2593,6 +2932,61 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
     return out;
 }
 
+
+/* fn:sort(seq, key?, collation?) — lane 07 tail: codepoint order,
+ * stable; an optional key function item computes the sort key
+ * per item; the collation argument is accepted and ignored
+ * (codepoint collation). */
+static struct leptris_xpath_result* fn_sort_seq(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    size_t c = 0;
+    char** xs = collect_items(ctx, args, 1, 0, &c);
+    struct leptris_xpath_result* out = seq_new();
+    if (!xs || !out) {
+        free_items(xs, c);
+        return out;
+    }
+    char** keys = NULL;
+    if (n >= 2) {
+        char* cc = fn_item_content(ctx, args, 1);
+        if (cc) {
+            keys = (char**)calloc(c, sizeof(char*));
+            for (size_t k = 0; k < c; k++) {
+                char* argv[1] = { xs[k] };
+                struct leptris_xpath_result* r =
+                    xpath_call_function_item(ctx, cc, argv, 1);
+                if (r) {
+                    keys[k] = xpath_to_string(r);
+                    xpath_result_free(r);
+                }
+                if (!keys[k]) keys[k] = leptris_strdup("");
+            }
+            free(cc);
+        }
+    }
+    /* stable insertion sort by key (or the item itself) */
+    for (size_t i = 1; i < c; i++) {
+        char* it = xs[i];
+        char* kt = keys ? keys[i] : it;
+        size_t j = i;
+        while (j > 0 &&
+               strcmp(keys ? keys[j - 1] : xs[j - 1], kt) > 0) {
+            xs[j] = xs[j - 1];
+            if (keys) keys[j] = keys[j - 1];
+            j--;
+        }
+        xs[j] = it;
+        if (keys) keys[j] = kt;
+    }
+    for (size_t k = 0; k < c; k++) seq_push_str(out, xs[k]);
+    if (keys) {
+        for (size_t k = 0; k < c; k++) free(keys[k]);
+        free(keys);
+    }
+    free_items(xs, c);
+    return out;
+}
+
 /* fn:for-each-pair(seq1, seq2, $f) — zip; the shorter input wins */
 static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
@@ -3625,6 +4019,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "fold-left", fn_fold_left, 3, 3);
     xpath_function_registry_register(registry, "fold-right", fn_fold_right, 3, 3);
     xpath_function_registry_register(registry, "for-each-pair", fn_for_each_pair, 3, 3);
+    xpath_function_registry_register(registry, "sort", fn_sort_seq, 1, 3);
     xpath_function_registry_register(registry, "apply", fn_apply, 2, 2);
 
     xpath_function_registry_register(registry, "map:for-each", fn_map_for_each, 2, 2);
@@ -3705,6 +4100,16 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:dayTimeDuration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:yearMonthDuration", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "implicit-timezone", fn_implicit_tz, 0, 0);
+    xpath_function_registry_register(registry, "current-dateTime", fn_current_dt, 0, 0);
+    xpath_function_registry_register(registry, "current-date", fn_current_date, 0, 0);
+    xpath_function_registry_register(registry, "current-time", fn_current_time, 0, 0);
+    xpath_function_registry_register(registry, "adjust-dateTime-to-timezone", fn_adjust_dttz, 1, 2);
+    xpath_function_registry_register(registry, "adjust-date-to-timezone", fn_adjust_dtetz, 1, 2);
+    xpath_function_registry_register(registry, "adjust-time-to-timezone", fn_adjust_ttz, 1, 2);
+    xpath_function_registry_register(registry, "format-dateTime", fn_format_dttz, 2, 5);
+    xpath_function_registry_register(registry, "format-date", fn_format_dtetz, 2, 5);
+    xpath_function_registry_register(registry, "format-time", fn_format_ttz, 2, 5);
     xpath_function_registry_register(registry, "year-from-dateTime", fn_year_from_dt, 1, 1);
     xpath_function_registry_register(registry, "year-from-date", fn_year_from_dt, 1, 1);
     xpath_function_registry_register(registry, "month-from-date", fn_month_from_dt, 1, 1);

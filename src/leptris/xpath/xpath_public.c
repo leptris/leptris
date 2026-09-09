@@ -23,6 +23,61 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <ctype.h>
+
+
+/* Lane 15: versioned eval — LEPTRIS_XPATH_10 gates the 3.x-only
+ * SYNTAX (arrow, bang, lookup, let, inline functions, string
+ * templates) off with a lexical scan outside literals; 3.1 is the
+ * unmodified leptris_xpath_eval. */
+static int x10_has_3x_syntax(const char* e) {
+    int q = 0;   /* 0 none, '\'' , '"' */
+    for (const char* p = e; *p; p++) {
+        if (q) {
+            if (*p == q) q = 0;
+            continue;
+        }
+        if (*p == '\'' || *p == '"' || *p == '`') {
+            q = *p;
+            continue;
+        }
+        if (p[0] == '=' && p[1] == '>') return 1;
+        if (*p == '!' || *p == '?' || *p == '`') return 1;
+        if ((p == e || !isalnum((unsigned char)p[-1])) &&
+            strncmp(p, "let ", 4) == 0) return 1;
+        if ((p == e || !isalnum((unsigned char)p[-1])) &&
+            strncmp(p, "function", 8) == 0 &&
+            (p[8] == '(' || p[8] == ' ')) return 1;
+    }
+    return q == '`';   /* unterminated template is 3.x anyway */
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_versioned(
+    LeptrisDocument doc,
+    LeptrisElement context,
+    const char* expression,
+    LeptrisXPathVersion version,
+    LeptrisStatus* status
+) {
+    if (status) *status = LEPTRIS_OK;
+    if (!doc || !expression) {
+        if (status) *status = LEPTRIS_ERROR_NULL_ARG;
+        return NULL;
+    }
+    if (version != LEPTRIS_XPATH_10 && version != LEPTRIS_XPATH_31) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    if (version == LEPTRIS_XPATH_10 &&
+        x10_has_3x_syntax(expression)) {
+        leptris_set_error(
+            LEPTRIS_ERROR_INVALID_ARG,
+            "XPath 3.x syntax rejected in LEPTRIS_XPATH_10 mode");
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    return leptris_xpath_eval(doc, context, expression);
+}
 
 LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
     LeptrisDocument doc,

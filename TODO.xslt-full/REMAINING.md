@@ -73,6 +73,20 @@ Per-lane details live in the numbered docs; this file is the index
   native C — schema IR -> SVRL evaluator on our XPath engine ->
   exact-N conformance corpus -> bindings + CLI. Opened from the
   XML Prague 2026 gap map (section G). Doc: 16-schematron.md.
+- **17 (XML diff, NEW 2026-09-09)**: native tree diff with the
+  #869 digest prefilter + ordered edit script; consumer is the
+  user's lutaml/canon gem (already rides leptris for C14N).
+  Phases: op model -> children alignment -> serializer + CLI ->
+  bindings + canon integration. Doc: 17-xml-diff.md.
+- **USER-DIRECTED ORDER (2026-09-09)**: finish the XSLT/XPath/
+  XQuery lane tails COMPLETELY, then Schematron (16), with XML
+  diff (17) alongside. Concretely: 05 dates tail (current-*,
+  implicit-timezone, adjust-*-to-timezone fixed-offset model,
+  format-date/time/dateTime picture subset) -> 07 fn-items tail
+  (fn:sort key/collation arity, for-each-pair past the zip) ->
+  15 binding entries (leptris_xpath_eval_versioned + result-type
+  mirrors) -> 16 + 17 in parallel -> 11/12 qt3tests subsets via
+  the XTH connector.
 
 ## D. Bindings (user-owned repos — PRs only, never release)
 
