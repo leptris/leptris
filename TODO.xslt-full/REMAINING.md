@@ -1,6 +1,6 @@
 # REMAINING — the complete open-work ledger
 
-SSOT for everything still open after v1.9.115 (2026-09-09).
+SSOT for everything still open after v1.9.117 (2026-09-09).
 Update entries as work ships; delete entries as they close.
 Per-lane details live in the numbered docs; this file is the index
 + the graph.
@@ -41,9 +41,8 @@ Per-lane details live in the numbered docs; this file is the index
   <template> placement (64), MathML/SVG foreign content (85),
   in-table insertion modes (tests19 residue), comment whitespace
   fidelity, entity edges, full AFE-list machinery.
-- **#930** — CLI tests race on fixed /tmp/leptris_cli_stdout|
-  stderr paths under `ctest -j4` (intermittent CliXpath/CliXquery
-  reds; serially green). Fix: per-process paths or a lock.
+- **#930** — CLOSED (v1.9.117): per-process pid-suffixed CLI temp
+  paths.
 
 ## C. TODO.xslt-full lanes — residual items
 
@@ -68,6 +67,10 @@ Per-lane details live in the numbered docs; this file is the index
   strict vs 3.x surface gating), result-type extensions from 07
   mirrored into both bindings. Gate: abi spec + mirrors drift
   check. NOTE: RelaxNG entries already shipped (leptris-ruby#165).
+- **16 (Schematron 2025, NEW)**: the third validation pillar,
+  native C — schema IR -> SVRL evaluator on our XPath engine ->
+  exact-N conformance corpus -> bindings + CLI. Opened from the
+  XML Prague 2026 gap map (section G). Doc: 16-schematron.md.
 
 ## D. Bindings (user-owned repos — PRs only, never release)
 
@@ -93,12 +96,43 @@ Per-lane details live in the numbered docs; this file is the index
   entity-table struct types, from #848) + sax/pull.c:447 (const
   discard in pull events). Both benign; fix in a cleanup PR.
 
+## G. XML Prague 2026 gap map (2026-09-09) — where the field is going
+
+Full inventory from all three day pages; lane 16 is the actionable
+head. Ranked rest:
+
+- **Schematron 2025** (Siegel + Users Meetup) -> LANE 16, above.
+- **XPath/XSLT/XQuery 4.0** (Tovey-Walsh standards update; Kay's
+  ordered-maps implementation paper; Leino XQuery-4 tutorial) —
+  the long language lane; ordered maps are a data-structure
+  design problem in our engine. Natural extension of lanes
+  06-12; gate on XTH (below).
+- **XTH connector** (Retter) — vendor-agnostic W3C qt3tests/
+  xslttests runner, "small connector per processor", CI
+  compliance reporting. This IS lanes 11/12 residual, done
+  properly. Cheap, high credibility.
+- **XML diff** (Quin/Brandes/Kutscherauer, Chawathe-style tree
+  diff) — we hold #869 Merkle digest + C14N 23x; a native
+  leptris diff is a medium lane, nothing in Nokogiri-land.
+- **AI via XPath functions** (Bina; Nadolu) — "add a few XPath
+  functions, LLMs across all XML tech". For us: an
+  extension-function callback registration entry on the eval
+  environment; bindings wire the LLM. Small hook, big demo.
+- **ixml** (Pemberton state-of-play + case studies; Holman
+  Crane-txt2xml) — parser-generator territory, conference-hot,
+  no C implementation. Speculative; note only.
+- **EPUB vertical** (EDRLab/Chomel) — epubcheck-shaped stack
+  (zip+OPF+XHTML+RNG+Schematron) becomes buildable once lane 16
+  lands. Application layer, later.
+- **XProc 3** (Users Meetup; Hillman XProc-Baseline) and
+  **XSL-FO** (Antenna House) — real but out of scope for now.
+
 ## Graph to success
 
 ```
 leptris-ruby#165 ──user merge──> standoc migration off Jing (prompt on #878) ──> #878 CLOSED, pdfa#98 JVM-free
      │
-#930 (per-process CLI temp paths) ──> PR ──> release
+#930 CLOSED (v1.9.117) ── per-process CLI temp paths shipped
      │
 #659: corpus re-run ──> full AFE list + in-table modes + 23 tokenizer edges
       ──> WHATWG floor up, parity 372 held ──> bindings expose html entries ──> #659 CLOSED
@@ -106,7 +140,11 @@ leptris-ruby#165 ──user merge──> standoc migration off Jing (prompt on #
 #682: USER CALL on scope (in-process ~1.1x ceiling vs wall-clock bars held)
       ──> close as-is OR one more streaming phase ──> lane 13 closed
      │
-05/07/11/12 tails (non-blocking) + lane 15 versioned entries ──> bindings wave
+lane 16 Schematron (after #659 settles): IR ──> SVRL evaluator ──> exact-N corpus
+      ──> bindings + CLI validate ──> migration prompt ──> third pillar DONE
+     │
+05/07/11/12 tails + XTH connector (qt3tests done properly) + lane 15 versioned entries
+      ──> bindings wave
      │
 F: warnings cleanup + build-dir consolidation (user call)
 ```
