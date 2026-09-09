@@ -68,3 +68,13 @@ XPath/XSLT/XQuery 4.0 ordered maps (Kay); XTH connector (Retter)
 digest; ixml (Pemberton) — speculative; AI-via-XPath-functions
 (Bina/Nadolu) — needs only an extension-fn callback entry; EPUB
 vertical (EDRLab) after Schematron; XProc 3 / XSL-FO — not now.
+
+
+## Status 2026-09-10 — phases 1+2 shipped (PR #964)
+
+Schema IR + SVRL evaluator + public API (leptris_schematron_*)
+landed; 6 RED-first specs. REMAINING in this lane: phase 3
+(abstract patterns + params, let scoping), phase 4 (phases/
+diagnostics/properties), phase 5 (conformance corpus, exact-N
+gate), phase 6 (bindings + `leptris validate` + migration
+prompt).
