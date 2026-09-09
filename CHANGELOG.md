@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.124] - 2026-09-09
+
+### Added
+
+- HTML (WHATWG mode): character-reference decoding per WHATWG
+  12.2.5.72-78 (#659). Legacy references decode without the
+  semicolon (longest-prefix match against the 107 legacy HTML4
+  names); in attribute values a missing ';' followed by '=' or
+  an alphanumeric stays literal; numeric references decode with
+  or without the ';'. The html4 entry keeps its strict forms.
+  html5lib corpus: WHATWG 897 → 914; Nokogiri parity 783 held.
+
+
+
 ## [1.9.123] - 2026-09-09
 
 ### Added
