@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.118] - 2026-09-09
+
+### Added
+
+- HTML: `<template>` elements are placed where the tokenizer
+  encounters them (#659). html5lib corpus: WHATWG 623→652,
+  Nokogiri-parity 777→783; both floors raised in the gate specs.
+
+### Changed
+
+- HTML: explicit `<head>`/`<body>` tags are honored in place —
+  content between/around them keeps its position instead of being
+  re-lifted; the implied-head lift only runs when the tags are
+  absent (#659).
+- The html5lib comparator now compares `<head>` subtrees for real
+  on the WHATWG meter (optional-empty-head normalization is
+  parity-only).
+
+
+
 ## [1.9.117] - 2026-09-09
 
 ### Added
