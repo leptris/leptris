@@ -209,6 +209,14 @@ extern cli_command_t* cli_command_format(void);
 extern cli_command_t* cli_command_version(void);
 
 /**
+ * Get the 'diff' command
+ *
+ * Command: leptris diff [OPTIONS] A B
+ * Purpose: Structural XML diff between two documents (lane 17)
+ */
+extern cli_command_t* cli_command_diff(void);
+
+/**
  * Get the 'xquery' command
  *
  * Command: leptris xquery [OPTIONS] (-q FILE | -e EXPR)

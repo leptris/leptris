@@ -218,6 +218,24 @@ typedef enum {
     LEPTRIS_PARSE_DTDATTR     = 2u
 } LeptrisParseFlags;
 
+/* ============================================================================
+ * XML Diff (lane 17)
+ * ========================================================================== */
+
+/* Edit-script op kinds. */
+typedef enum {
+    LEPTRIS_DIFF_INSERT = 1,
+    LEPTRIS_DIFF_DELETE = 2,
+    LEPTRIS_DIFF_UPDATE_TEXT = 3,
+    LEPTRIS_DIFF_UPDATE_ATTR = 4
+} LeptrisDiffOpType;
+
+typedef enum {
+    LEPTRIS_DIFF_DEFAULT = 0,
+    /* Whitespace-only text nodes are treated as absent. */
+    LEPTRIS_DIFF_IGNORE_WS_TEXT = 1u
+} LeptrisDiffFlags;
+
 /* Subtree digest flags (issue #869). The digest is content-defined
  * (no pointers/addresses — stable across processes); equality
  * implies subtree equivalence under the flag semantics. */

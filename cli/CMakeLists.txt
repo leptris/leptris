@@ -8,6 +8,7 @@ add_executable(leptris-cli
     output.c
     error.c
     commands/version.c
+    commands/diff.c
     commands/parse.c
     commands/xpath.c
     commands/format.c
