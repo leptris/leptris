@@ -29,14 +29,18 @@ Per-lane details live in the numbered docs; this file is the index
   the >=2x bar is unreachable there while libxslt does identical
   work. Bars HELD: transform 5x, predicate 15.6x, xsltproc wall
   >=2x. Options on the issue; do not micro-grind awaiting the call.
-- **#659** (the last open engine lane) — WHATWG floor 295/1753
-  (from 193, +53%), Nokogiri parity 372/1555 held throughout.
-  Shipped: two-mode split (html5 vs html4 entries), implied-head
-  lift, foster parenting, simplified adoption agency + attr-carry
-  clones, entity perf at/over par (2.9x libxml2 throughput).
-  REMAINING slices: full AFE-list machinery (adoption01.dat
-  table-interleaved variants), in-table insertion modes, the 23
-  deep tokenizer-edge parse-fails, then re-run both floors.
+- **#659** (the last open engine lane) — v1.9.116/117 jumps:
+  DOCTYPE recording (WHATWG 295 -> 556, parity 372 -> 649) +
+  structural head/body + html>[head,body] ensuring in WHATWG mode
+  (WHATWG -> 623, parity -> 777). The comparator now compares
+  heads for real on the WHATWG meter (optional-empty-head is
+  parity-only). Shipped cumulative: two-mode split, implied-head
+  lift, foster parenting, simplified adoption agency + attr
+  clones, doctype recording, structural head/body, entity perf
+  (2.9x libxml2). REMAINING slices (fresh red-list, ranked):
+  <template> placement (64), MathML/SVG foreign content (85),
+  in-table insertion modes (tests19 residue), comment whitespace
+  fidelity, entity edges, full AFE-list machinery.
 - **#930** — CLI tests race on fixed /tmp/leptris_cli_stdout|
   stderr paths under `ctest -j4` (intermittent CliXpath/CliXquery
   reds; serially green). Fix: per-process paths or a lock.
