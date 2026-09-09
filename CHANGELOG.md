@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.123] - 2026-09-09
+
+### Added
+
+- HTML (WHATWG mode): "in head noscript" (scripting off, #659).
+  A `<noscript>` opened in the head phase keeps head content and
+  comments inside; the first body-ish token pops it and
+  reprocesses at body level. `<html>` inside head-noscript merges
+  its attributes onto the html element; `<head>`/nested
+  `<noscript>` tokens are ignored, as are doctypes. `</br>` is
+  treated as `<br>`. `<noframes>` is RAWTEXT. html5lib corpus:
+  WHATWG 887 → 897; Nokogiri parity 783 held exactly.
+
+
+
 ## [1.9.122] - 2026-09-09
 
 ### Added
