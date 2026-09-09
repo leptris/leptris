@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.120] - 2026-09-09
+
+### Added
+
+- HTML (WHATWG mode): in-table wrapper synthesis per WHATWG
+  12.2.6.4 (#659). `<tr>` directly under `<table>` implies a
+  `<tbody>`; `<td>`/`<th>` imply `<tbody><tr>` (just `<tr>`
+  under an open tbody/thead/tfoot); `<col>` implies
+  `<colgroup>`. Follow-up rows reuse the synthesized tbody. The
+  html4/Nokogiri-compat entry keeps libxml2's bare shape
+  (pinned by specs). html5lib corpus: WHATWG 755 → 792;
+  Nokogiri parity 783 held exactly.
+
+
+
 ## [1.9.119] - 2026-09-09
 
 ### Added
