@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.124] - 2026-09-09
+
+### Added
+
+- #659 WHATWG character-reference decoding — 897→914, parity 783 held (html)
+
+
+
 ## [1.9.123] - 2026-09-09
 
 ### Added
