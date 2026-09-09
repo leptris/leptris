@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.117] - 2026-09-09
+
+### Added
+
+- #659 structural head/body tags — html>[head, body] in WHATWG mode (html)
+
+
+
 ## [1.9.116] - 2026-09-09
 
 ### Added
