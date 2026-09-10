@@ -82,7 +82,7 @@ endfunction()
 
 leptris_add_test(test_smoke      smoke/test_smoke.cpp)
 leptris_add_test(test_diff       diff/test_diff.cpp)
-leptris_add_test(test_sch        sch/test_schematron.cpp) b8d51d6f (feat(diff): lane 17 native XML diff — engine, public API, CLI)
+leptris_add_test(test_sch        sch/test_schematron.cpp)
 leptris_add_test(test_parser     parser/test_parser.cpp)
 leptris_add_test(test_large_docs parser/test_large_documents.cpp)
 leptris_add_test(test_encoding   parser/test_encoding.cpp)

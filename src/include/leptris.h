@@ -235,6 +235,8 @@ LEPTRIS_API LeptrisDocument leptris_schematron_validate(
 /** Last schema-level error message, or NULL. */
 LEPTRIS_API const char* leptris_schematron_error(
     LeptrisSchematron sch);
+
+/* ============================================================================
  * XML Diff (lane 17) — digest-pruned ordered edit script
  * ========================================================================== */
 
@@ -306,7 +308,7 @@ LEPTRIS_API const char* leptris_diff_op_after(LeptrisDiff diff,
  * @return Malloc'd string (free with leptris_free_string)
  */
 LEPTRIS_API char* leptris_diff_serialize(LeptrisDiff diff);
- b8d51d6f (feat(diff): lane 17 native XML diff — engine, public API, CLI)
+
 
 /**
  * Copy child node handles of ANY kind into a caller array (issue #535)
