@@ -145,8 +145,10 @@ refactor — the registry architecture did the work:
   message lines. Specs: CliValidate.* (Windows-guarded — the
   run_cli subprocess harness limitation; exit codes decoded from
   std::system's high byte).
-- REMAINING for the lane: binding PRs (leptris-ruby
-  `Leptris::XML::Schematron` — parse/parse_file/#valid?/#validate
-  -> SVRL — and the python mirror; PRs only, user merges), then
-  the standoc/oXygen migration prompt. Lane CLOSES after bindings
+- Ruby binding PR OPEN: leptris-ruby#170 —
+  Leptris::XML::Schematron (parse/parse_file/parse(phase:),
+  #valid?, #validate -> SVRL document; 6 specs, gem suite 570/570
+  against a shared build). USER MERGES.
+- REMAINING for the lane: python mirror PR (leptris-py), then the
+  standoc/oXygen migration prompt. Lane CLOSES after bindings
   merge.
