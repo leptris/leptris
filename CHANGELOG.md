@@ -4,9 +4,14 @@
 
 ### Added
 
-- QT3 subset adoption — fn/substring 45/45 (xquery)
+- **W3C QT3 test suite adoption, first slice (lanes 11/12)** — the `fn/substring` test-set vendored verbatim from [w3c/qt3tests](https://github.com/w3c/qt3tests) with an exact-N runner over the public XQuery API: **45/45** adopted cases. The runner parses the test-set with libleptris itself and grows its assertion surface incrementally (`assert-string-value`, `assert-eq`, `assert-true/false`, `all-of` today).
 
+### Fixed
 
+- **Pre-bound namespace prefixes** — XQuery reserves `fn`, `xs`, `math`, `map`, `array`, `err` without declaration; every `fn:`-prefixed call previously failed as "unknown function".
+- **Exponent number literals** — `0E0`, `1.5e0`, `5.2E-3` (XPath 2.0+/XQuery doubles; no valid 1.0 expression changes meaning).
+- **`count()` over atomic values** — one item, per sequence semantics (was a type error).
+- **`substring()` over non-BMP characters** — positions are codepoints, not bytes; astral characters are one position (ASCII keeps the byte fast path).
 
 ## [1.9.129] - 2026-09-10
 
