@@ -124,6 +124,13 @@ struct leptris_document {
      * transforms of the SAME document are not supported — one
      * document per mutating thread, per the README model. */
     void* xslt_state;
+    /* Schematron validation state (lane 16.5): while a schema
+     * validation runs on this document, leptris_xpath_build_
+     * custom_registry registers key() with the schema's xsl:key
+     * declarations as backing. Same save/restore discipline as
+     * xslt_state — set for the validate call only, with registry
+     * invalidation on both sides. */
+    void* sch_state;
     char* encoding;                 /* UTF-8 assumed, but store if specified */
     /* Issue #580: the document node's child chain (see the comment
      * above) — LeptrisNodeRef comment/PI nodes + the root element. */

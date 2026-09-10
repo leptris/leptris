@@ -113,15 +113,26 @@ Engine/runner work landed on the branch (RED-first via the corpus):
   embedded secondaries; subordinate documents via pattern/
   @documents evaluated runner-side (multi-doc validate).
 
-Remaining 3 cases (the 50/50 tail):
-- xslt-key-01 + xslt-key-element-content-01: xsl:key + key() in
-  tests. Needs the XSLT key-index machinery factored into an
-  internal shared module (xslt_fn_key rides XsltExec via
-  ctx->current_fn_user_data; sch needs its own registration of
-  xsl:key decls + per-doc index build; custom-fn API is
-  string-typed and cannot return node-sets).
-- let-value-element-content-01: schema 2 passes (quoted string
-  value); schema 1 (`count(html:p)` at "/") needs the SchXslt
-  graft-into-document behavior (let content copied under the
-  document node) + sch:ns prefix bindings for expressions.
+## Phase 5 COMPLETE (2026-09-10): 50/50
+
+The last three cases landed without the planned cross-subsystem
+refactor — the registry architecture did the work:
+- **key() bridge**: doc->sch_state (parallel to xslt_state) +
+  a sch key bridge hook in leptris_xpath_build_custom_registry
+  (CRITICAL: the early-exit guard needed !doc->sch_state too —
+  without it the doc falls back to the GLOBAL standard registry
+  and key() stays unknown). sch_fn_key builds lazily from
+  xsl:key decls via PUBLIC eval APIs (match patternized //,
+  use = @use or element text as quoted literal). Result nodesets
+  MUST init value.nodeset_value (xpath_result_new leaves it NULL;
+  count() of a NULL nodeset silently reads 0).
+- **element-content lets**: content parses standalone, root
+  detaches (root/new_dom_root/doc_children_* nulled), splices
+  onto the instance doc-children tail, pool kept alive via
+  leptris_document_adopt_child (xinclude pattern). The variable
+  value is the PRE-QUOTED text with bare=1 (verbatim insertion).
+- Banked bug: sch_patternize heap copy was freed before the node
+  loop re-read cexpr for the "/" special case — use-after-free
+  regression caught by the subordinate corpus cases; cexpr must
+  outlive the loop.
 

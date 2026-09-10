@@ -10,6 +10,14 @@
 #include "../leptris_internal.h"
 #include "../../include/leptris.h"
 #include "../dom/element.h"
+#include "../dom/node.h"
+#include "../xpath/evaluator_internal.h"
+#include "../xpath/functions.h"
+
+/* xpath_public.c — drops the doc-cached fn registry so the sch key
+ * bridge registers/unregisters cleanly around a validate call. */
+extern void leptris_xpath_invalidate_fn_registry(
+    struct leptris_document*);
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -141,13 +149,52 @@ typedef struct {
     int active;   /* 0 when a phase selection excludes it */
 } SchPattern;
 
+typedef struct {
+    char* name;
+    char* match;   /* patternized (// prefixed when relative) */
+    char* use;     /* expression, or quoted literal from content */
+} SchKey;
+
 struct leptris_schematron {
     SchPattern* patterns;
     size_t n;
     SchLet* lets;   /* schema-level */
     size_t nlets;
+    /* Element-content lets (ISO 2016 §5.4.5 cl.2): parallel to
+     * lets[] — serialized element children grafted into the
+     * instance document at validate time; NULL for value lets. */
+    char** let_contents;
+    size_t nlet_contents;   /* lockstep with lets[] */
+    SchKey* keys;   /* xsl:key declarations (key() bridge) */
+    size_t nkeys;
     char* error;
 };
+
+/* ---- key() bridge (lane 16.5) ----
+ * Backing state for one validate call: the schema's keys + the
+ * instance document. Indexes build lazily per key name. */
+typedef struct {
+    char* val;
+    LeptrisNodeRef node;
+} SchKeyPair;
+
+typedef struct {
+    SchKeyPair* pairs;
+    size_t n, cap;
+} SchKeyIdx;
+
+typedef struct {
+    struct leptris_schematron* s;
+    LeptrisDocument inst;
+    SchKeyIdx** idx;   /* parallel to s->keys; NULL until built */
+} SchKeyRun;
+
+static void sch_key_idx_free(SchKeyIdx* ix) {
+    if (!ix) return;
+    for (size_t i = 0; i < ix->n; i++) free(ix->pairs[i].val);
+    free(ix->pairs);
+    free(ix);
+}
 
 static void sch_set_error(struct leptris_schematron* s,
                           const char* msg) {
@@ -200,6 +247,8 @@ static int sch_has_dollar_ref(const char* e) {
     }
     return 0;
 }
+
+static char* sch_patternize(const char* ce);
 
 static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
                                                 const char* sel_phase,
@@ -291,9 +340,103 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
             } else {
                 s->lets[s->nlets].value = sch_dup(text_val);
             }
-            s->lets[s->nlets].bare = 0;
+            /* the value is ALREADY a quoted literal — insert
+             * verbatim (bare) so substitution does not re-quote */
+            s->lets[s->nlets].bare = 1;
         }
         s->nlets++;
+        /* content entry in lockstep: NULL for value lets */
+        {
+            char** nc = (char**)realloc(
+                s->let_contents, (s->nlet_contents + 1) *
+                                     sizeof(char*));
+            char* content = NULL;
+            if (nc) {
+                s->let_contents = nc;
+                s->let_contents[s->nlet_contents] = NULL;
+            }
+            if (!lv) {
+                /* serialize the let's ELEMENT children */
+                size_t cap = 0, len = 0;
+                for (LeptrisElement c =
+                         leptris_element_first_child_any(let);
+                     c;
+                     c = leptris_element_next_sibling_any(c)) {
+                    if (leptris_node_get_type((LeptrisNodeRef)c) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    char* part = leptris_element_serialize_ext_sized(
+                        c, NULL, NULL, 0);
+                    if (!part) continue;
+                    size_t pl = strlen(part);
+                    if (len + pl + 1 > cap) {
+                        cap = (len + pl + 1) * 2;
+                        char* nb = (char*)realloc(content, cap);
+                        if (!nb) {
+                            free(part);
+                            free(content);
+                            content = NULL;
+                            break;
+                        }
+                        content = nb;
+                    }
+                    memcpy(content + len, part, pl + 1);
+                    len += pl;
+                    free(part);
+                }
+            }
+            if (nc) {
+                s->let_contents[s->nlet_contents] = content;
+                s->nlet_contents++;
+            } else {
+                free(content);
+            }
+        }
+    }
+    /* xsl:key declarations (lane 16.5): key() in tests resolves
+     * through these during validation. Local-name match — inside a
+     * schematron schema, a `key` child is the XSLT vocabulary. */
+    for (LeptrisElement k = leptris_element_first_child_any(root); k;
+         k = leptris_element_next_sibling_any(k)) {
+        if (!sch_is(k, "key")) continue;
+        const char* kn = sch_attr(k, "name");
+        const char* km = sch_attr(k, "match");
+        const char* ku = sch_attr(k, "use");
+        if (!kn || !km) continue;
+        char* usex = NULL;
+        if (ku) {
+            usex = sch_dup(ku);
+        } else {
+            const char* t = leptris_element_text(k);
+            if (t && t[0]) {
+                size_t n = strlen(t);
+                usex = (char*)malloc(n + 3);
+                if (usex) {
+                    usex[0] = '\'';
+                    memcpy(usex + 1, t, n);
+                    usex[n + 1] = '\'';
+                    usex[n + 2] = 0;
+                }
+            }
+        }
+        if (!usex) continue;
+        char* matchx = sch_patternize(km);
+        if (!matchx) {
+            free(usex);
+            continue;
+        }
+        SchKey* nk =
+            (SchKey*)realloc(s->keys, (s->nkeys + 1) * sizeof(SchKey));
+        if (!nk) {
+            free(usex);
+            free(matchx);
+            continue;
+        }
+        s->keys = nk;
+        s->keys[s->nkeys].name = sch_dup(kn);
+        s->keys[s->nkeys].match = matchx;
+        s->keys[s->nkeys].use = usex;
+        s->nkeys++;
     }
     /* pass 1: collect ABSTRACT pattern bodies by id. */
     struct { char* id; LeptrisElement elem; } abst[32];
@@ -1039,6 +1182,15 @@ LEPTRIS_API void leptris_schematron_free(LeptrisSchematron sch) {
         free(s->lets[i].value);
     }
     free(s->lets);
+    for (size_t i = 0; i < s->nlet_contents; i++)
+        free(s->let_contents[i]);
+    free(s->let_contents);
+    for (size_t i = 0; i < s->nkeys; i++) {
+        free(s->keys[i].name);
+        free(s->keys[i].match);
+        free(s->keys[i].use);
+    }
+    free(s->keys);
     free(s->patterns);
     free(s->error);
     free(s);
@@ -1062,6 +1214,154 @@ static LeptrisElement sch_add_child(LeptrisDocument d,
     return e;
 }
 
+/* XSLT-pattern form of an expression: relative patterns are
+ * // prefixed (any-depth match); absolute/parenthesized pass
+ * through verbatim. Heap result (caller frees), or NULL on OOM. */
+static char* sch_patternize(const char* ce) {
+    if (!ce) return NULL;
+    if (ce[0] == '/' || ce[0] == '(') return sch_dup(ce);
+    char* b = (char*)malloc(strlen(ce) + 3);
+    if (!b) return NULL;
+    b[0] = '/';
+    b[1] = '/';
+    memcpy(b + 2, ce, strlen(ce) + 1);
+    return b;
+}
+
+/* ---- key() bridge ---- */
+
+/* Lazy index build for key slot ki: evaluate the (patternized)
+ * match expression, then the use expression at every matched
+ * element; every whitespace-separated token of the use string is
+ * a key value (§12.2 discipline, same as the XSLT side). */
+static void sch_key_build(SchKeyRun* kr, size_t ki) {
+    if (kr->idx[ki]) return;
+    SchKeyIdx* ix = (SchKeyIdx*)calloc(1, sizeof(*ix));
+    if (!ix) return;
+    kr->idx[ki] = ix;
+    LeptrisXPathResult mr =
+        leptris_xpath_eval(kr->inst, NULL, kr->s->keys[ki].match);
+    if (!mr || leptris_xpath_result_type(mr) != LEPTRIS_XPATH_NODESET) {
+        if (mr) leptris_xpath_result_free(mr);
+        return;
+    }
+    size_t total =
+        leptris_xpath_result_get_nodes_ex(mr, NULL, NULL, (size_t)-1);
+    if (!total) {
+        leptris_xpath_result_free(mr);
+        return;
+    }
+    LeptrisNodeRef* nodes =
+        (LeptrisNodeRef*)calloc(total, sizeof(LeptrisNodeRef));
+    LeptrisXPathNodeKind* kinds = (LeptrisXPathNodeKind*)calloc(
+        total, sizeof(LeptrisXPathNodeKind));
+    if (!nodes || !kinds) {
+        free(nodes);
+        free(kinds);
+        leptris_xpath_result_free(mr);
+        return;
+    }
+    size_t cnt =
+        leptris_xpath_result_get_nodes_ex(mr, nodes, kinds, total);
+    leptris_xpath_result_free(mr);
+    for (size_t m = 0; m < cnt; m++) {
+        if (kinds[m] != LEPTRIS_XPATH_NODE_ELEMENT) continue;
+        LeptrisXPathResult ur = leptris_xpath_eval(
+            kr->inst, (LeptrisElement)nodes[m], kr->s->keys[ki].use);
+        if (!ur) continue;
+        char* sv = leptris_xpath_result_string(ur);
+        leptris_xpath_result_free(ur);
+        if (!sv) continue;
+        char* q = sv;
+        while (*q) {
+            while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r')
+                q++;
+            if (!*q) break;
+            char* st = q;
+            while (*q && *q != ' ' && *q != '\t' && *q != '\n' &&
+                   *q != '\r')
+                q++;
+            char saved = *q;
+            *q = '\0';
+            if (ix->n == ix->cap) {
+                size_t nc = ix->cap ? ix->cap * 2 : 16;
+                SchKeyPair* np = (SchKeyPair*)realloc(
+                    ix->pairs, nc * sizeof(SchKeyPair));
+                if (np) { ix->pairs = np; ix->cap = nc; }
+            }
+            if (ix->n < ix->cap) {
+                ix->pairs[ix->n].val = sch_dup(st);
+                ix->pairs[ix->n].node = nodes[m];
+                if (ix->pairs[ix->n].val) ix->n++;
+            }
+            *q = saved;
+        }
+        free(sv);
+    }
+    free(nodes);
+    free(kinds);
+}
+
+/* Evaluate one XPath argument to its string value (the xslt bridge
+ * has the same helper; kept local to avoid coupling). */
+static char* sch_arg_string(XPathContext* ctx, XPathASTNode** args,
+                            size_t n, size_t i) {
+    if (i >= n) return sch_dup("");
+    struct leptris_xpath_result* r = evaluate_expr(ctx, args[i]);
+    if (!r) return sch_dup("");
+    char* s = leptris_xpath_result_string(r);
+    leptris_xpath_result_free(r);
+    return s;
+}
+
+/* key(name, value): nodes indexed under the value. The registration
+ * carries the SchKeyRun as user_data (the evaluator exposes it on
+ * ctx->current_fn_user_data). */
+static struct leptris_xpath_result* sch_fn_key(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* r =
+        xpath_result_new(XPATH_RESULT_NODESET);
+    if (!r) return NULL;
+    r->value.nodeset_value = xpath_nodeset_new();
+    if (!r->value.nodeset_value) {
+        xpath_result_free(r);
+        return NULL;
+    }
+    SchKeyRun* kr = (SchKeyRun*)ctx->current_fn_user_data;
+    if (!kr || n < 2) return r;
+    char* name = sch_arg_string(ctx, args, n, 0);
+    char* val = sch_arg_string(ctx, args, n, 1);
+    do {
+        if (!name || !*name || !val) break;
+        size_t ki = (size_t)-1;
+        for (size_t i = 0; i < kr->s->nkeys; i++)
+            if (strcmp(kr->s->keys[i].name, name) == 0) {
+                ki = i;
+                break;
+            }
+        if (ki == (size_t)-1) break;
+        sch_key_build(kr, ki);
+        SchKeyIdx* ix = kr->idx[ki];
+        if (!ix) break;
+        for (size_t i = 0; i < ix->n; i++)
+            if (strcmp(ix->pairs[i].val, val) == 0)
+                xpath_nodeset_add(r->value.nodeset_value,
+                                  ix->pairs[i].node);
+    } while (0);
+    free(name);
+    free(val);
+    if (r->value.nodeset_value)
+        xpath_nodeset_sort_doc_order(ctx, r->value.nodeset_value, 0);
+    return r;
+}
+
+void leptris_sch_register_key_bridge(XPathFunctionRegistry* r,
+                                     void* state) {
+    if (!r) return;
+    xpath_function_registry_register_ud(r, "key", sch_fn_key, 2, 2,
+                                        state);
+}
+
 /* Runs every pattern; returns an SVRL document and writes the
  * failed-assert count. NULL doc on allocation failure. */
 static LeptrisDocument sch_run(struct leptris_schematron* s,
@@ -1080,6 +1380,60 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
         "http://purl.oclc.org/dsdl/schematron");
     leptris_document_set_root(svrl, root);
     *failed = 0;
+
+    /* Element-content lets: graft the content elements into the
+     * instance as DOCUMENT-level children (SchXslt tunnel shape —
+     * "/"-context tests see them via the child axis). Each content
+     * parses standalone, detaches its root, and splices onto the
+     * doc-children chain; leptris_document_adopt_child keeps the
+     * pool alive for the instance's lifetime (xinclude pattern). */
+    for (size_t i = 0; i < s->nlets && i < s->nlet_contents;
+         i++) { /* nlet_contents lockstep, see parse */
+        char* content = s->let_contents[i];
+        if (!content) continue;
+        LeptrisStatus gst = LEPTRIS_OK;
+        LeptrisDocument cd =
+            leptris_parse_string(content, strlen(content), &gst);
+        if (!cd) continue;
+        struct leptris_document* cw = (struct leptris_document*)cd;
+        LeptrisNode* rn = (LeptrisNode*)leptris_document_root(cd);
+        if (!rn) {
+            leptris_document_free(cd);
+            continue;
+        }
+        cw->root = NULL;
+        cw->new_dom_root = NULL;
+        cw->doc_children_head = NULL;
+        cw->doc_children_tail = NULL;
+        struct leptris_document* d = (struct leptris_document*)inst;
+        LeptrisNode* tail = (LeptrisNode*)d->doc_children_tail;
+        if (tail)
+            leptris_node_set_next_sibling(tail, rn);
+        else
+            d->doc_children_head = rn;
+        d->doc_children_tail = rn;
+        leptris_node_set_next_sibling(rn, NULL);
+        leptris_document_adopt_child(inst, cd);
+    }
+
+    /* key() bridge: register the schema's keys for this document,
+     * invalidate the cached registry (the build is state-keyed),
+     * and tear down on every exit path below. */
+    SchKeyRun kr;
+    kr.s = s;
+    kr.inst = inst;
+    kr.idx = NULL;
+    int keys_active = 0;
+    if (s->nkeys) {
+        kr.idx = (SchKeyIdx**)calloc(s->nkeys, sizeof(SchKeyIdx*));
+        if (kr.idx) {
+            keys_active = 1;
+            ((struct leptris_document*)inst)->sch_state = &kr;
+            leptris_xpath_invalidate_fn_registry(
+                (struct leptris_document*)inst);
+        }
+    }
+
     for (size_t i = 0; i < s->n; i++) {
         SchPattern* p = &s->patterns[i];
         if (!p->active) continue;
@@ -1095,21 +1449,13 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
              * `//comment()`), `/` is the document node. Prefix
              * relative patterns with //; absolute and
              * parenthesized expressions pass through. */
-            const char* ce = r->context;
-            char* cbuf = NULL;
-            const char* cexpr = ce;
-            if (ce[0] != '/' && ce[0] != '(') {
-                cbuf = (char*)malloc(strlen(ce) + 3);
-                if (cbuf) {
-                    cbuf[0] = '/';
-                    cbuf[1] = '/';
-                    memcpy(cbuf + 2, ce, strlen(ce) + 1);
-                    cexpr = cbuf;
-                }
-            }
+            /* cexpr must outlive the node loop below (the "/"
+             * special case reads it) — free with the per-rule
+             * scratch, not here. */
+            char* cbuf = sch_patternize(r->context);
+            const char* cexpr = cbuf ? cbuf : r->context;
             LeptrisXPathResult ctxr = leptris_xpath_eval(
                 inst, NULL, cexpr);
-            free(cbuf);
             if (!ctxr) continue;
             size_t cnt = 0;
             LeptrisNodeRef* nodes = NULL;
@@ -1202,8 +1548,18 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
             free(nodes);
             free(kinds);
             leptris_xpath_result_free(ctxr);
+            free(cbuf);
         }
         free(matched);
+    }
+
+    if (keys_active) {
+        ((struct leptris_document*)inst)->sch_state = NULL;
+        leptris_xpath_invalidate_fn_registry(
+            (struct leptris_document*)inst);
+        for (size_t i = 0; i < s->nkeys; i++)
+            sch_key_idx_free(kr.idx[i]);
+        free(kr.idx);
     }
     return svrl;
 }

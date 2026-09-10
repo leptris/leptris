@@ -833,7 +833,8 @@ LEPTRIS_API LeptrisStatus leptris_exslt_enable(LeptrisDocument doc) {
 
 XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_document* doc) {
     if (!doc) return NULL;
-    if (!doc->custom_xpath_fns && !doc->exslt_enabled && !doc->xslt_state)
+    if (!doc->custom_xpath_fns && !doc->exslt_enabled &&
+        !doc->xslt_state && !doc->sch_state)
         return NULL;
 
     /* TODO.transform perf: the merged registry depends only on the
@@ -866,6 +867,16 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
         extern void xslt_register_bridge_handlers(XPathFunctionRegistry*,
                                                   void*);
         xslt_register_bridge_handlers(reg, doc->xslt_state);
+    }
+
+    /* Schematron key bridge (lane 16.5): while a schema validation
+     * runs on this document, key() resolves through the schema's
+     * xsl:key declarations. Same save/restore + invalidation
+     * discipline as the XSLT bridge above. */
+    if (doc->sch_state) {
+        extern void leptris_sch_register_key_bridge(
+            XPathFunctionRegistry*, void*);
+        leptris_sch_register_key_bridge(reg, doc->sch_state);
     }
 
     for (struct leptris_custom_xpath_fn* e = doc->custom_xpath_fns;
