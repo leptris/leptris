@@ -877,18 +877,42 @@ static struct leptris_xpath_result* xpath_func_substring(XPathContext* context,
         end_rounded = start_rounded + xpath_round_half_up(len_double);
     }
 
-    /* Walk the string positions and collect the matching chars.
-     * Position p is 1-indexed. */
+    /* Walk CODEPOINT positions (XQuery positions are codepoint
+     * indexes — a 4-byte astral char is ONE position; QT3's
+     * non-BMP cases). ASCII fast path for the common case. */
     size_t out_len = 0;
     char* result_str = LEPTRIS_ALLOC_N(char, len + 1);
     if (!result_str) {
         LEPTRIS_FREE(str);
         return NULL;
     }
+    int ascii_only = 1;
     for (size_t i = 0; i < len; i++) {
-        double p = (double)(i + 1);
-        if (p >= start_rounded && p < end_rounded) {
-            result_str[out_len++] = str[i];
+        if ((unsigned char)str[i] & 0x80) { ascii_only = 0; break; }
+    }
+    if (ascii_only) {
+        for (size_t i = 0; i < len; i++) {
+            double p = (double)(i + 1);
+            if (p >= start_rounded && p < end_rounded)
+                result_str[out_len++] = str[i];
+        }
+    } else {
+        size_t i = 0;
+        double p = 1.0;
+        while (i < len) {
+            size_t cp_len = 1;
+            unsigned char b = (unsigned char)str[i];
+            if ((b & 0x80) == 0) cp_len = 1;
+            else if ((b & 0xE0) == 0xC0) cp_len = 2;
+            else if ((b & 0xF0) == 0xE0) cp_len = 3;
+            else if ((b & 0xF8) == 0xF0) cp_len = 4;
+            if (i + cp_len > len) cp_len = 1;  /* truncated: byte */
+            if (p >= start_rounded && p < end_rounded) {
+                memcpy(result_str + out_len, str + i, cp_len);
+                out_len += cp_len;
+            }
+            i += cp_len;
+            p += 1.0;
         }
     }
     result_str[out_len] = '\0';
@@ -1960,15 +1984,14 @@ static struct leptris_xpath_result* xpath_func_count(XPathContext* context,
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
-    if (arg_result->type != XPATH_RESULT_NODESET) {
-        snprintf(context->error_msg, sizeof(context->error_msg),
-                "count() argument must be a nodeset");
-        xpath_result_free(arg_result);
-        return NULL;
+    /* XQuery 1.0+: count() accepts any sequence — an atomic
+     * value is one item (QT3: count(fn:substring("",0)) = 1).
+     * Empty sequences arrive as NULL results higher up. */
+    size_t count = 1;
+    if (arg_result->type == XPATH_RESULT_NODESET) {
+        XPathNodeSet* nodeset = arg_result->value.nodeset_value;
+        count = nodeset ? xpath_nodeset_count(nodeset) : 0;
     }
-
-    XPathNodeSet* nodeset = arg_result->value.nodeset_value;
-    size_t count = nodeset ? xpath_nodeset_count(nodeset) : 0;
     xpath_result_free(arg_result);
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);

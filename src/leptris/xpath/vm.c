@@ -2655,9 +2655,13 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
             case XPATH_BC_FUNC_COUNT: {
                 struct leptris_xpath_result* arg = vm_pop(&vm);
                 if (!arg) { vm.error = 1; break; }
-                size_t count = 0;
-                if (arg->type == XPATH_RESULT_NODESET && arg->value.nodeset_value) {
-                    count = arg->value.nodeset_value->count;
+                /* atomic = one item (XQuery sequences; the twin
+                 * of xpath_func_count's QT3 fix) */
+                size_t count = 1;
+                if (arg->type == XPATH_RESULT_NODESET) {
+                    count = arg->value.nodeset_value
+                                ? arg->value.nodeset_value->count
+                                : 0;
                 }
                 xpath_result_free(arg);
                 struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NUMBER);

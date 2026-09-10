@@ -42,6 +42,10 @@
  * silently hits the built-in count(). Adding extension support =
  * adding the URI here plus the handler registration. */
 static const char* const k_extension_ns_uris[] = {
+    "http://www.w3.org/2005/xpath-functions",  /* fn:* (XQuery
+     * pre-binds the default function namespace; QT3 writes
+     * fn:substring everywhere) */
+    "http://www.w3.org/2005/xpath-functions/math", /* math:* */
     "http://www.w3.org/2001/XMLSchema",   /* xs:* constructors (06) */
     "http://www.w3.org/2005/xpath-functions/map",   /* map:* (08) */
     "http://www.w3.org/2005/xpath-functions/array", /* array:* (08) */
@@ -830,6 +834,32 @@ static struct leptris_xpath_result* evaluate_function_call_impl(XPathContext* ct
             const char* uri = leptris_xpath_ns_lookup(
                 (const struct leptris_xpath_ns_map*)ctx->ns_set,
                 func_name, (size_t)(colon - func_name));
+            /* Pre-bound prefixes (XQuery 1.0/3.1 prolog reserves
+             * these with no declaration needed): fn, xs, math,
+             * map, array, err. Only consulted when the prefix has
+             * NO user declaration. */
+            if (!uri) {
+                static const struct { const char* pfx; const char* u; }
+                    k_prebound[] = {
+                        { "fn", "http://www.w3.org/2005/xpath-functions" },
+                        { "xs", "http://www.w3.org/2001/XMLSchema" },
+                        { "math",
+                          "http://www.w3.org/2005/xpath-functions/math" },
+                        { "map",
+                          "http://www.w3.org/2005/xpath-functions/map" },
+                        { "array",
+                          "http://www.w3.org/2005/xpath-functions/array" },
+                        { "err", "http://www.w3.org/2005/xqt-errors" },
+                        { NULL, NULL }
+                    };
+                size_t pl = (size_t)(colon - func_name);
+                for (int i = 0; k_prebound[i].pfx; i++)
+                    if (strlen(k_prebound[i].pfx) == pl &&
+                        strncmp(func_name, k_prebound[i].pfx, pl) == 0) {
+                        uri = k_prebound[i].u;
+                        break;
+                    }
+            }
             int ext = 0;
             if (uri) {
                 for (int i = 0; k_extension_ns_uris[i]; i++)

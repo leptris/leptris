@@ -521,6 +521,24 @@ parse_number:
             lexer->pos++;
             lexer->column++;
         }
+        /* XPath 2.0+/XQuery double literals: exponent suffix
+         * (0E0, 1.5e0, 5.2E-3). XPath 1.0 has no such token
+         * ("1e3" is a syntax error there), so accepting it never
+         * changes a valid 1.0 expression. */
+        if (lexer->pos < lexer->end &&
+            (*lexer->pos == 'e' || *lexer->pos == 'E')) {
+            const char* probe = lexer->pos + 1;
+            if (*probe == '+' || *probe == '-') probe++;
+            if (isdigit((unsigned char)*probe)) {
+                lexer->pos++;
+                lexer->column++;
+                while (lexer->pos < lexer->end &&
+                       isdigit((unsigned char)*lexer->pos)) {
+                    lexer->pos++;
+                    lexer->column++;
+                }
+            }
+        }
 
         token.type = TOK_NUMBER;
         token.value = start;
