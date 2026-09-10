@@ -284,3 +284,54 @@ TEST(Schematron, PhaseSelection) {
     leptris_document_free(doc2);
     leptris_schematron_free(s);
 }
+
+
+/* xsl:key + key() inside assert tests (corpus xslt-key pair).
+ * The bridge registers key() on the validating document for the
+ * call's duration — an unknown key name yields an empty
+ * nodeset (assert fails), not a hard error. */
+TEST(Schematron, XslKeyBridge) {
+    const char* sch =
+        "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+        " xmlns:xsl='http://www.w3.org/1999/XSL/Transform'"
+        " queryBinding='xslt'>"
+        "<xsl:key name='index' match='item' use='@k'/>"
+        "<pattern><rule context='/'>"
+        "<assert test=\"count(key('index', 'a')) = 1\"/>"
+        "</rule></pattern></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisSchematron s = leptris_schematron_parse(sch, strlen(sch), &st);
+    ASSERT_NE(s, nullptr);
+    LeptrisDocument ok = P("<r><item k='a'/><item k='b'/></r>");
+    ASSERT_NE(ok, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, ok), 1);
+    LeptrisDocument none = P("<r><item k='z'/></r>");
+    ASSERT_NE(none, nullptr);
+    /* no node is indexed under 'a' -> assert fails */
+    EXPECT_EQ(leptris_schematron_valid(s, none), 0);
+    leptris_document_free(ok);
+    leptris_document_free(none);
+    leptris_schematron_free(s);
+}
+
+/* Element-content lets: the content grafts into the instance as
+ * document-level children ("/" sees them) and the variable holds
+ * the content's string value (corpus let-value-element-content). */
+TEST(Schematron, ElementContentLetGraft) {
+    const char* sch =
+        "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+        " queryBinding='xslt'>"
+        "<let name='payload'><p>alpha beta</p></let>"
+        "<pattern><rule context='/'>"
+        "<assert test='count(p) = 1'/>"
+        "<assert test=\"contains($payload, 'alpha')\"/>"
+        "</rule></pattern></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisSchematron s = leptris_schematron_parse(sch, strlen(sch), &st);
+    ASSERT_NE(s, nullptr);
+    LeptrisDocument doc = P("<r/>");
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, doc), 1);
+    leptris_document_free(doc);
+    leptris_schematron_free(s);
+}

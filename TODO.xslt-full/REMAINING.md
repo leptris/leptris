@@ -7,35 +7,11 @@ Per-lane details live in the numbered docs; this file is the index
 
 ## A. In flight
 
-- **lane 16.5 Schematron corpus 47/50** — branch `feat/16-sch-phase5`
-  (WIP pushed, a0b46fa2; full suite otherwise green; NO PR until
-  50/50 — exact-N gate). Remaining 3 cases + exact plan:
-  1. **xslt-key-01 / xslt-key-element-content-01** — `key()` is NOT
-     registered in the public eval path at all (probe: `count(key('x','y'))`
-     fails to evaluate). Plan: factor the XSLT key machinery
-     (XsltKeyIndex/XsltKeyBucket/xslt_keys_build in
-     xslt/xslt_functions.c) into an internal shared module
-     (KeyDecl {name,match,use} + per-doc index build + bucket
-     lookup); register `key()` in the public standard registry
-     backed by a thread-local "active key context" that sch_run
-     sets (SchKey decls collected from xsl:x:key at parse —
-     use = @use OR the xsl:text element content as a string
-     literal) around test evaluation; xslt_fn_key keeps priority
-     via exec_from(ctx). Custom-fn API can NOT be used
-     (string-typed return, standard-wins collisions).
-  2. **let-value-element-content-01 schema 1** — `count(html:p)=1`
-     at "/": SchXslt grafts element-content lets into the document.
-     Plan: SchLet gains the serialized content; sch_run parses the
-     contents into a temp doc, adopts it
-     (leptris_document_adopt_child keeps the pool alive), and
-     splices each content element as a DOCUMENT-level child
-     (internal append — the xinclude splice path is the precedent);
-     the grafted subtree's own xmlns:html then resolves the
-     expression prefix. Schema 2 (quoted string value) already
-     passes.
-  Then: 50/50 → PR → 17 legs → rebase-merge → patch release →
-  lane 16 phase 6 (bindings Schematron::Schema + `leptris validate
-  --schematron` + migration prompt).
+- **lane 16.5 Schematron corpus 50/50 COMPLETE** — branch
+  `feat/16-sch-phase5`; PR + rebase-merge + v1.9.128, then phase
+  6 (bindings Schematron::Schema + `leptris validate
+  --schematron` + migration prompt). Implementation notes in
+  16-schematron.md "Phase 5 COMPLETE".
 - **leptris-ruby PR #165** — `Leptris::XML::RelaxNG` (user merges;
   requires libleptris >= 1.9.115, which is released). After merge:
   the metanorma-standoc migration off Jing (prompt on #878).
