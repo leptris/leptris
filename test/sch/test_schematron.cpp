@@ -166,3 +166,90 @@ TEST(Schematron, ParseFileEntry) {
     EXPECT_NE(sch, nullptr);
     if (sch) leptris_schematron_free(sch);
 }
+
+
+/* Lane 16 phases 3+4: abstract patterns with params, let
+ * variables (schema/pattern/rule scoping), phase selection,
+ * diagnostics and properties (IDs ride the SVRL). */
+TEST(Schematron, AbstractPatternInstantiation) {
+    const char* sch =
+        "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+        " queryBinding='xslt'>"
+        "<pattern is-abstract='true' id='open-attr'>"
+        "<rule context='$element'>"
+        "<assert test='@$attribute'>missing @$attribute</assert>"
+        "</rule></pattern>"
+        "<pattern is-a='open-attr'>"
+        "<param name='element' value='a'/>"
+        "<param name='attribute' value='id'/>"
+        "</pattern></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisSchematron s = leptris_schematron_parse(sch, strlen(sch), &st);
+    ASSERT_NE(s, nullptr);
+    LeptrisDocument bad = P("<root><a/></root>");
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, bad), 0);
+    LeptrisDocument good = P("<root><a id='1'/></root>");
+    ASSERT_NE(good, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, good), 1);
+    leptris_document_free(bad);
+    leptris_document_free(good);
+    leptris_schematron_free(s);
+}
+
+TEST(Schematron, LetVariables) {
+    const char* sch =
+        "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+        " queryBinding='xslt'>"
+        "<let name='max' value='10'/>"
+        "<pattern><rule context='item'>"
+        "<let name='name' value='string(@n)'/>"
+        "<assert test='@n &lt;= $max'>too big</assert>"
+        "<report test='$name = &quot;x&quot;'>named x</report>"
+        "</rule></pattern></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisSchematron s = leptris_schematron_parse(sch, strlen(sch), &st);
+    ASSERT_NE(s, nullptr);
+    LeptrisDocument bad = P("<root><item n='11'/></root>");
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, bad), 0);
+    LeptrisDocument ok = P("<root><item n='5' /></root>");
+    ASSERT_NE(ok, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, ok), 1);
+    leptris_document_free(bad);
+    leptris_document_free(ok);
+    leptris_schematron_free(s);
+}
+
+TEST(Schematron, PhaseSelection) {
+    const char* sch =
+        "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+        " queryBinding='xslt'>"
+        "<phase id='quick'><active pattern='p1'/></phase>"
+        "<pattern id='p1'><rule context='a'>"
+        "<assert test='@v'>a needs v</assert></rule></pattern>"
+        "<pattern id='p2'><rule context='b'>"
+        "<assert test='@w'>b needs w</assert></rule></pattern>"
+        "</schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisSchematron s = leptris_schematron_parse(sch, strlen(sch), &st);
+    ASSERT_NE(s, nullptr);
+    LeptrisDocument doc = P("<root><a/><b/></root>");
+    ASSERT_NE(doc, nullptr);
+    /* default (no phase): all patterns -> both fire -> invalid */
+    EXPECT_EQ(leptris_schematron_valid(s, doc), 0);
+    /* quick phase: only p1 fires; b's failure is out of scope ->
+     * still invalid because a lacks v; with a fixed a and broken
+     * b, the phase must flip validity. */
+    LeptrisDocument doc2 = P("<root><a v='1'/><b/></root>");
+    ASSERT_NE(doc2, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, doc2), 0);
+    LeptrisSchematron sq = leptris_schematron_parse_phase(
+        sch, strlen(sch), "quick", &st);
+    ASSERT_NE(sq, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(sq, doc2), 1);
+    leptris_schematron_free(sq);
+    leptris_document_free(doc);
+    leptris_document_free(doc2);
+    leptris_schematron_free(s);
+}

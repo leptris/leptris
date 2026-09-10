@@ -12,7 +12,107 @@
 #include "../dom/element.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
+
+typedef struct {
+    char* name;
+    char* value;
+    int bare;   /* params substitute verbatim (names/paths) */
+} SchLet;
+
+/* Substitute $var references in an expression with their string
+ * values (the engine's value-level variable model). */
+static char* sch_substitute_typed(const char* expr,
+                                  const SchLet* lets, size_t nlets,
+                                  int bare_mode);
+
+/* Bare mode: values substitute VERBATIM (params name element/
+ * attribute names; @context is a path). Typed mode: numeric
+ * values substitute bare, others as quoted string literals. */
+static char* sch_substitute(const char* expr, const SchLet* lets,
+                            size_t nlets) {
+    return sch_substitute_typed(expr, lets, nlets, 0);
+}
+
+static char* sch_substitute_bare(const char* expr,
+                                 const SchLet* lets, size_t nlets) {
+    return sch_substitute_typed(expr, lets, nlets, 1);
+}
+
+static char* sch_substitute_typed(const char* expr,
+                                  const SchLet* lets, size_t nlets,
+                                  int bare_mode) {
+    if (!expr) return NULL;
+    size_t cap = strlen(expr) + 64;
+    char* out = (char*)calloc(cap, 1);
+    size_t ol = 0;
+    for (const char* p = expr; *p;) {
+        if (*p == '$') {
+            const char* q = p + 1;
+            while (*q && (isalnum((unsigned char)*q) || *q == '_'))
+                q++;
+            size_t nl = (size_t)(q - p - 1);
+            const char* val = NULL;
+            int val_bare = 0;
+            for (size_t i = 0; i < nlets; i++)
+                if (strlen(lets[i].name) == nl &&
+                    strncmp(lets[i].name, p + 1, nl) == 0) {
+                    val = lets[i].value;
+                    val_bare = lets[i].bare;
+                    break;
+                }
+            if (val && val[0]) {
+                /* Numeric values substitute BARE (XPath number
+                 * coercion semantics; quoting a numeric let turns
+                 * '10' >= @n into a string-compare shape the
+                 * engine mishandles with element contexts). */
+                char* endp = NULL;
+                (void)strtod(val, &endp);
+                if (bare_mode || val_bare ||
+                    (endp && *endp == 0 && endp != val)) {
+                    if (ol + strlen(val) + 2 >= cap) {
+                        while (ol + strlen(val) + 2 >= cap)
+                            cap *= 2;
+                        char* no = (char*)realloc(out, cap);
+                        if (!no) {
+                            free(out);
+                            return NULL;
+                        }
+                        out = no;
+                    }
+                    memcpy(out + ol, val, strlen(val));
+                    ol += strlen(val);
+                    p = q;
+                    continue;
+                }
+                size_t vl = strlen(val);
+                while (ol + vl + 2 >= cap) {
+                    cap *= 2;
+                    char* no = (char*)realloc(out, cap);
+                    if (!no) { free(out); return NULL; }
+                    out = no;
+                }
+                /* quote the value into a string literal */
+                out[ol++] = '\'';
+                memcpy(out + ol, val, vl);
+                ol += vl;
+                out[ol++] = '\'';
+                p = q;
+                continue;
+            }
+        }
+        if (ol + 2 >= cap) {
+            cap *= 2;
+            char* no = (char*)realloc(out, cap);
+            if (!no) { free(out); return NULL; }
+            out = no;
+        }
+        out[ol++] = *p++;
+    }
+    out[ol] = 0;
+    return out;
+}
 
 static char* sch_dup(const char* s);
 
@@ -28,15 +128,21 @@ typedef struct {
     size_t n;
 } SchRule;
 
+
 typedef struct {
     char* id;
     SchRule* rules;
     size_t n;
+    /* phase 3+4: schema-level lets apply to every pattern;
+     * abstract patterns are instantiated via is-a + params. */
+    int active;   /* 0 when a phase selection excludes it */
 } SchPattern;
 
 struct leptris_schematron {
     SchPattern* patterns;
     size_t n;
+    SchLet* lets;   /* schema-level */
+    size_t nlets;
     char* error;
 };
 
@@ -70,12 +176,15 @@ static const char* sch_attr(LeptrisElement e, const char* name) {
         if (!an) continue;
         const char* colon = strchr(an, ':');
         if (strcmp(colon ? colon + 1 : an, name) == 0)
-            return attr_cvalue(a);
+            /* public accessor returns the entity-DECODED value;
+             * attr_cvalue is the raw lexical form. */
+            return leptris_attribute_get_value(e, a);
     }
     return NULL;
 }
 
 static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
+                                                const char* sel_phase,
                                                 char** err) {
     struct leptris_schematron* s =
         (struct leptris_schematron*)calloc(1, sizeof(*s));
@@ -102,22 +211,187 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
         leptris_schematron_free((LeptrisSchematron)s);
         return NULL;
     }
+    /* schema-level <let name= value=> */
+    for (LeptrisElement let = leptris_element_first_child_any(root); let;
+         let = leptris_element_next_sibling_any(let)) {
+        if (!sch_is(let, "let")) continue;
+        const char* ln = sch_attr(let, "name");
+        const char* lv = sch_attr(let, "value");
+        if (!ln || !lv) continue;
+        SchLet* nl = (SchLet*)realloc(s->lets,
+                                      (s->nlets + 1) * sizeof(SchLet));
+        if (!nl) continue;
+        s->lets = nl;
+        s->lets[s->nlets].name = sch_dup(ln);
+        s->lets[s->nlets].value = sch_substitute(
+            lv, s->lets, s->nlets);
+        s->lets[s->nlets].bare = 0;
+        s->nlets++;
+    }
+    /* pass 1: collect ABSTRACT pattern bodies by id. */
+    struct { char* id; LeptrisElement elem; } abst[32];
+    size_t nabst = 0;
+    for (LeptrisElement pat = leptris_element_first_child_any(root); pat;
+         pat = leptris_element_next_sibling_any(pat)) {
+        if (!sch_is(pat, "pattern")) continue;
+        const char* ia = sch_attr(pat, "is-abstract");
+        if (ia && strcmp(ia, "true") == 0 && nabst < 32) {
+            const char* pid = sch_attr(pat, "id");
+            if (pid) {
+                abst[nabst].id = sch_dup(pid);
+                abst[nabst].elem = pat;
+                nabst++;
+            }
+        }
+    }
     /* walk patterns -> rules -> assert/report */
     for (LeptrisElement pat = leptris_element_first_child_any(root); pat;
          pat = leptris_element_next_sibling_any(pat)) {
         if (!sch_is(pat, "pattern")) continue;
+        const char* abst_flag = sch_attr(pat, "is-abstract");
+        if (abst_flag && strcmp(abst_flag, "true") == 0) continue;
+        const char* isa = sch_attr(pat, "is-a");
+        LeptrisElement src = pat;
+        SchLet pl[32];
+        size_t npl = 0;
+        if (isa) {
+            /* instantiate the abstract pattern with <param>
+             * overrides merged over its defaults */
+            LeptrisElement def = NULL;
+            const char* defid = NULL;
+            for (size_t i = 0; i < nabst; i++)
+                if (strcmp(abst[i].id, isa) == 0) {
+                    def = abst[i].elem;
+                    defid = abst[i].id;
+                    break;
+                }
+            if (!def) continue;
+            /* defaults: abstract <param name= value=> */
+            for (LeptrisElement prm =
+                     leptris_element_first_child_any(def);
+                 prm;
+                 prm = leptris_element_next_sibling_any(prm)) {
+                if (!sch_is(prm, "param")) continue;
+                const char* pn = sch_attr(prm, "name");
+                const char* pv = sch_attr(prm, "value");
+                if (pn && pv && npl < 32) {
+                    pl[npl].name = sch_dup(pn);
+                    pl[npl].value = sch_dup(pv);
+                    pl[npl].bare = 1;
+                    npl++;
+                }
+            }
+            /* instance overrides */
+            for (LeptrisElement prm =
+                     leptris_element_first_child_any(pat);
+                 prm;
+                 prm = leptris_element_next_sibling_any(prm)) {
+                if (!sch_is(prm, "param")) continue;
+                const char* pn = sch_attr(prm, "name");
+                const char* pv = sch_attr(prm, "value");
+                if (!pn || !pv) continue;
+                int found = 0;
+                for (size_t i = 0; i < npl; i++)
+                    if (strcmp(pl[i].name, pn) == 0) {
+                        free(pl[i].value);
+                        pl[i].value = sch_dup(pv);
+                        found = 1;
+                        break;
+                    }
+                if (!found && npl < 32) {
+                    pl[npl].name = sch_dup(pn);
+                    pl[npl].value = sch_dup(pv);
+                    pl[npl].bare = 1;
+                    npl++;
+                }
+            }
+            (void)defid;
+            src = def;
+        }
+        const char* phase_active = (const char*)1; /* default on */
+        (void)phase_active;
         SchPattern p = {0};
+        p.active = 1;
+        if (sel_phase) {
+            p.active = 0;
+            /* a phase activates THIS pattern when the schema's
+             * phase lists its id (instance id or is-a ref). */
+            const char* own = sch_attr(pat, "id");
+            const char* ref = isa ? isa : own;
+            for (LeptrisElement ph = leptris_element_first_child_any(root);
+                 ph && !p.active;
+                 ph = leptris_element_next_sibling_any(ph)) {
+                if (!sch_is(ph, "phase")) continue;
+                const char* fid = sch_attr(ph, "id");
+                if (!fid || strcmp(fid, sel_phase) != 0) continue;
+                for (LeptrisElement ac =
+                         leptris_element_first_child_any(ph);
+                     ac; ac = leptris_element_next_sibling_any(ac)) {
+                    if (!sch_is(ac, "active")) continue;
+                    const char* ap = sch_attr(ac, "pattern");
+                    if (ap && ref && strcmp(ap, ref) == 0) {
+                        p.active = 1;
+                        break;
+                    }
+                }
+            }
+        }
         const char* pid = sch_attr(pat, "id");
-        p.id = sch_dup(pid ? pid : "");
+        p.id = sch_dup(pid ? pid : (isa ? isa : ""));
+        /* Rule-level let stack: a FRESH OWNED array per pattern
+         * (deep copies of schema lets + params; rule lets shadow
+         * in place). One owner — freed once after the rules. */
+        SchLet rl[64];
+        size_t nrl = 0;
+        for (size_t i = 0; i < s->nlets && nrl < 64; i++) {
+            rl[nrl].name = sch_dup(s->lets[i].name);
+            rl[nrl].value = sch_dup(s->lets[i].value);
+            rl[nrl].bare = s->lets[i].bare;
+            nrl++;
+        }
+        for (size_t i = 0; i < npl && nrl < 64; i++) {
+            rl[nrl].name = sch_dup(pl[i].name);
+            rl[nrl].value = sch_dup(pl[i].value);
+            rl[nrl].bare = pl[i].bare;
+            nrl++;
+        }
         for (LeptrisElement rule =
-                 leptris_element_first_child_any(pat);
+                 leptris_element_first_child_any(src);
              rule;
              rule = leptris_element_next_sibling_any(rule)) {
             if (!sch_is(rule, "rule")) continue;
+            size_t nrule = nrl;
+            for (LeptrisElement rl2 =
+                     leptris_element_first_child_any(rule);
+                 rl2;
+                 rl2 = leptris_element_next_sibling_any(rl2)) {
+                if (!sch_is(rl2, "let")) continue;
+                const char* ln = sch_attr(rl2, "name");
+                const char* lv = sch_attr(rl2, "value");
+                if (!ln || !lv || nrule >= 64) continue;
+                char* sub = sch_substitute(lv, rl, nrule);
+                int found = 0;
+                for (size_t i = 0; i < nrule; i++)
+                    if (strcmp(rl[i].name, ln) == 0) {
+                        /* rule let shadows: free the old entry */
+                        free(rl[i].name);
+                        free(rl[i].value);
+                        rl[i].name = sch_dup(ln);
+                        rl[i].value = sub ? sub : sch_dup(lv);
+                        rl[i].bare = 0;
+                        found = 1;
+                        break;
+                    }
+                if (found) continue;
+                rl[nrule].name = sch_dup(ln);
+                rl[nrule].value = sub;
+                rl[nrule].bare = 0;
+                nrule++;
+            }
             const char* ctx = sch_attr(rule, "context");
             if (!ctx) continue;
             SchRule r = {0};
-            r.context = sch_dup(ctx);
+            r.context = sch_substitute_bare(ctx, rl, nrule);
             for (LeptrisElement asser =
                      leptris_element_first_child_any(rule);
                  asser;
@@ -129,17 +403,28 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
                 if (!test) continue;
                 const char* mtext = leptris_element_text(asser);
                 char* msg = mtext ? sch_dup(mtext) : NULL;
+                char* stest = sch_substitute(test, rl, nrule);
                 SchAssert* na = (SchAssert*)realloc(
                     r.asserts, (r.n + 1) * sizeof(SchAssert));
                 if (!na) {
                     free(msg);
+                    free(stest);
                     continue;
                 }
                 r.asserts = na;
                 r.asserts[r.n].is_report = is_report;
-                r.asserts[r.n].test = sch_dup(test);
+                r.asserts[r.n].test = stest ? stest : sch_dup(test);
                 r.asserts[r.n].message = msg ? msg : sch_dup("");
                 r.n++;
+            }
+            /* free this rule's appended lets */
+            for (size_t i = nrl; i < nrule; i++) {
+                free(rl[i].name);
+                free(rl[i].value);
+            }
+            for (size_t i = 0; i < nrl; i++) {
+                free(rl[i].name);
+                free(rl[i].value);
             }
             SchRule* nr = (SchRule*)realloc(
                 p.rules, (p.n + 1) * sizeof(SchRule));
@@ -172,12 +457,24 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
         }
         s->patterns = np;
         s->patterns[s->n++] = p;
+        for (size_t i = 0; i < npl; i++) {
+            free(pl[i].name);
+            free(pl[i].value);
+        }
     }
+    for (size_t i = 0; i < nabst; i++) free(abst[i].id);
     return s;
 }
 
 LEPTRIS_API LeptrisSchematron leptris_schematron_parse(
     const char* schema, size_t len, LeptrisStatus* status) {
+    return leptris_schematron_parse_phase(schema, len, NULL,
+                                          status);
+}
+
+LEPTRIS_API LeptrisSchematron leptris_schematron_parse_phase(
+    const char* schema, size_t len, const char* phase_id,
+    LeptrisStatus* status) {
     if (status) *status = LEPTRIS_OK;
     if (!schema) {
         if (status) *status = LEPTRIS_ERROR_NULL_ARG;
@@ -190,7 +487,9 @@ LEPTRIS_API LeptrisSchematron leptris_schematron_parse(
         return NULL;
     }
     char* err = NULL;
-    struct leptris_schematron* s = sch_parse_doc(doc, &err);
+    struct leptris_schematron* s =
+        sch_parse_doc(doc, phase_id && phase_id[0] ? phase_id : NULL,
+                      &err);
     leptris_document_free(doc);
     if (!s) {
         leptris_set_error(LEPTRIS_ERROR_PARSE, err ? err : "bad");
@@ -246,6 +545,11 @@ LEPTRIS_API void leptris_schematron_free(LeptrisSchematron sch) {
         }
         free(s->patterns[i].rules);
     }
+    for (size_t i = 0; i < s->nlets; i++) {
+        free(s->lets[i].name);
+        free(s->lets[i].value);
+    }
+    free(s->lets);
     free(s->patterns);
     free(s->error);
     free(s);
@@ -289,6 +593,7 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
     *failed = 0;
     for (size_t i = 0; i < s->n; i++) {
         SchPattern* p = &s->patterns[i];
+        if (!p->active) continue;
         for (size_t k = 0; k < p->n; k++) {
             SchRule* r = &p->rules[k];
             LeptrisXPathResult ctxr = leptris_xpath_eval(
@@ -337,8 +642,7 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
                     LeptrisXPathResult tr = leptris_xpath_eval(
                         inst, nodes[m], as->test);
                     int truthy = tr ? leptris_xpath_result_boolean(tr)
-                                    : 0;
-                    int fire = as->is_report ? truthy : !truthy;
+                                    : 0;                    int fire = as->is_report ? truthy : !truthy;
                     if (tr) leptris_xpath_result_free(tr);
                     if (!fire) continue;
                     LeptrisElement op = sch_add_child(
