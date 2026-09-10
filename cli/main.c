@@ -21,6 +21,7 @@ static void print_usage(void) {
     printf("\n");
     printf("Commands:\n");
     printf("  parse      Parse and validate XML\n");
+    printf("  validate   Validate against RNG / Schematron\n");
     printf("  xpath      Execute XPath queries\n");
     printf("  format     Pretty-print XML\n");
     printf("  version    Show version information\n");
@@ -93,6 +94,7 @@ int main(int argc, char** argv) {
     /* Register commands */
     cli_registry_register(registry, cli_command_version());
     cli_registry_register(registry, cli_command_diff());
+    cli_registry_register(registry, cli_command_validate());
     cli_registry_register(registry, cli_command_parse());
     cli_registry_register(registry, cli_command_xpath());
     cli_registry_register(registry, cli_command_format());
