@@ -446,6 +446,86 @@ TEST(XPathOperators, StringComparison) {
     leptris_document_free(doc);
 }
 
+/* Issue #965: relational comparisons must keep operand order when
+ * the nodeset is on the RIGHT — `10 >= @n` is NOT `@n >= 10`. The
+ * any-node loop used to put the node value on the left
+ * unconditionally. */
+TEST(XPathOperators, ConstantLhsRelationalKeepsOperandOrder) {
+    const char xml[] =
+        "<r><item id='a' n='11'/><item id='b' n='5'/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; const char* want; } cases[] = {
+        {"string(//item[10 >= @n]/@id)", "b"},   /* 10>=5 only */
+        {"string(//item['10' >= @n]/@id)", "b"}, /* number('10')=10 */
+        {"string(//item[10 > @n]/@id)", "b"},
+        {"string(//item[4 <= @n]/@id)", "a"},    /* 4<=11 */
+        {"string(//item[@n >= 10]/@id)", "a"},   /* control: ns-LHS */
+    };
+    for (const auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
+        ASSERT_NE(r, nullptr) << c.expr;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_TRUE(s != NULL) << c.expr;
+        EXPECT_STREQ(s, c.want) << c.expr;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
+TEST(XPathOperators, ConstantLhsRelationalAtElementContext) {
+    const char xml[] = "<r><item n='11'/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXPathResult sel = leptris_xpath_eval(doc, nullptr, "/r/item");
+    ASSERT_NE(sel, nullptr);
+    LeptrisElement item = leptris_xpath_result_get(sel, 0);
+    ASSERT_NE(item, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, item, "10 >= @n");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_BOOLEAN);
+    EXPECT_EQ(leptris_xpath_result_boolean(r), 0);  /* 10 >= 11 is false */
+    leptris_xpath_result_free(r);
+
+    LeptrisXPathResult r2 = leptris_xpath_eval(doc, item, "12 >= @n");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r2), 1);
+    leptris_xpath_result_free(r2);
+
+    leptris_xpath_result_free(sel);
+    leptris_document_free(doc);
+}
+
+TEST(XPathOperators, ConstantLhsRelationalAnyNodeSemantics) {
+    /* Multiple RHS nodes: any node for which CONSTANT op node holds. */
+    const char xml[] =
+        "<r><item n='11'/><item n='5'/><item n='40'/></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "4 >= //item/@n");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r), 0);  /* 4 >= 5 fails for all */
+    leptris_xpath_result_free(r);
+
+    LeptrisXPathResult r2 = leptris_xpath_eval(doc, nullptr, "50 >= //item/@n");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r2), 1);
+    leptris_xpath_result_free(r2);
+
+    /* Nodeset on both sides keeps order too (any-pair, left op right). */
+    LeptrisXPathResult r3 =
+        leptris_xpath_eval(doc, nullptr, "//item/@n >= 40");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_EQ(leptris_xpath_result_boolean(r3), 1);
+    leptris_xpath_result_free(r3);
+
+    leptris_document_free(doc);
+}
+
 TEST(XPathText, TextNodeSelection) {
     LeptrisStatus st = LEPTRIS_OK;
     const char xml[] = "<r><a>text1</a><a>text2</a></r>";

@@ -1457,12 +1457,16 @@ static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
                 /* nodeset vs scalar: per-node string (equality) or
                  * number (relational) compare against the scalar. */
                 if (relational) {
+                    /* Operand order is part of the semantics (#965):
+                     * nodeset on the RIGHT compares scalar op node. */
                     double scalar = xpath_to_number(
                         l_is_ns ? right : left);
                     for (size_t i = 0; !matches && ns && i < ns->count; i++) {
                         char* a = get_node_text(ns->nodes[i]);
                         if (!a) continue;
-                        matches = vm_relational_cmp(op, atof(a), scalar);
+                        matches = l_is_ns
+                            ? vm_relational_cmp(op, atof(a), scalar)
+                            : vm_relational_cmp(op, scalar, atof(a));
                         free(a);
                     }
                 } else {

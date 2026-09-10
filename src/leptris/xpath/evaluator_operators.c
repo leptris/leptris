@@ -1782,9 +1782,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (left->type == XPATH_RESULT_NODESET ||
                 right->type == XPATH_RESULT_NODESET) {
                 int negate = (op == XPATH_OP_NOT_EQUAL);
+                int ns_is_left = (left->type == XPATH_RESULT_NODESET);
                 struct leptris_xpath_result* other =
-                    (left->type == XPATH_RESULT_NODESET) ? right : left;
-                XPathNodeSet* ns = (left->type == XPATH_RESULT_NODESET)
+                    ns_is_left ? right : left;
+                XPathNodeSet* ns = ns_is_left
                                        ? left->value.nodeset_value
                                        : right->value.nodeset_value;
                 int matches = 0;
@@ -1796,13 +1797,18 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     result->value.boolean_value =
                         negate ? (lb != rb) : (lb == rb);
                 } else if (other->type == XPATH_RESULT_NODESET) {
-                    /* nodeset vs nodeset: any-pair. */
+                    /* nodeset vs nodeset: any-pair. Operand ORDER is
+                     * part of the semantics for relational ops
+                     * (#965): a runs the LEFT nodeset, b the RIGHT,
+                     * whatever side `ns` came from. */
                     XPathNodeSet* on = other->value.nodeset_value;
-                    for (size_t i = 0; !matches && ns && i < ns->count; i++) {
-                        char* a = get_node_text(ns->nodes[i]);
+                    XPathNodeSet* lns = ns_is_left ? ns : on;
+                    XPathNodeSet* rns = ns_is_left ? on : ns;
+                    for (size_t i = 0; !matches && lns && i < lns->count; i++) {
+                        char* a = get_node_text(lns->nodes[i]);
                         if (!a) continue;
-                        for (size_t j = 0; !matches && on && j < on->count; j++) {
-                            char* b = get_node_text(on->nodes[j]);
+                        for (size_t j = 0; !matches && rns && j < rns->count; j++) {
+                            char* b = get_node_text(rns->nodes[j]);
                             if (!b) continue;
                             if (is_equality_op) {
                                 matches = negate ? (strcmp(a, b) != 0)
@@ -1830,12 +1836,18 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     if (scalar) LEPTRIS_FREE(scalar);
                     result->value.boolean_value = matches;
                 } else {
-                    /* nodeset vs scalar: any-node numeric compare. */
+                    /* nodeset vs scalar: any-node numeric compare.
+                     * Operand order matters (#965): a nodeset on the
+                     * RIGHT means scalar op node-value, not the
+                     * reverse. */
                     double scalar = xpath_to_number(other);
                     for (size_t i = 0; !matches && ns && i < ns->count; i++) {
                         char* a = get_node_text(ns->nodes[i]);
                         if (!a) continue;
-                        matches = op_relational_cmp(op, atof(a), scalar);
+                        double nv = atof(a);
+                        matches = ns_is_left
+                            ? op_relational_cmp(op, nv, scalar)
+                            : op_relational_cmp(op, scalar, nv);
                         LEPTRIS_FREE(a);
                     }
                     result->value.boolean_value = matches;
