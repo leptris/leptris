@@ -251,6 +251,81 @@ TEST(CliDiff, IdenticalDocumentsSaySo) {
     EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
     EXPECT_NE(r.out.find("identical"), std::string::npos);
 }
+
+// ---- validate (lane 16.6) --------------------------------------------------
+
+TEST(CliValidate, SchematronInvalidFails) {
+    write_file("leptris_cli_val.sch",
+               "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+               " queryBinding='xslt'><pattern><rule context='item'>"
+               "<assert test='@n &lt;= 3'>n too big</assert>"
+               "</rule></pattern></schema>");
+    write_file("leptris_cli_val_bad.xml",
+               "<r><item n='5'/></r>");
+    auto r = run_cli({"validate", "--schematron",
+                      "leptris_cli_val.sch",
+                      "leptris_cli_val_bad.xml"});
+    /* std::system encodes the child status in the high byte. */
+    EXPECT_EQ((r.exit_code >> 8) & 0xFF, 1)
+        << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("failed-assert"), std::string::npos);
+    EXPECT_NE(r.out.find("n too big"), std::string::npos);
+}
+
+TEST(CliValidate, SchematronValidPasses) {
+    write_file("leptris_cli_val.sch",
+               "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+               " queryBinding='xslt'><pattern><rule context='item'>"
+               "<assert test='@n &lt;= 3'>n too big</assert>"
+               "</rule></pattern></schema>");
+    write_file("leptris_cli_val_ok.xml", "<r><item n='2'/></r>");
+    auto r = run_cli({"validate", "--schematron",
+                      "leptris_cli_val.sch",
+                      "leptris_cli_val_ok.xml"});
+    EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("schematron: valid"), std::string::npos);
+}
+
+TEST(CliValidate, SvrlReportPrints) {
+    write_file("leptris_cli_val.sch",
+               "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+               " queryBinding='xslt'><pattern><rule context='item'>"
+               "<assert test='@n &lt;= 3'>n too big</assert>"
+               "</rule></pattern></schema>");
+    write_file("leptris_cli_val_bad.xml",
+               "<r><item n='5'/></r>");
+    auto r = run_cli({"validate", "--svrl", "--schematron",
+                      "leptris_cli_val.sch",
+                      "leptris_cli_val_bad.xml"});
+    EXPECT_EQ((r.exit_code >> 8) & 0xFF, 1)
+        << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("svrl:schematron-output"), std::string::npos);
+    EXPECT_NE(r.out.find("failed-assert"), std::string::npos);
+}
+
+TEST(CliValidate, RngRound) {
+    write_file("leptris_cli_val.rng",
+               "<element name='r'"
+               " xmlns='http://relaxng.org/ns/structure/1.0'>"
+               "<oneOrMore><element name='item'>"
+               "<attribute name='n'/></element></oneOrMore>"
+               "</element>");
+    write_file("leptris_cli_val_ok.xml", "<r><item n='2'/></r>");
+    auto r = run_cli({"validate", "--rng", "leptris_cli_val.rng",
+                      "leptris_cli_val_ok.xml"});
+    EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("rng: valid"), std::string::npos);
+}
+
+TEST(CliValidate, MissingSchemaIsIoError) {
+    write_file("leptris_cli_val_ok.xml", "<r/>");
+    auto r = run_cli({"validate", "--schematron",
+                      "leptris_cli_no_such.sch",
+                      "leptris_cli_val_ok.xml"});
+    EXPECT_EQ((r.exit_code >> 8) & 0xFF, 3)
+        << "stderr: " << r.err;
+}
+
 #endif  /* !_WIN32 */
 
 }  // namespace

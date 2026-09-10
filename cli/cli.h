@@ -215,6 +215,7 @@ extern cli_command_t* cli_command_version(void);
  * Purpose: Structural XML diff between two documents (lane 17)
  */
 extern cli_command_t* cli_command_diff(void);
+extern cli_command_t* cli_command_validate(void);
 
 /**
  * Get the 'xquery' command

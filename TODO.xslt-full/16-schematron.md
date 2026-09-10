@@ -136,3 +136,17 @@ refactor — the registry architecture did the work:
   regression caught by the subordinate corpus cases; cexpr must
   outlive the loop.
 
+## Phase 6 status (2026-09-10, branch feat/16-sch-phase6-cli)
+
+- `leptris validate` SHIPPED on the branch: `--rng FILE`,
+  `--schematron FILE` (or `-s`), `--phase ID`, `--svrl` (full SVRL
+  report instead of the summary). Exit 0 valid / 1 invalid /
+  3 I/O-schema error. Summary prints failed-assert location +
+  message lines. Specs: CliValidate.* (Windows-guarded — the
+  run_cli subprocess harness limitation; exit codes decoded from
+  std::system's high byte).
+- REMAINING for the lane: binding PRs (leptris-ruby
+  `Leptris::XML::Schematron` — parse/parse_file/#valid?/#validate
+  -> SVRL — and the python mirror; PRs only, user merges), then
+  the standoc/oXygen migration prompt. Lane CLOSES after bindings
+  merge.
