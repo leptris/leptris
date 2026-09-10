@@ -7,6 +7,13 @@ Per-lane details live in the numbered docs; this file is the index
 
 ## A. In flight
 
+- **lane 17.4 diff/canon COMPLETE as PRs** (user merges):
+  leptris-ruby#171 (Leptris::XML::Diff), lutaml/canon#191
+  (structural-identity fast path). The canon integration caught
+  the namespace-blind diff (PR #972, ships v1.9.129).
+- **lane 16.6 binding PRs open** (user merges): leptris-ruby#170
+  (Schematron), leptris-py#99 (Schematron). Migration prompt after
+  they merge, then lane 16 CLOSES.
 - **lane 16.5 Schematron corpus 50/50 COMPLETE** — branch
   `feat/16-sch-phase5`; PR + rebase-merge + v1.9.128, then phase
   6 (bindings Schematron::Schema + `leptris validate
