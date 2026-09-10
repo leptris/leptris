@@ -84,6 +84,9 @@ leptris_add_test(test_smoke      smoke/test_smoke.cpp)
 leptris_add_test(test_diff       diff/test_diff.cpp)
 leptris_add_test(test_sch        sch/test_schematron.cpp)
 leptris_add_test(test_sch_corpus  sch/test_schematron_corpus.cpp)
+leptris_add_test(test_qt3          xquery/test_qt3.cpp)
+target_compile_definitions(test_qt3 PRIVATE
+    LEPTRIS_QT3_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xquery/qt3")
 target_compile_definitions(test_sch_corpus PRIVATE
     LEPTRIS_SCH_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/sch/conformance-cases")
 leptris_add_test(test_parser     parser/test_parser.cpp)
