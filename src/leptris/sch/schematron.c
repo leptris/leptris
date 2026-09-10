@@ -603,6 +603,11 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
                             free(rl[i].name);
                             free(rl[i].value);
                         }
+                        for (size_t i = 0; i < npl; i++) {
+                            free(pl[i].name);
+                            free(pl[i].value);
+                        }
+                        free(p.id);
                         leptris_schematron_free((LeptrisSchematron)s);
                         return NULL;
                     }
