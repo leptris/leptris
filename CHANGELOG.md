@@ -2,13 +2,9 @@
 
 ## [1.9.129] - 2026-09-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
-
+- **Namespace-blind tree diff** (found via the lutaml/canon integration): a changed namespace URI — or a re-prefixed `xmlns` declaration — produced zero ops ("documents are identical"), and declarations on an unprefixed element never entered the Merkle digest, so such subtrees pruned as equal. Namespace declarations now surface as `UPDATE_ATTR` ops on `xmlns[:prefix]` names (URIs as before/after), and the digest mixes the element's own declarations as sorted (prefix, URI) pairs. 3 new specs in `test/diff`.
 
 ## [1.9.128] - 2026-09-10
 
