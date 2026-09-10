@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.127] - 2026-09-10
+
+### Added
+
+- lane 17 native XML diff — engine, public API, CLI (diff)
+- lane 16 phases 3+4 — abstract patterns, let scoping, phase selection (sch)
+- lane 16 phases 1+2 — schema IR + SVRL evaluator (sch)
+
+### Fixed
+
+- #965 keep operand order when nodeset is on the right of a relational comparison (xpath)
+- remove rebase-conflict residue from CMakeLists and header
+- diff specs use build-dir fixtures (no /tmp on Windows) (cli)
+- parse-file spec uses build-dir fixture (no /tmp on Windows) (sch)
+
+
+
 ## [1.9.126] - 2026-09-09
 
 ### Added
