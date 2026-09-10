@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.128] - 2026-09-10
+
+### Added
+
+- lane 16 phase 6 — leptris validate (RNG + Schematron) (cli)
+- lane 16 phase 5 — conformance corpus gate 50/50 (sch)
+- lane 16 phase 5 WIP — conformance corpus gate at 47/50 (sch)
+
+### Fixed
+
+- free pattern id and params on the phase-dup error path (LSan) (sch)
+
+
+
 ## [1.9.127] - 2026-09-10
 
 ### Added
