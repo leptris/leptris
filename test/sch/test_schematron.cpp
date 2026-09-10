@@ -221,6 +221,37 @@ TEST(Schematron, LetVariables) {
     leptris_schematron_free(s);
 }
 
+/* Corpus crash (rule-context-variable-03): a pattern with TWO
+ * rules under a schema-level let. The rule loop freed the base
+ * let stack after the FIRST rule, then freed it again after the
+ * second — SIGABRT. Both rules must also evaluate: rule 1
+ * matches <document> by the substituted name, rule 2 (*)
+ * asserts false() on everything else. */
+TEST(Schematron, SchemaLetWithTwoRulesInOnePattern) {
+    const char* sch =
+        "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"
+        " queryBinding='xslt'>"
+        "<let name=\"docname\" value=\"'document'\"/>"
+        "<pattern>"
+        "<rule context='*[local-name() = $docname]'>"
+        "<assert test='true()'/></rule>"
+        "<rule context='*'>"
+        "<assert test='false()'/></rule>"
+        "</pattern></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisSchematron s = leptris_schematron_parse(sch, strlen(sch), &st);
+    ASSERT_NE(s, nullptr);
+    LeptrisDocument ok = P("<document/>");
+    ASSERT_NE(ok, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, ok), 1);
+    LeptrisDocument bad = P("<other/>");
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(leptris_schematron_valid(s, bad), 0);
+    leptris_document_free(ok);
+    leptris_document_free(bad);
+    leptris_schematron_free(s);
+}
+
 TEST(Schematron, PhaseSelection) {
     const char* sch =
         "<schema xmlns='http://purl.oclc.org/dsdl/schematron'"

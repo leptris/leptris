@@ -50,7 +50,10 @@ static char* sch_substitute_typed(const char* expr,
     for (const char* p = expr; *p;) {
         if (*p == '$') {
             const char* q = p + 1;
-            while (*q && (isalnum((unsigned char)*q) || *q == '_'))
+            /* NCName: letters, digits, '_', '-', '.' (a '-' in a
+             * let name like $local-name must stay in the scan). */
+            while (*q && (isalnum((unsigned char)*q) || *q == '_' ||
+                          *q == '-' || *q == '.'))
                 q++;
             size_t nl = (size_t)(q - p - 1);
             const char* val = NULL;
@@ -183,6 +186,21 @@ static const char* sch_attr(LeptrisElement e, const char* name) {
     return NULL;
 }
 
+/* Literal-aware scan: does the expression still reference an
+ * (undefined) variable $name? (Used after substitution.) */
+static int sch_has_dollar_ref(const char* e) {
+    char q = 0;
+    for (; e && *e; e++) {
+        if (q) { if (*e == q) q = 0; continue; }
+        if (*e == '\'' || *e == '"') { q = *e; continue; }
+        if (*e == '$') {
+            const char* c = e + 1;
+            if (isalnum((unsigned char)*c) || *c == '_') return 1;
+        }
+    }
+    return 0;
+}
+
 static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
                                                 const char* sel_phase,
                                                 char** err) {
@@ -211,21 +229,70 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
         leptris_schematron_free((LeptrisSchematron)s);
         return NULL;
     }
+    /* ISO 2016 §5.4.13: with no explicit phase selection the
+     * processor uses @defaultPhase. */
+    const char* eff_phase = sel_phase;
+    if (!eff_phase) {
+        const char* dp = sch_attr(root, "defaultPhase");
+        if (dp && dp[0]) eff_phase = dp;
+    }
+    sel_phase = eff_phase;
+
     /* schema-level <let name= value=> */
     for (LeptrisElement let = leptris_element_first_child_any(root); let;
          let = leptris_element_next_sibling_any(let)) {
         if (!sch_is(let, "let")) continue;
         const char* ln = sch_attr(let, "name");
         const char* lv = sch_attr(let, "value");
-        if (!ln || !lv) continue;
+        /* Element-content let (ISO 2016 §5.4.5 cl. 2): the
+         * variable value is the content's string value (a quoted
+         * literal for substitution). */
+        const char* text_val = NULL;
+        if (ln && !lv) {
+            text_val = leptris_element_text(let);
+            if (!text_val || !text_val[0]) continue;
+        }
+        if (!ln || (!lv && !text_val)) continue;
+        /* ISO 2016 §5.4.5: multiply-defined variable in the same
+         * scope is an error. */
+        int dup = 0;
+        for (size_t i = 0; i < s->nlets; i++)
+            if (strcmp(s->lets[i].name, ln) == 0) { dup = 1; break; }
+        if (dup) {
+            char msg[160];
+            snprintf(msg, sizeof msg,
+                     "variable '%s' multiply defined in schema scope",
+                     ln);
+            sch_set_error(s, msg);
+            *err = sch_dup(s->error);
+            leptris_schematron_free((LeptrisSchematron)s);
+            return NULL;
+        }
         SchLet* nl = (SchLet*)realloc(s->lets,
                                       (s->nlets + 1) * sizeof(SchLet));
         if (!nl) continue;
         s->lets = nl;
         s->lets[s->nlets].name = sch_dup(ln);
-        s->lets[s->nlets].value = sch_substitute(
-            lv, s->lets, s->nlets);
-        s->lets[s->nlets].bare = 0;
+        if (lv) {
+            s->lets[s->nlets].value = sch_substitute(
+                lv, s->lets, s->nlets);
+            /* let @value is an XPath EXPRESSION — verbatim */
+            s->lets[s->nlets].bare = 1;
+        } else {
+            /* quote the content text as a string literal */
+            size_t n = strlen(text_val);
+            char* q = (char*)malloc(n + 3);
+            if (q) {
+                q[0] = '\'';
+                memcpy(q + 1, text_val, n);
+                q[n + 1] = '\'';
+                q[n + 2] = 0;
+                s->lets[s->nlets].value = q;
+            } else {
+                s->lets[s->nlets].value = sch_dup(text_val);
+            }
+            s->lets[s->nlets].bare = 0;
+        }
         s->nlets++;
     }
     /* pass 1: collect ABSTRACT pattern bodies by id. */
@@ -235,7 +302,9 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
          pat = leptris_element_next_sibling_any(pat)) {
         if (!sch_is(pat, "pattern")) continue;
         const char* ia = sch_attr(pat, "is-abstract");
-        if (ia && strcmp(ia, "true") == 0 && nabst < 32) {
+        const char* iab = sch_attr(pat, "abstract");
+        if (((ia && strcmp(ia, "true") == 0) ||
+             (iab && strcmp(iab, "true") == 0)) && nabst < 32) {
             const char* pid = sch_attr(pat, "id");
             if (pid) {
                 abst[nabst].id = sch_dup(pid);
@@ -249,7 +318,10 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
          pat = leptris_element_next_sibling_any(pat)) {
         if (!sch_is(pat, "pattern")) continue;
         const char* abst_flag = sch_attr(pat, "is-abstract");
-        if (abst_flag && strcmp(abst_flag, "true") == 0) continue;
+        const char* abst_flag2 = sch_attr(pat, "abstract");
+        if ((abst_flag && strcmp(abst_flag, "true") == 0) ||
+            (abst_flag2 && strcmp(abst_flag2, "true") == 0))
+            continue;
         const char* isa = sch_attr(pat, "is-a");
         LeptrisElement src = pat;
         SchLet pl[32];
@@ -349,18 +421,250 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
             rl[nrl].bare = s->lets[i].bare;
             nrl++;
         }
+        /* phase-level lets: in scope while that phase is selected
+         * (ISO 2016 §5.4.7); shadow schema lets. */
+        if (sel_phase) {
+            for (LeptrisElement ph =
+                     leptris_element_first_child_any(root);
+                 ph;
+                 ph = leptris_element_next_sibling_any(ph)) {
+                if (!sch_is(ph, "phase")) continue;
+                const char* fid = sch_attr(ph, "id");
+                if (!fid || strcmp(fid, sel_phase) != 0) continue;
+                for (LeptrisElement ple =
+                         leptris_element_first_child_any(ph);
+                     ple;
+                     ple = leptris_element_next_sibling_any(ple)) {
+                    if (!sch_is(ple, "let")) continue;
+                    const char* ln = sch_attr(ple, "name");
+                    const char* lv = sch_attr(ple, "value");
+                    if (!ln || !lv) continue;
+                    size_t phdefs = 0;
+                    for (LeptrisElement ple2 =
+                             leptris_element_first_child_any(ph);
+                         ple2;
+                         ple2 = leptris_element_next_sibling_any(ple2)) {
+                        if (!sch_is(ple2, "let")) continue;
+                        const char* other = sch_attr(ple2, "name");
+                        if (other && strcmp(other, ln) == 0) phdefs++;
+                    }
+                    if (phdefs > 1) {
+                        char msg[160];
+                        snprintf(msg, sizeof msg,
+                                 "variable '%s' multiply defined in"
+                                 " phase",
+                                 ln);
+                        sch_set_error(s, msg);
+                        *err = sch_dup(s->error);
+                        for (size_t i = 0; i < nrl; i++) {
+                            free(rl[i].name);
+                            free(rl[i].value);
+                        }
+                        leptris_schematron_free((LeptrisSchematron)s);
+                        return NULL;
+                    }
+                    char* sub = sch_substitute(lv, rl, nrl);
+                    int found = 0;
+                    for (size_t i = 0; i < nrl; i++)
+                        if (strcmp(rl[i].name, ln) == 0) {
+                            free(rl[i].value);
+                            rl[i].value = sub ? sub : sch_dup(lv);
+                            rl[i].bare = 1;
+                            found = 1;
+                            break;
+                        }
+                    if (found || nrl >= 64) {
+                        if (!found) free(sub);
+                        continue;
+                    }
+                    rl[nrl].name = sch_dup(ln);
+                    rl[nrl].value = sub ? sub : sch_dup(lv);
+                    rl[nrl].bare = 1;
+                    nrl++;
+                }
+                break;
+            }
+        }
         for (size_t i = 0; i < npl && nrl < 64; i++) {
             rl[nrl].name = sch_dup(pl[i].name);
             rl[nrl].value = sch_dup(pl[i].value);
             rl[nrl].bare = pl[i].bare;
             nrl++;
         }
+        /* pattern-level <let> children (ISO 2016 §5.4.6): shadow
+         * schema lets by name, visible to every rule below. A name
+         * defined TWICE in the same pattern is an error; a name not
+         * present at schema level also becomes globally visible to
+         * LATER patterns (the suite's "pattern variable has global
+         * scope"), without clobbering the schema binding. */
+        for (LeptrisElement pl2 = leptris_element_first_child_any(src);
+             pl2;
+             pl2 = leptris_element_next_sibling_any(pl2)) {
+            if (!sch_is(pl2, "let")) continue;
+            const char* ln = sch_attr(pl2, "name");
+            const char* lv = sch_attr(pl2, "value");
+            if (!ln || !lv) continue;
+            /* duplicate = same name on more than one let in THIS
+             * pattern */
+            size_t defs = 0;
+            for (LeptrisElement pl3 =
+                     leptris_element_first_child_any(src);
+                 pl3;
+                 pl3 = leptris_element_next_sibling_any(pl3)) {
+                if (!sch_is(pl3, "let")) continue;
+                const char* other = sch_attr(pl3, "name");
+                if (other && strcmp(other, ln) == 0) defs++;
+            }
+            /* Corpus semantics (multiply-defined-globally cases):
+             * a pattern let REDEFINING a global with an IDENTICAL
+             * value is a global redefinition error; a DIFFERENT
+             * value shadows (pattern-scoped) instead. */
+            int global_same = 0;
+            for (size_t i = 0; i < s->nlets; i++)
+                if (strcmp(s->lets[i].name, ln) == 0 &&
+                    strcmp(s->lets[i].value, lv) == 0) {
+                    global_same = 1;
+                    break;
+                }
+            if (global_same) {
+                char msg[160];
+                snprintf(msg, sizeof msg,
+                         "variable '%s' multiply defined globally",
+                         ln);
+                sch_set_error(s, msg);
+                *err = sch_dup(s->error);
+                for (size_t i = 0; i < nrl; i++) {
+                    free(rl[i].name);
+                    free(rl[i].value);
+                }
+                for (size_t i = 0; i < npl; i++) {
+                    free(pl[i].name);
+                    free(pl[i].value);
+                }
+                free(p.id);
+                leptris_schematron_free((LeptrisSchematron)s);
+                return NULL;
+            }
+            if (defs > 1) {
+                char msg[160];
+                snprintf(msg, sizeof msg,
+                         "variable '%s' multiply defined in pattern",
+                         ln);
+                sch_set_error(s, msg);
+                *err = sch_dup(s->error);
+                for (size_t i = 0; i < nrl; i++) {
+                    free(rl[i].name);
+                    free(rl[i].value);
+                }
+                for (size_t i = 0; i < npl; i++) {
+                    free(pl[i].name);
+                    free(pl[i].value);
+                }
+                free(p.id);
+                leptris_schematron_free((LeptrisSchematron)s);
+                return NULL;
+            }
+            char* sub = sch_substitute(lv, rl, nrl);
+            int found = 0;
+            for (size_t i = 0; i < nrl; i++)
+                if (strcmp(rl[i].name, ln) == 0) {
+                    free(rl[i].value);
+                    rl[i].value = sub ? sub : sch_dup(lv);
+                    rl[i].bare = 1;
+                    found = 1;
+                    break;
+                }
+            if (!found && nrl < 64) {
+                rl[nrl].name = sch_dup(ln);
+                rl[nrl].value = sub ? sub : sch_dup(lv);
+                rl[nrl].bare = 1;
+                nrl++;
+            } else if (!found) {
+                free(sub);
+            }
+            /* global visibility for later patterns when new */
+            int global_known = 0;
+            for (size_t i = 0; i < s->nlets; i++)
+                if (strcmp(s->lets[i].name, ln) == 0) {
+                    global_known = 1;
+                    break;
+                }
+            if (!global_known) {
+                SchLet* nl = (SchLet*)realloc(
+                    s->lets, (s->nlets + 1) * sizeof(SchLet));
+                if (nl) {
+                    s->lets = nl;
+                    s->lets[s->nlets].name = sch_dup(ln);
+                    s->lets[s->nlets].value = sch_dup(
+                        sub ? sub : lv);
+                    s->lets[s->nlets].bare = 1;
+                    s->nlets++;
+                }
+            }
+        }
+        /* pattern/@documents referencing an undefined variable
+         * is an error (undefined-07). */
+        {
+            const char* docs = sch_attr(src, "documents");
+            if (docs) {
+                char* sdocs = sch_substitute(docs, rl, nrl);
+                if (sch_has_dollar_ref(sdocs ? sdocs : docs)) {
+                    sch_set_error(
+                        s, "undefined variable in @documents");
+                    *err = sch_dup(s->error);
+                    free(sdocs);
+                    for (size_t i = 0; i < nrl; i++) {
+                        free(rl[i].name);
+                        free(rl[i].value);
+                    }
+                    for (size_t i = 0; i < npl; i++) {
+                        free(pl[i].name);
+                        free(pl[i].value);
+                    }
+                    free(p.id);
+                    leptris_schematron_free((LeptrisSchematron)s);
+                    return NULL;
+                }
+                free(sdocs);
+            }
+        }
+        /* Abstract rules (ISO 2016 §5.5.4): collected, not fired;
+         * <extends rule=> inside THIS pattern's rules pulls in
+         * their asserts/reports. Cross-pattern extends is an
+         * error. */
+        LeptrisElement abst_rules[32];
+        size_t nabst_rules = 0;
+        for (LeptrisElement rule =
+                 leptris_element_first_child_any(src);
+             rule;
+             rule = leptris_element_next_sibling_any(rule)) {
+            const char* ab = sch_attr(rule, "abstract");
+            if (sch_is(rule, "rule") && ab &&
+                strcmp(ab, "true") == 0 && nabst_rules < 32)
+                abst_rules[nabst_rules++] = rule;
+        }
         for (LeptrisElement rule =
                  leptris_element_first_child_any(src);
              rule;
              rule = leptris_element_next_sibling_any(rule)) {
             if (!sch_is(rule, "rule")) continue;
-            size_t nrule = nrl;
+            {
+                const char* ab = sch_attr(rule, "abstract");
+                if (ab && strcmp(ab, "true") == 0) continue;
+            }
+            /* Per-rule OWNED snapshot of the let stack: rule lets
+             * shadow base lets inside the snapshot only — the base
+             * array stays immutable for the next rule (freeing or
+             * mutating it here corrupted rule 2+: SIGABRT on the
+             * two-rules-under-a-schema-let shape). */
+            SchLet snap[128];
+            size_t nsnap = 0;
+            for (size_t i = 0; i < nrl && nsnap < 128; i++) {
+                snap[nsnap].name = sch_dup(rl[i].name);
+                snap[nsnap].value = sch_dup(rl[i].value);
+                snap[nsnap].bare = rl[i].bare;
+                nsnap++;
+            }
             for (LeptrisElement rl2 =
                      leptris_element_first_child_any(rule);
                  rl2;
@@ -368,34 +672,193 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
                 if (!sch_is(rl2, "let")) continue;
                 const char* ln = sch_attr(rl2, "name");
                 const char* lv = sch_attr(rl2, "value");
-                if (!ln || !lv || nrule >= 64) continue;
-                char* sub = sch_substitute(lv, rl, nrule);
-                int found = 0;
-                for (size_t i = 0; i < nrule; i++)
-                    if (strcmp(rl[i].name, ln) == 0) {
-                        /* rule let shadows: free the old entry */
+                if (!ln || !lv || nsnap >= 128) continue;
+                size_t rdefs = 0;
+                for (LeptrisElement rl3 =
+                         leptris_element_first_child_any(rule);
+                     rl3;
+                     rl3 = leptris_element_next_sibling_any(rl3)) {
+                    if (!sch_is(rl3, "let")) continue;
+                    const char* other = sch_attr(rl3, "name");
+                    if (other && strcmp(other, ln) == 0) rdefs++;
+                }
+                if (rdefs > 1) {
+                    char msg[160];
+                    snprintf(msg, sizeof msg,
+                             "variable '%s' multiply defined in rule",
+                             ln);
+                    sch_set_error(s, msg);
+                    *err = sch_dup(s->error);
+                    for (size_t i = 0; i < nsnap; i++) {
+                        free(snap[i].name);
+                        free(snap[i].value);
+                    }
+                    for (size_t i = 0; i < nrl; i++) {
                         free(rl[i].name);
                         free(rl[i].value);
-                        rl[i].name = sch_dup(ln);
-                        rl[i].value = sub ? sub : sch_dup(lv);
-                        rl[i].bare = 0;
+                    }
+                    for (size_t i = 0; i < npl; i++) {
+                        free(pl[i].name);
+                        free(pl[i].value);
+                    }
+                    free(p.id);
+                    leptris_schematron_free((LeptrisSchematron)s);
+                    return NULL;
+                }
+                char* sub = sch_substitute(lv, snap, nsnap);
+                int found = 0;
+                for (size_t i = 0; i < nsnap; i++)
+                    if (strcmp(snap[i].name, ln) == 0) {
+                        free(snap[i].name);
+                        free(snap[i].value);
+                        snap[i].name = sch_dup(ln);
+                        snap[i].value = sub ? sub : sch_dup(lv);
+                        snap[i].bare = 1;
                         found = 1;
                         break;
                     }
                 if (found) continue;
-                rl[nrule].name = sch_dup(ln);
-                rl[nrule].value = sub;
-                rl[nrule].bare = 0;
-                nrule++;
+                snap[nsnap].name = sch_dup(ln);
+                snap[nsnap].value = sub;
+                snap[nsnap].bare = 1;
+                nsnap++;
             }
             const char* ctx = sch_attr(rule, "context");
-            if (!ctx) continue;
+            if (!ctx) {
+                for (size_t i = 0; i < nsnap; i++) {
+                    free(snap[i].name);
+                    free(snap[i].value);
+                }
+                continue;
+            }
             SchRule r = {0};
-            r.context = sch_substitute_bare(ctx, rl, nrule);
-            for (LeptrisElement asser =
+            r.context = sch_substitute_bare(ctx, snap, nsnap);
+            if (sch_has_dollar_ref(r.context)) {
+                sch_set_error(s, "undefined variable in rule context");
+                *err = sch_dup(s->error);
+                free(r.context);
+                for (size_t i = 0; i < nsnap; i++) {
+                    free(snap[i].name);
+                    free(snap[i].value);
+                }
+                for (size_t i = 0; i < nrl; i++) {
+                    free(rl[i].name);
+                    free(rl[i].value);
+                }
+                for (size_t i = 0; i < npl; i++) {
+                    free(pl[i].name);
+                    free(pl[i].value);
+                }
+                free(p.id);
+                leptris_schematron_free((LeptrisSchematron)s);
+                return NULL;
+            }
+            /* sch:value-of/@select references must resolve too
+             * (nested in assert/report content — walk the rule
+             * subtree). */
+            LeptrisElement stack[128];
+            size_t nstack = 0;
+            if (nstack < 128) stack[nstack++] = rule;
+            while (nstack > 0) {
+                LeptrisElement c = stack[--nstack];
+                for (LeptrisElement k =
+                         leptris_element_first_child_any(c);
+                     k;
+                     k = leptris_element_next_sibling_any(k)) {
+                    if (nstack < 128) stack[nstack++] = k;
+                }
+                if (c == rule) continue;
+                const char* sel = NULL;
+                if (sch_is(c, "value-of"))
+                    sel = sch_attr(c, "select");
+                else if (sch_is(c, "name"))
+                    sel = sch_attr(c, "path");
+                if (!sel) continue;
+                char* ssel = sch_substitute(sel, snap, nsnap);
+                if (sch_has_dollar_ref(ssel ? ssel : sel)) {
+                    sch_set_error(
+                        s, "undefined variable in value-of/@select");
+                    *err = sch_dup(s->error);
+                    free(ssel);
+                    free(r.context);
+                    for (size_t i = 0; i < nsnap; i++) {
+                        free(snap[i].name);
+                        free(snap[i].value);
+                    }
+                    for (size_t i = 0; i < nrl; i++) {
+                        free(rl[i].name);
+                        free(rl[i].value);
+                    }
+                    for (size_t i = 0; i < npl; i++) {
+                        free(pl[i].name);
+                        free(pl[i].value);
+                    }
+                    free(p.id);
+                    leptris_schematron_free((LeptrisSchematron)s);
+                    return NULL;
+                }
+                free(ssel);
+            }
+            /* assert/report sources: the rule's own children PLUS
+             * the asserts of abstract rules pulled in via
+             * <extends rule=> (same pattern only). */
+            LeptrisElement srcs[64];
+            size_t nsrcs = 0;
+            for (LeptrisElement c =
                      leptris_element_first_child_any(rule);
-                 asser;
-                 asser = leptris_element_next_sibling_any(asser)) {
+                 c && nsrcs < 64;
+                 c = leptris_element_next_sibling_any(c)) {
+                if (sch_is(c, "extends")) {
+                    const char* rid = sch_attr(c, "rule");
+                    if (!rid) continue;
+                    LeptrisElement target = NULL;
+                    for (size_t z = 0; z < nabst_rules; z++) {
+                        const char* aid =
+                            sch_attr(abst_rules[z], "id");
+                        if (aid && strcmp(aid, rid) == 0) {
+                            target = abst_rules[z];
+                            break;
+                        }
+                    }
+                    if (!target) {
+                        char msg[160];
+                        snprintf(msg, sizeof msg,
+                                 "extends of unknown or foreign rule"
+                                 " '%s'",
+                                 rid);
+                        sch_set_error(s, msg);
+                        *err = sch_dup(s->error);
+                        free(r.context);
+                        for (size_t i = 0; i < nsnap; i++) {
+                            free(snap[i].name);
+                            free(snap[i].value);
+                        }
+                        for (size_t i = 0; i < nrl; i++) {
+                            free(rl[i].name);
+                            free(rl[i].value);
+                        }
+                        for (size_t i = 0; i < npl; i++) {
+                            free(pl[i].name);
+                            free(pl[i].value);
+                        }
+                        free(p.id);
+                        leptris_schematron_free((LeptrisSchematron)s);
+                        return NULL;
+                    }
+                    for (LeptrisElement ac =
+                             leptris_element_first_child_any(target);
+                         ac && nsrcs < 64;
+                         ac = leptris_element_next_sibling_any(ac)) {
+                        int rep = sch_is(ac, "report");
+                        if (rep || sch_is(ac, "assert"))
+                            srcs[nsrcs++] = ac;
+                    }
+                } else {
+                    srcs[nsrcs++] = c;
+                }
+            }
+            for (size_t si = 0; si < nsrcs; si++) {
+                LeptrisElement asser = srcs[si];
                 int is_report = sch_is(asser, "report");
                 if (!is_report && !sch_is(asser, "assert"))
                     continue;
@@ -403,7 +866,34 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
                 if (!test) continue;
                 const char* mtext = leptris_element_text(asser);
                 char* msg = mtext ? sch_dup(mtext) : NULL;
-                char* stest = sch_substitute(test, rl, nrule);
+                char* stest = sch_substitute(test, snap, nsnap);
+                if (sch_has_dollar_ref(stest ? stest : test)) {
+                    sch_set_error(s, "undefined variable in assert");
+                    *err = sch_dup(s->error);
+                    free(msg);
+                    free(stest);
+                    free(r.context);
+                    for (size_t z = 0; z < r.n; z++) {
+                        free(r.asserts[z].test);
+                        free(r.asserts[z].message);
+                    }
+                    free(r.asserts);
+                    for (size_t i = 0; i < nsnap; i++) {
+                        free(snap[i].name);
+                        free(snap[i].value);
+                    }
+                    for (size_t i = 0; i < nrl; i++) {
+                        free(rl[i].name);
+                        free(rl[i].value);
+                    }
+                    for (size_t i = 0; i < npl; i++) {
+                        free(pl[i].name);
+                        free(pl[i].value);
+                    }
+                    free(p.id);
+                    leptris_schematron_free((LeptrisSchematron)s);
+                    return NULL;
+                }
                 SchAssert* na = (SchAssert*)realloc(
                     r.asserts, (r.n + 1) * sizeof(SchAssert));
                 if (!na) {
@@ -417,14 +907,9 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
                 r.asserts[r.n].message = msg ? msg : sch_dup("");
                 r.n++;
             }
-            /* free this rule's appended lets */
-            for (size_t i = nrl; i < nrule; i++) {
-                free(rl[i].name);
-                free(rl[i].value);
-            }
-            for (size_t i = 0; i < nrl; i++) {
-                free(rl[i].name);
-                free(rl[i].value);
+            for (size_t i = 0; i < nsnap; i++) {
+                free(snap[i].name);
+                free(snap[i].value);
             }
             SchRule* nr = (SchRule*)realloc(
                 p.rules, (p.n + 1) * sizeof(SchRule));
@@ -457,6 +942,10 @@ static struct leptris_schematron* sch_parse_doc(LeptrisDocument doc,
         }
         s->patterns = np;
         s->patterns[s->n++] = p;
+        for (size_t i = 0; i < nrl; i++) {
+            free(rl[i].name);
+            free(rl[i].value);
+        }
         for (size_t i = 0; i < npl; i++) {
             free(pl[i].name);
             free(pl[i].value);
@@ -594,53 +1083,96 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
     for (size_t i = 0; i < s->n; i++) {
         SchPattern* p = &s->patterns[i];
         if (!p->active) continue;
+        /* Within a pattern a node fires at most ONE rule — the
+         * FIRST whose context matches it (ISO 2016 §5.5.5). */
+        LeptrisNodeRef* matched = NULL;
+        size_t nmatched = 0, capmatched = 0;
         for (size_t k = 0; k < p->n; k++) {
             SchRule* r = &p->rules[k];
+            /* ISO Schematron @context is an XSLT pattern: a
+             * relative pattern matches at ANY depth (pattern
+             * `item` ≡ `//item`, `@id` ≡ `//@id`, `comment()` ≡
+             * `//comment()`), `/` is the document node. Prefix
+             * relative patterns with //; absolute and
+             * parenthesized expressions pass through. */
+            const char* ce = r->context;
+            char* cbuf = NULL;
+            const char* cexpr = ce;
+            if (ce[0] != '/' && ce[0] != '(') {
+                cbuf = (char*)malloc(strlen(ce) + 3);
+                if (cbuf) {
+                    cbuf[0] = '/';
+                    cbuf[1] = '/';
+                    memcpy(cbuf + 2, ce, strlen(ce) + 1);
+                    cexpr = cbuf;
+                }
+            }
             LeptrisXPathResult ctxr = leptris_xpath_eval(
-                inst, NULL, r->context);
+                inst, NULL, cexpr);
+            free(cbuf);
             if (!ctxr) continue;
             size_t cnt = 0;
-            LeptrisElement* nodes = NULL;
+            LeptrisNodeRef* nodes = NULL;
+            LeptrisXPathNodeKind* kinds = NULL;
             if (leptris_xpath_result_type(ctxr) ==
                 LEPTRIS_XPATH_NODESET) {
                 size_t total = leptris_xpath_result_get_nodes_ex(
                     ctxr, NULL, NULL, (size_t)-1);
-                /* Schematron contexts are evaluated from the
-                 * DOCUMENT; the engine's NULL context is the root
-                 * ELEMENT, so a relative first step naming the
-                 * root matches the root itself. */
-                LeptrisElement root = leptris_document_root(inst);
-                const char* ce = r->context;
-                if (total == 0 && root && ce[0] != '/' &&
-                    ce[0] != '(' && strchr(ce, '/') == NULL) {
-                    const char* rn = leptris_element_name(root);
-                    const char* lb = strchr(ce, '[');
-                    size_t nl = lb ? (size_t)(lb - ce) : strlen(ce);
-                    if (rn && strlen(rn) == nl &&
-                        strncmp(ce, rn, nl) == 0) {
-                        total = 1;
-                        nodes = (LeptrisElement*)calloc(
-                            1, sizeof(LeptrisElement));
-                        if (nodes) {
-                            nodes[0] = root;
-                            cnt = 1;
-                        }
-                    }
-                }
-                if (total && !cnt) {
-                    nodes = (LeptrisElement*)calloc(
-                        total, sizeof(LeptrisElement));
-                    if (nodes)
-                        cnt = leptris_xpath_result_get_nodes(
-                            ctxr, nodes, total);
+                if (total) {
+                    nodes = (LeptrisNodeRef*)calloc(
+                        total, sizeof(LeptrisNodeRef));
+                    kinds = (LeptrisXPathNodeKind*)calloc(
+                        total, sizeof(LeptrisXPathNodeKind));
+                    if (nodes && kinds)
+                        cnt = leptris_xpath_result_get_nodes_ex(
+                            ctxr, nodes, kinds, total);
                 }
             }
             for (size_t m = 0; m < cnt; m++) {
                 if (!nodes || !nodes[m]) continue;
+                int seen = 0;
+                for (size_t q = 0; q < nmatched; q++)
+                    if (matched[q] == nodes[m]) { seen = 1; break; }
+                if (seen) continue;
+                if (nmatched == capmatched) {
+                    size_t nc = capmatched ? capmatched * 2 : 16;
+                    LeptrisNodeRef* nm = (LeptrisNodeRef*)realloc(
+                        matched, nc * sizeof(LeptrisNodeRef));
+                    if (nm) { matched = nm; capmatched = nc; }
+                }
+                if (nmatched < capmatched)
+                    matched[nmatched++] = nodes[m];
+                /* Asserts evaluate with the matched node as
+                 * context. Non-element contexts (attribute,
+                 * comment, text, PI) evaluate from their parent;
+                 * the DOCUMENT node evaluates as itself —
+                 * leptris_document_node works as an eval context
+                 * (child axis sees the root element). */
+                LeptrisElement eval_ctx = NULL;
+                if (cexpr[0] == '/' && cexpr[1] == 0) {
+                    /* "/" is the document node: tests' child axis
+                     * must see the root element. */
+                    eval_ctx =
+                        (LeptrisElement)leptris_document_node(inst);
+                } else if (kinds[m] == LEPTRIS_XPATH_NODE_ELEMENT) {
+                    eval_ctx = (LeptrisElement)nodes[m];
+                } else if (nodes[m] ==
+                           (LeptrisNodeRef)leptris_document_node(
+                               inst)) {
+                    eval_ctx =
+                        (LeptrisElement)leptris_document_node(inst);
+                } else {
+                    eval_ctx = leptris_node_parent(nodes[m]);
+                    if (!eval_ctx)
+                        eval_ctx = (LeptrisElement)
+                            leptris_document_node(inst);
+                    if (!eval_ctx)
+                        eval_ctx = leptris_document_root(inst);
+                }
                 for (size_t a = 0; a < r->n; a++) {
                     SchAssert* as = &r->asserts[a];
                     LeptrisXPathResult tr = leptris_xpath_eval(
-                        inst, nodes[m], as->test);
+                        inst, eval_ctx, as->test);
                     int truthy = tr ? leptris_xpath_result_boolean(tr)
                                     : 0;                    int fire = as->is_report ? truthy : !truthy;
                     if (tr) leptris_xpath_result_free(tr);
@@ -653,7 +1185,7 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
                     leptris_element_set_attribute(op, "test",
                                                   as->test);
                     char* loc =
-                        leptris_node_get_xpath((LeptrisNodeRef)nodes[m]);
+                        leptris_node_get_xpath(nodes[m]);
                     if (loc) {
                         leptris_element_set_attribute(op,
                                                       "location",
@@ -668,8 +1200,10 @@ static LeptrisDocument sch_run(struct leptris_schematron* s,
                 }
             }
             free(nodes);
+            free(kinds);
             leptris_xpath_result_free(ctxr);
         }
+        free(matched);
     }
     return svrl;
 }

@@ -78,3 +78,50 @@ landed; 6 RED-first specs. REMAINING in this lane: phase 3
 diagnostics/properties), phase 5 (conformance corpus, exact-N
 gate), phase 6 (bindings + `leptris validate` + migration
 prompt).
+
+## Phase 5 status (2026-09-10, branch feat/16-sch-phase5, WIP)
+
+Corpus vendored: test/sch/conformance-cases/ = 50 cases from
+schematron/schematron-conformance (core 44 + svrl 6; 14 error /
+19 invalid / 17 valid). Runner test/sch/test_schematron_corpus.cpp
+with the exact-N gate (agree == run == 50). Currently 47/50.
+
+Engine/runner work landed on the branch (RED-first via the corpus):
+- let-stack ownership: per-rule OWNED snapshot; base freed once
+  after the rules (was: freed inside the rule loop — SIGABRT on
+  two-rules-under-a-schema-let).
+- pattern semantics: @context is an XSLT pattern — relative
+  patterns prefix `//` (any-depth), `/` = document node (tests
+  evaluate at leptris_document_node so child steps see the root).
+- first-matching-rule-per-node within a pattern (matched set).
+- @defaultPhase honored when no explicit phase; phase-level lets
+  shadow into scope; suite phase selection = the schema's single
+  phase (older corpus format).
+- pattern lets: global visibility for later patterns (new names
+  only); duplicate-in-pattern / duplicate-in-phase / rule-level
+  duplicate / identical-value global redefinition = parse errors.
+- undefined $var rejection after substitution (contexts, tests,
+  value-of/@select, sch:name/@path, pattern/@documents) — literal
+  aware; NCName scan now includes '-' and '.'.
+- let @value is an EXPRESSION (verbatim substitution, bare);
+  element-content lets = quoted string value.
+- rule abstract="true" + <extends rule=> (pattern-scoped;
+  cross-pattern extends is an error); pattern abstract="true"
+  (2016 syntax) alongside is-abstract.
+- runner: verdict = ANY finding (failed-assert OR successful
+  report); transitive <extends href>/<include href> splicing from
+  embedded secondaries; subordinate documents via pattern/
+  @documents evaluated runner-side (multi-doc validate).
+
+Remaining 3 cases (the 50/50 tail):
+- xslt-key-01 + xslt-key-element-content-01: xsl:key + key() in
+  tests. Needs the XSLT key-index machinery factored into an
+  internal shared module (xslt_fn_key rides XsltExec via
+  ctx->current_fn_user_data; sch needs its own registration of
+  xsl:key decls + per-doc index build; custom-fn API is
+  string-typed and cannot return node-sets).
+- let-value-element-content-01: schema 2 passes (quoted string
+  value); schema 1 (`count(html:p)` at "/") needs the SchXslt
+  graft-into-document behavior (let content copied under the
+  document node) + sch:ns prefix bindings for expressions.
+
