@@ -91,6 +91,48 @@ static uint64_t digest_element(LeptrisElement e, LeptrisDigestFlags flags) {
     const char* name = leptris_element_get_name(e);
     h = digest_mix_str(h, name);
 
+    /* Namespace declarations ON this element (prefix->URI pairs,
+     * sorted like attrs so declaration order doesn't false-split;
+     * a changed or re-prefixed declaration changes the subtree —
+     * the x:root case resolved through the element URI, but an
+     * unused redeclaration only shows here). */
+    {
+        size_t ndecl = 0;
+        for (struct leptris_namespace* n2 = leptris_elem_namespaces(e);
+             n2; n2 = n2->next)
+            ndecl++;
+        if (ndecl > 0) {
+            struct leptris_namespace** order =
+                (struct leptris_namespace**)malloc(
+                    ndecl * sizeof(*order));
+            if (order) {
+                size_t k = 0;
+                for (struct leptris_namespace* n2 =
+                         leptris_elem_namespaces(e);
+                     n2; n2 = n2->next)
+                    order[k++] = n2;
+                for (size_t i = 0; i < ndecl; i++)
+                    for (size_t j = i + 1; j < ndecl; j++) {
+                        const char* pi = order[i]->prefix
+                                            ? order[i]->prefix : "";
+                        const char* pj = order[j]->prefix
+                                            ? order[j]->prefix : "";
+                        if (strcmp(pi, pj) > 0) {
+                            struct leptris_namespace* t = order[i];
+                            order[i] = order[j];
+                            order[j] = t;
+                        }
+                    }
+                h = digest_mix_u64(h, (uint64_t)ndecl);
+                for (size_t i = 0; i < ndecl; i++) {
+                    h = digest_mix_str(h, order[i]->prefix);
+                    h = digest_mix_str(h, order[i]->uri);
+                }
+                free(order);
+            }
+        }
+    }
+
     /* Attributes: resolved (URI, local, value) triples, sorted,
      * deduplicated first-wins (document order). */
     uint8_t acount = leptris_element_attribute_count(e);
