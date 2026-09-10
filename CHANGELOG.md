@@ -4,14 +4,17 @@
 
 ### Added
 
-- lane 16 phase 6 — leptris validate (RNG + Schematron) (cli)
-- lane 16 phase 5 — conformance corpus gate 50/50 (sch)
-- lane 16 phase 5 WIP — conformance corpus gate at 47/50 (sch)
+- **Schematron conformance gate (lane 16, phase 5)** — the 50-case [schematron/schematron-conformance](https://github.com/schematron/schematron-conformance) corpus vendored with an exact-N runner: **50/50** (14 error / 19 invalid / 17 valid). The corpus drove the engine to full ISO-2016 pattern semantics: XSLT-pattern contexts (any-depth `//` matching, `/` as the document node with tests evaluating from it), first-matching-rule-per-node, `@defaultPhase` + phase-scoped lets + phase selection, pattern lets with global visibility, abstract rules with pattern-scoped `extends`, duplicate-let and undefined-`$ref` rejection at every scope, and subordinate-document validation.
+- **`key()` for Schematron** — `xsl:key` declarations in schemas now back `key()` inside assert/report tests during validation (per-document registry bridge, lazily built indexes; `use` may be an expression or element content).
+- **Element-content lets** — a `<sch:let>` with element content grafts its content into the validated document as document-level children and binds the content's string value.
 
 ### Fixed
 
-- free pattern id and params on the phase-dup error path (LSan) (sch)
+- Use-after-free in Schematron context evaluation (the patternized context buffer was freed before the document-node special case re-read it).
 
+### Added
+
+- **`leptris validate` CLI (lane 16, phase 6)** — the one-stop validator: `--rng FILE` (RELAX NG), `--schematron FILE` / `-s` (ISO Schematron), `--phase ID`, and `--svrl` (full SVRL report instead of the summary). Exit 0 valid / 1 invalid / 3 I/O or schema error; the summary prints `failed-assert at <location>: <message>` lines and both validators can run in one call.
 
 
 ## [1.9.127] - 2026-09-10
