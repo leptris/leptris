@@ -4,18 +4,12 @@
 
 ### Added
 
-- lane 17 native XML diff — engine, public API, CLI (diff)
-- lane 16 phases 3+4 — abstract patterns, let scoping, phase selection (sch)
-- lane 16 phases 1+2 — schema IR + SVRL evaluator (sch)
+- **Schematron validation (lane 16, phases 1–4)** — native `sch:` schema IR + SVRL evaluator on the engine's XPath: patterns/rules/asserts/reports, `@context`/`@test`, `ns`/`let`/`param` scoping (schema → pattern → rule), abstract patterns with `is-a` instantiation and param substitution, phase selection (`leptris_schematron_parse_phase`), and `svrl:schematron-output` results (failed-assert / successful-report with `@location`/`@test`). Validity = zero failed-asserts. Loud-refuses non-XPath-1.x query bindings.
+- **Native XML diff (lane 17)** — `leptris diff [--ignore-ws] A B` and the C API behind it: Merkle-digest pruning of equal subtrees (#869), LCS alignment over child digests, same-name recursion, and a compact op model (`- path @attr "a" -> "b"`, `~ path "old" -> "new"`, `+ path <name>`, `x path <name>`) with positional `/name[i]` paths.
 
 ### Fixed
 
-- #965 keep operand order when nodeset is on the right of a relational comparison (xpath)
-- remove rebase-conflict residue from CMakeLists and header
-- diff specs use build-dir fixtures (no /tmp on Windows) (cli)
-- parse-file spec uses build-dir fixture (no /tmp on Windows) (sch)
-
-
+- **#965** — relational comparisons (`<`, `<=`, `>`, `>=`) with a nodeset on the right-hand side evaluated with the operands swapped: `10 >= @n` behaved as `@n >= 10`. Both comparison implementations (AST evaluator and bytecode VM) now compare in the written order; nodeset-vs-nodeset any-pair keeps left/right orientation too.
 
 ## [1.9.126] - 2026-09-09
 
