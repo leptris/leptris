@@ -201,6 +201,15 @@ LEPTRIS_API LeptrisSchematron leptris_schematron_parse(
 LEPTRIS_API LeptrisSchematron leptris_schematron_parse_file(
     const char* path, LeptrisStatus* status);
 
+/**
+ * Parse a Schematron schema selecting a PHASE (@p phase_id): only
+ * the patterns the phase activates are evaluated. NULL or "" for
+ * @p phase_id keeps every pattern (the default).
+ */
+LEPTRIS_API LeptrisSchematron leptris_schematron_parse_phase(
+    const char* schema, size_t len, const char* phase_id,
+    LeptrisStatus* status);
+
 /** Free a schema handle. */
 LEPTRIS_API void leptris_schematron_free(LeptrisSchematron sch);
 
