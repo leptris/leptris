@@ -140,6 +140,59 @@ static void d_diff_element(struct leptris_diff* d, LeptrisElement a,
                    attr_cvalue(bt));
     }
 
+    /* Namespace declarations: prefix->URI pairs on THIS element.
+     * Differences surface as UPDATE_ATTR ops on the xmlns names —
+     * the op model used to be namespace-blind (a changed URI
+     * reported "identical"; the digest saw it, the reporting
+     * didn't — found via canon's namespace specs). Inherited-URI
+     * changes are captured at the declaring element. */
+    for (struct leptris_namespace* na = leptris_elem_namespaces(a);
+         na; na = na->next) {
+        const char* b_uri = NULL;
+        for (struct leptris_namespace* nb2 =
+                 leptris_elem_namespaces(b);
+             nb2; nb2 = nb2->next) {
+            if ((na->prefix == NULL && nb2->prefix == NULL) ||
+                (na->prefix && nb2->prefix &&
+                 strcmp(na->prefix, nb2->prefix) == 0)) {
+                b_uri = nb2->uri;
+                break;
+            }
+        }
+        char nm[160];
+        if (na->prefix)
+            snprintf(nm, sizeof nm, "xmlns:%s", na->prefix);
+        else
+            snprintf(nm, sizeof nm, "xmlns");
+        if (!b_uri)
+            d_push(d, LEPTRIS_DIFF_UPDATE_ATTR, path, nm,
+                   na->uri ? na->uri : "", "");
+        else if (strcmp(na->uri ? na->uri : "", b_uri) != 0)
+            d_push(d, LEPTRIS_DIFF_UPDATE_ATTR, path, nm,
+                   na->uri ? na->uri : "", b_uri);
+    }
+    for (struct leptris_namespace* nb2 = leptris_elem_namespaces(b);
+         nb2; nb2 = nb2->next) {
+        int found = 0;
+        for (struct leptris_namespace* na = leptris_elem_namespaces(a);
+             na; na = na->next) {
+            if ((na->prefix == NULL && nb2->prefix == NULL) ||
+                (na->prefix && nb2->prefix &&
+                 strcmp(na->prefix, nb2->prefix) == 0)) {
+                found = 1;
+                break;
+            }
+        }
+        if (found) continue;
+        char nm[160];
+        if (nb2->prefix)
+            snprintf(nm, sizeof nm, "xmlns:%s", nb2->prefix);
+        else
+            snprintf(nm, sizeof nm, "xmlns");
+        d_push(d, LEPTRIS_DIFF_UPDATE_ATTR, path, nm, "",
+               nb2->uri ? nb2->uri : "");
+    }
+
     /* Children: LCS over digests, then run alignment. */
     LeptrisNodeRef A[DIFF_MAX_CHILDREN], B[DIFF_MAX_CHILDREN];
     size_t na = 0, nb = 0;

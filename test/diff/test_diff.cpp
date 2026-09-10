@@ -172,6 +172,61 @@ TEST(XmlDiff, IgnoreWsTextOption) {
     leptris_document_free(b);
 }
 
+/* Namespace declarations and element namespaces are part of the
+ * tree: a changed URI must surface as an op (digest already sees
+ * it — found via canon's namespace specs; the op model used to be
+ * namespace-blind and reported "identical"). */
+TEST(XmlDiff, NamespaceDeclarationChangeSurfaces) {
+    LeptrisDocument a = P(
+        "<x:root xmlns:x='http://a/ns'><x:child>c</x:child></x:root>");
+    LeptrisDocument b = P(
+        "<x:root xmlns:x='http://b/ns'><x:child>c</x:child></x:root>");
+    LeptrisDiff d = leptris_diff(a, b, LEPTRIS_DIFF_DEFAULT, NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_GT(leptris_diff_op_count(d), 0u);
+    if (leptris_diff_op_count(d) > 0) {
+        EXPECT_EQ(leptris_diff_op_type(d, 0), LEPTRIS_DIFF_UPDATE_ATTR);
+        EXPECT_STREQ(leptris_diff_op_name(d, 0), "xmlns:x");
+        EXPECT_STREQ(leptris_diff_op_before(d, 0), "http://a/ns");
+        EXPECT_STREQ(leptris_diff_op_after(d, 0), "http://b/ns");
+    }
+    leptris_diff_free(d);
+    leptris_document_free(a);
+    leptris_document_free(b);
+}
+
+TEST(XmlDiff, NamespaceAddAndRemoveSurface) {
+    LeptrisDocument a = P("<r xmlns:p='http://a/ns'><i/></r>");
+    LeptrisDocument b = P("<r xmlns:q='http://b/ns'><i/></r>");
+    LeptrisDiff d = leptris_diff(a, b, LEPTRIS_DIFF_DEFAULT, NULL);
+    ASSERT_NE(d, nullptr);
+    size_t n = leptris_diff_op_count(d);
+    EXPECT_GE(n, 2u);   /* remove xmlns:p, add xmlns:q */
+    char* ser = leptris_diff_serialize(d);
+    EXPECT_NE(strstr(ser, "xmlns:p"), nullptr);
+    EXPECT_NE(strstr(ser, "xmlns:q"), nullptr);
+    leptris_free_string(ser);
+    leptris_diff_free(d);
+    leptris_document_free(a);
+    leptris_document_free(b);
+}
+
+TEST(XmlDiff, SameNamespaceStillIdentical) {
+    LeptrisDocument a = P(
+        "<x:root xmlns:x='http://a/ns'><x:child>c</x:child></x:root>");
+    LeptrisDocument b = P(
+        "<y:root xmlns:y='http://a/ns'><y:child>c</y:child></y:root>");
+    /* same URIs, different prefixes: declarations xmlns:x vs
+     * xmlns:y differ textually — an op is acceptable, but the
+     * DIGEST must not claim identity when declarations differ */
+    LeptrisDiff d = leptris_diff(a, b, LEPTRIS_DIFF_DEFAULT, NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_GT(leptris_diff_op_count(d), 0u);
+    leptris_diff_free(d);
+    leptris_document_free(a);
+    leptris_document_free(b);
+}
+
 TEST(XmlDiff, NullArgsAndMismatchedRoots) {
     EXPECT_EQ(leptris_diff(nullptr, nullptr, LEPTRIS_DIFF_DEFAULT,
                            nullptr),
