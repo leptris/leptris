@@ -149,6 +149,8 @@ refactor — the registry architecture did the work:
   Leptris::XML::Schematron (parse/parse_file/parse(phase:),
   #valid?, #validate -> SVRL document; 6 specs, gem suite 570/570
   against a shared build). USER MERGES.
-- REMAINING for the lane: python mirror PR (leptris-py), then the
-  standoc/oXygen migration prompt. Lane CLOSES after bindings
-  merge.
+- Python binding PR OPEN: leptris-py#99 — leptris.Schematron
+  (Schematron/from_file/from_phase, is_valid, validate -> SVRL
+  Document; 6 tests, suite 412/412). USER MERGES.
+- REMAINING for the lane: the standoc/oXygen migration prompt
+  (after bindings merge). Lane CLOSES then.
