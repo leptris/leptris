@@ -84,3 +84,17 @@ the #692 silent-wrong case, typeswitch).
 Lane 11 remainder (qt3tests subset, collection(), Windows CLI
 harness) is tracked in the line above; lane 12 continues with
 group by / windowing / typeswitch / error-code model.
+
+## Update 2026-09-10: QT3 adoption slice 1 SHIPPED (PR #975)
+
+fn/substring 45/45 via test/xquery/test_qt3.cpp — the exact-N
+runner over the w3c/qt3tests test-set format (assert-string-value/
+eq/true/false + all-of; unsupported kinds and env refs exclude
+the case and are counted). FOUR engine fixes: pre-bound prefixes
+(fn/xs/math/map/array/err, no declaration needed), exponent
+literals (0E0/-3.1e0), count() over atomics = 1 (both twins),
+codepoint-indexed substring (astral = one position). NEXT slices:
+more fn/ sets + prod/ (ForExpr, OrderBy...), runner surface
+(assert-type via xs: type checking, assert-xml, any-of),
+then the XTH-connector CI report. Lane 12 mirrors the same
+runner (3.1 sets: array/, map/, higher-order fns).
