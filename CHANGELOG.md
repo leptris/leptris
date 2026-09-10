@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.130] - 2026-09-10
+
+### Added
+
+- QT3 subset adoption — fn/substring 45/45 (xquery)
+
+
+
 ## [1.9.129] - 2026-09-10
 
 ### Fixed
