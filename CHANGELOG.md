@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.135] - 2026-09-11
+
+### Fixed
+
+- initial-mode comments are document children (#659) (html)
+
+
+
 ## [1.9.134] - 2026-09-11
 
 ### Added
