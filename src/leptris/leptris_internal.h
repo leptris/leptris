@@ -588,6 +588,13 @@ typedef union {
 struct leptris_xpath_result {
     XPathResultType type;
     XPathResultValue value;
+    /* xs:integer fidelity: a NUMBER that came from an int64
+     * lexical form keeps the exact value here so stringification
+     * prints decimal, not double scientific. result_new MUST
+     * clear it — results recycle through a thread-local
+     * free-list. */
+    int is_int;
+    long long int_value;
 };
 
 /* Namespace mapping for XPath context (v0.8.0) */

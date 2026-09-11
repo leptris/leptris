@@ -728,3 +728,41 @@ TEST(XQueryCore, ExternalVariableParams) {
     leptris_xquery_free(xe);
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, XsIntegerLexicalFidelity) {
+    /* xs:integer keeps the int64 value: the decimal string form
+     * survives at every boundary (constructor result, string(),
+     * let-binding) instead of collapsing through double into
+     * scientific notation. Arithmetic demotes to double — that
+     * is the documented boundary of this slice. */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "xs:integer('999999999999999999')"),
+        "999999999999999999");
+    EXPECT_EQ(seq_string(doc,
+        "string(xs:integer('999999999999999999'))"),
+        "999999999999999999");
+    EXPECT_EQ(seq_string(doc,
+        "let $x := xs:integer('999999999999999999') return string($x)"),
+        "999999999999999999");
+    EXPECT_EQ(seq_string(doc,
+        "xs:integer('9223372036854775807')"),
+        "9223372036854775807");
+    EXPECT_EQ(seq_string(doc, "xs:integer(2.0e9)"), "2000000000");
+    EXPECT_EQ(seq_string(doc, "xs:integer('-7')"), "-7");
+    EXPECT_EQ(seq_string(doc, "xs:integer('5') + 1"), "6");
+    EXPECT_EQ(seq_string(doc,
+        "xs:decimal('999999999999999999')"),
+        "999999999999999999");
+    EXPECT_EQ(seq_string(doc, "xs:long('-92233720368547758')"),
+              "-92233720368547758");
+    EXPECT_EQ(seq_string(doc, "xs:positiveInteger('1')"), "1");
+    /* Type bounds reject out-of-range lexicals. */
+    EXPECT_EQ(seq_string(doc, "xs:int('2147483648')"), "(eval-failed)");
+    EXPECT_EQ(seq_string(doc, "xs:positiveInteger('-1')"),
+              "(eval-failed)");
+    EXPECT_EQ(seq_string(doc, "xs:unsignedShort('-1')"), "(eval-failed)");
+    leptris_document_free(doc);
+}
+

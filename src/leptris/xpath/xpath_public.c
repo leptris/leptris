@@ -446,6 +446,7 @@ LEPTRIS_API char* leptris_xpath_result_string(LeptrisXPathResult result) {
         case XPATH_RESULT_BOOLEAN:
             return leptris_strdup(result->value.boolean_value ? "true" : "false");
         case XPATH_RESULT_NUMBER:
+            if (result->is_int) return xpath_int_to_string(result->int_value);
             return xpath_number_to_string(result->value.number_value);
         case XPATH_RESULT_NODESET:
             if (result->value.nodeset_value &&
