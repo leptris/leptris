@@ -34,13 +34,22 @@ std::string Html(const char* in) {
     const char* open_wh = "<html><head/><body>";
     const char* open_w = "<html><body>";
     const char* close_w = "</body></html>";
+    /* Document-level prolog comments (WHATWG initial mode) ride
+     * ahead of the wrapper — keep them, strip around them. */
+    size_t pl = 0;
+    while (r.compare(pl, 4, "<!--") == 0) {
+        size_t e = r.find("-->", pl + 4);
+        if (e == std::string::npos) break;
+        pl = e + 3;
+    }
     for (const char* ow : {open_wh, open_w}) {
-        if (r.compare(0, std::strlen(ow), ow) == 0 &&
-            r.size() >= std::strlen(ow) + std::strlen(close_w) &&
+        if (r.compare(pl, std::strlen(ow), ow) == 0 &&
+            r.size() >= pl + std::strlen(ow) + std::strlen(close_w) &&
             r.compare(r.size() - std::strlen(close_w),
                       std::strlen(close_w), close_w) == 0) {
-            return r.substr(std::strlen(ow),
-                            r.size() - std::strlen(ow) -
+            return r.substr(0, pl) +
+                   r.substr(pl + std::strlen(ow),
+                            r.size() - pl - std::strlen(ow) -
                                 std::strlen(close_w));
         }
     }
@@ -124,6 +133,57 @@ TEST(HtmlParse, SynthesizesNokogiriDocumentShape) {
                 nullptr);
     leptris_free_string(out);
     leptris_document_free(doc);
+}
+
+TEST(HtmlParse, LeadingCommentsBelongToTheDocument) {
+    /* WHATWG initial/before-html: a comment token inserts as a
+     * child of the DOCUMENT, before the (implied) <html> element
+     * (html5lib tests6/ html5test-com ground truth). Text first
+     * starts body content — later comments stay in the flow. The
+     * html4 entry keeps the libxml2/Nokogiri shape (comment rides
+     * inside the synthesized body). */
+    LeptrisStatus st = LEPTRIS_OK;
+
+    const char w1[] = "<!-- lead --><p>hi</p>";
+    LeptrisDocument d1 = leptris_parse_html_string(w1, std::strlen(w1), &st);
+    ASSERT_NE(d1, nullptr);
+    char* o1 = leptris_document_serialize(d1, nullptr);
+    ASSERT_NE(o1, nullptr);
+    EXPECT_STREQ(o1,
+        "<!-- lead --><html><head/><body><p>hi</p></body></html>");
+    leptris_free_string(o1);
+    leptris_document_free(d1);
+
+    const char w2[] = "<!-- a --><!-- b --><p>x</p>";
+    LeptrisDocument d2 = leptris_parse_html_string(w2, std::strlen(w2), &st);
+    ASSERT_NE(d2, nullptr);
+    char* o2 = leptris_document_serialize(d2, nullptr);
+    ASSERT_NE(o2, nullptr);
+    EXPECT_STREQ(o2,
+        "<!-- a --><!-- b --><html><head/><body><p>x</p></body>"
+        "</html>");
+    leptris_free_string(o2);
+    leptris_document_free(d2);
+
+    /* Non-whitespace text opens body content; the comment that
+     * follows it is in-body. */
+    const char w3[] = "hi<!-- c -->";
+    LeptrisDocument d3 = leptris_parse_html_string(w3, std::strlen(w3), &st);
+    ASSERT_NE(d3, nullptr);
+    char* o3 = leptris_document_serialize(d3, nullptr);
+    ASSERT_NE(o3, nullptr);
+    EXPECT_STREQ(o3, "<html><head/><body>hi<!-- c --></body></html>");
+    leptris_free_string(o3);
+    leptris_document_free(d3);
+
+    const char n1[] = "<!-- lead --><p>hi</p>";
+    LeptrisDocument d4 = leptris_parse_html4_string(n1, std::strlen(n1), &st);
+    ASSERT_NE(d4, nullptr);
+    char* o4 = leptris_document_serialize(d4, nullptr);
+    ASSERT_NE(o4, nullptr);
+    EXPECT_STREQ(o4, "<html><body><!-- lead --><p>hi</p></body></html>");
+    leptris_free_string(o4);
+    leptris_document_free(d4);
 }
 
 TEST(HtmlParse, ExplicitHtmlElementIsHonored) {
@@ -647,8 +707,8 @@ TEST(HtmlTwoModes, TemplatePlacement) {
     };
     struct {
         const char* in;
-        const char* head_tpl;   /* "name(/html/head/*[1])" or "" */
-        const char* body_tpl;   /* "name(/html/body/*[1])" or "" */
+        const char* head_tpl;   /* name(/html/head/child1) or "" */
+        const char* body_tpl;   /* name(/html/body/child1) or "" */
     } cases[] = {
         {"<body><template>Hello</template>", "", "template"},
         {"<template>Hello</template>", "template", ""},

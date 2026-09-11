@@ -2370,6 +2370,13 @@ typedef struct {
     LeptrisElement root;        /* first top-level element */
     LeptrisNodeRef top_head;    /* top-level chain: text, comments, root */
     LeptrisNodeRef top_tail;
+    /* #659 WHATWG initial mode: comments tokenized while the
+     * document is still in its initial phase (no start/end tag,
+     * no non-whitespace text yet) are children of the DOCUMENT —
+     * kept ahead of the tree at commit (html4 keeps the libxml2
+     * shape). */
+    int left_initial;
+    LeptrisNodeRef prolog_head, prolog_tail;
     /* #659 master mode flag (the per-slice flags below derive from
      * the same html_parse_shared arg). */
     int whatwg;
@@ -2854,6 +2861,17 @@ static void h_insert_before(HBuilder* b, LeptrisElement parent,
 }
 
 static void h_append(HBuilder* b, LeptrisNodeRef n) {
+    if (b->whatwg && !b->left_initial &&
+        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
+        const char* t = leptris_text_node_get_content(n);
+        if (t)
+            for (const char* q = t; *q; q++)
+                if (*q != ' ' && *q != '\t' && *q != '\n' &&
+                    *q != '\r') {
+                    b->left_initial = 1;
+                    break;
+                }
+    }
     if (b->depth > 0) {
         LeptrisElement top = b->open[b->depth - 1];
         /* #659 foster (WHATWG only): text/elements in table context
@@ -2917,6 +2935,7 @@ static LeptrisElement h_open_foreign(HBuilder* b, const char* name,
     LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
     if (!e) return NULL;
     leptris_root_doc_register(e, b->doc);
+    b->left_initial = 1;
     leptris_element_set_namespace_uri_view(
         e, leptris_sv_from_cstr(
                ns == H_NS_SVG ? H_SVG_URI : H_MATH_URI));
@@ -2938,6 +2957,7 @@ static LeptrisElement h_open_element(HBuilder* b, const char* name) {
      * resolved internal; the root-map entry makes that work before
      * the element is attached (round-20 create contract). */
     leptris_root_doc_register(e, b->doc);
+    b->left_initial = 1;
     h_append(b, (LeptrisNodeRef)e);
     if (b->depth == 0 && !b->root) b->root = e;
     if (b->depth < 256) {
@@ -3198,7 +3218,17 @@ static LeptrisDocument html_parse_shared(
                     cs, clen, b.pool);
                 if (c) {
                     c->owner_doc = doc;
-                    h_append(&b, (LeptrisNodeRef)c);
+                    if (b.whatwg && !b.left_initial) {
+                        /* Initial mode: a Document-level child. */
+                        if (b.prolog_tail)
+                            leptris_node_set_next_sibling(
+                                b.prolog_tail, (LeptrisNodeRef)c);
+                        else
+                            b.prolog_head = (LeptrisNodeRef)c;
+                        b.prolog_tail = (LeptrisNodeRef)c;
+                    } else {
+                        h_append(&b, (LeptrisNodeRef)c);
+                    }
                 }
             } else {
                 /* First <!doctype ...> is recorded on the document
@@ -3339,6 +3369,8 @@ static LeptrisDocument html_parse_shared(
         }
 
         if (k1 == '/') {
+            /* End tag: ends the initial insertion mode too. */
+            b.left_initial = 1;
             /* End tag: name, then skip to '>'. */
             const char* ns = p + 2;
             const char* q = ns;
@@ -3505,7 +3537,9 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
-        /* Start tag. */
+        /* Start tag. Even a dropped structural tag ends the
+         * initial insertion mode — later comments are in-flow. */
+        b.left_initial = 1;
         const char* ns = p + 1;
         const char* q = ns;
         while (q < end && !h_is_ws(*q) && *q != '>' && *q != '/') q++;
@@ -3941,7 +3975,13 @@ done:
     }
     doc->new_dom_root = b.root;
     leptris_root_doc_register(b.root, doc);
-    doc->doc_children_head = (LeptrisNodeRef)b.top_head;
+    if (b.prolog_head) {
+        leptris_node_set_next_sibling(b.prolog_tail,
+                                      (LeptrisNodeRef)b.top_head);
+        doc->doc_children_head = b.prolog_head;
+    } else {
+        doc->doc_children_head = (LeptrisNodeRef)b.top_head;
+    }
     doc->doc_children_tail = b.top_tail;
     return doc;
 }
