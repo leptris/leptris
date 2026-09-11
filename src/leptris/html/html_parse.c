@@ -25,7 +25,8 @@
 /* HTML named character references, single-codepoint set
  * (generated from the WHATWG list; HTML4 252-set + common
  * punctuation). Names are matched case-SENSITIVELY. */
-static const struct { const char* name; uint32_t cp; } k_html_entities[] = {
+typedef struct { const char* name; uint32_t cp; } HtmlEnt;
+static const HtmlEnt k_html_entities[] = {
     {"AElig", 0x000C6},
     {"AMP", 0x00026},
     {"Aacute", 0x000C1},
@@ -2170,7 +2171,7 @@ static int h_closes(const char* open, const char* start) {
  * — O(2032 x len) per entity reference, superlinear in entity
  * count. A lazily-sorted pointer index turns each lookup into a
  * binary search. */
-typedef const struct { const char* name; uint32_t cp; }* HtmlEntPtr;
+typedef const HtmlEnt* HtmlEntPtr;
 static HtmlEntPtr h_ent_index[K_HTML_ENTITY_COUNT];
 static int h_ent_sorted = 0;
 
@@ -2206,11 +2207,6 @@ static char* h_decode_ww(LeptrisMemoryPool* pool, const char* s,
                          const char* e, int in_attr, int whatwg) {
     return h_decode_ex(pool, s, e, in_attr, whatwg);
 }
-static char* h_decode(LeptrisMemoryPool* pool, const char* s,
-                      const char* e) {
-    return h_decode_ex(pool, s, e, 0, 0);
-}
-
 static size_t h_utf8_encode(uint32_t cp, char* out) {
     if (cp < 0x80) { out[0] = (char)cp; return 1; }
     if (cp < 0x800) {
