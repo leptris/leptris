@@ -28,6 +28,12 @@
  * significant digits, trailing zeros trimmed; everything else
  * prints scientific (%.14e, mantissa zeros trimmed, exponent kept).
  * Returns a malloc'd string. */
+char* xpath_int_to_string(long long v) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", v);
+    return leptris_strdup(buf);
+}
+
 char* xpath_number_to_string(double number) {
     if (isnan(number)) return leptris_strdup("NaN");
     if (isinf(number))
@@ -270,6 +276,7 @@ char* xpath_to_string(struct leptris_xpath_result* result) {
             return leptris_strdup(result->value.string_value ?
                                result->value.string_value : "");
         case XPATH_RESULT_NUMBER: {
+            if (result->is_int) return xpath_int_to_string(result->int_value);
             return xpath_number_to_string(result->value.number_value);
         }
         case XPATH_RESULT_BOOLEAN:

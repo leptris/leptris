@@ -153,7 +153,8 @@ bool check(const Assertion& a, LeptrisXPathResult r) {
 void run_test_set(const char* set_path,
                   const std::vector<std::pair<const char*, const char*>>&
                       env_sources,
-                  int expected_adopted) {
+                  int expected_adopted,
+                  const std::vector<const char*>& extra_excludes = {}) {
     std::string xml = slurp(std::string(LEPTRIS_QT3_DIR) + "/" + set_path);
     ASSERT_FALSE(xml.empty());
     LeptrisStatus st = LEPTRIS_OK;
@@ -223,6 +224,8 @@ void run_test_set(const char* set_path,
                                 * engine surface; the codepoint and
                                 * html-ascii-case-insensitive URIs
                                 * ARE (3-arg contains) */
+        for (const char* ex : extra_excludes)
+            if (ok_kinds && strstr(q, ex)) ok_kinds = false;
         if (!ok_kinds) {
             skipped++;
             continue;
@@ -307,4 +310,15 @@ TEST(Qt3Subset, FnStartsWith) {
 TEST(Qt3Subset, FnEndsWith) {
     /* UCA-collation cases (15) and error-assertion cases (6) skip. */
     run_test_set("fn/ends-with.xml", {}, 34);
+}
+
+TEST(Qt3Subset, FnConcat) {
+    /* Error-assertion cases (6) skip. The xs:double/xs:float
+     * 2args cases skip too: their assert-string-values want the
+     * 17-significant-digit E-notation canonical double form,
+     * which the number formatter deliberately does not print
+     * (libxml2 xmlXPathFormatNumber parity is load-bearing for
+     * the libxslt suite). */
+    run_test_set("fn/concat.xml", {}, 80,
+                 {"xs:double(", "xs:float("});
 }

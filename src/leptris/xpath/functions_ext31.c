@@ -22,6 +22,7 @@
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <stdio.h>
 #include <math.h>
 #include <ctype.h>
@@ -1732,10 +1733,44 @@ static struct leptris_xpath_result* fn_xs_number_ctor(XPathContext* ctx,
             leptris_xpath_result_free(r);
             return NULL;
         }
-        if (integer_only) d = strtod(buf, NULL);
+        if (integer_only) {
+            /* int64 fidelity: keep the exact lexical value — a
+             * double roundtrip collapses 999999999999999999 to
+             * 1e+18. Out-of-range lexicals demote to double. */
+            errno = 0;
+            char* endp = NULL;
+            long long iv = strtoll(buf, &endp, 10);
+            if (!errno && endp && !*endp) {
+                leptris_xpath_result_free(r);
+                struct leptris_xpath_result* out =
+                    xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!out) return NULL;
+                out->value.number_value = (double)iv;
+                out->is_int = 1;
+                out->int_value = iv;
+                (void)n;
+                return out;
+            }
+            d = strtod(buf, NULL);
+        }
     } else {
         d = leptris_xpath_result_number(r);
-        if (integer_only) d = (d < 0) ? ceil(d) : floor(d);
+        if (integer_only) {
+            d = (d < 0) ? ceil(d) : floor(d);
+            if (d >= -9.2233720368547758e18 &&
+                d <= 9.2233720368547758e18 && d == (double)(long long)d) {
+                long long iv = (long long)d;
+                leptris_xpath_result_free(r);
+                struct leptris_xpath_result* out =
+                    xpath_result_new(XPATH_RESULT_NUMBER);
+                if (!out) return NULL;
+                out->value.number_value = d;
+                out->is_int = 1;
+                out->int_value = iv;
+                (void)n;
+                return out;
+            }
+        }
     }
     leptris_xpath_result_free(r);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
@@ -1751,6 +1786,110 @@ static struct leptris_xpath_result* fn_xs_integer(XPathContext* ctx,
 }
 static struct leptris_xpath_result* fn_xs_double(XPathContext* ctx,
         XPathASTNode** a, size_t n) {
+    return fn_xs_number_ctor(ctx, a, n, 0);
+}
+
+/* ---- integer-subtype constructors (QT3 fn/concat): the same
+ * int64 fidelity as xs:integer, each with its type bounds.
+ * xs:unsignedLong is int64-backed — literals beyond LLONG_MAX
+ * are out of range (documented boundary). ---- */
+static struct leptris_xpath_result* xs_int_bound(
+        XPathContext* ctx, XPathASTNode** args, size_t n,
+        long long lo, long long hi, const char* tname) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+    if (!r) return NULL;
+    long long iv = 0;
+    int have = 0;
+    if (r->type == XPATH_RESULT_STRING) {
+        const char* s = r->value.string_value ? r->value.string_value
+                                              : "";
+        while (isspace((unsigned char)*s)) s++;
+        const char* e = s + strlen(s);
+        while (e > s && isspace((unsigned char)e[-1])) e--;
+        const char* p = (s < e && (*s == '+' || *s == '-')) ? s + 1 : s;
+        if (e > p && strspn(p, "0123456789") == (size_t)(e - p) &&
+            (size_t)(e - s) < 40) {
+            char buf[40];
+            memcpy(buf, s, (size_t)(e - s));
+            buf[e - s] = 0;
+            errno = 0;
+            char* endp = NULL;
+            iv = strtoll(buf, &endp, 10);
+            have = !errno && endp && !*endp;
+        }
+        if (!have) {
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "Invalid lexical form for %s", tname);
+            leptris_xpath_result_free(r);
+            return NULL;
+        }
+    } else {
+        double d = leptris_xpath_result_number(r);
+        d = (d < 0) ? ceil(d) : floor(d);
+        if (d >= -9.2233720368547758e18 &&
+            d <= 9.2233720368547758e18 && d == (double)(long long)d) {
+            iv = (long long)d;
+            have = 1;
+        } else {
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "Value out of range for %s", tname);
+            leptris_xpath_result_free(r);
+            return NULL;
+        }
+    }
+    leptris_xpath_result_free(r);
+    if (iv < lo || iv > hi) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "Value out of range for %s", tname);
+        return NULL;
+    }
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
+    if (!out) return NULL;
+    out->value.number_value = (double)iv;
+    out->is_int = 1;
+    out->int_value = iv;
+    (void)n;
+    return out;
+}
+
+#define XS_INT_SUB(FN, LO, HI, TNAME)                                   \
+    static struct leptris_xpath_result* FN(                             \
+            XPathContext* ctx, XPathASTNode** a, size_t n) {            \
+        return xs_int_bound(ctx, a, n, LO, HI, TNAME);                  \
+    }
+
+XS_INT_SUB(fn_xs_int, -2147483647LL - 1, 2147483647LL, "xs:int")
+XS_INT_SUB(fn_xs_long, LLONG_MIN, LLONG_MAX, "xs:long")
+XS_INT_SUB(fn_xs_short, -32768, 32767, "xs:short")
+XS_INT_SUB(fn_xs_ushort, 0, 65535, "xs:unsignedShort")
+XS_INT_SUB(fn_xs_ulong, 0, LLONG_MAX, "xs:unsignedLong")
+XS_INT_SUB(fn_xs_negint, LLONG_MIN, -1, "xs:negativeInteger")
+XS_INT_SUB(fn_xs_posint, 1, LLONG_MAX, "xs:positiveInteger")
+XS_INT_SUB(fn_xs_nonpos, LLONG_MIN, 0, "xs:nonPositiveInteger")
+XS_INT_SUB(fn_xs_nonneg, 0, LLONG_MAX, "xs:nonNegativeInteger")
+
+/* xs:decimal: an all-integer lexical keeps int64 fidelity
+ * (QT3 fn/concatdec2args); fractions ride the double ctor. */
+static struct leptris_xpath_result* fn_xs_decimal(XPathContext* ctx,
+        XPathASTNode** a, size_t n) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, a[0]);
+    if (!r) return NULL;
+    if (r->type == XPATH_RESULT_STRING) {
+        const char* s = r->value.string_value ? r->value.string_value
+                                              : "";
+        while (isspace((unsigned char)*s)) s++;
+        const char* e = s + strlen(s);
+        while (e > s && isspace((unsigned char)e[-1])) e--;
+        const char* p = (s < e && (*s == '+' || *s == '-')) ? s + 1 : s;
+        int all_digits = e > p &&
+                         strspn(p, "0123456789") == (size_t)(e - p);
+        leptris_xpath_result_free(r);
+        if (all_digits)
+            return xs_int_bound(ctx, a, n, LLONG_MIN, LLONG_MAX,
+                                "xs:decimal");
+    } else {
+        leptris_xpath_result_free(r);
+    }
     return fn_xs_number_ctor(ctx, a, n, 0);
 }
 
@@ -4111,7 +4250,16 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:anyURI", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:integer", fn_xs_integer, 1, 1);
     xpath_function_registry_register(registry, "xs:double", fn_xs_double, 1, 1);
-    xpath_function_registry_register(registry, "xs:decimal", fn_xs_double, 1, 1);
+    xpath_function_registry_register(registry, "xs:decimal", fn_xs_decimal, 1, 1);
+    xpath_function_registry_register(registry, "xs:int", fn_xs_int, 1, 1);
+    xpath_function_registry_register(registry, "xs:long", fn_xs_long, 1, 1);
+    xpath_function_registry_register(registry, "xs:short", fn_xs_short, 1, 1);
+    xpath_function_registry_register(registry, "xs:unsignedShort", fn_xs_ushort, 1, 1);
+    xpath_function_registry_register(registry, "xs:unsignedLong", fn_xs_ulong, 1, 1);
+    xpath_function_registry_register(registry, "xs:negativeInteger", fn_xs_negint, 1, 1);
+    xpath_function_registry_register(registry, "xs:positiveInteger", fn_xs_posint, 1, 1);
+    xpath_function_registry_register(registry, "xs:nonPositiveInteger", fn_xs_nonpos, 1, 1);
+    xpath_function_registry_register(registry, "xs:nonNegativeInteger", fn_xs_nonneg, 1, 1);
     xpath_function_registry_register(registry, "xs:boolean", fn_xs_boolean, 1, 1);
     xpath_function_registry_register(registry, "xs:dateTime", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:time", fn_passthrough_ctor, 1, 1);

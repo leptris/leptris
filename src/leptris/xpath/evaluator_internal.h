@@ -20,6 +20,7 @@ double xpath_to_number(struct leptris_xpath_result* result);
 char* xpath_to_string(struct leptris_xpath_result* result);
 char* get_node_text(void* node);
 char* xpath_number_to_string(double number);
+char* xpath_int_to_string(long long v);
 
 /* From evaluator_operators.c — synthetic sequence members and the
  * storage-independent nodeset copy (let unwind safety). */

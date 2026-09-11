@@ -222,6 +222,7 @@ XPathFunctionDef* xpath_function_registry_get(
  */
 extern char* get_node_text(void* node);
 extern char* xpath_number_to_string(double number);
+extern char* xpath_int_to_string(long long v);
 
 /* Backward compatibility wrapper */
 static char* get_element_text(LeptrisElement element) {
@@ -238,6 +239,7 @@ static char* result_to_string(struct leptris_xpath_result* result) {
                    leptris_strdup(result->value.string_value) : leptris_strdup("");
 
         case XPATH_RESULT_NUMBER: {
+            if (result->is_int) return xpath_int_to_string(result->int_value);
             return xpath_number_to_string(result->value.number_value);
         }
 
