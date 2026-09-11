@@ -766,14 +766,34 @@ static struct leptris_xpath_result* xpath_func_deep_equal(XPathContext* context,
     return result;
 }
 
-/* contains(string, string) - Check if string contains substring */
+/* ASCII-only case-insensitive substring search — the
+ * html-ascii-case-insensitive collation folds ASCII letters and
+ * nothing else (WHATWG ASCII case-insensitive matching). */
+static int ascii_ci_contains(const char* hay, const char* needle) {
+    if (!*needle) return 1;
+    for (; *hay; hay++) {
+        const char* a = hay;
+        const char* b = needle;
+        while (*a && *b &&
+               tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+            a++;
+            b++;
+        }
+        if (!*b) return 1;
+    }
+    return 0;
+}
+
+/* contains(string, string[, collation]) - Check if string contains
+ * substring. The 3-arg form carries a collation URI: codepoint is
+ * the default semantics; html-ascii-case-insensitive folds ASCII. */
 static struct leptris_xpath_result* xpath_func_contains(XPathContext* context,
     XPathASTNode** args,
     size_t arg_count
 ) {
-    if (arg_count != 2) {
+    if (arg_count != 2 && arg_count != 3) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "contains() requires exactly 2 arguments, got %zu", arg_count);
+                "contains() requires 2 or 3 arguments, got %zu", arg_count);
         return NULL;
     }
 
@@ -786,10 +806,42 @@ static struct leptris_xpath_result* xpath_func_contains(XPathContext* context,
         return NULL;
     }
 
+    int ascii_ci = 0;
+    if (arg_count == 3) {
+        struct leptris_xpath_result* coll =
+            xpath_evaluate(context, args[2]);
+        if (!coll) {
+            xpath_result_free(str_result);
+            xpath_result_free(substr_result);
+            return NULL;
+        }
+        char* uri = result_to_string(coll);
+        if (uri && strcmp(uri,
+                "http://www.w3.org/2005/xpath-functions/collation/"
+                "html-ascii-case-insensitive") == 0) {
+            ascii_ci = 1;
+        } else if (uri && strcmp(uri,
+                "http://www.w3.org/2005/xpath-functions/collation/"
+                "codepoint") != 0) {
+            snprintf(context->error_msg, sizeof(context->error_msg),
+                    "contains(): unknown collation %s", uri);
+            LEPTRIS_FREE(uri);
+            xpath_result_free(coll);
+            xpath_result_free(str_result);
+            xpath_result_free(substr_result);
+            return NULL;
+        }
+        LEPTRIS_FREE(uri);
+        xpath_result_free(coll);
+    }
+
     char* str = result_to_string(str_result);
     char* substr = result_to_string(substr_result);
 
-    int match = (strstr(str, substr) != NULL);
+    int match = ascii_ci ? ascii_ci_contains(str ? str : "",
+                                              substr ? substr : "")
+                         : (strstr(str ? str : "",
+                                   substr ? substr : "") != NULL);
 
     LEPTRIS_FREE(str);
     LEPTRIS_FREE(substr);
@@ -2388,7 +2440,7 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "starts-with", xpath_func_starts_with, 2, 2);
     xpath_function_registry_register(registry, "ends-with", xpath_func_ends_with, 2, 2);
     xpath_function_registry_register(registry, "deep-equal", xpath_func_deep_equal, 2, 2);
-    xpath_function_registry_register(registry, "contains", xpath_func_contains, 2, 2);
+    xpath_function_registry_register(registry, "contains", xpath_func_contains, 2, 3);
     xpath_function_registry_register(registry, "substring", xpath_func_substring, 2, 3);
     xpath_function_registry_register(registry, "substring-before", xpath_func_substring_before, 2, 2);
     xpath_function_registry_register(registry, "substring-after", xpath_func_substring_after, 2, 2);
