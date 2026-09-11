@@ -284,6 +284,108 @@ TEST(XQueryCore, Issue790GrammarGaps) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, MultiBindingClauses) {
+    /* A clause binds several variables: `let $a := 1, $b := 2` /
+     * `for $x in ..., $y in ...`. The binding value is an
+     * ExprSingle, so the clause-level comma ends it — parenthesized
+     * sequences keep their own commas (QT3 K2-ContainsFunc-1). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "let $a := 1, $b := 2 return $a + $b"),
+        "3");
+    EXPECT_EQ(seq_string(doc,
+        "let $a := (1, 2), $b := 3 return count($a) + $b"),
+        "5");
+    EXPECT_EQ(seq_string(doc,
+        "for $x in (1,2), $y in ('a') return $x * 2"),
+        "2 4");
+    EXPECT_EQ(seq_string(doc,
+        "let $vA := ('B STRING', string('content'))[1] treat as xs:string,"
+        " $vB := ('other', string('content'))[1] treat as xs:string"
+        " return contains($vA, $vB)"),
+        "false");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, LetReturnKeepsAtomicType) {
+    /* A single-tuple FLWOR whose return is an atomic surfaces as
+     * the atomic itself: false must stay falsy (QT3
+     * K2-ContainsFunc-3 assert-false), numbers keep their type at
+     * the boundary. */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    const char* q =
+        "let $vA := ('B STRING', string('content'))[1] treat as xs:string,"
+        " $vB := ('no match', string('content'))[1] treat as xs:string"
+        " return contains(lower-case($vA), lower-case($vB))";
+    LeptrisXQuery xq = leptris_xquery_parse(q, strlen(q));
+    ASSERT_NE(xq, nullptr);
+    LeptrisXPathResult r = leptris_xquery_eval(xq, doc, nullptr);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_BOOLEAN);
+    EXPECT_FALSE(leptris_xpath_result_boolean(r));
+    leptris_xpath_result_free(r);
+    leptris_xquery_free(xq);
+
+    const char* qn = "let $a := 2, $b := 3 return $a + $b";
+    LeptrisXQuery xn = leptris_xquery_parse(qn, strlen(qn));
+    ASSERT_NE(xn, nullptr);
+    LeptrisXPathResult rn = leptris_xquery_eval(xn, doc, nullptr);
+    ASSERT_NE(rn, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(rn), LEPTRIS_XPATH_NUMBER);
+    char* s = leptris_xpath_result_string(rn);
+    EXPECT_STREQ(s ? s : "", "5");
+    leptris_free_string(s);
+    leptris_xpath_result_free(rn);
+    leptris_xquery_free(xn);
+
+    /* Multi-tuple returns stay the member list. */
+    const char* qf = "for $x in (1,2) return $x * 2";
+    LeptrisXQuery xf = leptris_xquery_parse(qf, strlen(qf));
+    ASSERT_NE(xf, nullptr);
+    LeptrisXPathResult rf = leptris_xquery_eval(xf, doc, nullptr);
+    ASSERT_NE(rf, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(rf), LEPTRIS_XPATH_NODESET);
+    EXPECT_EQ(leptris_xpath_result_count(rf), 2u);
+    leptris_xpath_result_free(rf);
+    leptris_xquery_free(xf);
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, CollationArgContains) {
+    /* fn:contains 3-arg form: the codepoint collation is the
+     * default semantics; html-ascii-case-insensitive folds ASCII
+     * only (QT3 liam-contains-004: the accented O does not fold). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "contains('input', '', "
+        "'http://www.w3.org/2005/xpath-functions/collation/codepoint')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "contains('iNPut', 'PU', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "contains('hôtel', 'hôt', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "contains('hôtel', 'HÔT', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "false");
+    EXPECT_EQ(seq_string(doc,
+        "index-of((true(), false()), "
+        "contains('input', 'in', "
+        "'http://www.w3.org/2005/xpath-functions/collation/codepoint'))"),
+        "1");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, TumblingWindow) {
     /* Saxon w1: <w s="1" n="3"/><w s="4" n="3"/> */
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),

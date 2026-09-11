@@ -1,8 +1,10 @@
 # W3C QT3 test suite subset (lanes 11/12)
 
 Vendored verbatim from [w3c/qt3tests](https://github.com/w3c/qt3tests)
-(W3C Software and Document Notice). First batch: `fn/substring`
-(48 test-cases) with its `concepts` source document.
+(W3C Software and Document Notice). Batches: `fn/substring`
+(48 test-cases, 45 adopted) with its `concepts` source document;
+`fn/contains` (48 test-cases, 41 adopted — the UCA-collation
+cases wait on the collation surface).
 
 The runner (`../test_qt3.cpp`) parses each test-set with
 libleptris itself, adopts every test-case whose assertions and

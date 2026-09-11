@@ -944,70 +944,81 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                             continue;
                         }
                     }
-                    char* var = parse_dollar_name(&s);
-                    if (!var) {
-                        xq_free(q);
-                        return NULL;
-                    }
-                    char* pos_var = NULL;
-                    scan_ws(&s);
-                    if (is_for) {
-                        /* positional: for $x at $i in ... */
-                        Scan at = s;
-                        const char* aw;
-                        size_t awl = scan_word(&at, &aw);
-                        if (awl && word_is(aw, awl, "at") &&
-                            aw + awl < s.end) {
-                            s.p = aw + awl;
-                            pos_var = parse_dollar_name(&s);
-                            if (!pos_var) {
+                    /* Binding list: one clause binds
+                     * VAR (:=|in) ExprSingle ("," VAR ...)*. */
+                    for (;;) {
+                        char* var = parse_dollar_name(&s);
+                        if (!var) {
+                            xq_free(q);
+                            return NULL;
+                        }
+                        char* pos_var = NULL;
+                        scan_ws(&s);
+                        if (is_for) {
+                            /* positional: for $x at $i in ... */
+                            Scan at = s;
+                            const char* aw;
+                            size_t awl = scan_word(&at, &aw);
+                            if (awl && word_is(aw, awl, "at") &&
+                                aw + awl < s.end) {
+                                s.p = aw + awl;
+                                pos_var = parse_dollar_name(&s);
+                                if (!pos_var) {
+                                    free(var);
+                                    xq_free(q);
+                                    return NULL;
+                                }
+                                scan_ws(&s);
+                            }
+                            const char* iw;
+                            size_t iwl = scan_word(&s, &iw);
+                            if (!iwl || !word_is(iw, iwl, "in")) {
                                 free(var);
                                 xq_free(q);
                                 return NULL;
                             }
+                            s.p = iw + iwl;
+                        } else {
+                            if (s.p + 1 >= s.end || s.p[0] != ':' ||
+                                s.p[1] != '=') {
+                                free(var);
+                                xq_free(q);
+                                return NULL;
+                            }
+                            s.p += 2;
+                        }
+                        Scan e = s;
+                        scan_expr_segment(&e, 1);
+                        XPathASTNode* expr = parse_expr_span(s.p, e.p);
+                        if (!expr) {
+                            free(var);
+                            xq_free(q);
+                            return NULL;
+                        }
+                        XqClause* grown = (XqClause*)realloc(
+                            q->clauses,
+                            (q->nclauses + 1) * sizeof(XqClause));
+                        if (!grown) {
+                            free(var);
+                            ast_node_free(expr);
+                            xq_free(q);
+                            return NULL;
+                        }
+                        q->clauses = grown;
+                        q->clauses[q->nclauses].is_for = is_for;
+                        q->clauses[q->nclauses].var = var;
+                        q->clauses[q->nclauses].pos_var = pos_var;
+                        q->clauses[q->nclauses].expr = expr;
+                        q->nclauses++;
+                        s = e;
+                        scan_ws(&s);
+                        if (s.p < s.end && *s.p == ',') {
+                            s.p++;
                             scan_ws(&s);
+                            continue;
                         }
-                        const char* iw;
-                        size_t iwl = scan_word(&s, &iw);
-                        if (!iwl || !word_is(iw, iwl, "in")) {
-                            free(var);
-                            xq_free(q);
-                            return NULL;
-                        }
-                        s.p = iw + iwl;
-                    } else {
-                        if (s.p + 1 >= s.end || s.p[0] != ':' ||
-                            s.p[1] != '=') {
-                            free(var);
-                            xq_free(q);
-                            return NULL;
-                        }
-                        s.p += 2;
+                        break;
                     }
-                    Scan e = s;
-                    scan_expr_segment(&e, 0);
-                    XPathASTNode* expr = parse_expr_span(s.p, e.p);
-                    if (!expr) {
-                        free(var);
-                        xq_free(q);
-                        return NULL;
-                    }
-                    XqClause* grown = (XqClause*)realloc(
-                        q->clauses,
-                        (q->nclauses + 1) * sizeof(XqClause));
-                    if (!grown) {
-                        free(var);
-                        ast_node_free(expr);
-                        xq_free(q);
-                        return NULL;
-                    }
-                    q->clauses = grown;
-                    q->clauses[q->nclauses].is_for = is_for;
-                    q->clauses[q->nclauses].var = var;
-                    q->clauses[q->nclauses].pos_var = pos_var;
-                    q->clauses[q->nclauses].expr = expr;
-                    q->nclauses++;
-                    s = e;
                 } else if (word_is(kw, kwl, "where")) {
                     Scan e = s;
                     scan_expr_segment(&e, 0);
@@ -1354,6 +1365,30 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
                 (XPathVariableSet*)ctx->variable_set, names[k]);
             if (!var) continue;
             XPathNodeSet* ns = var->value.v.nodeset_value;
+            if (clauses[i].is_for == 0 && k == 0 && ns && ns->count) {
+                /* LET: the binding is the whole sequence, not the
+                 * first member (group semantics reuse this list
+                 * form). */
+                size_t cnt = ns->count;
+                t->names[t->n] = strdup(names[k]);
+                t->contents[t->n] = (char**)calloc(cnt, sizeof(char*));
+                t->nodes[t->n] = (void**)calloc(cnt, sizeof(void*));
+                t->counts[t->n] = cnt;
+                if (!t->contents[t->n] || !t->nodes[t->n]) return 0;
+                for (size_t m = 0; m < cnt; m++) {
+                    void* nd = ns->nodes[m];
+                    if (nd && XPATH_NODE_TYPE(nd) != LEPTRIS_NODE_TEXT) {
+                        t->nodes[t->n][m] = nd;
+                        t->contents[t->n][m] = NULL;
+                    } else if (nd) {
+                        const char* c = ((XPathTextNode*)nd)->content;
+                        t->contents[t->n][m] = strdup(c ? c : "");
+                        t->nodes[t->n][m] = NULL;
+                    }
+                }
+                t->n++;
+                continue;
+            }
             void* node = (ns && ns->count) ? ns->nodes[0] : NULL;
             t->names[t->n] = strdup(names[k]);
             t->contents[t->n] = (char**)calloc(1, sizeof(char*));
@@ -2046,6 +2081,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
                 } else {
                     out->owns_synthetic_text = 1;
                     out->is_sequence = 1;
+                    int adopted = 0;
                     for (size_t ti = 0; ti < n_tuples; ti++) {
                         /* xpath_variable_set_nodeset overwrites
                          * without freeing — clear the key-loop
@@ -2059,16 +2095,30 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
                         struct leptris_xpath_result* r =
                             evaluate_expr(ctx, q->return_ast);
                         if (r) {
-                            char* s = xpath_to_string(r);
-                            XPathTextNode* tn = xpath_synth_text(
-                                s ? s : "", s ? strlen(s) : 0);
-                            free(s);
-                            if (tn) xpath_nodeset_add(out, tn);
-                            xpath_result_free(r);
+                            /* A single tuple's atomic return IS
+                             * the value: a false boolean must stay
+                             * falsy at the boundary (a one-member
+                             * text nodeset reads true). */
+                            if (!adopted && n_tuples == 1 &&
+                                r->type != XPATH_RESULT_NODESET) {
+                                xpath_result_free(result);
+                                result = r;
+                                adopted = 1;
+                            } else {
+                                char* s = xpath_to_string(r);
+                                XPathTextNode* tn = xpath_synth_text(
+                                    s ? s : "", s ? strlen(s) : 0);
+                                free(s);
+                                if (tn) xpath_nodeset_add(out, tn);
+                                xpath_result_free(r);
+                            }
                         }
                         xq_unbind_all(ctx, q->clauses, q->nclauses);
                     }
-                    result->value.nodeset_value = out;
+                    if (adopted)
+                        xpath_nodeset_free(out);
+                    else
+                        result->value.nodeset_value = out;
                 }
             }
             for (size_t ti = 0; ti < n_tuples; ti++)
