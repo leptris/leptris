@@ -386,6 +386,56 @@ TEST(XQueryCore, CollationArgContains) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, CollationArgStartsEndsWith) {
+    /* starts-with/ends-with carry the same 3-arg collation form:
+     * codepoint = default, html-ascii-case-insensitive folds ASCII
+     * only, any other URI is an unknown-collation error. */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "starts-with('input', 'in', "
+        "'http://www.w3.org/2005/xpath-functions/collation/codepoint')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "starts-with('iNPut', 'IN', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "starts-with('hôtel', 'HÔ', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "false");
+    EXPECT_EQ(seq_string(doc,
+        "ends-with('input', 'put', "
+        "'http://www.w3.org/2005/xpath-functions/collation/codepoint')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "ends-with('inPut', 'PUT', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "ends-with('hôtel', 'TEL', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "ends-with('HÔTEL', 'ôtEL', "
+        "'http://www.w3.org/2005/xpath-functions/collation/"
+        "html-ascii-case-insensitive')"),
+        "false");
+    EXPECT_EQ(seq_string(doc,
+        "starts-with('a', 'a', "
+        "'http://example.org/collation/unknown')"),
+        "(eval-failed)");
+    EXPECT_EQ(seq_string(doc,
+        "ends-with('a', 'a', "
+        "'http://example.org/collation/unknown')"),
+        "(eval-failed)");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, TumblingWindow) {
     /* Saxon w1: <w s="1" n="3"/><w s="4" n="3"/> */
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
