@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.131] - 2026-09-11
+
+### Added
+
+- QT3 slice 2 — fn/contains 41/41 + FLWOR fixes (xquery)
+
+
+
 ## [1.9.130] - 2026-09-10
 
 ### Added
