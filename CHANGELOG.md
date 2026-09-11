@@ -1,11 +1,10 @@
 ## [Unreleased]
 
-## [1.9.135] - 2026-09-11
+## [1.9.135] - 2026-09-12
 
 ### Fixed
 
-- initial-mode comments are document children (#659) (html)
-
+- **HTML initial-mode comment placement (#659)** — a comment that arrives while the document is still in its WHATWG initial insertion mode (no tag and no non-whitespace text yet) inserts as a child of the **Document**, ahead of the synthesized tree: `<!-- lead --><p>hi</p>` no longer drops the comment into the synthesized `<body>`. Token-time routing through a `left_initial` builder flag (any start tag — even a dropped structural one — any end tag, or non-ws text ends the initial phase); the html4/Nokogiri-parity entry keeps the libxml2 shape. Lane ledger records the next #659 nodes: the in-head insertion-mode gap and the adoption agency algorithm.
 
 
 ## [1.9.134] - 2026-09-11
