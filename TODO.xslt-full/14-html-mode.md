@@ -139,3 +139,25 @@ That is the #659 work list, ranked by the red-list.
 
 Separate: HTML parse throughput gated - 90.2 vs 31.1 MB/s (2.9x
 ahead of libxml2, byte-identical 450KB fixtures, PR #867).
+
+## Update 2026-09-12: comment placement (initial mode) — shipped
+
+`<!-- lead --><p>hi</p>` put the comment inside the synthesized
+body; WHATWG initial mode inserts initial-phase comments as
+DOCUMENT children. Fix is token-time routing: HBuilder tracks
+left_initial (cleared by any start tag — even dropped structural
+ones — any end tag, and any non-whitespace text via the h_append
+choke point); comments tokenized while left_initial rides a
+dedicated doc-prolog chain linked ahead of the tree at commit.
+html4 entry unchanged (libxml2 shape). The Html() spec helper now
+strips the wrapper around document-level prolog comments. Spec:
+LeadingCommentsBelongToTheDocument (doc-level placement, two-
+comment prolog, text-first in-body, html4 pinned).
+
+Corpus floor unchanged (928): only 4 cases lead with comments and
+they still fail on other axes — the known "in head" gap
+(tests19:87 expects comment+meta inside an explicit <head>;
+the dropped-structural design flattens them to body) and
+adoption agency. NEXT #659 nodes: in-head insertion mode for
+explicit <head> content, then full AFE, then bindings expose
+html.
