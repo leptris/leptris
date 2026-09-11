@@ -85,16 +85,35 @@ Lane 11 remainder (qt3tests subset, collection(), Windows CLI
 harness) is tracked in the line above; lane 12 continues with
 group by / windowing / typeswitch / error-code model.
 
-## Update 2026-09-10: QT3 adoption slice 1 SHIPPED (PR #975)
+## Update 2026-09-11: QT3 adoption (lanes 11/12) — 4 slices shipped
 
-fn/substring 45/45 via test/xquery/test_qt3.cpp — the exact-N
-runner over the w3c/qt3tests test-set format (assert-string-value/
-eq/true/false + all-of; unsupported kinds and env refs exclude
-the case and are counted). FOUR engine fixes: pre-bound prefixes
-(fn/xs/math/map/array/err, no declaration needed), exponent
-literals (0E0/-3.1e0), count() over atomics = 1 (both twins),
-codepoint-indexed substring (astral = one position). NEXT slices:
-more fn/ sets + prod/ (ForExpr, OrderBy...), runner surface
-(assert-type via xs: type checking, assert-xml, any-of),
-then the XTH-connector CI report. Lane 12 mirrors the same
-runner (3.1 sets: array/, map/, higher-order fns).
+Exact-N runner over the public XQuery API; test-sets vendored
+verbatim from w3c/qt3tests (`test/xquery/qt3/`), the set parsed
+with libleptris itself. Adopted = every case whose assertions,
+environment, and params are within the runner surface; the gate
+is `agree == run == N` exactly.
+
+- v1.9.130 / #975 — fn/substring 45/45. Drove: pre-bound
+  fn/xs/math/map/array/err prefixes, exponent literals, count()
+  over atomics, codepoint substring.
+- v1.9.131 / #978 — fn/contains 41/41→46/46 (see slice 4).
+  Drove three FLWOR fixes: multi-binding clauses never parsed
+  (binding value is an ExprSingle — the clause-level comma ends
+  the span, the clause loops its binding list); let snapshots
+  kept only the first member; single-tuple returns reified
+  atomics into truthy one-member nodesets. Plus 3-arg contains
+  (codepoint = default; html-ascii-case-insensitive = ASCII-only
+  folding; else unknown-collation error).
+- slice 3 (#984) — fn/starts-with 43/43, fn/ends-with 34/34; the
+  collation dispatch shared across all three predicates.
+- slice 4 (this PR) — external variables:
+  `declare variable $x [as T] external [:= default]` +
+  `leptris_xquery_eval_params` (param values are select
+  expressions evaluated in an empty context; binding overrides
+  default; unbound-without-default errors). The runner binds
+  set-level <param> environments — fn/contains is 46/46.
+
+Next adoption blockers, in order: xs:integer/xs:int lexical
+preservation (int64-backed constructors — blocks fn/concat,
+fn/abs families), UCA collation args, error-assertion cases
+(error-channel runner shape), assert-type/assert-xml/any-of.
