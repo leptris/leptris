@@ -444,7 +444,9 @@ LEPTRIS_API size_t leptris_pull_next_batch(LeptrisPullParser pull,
         if (!pull->current_staged) queue_reset_event(&pull->current);
         memset(&pull->current, 0, sizeof(pull->current));
         pull->current.type = LEPTRIS_PULL_START_ELEMENT;
-        pull->current.name = last_start_out->name;
+        /* staged events alias the batch's storage — owned only
+         * while current_staged keeps queue_reset_event away. */
+        pull->current.name = (char*)last_start_out->name;
         pull->current.attrs = pull->stage_last_attrs;
         pull->current.attr_count = pull->stage_last_attr_count;
         pull->current_staged = 1;
