@@ -171,6 +171,29 @@ void run_test_set(const char* set_path,
         }
     }
 
+    /* Set-level param environments: <environment name> holding
+     * <param name select> children — bound as external variables
+     * (QT3 <param select> semantics). */
+    std::vector<std::pair<std::string,
+                          std::vector<std::pair<std::string, std::string>>>>
+        param_envs;
+    for (LeptrisElement e = first_child_elem(leptris_document_root(ts));
+         e; e = next_elem(e)) {
+        if (strcmp(local_name(leptris_element_name(e)), "environment") != 0)
+            continue;
+        const char* nm = leptris_element_attribute(e, "name");
+        if (!nm) continue;
+        std::vector<std::pair<std::string, std::string>> ps;
+        for (LeptrisElement c = first_child_elem(e); c; c = next_elem(c)) {
+            if (strcmp(local_name(leptris_element_name(c)), "param") != 0)
+                continue;
+            const char* pn = leptris_element_attribute(c, "name");
+            const char* sel = leptris_element_attribute(c, "select");
+            if (pn && sel) ps.emplace_back(pn, sel);
+        }
+        if (!ps.empty()) param_envs.emplace_back(nm, std::move(ps));
+    }
+
     LeptrisDocument scratch = leptris_parse_string("<e/>", 4, &st);
     ASSERT_NE(scratch, nullptr);
 
@@ -206,26 +229,41 @@ void run_test_set(const char* set_path,
         }
 
         /* environment: known refs ride their source document as
-         * context; anything else is unsupported -> skip. */
+         * context; param environments bind external variables;
+         * anything else is unsupported -> skip. */
         LeptrisDocument doc = scratch;
+        std::vector<std::pair<std::string, std::string>>* params = nullptr;
         if (env) {
             const char* ref = leptris_element_attribute(env, "ref");
             LeptrisDocument found = NULL;
-            if (ref)
+            if (ref) {
                 for (const auto& e : envs)
                     if (e.first == ref) { found = e.second; break; }
-            if (found) {
-                doc = found;
-            } else {
+                if (!found)
+                    for (auto& pe : param_envs)
+                        if (pe.first == ref) { params = &pe.second; break; }
+            }
+            if (!found && !params) {
                 skipped++;
                 continue;
             }
+            if (found) doc = found;
         }
 
         run++;
         LeptrisXQuery xq = leptris_xquery_parse(q, strlen(q));
-        LeptrisXPathResult r =
-            xq ? leptris_xquery_eval(xq, doc, NULL) : NULL;
+        LeptrisXPathResult r = NULL;
+        if (xq && params) {
+            std::vector<const char*> pnames, pselects;
+            for (const auto& pr : *params) {
+                pnames.push_back(pr.first.c_str());
+                pselects.push_back(pr.second.c_str());
+            }
+            r = leptris_xquery_eval_params(xq, doc, NULL, pnames.data(),
+                                           pselects.data(), pnames.size());
+        } else if (xq) {
+            r = leptris_xquery_eval(xq, doc, NULL);
+        }
         std::string got = r ? result_string(r) : "(no result)";
         bool pass = r != NULL;
         for (const Assertion& a : asserts)
@@ -256,10 +294,9 @@ TEST(Qt3Subset, FnSubstring) {
 }
 
 TEST(Qt3Subset, FnContains) {
-    /* The 8 "-dyn" cases declare external variables (param
-     * binding) — unsupported, they skip; the adopted set is the
-     * rest. */
-    run_test_set("fn/contains.xml", {}, 41);
+    /* The "-dyn" cases bind the set-level param environment as
+     * external variables; UCA-collation cases still skip. */
+    run_test_set("fn/contains.xml", {}, 46);
 }
 
 TEST(Qt3Subset, FnStartsWith) {

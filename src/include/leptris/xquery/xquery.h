@@ -58,6 +58,18 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
                                                    LeptrisDocument doc,
                                                    LeptrisElement context_node);
 
+/* Evaluate a compiled query with external-variable bindings.
+ * names[i]/selects[i] bind `declare variable $names[i] external`
+ * declarations: each select is an XPath expression evaluated in
+ * an empty context (QT3 <param select> semantics) and takes
+ * precedence over an `external := default` initializer. An
+ * external variable with neither a binding nor a default fails
+ * evaluation. Other behavior matches leptris_xquery_eval.
+ */
+LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params(
+    LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
+    const char* const* names, const char* const* selects, size_t count);
+
 /* Free a compiled query. */
 LEPTRIS_API void leptris_xquery_free(LeptrisXQuery query);
 

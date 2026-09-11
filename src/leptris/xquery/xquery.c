@@ -38,6 +38,8 @@ typedef struct {
     char* params;      /* XQ_DECL_FN: '\x01'-joined param names */
     size_t arity;
     XPathASTNode* ast; /* var initializer / fn body */
+    int external;      /* XQ_DECL_VAR: `declare variable $x
+                        * external [:= default]` — ast is default */
 } XqDecl;
 
 typedef struct {
@@ -543,6 +545,91 @@ static int parse_decl(struct LeptrisXQueryInternal* q, Scan* s,
         char* name = parse_dollar_name(s);
         if (!name) return 0;
         scan_ws(s);
+        /* Optional `as SequenceType` — skipped textually: walk to
+         * `external` or `:=` at depth 0 before the ';'. */
+        {
+            Scan at = *s;
+            const char* aw;
+            size_t awl = scan_word(&at, &aw);
+            if (awl && word_is(aw, awl, "as")) {
+                const char* p = aw + awl;
+                int depth = 0;
+                const char* stop = NULL;
+                while (p < s->end) {
+                    char c = *p;
+                    if (c == '\'' || c == '"') {
+                        const char* q = p + 1;
+                        while (q < s->end && *q != c) q++;
+                        p = (q < s->end) ? q + 1 : s->end;
+                        continue;
+                    }
+                    if (c == '(' || c == '[' || c == '{') depth++;
+                    else if (c == ')' || c == ']' || c == '}') depth--;
+                    else if (c == ';' && depth == 0) break;
+                    else if (depth == 0 && p + 1 < s->end &&
+                             p[0] == ':' && p[1] == '=') {
+                        stop = p;
+                        break;
+                    } else if (depth == 0 &&
+                               (isalpha((unsigned char)c) || c == '_')) {
+                        const char* ww;
+                        size_t wwl = scan_word(&((Scan){p, s->end}), &ww);
+                        if (wwl && word_is(ww, wwl, "external")) {
+                            stop = ww;
+                            break;
+                        }
+                        p += wwl ? wwl : 1;
+                        continue;
+                    }
+                    p++;
+                }
+                if (!stop) {
+                    free(name);
+                    return 0;
+                }
+                s->p = stop;
+                scan_ws(s);
+            }
+        }
+        {
+            Scan t = *s;
+            const char* ew;
+            size_t ewl = scan_word(&t, &ew);
+            if (ewl && word_is(ew, ewl, "external")) {
+                s->p = ew + ewl;
+                scan_ws(s);
+                out->kind = XQ_DECL_VAR;
+                out->name = name;
+                out->external = 1;
+                if (s->p + 1 < s->end &&
+                    s->p[0] == ':' && s->p[1] == '=') {
+                    s->p += 2;
+                    Scan e = *s;
+                    {
+                        int depth = 0;
+                        while (e.p < e.end) {
+                            char c = *e.p;
+                            if (c == '\'' || c == '"') {
+                                scan_string(&e);
+                                continue;
+                            }
+                            if (c == '(' || c == '[' || c == '{') depth++;
+                            else if (c == ')' || c == ']' || c == '}') depth--;
+                            else if (c == ';' && depth == 0) break;
+                            e.p++;
+                        }
+                    }
+                    out->ast = parse_expr_span(s->p, e.p);
+                    if (!out->ast) {
+                        return 0;
+                    }
+                    s->p = (e.p < e.end) ? e.p + 1 : e.end;
+                } else if (s->p < s->end && *s->p == ';') {
+                    s->p++;
+                }
+                return 1;
+            }
+        }
         if (s->p + 1 >= s->end || s->p[0] != ':' || s->p[1] != '=') {
             free(name);
             return 0;
@@ -1132,6 +1219,24 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
         return NULL;
     }
     return q;
+}
+
+static LeptrisXPathResult xq_eval_impl(
+    LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
+    const char* const* param_names, const char* const* param_selects,
+    size_t nparams);
+
+LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
+                                                   LeptrisDocument doc,
+                                                   LeptrisElement context_node) {
+    return xq_eval_impl(query, doc, context_node, NULL, NULL, 0);
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params(
+    LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
+    const char* const* names, const char* const* selects, size_t count) {
+    if (count && (!names || !selects)) return NULL;
+    return xq_eval_impl(query, doc, context_node, names, selects, count);
 }
 
 LEPTRIS_API void leptris_xquery_free(LeptrisXQuery query) {
@@ -1747,9 +1852,25 @@ static int xq_enumerate(struct LeptrisXQueryInternal* q, XPathContext* ctx,
     return ok;
 }
 
-LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
-                                                   LeptrisDocument doc,
-                                                   LeptrisElement context_node) {
+/* A param select evaluates in its own context over the document
+ * (QT3: external-variable values are computed independently of
+ * the query's own bindings). */
+static struct leptris_xpath_result* xq_eval_param(
+    struct leptris_document* doc, LeptrisElement root, const char* sel) {
+    XPathASTNode* ast = parse_expr_span(sel, sel + strlen(sel));
+    if (!ast) return NULL;
+    XPathContext pc;
+    xpath_context_init(&pc, doc, root);
+    struct leptris_xpath_result* v = evaluate_expr(&pc, ast);
+    ast_node_free(ast);
+    xpath_context_cleanup(&pc);
+    return v;
+}
+
+static LeptrisXPathResult xq_eval_impl(
+    LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
+    const char* const* param_names, const char* const* param_selects,
+    size_t nparams) {
     struct LeptrisXQueryInternal* q = (struct LeptrisXQueryInternal*)query;
     if (!q || !doc) return NULL;
 
@@ -1848,7 +1969,28 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
             ctx->namespace_count++;
             ctx->namespaces_collected = 1;   /* keep ours */
         } else if (d->kind == XQ_DECL_VAR) {
-            struct leptris_xpath_result* v = evaluate_expr(ctx, d->ast);
+            struct leptris_xpath_result* v = NULL;
+            if (d->external) {
+                size_t pi = nparams;
+                for (size_t i = 0; i < nparams; i++) {
+                    if (param_names[i] &&
+                        strcmp(param_names[i], d->name) == 0) {
+                        pi = i;
+                        break;
+                    }
+                }
+                if (pi < nparams) {
+                    v = xq_eval_param((struct leptris_document*)doc,
+                                      ctx_elem, param_selects[pi]);
+                } else if (d->ast) {
+                    v = evaluate_expr(ctx, d->ast);
+                } else {
+                    snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                            "unbound external variable $%s", d->name);
+                }
+            } else {
+                v = evaluate_expr(ctx, d->ast);
+            }
             if (!v) {
                 err = 1;
                 break;
