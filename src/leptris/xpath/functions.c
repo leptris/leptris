@@ -493,14 +493,39 @@ static struct leptris_xpath_result* xpath_func_concat(XPathContext* context,
     return result;
 }
 
-/* starts-with(string, string) - Check if string starts with prefix */
+/* Collation-argument mode: 0 = codepoint (the default
+ * semantics), 1 = html-ascii-case-insensitive, -1 = unknown
+ * collation (error message set, callers return NULL). */
+static int collation_mode(XPathContext* context, XPathASTNode* arg) {
+    struct leptris_xpath_result* r = xpath_evaluate(context, arg);
+    if (!r) return -1;
+    char* uri = result_to_string(r);
+    int mode = 0;
+    if (uri && strcmp(uri,
+            "http://www.w3.org/2005/xpath-functions/collation/"
+            "html-ascii-case-insensitive") == 0) {
+        mode = 1;
+    } else if (uri && strcmp(uri,
+            "http://www.w3.org/2005/xpath-functions/collation/"
+            "codepoint") != 0) {
+        snprintf(context->error_msg, sizeof(context->error_msg),
+                "unknown collation %s", uri);
+        mode = -1;
+    }
+    LEPTRIS_FREE(uri);
+    xpath_result_free(r);
+    return mode;
+}
+
+/* starts-with(string, string[, collation]) - Check if string
+ * starts with prefix; the 3-arg form carries a collation URI. */
 static struct leptris_xpath_result* xpath_func_starts_with(XPathContext* context,
     XPathASTNode** args,
     size_t arg_count
 ) {
-    if (arg_count != 2) {
+    if (arg_count != 2 && arg_count != 3) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "starts-with() requires exactly 2 arguments, got %zu", arg_count);
+                "starts-with() requires 2 or 3 arguments, got %zu", arg_count);
         return NULL;
     }
 
@@ -513,10 +538,34 @@ static struct leptris_xpath_result* xpath_func_starts_with(XPathContext* context
         return NULL;
     }
 
+    int ascii_ci = 0;
+    if (arg_count == 3) {
+        int mode = collation_mode(context, args[2]);
+        if (mode < 0) {
+            xpath_result_free(str_result);
+            xpath_result_free(prefix_result);
+            return NULL;
+        }
+        ascii_ci = mode == 1;
+    }
+
     char* str = result_to_string(str_result);
     char* prefix = result_to_string(prefix_result);
 
-    int match = (strncmp(str, prefix, strlen(prefix)) == 0);
+    int match;
+    if (ascii_ci) {
+        const char* a = str ? str : "";
+        const char* b = prefix ? prefix : "";
+        while (*a && *b &&
+               tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+            a++;
+            b++;
+        }
+        match = *b == '\0';
+    } else {
+        match = (strncmp(str ? str : "", prefix ? prefix : "",
+                         prefix ? strlen(prefix) : 0) == 0);
+    }
 
     LEPTRIS_FREE(str);
     LEPTRIS_FREE(prefix);
@@ -530,15 +579,16 @@ static struct leptris_xpath_result* xpath_func_starts_with(XPathContext* context
     return result;
 }
 
-/* ends-with(string, string) — XPath 2.0 (#684): true when the first
- * string's tail equals the suffix (an empty suffix always matches). */
+/* ends-with(string, string[, collation]) — XPath 2.0 (#684): true
+ * when the first string's tail equals the suffix (an empty suffix
+ * always matches); the 3-arg form carries a collation URI. */
 static struct leptris_xpath_result* xpath_func_ends_with(XPathContext* context,
     XPathASTNode** args,
     size_t arg_count
 ) {
-    if (arg_count != 2) {
+    if (arg_count != 2 && arg_count != 3) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "ends-with() requires exactly 2 arguments, got %zu", arg_count);
+                "ends-with() requires 2 or 3 arguments, got %zu", arg_count);
         return NULL;
     }
 
@@ -551,11 +601,36 @@ static struct leptris_xpath_result* xpath_func_ends_with(XPathContext* context,
         return NULL;
     }
 
+    int ascii_ci = 0;
+    if (arg_count == 3) {
+        int mode = collation_mode(context, args[2]);
+        if (mode < 0) {
+            xpath_result_free(str_result);
+            xpath_result_free(suffix_result);
+            return NULL;
+        }
+        ascii_ci = mode == 1;
+    }
+
     char* str = result_to_string(str_result);
     char* suffix = result_to_string(suffix_result);
 
-    size_t sl = strlen(str), fl = strlen(suffix);
-    int match = fl <= sl && memcmp(str + sl - fl, suffix, fl) == 0;
+    size_t sl = str ? strlen(str) : 0, fl = suffix ? strlen(suffix) : 0;
+    int match = fl <= sl;
+    if (match) {
+        const char* a = (str ? str : "") + sl - fl;
+        const char* b = suffix ? suffix : "";
+        if (ascii_ci) {
+            while (*a && *b &&
+                   tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+                a++;
+                b++;
+            }
+            match = *b == '\0';
+        } else {
+            match = memcmp(a, b, fl) == 0;
+        }
+    }
 
     LEPTRIS_FREE(str);
     LEPTRIS_FREE(suffix);
@@ -768,7 +843,8 @@ static struct leptris_xpath_result* xpath_func_deep_equal(XPathContext* context,
 
 /* ASCII-only case-insensitive substring search — the
  * html-ascii-case-insensitive collation folds ASCII letters and
- * nothing else (WHATWG ASCII case-insensitive matching). */
+ * nothing else (WHATWG ASCII case-insensitive matching; folding
+ * never changes byte length, so byte-level scans are exact). */
 static int ascii_ci_contains(const char* hay, const char* needle) {
     if (!*needle) return 1;
     for (; *hay; hay++) {
@@ -808,31 +884,13 @@ static struct leptris_xpath_result* xpath_func_contains(XPathContext* context,
 
     int ascii_ci = 0;
     if (arg_count == 3) {
-        struct leptris_xpath_result* coll =
-            xpath_evaluate(context, args[2]);
-        if (!coll) {
+        int mode = collation_mode(context, args[2]);
+        if (mode < 0) {
             xpath_result_free(str_result);
             xpath_result_free(substr_result);
             return NULL;
         }
-        char* uri = result_to_string(coll);
-        if (uri && strcmp(uri,
-                "http://www.w3.org/2005/xpath-functions/collation/"
-                "html-ascii-case-insensitive") == 0) {
-            ascii_ci = 1;
-        } else if (uri && strcmp(uri,
-                "http://www.w3.org/2005/xpath-functions/collation/"
-                "codepoint") != 0) {
-            snprintf(context->error_msg, sizeof(context->error_msg),
-                    "contains(): unknown collation %s", uri);
-            LEPTRIS_FREE(uri);
-            xpath_result_free(coll);
-            xpath_result_free(str_result);
-            xpath_result_free(substr_result);
-            return NULL;
-        }
-        LEPTRIS_FREE(uri);
-        xpath_result_free(coll);
+        ascii_ci = mode == 1;
     }
 
     char* str = result_to_string(str_result);
@@ -2437,8 +2495,8 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     /* String functions (10 implemented) */
     xpath_function_registry_register(registry, "string", xpath_func_string, 0, 1);
     xpath_function_registry_register(registry, "concat", xpath_func_concat, 2, -1);
-    xpath_function_registry_register(registry, "starts-with", xpath_func_starts_with, 2, 2);
-    xpath_function_registry_register(registry, "ends-with", xpath_func_ends_with, 2, 2);
+    xpath_function_registry_register(registry, "starts-with", xpath_func_starts_with, 2, 3);
+    xpath_function_registry_register(registry, "ends-with", xpath_func_ends_with, 2, 3);
     xpath_function_registry_register(registry, "deep-equal", xpath_func_deep_equal, 2, 2);
     xpath_function_registry_register(registry, "contains", xpath_func_contains, 2, 3);
     xpath_function_registry_register(registry, "substring", xpath_func_substring, 2, 3);

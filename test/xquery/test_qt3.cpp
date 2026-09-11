@@ -261,3 +261,13 @@ TEST(Qt3Subset, FnContains) {
      * rest. */
     run_test_set("fn/contains.xml", {}, 41);
 }
+
+TEST(Qt3Subset, FnStartsWith) {
+    /* UCA-collation cases (15) and error-assertion cases (6) skip. */
+    run_test_set("fn/starts-with.xml", {}, 43);
+}
+
+TEST(Qt3Subset, FnEndsWith) {
+    /* UCA-collation cases (15) and error-assertion cases (6) skip. */
+    run_test_set("fn/ends-with.xml", {}, 34);
+}

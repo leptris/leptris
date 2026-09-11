@@ -3,8 +3,10 @@
 Vendored verbatim from [w3c/qt3tests](https://github.com/w3c/qt3tests)
 (W3C Software and Document Notice). Batches: `fn/substring`
 (48 test-cases, 45 adopted) with its `concepts` source document;
-`fn/contains` (48 test-cases, 41 adopted — the UCA-collation
-cases wait on the collation surface).
+`fn/contains` (48, 41 adopted); `fn/starts-with` (64, 43);
+`fn/ends-with` (55, 34) — in the last three the UCA-collation
+and error-assertion cases wait on the collation surface and the
+error-channel runner shape.
 
 The runner (`../test_qt3.cpp`) parses each test-set with
 libleptris itself, adopts every test-case whose assertions and
