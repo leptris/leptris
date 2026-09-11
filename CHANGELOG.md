@@ -4,7 +4,11 @@
 
 ### Added
 
-- QT3 slice 2 — fn/contains 41/41 + FLWOR fixes (xquery)
+- **QT3 slice 2 (lanes 11/12)** — the `fn/contains` test-set vendored verbatim from [w3c/qt3tests](https://github.com/w3c/qt3tests): **41/41** adopted cases (the UCA-collation cases wait on the collation surface). Driving it to green exposed three XQuery engine bugs, fixed test-first:
+  - **Multi-binding clauses never parsed** — `let $a := 1, $b := 2` / `for $x in ..., $y in ...` failed at the binding scan; a binding value is an ExprSingle, so the clause-level comma now ends the span and the clause loops its binding list (`treat as` inside a binding parses).
+  - **let bindings collapsed sequences** — the tuple snapshot kept only the first member; `count()`/`string-join()` over a let-bound sequence now see every item.
+  - **Single-tuple FLWOR returns lost their type** — a boolean false came back as a one-member truthy text nodeset; an atomic return now surfaces as itself at the API boundary.
+- **3-arg `fn:contains`** — the codepoint collation is the default semantics; `html-ascii-case-insensitive` folds ASCII only (WHATWG matching); any other URI is an unknown-collation error.
 
 
 
