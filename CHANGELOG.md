@@ -4,8 +4,7 @@
 
 ### Added
 
-- int64 integer fidelity — the integer subtype constructors (QT3 slice 5) (xpath)
-
+- **QT3 slice 5: int64 integer fidelity (lanes 11/12)** — `xs:integer` and the full integer-subtype family (`xs:int`, `xs:long`, `xs:short`, `xs:unsignedShort`, `xs:unsignedLong`, `xs:negativeInteger`, `xs:positiveInteger`, `xs:nonPositiveInteger`, `xs:nonNegativeInteger`) plus integer-lexical `xs:decimal` keep the exact int64 value: `xs:integer('999999999999999999')` prints its decimal form at every boundary instead of collapsing through `double` into `1e+18`. Out-of-range lexicals reject per type bounds; arithmetic demotes to double (the documented boundary). The `fn/concat` test-set is vendored: **96 test-cases, 80/80 adopted** — the canonical `xs:double`/`xs:float` E-notation cases wait on a future slice (the number formatter keeps libxml2 parity, which is load-bearing for the libxslt suite).
 
 
 ## [1.9.133] - 2026-09-11
