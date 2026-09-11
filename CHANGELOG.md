@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.132] - 2026-09-11
+
+### Added
+
+- QT3 slice 3 — starts-with 43/43, ends-with 34/34 (xquery)
+
+### Fixed
+
+- warning-clean full rebuild (html entity typedef, dead h_decode, pull alias const)
+
+
+
 ## [1.9.131] - 2026-09-11
 
 ### Added
