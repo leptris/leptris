@@ -2,12 +2,9 @@
 
 ## [1.9.133] - 2026-09-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
+- **QT3 slice 4: external variables (lanes 11/12)** — `declare variable $x [as SequenceType] external [:= default]` now parses and binds through the new `leptris_xquery_eval_params` entry point: each param value is an XPath expression evaluated in an empty context (QT3 `<param select>` semantics — `select="()"` binds the empty sequence), a binding overrides the default initializer, and an unbound external without a default fails evaluation. The QT3 runner binds set-level `<param>` environments — the `-dyn` cases adopt and `fn/contains` is now **46/46**. Lane ledger updated in `TODO.xslt-full/11-xquery-core.md`.
 
 
 ## [1.9.132] - 2026-09-11
