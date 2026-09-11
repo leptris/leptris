@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.134] - 2026-09-11
+
+### Added
+
+- int64 integer fidelity — the integer subtype constructors (QT3 slice 5) (xpath)
+
+
+
 ## [1.9.133] - 2026-09-11
 
 ### Added
