@@ -666,3 +666,65 @@ TEST(XQueryCore, StringConstructors) {
     EXPECT_EQ(seq_string(doc, "`a where b`"), "a where b");
     leptris_document_free(doc);
 }
+
+TEST(XQueryCore, ExternalVariableParams) {
+    /* `declare variable $x external` + params-by-expression —
+     * QT3 <param select> semantics: each value is an XPath
+     * expression evaluated in an empty context; a default
+     * initializer applies when no binding arrives. */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+
+    const char* q =
+        "declare variable $input external; contains($input, 'str')";
+    LeptrisXQuery xq = leptris_xquery_parse(q, strlen(q));
+    ASSERT_NE(xq, nullptr);
+    const char* names[] = {"input"};
+    const char* selects[] = {"'a string'"};
+    LeptrisXPathResult r = leptris_xquery_eval_params(
+        xq, doc, nullptr, names, selects, 1);
+    ASSERT_NE(r, nullptr);
+    EXPECT_TRUE(leptris_xpath_result_boolean(r));
+    leptris_xpath_result_free(r);
+    /* Unbound external without default: evaluation error. */
+    EXPECT_EQ(leptris_xquery_eval(xq, doc, nullptr), nullptr);
+    leptris_xquery_free(xq);
+
+    const char* qd =
+        "declare variable $x external := 7; $x + 1";
+    LeptrisXQuery xd = leptris_xquery_parse(qd, strlen(qd));
+    ASSERT_NE(xd, nullptr);
+    /* Default applies when unbound. */
+    LeptrisXPathResult rd = leptris_xquery_eval(xd, doc, nullptr);
+    ASSERT_NE(rd, nullptr);
+    char* s = leptris_xpath_result_string(rd);
+    EXPECT_STREQ(s ? s : "", "8");
+    leptris_free_string(s);
+    leptris_xpath_result_free(rd);
+    /* A binding overrides the default. */
+    const char* dn[] = {"x"};
+    const char* dv[] = {"41"};
+    LeptrisXPathResult ro = leptris_xquery_eval_params(
+        xd, doc, nullptr, dn, dv, 1);
+    ASSERT_NE(ro, nullptr);
+    char* so = leptris_xpath_result_string(ro);
+    EXPECT_STREQ(so ? so : "", "42");
+    leptris_free_string(so);
+    leptris_xpath_result_free(ro);
+    leptris_xquery_free(xd);
+
+    /* The empty-sequence param binds as the empty sequence. */
+    const char* qe =
+        "declare variable $empty external; contains($empty, '')";
+    LeptrisXQuery xe = leptris_xquery_parse(qe, strlen(qe));
+    ASSERT_NE(xe, nullptr);
+    const char* en[] = {"empty"};
+    const char* ev[] = {"()"};
+    LeptrisXPathResult re = leptris_xquery_eval_params(
+        xe, doc, nullptr, en, ev, 1);
+    ASSERT_NE(re, nullptr);
+    EXPECT_TRUE(leptris_xpath_result_boolean(re));
+    leptris_xpath_result_free(re);
+    leptris_xquery_free(xe);
+    leptris_document_free(doc);
+}
