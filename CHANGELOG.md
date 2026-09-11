@@ -4,11 +4,11 @@
 
 ### Added
 
-- QT3 slice 3 — starts-with 43/43, ends-with 34/34 (xquery)
+- **QT3 slice 3 (lanes 11/12)** — the `fn/starts-with` and `fn/ends-with` test-sets vendored verbatim from [w3c/qt3tests](https://github.com/w3c/qt3tests): **43/43** and **34/34** adopted cases (UCA-collation and error-assertion cases wait on future slices). The 3-arg collation form now covers `contains`, `starts-with`, and `ends-with` through one shared dispatch: codepoint = the default semantics; `html-ascii-case-insensitive` = ASCII-only folding (WHATWG matching); any other URI is an unknown-collation error.
 
 ### Fixed
 
-- warning-clean full rebuild (html entity typedef, dead h_decode, pull alias const)
+- **Warning-clean full rebuild** — three warnings that incremental builds never surfaced: the HTML entity table/index anonymous-struct mismatch (one named `HtmlEnt` type now backs both), the dead pre-WHATWG `h_decode` wrapper (removed), and the staged-batch attribute mirror's const alias in the SAX pull parser (explicit cast at the staged lifetime).
 
 
 
