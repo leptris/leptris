@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.138] - 2026-09-12
+
+### Added
+
+- foreign integration points are scope boundaries (#659) (html)
+
+
+
 ## [1.9.137] - 2026-09-12
 
 ### Added
