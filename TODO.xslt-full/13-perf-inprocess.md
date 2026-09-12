@@ -323,3 +323,27 @@ out-param API the adapter uses instead of 3 FFI calls) and
 memoized Ruby-side wrappers. The C-side work is banked in this
 file's git history if the batched accessor lands (branch
 
+
+## CLOSED 2026-09-12 (final): the moxml 0.69x row — measured to
+## the bottom, four ways
+
+1. C resolver: parse-time stamping built + guard-specs green —
+   bench unmoved (~20ns/read either way; the walk is off the
+   profile). Discarded unpushed.
+2. Raw FFI fan-out: 3 calls 48ms vs 1 batched+3 reads 52ms per
+   180k reads — batching does not pay at this call cost (~80ns).
+3. Gem steady-state: identical (memoization already absorbs
+   repeats; the loop cost is element_children wrapper allocs).
+4. Gem cold first-touch: batching SLOWER (63ms -> 100ms; the
+   buffer+tuple allocation per element outweighs the saved
+   crossing). Reverted.
+
+VERDICT: the row sits in moxml's own wrapper/materializer layer
+(its adapter rides the leptris GEM, and our gem layers are
+measured off the deficit). leptris_element_expanded_name ships
+(v1.9.144) as an adapter-available primitive for anyone who does
+pay per-read fan-out; our gem keeps per-accessor calls. If the
+row must move, the work is in moxml's repo (external-PR style):
+profile their NS-read bench (benchmark-ips + stackprof) and fix
+their materializer — the leptris stack underneath is not the
+cost.
