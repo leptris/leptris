@@ -4,7 +4,20 @@
 
 ### Added
 
-- WHATWG bogus-markup edges + heading self-close (#659) (html)
+- **HTML WHATWG bogus-markup edges + heading self-close
+  (#659)** — tokenizer tails (html5lib tests1:38-49): EOF right
+  after `</` emits the two characters as text (eof-before-tag-
+  name); an invalid first tag-name char after `</`, any
+  non-doctype `<!` construct, and every `<?` (html5lib has no PI
+  tokenizer) make a bogus comment — raw bytes to the first `>`
+  with NUL → U+FFFD, riding the document prolog while still in
+  the initial mode. Heading starts pop a current heading
+  (`<h1>x<h2>` → siblings). The html4 entry keeps the libxml2
+  PI/bogus shapes (Nokogiri parity untouched). The html5lib
+  corpus harness now reads its `.dat` binary —
+  `std::string(char*)` truncated every line at its first NUL and
+  the unsafe-inputs corpus has real NULs. html5lib corpus
+  **1027 → 1046**; parity floor 784 unchanged.
 
 
 
