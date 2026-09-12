@@ -4,7 +4,17 @@
 
 ### Added
 
-- in-table clear-stack + frameset content drop (#659) (html)
+- **HTML in-table clear-stack + frameset content drop (#659)** —
+  cell/row/group/caption starts pop the stack back to table
+  context before the wrapper synthesis, so stray elements above
+  the table no longer swallow the synthesized cell (a
+  foster-parented `<a>` reconstructs as a second link holding the
+  trailing text — adoption01:11; adoption01/02 now 18/18).
+  "In frameset" drops everything but frameset/frame/noframes
+  starts and non-whitespace text. A replace-body `<frameset>` is
+  reused as its own `html > [head, frameset]` wrapper instead of
+  getting a synthesized shell around it. html5lib corpus
+  **1027 → 1038**; Nokogiri parity floor 784 unchanged.
 
 
 
