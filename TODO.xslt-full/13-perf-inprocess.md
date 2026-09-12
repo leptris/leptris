@@ -347,3 +347,42 @@ row must move, the work is in moxml's repo (external-PR style):
 profile their NS-read bench (benchmark-ips + stackprof) and fix
 their materializer — the leptris stack underneath is not the
 cost.
+
+## DOM vs pugixml race (2026-09-12, user directive: "why are we not
+## zero-copy?")
+
+Answer: the PARSER already is (names/attrs/values NUL-terminated
+in-place in the buffer copy, same strategy as pugixml load_buffer).
+The losses were bookkeeping, and the big one is FIXED (PR #1017):
+
+- attr-heavy-5k parse: 2086 -> 769 us (2.7x faster; 4.9x -> 1.96x
+  vs pugixml). Root cause: the #635 raw-view was built with one
+  pool_alloc + tail walk PER ATTR + one ns_cache alloc per
+  attr-bearing element; the #542 owner stamp added a post-loop
+  memchr per attr. Fix: 128-entry chunk carve + parser-local tail;
+  owner cache inline at colon detection. Specs:
+  RawAttributesAcrossChunkBoundaries (two chunk exhaustions).
+- Remaining parse gap (769 vs 393): element path (name-hash walk,
+  register-on-create bookkeeping), the fused sizing pre-scan +
+  buffer copy, per-element ns_cache alloc. Next levers, ranked by
+  expected value: (1) ns_cache chunk carve, (2) element name-hash
+  fusion with the split walk (already fused — dp_split_hash_name),
+  (3) the sizing pre-scan. Each ~5-10%.
+
+## Measured-and-BANKED: the mutation rows (append 3.4x, set-attr
+## 2.4x behind pugixml) are a NODE-LAYOUT lane, not tweaks
+
+Split (best-of-200 harness, 10k ops): create-only 20.6 ns/op,
+append-only 18.9 ns/op; pugixml append_child 11.6 ns/op for BOTH.
+Structural floor for the current 96-byte element: memset ~4ns +
+two pool carves ~5ns + FNV hash ~2ns (create >= 12ns); call chain
++ double parent decode + type-dispatching sibling setter + ~8
+stores (append >= 8ns) ~= 20ns floor vs pugi 44-byte nodes at
+11.6ns. Cheap swings identified (dispatch-free sibling store,
+wrapper chain collapse) total <= 10% — below the effort bar.
+Reaching <= 1x needs the compact-node redesign (44-56B nodes,
+lazy name-hash/init) — the same class of decision as the #682
+scope call; USER CALL. Do NOT micro-grind this row awaiting it.
+Known hazard from the split_qname incident: register-on-create
+elision (part of any lazy-init design) must FIRST restructure the
+name backpointer to survive in-place QName splits.
