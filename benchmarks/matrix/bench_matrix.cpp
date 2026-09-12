@@ -640,7 +640,7 @@ int main(int argc, char** argv) {
     {
         Library lib;
         lib.name = "leptris";
-        lib.version = "0.25.11";
+        lib.version = LEPTRIS_BENCH_VERSION;  // from PROJECT_VERSION via CMake
         printf("running leptris...\n");
         bench_dom_parse(lib, parse_fixtures, iters);
         bench_sax_parse(lib, parse_fixtures, iters);
@@ -654,7 +654,12 @@ int main(int argc, char** argv) {
     {
         Library lib;
         lib.name = "pugixml";
-        lib.version = "1.16";
+        {
+            char vbuf[16];
+            snprintf(vbuf, sizeof vbuf, "%d.%d",
+                     PUGIXML_VERSION / 1000, (PUGIXML_VERSION % 1000) / 10);
+            lib.version = vbuf;
+        }
         printf("running pugixml...\n");
         bench_dom_parse(lib, parse_fixtures, iters);
         bench_serialize(lib, attr_heavy, text_heavy, iters);
@@ -668,7 +673,7 @@ int main(int argc, char** argv) {
     {
         Library lib;
         lib.name = "libxml2";
-        lib.version = "2.9";
+        lib.version = LIBXML_DOTTED_VERSION;  // the header we compile against
         printf("running libxml2...\n");
         bench_dom_parse(lib, parse_fixtures, iters);
         bench_sax_parse(lib, parse_fixtures, iters);
