@@ -1363,3 +1363,26 @@ TEST(HtmlParse, NumericReferenceEndStates) {
     EXPECT_EQ(Html("FOO&#11111111111"), "FOO\xEF\xBF\xBD");
     EXPECT_EQ(Html("FOO&#1111111111ZOO"), "FOO\xEF\xBF\xBDZOO");
 }
+
+TEST(HtmlParse, TemplateInsertion) {
+    /* WHATWG "in template": end tags never pop past the nearest
+     * template (the fence); structural html/body/head tags inside
+     * template drop entirely, attrs NOT merged onto the outer
+     * elements (html5lib template.dat:7/64-67/78-79). The
+     * row/cell synthesis shapes need the per-template
+     * insertion-mode stack — banked in the lane-14 ledger. */
+    EXPECT_EQ(Html("<div><template></div>Hello"),
+              "<div><template>Hello</template></div>");
+    /* After the fence ignores </div>, the row nests in the
+     * template content verbatim (template.dat:79 shape). */
+    EXPECT_EQ(Html("<template><tr><td>Foo</td></tr></template>"),
+              "<html><head><template><tr><td>Foo</td></tr>"
+              "</template></head><body/></html>");
+    EXPECT_EQ(Html("<body><template></div><tr><td>Foo</td>"
+                   "</tr></template>"),
+              "<template><tr><td>Foo</td></tr></template>");
+    EXPECT_EQ(Html("<body a=b><template><div></div><body c=d>"
+                   "<div></div></body></template>"),
+              "<html><head/><body a=\"b\"><template><div/>"
+              "<div/></template></body></html>");
+}
