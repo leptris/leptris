@@ -1259,3 +1259,19 @@ TEST(HtmlParse, ForeignIntegrationPointsAreScopeBoundaries) {
                    "<p>baz</table><p>quux"),
               "<select>foobarbaz</select><table/><p>quux</p>");
 }
+
+TEST(HtmlParse, FramesetAndInTableClearStack) {
+    /* WHATWG "in frameset" (13.2.6.4.18): only frameset/frame/
+     * noframes content is live — everything else drops
+     * (html5lib tests10:21/22). And "in table" cell/row starts
+     * CLEAR THE STACK BACK TO TABLE CONTEXT first — stray open
+     * elements above the table (a foster-parented <a>) must not
+     * swallow the synthesized cell (adoption01:11): the trailing
+     * text then fosters BEFORE the table inside a reconstructed
+     * formatting clone. */
+    EXPECT_EQ(Html("<frameset><svg><g></g><g></g><p><span>"),
+              "<html><head/><frameset/></html>");
+    EXPECT_EQ(Html("<table><a>1<td>2</td>3</table>"),
+              "<a>1</a><a>3</a><table><tbody><tr><td>2</td></tr>"
+              "</tbody></table>");
+}

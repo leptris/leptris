@@ -244,3 +244,21 @@ ForeignIntegrationPointsAreScopeBoundaries. NEXT #659 nodes:
 frameset-mode content drop (tests10:21/22), annotation-xml
 without encoding staying foreign (52-54 tails), in-table
 dispatch (adoption01:11), then bindings expose html.
+
+## Update 2026-09-12 (c): in-table clear-stack + frameset
+## content drop — shipped (floor 1038)
+
+Three insertion-mode gaps: (1) cell/row/group/caption starts
+CLEAR THE STACK BACK TO TABLE CONTEXT before the wrapper
+synthesis (stray elements above the table — a foster-parented
+<a> — no longer swallow the synthesized cell; the trailing text
+then fosters before the table inside a reconstructed formatting
+clone: adoption01:11 green, AFE + foster + reconstruct
+composing end to end); (2) "in frameset" drops everything but
+frameset/frame/noframes starts (non-ws text too — html5lib
+tests10:21/22); (3) the replace-body frameset no longer
+double-wraps — h_split_head_body reuses the parsed frameset as
+its own wrapper instead of synthesizing a shell around it.
+Corpus 1027 → 1038 (+11); adoption01/02 now 18/18; parity 784
+held. Spec: FramesetAndInTableClearStack. NEXT: template/
+script-data/entity families by size, then bindings expose html.
