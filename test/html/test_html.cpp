@@ -320,6 +320,50 @@ TEST(HtmlParse, CommentsAndDoctypeSurvive) {
     if (doc) leptris_document_free(doc);
 }
 
+TEST(HtmlParse, HeadCommentsNestIntoHead) {
+    /* WHATWG "in head": a comment token is a child of the head
+     * element — it must not end the head run (html5lib
+     * tests19.dat:87 class). The html4 entry keeps the libxml2
+     * shape (comment rides in body). */
+    LeptrisStatus st = LEPTRIS_OK;
+
+    const char w1[] =
+        "<!doctype html><head><!--c--><meta charset=\"utf8\">";
+    LeptrisDocument d1 = leptris_parse_html_string(w1, std::strlen(w1), &st);
+    ASSERT_NE(d1, nullptr);
+    char* o1 = leptris_document_serialize(d1, nullptr);
+    ASSERT_NE(o1, nullptr);
+    EXPECT_STREQ(o1,
+        "<!DOCTYPE html><html><head><!--c-->"
+        "<meta charset=\"utf8\"/></head><body/></html>");
+    leptris_free_string(o1);
+    leptris_document_free(d1);
+
+    /* A comment BETWEEN head elements must not truncate the run. */
+    const char w2[] = "<head><meta><!--c--><title>T</title><p>x";
+    LeptrisDocument d2 = leptris_parse_html_string(w2, std::strlen(w2), &st);
+    ASSERT_NE(d2, nullptr);
+    char* o2 = leptris_document_serialize(d2, nullptr);
+    ASSERT_NE(o2, nullptr);
+    EXPECT_STREQ(o2,
+        "<html><head><meta/><!--c--><title>T</title></head>"
+        "<body><p>x</p></body></html>");
+    leptris_free_string(o2);
+    leptris_document_free(d2);
+
+    const char n1[] =
+        "<!doctype html><head><!--c--><meta charset=\"utf8\">";
+    LeptrisDocument d3 = leptris_parse_html4_string(n1, std::strlen(n1), &st);
+    ASSERT_NE(d3, nullptr);
+    char* o3 = leptris_document_serialize(d3, nullptr);
+    ASSERT_NE(o3, nullptr);
+    EXPECT_STREQ(o3,
+        "<!DOCTYPE html><html><body><!--c-->"
+        "<meta charset=\"utf8\"/></body></html>");
+    leptris_free_string(o3);
+    leptris_document_free(d3);
+}
+
 TEST(HtmlParse, StrayEndTagsAreIgnoredOrPop) {
     /* libxml2 shape (stray </i> ignored, no clone) — the WHATWG
      * entry keeps the adopted empty <i> (adoption agency). */

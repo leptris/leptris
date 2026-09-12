@@ -161,3 +161,17 @@ the dropped-structural design flattens them to body) and
 adoption agency. NEXT #659 nodes: in-head insertion mode for
 explicit <head> content, then full AFE, then bindings expose
 html.
+## Update 2026-09-12 (later): in-head comments — shipped (floor 933)
+
+The tests19:87 class resolved narrower than modeled: elements
+after an explicit <head> already lifted correctly — only COMMENTS
+broke the head run (the lift scan walks elements only, so a
+comment first in the chain blocked the whole lift, and one
+between head elements truncated it). Fix: comments (and PI-ish
+bogus comments) are NEUTRAL in the head-run scan, WHATWG-gated;
+the run-splice reparent now dispatches set_parent by node kind
+(an element-shaped write on a comment corrupted its content —
+found by the spec, invisible before because comments never rode
+the run). Corpus 928 → 933 (+5); Nokogiri parity 784 held.
+Spec: HeadCommentsNestIntoHead. NEXT #659 node: full AFE (the
+295-red block), then bindings expose html.
