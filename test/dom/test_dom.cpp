@@ -1845,6 +1845,58 @@ TEST(DomBasics, RawAttributesIncludeXmlnsInSourceOrder) {
     leptris_document_free(doc);
 }
 
+/* The raw-view entries carve from 128-entry chunks (pugixml-race
+ * perf path) — this spec pins the chunk-boundary behavior: an
+ * element with >256 attrs crosses TWO chunk exhaustion points and
+ * must still deliver every entry in source order, with xmlns
+ * declarations interleaved and the prefixed attr's owner-stamped
+ * cache intact (the parse-inline #542 path). */
+TEST(DomBasics, RawAttributesAcrossChunkBoundaries) {
+    std::string xml = "<e xmlns='urn:d' p:k0='v0'";
+    for (int i = 1; i < 300; i++) {
+        xml += " k" + std::to_string(i) + "='v" + std::to_string(i) + "'";
+    }
+    xml += " xmlns:p='urn:p'/>";
+    LeptrisDocument doc =
+        leptris_parse_string(xml.c_str(), xml.size(), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_document_root(doc);
+
+    /* 300 attrs + leading xmlns + trailing xmlns:p = 302 raw entries. */
+    EXPECT_EQ(leptris_element_attributes_raw(e, nullptr, nullptr, 0), 302u);
+
+    std::vector<const char*> q(302, nullptr);
+    std::vector<const char*> v(302, nullptr);
+    ASSERT_EQ(leptris_element_attributes_raw(e, q.data(), v.data(), 302),
+              302u);
+    EXPECT_STREQ(q[0], "xmlns");
+    EXPECT_STREQ(v[0], "urn:d");
+    /* Chunk boundary straddlers keep exact source order.
+     * Entry i (i >= 2) is k(i-1): q[0]=xmlns, q[1]=p:k0. */
+    EXPECT_STREQ(q[1], "p:k0");
+    EXPECT_STREQ(v[1], "v0");
+    EXPECT_STREQ(q[127], "k126");
+    EXPECT_STREQ(v[127], "v126");
+    EXPECT_STREQ(q[128], "k127");
+    EXPECT_STREQ(v[128], "v127");
+    EXPECT_STREQ(q[257], "k256");
+    EXPECT_STREQ(q[301], "xmlns:p");
+    EXPECT_STREQ(v[301], "urn:p");
+    for (int i = 2; i < 301; i++) {
+        std::string want = "k" + std::to_string(i - 1);
+        EXPECT_STREQ(q[i], want.c_str()) << "entry " << i;
+    }
+
+    /* The prefixed attr's owner-stamped side cache (allocated inline
+     * at parse since the pugixml-race slice) resolves standalone. */
+    const char* ln = nullptr;
+    const char* pfx = nullptr;
+    const char* uri = nullptr;
+    leptris_element_expanded_name(e, &ln, &pfx, &uri);
+    EXPECT_STREQ(ln, "e");
+    leptris_document_free(doc);
+}
+
 
 /* Issue #696: element copies dropped COMMENT and PI children at
  * every level — text/CDATA/elements survived, the other two kinds
