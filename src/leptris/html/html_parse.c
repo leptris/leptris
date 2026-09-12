@@ -4657,7 +4657,12 @@ static LeptrisDocument html_parse_shared(
         int raw_name = h_is_raw(name) ||
                        (b.whatwg &&
                         (strcmp(name, "plaintext") == 0 ||
-                         strcmp(name, "noframes") == 0));
+                         strcmp(name, "noframes") == 0 ||
+                         strcmp(name, "title") == 0 ||
+                         strcmp(name, "textarea") == 0 ||
+                         strcmp(name, "iframe") == 0 ||
+                         strcmp(name, "noembed") == 0 ||
+                         strcmp(name, "xmp") == 0));
         if (raw_name && !self_closing && elem_ns == H_NS_HTML) {
             const char* rs = q;
             if (strcmp(name, "plaintext") == 0) {
@@ -4735,11 +4740,34 @@ static LeptrisDocument html_parse_shared(
                 }
             }
             if (rs > q) {
-                LeptrisTextNode* t =
-                    leptris_text_create(q, (size_t)(rs - q), b.pool);
-                if (t)
-                    leptris_element_append_child_internal_doc(
-                        e, (LeptrisNodeRef)t, b.doc);
+                /* RCDATA (title/textarea) decodes entities and
+                 * textarea drops one leading newline (13.2.6.2
+                 * authoring convenience); the rest is raw. */
+                const char* cs = q;
+                size_t clen = (size_t)(rs - q);
+                if (b.whatwg &&
+                    (strcmp(name, "title") == 0 ||
+                     strcmp(name, "textarea") == 0)) {
+                    if (strcmp(name, "textarea") == 0 && *cs == '\n') {
+                        cs++;
+                        clen--;
+                    }
+                    char* dec =
+                        h_decode_ww(b.pool, cs, cs + clen, 0, b.whatwg);
+                    if (dec) {
+                        LeptrisTextNode* t = leptris_text_create(
+                            dec, strlen(dec), b.pool);
+                        if (t)
+                            leptris_element_append_child_internal_doc(
+                                e, (LeptrisNodeRef)t, b.doc);
+                    }
+                } else {
+                    LeptrisTextNode* t = leptris_text_create(
+                        cs, clen, b.pool);
+                    if (t)
+                        leptris_element_append_child_internal_doc(
+                            e, (LeptrisNodeRef)t, b.doc);
+                }
             }
             /* Skip past the close tag. */
             const char* cq = rs;
