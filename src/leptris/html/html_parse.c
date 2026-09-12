@@ -2116,6 +2116,25 @@ static int h_closes_ww(const char* open, const char* start) {
     return 0;
 }
 
+/* WHATWG: starts that close an open p in button scope
+ * (13.2.6.4.7 "in body" block set + h/pre/form/li/dd/dt/plaintext/
+ * hr/xmp). */
+static int h_p_closes(const char* start) {
+    static const char* const k[] = {
+        "address", "article", "aside",  "blockquote", "center",
+        "details", "dialog", "dir",     "div",        "dl",
+        "fieldset", "figcaption", "figure", "footer", "header",
+        "hgroup",  "main",    "menu",   "nav",        "ol",
+        "p",       "search",  "section", "summary",   "ul",
+        "h1",      "h2",      "h3",     "h4",         "h5",
+        "h6",      "pre",     "listing", "form",      "li",
+        "dd",      "dt",      "plaintext", "hr",     "xmp",
+        NULL};
+    for (int i = 0; k[i]; i++)
+        if (strcmp(start, k[i]) == 0) return 1;
+    return 0;
+}
+
 /* Implied-end sets: a start tag in `closes` closes any open
  * element named `name` (HTML4 §7.5.4 / table model). */
 static const char* const k_p_closers[] = {
@@ -2416,6 +2435,14 @@ typedef struct {
      * formatting scope (<b>1<i>2</b>3</i> -> <b>1<i>2</i></b><i>3
      * </i>). libxml2 pops them away; html4 keeps that shape. */
     int whatwg_adopt;
+    /* #659 WHATWG list of active formatting elements (13.2.4.3):
+     * each entry is the element created for its token (clones are
+     * re-created from it); markers (el == NULL, afe_marker == 1)
+     * fence applet/object/marquee/td/th/caption scopes so
+     * formatting cannot leak in or out. */
+    LeptrisElement afe[64];
+    unsigned char afe_marker[64];
+    int afe_n;
 } HBuilder;
 
 /* Pool a NUL-terminated ASCII-lowercased copy of [s, s+len). */
@@ -2573,6 +2600,56 @@ static int h_is_formatting(const char* n) {
            h_ieq_raw(n, "s") || h_ieq_raw(n, "small") ||
            h_ieq_raw(n, "strike") || h_ieq_raw(n, "strong") ||
            h_ieq_raw(n, "tt") || h_ieq_raw(n, "u");
+}
+
+/* WHATWG "special" category (13.2.4.2) — the adoption agency's
+ * furthest-block candidates. */
+static int h_is_special_ww(const char* n) {
+    static const char* const k[] = {
+        "address",  "applet",  "area",   "article",  "aside",
+        "base",     "basefont", "bgsound", "blockquote", "body",
+        "br",       "button",  "caption", "center",  "col",
+        "colgroup", "dd",      "details", "dir",     "div",
+        "dl",       "dt",      "embed",  "fieldset", "figcaption",
+        "figure",   "footer",  "form",   "frame",    "frameset",
+        "h1",       "h2",      "h3",     "h4",       "h5",
+        "h6",       "head",    "header", "hgroup",   "hr",
+        "html",     "iframe",  "img",    "input",    "keygen",
+        "li",       "link",    "listing", "main",    "marquee",
+        "menu",     "meta",    "nav",    "noembed",  "noframes",
+        "noscript", "object",  "ol",     "p",        "param",
+        "plaintext", "pre",    "script", "search",   "section",
+        "select",   "source",  "style",  "summary",  "table",
+        "tbody",    "td",      "template", "textarea", "tfoot",
+        "th",       "thead",   "title",  "tr",       "track",
+        "ul",       "wbr",     "xmp",    NULL};
+    if (!n) return 0;
+    for (int i = 0; k[i]; i++)
+        if (strcmp(n, k[i]) == 0) return 1;
+    return 0;
+}
+
+/* Start tags that DO reconstruct the active formatting list
+ * before inserting (13.2.6.4.7): everything except the structural
+ * head set, the block-level set (they close p instead), the table
+ * family, and raw-text elements. */
+static int h_reconstructs(const char* n) {
+    static const char* const no[] = {
+        "html",  "head",   "body",   "frameset", "base",  "basefont",
+        "bgsound", "link", "meta",   "script",   "style", "template",
+        "title", "noframes", "address", "article", "aside",
+        "blockquote", "center", "details", "dialog", "dir",
+        "div",   "dl",     "fieldset", "figcaption", "figure",
+        "footer", "header", "hgroup", "main",    "menu",  "nav",
+        "ol",    "p",      "search", "section",  "summary", "ul",
+        "h1",    "h2",     "h3",     "h4",       "h5",    "h6",
+        "pre",   "listing", "form",  "li",       "dd",    "dt",
+        "plaintext", "textarea", "table", "hr",  "caption", "col",
+        "colgroup", "frame", "tbody", "tfoot",   "thead", "td",
+        "th",    "tr",     NULL};
+    for (int i = 0; no[i]; i++)
+        if (strcmp(n, no[i]) == 0) return 0;
+    return 1;
 }
 
 /* ---- #659 foreign content (WHATWG 12.2.6.5) ---- */
@@ -2978,6 +3055,392 @@ static int h_ieq_raw(const char* a, const char* bname) {
     return *a == 0 && *bname == 0;
 }
 
+/* ---- #659 WHATWG adoption agency (13.2.6.4.7) ----
+ * The list of active formatting elements + reconstruct + the
+ * agency itself. Stack positions are oldest-first in open[]
+ * (open[depth-1] is the current node), which is the spec stack
+ * inverted; "above X" = open[i-1], "below X" = open[i+1]. */
+
+static int h_stack_find(HBuilder* b, LeptrisElement e) {
+    for (size_t i = 0; i < b->depth; i++)
+        if (b->open[i] == e) return (int)i;
+    return -1;
+}
+
+/* Entry index of el anywhere in the list (-1 if absent). */
+static int h_afe_index_of(HBuilder* b, LeptrisElement el) {
+    for (int i = 0; i < b->afe_n; i++)
+        if (!b->afe_marker[i] && b->afe[i] == el) return i;
+    return -1;
+}
+
+/* Last entry after the last marker whose name is subject. */
+static int h_afe_find(HBuilder* b, const char* subject) {
+    int last_marker = -1;
+    for (int i = 0; i < b->afe_n; i++)
+        if (b->afe_marker[i]) last_marker = i;
+    for (int i = b->afe_n - 1; i > last_marker; i--)
+        if (!b->afe_marker[i]) {
+            const char* n = leptris_element_name(b->afe[i]);
+            if (n && strcmp(n, subject) == 0) return i;
+        }
+    return -1;
+}
+
+static void h_afe_remove_idx(HBuilder* b, int idx) {
+    if (idx < 0 || idx >= b->afe_n) return;
+    memmove(&b->afe[idx], &b->afe[idx + 1],
+            (b->afe_n - idx - 1) * sizeof(b->afe[0]));
+    memmove(&b->afe_marker[idx], &b->afe_marker[idx + 1],
+            (b->afe_n - idx - 1));
+    b->afe_n--;
+}
+
+static void h_afe_clear_to_marker(HBuilder* b) {
+    while (b->afe_n > 0) {
+        int marker = b->afe_marker[b->afe_n - 1];
+        b->afe_n--;
+        if (marker) break;
+    }
+}
+
+/* Same token identity (name + attribute multiset) — the Noah's
+ * Ark clause compares attributes as parsed. */
+static int h_fmt_same(LeptrisElement a, LeptrisElement b2) {
+    if (a == b2) return 1;
+    const char* na = leptris_element_name(a);
+    const char* nb = leptris_element_name(b2);
+    if (!na || !nb || strcmp(na, nb) != 0) return 0;
+    int ca = 0, cb = 0;
+    for (struct leptris_attribute* x =
+             leptris_element_get_first_attribute(a);
+         x; x = leptris_attr_next(x))
+        ca++;
+    for (struct leptris_attribute* x =
+             leptris_element_get_first_attribute(b2);
+         x; x = leptris_attr_next(x))
+        cb++;
+    if (ca != cb) return 0;
+    for (struct leptris_attribute* x =
+             leptris_element_get_first_attribute(a);
+         x; x = leptris_attr_next(x)) {
+        int found = 0;
+        for (struct leptris_attribute* y =
+                 leptris_element_get_first_attribute(b2);
+             y; y = leptris_attr_next(y))
+            if (strcmp(attr_cname(x), attr_cname(y)) == 0 &&
+                strcmp(attr_cvalue(x), attr_cvalue(y)) == 0) {
+                found = 1;
+                break;
+            }
+        if (!found) return 0;
+    }
+    return 1;
+}
+
+/* Push with the Noah's Ark clause: a fourth same-identity entry
+ * after the last marker drops the earliest one. */
+static void h_afe_push(HBuilder* b, LeptrisElement e) {
+    int last_marker = -1;
+    for (int i = 0; i < b->afe_n; i++)
+        if (b->afe_marker[i]) last_marker = i;
+    int same = 0, earliest = -1;
+    for (int i = last_marker + 1; i < b->afe_n; i++) {
+        if (b->afe_marker[i]) break;
+        if (h_fmt_same(e, b->afe[i])) {
+            same++;
+            if (earliest < 0) earliest = i;
+        }
+    }
+    if (same >= 3 && earliest >= 0) h_afe_remove_idx(b, earliest);
+    if (b->afe_n >= 64) return;
+    b->afe[b->afe_n] = e;
+    b->afe_marker[b->afe_n] = 0;
+    b->afe_n++;
+}
+
+static void h_afe_marker_push(HBuilder* b) {
+    if (b->afe_n >= 64) return;
+    b->afe[b->afe_n] = NULL;
+    b->afe_marker[b->afe_n] = 1;
+    b->afe_n++;
+}
+
+/* Unattached re-creation of an element for the token it was
+ * created from (13.2.6.1): same name + parsed attributes. */
+static LeptrisElement h_afe_clone(HBuilder* b, LeptrisElement src) {
+    const char* n = leptris_element_name(src);
+    if (!n) return NULL;
+    LeptrisElement c =
+        leptris_element_create_with_view(leptris_sv_from_cstr(n),
+                                         b->pool);
+    if (!c) return NULL;
+    leptris_root_doc_register(c, b->doc);
+    for (struct leptris_attribute* a =
+             leptris_element_get_first_attribute(src);
+         a; a = leptris_attr_next(a))
+        leptris_element_add_attribute(
+            c, leptris_sv_from_cstr(attr_cname(a)),
+            leptris_sv_from_cstr(attr_cvalue(a)), b->pool);
+    return c;
+}
+
+/* Attach + push one reconstruction clone at the current
+ * insertion point (append_child unlinks from any old parent). */
+static LeptrisElement h_afe_open_clone(HBuilder* b, LeptrisElement src) {
+    const char* n = leptris_element_name(src);
+    if (!n) return NULL;
+    LeptrisElement c =
+        leptris_element_create_with_view(leptris_sv_from_cstr(n),
+                                         b->pool);
+    if (!c) return NULL;
+    leptris_root_doc_register(c, b->doc);
+    for (struct leptris_attribute* a =
+             leptris_element_get_first_attribute(src);
+         a; a = leptris_attr_next(a))
+        leptris_element_add_attribute(
+            c, leptris_sv_from_cstr(attr_cname(a)),
+            leptris_sv_from_cstr(attr_cvalue(a)), b->pool);
+    h_append(b, (LeptrisNodeRef)c);
+    if (b->depth == 0 && !b->root) b->root = c;
+    if (b->depth < 256) {
+        b->open[b->depth] = c;
+        b->open_ns[b->depth] = H_NS_HTML;
+        b->depth++;
+    }
+    return c;
+}
+
+/* Reconstruct the active formatting elements (13.2.4.3): every
+ * entry after the last in-stack/marker entry re-opens as a fresh
+ * clone at the insertion point. Character and ordinary start
+ * tags run this before inserting. */
+static void h_reconstruct(HBuilder* b) {
+    if (!b->whatwg_adopt || b->afe_n == 0) return;
+    /* Raw-text containers hold raw data ("text" insertion mode);
+     * no reconstruction runs inside them. */
+    if (b->depth > 0) {
+        const char* tn = leptris_element_name(b->open[b->depth - 1]);
+        if (tn &&
+            (strcmp(tn, "title") == 0 || strcmp(tn, "textarea") == 0 ||
+             strcmp(tn, "script") == 0 || strcmp(tn, "style") == 0 ||
+             strcmp(tn, "xmp") == 0 || strcmp(tn, "iframe") == 0 ||
+             strcmp(tn, "noembed") == 0 || strcmp(tn, "noscript") == 0))
+            return;
+    }
+    int i = b->afe_n - 1;
+    if (b->afe_marker[i] || h_stack_find(b, b->afe[i]) >= 0) return;
+    while (i > 0 && !b->afe_marker[i - 1] &&
+           h_stack_find(b, b->afe[i - 1]) < 0)
+        i--;
+    for (int j = i; j < b->afe_n; j++) {
+        LeptrisElement c = h_afe_open_clone(b, b->afe[j]);
+        if (c) b->afe[j] = c;
+    }
+}
+
+/* The adoption agency proper. Returns 1 when the end tag is fully
+ * consumed; 0 means no formatting entry matched and the caller
+ * runs its generic (any-other-end-tag) handling. */
+static int h_afe_end(HBuilder* b, const char* subject) {
+    if (b->depth > 0) {
+        LeptrisElement cur = b->open[b->depth - 1];
+        const char* cn = leptris_element_name(cur);
+        if (cn && strcmp(cn, subject) == 0 &&
+            h_afe_index_of(b, cur) < 0) {
+            b->depth--;
+            return 1;
+        }
+    }
+    for (int outer = 0; outer < 8; outer++) {
+        int fi = h_afe_find(b, subject);
+        if (fi < 0) return 0;
+        LeptrisElement fe = b->afe[fi];
+        int si = h_stack_find(b, fe);
+        if (si < 0) {
+            h_afe_remove_idx(b, fi);
+            return 1;
+        }
+        int fbi = -1;
+        for (size_t k = (size_t)si + 1; k < b->depth; k++) {
+            /* Only HTML-namespace elements are furthest-block
+             * candidates — foreign elements with special-looking
+             * names (svg tr) are ordinary foreign content. */
+            if (b->open_ns[k] == H_NS_HTML &&
+                h_is_special_ww(leptris_element_name(b->open[k]))) {
+                fbi = (int)k;
+                break;
+            }
+        }
+        if (fbi < 0) {
+            b->depth = (size_t)si;
+            h_afe_remove_idx(b, fi);
+            return 1;
+        }
+        LeptrisElement fb = b->open[fbi];
+        LeptrisElement ancestor =
+            si > 0 ? b->open[si - 1] : NULL;   /* NULL = top chain */
+        int bookmark = fi;
+        /* Pre-removal stack snapshot: the inner loop walks the
+         * neighbors nodes had before this algorithm removed any
+         * of them. */
+        LeptrisElement snap[256];
+        size_t snapn = b->depth;
+        memcpy(snap, b->open, snapn * sizeof(snap[0]));
+        LeptrisElement node = fb, last = fb;
+        int inner = 0;
+        for (;;) {
+            inner++;
+            int ni = -1;
+            for (size_t k = 0; k < snapn; k++)
+                if (snap[k] == node) {
+                    ni = (int)k;
+                    break;
+                }
+            if (ni <= 0) break;
+            LeptrisElement above = snap[ni - 1];
+            if (above == fe) break;
+            int ai = h_afe_index_of(b, above);
+            if (inner > 3 && ai >= 0) {
+                h_afe_remove_idx(b, ai);
+                if (bookmark > ai) bookmark--;
+                ai = -1;
+            }
+            if (ai < 0) {
+                /* Not a formatting entry: drop it from the real
+                 * stack; the snapshot keeps its old position for
+                 * navigation. */
+                int ri = h_stack_find(b, above);
+                if (ri >= 0) {
+                    memmove(&b->open[ri], &b->open[ri + 1],
+                            (b->depth - ri - 1) *
+                                sizeof(b->open[0]));
+                    memmove(&b->open_ns[ri], &b->open_ns[ri + 1],
+                            (b->depth - ri - 1));
+                    b->depth--;
+                }
+                node = above;
+                continue;
+            }
+            LeptrisElement cl = h_afe_clone(b, above);
+            if (!cl) break;
+            b->afe[ai] = cl;
+            int ri = h_stack_find(b, above);
+            if (ri >= 0) b->open[ri] = cl;
+            snap[ni - 1] = cl;
+            if (last == fb) bookmark = ai + 1;
+            leptris_element_append_child_internal_doc(
+                cl, (LeptrisNodeRef)last, b->doc);
+            last = node = cl;
+        }
+        {
+            /* Steps 14-16 run even when the inner loop broke at
+             * once (lastNode == furthestBlock): moving the block
+             * out of the formatting element IS the adoption. The
+             * appropriate place is a plain append, or foster
+             * parenting when the ancestor is a table context. */
+            if (ancestor &&
+                h_is_table_context(ancestor)) {
+                int ti = (int)b->depth - 1;
+                while (ti >= 0 && !h_ieq_raw(
+                            leptris_element_name(b->open[ti]),
+                            "table"))
+                    ti--;
+                if (ti >= 1) {
+                    h_insert_before(b, b->open[ti - 1],
+                                    b->open[ti], (LeptrisNodeRef)last);
+                } else {
+                    /* Top-chain splice before the table node —
+                     * unlink from the old parent first. */
+                    leptris_node_unlink((LeptrisNodeRef)last);
+                    if (b->top_head) {
+                        if (b->top_head ==
+                            (LeptrisNodeRef)b->open[0]) {
+                            leptris_node_set_next_sibling(
+                                (LeptrisNodeRef)last, b->top_head);
+                            b->top_head = (LeptrisNodeRef)last;
+                        } else {
+                            LeptrisNodeRef prev = b->top_head;
+                            while (prev) {
+                                LeptrisNodeRef nx =
+                                    leptris_node_get_next_sibling(
+                                        prev);
+                                if (nx == (LeptrisNodeRef)b->open[0])
+                                    break;
+                                prev = nx;
+                            }
+                            if (prev) {
+                                leptris_node_set_next_sibling(
+                                    prev, (LeptrisNodeRef)last);
+                                leptris_node_set_next_sibling(
+                                    (LeptrisNodeRef)last,
+                                    (LeptrisNodeRef)b->open[0]);
+                            }
+                        }
+                    }
+                }
+            } else if (ancestor) {
+                leptris_element_append_child_internal_doc(
+                    ancestor, (LeptrisNodeRef)last, b->doc);
+            } else {
+                /* Top chain: unlink from the old parent first —
+                 * h_top_append only links siblings. */
+                leptris_node_unlink((LeptrisNodeRef)last);
+                h_top_append(b, (LeptrisNodeRef)last);
+            }
+        }
+        /* New formatting element inside the furthest block: it
+         * adopts the block's children, then is appended. */
+        LeptrisElement ne = h_afe_clone(b, fe);
+        if (!ne) return 1;
+        LeptrisNodeRef c = leptris_node_first_child_internal(
+            (LeptrisNode*)fb);
+        while (c) {
+            LeptrisNodeRef nx = leptris_node_get_next_sibling(c);
+            leptris_element_append_child_internal_doc(
+                ne, c, b->doc);
+            c = nx;
+        }
+        leptris_element_append_child_internal_doc(
+            fb, (LeptrisNodeRef)ne, b->doc);
+        h_afe_remove_idx(b, fi);
+        if (bookmark > fi) bookmark--;
+        if (bookmark > b->afe_n) bookmark = b->afe_n;
+        if (b->afe_n < 64) {
+            memmove(&b->afe[bookmark + 1], &b->afe[bookmark],
+                    (b->afe_n - bookmark) * sizeof(b->afe[0]));
+            memmove(&b->afe_marker[bookmark + 1],
+                    &b->afe_marker[bookmark],
+                    (b->afe_n - bookmark));
+            b->afe[bookmark] = ne;
+            b->afe_marker[bookmark] = 0;
+            b->afe_n++;
+        }
+        int ri = h_stack_find(b, fe);
+        if (ri >= 0) {
+            memmove(&b->open[ri], &b->open[ri + 1],
+                    (b->depth - ri - 1) * sizeof(b->open[0]));
+            memmove(&b->open_ns[ri], &b->open_ns[ri + 1],
+                    (b->depth - ri - 1));
+            b->depth--;
+        }
+        /* Insert the new element immediately below (more recent
+         * than) the furthest block's stack position. */
+        int fbpos = h_stack_find(b, fb);
+        if (fbpos >= 0 && b->depth < 256) {
+            memmove(&b->open[fbpos + 2], &b->open[fbpos + 1],
+                    (b->depth - fbpos - 1) * sizeof(b->open[0]));
+            memmove(&b->open_ns[fbpos + 2],
+                    &b->open_ns[fbpos + 1],
+                    (b->depth - fbpos - 1));
+            b->open[fbpos + 1] = ne;
+            b->open_ns[fbpos + 1] = H_NS_HTML;
+            b->depth++;
+        }
+    }
+    return 1;
+}
+
 /* Create + attach an element; push==0 leaves the stack alone
  * (synthesis helpers run at commit time). */
 static LeptrisElement h_open_named(HBuilder* b, const char* name,
@@ -3211,7 +3674,10 @@ static LeptrisDocument html_parse_shared(
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, strlen(dec), b.pool);
-                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                    if (t) {
+                        h_reconstruct(&b);
+                        h_append(&b, (LeptrisNodeRef)t);
+                    }
                 }
             }
             if (p + 3 < end && p[2] == '-' && p[3] == '-') {
@@ -3418,7 +3884,10 @@ static LeptrisDocument html_parse_shared(
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, strlen(dec), b.pool);
-                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                    if (t) {
+                        h_reconstruct(&b);
+                        h_append(&b, (LeptrisNodeRef)t);
+                    }
                 }
             }
             if (nlen && b.depth > 0) {
@@ -3459,6 +3928,17 @@ static LeptrisDocument html_parse_shared(
                             continue;
                         }
                     }
+                    /* #659 adoption agency (WHATWG 13.2.6.4.7):
+                     * formatting end tags run the agency — it
+                     * consumes the tag when a formatting entry
+                     * matched; otherwise the generic path below
+                     * is the any-other-end-tag run. */
+                    if (b.whatwg_adopt && h_is_formatting(lname) &&
+                        h_afe_end(&b, lname)) {
+                        p = q;
+                        text = p;
+                        continue;
+                    }
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
                         /* #659: foreign slots store the
@@ -3480,45 +3960,18 @@ static LeptrisDocument html_parse_shared(
                             }
                         }
                         if (on && tag_match) {
-                            /* #659 adoption agency (WHATWG, simplified
-                             * 8.2.5.4 steps): formatting elements open
-                             * ABOVE the match are cloned and reopened
-                             * at the new insertion point — misnested
-                             * content keeps its formatting scope. */
-                            char clones[16][24];
-                            LeptrisElement src[16];
-                            size_t nclones = 0;
-                            if (b.whatwg_adopt && h_is_formatting(lname)) {
-                                for (size_t k = d; k < b.depth && nclones < 16;
-                                     k++) {
-                                    const char* fn =
-                                        leptris_element_name(b.open[k]);
-                                    if (fn && h_is_formatting(fn)) {
-                                        size_t fl = strlen(fn);
-                                        if (fl < sizeof(clones[0])) {
-                                            memcpy(clones[nclones], fn, fl + 1);
-                                            src[nclones] = b.open[k];
-                                            nclones++;
-                                        }
-                                    }
-                                }
-                            }
                             h_pop_to(&b, d - 1);
-                            for (size_t k = 0; k < nclones; k++) {
-                                LeptrisElement c =
-                                    h_open_element(&b, clones[k]);
-                                /* The clone carries the original's
-                                 * attributes (8.2.5.4 step 5). */
-                                if (c && src[k]) {
-                                    for (struct leptris_attribute* a =
-                                             leptris_element_get_first_attribute(
-                                                 src[k]);
-                                         a; a = leptris_attr_next(a)) {
-                                        leptris_element_set_attribute(
-                                            c, attr_cname(a), attr_cvalue(a));
-                                    }
-                                }
-                            }
+                            /* Marker-scope closes clear the active
+                             * formatting list up to their marker
+                             * (13.2.4.3 cell/applet close). */
+                            if (b.whatwg_adopt &&
+                                (strcmp(on, "applet") == 0 ||
+                                 strcmp(on, "marquee") == 0 ||
+                                 strcmp(on, "object") == 0 ||
+                                 strcmp(on, "td") == 0 ||
+                                 strcmp(on, "th") == 0 ||
+                                 strcmp(on, "caption") == 0))
+                                h_afe_clear_to_marker(&b);
                             break;
                         }
                     }
@@ -3538,7 +3991,10 @@ static LeptrisDocument html_parse_shared(
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, strlen(dec), b.pool);
-                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                    if (t) {
+                        h_reconstruct(&b);
+                        h_append(&b, (LeptrisNodeRef)t);
+                    }
                 }
             }
             const char* ts = p + 2;   /* skip "<?" */
@@ -3646,7 +4102,10 @@ static LeptrisDocument html_parse_shared(
             if (dec && *dec) {
                 LeptrisTextNode* t =
                     leptris_text_create(dec, strlen(dec), b.pool);
-                if (t) h_append(&b, (LeptrisNodeRef)t);
+                if (t) {
+                    h_reconstruct(&b);
+                    h_append(&b, (LeptrisNodeRef)t);
+                }
             }
         }
 
@@ -3718,6 +4177,32 @@ static LeptrisDocument html_parse_shared(
         /* Implied end tags this start tag triggers (HTML rules
          * only — foreign content has none). */
         if (elem_ns == H_NS_HTML) {
+            /* WHATWG: block starts close an open p in BUTTON
+             * SCOPE — formatting elements do not fence the scan,
+             * they stay dangling in the active formatting list
+             * and reconstruct inside the new block. */
+            if (b.whatwg_adopt && h_p_closes(name)) {
+                for (size_t d = b.depth; d > 0; d--) {
+                    const char* on =
+                        leptris_element_name(b.open[d - 1]);
+                    if (!on) break;
+                    if (strcmp(on, "p") == 0) {
+                        b.depth = d - 1;
+                        break;
+                    }
+                    if (h_ieq_raw(on, "button") ||
+                        h_ieq_raw(on, "applet") ||
+                        h_ieq_raw(on, "caption") ||
+                        h_ieq_raw(on, "table") ||
+                        h_ieq_raw(on, "td") ||
+                        h_ieq_raw(on, "th") ||
+                        h_ieq_raw(on, "marquee") ||
+                        h_ieq_raw(on, "object") ||
+                        h_ieq_raw(on, "select") ||
+                        h_ieq_raw(on, "template"))
+                        break;
+                }
+            }
             while (b.depth > 0) {
                 const char* on = leptris_element_name(b.open[b.depth - 1]);
                 if (on &&
@@ -3754,6 +4239,41 @@ static LeptrisDocument html_parse_shared(
                 h_open_element(&b, "tr");
             }
         }
+
+        /* #659 a/nobr start tags run the adoption agency first
+         * when an open element of the same name is still in the
+         * active formatting list (13.2.6.4.7) — the duplicate
+         * closes before the new one opens. */
+        if (b.whatwg_adopt && elem_ns == H_NS_HTML &&
+            (strcmp(name, "a") == 0 || strcmp(name, "nobr") == 0)) {
+            if (h_afe_find(&b, name) >= 0) {
+                h_afe_end(&b, name);
+                /* The agency's 8-iteration cap can leave the
+                 * entry — the start-tag branch removes it
+                 * unconditionally. */
+                int ai = h_afe_find(&b, name);
+                if (ai >= 0) {
+                    LeptrisElement fe = b.afe[ai];
+                    h_afe_remove_idx(&b, ai);
+                    int ri = h_stack_find(&b, fe);
+                    if (ri >= 0) {
+                        memmove(&b.open[ri], &b.open[ri + 1],
+                                (b.depth - ri - 1) *
+                                    sizeof(b.open[0]));
+                        memmove(&b.open_ns[ri], &b.open_ns[ri + 1],
+                                (b.depth - ri - 1));
+                        b.depth--;
+                    }
+                }
+            }
+        }
+        /* #659 reconstruct the active formatting elements before
+         * this insertion (13.2.6.4.7 reconstructs on character
+         * tokens and on formatting/ordinary element starts — NOT
+         * on the structural/head/block/table set). */
+        if (b.whatwg_adopt && elem_ns == H_NS_HTML &&
+            h_reconstructs(name))
+            h_reconstruct(&b);
 
         LeptrisElement e = (elem_ns != H_NS_HTML)
                                ? h_open_foreign(&b, name, elem_ns)
@@ -3870,6 +4390,22 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
+        /* #659 active formatting list: formatting elements push
+         * their entry; applet/object/marquee/td/th/caption open a
+         * marker scope (13.2.4.3). */
+        if (b.whatwg_adopt && elem_ns == H_NS_HTML &&
+            !(self_closing || h_is_void(name))) {
+            if (h_is_formatting(name)) {
+                h_afe_push(&b, e);
+            } else if (strcmp(name, "applet") == 0 ||
+                       strcmp(name, "marquee") == 0 ||
+                       strcmp(name, "object") == 0 ||
+                       strcmp(name, "td") == 0 ||
+                       strcmp(name, "th") == 0 ||
+                       strcmp(name, "caption") == 0) {
+                h_afe_marker_push(&b);
+            }
+        }
         if (self_closing || h_is_void(name)) b.depth--;
         p = q;
         text = p;
@@ -3881,7 +4417,10 @@ static LeptrisDocument html_parse_shared(
         if (dec && *dec) {
             LeptrisTextNode* t =
                 leptris_text_create(dec, strlen(dec), b.pool);
-            if (t) h_append(&b, (LeptrisNodeRef)t);
+            if (t) {
+                h_reconstruct(&b);
+                h_append(&b, (LeptrisNodeRef)t);
+            }
         }
     }
 
