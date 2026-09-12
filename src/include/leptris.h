@@ -3462,10 +3462,12 @@ LEPTRIS_API const char* leptris_xinclude_get_encoding(LeptrisElement include_ele
  * Version Information
  * ============================================================================ */
 
-#define LIBLEPTRIS_VERSION_MAJOR 0
-#define LIBLEPTRIS_VERSION_MINOR 1
-#define LIBLEPTRIS_VERSION_PATCH 0
-#define LIBLEPTRIS_VERSION_STRING "0.1.0"
+/* Keep in sync with project(VERSION) in the root CMakeLists.txt —
+ * CI's export-surface gate diffs the header against the binary. */
+#define LIBLEPTRIS_VERSION_MAJOR 1
+#define LIBLEPTRIS_VERSION_MINOR 9
+#define LIBLEPTRIS_VERSION_PATCH 144
+#define LIBLEPTRIS_VERSION_STRING "1.9.144"
 
 /**
  * Get libleptris version string
