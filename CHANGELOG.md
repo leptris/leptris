@@ -4,7 +4,13 @@
 
 ### Added
 
-- numeric-reference end states (#659) (html)
+- **HTML numeric-reference end states (#659)** — WHATWG 13.2.5.84
+  in the WHATWG decode branch: NUL, surrogate, and out-of-range
+  references (including overflow digit strings, semicolon or
+  not) become U+FFFD; the C1 range remaps through the
+  Windows-1252 table. html5lib corpus **1129 → 1169** (+40) —
+  entities01.dat fully green; Nokogiri parity floor 784
+  unchanged.
 
 
 
