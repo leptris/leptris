@@ -2,9 +2,17 @@
 
 ## [1.9.146] - 2026-09-12
 
-### Added
+### Fixed
 
-- WHATWG in-template end-tag fence + structural tag drop (html)
+- **WHATWG `<template>` insertion, subset** — end tags no longer pop
+  past the nearest open template (html5lib template.dat 7/78/79);
+  `html`/`head`/`body` start tags inside a template drop entirely
+  instead of merging attributes onto the outer elements (template.dat
+  64-67); `</template>` clears the active formatting list to its
+  marker. WHATWG corpus floor 1169 → 1175, Nokogiri parity 784 held,
+  html4 mode unchanged (all new branches whatwg-gated). The remaining
+  ~25 template.dat cases need the per-template insertion-mode stack
+  (design banked in TODO.xslt-full/14-html-mode.md).
 
 
 
