@@ -318,7 +318,6 @@ template (29).
 
 ## Update 2026-09-12 (g): numeric-reference end states — shipped
 ## (floor 1169, +40)
-
 WHATWG 13.2.5.84 in h_decode_ww's whatwg branch: NUL, surrogate,
 and >0x10FFFF references (including strtol-saturated overflow
 digit strings, semicolon or not) become U+FFFD; the C1 range
@@ -327,3 +326,24 @@ rows without entries stay literal). html4 keeps its strict
 ';'-required semantics (parity 784 held). Spec:
 NumericReferenceEndStates. entities01 is now 100% green. NEXT:
 template.dat (29), tests2/3 tails, the 3-case walker mystery.
+
+## Triaged 2026-09-12 (h): template.dat (31 reds) — design banked
+
+The runner keeps html5lib's literal `content` marker node (the
+tail MARKER-splice in NormalizeExpected handles it — a FIRST
+attempt to pre-splice content markers LOST 4 net cases, cause
+not yet found; the tail splice alone is the current state).
+ENGINE rules needed (expected trees confirmed):
+- in-template depth counter; content = template's own children;
+- td/th at template top synthesize a bare tr (NO tbody); tr is
+  bare; block starts close open tr/td/tbody back to the template
+  (case 45: div becomes a sibling of tr);
+- end-tag fence: a non-template end tag whose nearest match is
+  at/below the nearest template's stack index is IGNORED (7, 78,
+  79); </template> pops + marker-clear (add template to the
+  marker-clear set);
+- structural html/head/body tokens inside template DROP entirely
+  — attrs NOT merged (64-67);
+- nested templates stack (68-70, 91).
+RED spec drafted (TemplateInsertion, 4 shapes) — banked in the
+git history of branch feat/html-template.
