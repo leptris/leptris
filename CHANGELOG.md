@@ -2,12 +2,21 @@
 
 ## [1.9.145] - 2026-09-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
+- **`LIBLEPTRIS_VERSION_*` macros** — the public version macros still
+  said "0.1.0" at 1.9.x; they now track the release (and
+  `bump-version.sh` updates them every release, so this cannot drift
+  again).
 
-- (describe changes here)
+### Benchmarks
+
+- **XSLT scorecard reference twins** (`benchmarks/xslt/scorecard_lxml.py`) —
+  in-process libxslt timings for the five fixtures that lacked a
+  reference; every scorecard ratio now reproduces from the tree.
+- `bench_matrix` reports the versions it actually links
+  (`PROJECT_VERSION`, `PUGIXML_VERSION`, `LIBXML_DOTTED_VERSION`)
+  instead of hardcoded stale strings.
 
 
 ## [1.9.144] - 2026-09-12
