@@ -387,6 +387,19 @@ Known hazard from the split_qname incident: register-on-create
 elision (part of any lazy-init design) must FIRST restructure the
 name backpointer to survive in-place QName splits.
 
+## RESOLVED same day: the carve ships as PR #1023
+
+ROOT CAUSE (pointer instrumentation, 15 min after 3 failed
+hypotheses): the chunk-exhaustion branch wrote `c = cursor = c + 1`
+— returns entry 1 while the cursor POINTS AT entry 1, so the next
+fresh allocation reuses the same address (cache aliasing: the
+second element's cache zeroed the first's xmlns declarations ->
+52/205 libxslt failures). The fix = the shipped raw-attr form
+(`cursor = c + 1`, use entry 0). v1.9.147's raw-attr path verified
+already-correct. Result: attr-heavy 684 -> 641 us, suite 205/205,
+parity held. META-LESSON: the three failed hypotheses were all
+"equivalent rewrite" reasoning; one instrumented run ended it.
+
 ## Measured-and-REVERTED 2026-09-12 (round 3): ns_cache chunk carve
 
 The per-element ns_cache pool_alloc (5000 on attr-heavy) replaced by
