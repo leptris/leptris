@@ -401,4 +401,12 @@ cause unfound; next attempt starts by tracing the element_query
 prefix->URI resolver (own cache slot vs declarations walk) before
 touching allocation. LESSON: allocation-pattern changes in the
 parse path are LAYOUT-SENSITIVE here; the suite is the gate, single
--shape probes are not.
+-shape probes are not. READ-PATH MAPPED for
+the next attempt: get_namespace_uri is LAZY (element.c:449 —
+cache slot first, then lookup_namespace walking
+ns_cache->declarations, result cached back into the slot); the
+parse interleaves dp_split_hash_name's set_prefix (creates the
+cache, inits ONLY 3 of 7 fields — raw_attrs/doc_next/heap-flags
+left raw on dirty pages) with the xmlns-branch wiring. Compare the
+cache LIFETIME ordering (set_prefix-created vs carve-created) on a
+prefixed+declaring element before re-applying.
