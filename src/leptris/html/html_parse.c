@@ -3624,9 +3624,37 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
     }
 
     /* <body> (or <frameset>, #659) owns the rest, then links in
-     * as html's last child. */
-    LeptrisElement body = h_create_unattached(
-        b, b->frameset ? "frameset" : "body");
+     * as html's last child. When the rest already IS a parsed
+     * frameset (the replace-body path), it stays as its own
+     * wrapper — no synthesized shell around it. */
+    LeptrisElement body = NULL;
+    if (b->frameset && rest) {
+        LeptrisNodeRef c0 = rest;
+        while (c0 && leptris_node_get_type(c0) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+            c0 = leptris_node_get_next_sibling(c0);
+        if (c0 && h_ieq_raw(leptris_element_name((LeptrisElement)c0),
+                            "frameset"))
+            body = (LeptrisElement)c0;
+    }
+    if (body) {
+        /* Already owns its children and its place in html's
+         * chain — relink defensively and recount. */
+        leptris_element_set_parent(body, html);
+        if (head_spliced)
+            leptris_node_set_next_sibling(
+                (LeptrisNodeRef)html_first_new, (LeptrisNodeRef)body);
+        else
+            leptris_elem_set_first_child(html, (LeptrisNodeRef)body);
+        size_t cnt = 0;
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child((LeptrisNodeRef)html);
+             c; c = leptris_node_get_next_sibling(c))
+            cnt++;
+        html->child_count = cnt;
+        return;
+    }
+    body = h_create_unattached(b, b->frameset ? "frameset" : "body");
     if (!body) return;
     size_t elems = 0;
     LeptrisNodeRef last = NULL;
@@ -4162,6 +4190,37 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
+        /* #659 "in frameset" (WHATWG 13.2.6.4.18): inside
+         * frameset content only frameset/frame/noframes is live;
+         * other start tags drop, non-whitespace text drops. */
+        if (b.whatwg && b.frameset && b.depth > 0 &&
+            strcmp(name, "frameset") != 0 &&
+            strcmp(name, "frame") != 0 &&
+            strcmp(name, "noframes") != 0) {
+            if (text < p) {
+                char* dec =
+                    h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                if (dec && *dec) {
+                    int ws = 1;
+                    for (const char* q2 = dec; *q2; q2++)
+                        if (!h_is_ws(*q2)) {
+                            ws = 0;
+                            break;
+                        }
+                    if (ws) {
+                        LeptrisTextNode* t = leptris_text_create(
+                            dec, strlen(dec), b.pool);
+                        if (t)
+                            h_append(&b, (LeptrisNodeRef)t);
+                    }
+                }
+            }
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+
         /* Flush pending text before the element. */
         if (text < p) {
             char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
@@ -4306,6 +4365,41 @@ static LeptrisDocument html_parse_shared(
          * Nokogiri keeps them bare — the html4 entry's parity
          * shape, unchanged here. */
         if (b.whatwg && elem_ns == H_NS_HTML && b.depth > 0) {
+            /* Clear the stack back to a table context first: a
+             * cell/row/group/caption start with stray elements
+             * open ABOVE the table (a foster-parented <a>) pops
+             * them before the wrapper synthesis runs. */
+            {
+                const char* topn =
+                    leptris_element_name(b.open[b.depth - 1]);
+                int tableish =
+                    h_ieq_raw(topn, "table") ||
+                    h_ieq_raw(topn, "tbody") ||
+                    h_ieq_raw(topn, "thead") ||
+                    h_ieq_raw(topn, "tfoot") ||
+                    h_ieq_raw(topn, "tr") ||
+                    h_ieq_raw(topn, "caption") ||
+                    h_ieq_raw(topn, "colgroup");
+                if (!tableish &&
+                    (strcmp(name, "caption") == 0 ||
+                     strcmp(name, "col") == 0 ||
+                     strcmp(name, "colgroup") == 0 ||
+                     strcmp(name, "tbody") == 0 ||
+                     strcmp(name, "tfoot") == 0 ||
+                     strcmp(name, "thead") == 0 ||
+                     strcmp(name, "td") == 0 ||
+                     strcmp(name, "th") == 0 ||
+                     strcmp(name, "tr") == 0)) {
+                    for (size_t d2 = b.depth; d2 > 0; d2--) {
+                        const char* on2 =
+                            leptris_element_name(b.open[d2 - 1]);
+                        if (on2 && h_ieq_raw(on2, "table")) {
+                            b.depth = d2;
+                            break;
+                        }
+                    }
+                }
+            }
             const char* tn = leptris_element_name(b.open[b.depth - 1]);
             int is_body = h_ieq_raw(tn, "tbody") ||
                           h_ieq_raw(tn, "thead") ||
