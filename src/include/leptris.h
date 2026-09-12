@@ -1338,6 +1338,26 @@ LEPTRIS_API int leptris_get_max_depth(void);
 LEPTRIS_API const char* leptris_element_name(LeptrisElement elem);
 
 /**
+ * Read an element's expanded name in one call — the local name,
+ * its prefix, and the resolved namespace URI. Equivalent to
+ * leptris_element_name() + leptris_element_prefix() +
+ * leptris_element_namespace()/leptris_namespace_uri(), but one
+ * call for FFI adapters that fan out per-element reads.
+ *
+ * Each out-param may be NULL (that value is skipped). Contracts
+ * match the individual accessors exactly: local_name is never
+ * NULL ("" for nameless); prefix and namespace_uri are NULL when
+ * absent.
+ *
+ * Memory: all returned strings are document-owned and live until
+ * leptris_document_free().
+ */
+LEPTRIS_API void leptris_element_expanded_name(LeptrisElement elem,
+                                               const char** local_name,
+                                               const char** prefix,
+                                               const char** namespace_uri);
+
+/**
  * Get element text content (concatenation of all text nodes)
  *
  * @param elem Element
