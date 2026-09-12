@@ -607,7 +607,9 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 1187 since the in-template START-tag fence (13.2.4.2
+     * 1197 since the per-template insertion-mode machine
+     * (13.2.6.4.10 wrap/drop transitions; +10). 1187 was the
+     * in-template START-tag fence (13.2.4.2
      * scope boundary — table-context starts become template
      * content; +12 net). 1175 was the end-tag fence + structural
      * drop;
@@ -628,7 +630,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
      * <template> placement, 623 structural head/body, 556
      * DOCTYPE, 295 adoption agency, 294 foster, 285 two-mode
      * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)1187);
+    EXPECT_GE(passed, (size_t)1197);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
