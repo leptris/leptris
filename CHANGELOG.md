@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.142] - 2026-09-12
+
+### Added
+
+- RCDATA/rawtext family (#659) (html)
+
+
+
 ## [1.9.141] - 2026-09-12
 
 ### Added
