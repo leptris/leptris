@@ -4,7 +4,13 @@
 
 ### Added
 
-- RCDATA/rawtext family (#659) (html)
+- **HTML RCDATA/rawtext family (#659)** — `title`/`textarea`
+  are RCDATA per WHATWG 13.2.6.2 (entity-decoded content, no
+  markup inside — a `<!--` inside `<title>` was parsed as a
+  comment; `textarea` drops one leading newline), and
+  `iframe`/`noembed`/`xmp` join the raw-text set. html5lib
+  corpus **1096 → 1129** (+33; **933 → 1129** today across
+  v1.9.137–.142); Nokogiri parity floor 784 unchanged.
 
 
 
