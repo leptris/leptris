@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.144] - 2026-09-12
+
+### Added
+
+- leptris_element_expanded_name — one-call expanded-name read (api)
+
+
+
 ## [1.9.143] - 2026-09-12
 
 ### Added
