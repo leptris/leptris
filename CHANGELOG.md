@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.146] - 2026-09-12
+
+### Added
+
+- WHATWG in-template end-tag fence + structural tag drop (html)
+
+
+
 ## [1.9.145] - 2026-09-12
 
 ### Fixed
