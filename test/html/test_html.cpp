@@ -1386,3 +1386,21 @@ TEST(HtmlParse, TemplateInsertion) {
               "<html><head/><body a=\"b\"><template><div/>"
               "<div/></template></body></html>");
 }
+
+TEST(HtmlParse, TemplateStartTagFence) {
+    /* 13.2.4.2: an open template is a scope boundary — table-context
+     * start tags arriving inside it are TEMPLATE CONTENT (the
+     * template's own insertion mode owns them); the start-tag
+     * close-stack never pops past the template. html5lib
+     * template.dat:28/30 (thead stays in content), 32 (tr), 36
+     * (bare td), 27 (td inside a thead's template). */
+    EXPECT_EQ(Html("<table><template><thead></template></table>"),
+              "<table><template><thead/></template></table>");
+    EXPECT_EQ(Html("<table><template><tr></template></table>"),
+              "<table><template><tr/></template></table>");
+    EXPECT_EQ(Html("<table><template><td></template>"),
+              "<table><template><td/></template></table>");
+    EXPECT_EQ(Html("<table><thead><template><td></template></table>"),
+              "<table><thead><template><td/></template></thead>"
+              "</table>");
+}

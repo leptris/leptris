@@ -4546,9 +4546,16 @@ static LeptrisDocument html_parse_shared(
                 const char* on = leptris_element_name(b.open[b.depth - 1]);
                 if (on &&
                     (h_closes(on, name) ||
-                     (b.whatwg && h_closes_ww(on, name))))
+                     (b.whatwg && h_closes_ww(on, name)))) {
+                    /* #659 "in template" start-tag fence (13.2.4.2):
+                     * an open template is a scope boundary — a start
+                     * tag never pops it; table-context starts become
+                     * template content instead (html5lib
+                     * template.dat:28/32/36). */
+                    if (b.whatwg && h_ieq_raw(on, "template"))
+                        break;
                     b.depth--;
-                else break;
+                } else break;
             }
         }
 
@@ -4586,6 +4593,11 @@ static LeptrisDocument html_parse_shared(
                     for (size_t d2 = b.depth; d2 > 0; d2--) {
                         const char* on2 =
                             leptris_element_name(b.open[d2 - 1]);
+                        /* #659 fence: a template between here and the
+                         * table owns the token — no clearing past it
+                         * (template-top no-ops the synthesis below). */
+                        if (on2 && h_ieq_raw(on2, "template"))
+                            break;
                         if (on2 && h_ieq_raw(on2, "table")) {
                             b.depth = d2;
                             break;

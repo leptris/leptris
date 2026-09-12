@@ -363,3 +363,25 @@ starts switch it: tr -> in-row, td -> in-cell, thead/tbody/
 caption/col -> in-table..., EOF/reset restores). The remaining
 ~25 template reds need that mode-stack modeled properly —
 next session's design, NOT more content heuristics.
+
+## Update 2026-09-12 (j): in-template START-tag fence — shipped
+## (floor 1187, +12)
+
+13.2.4.2's template-as-scope-boundary, start-tag side: the
+close-stack loop and the clear-back-to-table loop both stop at an
+open template (WHATWG-gated). `<table><template><tr>` now nests the
+row in template content instead of popping the template and
+synthesizing at table level (template.dat 27-36/39/63 shapes).
+Spec: TemplateStartTagFence. Nokogiri parity 784 held.
+
+THE REMAINING ~24 template reds need the FAITHFUL per-template
+insertion-mode stack — every simplified state model tried against
+the expected trees has been falsified by a case pair: 46 vs 48
+(post-</tr> td gets a tr-wrap; post-</td> td is bare), 52 vs 69
+(post-row tbody DROPPED; post-section tfoot OPENED, tr gets a
+tbody-wrap). The observable divergence demands the real mode
+sequence (in-template -> in-table/in-row/in-cell pushes with their
+own start/end handling), not a two-state flag. NEXT: mode enum +
+per-template mode stack in HBuilder + the 13.2.6.4.10 transition
+table verbatim; the 36-red extraction (trees for every failing
+case) is in this file's git history and the session red-list.
