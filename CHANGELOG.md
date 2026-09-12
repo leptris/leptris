@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.140] - 2026-09-12
+
+### Added
+
+- WHATWG bogus-markup edges + heading self-close (#659) (html)
+
+
+
 ## [1.9.139] - 2026-09-12
 
 ### Added
