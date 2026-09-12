@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.149] - 2026-09-12
+
+### Performance
+
+- chunk-carved ns_cache — attr-heavy 684 -> 641 us (parse)
+
+
+
 ## [1.9.148] - 2026-09-12
 
 ### Added
