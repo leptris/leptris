@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.137] - 2026-09-12
+
+### Added
+
+- full WHATWG adoption agency (#659) (html)
+
+
+
 ## [1.9.136] - 2026-09-12
 
 ### Fixed
