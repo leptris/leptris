@@ -315,3 +315,15 @@ content as markup (a comment inside the title) and iframe left
 shapes (parity 784 held). Spec: RcdataAndRawtextFamily. NEXT:
 explicit html/head shapes (tests1:7-13/101), entities01 (40),
 template (29).
+
+## Update 2026-09-12 (g): numeric-reference end states — shipped
+## (floor 1169, +40)
+
+WHATWG 13.2.5.84 in h_decode_ww's whatwg branch: NUL, surrogate,
+and >0x10FFFF references (including strtol-saturated overflow
+digit strings, semicolon or not) become U+FFFD; the C1 range
+remaps through the Windows-1252 table (0x80 EUR ... 0x9F YD;
+rows without entries stay literal). html4 keeps its strict
+';'-required semantics (parity 784 held). Spec:
+NumericReferenceEndStates. entities01 is now 100% green. NEXT:
+template.dat (29), tests2/3 tails, the 3-case walker mystery.

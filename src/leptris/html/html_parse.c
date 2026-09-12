@@ -2225,6 +2225,28 @@ static uint32_t h_entity_lookup(const char* name, size_t len) {
 /* Text-context decode (no attribute literal guard). */
 static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                          const char* e, int in_attr, int whatwg);
+/* WHATWG 13.2.5.84 numeric-reference end states: the C1 range
+ * remaps through the Windows-1252 table (rows without an entry
+ * stay as-is); everything else out of range, and surrogates and
+ * NUL, become U+FFFD. */
+static uint32_t h_numref_fix(long v) {
+    static const struct { long from; uint32_t to; } k_c1[] = {
+        {0x80, 0x20AC}, {0x82, 0x201A}, {0x83, 0x0192}, {0x84, 0x201E},
+        {0x85, 0x2026}, {0x86, 0x2020}, {0x87, 0x2021}, {0x88, 0x02C6},
+        {0x89, 0x2030}, {0x8A, 0x0160}, {0x8B, 0x2039}, {0x8C, 0x0152},
+        {0x8E, 0x017D}, {0x91, 0x2018}, {0x92, 0x2019}, {0x93, 0x201C},
+        {0x94, 0x201D}, {0x95, 0x2022}, {0x96, 0x2013}, {0x97, 0x2014},
+        {0x98, 0x02DC}, {0x99, 0x2122}, {0x9A, 0x0161}, {0x9B, 0x203A},
+        {0x9C, 0x0153}, {0x9E, 0x017E}, {0x9F, 0x0178},
+    };
+    if (v <= 0 || v > 0x10FFFF) return 0xFFFD;
+    if (v >= 0xD800 && v <= 0xDFFF) return 0xFFFD;
+    if (v >= 0x80 && v <= 0x9F)
+        for (size_t i = 0; i < sizeof(k_c1) / sizeof(k_c1[0]); i++)
+            if (k_c1[i].from == v) return k_c1[i].to;
+    return (uint32_t)v;
+}
+
 static char* h_decode_ww(LeptrisMemoryPool* pool, const char* s,
                          const char* e, int in_attr, int whatwg) {
     return h_decode_ex(pool, s, e, in_attr, whatwg);
@@ -2320,13 +2342,22 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                     memcpy(buf, ds, dn);
                     buf[dn] = 0;
                     long v = strtol(buf, NULL, hex ? 16 : 10);
-                    int ok = v > 0 && v <= 0x10FFFF;
-                    if (!whatwg)
-                        ok = ok && q < e && *q == ';';   /* ';' required */
-                    if (ok) {
-                        cp = (uint32_t)v;
+                    if (whatwg) {
+                        /* 13.2.5.84 end states: overflow saturates
+                         * at LONG_MAX (strtol) and lands in the
+                         * FFFD bucket with everything else; the
+                         * missing semicolon is tolerated. */
+                        cp = h_numref_fix(v);
                         adv = q;
                         if (adv < e && *adv == ';') adv++;
+                    } else {
+                        int ok = v > 0 && v <= 0x10FFFF;
+                        ok = ok && q < e && *q == ';';
+                        if (ok) {
+                            cp = (uint32_t)v;
+                            adv = q;
+                            if (adv < e && *adv == ';') adv++;
+                        }
                     }
                 }
             } else {
