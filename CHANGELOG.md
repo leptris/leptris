@@ -4,7 +4,16 @@
 
 ### Added
 
-- leptris_element_expanded_name — one-call expanded-name read (api)
+- **`leptris_element_expanded_name` (API)** — the local name,
+  prefix, and resolved namespace URI through one call, contracts
+  identical to the three individual accessors (name never NULL;
+  prefix/URI NULL when absent; strings document-owned). Pure
+  addition for FFI adapters that fan out per-element reads.
+  Measured note: the leptris-ruby gem's read path does NOT gain
+  from it (the batch's buffer+tuple allocation outweighs the
+  saved crossing — 4-way benchmarked; the binding keeps its
+  per-accessor calls), so it ships as an adapter-available
+  primitive, not a gem change.
 
 
 
