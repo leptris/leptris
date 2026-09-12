@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.139] - 2026-09-12
+
+### Added
+
+- in-table clear-stack + frameset content drop (#659) (html)
+
+
+
 ## [1.9.138] - 2026-09-12
 
 ### Added
