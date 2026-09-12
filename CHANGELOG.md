@@ -4,7 +4,19 @@
 
 ### Added
 
-- foreign integration points are scope boundaries (#659) (html)
+- **HTML foreign integration points as scope boundaries
+  (#659)** — MathML text integration points (`mi`/`mo`/`mn`/
+  `ms`/`mtext`) and HTML integration points (`annotation-xml`
+  with an HTML `encoding`, SVG `foreignObject`/`desc`/`title`)
+  now terminate every WHATWG scope walk (13.2.4.2): a block
+  start inside an integration point no longer closes an outer
+  `p`, an end tag fenced off by an integration point is ignored,
+  and a foreign breakout pops only down TO the integration point
+  so the reprocessed HTML tag lands inside it. In-select drops
+  non-select start tags (their text joins the select's text) and
+  `</table>` closes the select first (in-select-in-table).
+  html5lib corpus **1006 → 1027** (+21); Nokogiri parity floor
+  784 unchanged.
 
 
 
