@@ -215,20 +215,48 @@ bool ParseExpected(const std::vector<std::string>& lines, XNode* doc,
  * completes at the next #data or EOF. Multiple #data sections mean
  * fragment-after-document — skipped (slice 1). */
 std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
-                            std::string* err) {
+                            std::string* err, int truncate_at_nul) {
     std::vector<XCase> cases;
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) { *err = "open failed: " + path; return cases; }
     std::vector<std::string> lines;
     {
-        char buf[8192];
-        while (fgets(buf, sizeof(buf), f)) {
-            std::string l = buf;
-            while (!l.empty() && (l.back() == '\n' || l.back() == '\r'))
-                l.pop_back();
-            lines.push_back(l);
+        /* Binary read + manual split for the WHATWG meter:
+         * std::string(char*) would truncate every line at its
+         * first NUL byte, and the unsafe-inputs corpus has real
+         * NULs in #data lines (plain-text-unsafe.dat) — the
+         * engine must see them. The Nokogiri-parity meter keeps
+         * the truncating read: its reference trees were recorded
+         * from that input shape and are byte-pinned. */
+        if (!truncate_at_nul) {
+            std::string all;
+            char buf[8192];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+                all.append(buf, n);
+            fclose(f);
+            size_t pos = 0;
+            while (pos <= all.size()) {
+                size_t nl = all.find('\n', pos);
+                std::string l = (nl == std::string::npos)
+                                    ? all.substr(pos)
+                                    : all.substr(pos, nl - pos);
+                while (!l.empty() && (l.back() == '\r')) l.pop_back();
+                lines.push_back(l);
+                if (nl == std::string::npos) break;
+                pos = nl + 1;
+            }
+        } else {
+            char buf[8192];
+            while (fgets(buf, sizeof(buf), f)) {
+                std::string l = buf;
+                while (!l.empty() &&
+                       (l.back() == '\n' || l.back() == '\r'))
+                    l.pop_back();
+                lines.push_back(l);
+            }
+            fclose(f);
         }
-        fclose(f);
     }
     size_t i = 0, case_no = 0;
     while (i < lines.size()) {
@@ -519,7 +547,8 @@ TEST(Html5LibCorpus, TreeConstruction) {
     std::string err;
     std::map<std::string, size_t> skip_why;
     for (const std::string& fn : files) {
-        std::vector<XCase> cs = ScanFile(dir + "/" + fn, fn, &err);
+        std::vector<XCase> cs =
+            ScanFile(dir + "/" + fn, fn, &err, 0);
         if (!err.empty() && cs.empty()) {
             ADD_FAILURE() << fn << ": " << err;
             continue;
@@ -603,7 +632,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
     {
         std::vector<XCase> cs =
             ScanFile(dir + "/../../nokogiri-tree-tests.dat",
-                     "nokogiri-tree-tests.dat", &err);
+                     "nokogiri-tree-tests.dat", &err, 1);
         ASSERT_TRUE(cs.empty() || err.empty()) << err;
         size_t ptotal = 0, ppassed = 0, pfailed = 0, pskip = 0;
         std::vector<std::string> pfails;

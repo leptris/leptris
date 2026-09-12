@@ -262,3 +262,30 @@ its own wrapper instead of synthesizing a shell around it.
 Corpus 1027 → 1038 (+11); adoption01/02 now 18/18; parity 784
 held. Spec: FramesetAndInTableClearStack. NEXT: template/
 script-data/entity families by size, then bindings expose html.
+## Update 2026-09-12 (d): bogus-markup edges + heading
+## self-close (branch floor 1035, +8 on its 1027 base)
+
+WHATWG tokenizer tails (tests1:38-49): EOF right after "</"
+emits the two characters as text; an invalid first tag-name char
+after "</" (and any non-doctype "<!" construct, and every "<?"
+— html5lib has no PI tokenizer) makes a bogus comment with
+NUL→U+FFFD substitution, routed to the document prolog while
+still in the initial mode. Heading starts pop a current heading
+(h_closes_ww). The ProcessingInstructionAndBogus spec flipped
+to the bogus-comment truth; html4 keeps libxml2 PIs (parity
+784 held). The corpus READER now reads the WHATWG meter's .dat
+binary (std::string(char*) truncated every line at its first
+NUL — the unsafe corpus has real NULs); the parity meter keeps
+the truncating read (its reference trees were recorded from
+that input shape; binary-preserve broke it 784→776).
+
+OPEN MYSTERY (3 reds: plain-text-unsafe 12/13 + noscript01:1):
+an exact C++ replication of the runner's read+parse produces
+the byte-correct tree (FFFD comment in body; head>[noscript>/
+[comment]]), lldb confirms the corpus binary itself runs the
+FFFD h_bogus_comment with the right input bytes, comment_create
+copies+NUL-terminates — yet the walker compares OUR comment as
+''. Next session: instrument CollectDocument/Coalesce for
+these cases (suspect the walker's body traversal vs prolog
+routing interaction, or a second empty comment). +10 other
+cases fixed; net +8.

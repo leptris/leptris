@@ -408,18 +408,20 @@ TEST(HtmlParse, ProcessingInstructionAndBogus) {
     ASSERT_NE(body, nullptr);
     LeptrisElement dv = leptris_element_first_child_any(body);
     ASSERT_NE(dv, nullptr);
-    /* children: text "a", PI(foo, "bar?"), text "b" */
+    /* children: text "a", bogus comment "?foo bar?", text "b" —
+     * html5lib has no PI tokenizer, "<?" makes a comment whose
+     * data is "?" + the raw bytes to '>' (tests1:44). The html4
+     * entry keeps the libxml2 PI node. */
     LeptrisNodeRef c1 = leptris_node_first_child(
         leptris_element_as_node(dv));
     ASSERT_NE(c1, nullptr);
     EXPECT_EQ(leptris_node_get_type(c1), LEPTRIS_NODE_TYPE_TEXT);
     LeptrisNodeRef c2 = leptris_node_next_sibling(c1);
     ASSERT_NE(c2, nullptr);
-    EXPECT_EQ(leptris_node_get_type(c2), LEPTRIS_NODE_TYPE_PI);
-    const char* nm = leptris_pi_node_get_target(c2);
-    EXPECT_STREQ(nm ? nm : "", "foo");
-    const char* pd = leptris_pi_node_get_data(c2);
-    EXPECT_STREQ(pd ? pd : "", "bar?");
+    EXPECT_EQ(leptris_node_get_type(c2),
+              LEPTRIS_NODE_TYPE_COMMENT);
+    const char* cd = leptris_comment_node_get_content(c2);
+    EXPECT_STREQ(cd ? cd : "", "?foo bar?");
     LeptrisNodeRef c3 = leptris_node_next_sibling(c2);
     ASSERT_NE(c3, nullptr);
     EXPECT_EQ(leptris_node_get_type(c3), LEPTRIS_NODE_TYPE_TEXT);
@@ -1274,4 +1276,34 @@ TEST(HtmlParse, FramesetAndInTableClearStack) {
     EXPECT_EQ(Html("<table><a>1<td>2</td>3</table>"),
               "<a>1</a><a>3</a><table><tbody><tr><td>2</td></tr>"
               "</tbody></table>");
+}
+
+TEST(HtmlParse, BogusMarkupEdgesAndHeadingSelfClose) {
+    /* WHATWG tokenizer tails (html5lib tests1:38-49): eof before
+     * a tag name emits the pending characters as text; an invalid
+     * first tag/comment char makes a bogus comment (<? makes
+     * "?"+data — html5lib has no PI tokenizer). Headings
+     * self-close: a heading start pops a current heading
+     * (tests1:22/95). html4 keeps libxml2 PI/bogus shapes. */
+    EXPECT_EQ(Html("</"), "&lt;/");
+    EXPECT_EQ(Html("</#"), "<!--#--><html><head/><body/></html>");
+    EXPECT_EQ(Html("<?"), "<!--?--><html><head/><body/></html>");
+    EXPECT_EQ(Html("<?#"), "<!--?#--><html><head/><body/></html>");
+    EXPECT_EQ(Html("<!"), "<!----><html><head/><body/></html>");
+    EXPECT_EQ(Html("<!#"), "<!--#--><html><head/><body/></html>");
+    EXPECT_EQ(Html("<?COMMENT?>"),
+              "<!--?COMMENT?--><html><head/><body/></html>");
+    EXPECT_EQ(Html("<!COMMENT>"),
+              "<!--COMMENT--><html><head/><body/></html>");
+    EXPECT_EQ(Html("</ COMMENT >"),
+              "<!-- COMMENT --><html><head/><body/></html>");
+    EXPECT_EQ(Html("<?COM--MENT?>"),
+              "<!--?COM--MENT?--><html><head/><body/></html>");
+    EXPECT_EQ(Html("<!COM--MENT>"),
+              "<!--COM--MENT--><html><head/><body/></html>");
+    EXPECT_EQ(Html("</ COM--MENT >"),
+              "<!-- COM--MENT --><html><head/><body/></html>");
+    EXPECT_EQ(Html("<h1>Hello<h2>World"),
+              "<h1>Hello</h1><h2>World</h2>");
+    EXPECT_EQ(Html("<h1><h2>"), "<h1/><h2/>");
 }

@@ -7,6 +7,34 @@ Per-lane details live in the numbered docs; this file is the index
 
 ## A. In flight
 
+- **THE GRAPH TO SUCCESS (2026-09-12, after v1.9.138)** —
+  three in-repo tracks + one user-side gate:
+  1. **#659 HTML tail** (the only issue I own end-to-end):
+     (a) misc insertion-mode slice — frameset-mode content drop
+     (tests10:21/22), annotation-xml-without-encoding foreign
+     tails (tests10:52-54), in-table clear-stack
+     (adoption01:11) — then (b) the remaining corpus families
+     in size order (template 29, script-data states ~60
+     domjs/plain-text-unsafe, entities01 40, tests1/16 tails)
+     while the floor only rises; (c) bindings expose
+     `leptris_parse_html_string`/`html4` (leptris-ruby PR:
+     `Leptris::HTML.parse` WHATWG + `parse4` Nokogiri-parity) →
+     close #659.
+  2. **QT3 growth (lanes 11/12)**: UCA collation → error-assertion
+     runner (error channel) → assert-type/assert-xml/any-of →
+     prod/ + Context* sets → lane-12 3.1 sets (array/, map/).
+  3. **#682 last lever**: dispatch 2.25x vs the 2x bar (value-of
+     135x, subtree-copy 2.27x already clear) — either one more
+     dispatch lever or the user's scope call.
+  4. **User-side gate (blocks #878 + lane 16/17 close)**: merge
+     leptris-ruby#165 (→ closes #878 after standoc migration),
+     #170 (Schematron), #171 (Diff), leptris-py#99, canon#191.
+- **Schematron lane 16 COMPLETE on the C side** — phases 1-6 all
+  on main through v1.9.129 (schema IR + SVRL, abstract patterns/
+  let/phase, corpus 50/50, `leptris validate` CLI). The stale
+  branch `feat/16-sch-phases34` carries already-merged SHAs —
+  nothing pending there.
+
 - **lane 17.4 diff/canon COMPLETE as PRs** (user merges):
   leptris-ruby#171 (Leptris::XML::Diff), lutaml/canon#191
   (structural-identity fast path). The canon integration caught
