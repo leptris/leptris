@@ -302,3 +302,24 @@ a quiet machine, best-of-20; if it loses again the drain residual
 is Ruby dispatch itself and the real lever is an ENGINE-side
 batched drain API (parallel arrays out of one call) — file as an
 issue when picked up.
+
+## CLOSED 2026-09-12 (measured): moxml NS-heavy reads 0.69x —
+## the expanded-name/prefixed-path lever
+
+HYPOTHESIS DISPROVEN. Built the full parse-time stamping design
+(DParser scope-binding stack + element ns_uri stamp + attr
+resolved-uri side-cache + public fast paths), guard specs green
+— and the C-level bench did not move: expanded-name reads are
+~20ns either way (first-pass 0.336ms -> 0.344ms / 15k attr
+reads; element traversal identical; the lazy element cache and
+the short decl lists keep the walk off the profile). The 0.69x
+row is NOT in the C resolver — it lives in the leptris-ruby
+adapter loop (FFI call count / per-read Ruby allocations).
+NEXT ACTION (leptris-ruby repo, PR-only): profile the moxml
+adapter's expanded-name loop in Ruby (benchmark-ips + stackprof);
+candidate levers = batched expanded-name reads (one C call
+returning name+prefix+uri, e.g. a leptris_element_expanded_name
+out-param API the adapter uses instead of 3 FFI calls) and
+memoized Ruby-side wrappers. The C-side work is banked in this
+file's git history if the batched accessor lands (branch
+
