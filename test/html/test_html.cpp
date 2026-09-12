@@ -1233,3 +1233,29 @@ TEST(HtmlParse, AdoptionAgencyMisnest) {
     EXPECT_EQ(Html("<p>1<b>2<i>3</b>4</i>5</p>"),
               "<p>1<b>2<i>3</i></b><i>4</i>5</p>");
 }
+
+TEST(HtmlParse, ForeignIntegrationPointsAreScopeBoundaries) {
+    /* WHATWG 13.2.4.2 "in scope": MathML text integration points
+     * (mi/mo/mn/ms/mtext/annotation-xml) and SVG integration
+     * points (foreignObject/desc/title) terminate every scope
+     * walk (html5lib tests10:34-37,7). Consequences: a block
+     * start inside an integration point does NOT close an outer
+     * p; a breakout start pops only down TO the integration
+     * point; an HTML end tag with an integration point between
+     * current node and target is ignored. */
+    EXPECT_EQ(Html("<svg><desc><svg><ul>a"),
+              "<svg><desc><svg/><ul>a</ul></desc></svg>");
+    EXPECT_EQ(Html("<p><svg><desc><p>"), "<p><svg><desc><p/></desc></svg></p>");
+    EXPECT_EQ(Html("<p><svg><title><p>"), "<p><svg><title><p/></title></svg></p>");
+    EXPECT_EQ(Html("<div><svg><path><foreignObject><math></div>a"),
+              "<div><svg><path><foreignObject><math>a</math></foreignObject>"
+              "</path></svg></div>");
+    EXPECT_EQ(Html("<div><svg><path><foreignObject><p></div>a"),
+              "<div><svg><path><foreignObject><p>a</p></foreignObject>"
+              "</path></svg></div>");
+    /* In-select swallows foreign/block start tags as ignorable —
+     * their text content joins the select's text (tests10:17/18). */
+    EXPECT_EQ(Html("<body><table><select><svg><g>foo</g><g>bar</g>"
+                   "<p>baz</table><p>quux"),
+              "<select>foobarbaz</select><table/><p>quux</p>");
+}

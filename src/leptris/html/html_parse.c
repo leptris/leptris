@@ -2629,6 +2629,41 @@ static int h_is_special_ww(const char* n) {
     return 0;
 }
 
+#define H_NS_HTML 0
+#define H_NS_SVG 1
+#define H_NS_MATH 2
+
+/* Foreign integration points (13.2.6 tree construction
+ * dispatcher): MathML text integration points (mi/mo/mn/ms/
+ * mtext) and HTML integration points (annotation-xml with an
+ * HTML encoding, svg foreignObject/desc/title). They terminate
+ * every scope walk (13.2.4.2 "in scope" list) and the foreign
+ * breakout pop. */
+static int h_is_int_point(HBuilder* b, size_t idx) {
+    if (b->open_ns[idx] == H_NS_HTML) return 0;
+    const char* tn = leptris_element_name(b->open[idx]);
+    if (!tn) return 0;
+    if (h_ieq_raw(tn, "mi") || h_ieq_raw(tn, "mo") ||
+        h_ieq_raw(tn, "mn") || h_ieq_raw(tn, "ms") ||
+        h_ieq_raw(tn, "mtext") || h_ieq_raw(tn, "foreignobject") ||
+        h_ieq_raw(tn, "desc") || h_ieq_raw(tn, "title"))
+        return 1;
+    if (h_ieq_raw(tn, "annotation-xml")) {
+        for (struct leptris_attribute* a =
+                 leptris_element_get_first_attribute(b->open[idx]);
+             a; a = leptris_attr_next(a)) {
+            const char* cn = attr_cname(a);
+            if (cn && strcmp(cn, "encoding") == 0) {
+                const char* v = attr_cvalue(a);
+                if (h_ieq_raw(v, "text/html") ||
+                    h_ieq_raw(v, "application/xhtml+xml"))
+                    return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 /* Start tags that DO reconstruct the active formatting list
  * before inserting (13.2.6.4.7): everything except the structural
  * head set, the block-level set (they close p instead), the table
@@ -2653,10 +2688,6 @@ static int h_reconstructs(const char* n) {
 }
 
 /* ---- #659 foreign content (WHATWG 12.2.6.5) ---- */
-
-#define H_NS_HTML 0
-#define H_NS_SVG 1
-#define H_NS_MATH 2
 
 static const char H_SVG_URI[] = "http://www.w3.org/2000/svg";
 static const char H_MATH_URI[] = "http://www.w3.org/1998/Math/MathML";
@@ -3939,6 +3970,27 @@ static LeptrisDocument html_parse_shared(
                         text = p;
                         continue;
                     }
+                    /* #659 in-select end tags: option/optgroup/
+                     * select take the generic path; </table>
+                     * closes the select first (in select in
+                     * table) and reprocesses; the rest drop. */
+                    if (b.whatwg && h_in_select(&b)) {
+                        if (strcmp(lname, "table") == 0) {
+                            for (size_t d2 = b.depth; d2 > 0; d2--)
+                                if (strcmp(leptris_element_name(
+                                               b.open[d2 - 1]),
+                                           "select") == 0) {
+                                    b.depth = d2 - 1;
+                                    break;
+                                }
+                        } else if (strcmp(lname, "option") != 0 &&
+                                   strcmp(lname, "optgroup") != 0 &&
+                                   strcmp(lname, "select") != 0) {
+                            p = q;
+                            text = p;
+                            continue;
+                        }
+                    }
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
                         /* #659: foreign slots store the
@@ -3960,6 +4012,20 @@ static LeptrisDocument html_parse_shared(
                             }
                         }
                         if (on && tag_match) {
+                            /* Scope guard (WHATWG): a foreign
+                             * integration point between the
+                             * current node and the match puts the
+                             * target OUT OF SCOPE — the tag is
+                             * ignored (13.2.4.2 boundary list). */
+                            int fenced = 0;
+                            if (b.whatwg) {
+                                for (size_t k = b.depth; k > d; k--)
+                                    if (h_is_int_point(&b, k - 1)) {
+                                        fenced = 1;
+                                        break;
+                                    }
+                            }
+                            if (fenced) break;
                             h_pop_to(&b, d - 1);
                             /* Marker-scope closes clear the active
                              * formatting list up to their marker
@@ -4109,6 +4175,25 @@ static LeptrisDocument html_parse_shared(
             }
         }
 
+        /* #659 "in select" (WHATWG 13.2.6.4.7): only the select
+         * set is live inside an open <select> — every other
+         * start tag is dropped; its text content joins the
+         * select's text. */
+        if (b.whatwg && h_in_select(&b) &&
+            strcmp(name, "option") != 0 &&
+            strcmp(name, "optgroup") != 0 &&
+            strcmp(name, "select") != 0 &&
+            strcmp(name, "input") != 0 &&
+            strcmp(name, "keygen") != 0 &&
+            strcmp(name, "textarea") != 0 &&
+            strcmp(name, "script") != 0 &&
+            strcmp(name, "template") != 0) {
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+
         /* #659 "in head noscript" (scripting off): head content
          * stays inside the noscript; the first body-ish token
          * pops it and reprocesses at top level. */
@@ -4162,7 +4247,8 @@ static LeptrisDocument html_parse_shared(
                     /* Breakout: pop the foreign scope, reprocess
                      * under HTML rules below. */
                     while (b.depth > 0 &&
-                           b.open_ns[b.depth - 1] != H_NS_HTML)
+                           b.open_ns[b.depth - 1] != H_NS_HTML &&
+                           !h_is_int_point(&b, b.depth - 1))
                         b.depth--;
                 } else {
                     elem_ns = sns;
@@ -4199,7 +4285,8 @@ static LeptrisDocument html_parse_shared(
                         h_ieq_raw(on, "marquee") ||
                         h_ieq_raw(on, "object") ||
                         h_ieq_raw(on, "select") ||
-                        h_ieq_raw(on, "template"))
+                        h_ieq_raw(on, "template") ||
+                        h_is_int_point(&b, d - 1))
                         break;
                 }
             }

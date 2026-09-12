@@ -578,7 +578,9 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 1006 since full AFE (983 simplified-AFE replacement +
+     * 1027 since foreign integration-point scope boundaries +
+     * in-select swallow (1006 full AFE, 983 simplified-AFE
+     * replacement +
      * reconstruct, 933 in-head comments, 928 initial-mode
      * comments, 914 WHATWG character-reference decoding, 897
      * "in head noscript", 887 frameset mode + structural-tag
@@ -587,7 +589,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
      * <template> placement, 623 structural head/body, 556
      * DOCTYPE, 295 adoption agency, 294 foster, 285 two-mode
      * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)1006);
+    EXPECT_GE(passed, (size_t)1027);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *

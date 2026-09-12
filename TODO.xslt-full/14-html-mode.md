@@ -223,3 +223,24 @@ AdoptionAgencyMisnest (6 shapes: both spec walkthroughs +
 adoption01 1/2/3/5). NEXT #659 node: in-table dispatch (clear
 stack back to table context + in-table text batching), then
 bindings expose html → close #659.
+
+## Update 2026-09-12 (b): foreign integration points are scope
+## boundaries + in-select — shipped (floor 1027)
+
+One root cause behind most of tests10's 15 reds: MathML text
+integration points (mi/mo/mn/ms/mtext) and HTML integration
+points (annotation-xml with HTML encoding, svg foreignObject/
+desc/title) are on EVERY scope-walk boundary list (13.2.4.2).
+h_is_int_point now terminates: the button-scope p-close scan, a
+new generic-end-tag scope guard (an integration point between
+the current node and the nearest name match = out of scope, the
+tag is ignored — WHATWG-gated), and the foreign breakout pop
+(pops only down TO the integration point, the reprocessed HTML
+tag lands inside it). Plus in-select: non-select-set start tags
+drop (text joins the select's text) and </table> closes the
+select first (in-select-in-table). Corpus 1006 → 1027 (+21);
+Nokogiri parity 784 held. Spec:
+ForeignIntegrationPointsAreScopeBoundaries. NEXT #659 nodes:
+frameset-mode content drop (tests10:21/22), annotation-xml
+without encoding staying foreign (52-54 tails), in-table
+dispatch (adoption01:11), then bindings expose html.
