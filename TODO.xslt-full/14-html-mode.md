@@ -347,3 +347,19 @@ ENGINE rules needed (expected trees confirmed):
 - nested templates stack (68-70, 91).
 RED spec drafted (TemplateInsertion, 4 shapes) — banked in the
 git history of branch feat/html-template.
+
+## Update 2026-09-12 (i): in-template fence + structural drop —
+## shipped (floor 1175, +6)
+
+WHATWG-gated: end tags never pop past the nearest template (the
+fence — template.dat 7/78/79); structural html/head/body starts
+inside template drop entirely, attrs NOT merged onto the outer
+elements (64-67); </template> clears the AAFE to its marker.
+Spec: TemplateInsertion. The row/cell synthesis HEURISTICS were
+built twice (content-level rules v1/v2) and REVERTED both times
+— net-negative: html5lib's template trees come from the
+PER-TEMPLATE INSERTION-MODE STACK (each template saves its mode;
+starts switch it: tr -> in-row, td -> in-cell, thead/tbody/
+caption/col -> in-table..., EOF/reset restores). The remaining
+~25 template reds need that mode-stack modeled properly —
+next session's design, NOT more content heuristics.

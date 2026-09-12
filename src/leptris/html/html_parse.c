@@ -2926,6 +2926,17 @@ static int h_in_select(HBuilder* b) {
     return 0;
 }
 
+/* #659: index of the nearest open <template> on the stack, or
+ * -1. The in-template insertion rules fence on it. */
+static int h_template_idx(HBuilder* b) {
+    for (size_t i = b->depth; i > 0; i--) {
+        const char* n = leptris_element_name(b->open[i - 1]);
+        if (n && h_ieq_raw(n, "template")) return (int)(i - 1);
+    }
+    return -1;
+}
+
+
 /* font breaks out of foreign content only when it carries a
  * color/face/size attribute — peek the raw tag span [q, '>')
  * without consuming. */
@@ -4184,6 +4195,18 @@ static LeptrisDocument html_parse_shared(
                                     }
                             }
                             if (fenced) break;
+                            /* #659 "in template" fence: a
+                             * non-template end tag whose nearest
+                             * match is the template itself or an
+                             * ancestor of it is ignored — nothing
+                             * pops past the nearest template. */
+                            if (b.whatwg) {
+                                int ti = h_template_idx(&b);
+                                if (ti >= 0 &&
+                                    strcmp(lname, "template") != 0 &&
+                                    (int)(d - 1) <= ti)
+                                    break;
+                            }
                             h_pop_to(&b, d - 1);
                             /* Marker-scope closes clear the active
                              * formatting list up to their marker
@@ -4194,7 +4217,8 @@ static LeptrisDocument html_parse_shared(
                                  strcmp(on, "object") == 0 ||
                                  strcmp(on, "td") == 0 ||
                                  strcmp(on, "th") == 0 ||
-                                 strcmp(on, "caption") == 0))
+                                 strcmp(on, "caption") == 0 ||
+                                 strcmp(on, "template") == 0))
                                 h_afe_clear_to_marker(&b);
                             break;
                         }
@@ -4334,6 +4358,25 @@ static LeptrisDocument html_parse_shared(
                    (strcmp(name, "html") == 0 ||
                     strcmp(name, "head") == 0 ||
                     strcmp(name, "body") == 0)) {
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        } else if (b.whatwg && h_template_idx(&b) >= 0 &&
+                   (strcmp(name, "html") == 0 ||
+                    strcmp(name, "head") == 0 ||
+                    strcmp(name, "body") == 0)) {
+            /* #659 "in template": structural tags drop entirely
+             * (html5lib template.dat:64-67 — attrs do NOT merge
+             * onto the outer elements). */
+            if (text < p) {
+                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                if (dec && *dec) {
+                    LeptrisTextNode* t = leptris_text_create(
+                        dec, strlen(dec), b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
+            }
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;

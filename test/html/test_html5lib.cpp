@@ -607,7 +607,8 @@ TEST(Html5LibCorpus, TreeConstruction) {
         printf("  SKIP %zu x %s\n", w.second, w.first.c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Falsifiable floor — each lane-14 slice must only raise it.
-     * 1169 since numeric-reference end states — the whole
+     * 1175 since the in-template fence + structural drop
+     * (1169 numeric-reference end states — the whole
      * entities01 family (+40; 1129 the RCDATA/rawtext family (1096 script-data
      * escaped states on the merged
      * bogus-markup base (1088 script states standalone, 1046
@@ -624,7 +625,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
      * <template> placement, 623 structural head/body, 556
      * DOCTYPE, 295 adoption agency, 294 foster, 285 two-mode
      * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)1169);
+    EXPECT_GE(passed, (size_t)1175);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *
