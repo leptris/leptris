@@ -4,7 +4,16 @@
 
 ### Added
 
-- script-data escaped states (#659) (html)
+- **HTML script-data escaped states (#659)** — the WHATWG
+  13.2.5.15-.31 script tokenizer states: `<!--` inside script
+  text enters script-data-escaped; there `</script` + delimiter
+  closes (a bare `</scripta` stays text), `<script` + delimiter
+  enters double-escaped where `</script>` drops only one level,
+  and `-->`/`--!>` re-enter plain script data. Clears the
+  html5lib tests16 script-escape block plus script cases across
+  webkit01/tests2. html5lib corpus **1046 → 1096** (+50;
+  933 → 1096 today across v1.9.137-.141); Nokogiri parity floor
+  784 unchanged (html4 keeps the naive scan).
 
 
 
