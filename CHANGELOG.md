@@ -4,8 +4,7 @@
 
 ### Fixed
 
-- comments are head children — neutral in the head-run lift (#659) (html)
-
+- **HTML in-head comments (#659)** — a comment inside an explicit `<head>` is a head child (WHATWG "in head"): a comment first in the chain no longer blocks the whole head lift (`<!doctype html><head><!--c--><meta>` kept an empty head and dropped comment+meta into body), and a comment between head elements no longer truncates the run. The run-splice reparent now dispatches by node kind — the element-shaped write corrupted comment content. html5lib corpus floor **928 → 933**; Nokogiri parity held at 784.
 
 
 ## [1.9.135] - 2026-09-12
