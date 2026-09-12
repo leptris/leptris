@@ -1051,6 +1051,16 @@ LEPTRIS_API LeptrisNamespace leptris_element_namespace(LeptrisElement elem) {
     return leptris_element_get_namespace_uri(elem);
 }
 
+LEPTRIS_API void leptris_element_expanded_name(LeptrisElement elem,
+                                               const char** local_name,
+                                               const char** prefix,
+                                               const char** namespace_uri) {
+    if (local_name) *local_name = elem ? leptris_element_get_name(elem) : NULL;
+    if (prefix) *prefix = elem ? leptris_element_get_prefix(elem) : NULL;
+    if (namespace_uri)
+        *namespace_uri = elem ? leptris_element_get_namespace_uri(elem) : NULL;
+}
+
 LEPTRIS_API const char* leptris_element_prefix(LeptrisElement elem) {
     /* leptris_namespace_prefix(LeptrisNamespace) cannot answer this:
      * in the compact architecture the prefix lives on the ELEMENT,

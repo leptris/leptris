@@ -1892,3 +1892,43 @@ TEST(ElementCopy, KeepsNamespacePrefixesAndDeclarations) {
     leptris_document_free(target);
     leptris_document_free(doc);
 }
+
+TEST(ExpandedNameBatch, OneCallEqualsTheThreeAccessors) {
+    /* FFI fan-out lever: the Ruby adapter reads local name +
+     * prefix + namespace URI per element (3 calls); this one
+     * call must return exactly what the three individual
+     * accessors return, with their contracts (name is never
+     * NULL — ""; prefix/URI are NULL when absent). */
+    const char* xml =
+        "<r xmlns:p=\"urn:p\" xmlns=\"urn:d\">"
+        "<p:a p:k=\"1\"/><b/><c xmlns=\"\"><d/></c></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    const char *ln = NULL, *px = NULL, *uri = NULL;
+    leptris_element_expanded_name(root, &ln, &px, &uri);
+    EXPECT_STREQ(ln, leptris_element_name(root));
+    EXPECT_STREQ(px, leptris_element_prefix(root));
+    EXPECT_STREQ(uri ? uri : "",
+                 leptris_element_namespace(root)
+                     ? leptris_namespace_uri(leptris_element_namespace(root))
+                     : "");
+
+    LeptrisElement pa = (LeptrisElement)leptris_node_first_child(
+        (LeptrisNodeRef)root);
+    ASSERT_NE(pa, nullptr);
+    leptris_element_expanded_name(pa, &ln, &px, &uri);
+    EXPECT_STREQ(ln, leptris_element_name(pa));      /* "a" */
+    EXPECT_STREQ(px, leptris_element_prefix(pa));    /* "p" */
+    ASSERT_NE(uri, nullptr);
+    EXPECT_STREQ(uri, "urn:p");
+
+    /* NULL out-params are fine; NULL element is a no-op. */
+    leptris_element_expanded_name(pa, NULL, &px, NULL);
+    EXPECT_STREQ(px, "p");
+    leptris_element_expanded_name(NULL, &ln, &px, &uri);
+    EXPECT_EQ(ln, nullptr);
+    leptris_document_free(doc);
+}
