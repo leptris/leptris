@@ -7,9 +7,10 @@
 # (tamatebako/jemalloc/.github/scripts/bump-version.sh).
 #
 # Files updated:
-#   - CMakeLists.txt  (project(leptris VERSION ...))
-#   - vcpkg.json      (version-semver + version-string)
-#   - CHANGELOG.md    (new entry template)
+#   - CMakeLists.txt        (project(leptris VERSION ...))
+#   - vcpkg.json            (version-semver + version-string)
+#   - src/include/leptris.h (LIBLEPTRIS_VERSION_* macros)
+#   - CHANGELOG.md          (new entry template)
 #
 # The script does NOT commit or tag — the caller (release workflow)
 # handles that.
@@ -20,6 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 CMAKE_FILE="$REPO_ROOT/CMakeLists.txt"
+VERSION_HEADER="$REPO_ROOT/src/include/leptris.h"
 VCPKG_JSON="$REPO_ROOT/vcpkg.json"
 CHANGELOG="$REPO_ROOT/CHANGELOG.md"
 
@@ -70,6 +72,16 @@ print_info "New version: $NEXT"
 if [ -f "$CMAKE_FILE" ]; then
     perl -i -0777 -pe "s/(project\(\s*leptris\b[^)]*?)VERSION\s+[0-9]+\.[0-9]+\.[0-9]+/\${1}VERSION $NEXT/s" "$CMAKE_FILE"
     print_info "Updated CMakeLists.txt"
+fi
+
+# --- Update src/include/leptris.h (version macros) ---
+if [ -f "$VERSION_HEADER" ]; then
+    IFS='.' read -r NEXT_MAJOR NEXT_MINOR NEXT_PATCH <<< "$NEXT"
+    perl -i -pe "s/^#define LIBLEPTRIS_VERSION_MAJOR [0-9]+\$/#define LIBLEPTRIS_VERSION_MAJOR $NEXT_MAJOR/" "$VERSION_HEADER"
+    perl -i -pe "s/^#define LIBLEPTRIS_VERSION_MINOR [0-9]+\$/#define LIBLEPTRIS_VERSION_MINOR $NEXT_MINOR/" "$VERSION_HEADER"
+    perl -i -pe "s/^#define LIBLEPTRIS_VERSION_PATCH [0-9]+\$/#define LIBLEPTRIS_VERSION_PATCH $NEXT_PATCH/" "$VERSION_HEADER"
+    perl -i -pe "s/^#define LIBLEPTRIS_VERSION_STRING \"[^\"]*\"/#define LIBLEPTRIS_VERSION_STRING \"$NEXT\"/" "$VERSION_HEADER"
+    print_info "Updated src/include/leptris.h version macros"
 fi
 
 # --- Update vcpkg.json ---
@@ -145,5 +157,5 @@ print_info "Updated CHANGELOG.md"
 
 print_info ""
 print_info "Version bump complete: $CURRENT_VERSION → $NEXT"
-print_info "Files updated: CMakeLists.txt, vcpkg.json, CHANGELOG.md"
+print_info "Files updated: CMakeLists.txt, vcpkg.json, src/include/leptris.h, CHANGELOG.md"
 print_info "Next step: commit + push + open release PR"
