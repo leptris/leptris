@@ -3027,9 +3027,22 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                               LeptrisNodeRef orig_head) {
     LeptrisNodeRef head_end = orig_head;   /* first non-head node */
     if (!(b->lift_closed && !b->lift_boundary)) {
-        while (head_end &&
-               leptris_node_get_type(head_end) ==
-                   LEPTRIS_NODE_TYPE_ELEMENT) {
+        while (head_end) {
+            /* WHATWG "in head": comments (and PI-ish bogus
+             * comments) are head children — neutral in the run,
+             * never ending it. html4 keeps libxml2's shape (they
+             * ride in body). */
+            int hty = leptris_node_get_type(head_end);
+            if (hty == LEPTRIS_NODE_TYPE_COMMENT ||
+                hty == LEPTRIS_NODE_TYPE_PI) {
+                if (b->whatwg_head_set) {
+                    head_end = leptris_node_get_next_sibling(head_end);
+                    continue;
+                }
+                break;
+            }
+            if (hty != LEPTRIS_NODE_TYPE_ELEMENT)
+                break;
             const char* hn = leptris_element_name((LeptrisElement)head_end);
             /* #659 two modes: WHATWG lifts the full "in head" set;
              * the html4-compat entry lifts only title/meta/link/
@@ -3080,7 +3093,28 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             LeptrisNodeRef hlast = NULL;
             for (LeptrisNodeRef c = orig_head; c && c != head_end; ) {
                 LeptrisNodeRef next = leptris_node_get_next_sibling(c);
-                leptris_element_set_parent((LeptrisElement)c, head);
+                /* The run can carry comments (WHATWG in-head) —
+                 * set_parent must go through the node-kind setter,
+                 * an element-shaped write corrupts them. */
+                switch (leptris_node_get_type(c)) {
+                    case LEPTRIS_NODE_TYPE_COMMENT:
+                        leptris_comment_set_parent((LeptrisCommentNode*)c,
+                                                   head);
+                        break;
+                    case LEPTRIS_NODE_TYPE_TEXT:
+                        leptris_textnode_set_parent((LeptrisTextNode*)c,
+                                                    head);
+                        break;
+                    case LEPTRIS_NODE_TYPE_CDATA:
+                        leptris_cdata_set_parent((LeptrisCDATANode*)c, head);
+                        break;
+                    case LEPTRIS_NODE_TYPE_PI:
+                        leptris_pi_set_parent((LeptrisPINode*)c, head);
+                        break;
+                    default:
+                        leptris_element_set_parent((LeptrisElement)c, head);
+                        break;
+                }
                 hlast = c;
                 hn++;
                 c = next;
