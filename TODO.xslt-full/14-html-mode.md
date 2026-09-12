@@ -302,3 +302,16 @@ double-escaped where "</script>" only drops one level, and
 tests16 38-48/64-72 block plus script cases across webkit01/
 tests2 (1046 -> 1088, +42). Nokogiri parity 784 held (html4
 keeps the naive scan). Spec: ScriptDataEscapedStates.
+
+## Update 2026-09-12 (f): RCDATA/rawtext family — shipped
+## (floor 1129, +33)
+
+title/textarea are RCDATA (entity-decoded content, no markup
+inside, textarea drops one leading newline) and iframe/noembed/
+xmp join the whatwg raw set (13.2.6.2) — previously only
+script/style/plaintext/noframes were raw, so title parsed its
+content as markup (a comment inside the title) and iframe left
+</noscript> to the generic end-tag path. html4 keeps libxml2
+shapes (parity 784 held). Spec: RcdataAndRawtextFamily. NEXT:
+explicit html/head shapes (tests1:7-13/101), entities01 (40),
+template (29).

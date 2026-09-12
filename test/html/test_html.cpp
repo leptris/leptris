@@ -1329,3 +1329,21 @@ TEST(HtmlParse, ScriptDataEscapedStates) {
               "<html><head><script>&lt;!--&lt;script&gt;--!&gt;"
               "</script></head><body>X</body></html>");
 }
+
+TEST(HtmlParse, RcdataAndRawtextFamily) {
+    /* WHATWG 13.2.6.2: title/textarea are RCDATA (entity-
+     * decoding, no markup, first close tag ends); iframe/noembed/
+     * xmp are raw text (html5lib tests16:81-99). */
+    EXPECT_EQ(Html("<title><!--<title></title>--></title>"),
+              "<html><head><title>&lt;!--&lt;title&gt;</title>"
+              "</head><body>--&gt;</body></html>");
+    EXPECT_EQ(Html("<textarea><!--<textarea></textarea>-->"
+                   "</textarea>"),
+              "<textarea>&lt;!--&lt;textarea&gt;</textarea>"
+              "--&gt;");
+    EXPECT_EQ(Html("<xmp><!--<xmp></xmp>--></xmp>"),
+              "<xmp>&lt;!--&lt;xmp&gt;</xmp>--&gt;");
+    EXPECT_EQ(Html("<noscript><iframe></noscript>X"),
+              "<html><head><noscript/></head><body>"
+              "<iframe>&lt;/noscript&gt;X</iframe></body></html>");
+}
