@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.147] - 2026-09-12
+
+### Performance
+
+- bulk-carved raw-attr view + inline prefixed-owner stamp (parse)
+
+
+
 ## [1.9.146] - 2026-09-12
 
 ### Fixed
