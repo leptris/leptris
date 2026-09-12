@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.136] - 2026-09-12
+
+### Fixed
+
+- comments are head children — neutral in the head-run lift (#659) (html)
+
+
+
 ## [1.9.135] - 2026-09-12
 
 ### Fixed
