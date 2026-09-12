@@ -4,8 +4,18 @@
 
 ### Added
 
-- per-template insertion-mode machine (13.2.6.4.10) (html)
-- in-template start-tag fence — template is a scope boundary (html)
+- **WHATWG template insertion modes** — start tags now treat an
+  open template as a scope boundary (13.2.4.2: table-context starts
+  inside a template become template content instead of popping it),
+  and each open template tracks its saved insertion mode
+  (13.2.6.4.10): fresh templates open rows/cells/sections bare; a
+  cell after a closed row gets an implied `tr`; a row after a closed
+  section gets its implied `tbody`; rows/sections with nothing in
+  table scope drop; head-family tokens leave the mode untouched;
+  stray table tags in body-mode content drop. Transitions verified
+  against gumbo's reference handlers. html5lib corpus floor
+  1175 → 1197, Nokogiri parity 784 held, html4 mode unchanged.
+  Specs: TemplateStartTagFence, TemplateInsertionModes.
 
 
 
