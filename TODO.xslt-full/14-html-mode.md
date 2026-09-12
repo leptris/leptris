@@ -175,3 +175,51 @@ found by the spec, invisible before because comments never rode
 the run). Corpus 928 → 933 (+5); Nokogiri parity 784 held.
 Spec: HeadCommentsNestIntoHead. NEXT #659 node: full AFE (the
 295-red block), then bindings expose html.
+
+## Update 2026-09-12 (final): full AFE — shipped (floor 1006)
+
+Replaced the simplified adoption block with the real WHATWG
+machinery (13.2.4.3 + 13.2.6.4.7):
+
+- HBuilder grows the LIST OF ACTIVE FORMATTING ELEMENTS (64
+  entries; el + marker flag): formatting starts push with the
+  Noah's Ark clause (4th same token identity drops the earliest);
+  applet/object/marquee/td/th/caption push markers; marker-scope
+  end tags clear to the marker; generic pops leave entries
+  dangling by design (that is what reconstruction consumes).
+- RECONSTRUCT runs at every text flush and before formatting/
+  ordinary starts (blocklist = structural head set + block set +
+  table family — the starts that close p instead): dangling
+  entries re-open as clones at the insertion point and push on
+  the stack. Raw-text containers are excluded ("text" insertion
+  mode). This is what reopens formatting after `</b>` pops
+  through an inner formatting element.
+- The AGENCY itself: outer loop (8), step-2 current-node fast
+  path, after-last-marker entry lookup, furthest block = first
+  special HTML-ns element more recent than the entry (namespace
+  matters: svg tr is not a furthest block), common ancestor
+  (NULL = our top chain — html/body are synthesized at commit),
+  snapshot-based inner loop (clone-and-replace of formatting
+  intermediates, append lastNode chains), UNCONDITIONAL steps
+  14-16 (the block itself is adopted out — skipping these when
+  the inner loop broke at once was the first bug), new element
+  takes the furthest block's children, bookmark insertion in the
+  list, stack insert just more-recent than the block. leptris_
+  node_unlink handles detach for the top-chain move (append_
+  child_internal_doc already unlinks — a first draft that linked
+  siblings without unlinking duplicated subtrees).
+- a/nobr START tags run the agency first when an entry is open
+  (duplicate-<a> close), then reconstruct, then open.
+- Button-scope p close: block starts pop through an open p even
+  with formatting in between (they stay dangling and reconstruct
+  inside the new block) — `<p><b><b><b><b><p>x` now reconstructs
+  exactly three b's (Noah dropped the fourth at push time).
+
+Corpus 933 → 1006 (+73); adoption01/02 17/18 green; the last
+adoption red (adoption01:11 `<table><a>1<td>...</td>3</table>`)
+needs in-table "clear the stack back to table context" — table
+mode slice, not AFE. Nokogiri parity 784 held. Spec:
+AdoptionAgencyMisnest (6 shapes: both spec walkthroughs +
+adoption01 1/2/3/5). NEXT #659 node: in-table dispatch (clear
+stack back to table context + in-table text batching), then
+bindings expose html → close #659.

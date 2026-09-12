@@ -1215,3 +1215,21 @@ TEST(HtmlParse, EmptyCommentForms) {
     EXPECT_EQ(Html("FOO<!--->BAZ"), "FOO<!---->BAZ");
     EXPECT_EQ(Html("FOO<!-->BAZ"), "FOO<!---->BAZ");
 }
+
+TEST(HtmlParse, AdoptionAgencyMisnest) {
+    /* WHATWG 13.2.6.4.7 adoption agency (html5lib adoption01.dat
+     * + spec walkthroughs 13.2.10.1/.2): a formatting end tag
+     * whose scope holds a special element adopts the furthest
+     * block out of the formatting element and re-opens a clone
+     * inside it; with no block it pops through and the active
+     * formatting list reconstructs at the next insertion. */
+    EXPECT_EQ(Html("<a><p></a></p>"), "<a/><p><a/></p>");
+    EXPECT_EQ(Html("<a>1<p>2</a>3</p>"), "<a>1</a><p><a>2</a>3</p>");
+    EXPECT_EQ(Html("<a>1<button>2</a>3</button>"),
+              "<a>1</a><button><a>2</a>3</button>");
+    EXPECT_EQ(Html("<a>1<b>2</a>3</b>"), "<a>1<b>2</b></a><b>3</b>");
+    EXPECT_EQ(Html("<a>1<div>2<div>3</a>4</div>5</div>"),
+              "<a>1</a><div><a>2</a><div><a>3</a>4</div>5</div>");
+    EXPECT_EQ(Html("<p>1<b>2<i>3</b>4</i>5</p>"),
+              "<p>1<b>2<i>3</i></b><i>4</i>5</p>");
+}
