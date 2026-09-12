@@ -386,3 +386,19 @@ scope call; USER CALL. Do NOT micro-grind this row awaiting it.
 Known hazard from the split_qname incident: register-on-create
 elision (part of any lazy-init design) must FIRST restructure the
 name backpointer to survive in-place QName splits.
+
+## Measured-and-REVERTED 2026-09-12 (round 3): ns_cache chunk carve
+
+The per-element ns_cache pool_alloc (5000 on attr-heavy) replaced by
+a 64-entry chunk carve measured 684 -> 640 us (-6.4%) BUT broke the
+libxslt suite deterministically (52/205; the gate caught what the
+standalone tree probe missed). Isolated symptom: on
+<xsl:stylesheet xmlns:xsl=...>, leptris_element_expanded_name
+returns prefix=xsl uri=NULL with the carve (uri resolves on main).
+Both halves independently contribute (xmlns-branch reroute alone:
+52; dp_raw_attr ensure-cache alone: 36). NOT re-applied — root
+cause unfound; next attempt starts by tracing the element_query
+prefix->URI resolver (own cache slot vs declarations walk) before
+touching allocation. LESSON: allocation-pattern changes in the
+parse path are LAYOUT-SENSITIVE here; the suite is the gate, single
+-shape probes are not.
