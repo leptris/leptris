@@ -1353,13 +1353,13 @@ TEST(HtmlParse, NumericReferenceEndStates) {
      * become U+FFFD; the C1 range remaps through the Windows-1252
      * table (0x80 -> euro sign); overflow digit strings become
      * U+FFFD even without a semicolon (html5lib entities01). */
-    EXPECT_EQ(Html("FOO&#x0000;ZOO"), "FOO\uFFFDZOO");
-    EXPECT_EQ(Html("FOO&#x0080;ZOO"), "FOO\u20ACZOO");
-    EXPECT_EQ(Html("FOO&#x0082;ZOO"), "FOO\u201AZOO");
-    EXPECT_EQ(Html("FOO&#x009F;ZOO"), "FOO\u0178ZOO");
-    EXPECT_EQ(Html("FOO&#x0081;ZOO"), "FOO\u0081ZOO");  /* no table row */
-    EXPECT_EQ(Html("FOO&#xD800;ZOO"), "FOO\uFFFDZOO");
-    EXPECT_EQ(Html("FOO&#x110000;ZOO"), "FOO\uFFFDZOO");
-    EXPECT_EQ(Html("FOO&#11111111111"), "FOO\uFFFD");
-    EXPECT_EQ(Html("FOO&#1111111111ZOO"), "FOO\uFFFDZOO");
+    EXPECT_EQ(Html("FOO&#x0000;ZOO"), "FOO\xEF\xBF\xBDZOO");
+    EXPECT_EQ(Html("FOO&#x0080;ZOO"), "FOO\xE2\x82\xACZOO");
+    EXPECT_EQ(Html("FOO&#x0082;ZOO"), "FOO\xE2\x80\x9AZOO");
+    EXPECT_EQ(Html("FOO&#x009F;ZOO"), "FOO\xC5\xB8ZOO");
+    EXPECT_EQ(Html("FOO&#x0081;ZOO"), "FOO\xC2\x81ZOO");  /* no table row */
+    EXPECT_EQ(Html("FOO&#xD800;ZOO"), "FOO\xEF\xBF\xBDZOO");
+    EXPECT_EQ(Html("FOO&#x110000;ZOO"), "FOO\xEF\xBF\xBDZOO");
+    EXPECT_EQ(Html("FOO&#11111111111"), "FOO\xEF\xBF\xBD");
+    EXPECT_EQ(Html("FOO&#1111111111ZOO"), "FOO\xEF\xBF\xBDZOO");
 }
