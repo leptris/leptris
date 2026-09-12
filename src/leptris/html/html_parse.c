@@ -2101,6 +2101,9 @@ static int h_is_heading(const char* n) {
  * become siblings) plus rb/rt/rp/listing/plaintext closing an
  * open p. libxml2 keeps nesting; the html4 entry stays bare. */
 static int h_closes_ww(const char* open, const char* start) {
+    /* Heading starts pop a current heading (13.2.6.4.7 "in
+     * body": <h1>x<h2> -> siblings). */
+    if (h_is_heading(open) && h_is_heading(start)) return 1;
     int is_ruby_start = strcmp(start, "rb") == 0 ||
                         strcmp(start, "rt") == 0 ||
                         strcmp(start, "rp") == 0;
@@ -3027,6 +3030,41 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
     }
 }
 
+/* WHATWG bogus comment (13.2.5.41/13.2.5.7): a comment whose
+ * data is the raw bytes to the first '>' (or EOF). */
+static void h_bogus_comment(HBuilder* b, const char* data,
+                            size_t len) {
+    /* 13.2.5.41: NUL in bogus-comment data becomes U+FFFD. */
+    char* buf = (char*)leptris_pool_alloc(b->pool, 3 * len + 1);
+    if (!buf) return;
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == 0) {
+            buf[o++] = (char)0xEF;
+            buf[o++] = (char)0xBD;
+            buf[o++] = (char)0xBF;
+        } else {
+            buf[o++] = data[i];
+        }
+    }
+    LeptrisCommentNode* c =
+        leptris_comment_create(buf, o, b->pool);
+    if (!c) return;
+    c->owner_doc = b->doc;
+    if (b->whatwg && !b->left_initial) {
+        /* Initial mode: a Document-level child (the prolog
+         * chain), exactly like a leading <!-- comment. */
+        if (b->prolog_tail)
+            leptris_node_set_next_sibling(b->prolog_tail,
+                                          (LeptrisNodeRef)c);
+        else
+            b->prolog_head = (LeptrisNodeRef)c;
+        b->prolog_tail = (LeptrisNodeRef)c;
+        return;
+    }
+    h_append(b, (LeptrisNodeRef)c);
+}
+
 /* Pop the open stack down to (and including) index d. */
 static void h_pop_to(HBuilder* b, size_t d) {
     b->depth = d;
@@ -3917,9 +3955,25 @@ static LeptrisDocument html_parse_shared(
                     }
                     p = (ce + 3 <= end) ? ce + 3 : end;
                 } else {
-                    /* CDATA-ish bogus: skip to '>'. */
+                    /* CDATA-ish bogus: skip to '>'. WHATWG makes
+                     * it a bogus comment (tests1:42-49) — except
+                     * doctype-shaped constructs, which the
+                     * head-noscript/second-doctype rules ignore
+                     * (noscript01:1); the html4 entry keeps the
+                     * libxml2 drop. */
                     const char* q2 = p + 2;
                     while (q2 < end && *q2 != '>') q2++;
+                    int dt_shaped = end - (p + 2) >= 7;
+                    if (dt_shaped) {
+                        static const char kw[] = "doctype";
+                        for (int i = 0; i < 7; i++)
+                            if (h_lower(p[2 + i]) != kw[i])
+                                dt_shaped = 0;
+                    }
+                    if (b.whatwg && !dt_shaped) {
+                        h_bogus_comment(&b, p + 2,
+                                        (size_t)(q2 - (p + 2)));
+                    }
                     p = (q2 < end) ? q2 + 1 : end;
                 }
             }
@@ -3928,6 +3982,51 @@ static LeptrisDocument html_parse_shared(
         }
 
         if (k1 == '/') {
+            /* #659 WHATWG tokenizer tails: EOF right after "</"
+             * emits the two characters as text (eof-before-tag-
+             * name — h_append's own non-ws check leaves the
+             * initial mode); an invalid first tag-name char makes
+             * a bogus comment BEFORE the mode flip, so it rides
+             * the document prolog like any initial-mode comment
+             * (tests1:38-49). html4 keeps its shape. */
+            {
+                const char* ns2 = p + 2;
+                if (b.whatwg && ns2 >= end) {
+                    if (text < p) {
+                        char* dec = h_decode_ww(b.pool, text, p, 0,
+                                                b.whatwg);
+                        if (dec && *dec) {
+                            LeptrisTextNode* t = leptris_text_create(
+                                dec, strlen(dec), b.pool);
+                            if (t) h_append(&b, (LeptrisNodeRef)t);
+                        }
+                    }
+                    LeptrisTextNode* t =
+                        leptris_text_create("</", 2, b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                    p = end;
+                    text = p;
+                    continue;
+                }
+                if (b.whatwg && !((*ns2 >= 'a' && *ns2 <= 'z') ||
+                                  (*ns2 >= 'A' && *ns2 <= 'Z'))) {
+                    if (text < p) {
+                        char* dec = h_decode_ww(b.pool, text, p, 0,
+                                                b.whatwg);
+                        if (dec && *dec) {
+                            LeptrisTextNode* t = leptris_text_create(
+                                dec, strlen(dec), b.pool);
+                            if (t) h_append(&b, (LeptrisNodeRef)t);
+                        }
+                    }
+                    const char* q2 = ns2;
+                    while (q2 < end && *q2 != '>') q2++;
+                    h_bogus_comment(&b, ns2, (size_t)(q2 - ns2));
+                    p = (q2 < end) ? q2 + 1 : end;
+                    text = p;
+                    continue;
+                }
+            }
             /* End tag: ends the initial insertion mode too. */
             b.left_initial = 1;
             /* End tag: name, then skip to '>'. */
@@ -4092,6 +4191,26 @@ static LeptrisDocument html_parse_shared(
                 }
             }
             const char* ts = p + 2;   /* skip "<?" */
+            /* #659 WHATWG: html5lib has no PI tokenizer — "<?"
+             * makes a bogus comment whose data is "?" plus the
+             * raw bytes to the first '>' (tests1:40/41/44/47).
+             * The html4 entry keeps the libxml2 PI node. */
+            if (b.whatwg) {
+                const char* q2 = ts;
+                while (q2 < end && *q2 != '>') q2++;
+                char* dat = (char*)leptris_pool_alloc(
+                    b.pool, 1 + (size_t)(q2 - ts) + 1);
+                if (dat) {
+                    dat[0] = '?';
+                    memcpy(dat + 1, ts, (size_t)(q2 - ts));
+                    dat[1 + (q2 - ts)] = 0;
+                    h_bogus_comment(&b, dat,
+                                    1 + (size_t)(q2 - ts));
+                }
+                p = (q2 < end) ? q2 + 1 : end;
+                text = p;
+                continue;
+            }
             const char* q = ts;
             while (q < end && !h_is_ws(*q) && *q != '>') q++;
             size_t tlen = (size_t)(q - ts);
