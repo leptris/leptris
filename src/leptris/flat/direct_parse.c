@@ -135,6 +135,14 @@ typedef struct {
     struct leptris_attribute* current_elem_last_attr;
     struct leptris_namespace* current_elem_last_ns;
     int saw_namespace;   /* any xmlns seen → doc->has_namespaces */
+    /* Raw-view bulk block (issue #635 perf, pugixml race): raw-attr
+     * entries carved from 128-entry pool chunks — one bump per attr,
+     * no per-attr pool_alloc, no tail walk. raw_last is the current
+     * element's chain tail; reset at dp_parse_attrs start like
+     * current_elem_last_attr. */
+    struct leptris_raw_attr* raw_cursor;
+    struct leptris_raw_attr* raw_end;
+    struct leptris_raw_attr* raw_last;
     /* DTD parsed from the DOCTYPE internal subset. NULL when the
      * document has no DTD (or only an external subset). When non-NULL,
      * text/attr entity expansion routes through
@@ -286,7 +294,8 @@ static inline void dp_doc_child(DParser* p, LeptrisNode* n) {
 static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
                                       char* name, size_t name_len,
                                       char* val, size_t val_len,
-                                      int has_amp, int has_ws) {
+                                      int has_amp, int has_ws,
+                                      const char* name_colon) {
     /* Attribute-value normalization (XML 1.0 §3.3.3, issue #576):
      * each literal tab/LF/CR in a CDATA attribute becomes a single
      * space. Character references (&#9;) are ASCII text here —
@@ -340,6 +349,28 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
     }
     attr->name_hash = (uint16_t)(ent << 15);
     attr->ns_cache_off = 0;  /* TODO 173: side cache allocated on demand */
+    /* #542 fused into the parse loop (was the post-loop
+     * dp_stamp_attr_owners pass): a prefixed attr name gets its
+     * ns side-cache HERE — owner stamped, prefix materialized from
+     * the just-scanned name. Per-attr independent; order within the
+     * element is irrelevant. Unprefixed names pay one NULL check. */
+    if (name_colon) {
+        struct leptris_attr_ns_cache* c =
+            (struct leptris_attr_ns_cache*)leptris_pool_alloc(
+                p->pool, sizeof(*c));
+        if (c) {
+            memset(c, 0, sizeof(*c));
+            size_t pl = (size_t)(name_colon - name);
+            char* pfx = (char*)leptris_pool_alloc(p->pool, pl + 1);
+            if (pfx) {
+                memcpy(pfx, name, pl);
+                pfx[pl] = '\0';
+                c->prefix = pfx;
+            }
+            c->owner_elem = elem;
+            attr_set_ns_cache(attr, c);
+        }
+    }
     /* TODO 183 Phase 5 (TODO 181 Phase D): cp16 sibling edge. Attrs of
      * one element are adjacent attr_block slots (distance ≤ K × 40 B,
      * far inside cp16 range) — direct store, no encoder call on the
@@ -556,41 +587,6 @@ static LEPTRIS_ALWAYS_INLINE void dp_split_hash_name(LeptrisElement elem, char* 
  * pre-allocated attr_block (zero-copy name/value, no interning).
  * Names are NUL-terminated in-place AFTER '=' is consumed; values
  * are NUL-terminated in-place at the closing quote. */
-/* Issue #542: ensure the ns side-cache exists with the owning
- * element stamped, for every attribute whose name carries a prefix.
- * Runs once per element at the END of the attribute loop (all of
- * elem's OWN xmlns declarations are wired by then; ancestor decls
- * were complete before this element opened). Prefix is materialized
- * here too — it is name-derived and immutable. */
-static void dp_stamp_attr_owners(DParser* p, LeptrisElement elem) {
-    struct leptris_attribute* a =
-        (struct leptris_attribute*)((char*)elem + (elem->first_attribute_off ? elem->first_attribute_off : 0));
-    if (elem->first_attribute_off == 0) return;
-    while (a) {
-        const char* n = a->name_view.data;
-        size_t nl = a->name_view.length;
-        const char* colon = nl ? memchr(n, ':', nl) : NULL;
-        if (colon && attr_get_ns_cache(a) == NULL) {
-            struct leptris_attr_ns_cache* c =
-                (struct leptris_attr_ns_cache*)leptris_pool_alloc(
-                    p->pool, sizeof(*c));
-            if (c) {
-                memset(c, 0, sizeof(*c));
-                size_t pl = (size_t)(colon - n);
-                char* pfx = (char*)leptris_pool_alloc(p->pool, pl + 1);
-                if (pfx) {
-                    memcpy(pfx, n, pl);
-                    pfx[pl] = '\0';
-                    c->prefix = pfx;
-                }
-                c->owner_elem = elem;
-                attr_set_ns_cache(a, c);
-            }
-        }
-        a = leptris_attr_next(a);
-    }
-}
-
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
                        const char* qname, const char* value);
 
@@ -599,6 +595,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
      * xmlns wiring below can both run in O(1) per attr. */
     p->current_elem_last_attr = NULL;
     p->current_elem_last_ns = NULL;
+    p->raw_last = NULL;
     p->cur_attr_count = 0;
     /* Sentinel-terminated (parse endgame, third application): buf[len]
      * is NUL and NUL fails every classification below — not '>', not
@@ -613,11 +610,8 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             int self_close = (c == '/');
             p->pos += self_close ? 2 : 1;
             elem->attr_count = (uint8_t)p->cur_attr_count;
-            /* Issue #542: stamp the owner on prefixed attrs so the
-             * standalone expanded-name accessors can resolve. No
-             * tree pointers exist mid-parse, so the OWNER comes from
-             * the parse context; the URI resolves lazily per read. */
-            dp_stamp_attr_owners(p, elem);
+            /* Issue #542: prefixed attrs got their owner-stamped
+             * side-cache inline in dp_add_attr_inline. */
             return self_close ? 1 : 0;
         }
         if (c == '/') return -1;  /* '/' not followed by '>' */
@@ -629,6 +623,22 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         dp_scan_name(p);
         char* name_end = p->pos;
         size_t name_len = name_end - name_start;
+        /* Prefixed-name probe (fused here; was the post-loop
+         * dp_stamp_attr_owners pass): a colon needs prefix + ':'
+         * + local = >= 3 bytes, so 1-2 byte names skip entirely.
+         * Short names inline (a memchr call costs more than the
+         * 2-4 iterations); long names keep memchr. */
+        const char* attr_colon = NULL;
+        if (name_len >= 3) {
+            if (name_len <= 16) {
+                for (const char* c9 = name_start; c9 < name_end; c9++) {
+                    if (*c9 == ':') { attr_colon = c9; break; }
+                }
+            } else {
+                attr_colon =
+                    (const char*)memchr(name_start, ':', name_len);
+            }
+        }
         /* Defer NUL-termination until after '=' is consumed — the
          * delimiter byte (whitespace or '=') is needed for the scan. */
 
@@ -758,7 +768,8 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
 
         /* Regular attribute — zero-copy name/value, bulk-allocated struct. */
         if (dp_add_attr_inline(p, elem, name_start, name_len,
-                                val_start, val_len, has_amp, has_ws) != 0)
+                                val_start, val_len, has_amp, has_ws,
+                                attr_colon) != 0)
             return -1;
         if (dp_raw_attr(p, elem, name_start, val_start) != 0) return -1;
     }
@@ -767,26 +778,35 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
      * fallthrough path, so no trailing statement. */
 }
 /* Issue #635: append one raw attribute-view entry (attrs AND xmlns
- * declarations, source order) to the element's cache chain. */
+ * declarations, source order) to the element's cache chain. Entries
+ * carve from 128-entry pool chunks (the attr/text block pattern) —
+ * one bump per attr, O(1) tail via p->raw_last; the old per-attr
+ * pool_alloc + tail walk was the largest single cost of attr-heavy
+ * parses (39% of attr-heavy-5k). */
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
                        const char* qname, const char* value) {
     struct leptris_ns_cache** cache_ptr =
         leptris_elem_cache_ptr(elem, p->pool);
     if (!cache_ptr || !*cache_ptr) return 0;
-    struct leptris_raw_attr* ra =
-        (struct leptris_raw_attr*)leptris_pool_alloc(
-            p->pool, sizeof(struct leptris_raw_attr));
-    if (!ra) return -1;
+    struct leptris_raw_attr* ra;
+    if (p->raw_cursor < p->raw_end) {
+        ra = p->raw_cursor++;
+    } else {
+        ra = (struct leptris_raw_attr*)leptris_pool_alloc(
+            p->pool, 128 * sizeof(struct leptris_raw_attr));
+        if (!ra) return -1;
+        p->raw_end = ra + 128;
+        p->raw_cursor = ra + 1;
+    }
     ra->qname = qname;
     ra->value = value;
     ra->next = NULL;
-    if (!(*cache_ptr)->raw_attrs) {
-        (*cache_ptr)->raw_attrs = ra;
+    if (p->raw_last) {
+        p->raw_last->next = ra;
     } else {
-        struct leptris_raw_attr* t = (*cache_ptr)->raw_attrs;
-        while (t->next) t = t->next;
-        t->next = ra;
+        (*cache_ptr)->raw_attrs = ra;
     }
+    p->raw_last = ra;
     return 0;
 }
 
@@ -1045,6 +1065,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.text_end = text_block + lt_count;
     p.cpi_cursor = cpi_block;
     p.cpi_end = cpi_block + cpi_bytes;
+    p.raw_cursor = NULL;
+    p.raw_end = NULL;
+    p.raw_last = NULL;
     p.cpi_stride = cpi_stride;
     /* owns_buffer==2 was converted to 1 above; only the parser's own
      * copy carries the zeroed slack. */
