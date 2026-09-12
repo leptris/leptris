@@ -289,3 +289,16 @@ copies+NUL-terminates — yet the walker compares OUR comment as
 these cases (suspect the walker's body traversal vs prolog
 routing interaction, or a second empty comment). +10 other
 cases fixed; net +8.
+
+## Update 2026-09-12 (e): script-data escaped states — shipped
+## (floor 1088, +42)
+
+The WHATWG 13.2.5.15-.31 script tokenizer states, as a scan
+machine inside the rawtext branch (WHATWG + script only):
+"<!--" enters script-data-escaped; there "</script"+delimiter
+closes (a bare "</scripta" is text), "<script"+delimiter enters
+double-escaped where "</script>" only drops one level, and
+"-->"/"--!>" re-enter plain script data. Cleared the whole
+tests16 38-48/64-72 block plus script cases across webkit01/
+tests2 (1046 -> 1088, +42). Nokogiri parity 784 held (html4
+keeps the naive scan). Spec: ScriptDataEscapedStates.
