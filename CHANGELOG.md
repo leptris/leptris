@@ -4,7 +4,19 @@
 
 ### Added
 
-- full WHATWG adoption agency (#659) (html)
+- **HTML full adoption agency (#659)** — the WHATWG misnested-
+  formatting machinery (`<b>1<p>2</b>3</p>`), replacing the
+  simplified clone-reopen approximation: the list of active
+  formatting elements (Noah's Ark clause, markers for
+  applet/object/marquee/td/th/caption), reconstruct-active-
+  formatting at text and formatting/ordinary insertions, and the
+  21-step agency — furthest block (HTML-namespace only), inner
+  clone chain, unconditional block adoption, bookmark
+  re-insertion. `a`/`nobr` start tags run the agency for
+  duplicate opens; block starts close an open `p` in button
+  scope so dangling formatting reconstructs inside the new block.
+  html5lib corpus **933 → 1006** (+73), adoption01/02 **17/18**
+  green; Nokogiri/libxml2 parity floor 784 unchanged.
 
 
 
