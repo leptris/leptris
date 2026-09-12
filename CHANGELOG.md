@@ -4,7 +4,17 @@
 
 ### Performance
 
-- bulk-carved raw-attr view + inline prefixed-owner stamp (parse)
+- **attr-heavy DOM parse 2.7x faster** (`bench_matrix` attr-heavy-5k:
+  2086 -> 769 us; 4.9x -> 1.96x vs pugixml): the raw attribute view
+  (issue #635) now carves from 128-entry pool chunks with a
+  parser-local tail (was one pool_alloc + tail walk per attribute),
+  and the #542 prefixed-attr owner cache allocates inline at colon
+  detection — the post-loop stamp pass with its per-attr memchr is
+  gone. Spec: RawAttributesAcrossChunkBoundaries (chunk-boundary
+  crossings pinned). No other row regressed; text-heavy parse stays
+  3.2x ahead of pugixml. The mutation rows (append/set-attr) are
+  ceiling-analyzed as a compact-node redesign — banked in
+  TODO 13.
 
 
 
