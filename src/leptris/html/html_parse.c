@@ -4662,6 +4662,66 @@ static LeptrisDocument html_parse_shared(
             const char* rs = q;
             if (strcmp(name, "plaintext") == 0) {
                 rs = end;   /* eats the rest of the input */
+            } else if (b.whatwg && strcmp(name, "script") == 0) {
+                /* #659 script-data escaped states (13.2.5.15-.31,
+                 * html5lib tests16:38-48/64-72): "<!--" enters
+                 * script-data-escaped; there "</script" + delimiter
+                 * closes while "<script" + delimiter enters
+                 * double-escaped (one </script> only drops back);
+                 * "-->"/"--!>" re-enter plain script data. */
+                int esc = 0, dbl = 0;
+                while (rs < end) {
+                    if (rs[0] == '<') {
+                        int is_end = rs + 1 < end && rs[1] == '/';
+                        int is_open = rs + 1 < end && rs[1] != '/';
+                        const char* tn = rs + (is_end ? 2 : 1);
+                        if (tn + 6 <= end) {
+                            static const char kw[] = "script";
+                            int m = 1;
+                            for (int i = 0; i < 6; i++)
+                                if (h_lower(tn[i]) != kw[i]) {
+                                    m = 0;
+                                    break;
+                                }
+                            char d = tn[6];
+                            if (m && (d == '>' || d == '/' || d == ' ' ||
+                                      d == '\t' || d == '\n' ||
+                                      d == '\r' || d == '\f')) {
+                                if (is_end) {
+                                    if (dbl) {
+                                        dbl = 0;   /* one level back */
+                                    } else {
+                                        break;      /* close here */
+                                    }
+                                } else if (esc) {
+                                    dbl = 1;
+                                }
+                                rs = tn + 6;
+                                continue;
+                            }
+                        }
+                        if (rs + 4 <= end && rs[1] == '!' &&
+                            rs[2] == '-' && rs[3] == '-') {
+                            if (!esc && !dbl) esc = 1;
+                            rs += 4;
+                            continue;
+                        }
+                        rs++;
+                        continue;
+                    }
+                    if ((esc || dbl) && rs[0] == '-' && rs + 3 <= end &&
+                        ((rs[1] == '-' && rs[2] == '>') ||
+                         (rs[1] == '-' && rs[2] == '!' &&
+                          rs + 4 <= end && rs[3] == '>'))) {
+                        /* --> or --!>: drop out of the escaped
+                         * states entirely. */
+                        esc = 0;
+                        dbl = 0;
+                        rs += (rs[2] == '!') ? 4 : 3;
+                        continue;
+                    }
+                    rs++;
+                }
             } else {
                 while (rs < end) {
                     if (rs + 2 + nlen + 1 <= end && rs[0] == '<' &&

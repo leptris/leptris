@@ -1307,3 +1307,25 @@ TEST(HtmlParse, BogusMarkupEdgesAndHeadingSelfClose) {
               "<h1>Hello</h1><h2>World</h2>");
     EXPECT_EQ(Html("<h1><h2>"), "<h1/><h2/>");
 }
+
+TEST(HtmlParse, ScriptDataEscapedStates) {
+    /* WHATWG 13.2.5.15-.31: inside <script>, "<!--" enters the
+     * escaped states; </script> closes only with a delimiter
+     * after the name, "<script" re-enters double-escaped where
+     * </script> only escapes one level, and --!>/--> drop back
+     * out (html5lib tests16:38-48/64-72). */
+    EXPECT_EQ(Html("<script><!--<script </scripta"),
+              "<html><head><script>&lt;!--&lt;script &lt;/scripta"
+              "</script></head><body/></html>");
+    EXPECT_EQ(Html("<script><!--<script </script>"),
+              "<html><head><script>&lt;!--&lt;script &lt;/script&gt;"
+              "</script></head><body/></html>");
+    EXPECT_EQ(Html("<script><!--<script></script><script></script>"
+                   "</script>"),
+              "<html><head><script>&lt;!--&lt;script&gt;&lt;/script&gt;"
+              "&lt;script&gt;&lt;/script&gt;</script></head><body/>"
+              "</html>");
+    EXPECT_EQ(Html("<script><!--<script>--!></script>X"),
+              "<html><head><script>&lt;!--&lt;script&gt;--!&gt;"
+              "</script></head><body>X</body></html>");
+}
