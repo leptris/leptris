@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.143] - 2026-09-12
+
+### Added
+
+- numeric-reference end states (#659) (html)
+
+
+
 ## [1.9.142] - 2026-09-12
 
 ### Added
