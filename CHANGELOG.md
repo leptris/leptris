@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.148] - 2026-09-12
+
+### Added
+
+- per-template insertion-mode machine (13.2.6.4.10) (html)
+- in-template start-tag fence — template is a scope boundary (html)
+
+
+
 ## [1.9.147] - 2026-09-12
 
 ### Performance
