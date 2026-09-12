@@ -2477,6 +2477,9 @@ typedef struct {
     LeptrisElement afe[64];
     unsigned char afe_marker[64];
     int afe_n;
+    /* #659 per-template insertion mode, indexed by the template's
+     * open-stack index (see h_tmpl_content_start). */
+    unsigned char tmpl_mode[256];
 } HBuilder;
 
 /* Pool a NUL-terminated ASCII-lowercased copy of [s, s+len). */
@@ -2934,6 +2937,93 @@ static int h_template_idx(HBuilder* b) {
         if (n && h_ieq_raw(n, "template")) return (int)(i - 1);
     }
     return -1;
+}
+
+/* #659 per-template insertion modes (13.2.6.4.10): the saved mode a
+ * template re-enters at content level, indexed by its open-stack
+ * index. Drives wrap/drop for table-context start tokens arriving
+ * with the template on top of the stack. The transitions mirror
+ * the WHATWG reprocess chains (verified against gumbo's
+ * handle_in_template/in_table_body/in_row): fresh templates open
+ * rows/cells/sections BARE; after an explicit row closes (mode
+ * in-table-body) a cell gets an implied tr; after a section closes
+ * (mode in-table) a row gets its implied tbody; rows/sections with
+ * nothing in table scope DROP (stray tokens in row/body context). */
+#define H_TPLM_TEMPLATE 0u
+#define H_TPLM_IN_TABLE 1u
+#define H_TPLM_IN_TBODY 2u
+#define H_TPLM_IN_ROW   3u
+#define H_TPLM_IN_CGROUP 4u
+#define H_TPLM_IN_BODY  5u
+
+/* Actions for a table-context start token at template content.
+ * h_tmpl_content_start advances the template's mode and returns:
+ *  0 = open bare (no wrapper synthesis)
+ *  1 = DROP the token entirely
+ *  2 = open an implied tr first
+ *  3 = open an implied tbody first
+ *  4 = open implied tbody + tr
+ *  5 = not template-governed (ordinary open) */
+static int h_tmpl_content_start(HBuilder* b, const char* name) {
+    int ti = (int)b->depth - 1; /* caller checked: top is template */
+    if (strcmp(name, "template") == 0) return 5; /* head rules own it */
+    int is_row = strcmp(name, "tr") == 0;
+    int is_cell = strcmp(name, "td") == 0 || strcmp(name, "th") == 0;
+    int is_col = strcmp(name, "col") == 0;
+    int is_group = strcmp(name, "caption") == 0 ||
+                   strcmp(name, "colgroup") == 0 ||
+                   strcmp(name, "tbody") == 0 ||
+                   strcmp(name, "thead") == 0 ||
+                   strcmp(name, "tfoot") == 0;
+    if (!is_row && !is_cell && !is_col && !is_group) {
+        if (b->tmpl_mode[ti] == H_TPLM_TEMPLATE) {
+            /* 13.2.6.4.10: head-family tokens (base/basefont/bgsound/
+             * link/meta/noframes/script/style/title) process via
+             * "in head" rules and leave the mode untouched; any
+             * other start tag pushes in-body. */
+            if (strcmp(name, "base") != 0 &&
+                strcmp(name, "basefont") != 0 &&
+                strcmp(name, "bgsound") != 0 &&
+                strcmp(name, "link") != 0 &&
+                strcmp(name, "meta") != 0 &&
+                strcmp(name, "noframes") != 0 &&
+                strcmp(name, "script") != 0 &&
+                strcmp(name, "style") != 0 &&
+                strcmp(name, "title") != 0)
+                b->tmpl_mode[ti] = H_TPLM_IN_BODY;
+        }
+        return 5;
+    }
+    unsigned char m = b->tmpl_mode[ti];
+    switch (m) {
+    case H_TPLM_TEMPLATE:
+        if (is_group) b->tmpl_mode[ti] = H_TPLM_IN_TABLE;
+        else if (is_col) b->tmpl_mode[ti] = H_TPLM_IN_CGROUP;
+        else if (is_row) b->tmpl_mode[ti] = H_TPLM_IN_TBODY;
+        else b->tmpl_mode[ti] = H_TPLM_IN_ROW;
+        return 0;
+    case H_TPLM_IN_TABLE:
+        if (is_row) { b->tmpl_mode[ti] = H_TPLM_IN_TBODY; return 3; }
+        if (is_cell) { b->tmpl_mode[ti] = H_TPLM_IN_ROW; return 4; }
+        if (is_col) b->tmpl_mode[ti] = H_TPLM_IN_CGROUP;
+        return 0;
+    case H_TPLM_IN_TBODY:
+        if (is_cell) { b->tmpl_mode[ti] = H_TPLM_IN_ROW; return 2; }
+        if (is_group) return 1; /* no open section in table scope */
+        if (is_col) { b->tmpl_mode[ti] = H_TPLM_IN_CGROUP; return 0; }
+        return 0; /* another row, bare */
+    case H_TPLM_IN_ROW:
+        if (is_cell) return 0; /* cell in the virtual row context */
+        return 1; /* row/group/col with no tr in table scope */
+    case H_TPLM_IN_CGROUP:
+        if (is_col) return 0;
+        if (is_group) { b->tmpl_mode[ti] = H_TPLM_IN_TABLE; return 0; }
+        if (is_row) { b->tmpl_mode[ti] = H_TPLM_IN_TBODY; return 0; }
+        if (is_cell) { b->tmpl_mode[ti] = H_TPLM_IN_ROW; return 0; }
+        return 0;
+    default: /* H_TPLM_IN_BODY: stray table tags drop */
+        return 1;
+    }
 }
 
 
@@ -4208,6 +4298,31 @@ static LeptrisDocument html_parse_shared(
                                     break;
                             }
                             h_pop_to(&b, d - 1);
+                            /* #659 content-level closes restore the
+                             * template's saved mode (the reset-
+                             * appropriately template clause):
+                             * row -> in-table-body, cell -> in-row,
+                             * section/caption/colgroup -> in-table. */
+                            if (b.whatwg && b.depth > 0) {
+                                const char* pt = leptris_element_name(
+                                    b.open[b.depth - 1]);
+                                if (pt &&
+                                    strcmp(pt, "template") == 0) {
+                                    unsigned char* tm =
+                                        &b.tmpl_mode[b.depth - 1];
+                                    if (strcmp(lname, "tr") == 0)
+                                        *tm = H_TPLM_IN_TBODY;
+                                    else if (strcmp(lname, "td") == 0 ||
+                                             strcmp(lname, "th") == 0)
+                                        *tm = H_TPLM_IN_ROW;
+                                    else if (strcmp(lname, "tbody") == 0 ||
+                                             strcmp(lname, "thead") == 0 ||
+                                             strcmp(lname, "tfoot") == 0 ||
+                                             strcmp(lname, "caption") == 0 ||
+                                             strcmp(lname, "colgroup") == 0)
+                                        *tm = H_TPLM_IN_TABLE;
+                                }
+                            }
                             /* Marker-scope closes clear the active
                              * formatting list up to their marker
                              * (13.2.4.3 cell/applet close). */
@@ -4542,6 +4657,7 @@ static LeptrisDocument html_parse_shared(
                         break;
                 }
             }
+            const char* tmpl_last_popped = NULL;
             while (b.depth > 0) {
                 const char* on = leptris_element_name(b.open[b.depth - 1]);
                 if (on &&
@@ -4554,9 +4670,100 @@ static LeptrisDocument html_parse_shared(
                      * template.dat:28/32/36). */
                     if (b.whatwg && h_ieq_raw(on, "template"))
                         break;
+                    tmpl_last_popped = on;
                     b.depth--;
                 } else break;
             }
+            /* #659: a section element this token just closed means
+             * the new section/group token arrives in in-table mode
+             * (gumbo in-table-body 3775: pop the open section,
+             * switch to in-table, reprocess) — not a stray drop. */
+            if (b.whatwg && tmpl_last_popped && b.depth > 0) {
+                const char* tp =
+                    leptris_element_name(b.open[b.depth - 1]);
+                if (tp && h_ieq_raw(tp, "template") &&
+                    (h_ieq_raw(tmpl_last_popped, "tbody") ||
+                     h_ieq_raw(tmpl_last_popped, "thead") ||
+                     h_ieq_raw(tmpl_last_popped, "tfoot") ||
+                     h_ieq_raw(tmpl_last_popped, "caption") ||
+                     h_ieq_raw(tmpl_last_popped, "colgroup")))
+                    b.tmpl_mode[b.depth - 1] = H_TPLM_IN_TABLE;
+            }
+        }
+
+        /* #659 template content-level table tokens: the per-
+         * template insertion mode governs wrapping/dropping
+         * (13.2.6.4.10 — see h_tmpl_content_start). Runs BEFORE the
+         * generic in-table synthesis, which no-ops on a template
+         * top for the bare/pass actions. */
+        int tmpl_act = 5;
+        if (b.whatwg && elem_ns == H_NS_HTML && b.depth > 0) {
+            const char* ttop =
+                leptris_element_name(b.open[b.depth - 1]);
+            if (ttop && strcmp(ttop, "template") == 0) {
+                tmpl_act = h_tmpl_content_start(&b, name);
+            } else {
+                /* #659 in-body stray drop (template.dat:57): a
+                 * table-context token inside a template with NO
+                 * table-family element between here and the template
+                 * is body content — in-body rules ignore it. */
+                int ttype = strcmp(name, "tr") == 0 ||
+                            strcmp(name, "td") == 0 ||
+                            strcmp(name, "th") == 0 ||
+                            strcmp(name, "tbody") == 0 ||
+                            strcmp(name, "thead") == 0 ||
+                            strcmp(name, "tfoot") == 0 ||
+                            strcmp(name, "caption") == 0 ||
+                            strcmp(name, "colgroup") == 0 ||
+                            strcmp(name, "col") == 0;
+                if (ttype) {
+                    int ti2 = h_template_idx(&b);
+                    if (ti2 >= 0) {
+                        int tableish = 0;
+                        for (int k = (int)b.depth - 1; k > ti2; k--) {
+                            const char* an = leptris_element_name(
+                                b.open[k]);
+                            if (an &&
+                                (strcmp(an, "table") == 0 ||
+                                 strcmp(an, "tbody") == 0 ||
+                                 strcmp(an, "thead") == 0 ||
+                                 strcmp(an, "tfoot") == 0 ||
+                                 strcmp(an, "tr") == 0 ||
+                                 strcmp(an, "td") == 0 ||
+                                 strcmp(an, "th") == 0 ||
+                                 strcmp(an, "caption") == 0 ||
+                                 strcmp(an, "colgroup") == 0 ||
+                                 strcmp(an, "col") == 0)) {
+                                tableish = 1;
+                                break;
+                            }
+                        }
+                        if (!tableish) tmpl_act = 1;
+                    }
+                }
+            }
+        }
+        if (tmpl_act == 1) {
+            if (text < p) {
+                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                if (dec && *dec) {
+                    LeptrisTextNode* t = leptris_text_create(
+                        dec, strlen(dec), b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
+            }
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+        if (tmpl_act == 2) {
+            h_open_element(&b, "tr");
+        } else if (tmpl_act == 3) {
+            h_open_element(&b, "tbody");
+        } else if (tmpl_act == 4) {
+            h_open_element(&b, "tbody");
+            h_open_element(&b, "tr");
         }
 
         /* #659 in-table wrapper synthesis (WHATWG 12.2.6.4, WHATWG
@@ -4665,6 +4872,10 @@ static LeptrisDocument html_parse_shared(
                                ? h_open_foreign(&b, name, elem_ns)
                                : h_open_element(&b, name);
         if (!e) goto done;
+        if (b.whatwg && elem_ns == H_NS_HTML &&
+            strcmp(name, "template") == 0 && b.depth > 0) {
+            b.tmpl_mode[b.depth - 1] = H_TPLM_TEMPLATE;
+        }
 
         /* Attributes. */
         int self_closing = 0;

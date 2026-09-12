@@ -1404,3 +1404,33 @@ TEST(HtmlParse, TemplateStartTagFence) {
               "<table><thead><template><td/></template></thead>"
               "</table>");
 }
+
+TEST(HtmlParse, TemplateInsertionModes) {
+    /* The per-template insertion-mode machine (13.2.6.4.10 pushes
+     * in-table/in-table-body/in-row; the reprocess chains decide
+     * wrapping): after an explicit row closes, a cell gets an
+     * IMPLIED tr (46); a cell without any row is bare and a tbody
+     * in row/table-body context without an open section DROPS
+     * (48/52); caption after a closed row drops (53); after a
+     * closed section the mode is in-table: a row gets its implied
+     * TBODY (69); a stray row inside body-mode content drops
+     * (57). All shapes from the html5lib template.dat trees. */
+    EXPECT_EQ(Html("<body><template><tr></tr><td></td></template>"),
+              "<template><tr/><tr><td/></tr></template>");
+    EXPECT_EQ(Html("<body><template><td></td><tbody><td></td>"
+                   "</template>"),
+              "<template><td/><td/></template>");
+    EXPECT_EQ(Html("<body><template><tr></tr><tbody><tr></tr>"
+                   "</template>"),
+              "<template><tr/><tr/></template>");
+    EXPECT_EQ(Html("<body><template><tr></tr><caption><tr></tr>"
+                   "</template>"),
+              "<template><tr/><tr/></template>");
+    EXPECT_EQ(Html("<body><template><thead></thead>"
+                   "<template><tr></tr></template>"
+                   "<tr></tr><tfoot></tfoot></template>"),
+              "<template><thead/><template><tr/></template>"
+              "<tbody><tr/></tbody><tfoot/></template>");
+    EXPECT_EQ(Html("<body><template><div><tr></tr></div></template>"),
+              "<template><div/></template>");
+}

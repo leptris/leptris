@@ -385,3 +385,23 @@ own start/end handling), not a two-state flag. NEXT: mode enum +
 per-template mode stack in HBuilder + the 13.2.6.4.10 transition
 table verbatim; the 36-red extraction (trees for every failing
 case) is in this file's git history and the session red-list.
+
+## Update 2026-09-12 (k): per-template insertion-mode machine —
+## shipped (floor 1197, +10)
+
+HBuilder.tmpl_mode[]: the saved mode per open template
+(TEMPLATE/IN_TABLE/IN_TBODY/IN_ROW/IN_CGROUP/IN_BODY), driven by
+h_tmpl_content_start for table-context starts at template content +
+mode restores at content-level closes + a section-popped-by-this-
+token tracker (gumbo in-table-body 3775: pop the open section, go
+in-table, reprocess). Fresh templates open rows/cells/sections
+BARE; post-row cells get an implied tr (46); post-section rows get
+an implied tbody (69); rows/sections with nothing in table scope
+DROP (48/52/53); head-family tokens leave the mode untouched
+(44/60-62); stray table tags in body-mode content drop (57).
+Verified against gumbo's handle_in_template/in_table_body/in_row
+(nokogiri's vendored copy) — the reference for the remaining
+families. Corpus 1187 -> 1197, parity 784 held. Spec:
+TemplateInsertionModes. REMAINING template.dat reds (~14): select-
+in-table (22, 102), frameset/frame drops (41, 67, 93), misc rows
+(71-76), nested/head shapes (91, 106, 108), foreignObject (100).
