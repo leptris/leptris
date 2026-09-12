@@ -4,7 +4,15 @@
 
 ### Performance
 
-- chunk-carved ns_cache — attr-heavy 684 -> 641 us (parse)
+- **attr-heavy DOM parse 6.4% faster** (best-of-2000 harness: 684 →
+  641 µs; cumulative with v1.9.147: 2086 → 641 µs, 4.9× → 1.63× vs
+  pugixml): the per-element namespace side-cache now carves from
+  64-entry pool chunks (the v1.9.147 raw-attr pattern) instead of
+  one pool allocation per attribute-bearing element. The first
+  attempt's chunk-exhaustion off-by-one (cursor left pointing at
+  the entry just returned → cache aliasing → erased xmlns
+  declarations) was caught by the libxslt suite and root-caused by
+  pointer instrumentation before this release.
 
 
 
