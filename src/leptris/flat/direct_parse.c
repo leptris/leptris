@@ -143,6 +143,8 @@ typedef struct {
     struct leptris_raw_attr* raw_cursor;
     struct leptris_raw_attr* raw_end;
     struct leptris_raw_attr* raw_last;
+    struct leptris_ns_cache* nsc_cursor;
+    struct leptris_ns_cache* nsc_end;
     /* DTD parsed from the DOCTYPE internal subset. NULL when the
      * document has no DTD (or only an external subset). When non-NULL,
      * text/attr entity expansion routes through
@@ -589,6 +591,8 @@ static LEPTRIS_ALWAYS_INLINE void dp_split_hash_name(LeptrisElement elem, char* 
  * are NUL-terminated in-place at the closing quote. */
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
                        const char* qname, const char* value);
+static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
+                                                LeptrisElement elem);
 
 static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
     /* Reset the per-element caches so dp_add_attr_inline and the
@@ -743,8 +747,9 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             /* TODO 155 Phase A: parser has the pool directly; use it
              * to allocate ns_cache without going through the
              * (not-yet-registered) document. */
-            struct leptris_namespace** head_ptr =
-                leptris_elem_namespaces_ptr(elem, p->pool);
+            struct leptris_ns_cache* ecache = dp_ensure_cache(p, elem);
+            if (!ecache) return -1;
+            struct leptris_namespace** head_ptr = &ecache->declarations;
             if (!head_ptr) return -1;
             if (!*head_ptr) {
                 *head_ptr = ns;
@@ -777,6 +782,30 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
      * closed, 1 = self-closing, -1 = error) — there is no
      * fallthrough path, so no trailing statement. */
 }
+static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
+                                                LeptrisElement elem) {
+    if (elem->ns_cache) return elem->ns_cache;
+    struct leptris_ns_cache* c;
+    if (p->nsc_cursor < p->nsc_end) {
+        c = p->nsc_cursor++;
+    } else {
+        c = (struct leptris_ns_cache*)leptris_pool_alloc(
+            p->pool, 64 * sizeof(struct leptris_ns_cache));
+        if (!c) return NULL;
+        p->nsc_end = c + 64;
+        p->nsc_cursor = c + 1;
+    }
+    c->prefix = NULL;
+    c->namespace_uri = NULL;
+    c->declarations = NULL;
+    c->raw_attrs = NULL;
+    c->doc_next = NULL;
+    c->prefix_heap = 0;
+    c->uri_heap = 0;
+    elem->ns_cache = c;
+    return c;
+}
+
 /* Issue #635: append one raw attribute-view entry (attrs AND xmlns
  * declarations, source order) to the element's cache chain. Entries
  * carve from 128-entry pool chunks (the attr/text block pattern) —
@@ -785,9 +814,8 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
  * parses (39% of attr-heavy-5k). */
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
                        const char* qname, const char* value) {
-    struct leptris_ns_cache** cache_ptr =
-        leptris_elem_cache_ptr(elem, p->pool);
-    if (!cache_ptr || !*cache_ptr) return 0;
+    struct leptris_ns_cache* cache = dp_ensure_cache(p, elem);
+    if (!cache) return 0;
     struct leptris_raw_attr* ra;
     if (p->raw_cursor < p->raw_end) {
         ra = p->raw_cursor++;
@@ -804,7 +832,7 @@ static int dp_raw_attr(DParser* p, LeptrisElement elem,
     if (p->raw_last) {
         p->raw_last->next = ra;
     } else {
-        (*cache_ptr)->raw_attrs = ra;
+        cache->raw_attrs = ra;
     }
     p->raw_last = ra;
     return 0;
@@ -1068,6 +1096,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.raw_cursor = NULL;
     p.raw_end = NULL;
     p.raw_last = NULL;
+    p.nsc_cursor = NULL;
+    p.nsc_end = NULL;
     p.cpi_stride = cpi_stride;
     /* owns_buffer==2 was converted to 1 above; only the parser's own
      * copy carries the zeroed slack. */
