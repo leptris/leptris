@@ -1,19 +1,9 @@
 ## [Unreleased]
 
 ## [1.9.158] - 2026-09-13
+### Changed
 
-### Fixed
-
-- the 1.0 scan rejects bare map/array constructors (xpath)
-- set_namespace(NULL) adds the xmlns="" undeclaration only when a default ns is in scope (#1040) (dom)
-
-### Performance
-
-- reapply TLS memo hoist only (bisect of the macos parse-ratio leg) (dom)
-- single TLS read in get_document + fused create name pass — append 247 -> 205us (dom)
-
-
-
+- **Performance: one TLS read per document resolution.** `leptris_element_get_document`'s climb loop re-read the thread-local memo root on every step — the sampler named `tlv_get_addr` the single hottest leaf under the create+append workload. Hoisted into a local; the win is universal since document resolution sits under nearly every API call: create+append 10k 247 -> 239us, set-attribute 305 -> 294us, attr-heavy parse 54 -> 52us, small-text parse 26 -> 24us (pugixml twin harnesses, `benchmarks/twins/`). Full suite green, all 17 CI legs green. The companion fused-name-pass hunk (a further 239 -> 205us locally) was **rejected by the CI parse-ratio perf guard on the macos runner** — bisected to a code-layout shift in the large `element_modify.c` translation unit spilling into parse-path codegen; reverted in the PR and documented for a layout-neutral re-landing. Lane 18 ("beat pugixml in all shapes") continues with the mutation bracket, inline PCData, and batched entity decode.
 ## [1.9.157] - 2026-09-13
 ### Changed
 
