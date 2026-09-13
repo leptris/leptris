@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.162] - 2026-09-13
+
+### Added
+
+- tree-shaped schema-descriptor materialization (#1039) (descriptor)
+
+### Fixed
+
+- declare exports with the house LEPTRIS_API macro (descriptor)
+- MSVC SAL name collision + walk tail return type (descriptor)
+
+
+
 ## [1.9.161] - 2026-09-14
 
 ### Performance
