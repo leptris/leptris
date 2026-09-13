@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.160] - 2026-09-13
+
+### Performance
+
+- S9 set-attr levers — 307 -> 203 us (-34%) (attr)
+- S8 mutation-row levers — create+append 246 -> 190 us (-24%) (mut)
+
+
+
 ## [1.9.159] - 2026-09-13
 
 ### Performance
