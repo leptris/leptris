@@ -56,25 +56,25 @@ const char* leptris_pi_get_data(LeptrisPINode* pi);
 /* Compact next_sibling accessors (TODO 179 Phase B — cp16). */
 static inline LeptrisNode* leptris_pi_next_sibling(const LeptrisPINode* p) {
     return (p)
-        ? (LeptrisNode*)leptris_compact_int32_decode((void*)p, p->next_sibling_off, &p->next_sibling_off)
+        ? (LeptrisNode*)leptris_compact_int32_decode_inline((void*)p, p->next_sibling_off, &p->next_sibling_off)
         : NULL;
 }
 
 static inline void leptris_pi_set_next_sibling(LeptrisPINode* p, LeptrisNode* sibling) {
     if (!p) return;
-    p->next_sibling_off = leptris_compact_int32_encode(p, sibling, &p->next_sibling_off);
+    p->next_sibling_off = leptris_compact_int32_encode_inline(p, sibling, &p->next_sibling_off);
 }
 
 /* Compact parent accessors (issue #168). */
 static inline LeptrisElement leptris_pi_parent(const LeptrisPINode* p) {
     return (p)
-        ? (LeptrisElement)leptris_compact_int32_decode((void*)p, p->parent_off, &p->parent_off)
+        ? (LeptrisElement)leptris_compact_int32_decode_inline((void*)p, p->parent_off, &p->parent_off)
         : NULL;
 }
 
 static inline void leptris_pi_set_parent(LeptrisPINode* p, LeptrisElement parent) {
     if (!p) return;
-    p->parent_off = leptris_compact_int32_encode(p, parent, &p->parent_off);
+    p->parent_off = leptris_compact_int32_encode_inline(p, parent, &p->parent_off);
 }
 
 #endif /* LEPTRIS_DOM_PI_H */

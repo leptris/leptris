@@ -259,12 +259,12 @@ static inline uint16_t attr_name_hash(struct leptris_attribute* a) {
  * (0 = none; overflow-table fallback for >2GB spans). */
 static inline struct leptris_attr_ns_cache* attr_get_ns_cache(
     struct leptris_attribute* a) {
-    return (struct leptris_attr_ns_cache*)leptris_compact_int32_decode(
+    return (struct leptris_attr_ns_cache*)leptris_compact_int32_decode_inline(
         a, a->ns_cache_off, &a->ns_cache_off);
 }
 static inline void attr_set_ns_cache(struct leptris_attribute* a,
                                      struct leptris_attr_ns_cache* ns) {
-    a->ns_cache_off = leptris_compact_int32_encode(a, ns, &a->ns_cache_off);
+    a->ns_cache_off = leptris_compact_int32_encode_inline(a, ns, &a->ns_cache_off);
 }
 static inline const char* attr_get_prefix(struct leptris_attribute* a) {
     struct leptris_attr_ns_cache* c = attr_get_ns_cache(a);
@@ -610,13 +610,13 @@ LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 40,
 
 static inline LeptrisElement leptris_elem_parent(const LeptrisElement e) {
     return (e)
-        ? (LeptrisElement)leptris_compact_int32_decode((void*)e, e->parent_off, &e->parent_off)
+        ? (LeptrisElement)leptris_compact_int32_decode_inline((void*)e, e->parent_off, &e->parent_off)
         : NULL;
 }
 
 static inline LeptrisNode* leptris_elem_first_child(const LeptrisElement e) {
     return (e)
-        ? (LeptrisNode*)leptris_compact_int32_decode((void*)e, e->first_child_off, &e->first_child_off)
+        ? (LeptrisNode*)leptris_compact_int32_decode_inline((void*)e, e->first_child_off, &e->first_child_off)
         : NULL;
 }
 
@@ -638,7 +638,7 @@ static inline LeptrisNode* leptris_elem_last_child(const LeptrisElement e) {
 
 static inline LeptrisNode* leptris_elem_next_sibling(const LeptrisElement e) {
     return (e)
-        ? (LeptrisNode*)leptris_compact_int32_decode((void*)e, e->next_sibling_off, &e->next_sibling_off)
+        ? (LeptrisNode*)leptris_compact_int32_decode_inline((void*)e, e->next_sibling_off, &e->next_sibling_off)
         : NULL;
 }
 
@@ -648,12 +648,12 @@ static inline LeptrisNode* leptris_elem_next_sibling(const LeptrisElement e) {
  * instead of silently dropping the edge. */
 static inline void leptris_elem_set_parent(LeptrisElement e, LeptrisElement parent) {
     if (!e) return;
-    e->parent_off = leptris_compact_int32_encode(e, parent, &e->parent_off);
+    e->parent_off = leptris_compact_int32_encode_inline(e, parent, &e->parent_off);
 }
 
 static inline void leptris_elem_set_first_child(LeptrisElement e, LeptrisNode* child) {
     if (!e) return;
-    e->first_child_off = leptris_compact_int32_encode(e, child, &e->first_child_off);
+    e->first_child_off = leptris_compact_int32_encode_inline(e, child, &e->first_child_off);
 }
 
 static inline void leptris_elem_set_last_child(LeptrisElement e, LeptrisNode* child) {
@@ -666,7 +666,7 @@ static inline void leptris_elem_set_last_child(LeptrisElement e, LeptrisNode* ch
 
 static inline void leptris_elem_set_next_sibling(LeptrisElement e, LeptrisNode* sibling) {
     if (!e) return;
-    e->next_sibling_off = leptris_compact_int32_encode(e, sibling, &e->next_sibling_off);
+    e->next_sibling_off = leptris_compact_int32_encode_inline(e, sibling, &e->next_sibling_off);
 }
 
 /* Compact attribute-list accessors (Phase 2d of TODO 90).
@@ -675,7 +675,7 @@ static inline void leptris_elem_set_next_sibling(LeptrisElement e, LeptrisNode* 
  * Pool-allocated, same safety argument as the tree edges. */
 static inline struct leptris_attribute* leptris_elem_first_attribute(const LeptrisElement e) {
     return (e)
-        ? (struct leptris_attribute*)leptris_compact_int32_decode((void*)e, e->first_attribute_off, &e->first_attribute_off)
+        ? (struct leptris_attribute*)leptris_compact_int32_decode_inline((void*)e, e->first_attribute_off, &e->first_attribute_off)
         : NULL;
 }
 
@@ -691,7 +691,7 @@ static inline struct leptris_attribute* leptris_elem_last_attribute(const Leptri
 
 static inline void leptris_elem_set_first_attribute(LeptrisElement e, struct leptris_attribute* attr) {
     if (!e) return;
-    e->first_attribute_off = leptris_compact_int32_encode(e, attr, &e->first_attribute_off);
+    e->first_attribute_off = leptris_compact_int32_encode_inline(e, attr, &e->first_attribute_off);
 }
 
 static inline void leptris_elem_set_last_attribute(LeptrisElement e, struct leptris_attribute* attr) {

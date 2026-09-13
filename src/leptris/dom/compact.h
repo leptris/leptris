@@ -90,7 +90,7 @@ typedef struct leptris_compact_overflow_table {
  *
  * Used by element.h, text.h, comment.h, cdata.h, pi.h for parent/
  * first/last/next-sibling offsets.  On macOS, ASLR can place pool-
- * resident nodes > 2GB apart, overflowing int32_t.  The encode side
+ * residential nodes > 2GB apart, overflowing int32_t.  The encode side
  * detects overflow and registers the mapping in the global overflow
  * table keyed on `field_addr` (the address of the int32_t field
  * itself), returning INT32_MIN as a sentinel.  Decode recognises the
@@ -109,6 +109,37 @@ void*   leptris_compact_int32_decode(void* base, int32_t off,
 #ifdef __cplusplus
 }
 #endif
+
+/* int32 sentinel written when the delta overflows and lands in the
+ * overflow table (compact.c keeps the authoritative definition; the
+ * value is INT32_MIN). */
+#define LEPTRIS_INT32_OVERFLOW_SENTINEL_H ((int32_t)(-2147483647 - 1))
+
+/* Inline fast paths (lane 18): the shared encode/decode live in
+ * compact.c, so every tree-edge store or sibling/parent read paid an
+ * out-of-line call — two per node in the parse loop and one per edge
+ * in every mutation. The in-range case is a plain subtraction/add,
+ * inlined here; only NULL, the sentinel, and out-of-range deltas
+ * reach the shared functions (which keep the overflow-table and
+ * current-document registration semantics). Semantics are identical
+ * to the compact.c definitions — the asserts in test_compact guard
+ * the pairing. */
+static inline int32_t leptris_compact_int32_encode_inline(
+    void* base, void* target, const int32_t* field_addr) {
+    if (!target) return 0;
+    ptrdiff_t d = (char*)target - (char*)base;
+    if (d < INT32_MIN || d > INT32_MAX)
+        return leptris_compact_int32_encode(base, target, field_addr);
+    return (int32_t)d;
+}
+
+static inline void* leptris_compact_int32_decode_inline(
+    void* base, int32_t off, const int32_t* field_addr) {
+    if (off == 0) return NULL;
+    if (off == LEPTRIS_INT32_OVERFLOW_SENTINEL_H)
+        return leptris_compact_int32_decode(base, off, field_addr);
+    return (char*)base + off;
+}
 
 /* TODO 178: 1-byte and 2-byte compact pointer encoders.
  *
