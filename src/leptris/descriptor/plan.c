@@ -125,12 +125,12 @@ static void dp_plan_free(LeptrisPlan p) {
     free(p);
 }
 
-LEPTRIS_DESCRIPTOR_API uint32_t leptris_plan_abi_version(void) {
+LEPTRIS_API uint32_t leptris_plan_abi_version(void) {
     return LEPTRIS_PLAN_ABI_VERSION;
 }
 
 
-LEPTRIS_DESCRIPTOR_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
+LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                                LeptrisStatus* status) {
     if (status) *status = LEPTRIS_OK;
     if (!spec || !spec->plans || spec->plan_count == 0) {
@@ -215,7 +215,7 @@ oom:
     return NULL;
 }
 
-LEPTRIS_DESCRIPTOR_API void leptris_plan_free(LeptrisPlan plan) { dp_plan_free(plan); }
+LEPTRIS_API void leptris_plan_free(LeptrisPlan plan) { dp_plan_free(plan); }
 
 /* ---- walk ------------------------------------------------------- */
 
@@ -440,7 +440,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
     return 1;
 }
 
-LEPTRIS_DESCRIPTOR_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc, LeptrisElement ctx,
+LEPTRIS_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc, LeptrisElement ctx,
                                     LeptrisPlan plan, LeptrisStatus* status) {
     if (status) *status = LEPTRIS_OK;
     if (!doc || !ctx || !plan) {
@@ -456,46 +456,46 @@ LEPTRIS_DESCRIPTOR_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc, 
     return r;
 }
 
-LEPTRIS_DESCRIPTOR_API void leptris_plan_result_free(LeptrisPlanResult result) {
+LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result) {
     dp_result_free_rec((struct leptris_plan_result*)result);
 }
 
 /* ---- accessors --------------------------------------------------- */
 
-LEPTRIS_DESCRIPTOR_API LeptrisPlanValueKind leptris_plan_value_kind(const LeptrisPlanResult v) {
+LEPTRIS_API LeptrisPlanValueKind leptris_plan_value_kind(const LeptrisPlanResult v) {
     return v ? v->kind : LEPTRIS_PLAN_VALUE_ELEMENT;
 }
 
-LEPTRIS_DESCRIPTOR_API const char* leptris_plan_value_name(const LeptrisPlanResult v) {
+LEPTRIS_API const char* leptris_plan_value_name(const LeptrisPlanResult v) {
     return v ? v->name : NULL;
 }
 
-LEPTRIS_DESCRIPTOR_API uint8_t leptris_plan_value_type_tag(const LeptrisPlanResult v) {
+LEPTRIS_API uint8_t leptris_plan_value_type_tag(const LeptrisPlanResult v) {
     return v ? v->type_tag : 0;
 }
 
-LEPTRIS_DESCRIPTOR_API const char* leptris_plan_value_string(const LeptrisPlanResult v) {
+LEPTRIS_API const char* leptris_plan_value_string(const LeptrisPlanResult v) {
     return v ? v->str : NULL;
 }
 
-LEPTRIS_DESCRIPTOR_API size_t leptris_plan_value_length(const LeptrisPlanResult v) {
+LEPTRIS_API size_t leptris_plan_value_length(const LeptrisPlanResult v) {
     return v ? v->length : 0;
 }
 
-LEPTRIS_DESCRIPTOR_API size_t leptris_plan_value_position(const LeptrisPlanResult v) {
+LEPTRIS_API size_t leptris_plan_value_position(const LeptrisPlanResult v) {
     return v ? v->position : 0;
 }
 
-LEPTRIS_DESCRIPTOR_API size_t leptris_plan_value_count(const LeptrisPlanResult v) {
+LEPTRIS_API size_t leptris_plan_value_count(const LeptrisPlanResult v) {
     return v ? v->kid_count : 0;
 }
 
-LEPTRIS_DESCRIPTOR_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v, size_t i) {
+LEPTRIS_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v, size_t i) {
     if (!v || i >= v->kid_count) return NULL;
     return v->kids[i];
 }
 
-LEPTRIS_DESCRIPTOR_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
+LEPTRIS_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
                                          const char* wire_name) {
     if (!v || !wire_name) return NULL;
     for (size_t i = 0; i < v->attr_count; i++)
