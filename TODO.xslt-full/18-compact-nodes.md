@@ -141,3 +141,13 @@ climbs per overwrite + pool_alloc per value + hash on walk path; pool_alloc only
    lazy hash (index path only), update path attr_value_set (inline = zero alloc).
 4. Gates: /tmp twins row (<144us), all four rows held or improved, full ctest, xslt 205,
    html5lib 1206, parity 784, 17 legs. Twins now in benchmarks/twins/ (survive /tmp wipes).
+
+## S4 design (text-small 24 -> <14us; after v1.9.158): text-node bump block
+Parse already borrows content (text_create_borrowed, zero-copy). Cost = 56B struct
+pool_alloc per node. Lever: per-doc contiguous text block (mut_elem_carve pattern):
+struct leptris_text_block{next,cursor,end,bytes[]}, 1024 nodes/56B stride, doc fields
+text_blocks/text_cursor/text_end, carve fn IN THE PARSER TU (direct_parse.c — NOT
+element_modify.c; v1.9.158 lesson). Fallback to pool on exhaustion. document_free
+frees blocks wholesale (lifetime = doc, same as pool; #1038-safe: nothing outlives).
+Sibling edges int32 already span cross-block gaps (#450). Spec: text-heavy doc all
+content round-trips exactly + 17 legs + twins gate (text row) + parse-ratio guard.
