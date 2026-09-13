@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.161] - 2026-09-13
+
+### Performance
+
+- S10 count3 kernels — deferred horizontal reduction (simd)
+
+
+
 ## [1.9.160] - 2026-09-14
 
 ### Performance
