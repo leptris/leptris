@@ -178,25 +178,32 @@ struct leptris_attribute* leptris_element_get_attribute_by_index(LeptrisElement 
 /* Get attribute by name */
 struct leptris_attribute* leptris_element_get_attribute_by_name(LeptrisElement elem, const char* name) {
     if (!elem || !name) return NULL;
+    return leptris_dom_attr_find(elem, name, leptris_cstr_len16(name));
+}
 
-    /* Hash-filtered attribute lookup (TODO 113 Phase 4).
-     * Compute the 15-bit hash of the search name once (round 19 —
-     * attr_name_hash truncates identically via attr_hash15), then
-     * compare small integers in the loop before touching string
-     * data. This turns O(N × strlen) into O(N × uint16) for the
-     * non-matching case. */
-    size_t name_len = strlen(name);
+/* S9: the hash-prefiltered walk, factored so the mutation path pays
+ * the name strlen exactly once per call (set_attribute used to
+ * strlen here AND again through the public wrapper).
+ *
+ * Hash-filtered attribute lookup (TODO 113 Phase 4). Compute the
+ * 15-bit hash of the search name once, then compare small integers
+ * in the loop before touching string data. This turns
+ * O(N x strlen) into O(N x uint16) for the non-matching case; the
+ * final confirm is a short inline byte compare (the TODO 174 law —
+ * a memcmp libc call costs more than the scan for 1-16 byte names). */
+struct leptris_attribute* leptris_dom_attr_find(LeptrisElement elem,
+                                                const char* name,
+                                                size_t name_len) {
+    if (!elem || !name) return NULL;
     uint16_t name_hash = attr_hash15(name, name_len);
 
     struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
     while (attr) {
-        /* Hash pre-filter: reject most non-matching attrs in one
-         * integer comparison. Lazy compute on first read (TODO 172).
-         * Only when hash AND length match do we do the full memcmp. */
         if (attr_name_hash(attr) == name_hash &&
             attr->name_view.length == name_len) {
             if (!leptris_sv_is_empty(&attr->name_view) &&
-                memcmp(attr->name_view.data, name, name_len) == 0) {
+                leptris_memeq_short(attr->name_view.data, name,
+                                    name_len)) {
                 return attr;
             }
         }
