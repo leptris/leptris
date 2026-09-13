@@ -197,6 +197,26 @@ set-attr ~308 vs 144. Mutation remains redesign-class per the #1031
 verdict (safety ladder + doc resolution + name carves) — next lever
 there needs profiling of element_modify/element.c first, not guessing.
 
+
+## S7 (PR #1051 commit 4): doc-entry chain kills the 256-bucket sweep — guard 1100 -> 650
+
+The macos perf guard failed 1010.5 and 1013.8 vs the 1000 line across
+two pushes; local base-vs-S6 guard replica was IDENTICAL (~1095 both)
+— the code was not the regression, the BASELINE was at the line.
+Throwaway no-sweep build: ratio 1100 -> 620. THE #1038 sweep (256 TLS
+buckets per document_free) was ~42% of small-doc parse+free cost —
+landed in v1.9.156, quietly ate the guard's margin.
+Fix: entries carry doc_next; doc->map_entries chains them; the sweep
+walks THIS doc's entries, unlinking each from its bucket by ENTRY
+IDENTITY (root pointer VALUE only — never dereferenced, adopted-pool
+rule preserved). Single-unregister and cross-doc re-register maintain
+the chain (specs falsify both aliasing hazards; 1470/1470, 0 leaks).
+Guard replica ~650 (35% margin back). Churn workloads (parse->free
+loops, matrix teardown) get the full 42% small-doc win.
+LESSON: a hotfix that adds per-free fixed cost shows up in the RATIO
+guard, not the twins — re-check guard margin after any fixed-cost
+addition.
+
 ## S4 design (text-small 24 -> <14us; after v1.9.158): text-node bump block
 Parse already borrows content (text_create_borrowed, zero-copy). Cost = 56B struct
 pool_alloc per node. Lever: per-doc contiguous text block (mut_elem_carve pattern):
