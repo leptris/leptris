@@ -563,7 +563,6 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
             dtd = parsed;
         }
     }
-    
     *pos_io = pos;
     *dtd_io = dtd;
     return 0;
