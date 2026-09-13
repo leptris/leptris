@@ -426,6 +426,13 @@ LEPTRIS_API LeptrisElement leptris_node_parent(LeptrisNodeRef node) {
     return leptris_node_parent_inline(node);
 }
 
+LEPTRIS_API size_t leptris_node_byte_offset(LeptrisNodeRef node) {
+    /* Issue #223 lazy scheme: parse-created nodes store byteOffset+1
+     * in .line; 0 means unknown (mutation nodes, huge docs). */
+    if (!node || node->line == 0) return 0;
+    return (size_t)node->line - 1u;
+}
+
 LEPTRIS_API LeptrisStatus leptris_node_unlink(LeptrisNodeRef node) {
     if (!node) return LEPTRIS_ERROR_NULL_ARG;
     LeptrisElement parent = leptris_node_parent(node);

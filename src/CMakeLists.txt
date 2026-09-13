@@ -32,6 +32,7 @@ set(LEPTRIS_SOURCES
     leptris/dom/node_vtable.c
     leptris/dom/document_node.c
     leptris/dom/node_public.c
+    leptris/descriptor/plan.c
     leptris/dom/element.c
     leptris/dom/element_query.c
     leptris/dom/element_modify.c

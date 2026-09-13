@@ -106,6 +106,16 @@ LEPTRIS_API int leptris_node_get_type(LeptrisNodeRef node);
  *         (pool-owned strings), detached nodes, or NULL
  */
 LEPTRIS_API int leptris_node_line(LeptrisNodeRef node);
+/**
+ * Get the node's byte offset within the source document (0-based;
+ * the '<' of the node's markup). Returns 0 when unknown (mutation-
+ * created nodes, or documents >= 2 GiB whose offsets do not fit).
+ * Parse-created nodes store byteOffset+1 internally (the issue #223
+ * lazy line scheme) — this accessor surfaces the raw byte position
+ * for descriptor materialization (#1039).
+ */
+LEPTRIS_API size_t leptris_node_byte_offset(LeptrisNodeRef node);
+
 
 /**
  * Get first child node (any type)
