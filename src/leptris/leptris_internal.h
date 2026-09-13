@@ -228,6 +228,12 @@ struct leptris_document {
     struct leptris_mut_elem_block* mut_elem_blocks;
     struct leptris_element* mut_elem_cursor;
     struct leptris_element* mut_elem_end;
+    /* Per-doc chain of this document's root-doc-map entries (#1038
+     * sweep successor): register pushes, document_free walks THIS
+     * list instead of sweeping all 256 TLS buckets — the sweep was
+     * ~42% of small-document parse+free cost. Void-typed to avoid a
+     * header cycle; root_doc_map.c owns the layout. */
+    void* map_entries;
     /* Mutation name bump block (round 21): element_create's name
      * copy went through leptris_pool_strdup → arena_alloc (call
      * chain + strlen + slack checks, ~9ns for a 2-byte name).

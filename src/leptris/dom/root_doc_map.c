@@ -35,10 +35,30 @@ static inline void rootmap_set(LeptrisElement e, int on) {
 typedef struct root_doc_entry {
     LeptrisElement root;
     struct leptris_document* doc;
-    struct root_doc_entry* next;
+    struct root_doc_entry* next;       /* bucket chain */
+    struct root_doc_entry* doc_next;   /* owning doc's chain */
 } RootDocEntry;
 
 static LEPTRIS_THREAD_LOCAL RootDocEntry* g_root_doc_buckets[ROOT_DOC_BUCKETS];
+
+/* Doc-entry chain helpers: every register pushes the entry onto its
+ * document's list (doc->map_entries), so unregister_doc walks exactly
+ * this doc's entries instead of all 256 TLS buckets (the #1038 sweep
+ * was ~42% of small-document parse+free). Entries are map-owned
+ * storage — the chain never touches element headers, preserving the
+ * #1038 adopted-pool rule. */
+static void doc_chain_push(struct leptris_document* doc, RootDocEntry* e) {
+    e->doc_next = doc->map_entries;
+    doc->map_entries = e;
+}
+
+static void doc_chain_unlink(struct leptris_document* doc, RootDocEntry* e) {
+    RootDocEntry** pp = (RootDocEntry**)&doc->map_entries;
+    while (*pp) {
+        if (*pp == e) { *pp = e->doc_next; return; }
+        pp = &(*pp)->doc_next;
+    }
+}
 
 /* Free-list: recycled entries from unregistered roots. Eliminates
  * malloc/free churn on the parse→free cycle. */
@@ -88,7 +108,17 @@ void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc
     if (rootmap_marked(root)) {
         /* Possibly already present: walk to update. */
         for (RootDocEntry* e = g_root_doc_buckets[idx]; e; e = e->next) {
-            if (e->root == root) { e->doc = doc; return; }
+            if (e->root == root) {
+                if (e->doc != doc) {
+                    /* Re-registered under a new document: the entry
+                     * must move to the new doc's chain or the old
+                     * doc's sweep would recycle a live entry. */
+                    doc_chain_unlink(e->doc, e);
+                    e->doc = doc;
+                    doc_chain_push(doc, e);
+                }
+                return;
+            }
         }
     } else {
         /* Never registered: prepend directly, no duplicate walk. */
@@ -97,6 +127,7 @@ void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc
         e->root = root; e->doc = doc;
         e->next = g_root_doc_buckets[idx];
         g_root_doc_buckets[idx] = e;
+        doc_chain_push(doc, e);
         rootmap_set(root, 1);
         return;
     }
@@ -106,6 +137,7 @@ void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc
     e->root = root; e->doc = doc;
     e->next = g_root_doc_buckets[idx];
     g_root_doc_buckets[idx] = e;
+    doc_chain_push(doc, e);
 }
 
 /* TODO.concurrency/08: TLS free-list entries outlive their thread
@@ -134,6 +166,9 @@ void leptris_root_doc_unregister(LeptrisElement root) {
         if ((*pp)->root == root) {
             RootDocEntry* freed = *pp;
             *pp = freed->next;
+            /* Leave the owning doc's chain too — a stale doc_next
+             * here would alias a free-list-recycled entry. */
+            doc_chain_unlink(freed->doc, freed);
             /* Push to free-list instead of free(). */
             freed->next = g_free_list;
             g_free_list = freed;
@@ -151,31 +186,35 @@ void leptris_root_doc_unregister(LeptrisElement root) {
  * pre-fix those entries outlived the doc, and a malloc-recycled
  * element address later resolved the FREED doc through the stale
  * entry: roaming heap corruption in downstream binding suites
- * (~5% of runs, v1.9.151-155). document_free sweeps every bucket
- * for this doc; the TLS memo is already invalidated there. */
+ * (~5% of runs, v1.9.151-155).
+ *
+ * The doc-entry chain (doc->map_entries) makes the sweep O(this
+ * doc's entries) instead of O(all 256 TLS buckets) — the bucket
+ * sweep was ~42% of small-document parse+free cost, which had
+ * pushed the CI parse-ratio guard to its margin. Bucket unlinking
+ * uses only the entry ADDRESS and its root POINTER VALUE (bucket
+ * hashing): element storage is never dereferenced or written,
+ * preserving the adopted-pool rule above. */
 size_t leptris_root_doc_unregister_doc(struct leptris_document* doc) {
     if (!doc) return 0;
     size_t removed = 0;
-    for (size_t b = 0; b < ROOT_DOC_BUCKETS; b++) {
-        RootDocEntry** pp = &g_root_doc_buckets[b];
+    RootDocEntry* e = (RootDocEntry*)doc->map_entries;
+    doc->map_entries = NULL;
+    while (e) {
+        RootDocEntry* next = e->doc_next;
+        size_t idx = bucket_index(e->root);
+        RootDocEntry** pp = &g_root_doc_buckets[idx];
         while (*pp) {
-            if ((*pp)->doc == doc) {
-                RootDocEntry* freed = *pp;
-                *pp = freed->next;
-                freed->next = g_free_list;
-                g_free_list = freed;
-                /* The bucket chain is authoritative here — do NOT
-                 * rootmap_set(freed->root, 0): XInclude-adopted
-                 * subtrees can leave entries whose element storage
-                 * died with an ALREADY-freed child pool, and the
-                 * header mark is only a hint that register and
-                 * unregister both handle benignly on fresh
-                 * elements (create memsets the bit clear). */
-                removed++;
-                continue;
+            if (*pp == e) {
+                *pp = e->next;
+                break;
             }
             pp = &(*pp)->next;
         }
+        e->next = g_free_list;
+        g_free_list = e;
+        removed++;
+        e = next;
     }
     return removed;
 }
