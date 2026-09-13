@@ -227,14 +227,29 @@ static const size_t dp_par_off[5] = {
 
 /* Wire child into parent's child chain. Uses compile-time offset
  * tables for branchless type dispatch — no switch, no branch predict. */
+
+/* #450 fast path: parse-created nodes live in the combined block (or
+ * contiguous pool pages of the same arena-backed pool), so every edge
+ * delta fits int32 and the encode is plain pointer subtraction —
+ * inlined here instead of the out-of-line compact.c call it replaced
+ * (two calls per node across a TU boundary the optimizer can't cross).
+ * Documents beyond the 2 GiB window take the shared encoder, which
+ * registers the delta in the overflow table keyed by field_addr. */
+static inline int32_t dp_edge(void* base, void* target,
+                              const int32_t* field_addr) {
+    ptrdiff_t d = (char*)target - (char*)base;
+    if (DP_UNLIKELY(d < INT32_MIN || d > INT32_MAX))
+        return leptris_compact_int32_encode(base, target, field_addr);
+    return (int32_t)d;
+}
+
 static inline void dp_wire_child(DParser* p, LeptrisElement parent,
                                   LeptrisNode* child) {
     unsigned t = (unsigned)child->type;
     if (t < 5) {
         int32_t* par_field =
             (int32_t*)((char*)child + dp_par_off[t]);
-        *par_field = leptris_compact_int32_encode(
-            child, parent, (const int32_t*)par_field);
+        *par_field = dp_edge(child, parent, par_field);
     }
 
     LeptrisNode* prev_last = p->last_child_stack[p->depth - 1];
@@ -243,18 +258,14 @@ static inline void dp_wire_child(DParser* p, LeptrisElement parent,
         if (pt <= LEPTRIS_NODE_TYPE_PI) {
             /* All sibling edges: unscaled int32 byte offsets (#450 —
              * cp16 ranges cannot hold cross-block sibling links on
-             * large documents). Routed through the encoder so a
-             * delta that overflows int32 (or collides with the
-             * sentinel) lands in the overflow table instead of
-             * truncating (issue #478). */
+             * large documents). */
             int32_t* sib_field =
                 (int32_t*)((char*)prev_last + dp_ns_off_int32[pt]);
-            *sib_field = leptris_compact_int32_encode(
-                prev_last, child, (const int32_t*)sib_field);
+            *sib_field = dp_edge(prev_last, child, sib_field);
         }
     } else {
-        parent->first_child_off = leptris_compact_int32_encode(
-            parent, child, &parent->first_child_off);
+        parent->first_child_off = dp_edge(parent, child,
+                                          &parent->first_child_off);
     }
     p->last_child_stack[p->depth - 1] = child;
 
@@ -1037,7 +1048,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         (struct leptris_text_node*)(combined + elem_bytes + attr_bytes);
     char* cpi_block = combined + elem_bytes + attr_bytes + text_bytes;
     /* No memset on attr_block — dp_add_attr_inline initializes every
-     * field of each attr it uses. */
+     * field of each attr it uses. (Elements keep the bulk memset:
+     * carve-time zeroing measured 1-2 us SLOWER — interleaved in-loop
+     * stores cost more than the streaming pass saves, even though the
+     * reservation tail is ~2x the carved elements on mixed docs.) */
     size_t elem_idx = 0;
 
     /* 4. Create document. Pool-allocated to save one malloc per
