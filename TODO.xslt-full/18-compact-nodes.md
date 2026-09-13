@@ -142,6 +142,31 @@ climbs per overwrite + pool_alloc per value + hash on walk path; pool_alloc only
 4. Gates: /tmp twins row (<144us), all four rows held or improved, full ctest, xslt 205,
    html5lib 1206, parity 784, 17 legs. Twins now in benchmarks/twins/ (survive /tmp wipes).
 
+
+## S4 OUTCOME (PR #1051): dp_edge inline; three dead ends; block already existed
+
+CORRECTION to the design below: the text-node bump block ALREADY SHIPPED
+as "round 8" (dp_text_create in direct_parse.c, with the #815 dirty-page
+fix). Text-small was never missing a carve. Instrumented phase timing of
+the twins text-heavy-1k shape (1101 elems + 1000 texts, 17.4 KB):
+
+- copy_count3 0 us best-of-5000 (memcpy speed) — the fused NEON pass is
+  NOT a lever; the 16% xctrace attribution was a distorted-build artifact
+- alloc (arena+blocks+memset 212KB) 1.7 us; halving the reservation
+  (est_elems = lt/2 experiment) measured NO delta — macOS malloc +
+  streaming memset too cheap; the '</' pair-count kernel idea is dead
+- carve-time element zeroing (replacing the bulk memset) measured 1-2 us
+  SLOWER — interleaved in-loop stores lose to one streaming pass; reverted
+- loop = 91% of parse. The ONE out-of-line per-node call was
+  leptris_compact_int32_encode (compact.c, cross-TU, 2x per node) — now
+  dp_edge: inlined pointer subtraction with the shared encoder kept as
+  the >2 GiB fallback (#450 guarantees in-range).
+
+Interleaved twins: text-heavy-1k 25 -> 21 us (-14%), attr-heavy neutral.
+Remaining text-row gap (21 vs ~14) = the 96 B element footprint — P2
+slimming is the next (design-level) slice; it moves every row
+(append 2.1x, set-attr 2.0x, attr-heavy 1.6x, text 1.5x).
+
 ## S4 design (text-small 24 -> <14us; after v1.9.158): text-node bump block
 Parse already borrows content (text_create_borrowed, zero-copy). Cost = 56B struct
 pool_alloc per node. Lever: per-doc contiguous text block (mut_elem_carve pattern):
