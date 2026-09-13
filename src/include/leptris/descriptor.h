@@ -24,29 +24,14 @@
 
 #include "leptris/types.h"
 
-/* Export macro — mirrors leptris.h (which defines it before including
- * anything); guarded so this header also parses standalone. */
-#ifndef LEPTRIS_DESCRIPTOR_API_DEFINED
-#define LEPTRIS_DESCRIPTOR_API_DEFINED
-#ifdef LEPTRIS_FOR_BINDGEN
-#define LEPTRIS_DESCRIPTOR_API
-#else
+/* LEPTRIS_API comes from leptris.h (the house export macro — the
+ * export-surface gate greps for it). Guarded fallback so this header
+ * also parses standalone. */
 #ifndef LEPTRIS_API
-#  ifdef _WIN32
-#    ifdef LEPTRIS_BUILD_SHARED
-#      define LEPTRIS_API __declspec(dllexport)
-#    elif defined(LEPTRIS_BUILDING_DLL)
-#      define LEPTRIS_API __declspec(dllexport)
-#    elif defined(LEPTRIS_USE_SHARED)
-#      define LEPTRIS_API __declspec(dllimport)
-#    else
-#      define LEPTRIS_API
-#    endif
-#  else
-#    define LEPTRIS_API __attribute__((visibility("default")))
-#  endif
-#endif
-#define LEPTRIS_DESCRIPTOR_API LEPTRIS_API
+#ifdef _WIN32
+#define LEPTRIS_API
+#else
+#define LEPTRIS_API __attribute__((visibility("default")))
 #endif
 #endif
 
@@ -128,15 +113,15 @@ typedef enum {
 } LeptrisPlanValueKind;
 
 /* Descriptor ABI version — versioned lockstep with the structs above. */
-LEPTRIS_DESCRIPTOR_API uint32_t leptris_plan_abi_version(void);
+LEPTRIS_API uint32_t leptris_plan_abi_version(void);
 
 /* Compile a descriptor: deep-copies every plan, string, and array into
  * an engine-owned pool — the spec (and its strings) may be freed by the
  * caller immediately after a successful build.
  * Memory: the plan owns everything; release with leptris_plan_free. */
-LEPTRIS_DESCRIPTOR_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
+LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                                            LeptrisStatus* status);
-LEPTRIS_DESCRIPTOR_API void leptris_plan_free(LeptrisPlan plan);
+LEPTRIS_API void leptris_plan_free(LeptrisPlan plan);
 
 /* Walk the subtree rooted at ctx against plans[0] (the root plan
  * applies to ctx itself: attribute rows read ctx's attributes, child
@@ -149,32 +134,32 @@ LEPTRIS_DESCRIPTOR_API void leptris_plan_free(LeptrisPlan plan);
  * Memory: whole-subtree result owned by the caller; free with
  * leptris_plan_result_free. The result is standalone (strings copied)
  * and outlives the document. */
-LEPTRIS_DESCRIPTOR_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc,
+LEPTRIS_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc,
                                                 LeptrisElement ctx,
                                                 LeptrisPlan plan,
                                                 LeptrisStatus* status);
-LEPTRIS_DESCRIPTOR_API void leptris_plan_result_free(LeptrisPlanResult result);
+LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result);
 
 /* ---- Result accessors (NULL-tolerant: NULL in, 0/NULL out) ------- */
 
-LEPTRIS_DESCRIPTOR_API LeptrisPlanValueKind leptris_plan_value_kind(const LeptrisPlanResult v);
+LEPTRIS_API LeptrisPlanValueKind leptris_plan_value_kind(const LeptrisPlanResult v);
 /* wire_name of the plan row that produced this value. */
-LEPTRIS_DESCRIPTOR_API const char* leptris_plan_value_name(const LeptrisPlanResult v);
+LEPTRIS_API const char* leptris_plan_value_name(const LeptrisPlanResult v);
 /* Host type_tag echoed verbatim (0 when the row had none). */
-LEPTRIS_DESCRIPTOR_API uint8_t leptris_plan_value_type_tag(const LeptrisPlanResult v);
+LEPTRIS_API uint8_t leptris_plan_value_type_tag(const LeptrisPlanResult v);
 /* SCALAR / RAW / CALLBACK string value. NUL-terminated, result-owned;
  * length excludes the terminator. */
-LEPTRIS_DESCRIPTOR_API const char* leptris_plan_value_string(const LeptrisPlanResult v);
-LEPTRIS_DESCRIPTOR_API size_t leptris_plan_value_length(const LeptrisPlanResult v);
+LEPTRIS_API const char* leptris_plan_value_string(const LeptrisPlanResult v);
+LEPTRIS_API size_t leptris_plan_value_length(const LeptrisPlanResult v);
 /* CALLBACK: document byte offset of the source node (0 unknown). */
-LEPTRIS_DESCRIPTOR_API size_t leptris_plan_value_position(const LeptrisPlanResult v);
+LEPTRIS_API size_t leptris_plan_value_position(const LeptrisPlanResult v);
 /* ELEMENT: child-value count. COLLECTION: item count. */
-LEPTRIS_DESCRIPTOR_API size_t leptris_plan_value_count(const LeptrisPlanResult v);
+LEPTRIS_API size_t leptris_plan_value_count(const LeptrisPlanResult v);
 /* ELEMENT child value / COLLECTION item at i; NULL out of range. */
-LEPTRIS_DESCRIPTOR_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v,
+LEPTRIS_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v,
                                                     size_t i);
 /* ELEMENT: attribute value by wire_name; NULL when absent. */
-LEPTRIS_DESCRIPTOR_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
+LEPTRIS_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
                                                      const char* wire_name);
 
 #ifdef __cplusplus
