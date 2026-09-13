@@ -241,6 +241,32 @@ builders):
 3. mut_name_carve: <=8-byte names as two 8-byte stores instead of the
    runtime-length memmove call.
 
+
+## S8+S9 SHIPPED (PR #1054, 2026-09-14): mutation rows 2.18x -> 1.66x, 2.11x -> 1.40x
+
+S8 (create+append 246 -> 188us): split_qname colon gate (name_len>=3 +
+inline scan; both callers set name_len first), dom/edges.h shared
+offset tables + ALWAYS_INLINE node_parent (was an out-of-line switch
+running 2x per append), mut_name_carve 8-byte-word name copy (word
+RESERVED in the carve size — block-bound safety).
+S9 (set-attr 307 -> 203us): profile showed 26% in the find + FOUR
+libc calls/op (strlen name x2 via the public wrapper, strlen value,
+memcmp confirm). leptris_dom_attr_find takes the caller's name length
+(both public get-by-name and set_attribute share it — one strlen);
+leptris_cstr_len16 (inline 16-byte NUL scan, never past the NUL) +
+leptris_memeq_short (inline confirm). Suite 1472/1472 both slices.
+
+REMAINING >1.5x rows and the semantic wall:
+- set-attr 1.40x / append 1.66x: the biggest single remaining piece
+  is leptris_element_get_document (~4ns: TLS memo + parent climb).
+  Mutation-created elements ALL carry the namebp doc backpointer —
+  checking it FIRST would make resolution O(1). NOT DONE: it changes
+  documented semantics ("walk to the root") and the cross-doc-attach
+  case (create in A, append under B — climb says B, namebp says A).
+  Needs a user call, same class as #1031's opt-out fast builders.
+- attr-heavy parse 1.6x: per-attr raw-view entry (#635 channel) +
+  entity routing — S3's territory, needs its own profile.
+
 ## S4 design (text-small 24 -> <14us; after v1.9.158): text-node bump block
 Parse already borrows content (text_create_borrowed, zero-copy). Cost = 56B struct
 pool_alloc per node. Lever: per-doc contiguous text block (mut_elem_carve pattern):
