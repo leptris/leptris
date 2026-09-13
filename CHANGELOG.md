@@ -1,13 +1,21 @@
 ## [Unreleased]
 
-## [1.9.160] - 2026-09-13
+## [1.9.160] - 2026-09-14
 
 ### Performance
 
-- S9 set-attr levers — 307 -> 203 us (-34%) (attr)
-- S8 mutation-row levers — create+append 246 -> 190 us (-24%) (mut)
+Mutation-row levers from fresh xctrace profiles of the create+append and set-attribute loops (PR #1054):
 
+- **Element create: split_qname colon gate** — the prefix split ran an unconditional `strchr` libc call on every created element; a prefix needs >= 3 bytes and `name_len` is already set at both call sites, so 1-2 byte names skip the probe and short names scan inline.
+- **Parent reads: shared edge tables** — `leptris_node_parent` dispatched through an out-of-line switch that ran twice per append (fresh-child check + tail-cache validation). New `dom/edges.h` gives one home to the parent/sibling offset tables (the parser's branchless pattern) plus an always-inline parent read; the public API delegates and the append paths inline.
+- **Element create: name carve** — 1-8 byte names copy as one 8-byte word (reserved in the carve size so block boundaries hold) instead of a runtime-length `memcpy` call.
+- **Attribute find: one strlen, inline confirms** — `set_attribute` strlent the name twice (once itself, once through the public get-by-name wrapper) and paid a `memcmp` libc call to confirm a 1-byte hash hit. `leptris_dom_attr_find` takes the caller's name length; short-string length/compare helpers inline the common 1-16 byte cases (the scan never reads past the NUL it finds).
 
+Measured (interleaved twins, same machine): create+append 10k 246 -> 188 us (-24%; 2.18x -> 1.66x vs pugixml), set-attr 10k 307 -> 203 us (-34%; 2.11x -> 1.40x); parse rows neutral. 1472 tests green.
+
+### Internal
+
+- The remaining mutation-row cost is dominated by document resolution (TLS memo + root climb); an O(1) namebp-first resolution is designed but changes documented walk-to-root semantics and cross-document attach resolution — recorded in the lane ledger for a decision rather than silently switched.
 
 ## [1.9.159] - 2026-09-13
 
