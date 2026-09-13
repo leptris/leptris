@@ -45,6 +45,11 @@ static char* mut_name_carve(struct leptris_document* doc,
          * No backpointer — caller must register in the root map. */
         return NULL;
     }
+    /* Small-name fast path (S8): a runtime-length memcpy is a libc
+     * call; element names are 1-8 bytes, so one 8-byte store wins.
+     * The store writes the full word — reserve it so the block-bound
+     * check accounts for the write, never just the logical size. */
+    if (name_len <= 8) need = sizeof(struct leptris_document*) + 9;
     if (doc->mut_name_cursor + need > doc->mut_name_end) {
         struct leptris_mut_name_block* blk =
             (struct leptris_mut_name_block*)malloc(
@@ -58,8 +63,17 @@ static char* mut_name_carve(struct leptris_document* doc,
     char* slot = doc->mut_name_cursor;
     doc->mut_name_cursor += need;
     *(struct leptris_document**)slot = doc;
-    memcpy(slot + sizeof(struct leptris_document*), name, name_len);
-    slot[sizeof(struct leptris_document*) + name_len] = '\0';
+    char* dst = slot + sizeof(struct leptris_document*);
+    if (name_len <= 8) {
+        uint64_t w = 0;
+        for (size_t i = 0; i < name_len; i++)
+            ((unsigned char*)&w)[i] = (unsigned char)name[i];
+        memcpy(dst, &w, 8);
+        dst[name_len] = '\0';
+    } else {
+        memcpy(dst, name, name_len);
+        dst[name_len] = '\0';
+    }
     return slot + sizeof(struct leptris_document*);
 }
 

@@ -489,7 +489,23 @@ static inline void leptris_elem_set_ns_uri(LeptrisElement e, char* uri,
 static inline void leptris_elem_split_qname(LeptrisElement e,
                                             LeptrisMemoryPool* pool) {
     if (!e || !e->name) return;
-    char* colon = strchr(e->name, ':');
+    /* Colon probe (S8): a prefix needs >= 3 bytes (prefix + ':' +
+     * local), and e->name_len is exact here (every caller sets it
+     * before splitting; >254-byte names store 0xFF which keeps the
+     * probe). 1-2 byte names skip entirely; short names scan inline —
+     * one strchr libc call per created element cost more than the
+     * scan (the dp_split_hash_name law). */
+    char* colon = NULL;
+    size_t probe_len = (e->name_len != 0xFF) ? e->name_len : strlen(e->name);
+    if (probe_len >= 3) {
+        if (probe_len <= 16) {
+            for (const char* c9 = e->name; *c9; c9++) {
+                if (*c9 == ':') { colon = (char*)c9; break; }
+            }
+        } else {
+            colon = strchr(e->name, ':');
+        }
+    }
     if (!colon) return;
     /* Lane 18 P1: read the doc backpointer BEFORE the split moves
      * the name — then re-stamp it in a fresh slot so namebp
