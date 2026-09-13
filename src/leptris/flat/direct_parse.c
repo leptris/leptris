@@ -230,30 +230,20 @@ static const size_t dp_par_off[5] = {
 };
 
 /* Wire child into parent's child chain. Uses compile-time offset
- * tables for branchless type dispatch — no switch, no branch predict. */
-
-/* #450 fast path: parse-created nodes live in the combined block (or
- * contiguous pool pages of the same arena-backed pool), so every edge
- * delta fits int32 and the encode is plain pointer subtraction —
- * inlined here instead of the out-of-line compact.c call it replaced
- * (two calls per node across a TU boundary the optimizer can't cross).
- * Documents beyond the 2 GiB window take the shared encoder, which
- * registers the delta in the overflow table keyed by field_addr. */
-static inline int32_t dp_edge(void* base, void* target,
-                              const int32_t* field_addr) {
-    ptrdiff_t d = (char*)target - (char*)base;
-    if (DP_UNLIKELY(d < INT32_MIN || d > INT32_MAX))
-        return leptris_compact_int32_encode(base, target, field_addr);
-    return (int32_t)d;
-}
-
-static LEPTRIS_ALWAYS_INLINE void dp_wire_child(DParser* p, LeptrisElement parent,
+ * tables for branchless type dispatch — no switch, no branch predict.
+ * Edge encoding goes through leptris_compact_int32_encode_inline
+ * (compact.h): #450 guarantees parse-created nodes live in the
+ * combined arena-backed block, so the delta is a plain inlined
+ * subtraction; documents beyond the 2 GiB window take the shared
+ * encoder's overflow-table path. */
+static inline void dp_wire_child(DParser* p, LeptrisElement parent,
                                   LeptrisNode* child) {
     unsigned t = (unsigned)child->type;
     if (t < 5) {
         int32_t* par_field =
             (int32_t*)((char*)child + dp_par_off[t]);
-        *par_field = dp_edge(child, parent, par_field);
+        *par_field = leptris_compact_int32_encode_inline(
+            child, parent, par_field);
     }
 
     LeptrisNode* prev_last = p->last_child_stack[p->depth - 1];
@@ -265,11 +255,12 @@ static LEPTRIS_ALWAYS_INLINE void dp_wire_child(DParser* p, LeptrisElement paren
              * large documents). */
             int32_t* sib_field =
                 (int32_t*)((char*)prev_last + dp_ns_off_int32[pt]);
-            *sib_field = dp_edge(prev_last, child, sib_field);
+            *sib_field = leptris_compact_int32_encode_inline(
+                prev_last, child, sib_field);
         }
     } else {
-        parent->first_child_off = dp_edge(parent, child,
-                                          &parent->first_child_off);
+        parent->first_child_off = leptris_compact_int32_encode_inline(
+            parent, child, &parent->first_child_off);
     }
     p->last_child_stack[p->depth - 1] = child;
 

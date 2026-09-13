@@ -95,25 +95,25 @@ void leptris_text_set_content(LeptrisTextNode* text, const char* content);
  * documents; the raw store truncated. */
 static inline LeptrisNode* leptris_textnode_next_sibling(const LeptrisTextNode* t) {
     return (t)
-        ? (LeptrisNode*)leptris_compact_int32_decode((void*)t, t->next_sibling_off, &t->next_sibling_off)
+        ? (LeptrisNode*)leptris_compact_int32_decode_inline((void*)t, t->next_sibling_off, &t->next_sibling_off)
         : NULL;
 }
 
 static inline void leptris_textnode_set_next_sibling(LeptrisTextNode* t, LeptrisNode* sibling) {
     if (!t) return;
-    t->next_sibling_off = leptris_compact_int32_encode(t, sibling, &t->next_sibling_off);
+    t->next_sibling_off = leptris_compact_int32_encode_inline(t, sibling, &t->next_sibling_off);
 }
 
 /* Compact parent accessors (issue #168). */
 static inline LeptrisElement leptris_textnode_parent(const LeptrisTextNode* t) {
     return (t)
-        ? (LeptrisElement)leptris_compact_int32_decode((void*)t, t->parent_off, &t->parent_off)
+        ? (LeptrisElement)leptris_compact_int32_decode_inline((void*)t, t->parent_off, &t->parent_off)
         : NULL;
 }
 
 static inline void leptris_textnode_set_parent(LeptrisTextNode* t, LeptrisElement parent) {
     if (!t) return;
-    t->parent_off = leptris_compact_int32_encode(t, parent, &t->parent_off);
+    t->parent_off = leptris_compact_int32_encode_inline(t, parent, &t->parent_off);
 }
 
 #endif /* LEPTRIS_DOM_TEXT_H */

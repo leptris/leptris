@@ -50,25 +50,25 @@ const char* leptris_comment_get_content(LeptrisCommentNode* comment);
 /* Compact next_sibling accessors (TODO 179 Phase B — cp16). */
 static inline LeptrisNode* leptris_comment_next_sibling(const LeptrisCommentNode* c) {
     return (c)
-        ? (LeptrisNode*)leptris_compact_int32_decode((void*)c, c->next_sibling_off, &c->next_sibling_off)
+        ? (LeptrisNode*)leptris_compact_int32_decode_inline((void*)c, c->next_sibling_off, &c->next_sibling_off)
         : NULL;
 }
 
 static inline void leptris_comment_set_next_sibling(LeptrisCommentNode* c, LeptrisNode* sibling) {
     if (!c) return;
-    c->next_sibling_off = leptris_compact_int32_encode(c, sibling, &c->next_sibling_off);
+    c->next_sibling_off = leptris_compact_int32_encode_inline(c, sibling, &c->next_sibling_off);
 }
 
 /* Compact parent accessors (issue #168). */
 static inline LeptrisElement leptris_comment_parent(const LeptrisCommentNode* c) {
     return (c)
-        ? (LeptrisElement)leptris_compact_int32_decode((void*)c, c->parent_off, &c->parent_off)
+        ? (LeptrisElement)leptris_compact_int32_decode_inline((void*)c, c->parent_off, &c->parent_off)
         : NULL;
 }
 
 static inline void leptris_comment_set_parent(LeptrisCommentNode* c, LeptrisElement parent) {
     if (!c) return;
-    c->parent_off = leptris_compact_int32_encode(c, parent, &c->parent_off);
+    c->parent_off = leptris_compact_int32_encode_inline(c, parent, &c->parent_off);
 }
 
 #endif /* LEPTRIS_DOM_COMMENT_H */
