@@ -506,3 +506,21 @@ route <frameset> through the frameset_ok gate there; (2) non-ws TEXT
 flush must clear frameset_ok; (3) NUL-in-text truncation: h_decode_ww
 truncates runs at NUL (probe: 'a\0a' -> text 'a' — expected 'aa';
 WHATWG in-body NUL is dropped byte-wise, not run-terminating).
+
+## Slice A resume point (2026-09-14): corrected architecture map
+
+NOT phase loops: ONE main loop (3920-~4519+) builds a FLAT chain under
+the root via h_append; h_split_head_body (3718, commit-time) splices
+<head> and hands the rest to the body slot; the 5261 commit fallback
+(`if (!has_body) h_new_child(..., frameset?:body)`) synthesizes the
+slot. The body-context start-tag region (structural drop at 4471,
+frameset branch at 4519) is reached LAST in dispatch order — the
+reach=0 probe proves an EARLIER region inside the same loop consumes
+<frameset> right after explicit <html>. NEXT: instrument the loop
+HEAD (print name for every start-tag iteration when the input has
+frameset) — the consumer is in 3927-4470 (comment/PI/raw-text/
+foreign/special regions) or the name-scan produces something else
+entirely. Then re-apply the banked frameset_ok pieces + the two text
+fixes (non-ws flush clears frameset_ok; h_decode_ww drops NUL bytes
+instead of truncating runs). Corpus floors at this point: 1206/345,
+parity 784/771. v1.9.162 shipped the #1039 descriptor ABI.
