@@ -437,3 +437,45 @@ close+reprocess (102), sibling placement of non-table tokens over
 tr/tbody in template content (45/91), foster-before-table target in
 template content (108). H5DUMP=1 in the corpus runner now dumps
 expected-vs-ours trees per failed case under /tmp/h5dump/.
+
+## Update 2026-09-14 (n): "fully complete HTML" campaign — fresh
+## investigation + slice plan (html5lib floor 1206/~1551, parity 784/1555)
+
+Fresh H5DUMP-based triage of all 345 html5lib + 771 nokogiri-parity
+reds. Failure shapes: child-count 241 / other 107 / text 29 (html5lib);
+kind-mismatch + child-count dominant (parity). Root-cause families
+(evidence in /tmp/h5dump regenerated with H5DUMP=1 + mkdir /tmp/h5dump
+— the runner does not mkdir):
+
+A. FRAMSET-OK + after-body frameset conversion. plain-text-unsafe
+   2/3/5/6: `<html>[NUL] <frameset>` must yield head+frameset (NUL
+   ignored in-body does NOT flip frameset-ok); ours keeps body.
+   Also the frameset-conversion path after `</body>`.
+B. U+FFFD-at-EOF in raw text/RCDATA/comment/DOCTYPE tails
+   (domjs-unsafe 4-8/15-17: script EOF appends U+FFFD; ledger item
+   (m) noted the h_bogus_comment EF BD BF byte-swap — U+FFFD is
+   EF BF BD). ~40 cases.
+C. Second `<html>` rules: MERGE attrs into the open html in before-
+   html/initial (domjs-unsafe 28-34 expect ONE html); but tests19:102
+   expects TWO htmls (mode-dependent) — implement per 13.2.4.1 both
+   branches. ~12 cases.
+D. Select close/re-entry (tests1:100: `</select><option>` — option
+   lands as select SIBLING; ours re-enters a dead select) + template
+   22/102. ~10 cases.
+E. Ruby family closes (tests19:18: rtc/rt/rb/rtc interplay — ours
+   drops trailing rb). ~10 cases.
+F. after-head whitespace insertion at html level (tests6:1: expected
+   text ' ' between head and body under html; ours drops). ~8 cases.
+G. tests1.dat remaining 46: mixed in-body/adoption shapes — triage
+   after A-F land (many may cascade).
+NOKO-parity 771 likely mirrors the same families (kind mismatches at
+body child 0 = the html/frameset/select shapes). CHECK: plain-text-
+unsafe.dat vs pending-spec-changes-plain-text-unsafe.dat share inputs
+with INVERTED expectations in places — before chasing those to zero,
+verify which variant the corpus gate should score (upstream runs one
+OR the other; possibly unsatisfiable as a pair — a runner flag may be
+needed; investigate before burning slices on B-tail conflicts).
+
+Method per slice: H5DUMP the family, WHATWG section cite, RED spec,
+fix, corpus floor + parity floor + 17 legs. html_parse.c is the only
+file family.
