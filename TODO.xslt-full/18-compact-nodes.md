@@ -217,6 +217,30 @@ LESSON: a hotfix that adds per-free fixed cost shows up in the RATIO
 guard, not the twins — re-check guard margin after any fixed-cost
 addition.
 
+
+## S8 plan (post-v1.9.159): mutation row profile — create 25 / append 20 of 135 samples
+
+xctrace on the create+append loop (dylib build, v1.9.159): create=20
+top/25 incl, append_internal=18/20, node_parent=9 (out-of-line
+dispatch: tail-cache validation + the always-NULL old_parent check on
+fresh children), get_document=7, strchr=7 (leptris_elem_split_qname
+scans for ':' with a libc call on EVERY create — parser gates it
+behind name_len>=3 and inlines), memmove+strlen=13 (mut_name_carve's
+runtime-length memcpy on 2-byte names). Teardown malloc/free samples
+are outside the twin's timed window.
+
+S8 levers (each ~1-2ns of the 24.8ns/op; summed ~4-6ns -> ~1.6-1.7x;
+PARITY still needs the #1031 design decision — opt-out fast
+builders):
+1. split_qname: gate the colon probe behind name_len>=3, inline the
+   2-4 byte scan (mirror dp_split_hash_name); create already knows
+   name_len.
+2. node_parent: inline the 5-type dispatch via the dp_wire_child
+   offset-table pattern; create_child (fused API) can skip the
+   old_parent check entirely for fresh children.
+3. mut_name_carve: <=8-byte names as two 8-byte stores instead of the
+   runtime-length memmove call.
+
 ## S4 design (text-small 24 -> <14us; after v1.9.158): text-node bump block
 Parse already borrows content (text_create_borrowed, zero-copy). Cost = 56B struct
 pool_alloc per node. Lever: per-doc contiguous text block (mut_elem_carve pattern):
