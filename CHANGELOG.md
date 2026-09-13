@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.158] - 2026-09-13
+
+### Fixed
+
+- the 1.0 scan rejects bare map/array constructors (xpath)
+- set_namespace(NULL) adds the xmlns="" undeclaration only when a default ns is in scope (#1040) (dom)
+
+### Performance
+
+- reapply TLS memo hoist only (bisect of the macos parse-ratio leg) (dom)
+- single TLS read in get_document + fused create name pass — append 247 -> 205us (dom)
+
+
+
 ## [1.9.157] - 2026-09-13
 ### Changed
 
