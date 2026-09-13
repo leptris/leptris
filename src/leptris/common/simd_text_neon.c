@@ -98,8 +98,11 @@ size_t leptris_text_count_char_neon(const char* s, size_t len, char c) {
 }
 
 /* Three counters in one memory pass — the sizing pre-scan shape.
- * Same widen-then-add idiom as count_char above, three vceqq per
- * chunk. One DRAM/L2 traversal instead of three. */
+ * S10: per-char u16 accumulators with a horizontal reduce only every
+ * 1024 chunks (lane ceiling 2048, far under u16). The old form paid
+ * vaddvq horizontal reductions per vector per char — counting, not
+ * the copy, capped the kernel at ~16 GB/s while memcpy runs 5x+ that.
+ * Counts saturate no lane; flush cadence keeps every u16 lane < 2048. */
 void leptris_text_count3_neon(const char* s, size_t len,
                              char c0, char c1, char c2,
                              size_t* n0, size_t* n1, size_t* n2) {
@@ -109,14 +112,26 @@ void leptris_text_count3_neon(const char* s, size_t len,
     const uint8x16_t k1 = vdupq_n_u8((uint8_t)c1);
     const uint8x16_t k2 = vdupq_n_u8((uint8_t)c2);
     size_t a = 0, b = 0, c = 0;
+    uint16x8_t a0 = vdupq_n_u16(0), a1 = vdupq_n_u16(0), a2 = vdupq_n_u16(0);
+    size_t since_flush = 0;
 
     while (end - p >= 16) {
         uint8x16_t v = vld1q_u8((const uint8_t*)p);
-        a += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v, k0))) / 255);
-        b += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v, k1))) / 255);
-        c += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v, k2))) / 255);
+        a0 = vpadalq_u8(a0, vshrq_n_u8(vceqq_u8(v, k0), 7));
+        a1 = vpadalq_u8(a1, vshrq_n_u8(vceqq_u8(v, k1), 7));
+        a2 = vpadalq_u8(a2, vshrq_n_u8(vceqq_u8(v, k2), 7));
         p += 16;
+        if (++since_flush == 1024) {
+            a += (size_t)vaddvq_u16(a0);
+            b += (size_t)vaddvq_u16(a1);
+            c += (size_t)vaddvq_u16(a2);
+            a0 = a1 = a2 = vdupq_n_u16(0);
+            since_flush = 0;
+        }
     }
+    a += (size_t)vaddvq_u16(a0);
+    b += (size_t)vaddvq_u16(a1);
+    c += (size_t)vaddvq_u16(a2);
     while (p < end) {
         unsigned char ch = (unsigned char)*p;
         if (ch == (unsigned char)c0) a++;
@@ -134,8 +149,8 @@ void leptris_text_count3_neon(const char* s, size_t len,
  * count3 pre-scan for arena sizing, then the memcpy into the
  * buffer copy. This kernel loads each chunk once, stores it to
  * dst, and counts all three chars from the same registers.
- * Measured on M1: 17-33% faster than memcpy + count3_neon across
- * 40-884 KB inputs (26 -> 16 GB/s single-pass effective). */
+ * S10: same accumulator/flush form as count3_neon — the copy is
+ * cheap; the reductions were the cost. */
 void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
                              char c0, char c1, char c2,
                              size_t* n0, size_t* n1, size_t* n2) {
@@ -146,21 +161,33 @@ void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
     const uint8x16_t k1 = vdupq_n_u8((uint8_t)c1);
     const uint8x16_t k2 = vdupq_n_u8((uint8_t)c2);
     size_t a = 0, b = 0, c = 0;
+    uint16x8_t a0 = vdupq_n_u16(0), a1 = vdupq_n_u16(0), a2 = vdupq_n_u16(0);
+    size_t since_flush = 0;
 
     while (end - p >= 32) {
         uint8x16_t v0 = vld1q_u8((const uint8_t*)p);
         uint8x16_t v1 = vld1q_u8((const uint8_t*)p + 16);
         vst1q_u8((uint8_t*)q, v0);
         vst1q_u8((uint8_t*)q + 16, v1);
-        a += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v0, k0))) / 255);
-        a += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v1, k0))) / 255);
-        b += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v0, k1))) / 255);
-        b += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v1, k1))) / 255);
-        c += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v0, k2))) / 255);
-        c += (size_t)(vaddvq_u16(vpaddlq_u8(vceqq_u8(v1, k2))) / 255);
+        a0 = vpadalq_u8(a0, vpaddq_u8(vshrq_n_u8(vceqq_u8(v0, k0), 7),
+                                       vshrq_n_u8(vceqq_u8(v1, k0), 7)));
+        a1 = vpadalq_u8(a1, vpaddq_u8(vshrq_n_u8(vceqq_u8(v0, k1), 7),
+                                       vshrq_n_u8(vceqq_u8(v1, k1), 7)));
+        a2 = vpadalq_u8(a2, vpaddq_u8(vshrq_n_u8(vceqq_u8(v0, k2), 7),
+                                       vshrq_n_u8(vceqq_u8(v1, k2), 7)));
         p += 32;
         q += 32;
+        if (++since_flush == 1024) {
+            a += (size_t)vaddvq_u16(a0);
+            b += (size_t)vaddvq_u16(a1);
+            c += (size_t)vaddvq_u16(a2);
+            a0 = a1 = a2 = vdupq_n_u16(0);
+            since_flush = 0;
+        }
     }
+    a += (size_t)vaddvq_u16(a0);
+    b += (size_t)vaddvq_u16(a1);
+    c += (size_t)vaddvq_u16(a2);
     while (p < end) {
         unsigned char ch = (unsigned char)*p;
         *q = (char)ch;
