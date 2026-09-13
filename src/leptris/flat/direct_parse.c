@@ -186,8 +186,8 @@ static inline void dp_skip_ws(DParser* p) {
  * failed fast path was SWAR (mask setup dominated short names);
  * this one keeps plain byte loads and only amortizes the loop
  * counter and exits via unlikely hints. NUL stops the scan. */
-static LEPTRIS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
-    char* s = p->pos;
+static LEPTRIS_ALWAYS_INLINE void dp_scan_name_p(char** pos) {
+    char* s = *pos;
     for (;;) {
         char c = s[0];
         if (DP_UNLIKELY(!IS_NAME_CHAR(c))) break;
@@ -199,7 +199,11 @@ static LEPTRIS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
         if (DP_UNLIKELY(!IS_NAME_CHAR(c))) { s += 3; break; }
         s += 4;
     }
-    p->pos = s;
+    *pos = s;
+}
+
+static LEPTRIS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
+    dp_scan_name_p(&p->pos);
 }
 
 /* Compile-time offset tables for next_sibling and parent_off
@@ -243,7 +247,7 @@ static inline int32_t dp_edge(void* base, void* target,
     return (int32_t)d;
 }
 
-static inline void dp_wire_child(DParser* p, LeptrisElement parent,
+static LEPTRIS_ALWAYS_INLINE void dp_wire_child(DParser* p, LeptrisElement parent,
                                   LeptrisNode* child) {
     unsigned t = (unsigned)child->type;
     if (t < 5) {
@@ -277,7 +281,7 @@ static inline void dp_wire_child(DParser* p, LeptrisElement parent,
 /* Append a node to the document-child chain (issue #580). The first
  * epilog capture moves the root element into the chain between the
  * prolog nodes and everything that follows. */
-static inline void dp_doc_child(DParser* p, LeptrisNode* n) {
+static LEPTRIS_ALWAYS_INLINE void dp_doc_child(DParser* p, LeptrisNode* n) {
     /* #612: document linkage — the #526 setters resolve the owning
      * document through owner_doc; parse-created doc-level nodes
      * must carry it exactly like leptris_pi_node_create ones. */
@@ -430,51 +434,63 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
  * Returns:
  *   0  — handled, caller should `continue` the parse loop.
  *  -1  — parse error, caller should fail. */
-static LEPTRIS_NOINLINE int dp_parse_doctype(DParser* p) {
-    p->pos += 2; /* skip "<!" */
+/* Takes the parser STATE PIECES, never &p: one &DParser escape
+ * anywhere in direct_parse_internal keeps the whole 4 KB state
+ * struct memory-resident (no SROA/register promotion) for the entire
+ * loop — every p.pos/p.depth/p.end access reloaded from the stack
+ * each iteration. pos_io/dtd_io point at the CALLER's local scalars,
+ * which sync into p around the call. */
+static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
+                                             LeptrisMemoryPool* pool,
+                                             struct leptris_document* doc,
+                                             LeptrisDTD** dtd_io) {
+    char* pos = *pos_io;
+    LeptrisDTD* dtd = *dtd_io;
+    pos += 2; /* skip "<!" */
     /* Match "DOCTYPE" keyword (case-sensitive per XML spec). */
-    if (p->end - p->pos < 7 ||
-        memcmp(p->pos, "DOCTYPE", 7) != 0) {
-        while (p->pos < p->end && *p->pos != '>') p->pos++;
-        if (p->pos < p->end) p->pos++;
+    if (end - pos < 7 ||
+        memcmp(pos, "DOCTYPE", 7) != 0) {
+        while (pos < end && *pos != '>') pos++;
+        if (pos < end) pos++;
+        *pos_io = pos;
         return 0;
     }
-    p->pos += 7;
-    while (p->pos < p->end && IS_WS(*p->pos)) p->pos++;
+    pos += 7;
+    while (pos < end && IS_WS(*pos)) pos++;
     /* Scan DOCTYPE name. */
-    char* dt_name_start = p->pos;
-    dp_scan_name(p);
-    size_t dt_name_len = p->pos - dt_name_start;
+    char* dt_name_start = pos;
+    dp_scan_name_p(&pos);
+    size_t dt_name_len = pos - dt_name_start;
 
     /* Skip to '[' (internal subset) or '>' (no subset). */
     char* subset_start = NULL;
     char* subset_end = NULL;
-    while (p->pos < p->end && *p->pos != '>' && *p->pos != '[') {
-        p->pos++;
+    while (pos < end && *pos != '>' && *pos != '[') {
+        pos++;
     }
-    if (p->pos < p->end && *p->pos == '[') {
-        subset_start = ++p->pos;
+    if (pos < end && *pos == '[') {
+        subset_start = ++pos;
         /* Find matching ']'. Nested brackets aren't legal
          * in DTD internal subsets, so no depth tracking. */
-        while (p->pos < p->end && *p->pos != ']') p->pos++;
-        subset_end = p->pos;
-        if (p->pos < p->end) p->pos++; /* skip ']' */
+        while (pos < end && *pos != ']') pos++;
+        subset_end = pos;
+        if (pos < end) pos++; /* skip ']' */
         /* Skip to '>'. */
-        while (p->pos < p->end && *p->pos != '>') p->pos++;
-        if (p->pos < p->end) p->pos++; /* skip '>' */
+        while (pos < end && *pos != '>') pos++;
+        if (pos < end) pos++; /* skip '>' */
     } else {
         /* No internal subset, skip to '>'. */
-        while (p->pos < p->end && *p->pos != '>') p->pos++;
-        if (p->pos < p->end) p->pos++; /* skip '>' */
+        while (pos < end && *pos != '>') pos++;
+        if (pos < end) pos++; /* skip '>' */
     }
 
     /* Create DOCTYPE node with the extracted name. */
     LeptrisDoctypeNode* dt = NULL;
     if (dt_name_len > 0) {
         dt = leptris_doctype_create(
-            dt_name_start, dt_name_len, p->pool);
+            dt_name_start, dt_name_len, pool);
         if (dt) {
-            p->doc->doctype = dt;
+            doc->doctype = dt;
         }
     }
 
@@ -488,40 +504,40 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(DParser* p) {
     /* Re-scan from after the name to find PUBLIC/SYSTEM. */
     char* scan = dt_name_start + dt_name_len;
     /* Skip whitespace after name. */
-    while (scan < p->end && IS_WS(*scan)) scan++;
+    while (scan < end && IS_WS(*scan)) scan++;
     char* public_id = NULL;
     size_t public_id_len = 0;
     char* system_id = NULL;
     size_t system_id_len = 0;
-    if (scan + 6 <= p->end && memcmp(scan, "SYSTEM", 6) == 0) {
+    if (scan + 6 <= end && memcmp(scan, "SYSTEM", 6) == 0) {
         scan += 6;
-        while (scan < p->end && IS_WS(*scan)) scan++;
-        if (scan < p->end && (*scan == '"' || *scan == '\'')) {
+        while (scan < end && IS_WS(*scan)) scan++;
+        if (scan < end && (*scan == '"' || *scan == '\'')) {
             char q = *scan++;
             system_id = scan;
-            while (scan < p->end && *scan != q) scan++;
+            while (scan < end && *scan != q) scan++;
             system_id_len = scan - system_id;
-            if (scan < p->end) scan++; /* skip closing quote */
+            if (scan < end) scan++; /* skip closing quote */
         }
-    } else if (scan + 6 <= p->end && memcmp(scan, "PUBLIC", 6) == 0) {
+    } else if (scan + 6 <= end && memcmp(scan, "PUBLIC", 6) == 0) {
         scan += 6;
-        while (scan < p->end && IS_WS(*scan)) scan++;
+        while (scan < end && IS_WS(*scan)) scan++;
         /* Public ID (quoted) */
-        if (scan < p->end && (*scan == '"' || *scan == '\'')) {
+        if (scan < end && (*scan == '"' || *scan == '\'')) {
             char q = *scan++;
             public_id = scan;
-            while (scan < p->end && *scan != q) scan++;
+            while (scan < end && *scan != q) scan++;
             public_id_len = scan - public_id;
-            if (scan < p->end) scan++; /* skip closing quote */
+            if (scan < end) scan++; /* skip closing quote */
         }
         /* System ID (quoted, after whitespace) */
-        while (scan < p->end && IS_WS(*scan)) scan++;
-        if (scan < p->end && (*scan == '"' || *scan == '\'')) {
+        while (scan < end && IS_WS(*scan)) scan++;
+        if (scan < end && (*scan == '"' || *scan == '\'')) {
             char q = *scan++;
             system_id = scan;
-            while (scan < p->end && *scan != q) scan++;
+            while (scan < end && *scan != q) scan++;
             system_id_len = scan - system_id;
-            if (scan < p->end) scan++; /* skip closing quote */
+            if (scan < end) scan++; /* skip closing quote */
         }
     }
     /* NUL-terminate and set on the DOCTYPE node. The
@@ -529,11 +545,11 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(DParser* p) {
     if (dt) {
         if (public_id && public_id_len > 0) {
             public_id[public_id_len] = '\0';
-            leptris_doctype_set_public_id(dt, public_id, p->pool);
+            leptris_doctype_set_public_id(dt, public_id, pool);
         }
         if (system_id && system_id_len > 0) {
             system_id[system_id_len] = '\0';
-            leptris_doctype_set_system_id(dt, system_id, p->pool);
+            leptris_doctype_set_system_id(dt, system_id, pool);
         }
     }
 
@@ -547,15 +563,18 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(DParser* p) {
         *subset_end = '\0';
         if (dt) {
             leptris_doctype_set_internal_subset(
-                dt, subset_start, p->pool);
+                dt, subset_start, pool);
         }
-        LeptrisDTD* dtd = leptris_dtd_parse_internal_subset(
+        LeptrisDTD* parsed = leptris_dtd_parse_internal_subset(
             subset_start, (size_t)(subset_end - subset_start),
-            p->pool);
-        if (dtd) {
-            p->dtd = dtd;
+            pool);
+        if (parsed) {
+            dtd = parsed;
         }
     }
+    
+    *pos_io = pos;
+    *dtd_io = dtd;
     return 0;
 }
 
@@ -1458,7 +1477,18 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             } else {
                 /* DOCTYPE: extract name + internal subset. Cold path
                  * extracted to dp_parse_doctype (TODO 166 Phase A). */
-                if (dp_parse_doctype(&p) != 0) goto fail;
+                {
+                /* Cold path: pass state pieces through locals, sync
+                 * back — &p must never escape direct_parse_internal
+                 * (keeps the hot fields register-promoted). */
+                char* dpos = p.pos;
+                LeptrisDTD* ddtd = p.dtd;
+                if (dp_parse_doctype(&dpos, p.end, p.pool, p.doc,
+                                     &ddtd) != 0)
+                    goto fail;
+                p.pos = dpos;
+                p.dtd = ddtd;
+            }
                 continue;
             }
         }
