@@ -98,14 +98,14 @@ typedef struct {
                                * the CHILD row's wire_name — this field
                                * documents/validates the same name */
     uint8_t ns_form;          /* LeptrisPlanNsForm */
-    uint8_t _reserved;
+    uint8_t pad0;
     const char* ns_uri;       /* LEPTRIS_PLAN_NS_EXACT only */
     uint32_t attribute_count;
     uint32_t child_count;
     const leptris_attr_plan* attribute_plans;
     const leptris_child_plan* child_plans;
     uint16_t flags; /* LEPTRIS_PLAN_FLAG_* */
-    uint16_t __reserved;
+    uint16_t pad1;
 } leptris_element_plan;
 
 typedef struct {
