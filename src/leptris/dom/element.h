@@ -249,6 +249,28 @@ static inline uint16_t attr_name_hash(struct leptris_attribute* a) {
     return (uint16_t)(a->name_hash & 0x7FFFu);
 }
 
+/* S9 short-string helpers (the TODO 174 law, applied to the
+ * attribute hot paths): a libc strlen/memcmp call costs more than
+ * the scan for the 1-16 byte names and values that dominate
+ * attribute traffic. The length scan reads at most up to the NUL it
+ * returns — never past the terminator. */
+static inline size_t leptris_cstr_len16(const char* s) {
+    for (size_t i = 0; i < 16; i++) if (!s[i]) return i;
+    return strlen(s);
+}
+
+static inline int leptris_memeq_short(const char* a, const char* b,
+                                      size_t n) {
+    for (size_t i = 0; i < n; i++) if (a[i] != b[i]) return 0;
+    return 1;
+}
+
+/* Internal: hash-prefiltered attribute find with the caller's
+ * already-computed name length (element.c). */
+struct leptris_attribute* leptris_dom_attr_find(LeptrisElement elem,
+                                                const char* name,
+                                                size_t name_len);
+
 /* Attribute namespace-cache accessors (TODO 173). The prefix and
  * namespace_uri (both view and cstr form) live in a side cache struct
  * that's only allocated when one of them is set. The common case (attr
@@ -418,8 +440,7 @@ static inline struct leptris_document* leptris_elem_namebp_doc(
 
 /* Compute 16-bit FNV-1a hash of an element name string. Used
  * together with elem->name_hash for fast pre-filtering in child-
- * axis lookups. TODO 159: fast child-name matching. */
-static inline uint16_t leptris_name_hash_compute(const char* name) {
+ * axis lookups. TODO 159: fast child-name matching. */static inline uint16_t leptris_name_hash_compute(const char* name) {
     uint16_t h = 0x811C;
     for (const char* c = name; *c; c++) {
         h ^= (unsigned char)*c;

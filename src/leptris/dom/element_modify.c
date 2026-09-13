@@ -849,7 +849,7 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
     /* Check if attribute already exists — O(1) via the doc-level
      * attr-name index (lazy registration covers parse-created attrs);
      * NULL index (alloc failure) falls back to the list walk. */
-    size_t set_name_len = strlen(name);
+    size_t set_name_len = leptris_cstr_len16(name);
     uint32_t set_name_hash = 0;
     struct leptris_document* set_doc = leptris_element_get_document(elem);
     struct leptris_attr_index* set_ix = NULL;
@@ -867,7 +867,7 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
     } else {
         /* Walk-first (small elements): set_ix stays NULL so the
          * insert below skips the index put too. */
-        existing = leptris_element_get_attribute_by_name(elem, name);
+        existing = leptris_dom_attr_find(elem, name, set_name_len);
     }
     if (existing) {
         /* Update existing attribute's value. One resolution (the
@@ -876,7 +876,7 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
         LeptrisMemoryPool* pool = set_doc ? set_doc->pool : NULL;
 
         if (value) {
-            size_t vlen = strlen(value);
+            size_t vlen = leptris_cstr_len16(value);
             if (vlen <= LEPTRIS_ATTR_VALUE_MAX_INLINE) {
                 /* lane18 S1: small values store INLINE in the slot —
                  * zero allocation per overwrite. */
@@ -890,7 +890,7 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
              * interning — see header comment).  Old value is pool-
              * allocated and reclaims when the pool frees. */
             if (value) {
-                size_t vlen = strlen(value);
+                size_t vlen = leptris_cstr_len16(value);
                 char* storage = (char*)leptris_pool_alloc(pool, vlen + 1);
                 if (!storage) return LEPTRIS_ERROR_MEMORY;
                 memcpy(storage, value, vlen);
@@ -942,7 +942,7 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
         attr->name_hash = attr_hash15(name_storage, nlen);
 
         if (value) {
-            size_t vlen = strlen(value);
+            size_t vlen = leptris_cstr_len16(value);
             if (vlen <= LEPTRIS_ATTR_VALUE_MAX_INLINE) {
                 /* lane18 S1: small new values inline in the slot —
                  * no carve, no pool round-trip. */
