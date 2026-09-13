@@ -2,23 +2,21 @@
 
 ## [1.9.159] - 2026-09-13
 
-### Added
+### Performance
 
-- leptris_document_add_comment — document-level comment writer (#1032) (dom)
+- **Parse loop: inline tree-edge encoding** — wiring a child called the out-of-line compact encoder for every parent and sibling edge (two cross-TU calls per node). All parse-created nodes sit in one arena-backed pool, so the encode is now plain pointer subtraction inlined at the wire sites (PR #1051).
+- **Parse loop: parser state register promotion** — the 4 KB parser state struct was memory-resident for the whole loop because one cold DOCTYPE helper took its address; it now receives state pieces instead, and the per-node wiring helpers are force-inlined.
+- **DOM headers: inline int32 edge codecs** — every tree-edge store and sibling/parent/attribute read in the node headers paid an out-of-line call; `compact.h` now carries inline fast paths with identical overflow-table fallback semantics.
+- **Document free: O(this document) map sweep** — the v1.9.156 corruption hotfix walked all 256 thread-local map buckets on every `leptris_document_free`, measured at ~42% of total parse+free cost for small documents (it had also pushed the CI small-doc parse-ratio guard onto its margin, 1010-1014 against the 1000 line). Map entries now chain off their document; free walks exactly its own entries, unlinking each from its bucket by entry identity — element storage is never dereferenced, preserving the #1038 adopted-pool safety rule.
+- Measured (interleaved twins, same machine): text-heavy parse 25 -> 21 us (-14%), attr-heavy parse 59 -> 54 us (-8%); small-document parse+free guard ratio ~1100 -> ~650.
 
 ### Fixed
 
-- portable getpid for the per-process fixture paths (MSVC) (test)
-- per-process /tmp fixture paths in XpointerForms (#1018) (test)
+- Corrected stale architecture comments: the element struct is 64 bytes / one cache line (docs claimed ~96).
 
-### Performance
+### Testing
 
-- doc-entry chain replaces the 256-bucket sweep at free (map)
-- inline int32 edge codecs across node headers (dom)
-- keep parser state register-promoted; no &p escapes (parse)
-- inline tree-edge encoding in the parse loop (parse)
-
-
+- Two new root-doc-map lifecycle specs falsify the chain-aliasing hazards of the new doc-entry chain (cross-document free, re-register under a new document). 1470 tests green, leak-clean.
 
 ## [1.9.158] - 2026-09-13
 ### Changed
