@@ -167,6 +167,23 @@ Remaining text-row gap (21 vs ~14) = the 96 B element footprint — P2
 slimming is the next (design-level) slice; it moves every row
 (append 2.1x, set-attr 2.0x, attr-heavy 1.6x, text 1.5x).
 
+
+## S5 (PR #1051 commit 2): no-&p escapes — attr-heavy 59-60 -> 53-55us
+
+DParser is 4KB (two 256-entry stacks): ANY &p escape (even one cold
+NOINLINE call, dp_parse_doctype) kept ALL hot fields stack-resident
+every iteration (assembly: loop head `ldr w8,[sp,#4408]` before the
+depth compare). dp_wire_child also compiled to a real bl (3 sites).
+Fixed: doctype takes state pieces via caller-local sync; wire/doc_child
+ALWAYS_INLINE; dp_scan_name delegates to dp_scan_name_p(char**).
+FIRST DRAFT inverted the parsed-DTD guard (if(dtd) not if(parsed)) —
+10 DTD failures in one ctest run; fixed before commit. Also verified:
+element struct is 64B/one cache line (the ~96B docs are stale); the
+unattributed per-element floor (~14ns) after S4/S5 is dispatch/carve/
+scan — next candidates: fused simple-open-tag fast path, attr raw-view
+per-attr cost (S3). Board: text 21-22 vs ~14, attr 53-55 vs 33,
+append 239 vs 113, set-attr 294 vs 144, create AHEAD.
+
 ## S4 design (text-small 24 -> <14us; after v1.9.158): text-node bump block
 Parse already borrows content (text_create_borrowed, zero-copy). Cost = 56B struct
 pool_alloc per node. Lever: per-doc contiguous text block (mut_elem_carve pattern):
