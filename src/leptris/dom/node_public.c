@@ -15,6 +15,7 @@
 #include "pi.h"
 #include "document_node.h"
 #include "root_doc_map.h"
+#include "edges.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -419,24 +420,10 @@ LEPTRIS_API LeptrisStatus leptris_pi_node_set_data(LeptrisNodeRef node,
  * ============================================================================ */
 
 LEPTRIS_API LeptrisElement leptris_node_parent(LeptrisNodeRef node) {
-    if (!node) return NULL;
-    if (node->type == LEPTRIS_NODE_TYPE_ELEMENT) {
-        return leptris_element_get_parent((LeptrisElement)node);
-    }
-    /* Non-element nodes carry parent_off (issue #168). The parser
-     * and append_child_internal both populate it when attaching. */
-    switch (node->type) {
-        case LEPTRIS_NODE_TYPE_TEXT:
-            return leptris_textnode_parent((LeptrisTextNode*)node);
-        case LEPTRIS_NODE_TYPE_COMMENT:
-            return leptris_comment_parent((LeptrisCommentNode*)node);
-        case LEPTRIS_NODE_TYPE_CDATA:
-            return leptris_cdata_parent((LeptrisCDATANode*)node);
-        case LEPTRIS_NODE_TYPE_PI:
-            return leptris_pi_parent((LeptrisPINode*)node);
-        default:
-            return NULL;
-    }
+    /* S8: the branchless table + inline decode (dom/edges.h) — the
+     * old type switch lived out-of-line and ran twice per append
+     * (fresh-child check + tail-cache validation). */
+    return leptris_node_parent_inline(node);
 }
 
 LEPTRIS_API LeptrisStatus leptris_node_unlink(LeptrisNodeRef node) {

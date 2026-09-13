@@ -15,6 +15,7 @@
 #include "element.h"
 #include "compact.h"
 #include "root_doc_map.h"
+#include "edges.h"
 #include "text.h"
 #include "comment.h"
 #include "cdata.h"
@@ -713,7 +714,7 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
      * it first — even if the parent is the SAME element (re-ordering
      * within the same parent). Without this, the child appears twice
      * in the chain and child_count is inflated. */
-    LeptrisElement old_parent = leptris_node_parent(child);
+    LeptrisElement old_parent = leptris_node_parent_inline(child);
     if (old_parent) {
         leptris_node_unlink(child);
     }
@@ -731,7 +732,7 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
         struct leptris_mut_tail* s =
             &mut_doc->mut_tail[(((uintptr_t)elem) >> 4) & 63];
         if (s->parent == elem && s->child &&
-            leptris_node_parent(s->child) == elem)
+            leptris_node_parent_inline(s->child) == elem)
             mut_tail = s->child;
     }
 
@@ -831,7 +832,7 @@ void leptris_element_prepend_child_internal(LeptrisElement elem, LeptrisNode* ch
      * it first — even if the parent is the SAME element (re-ordering
      * within the same parent). Without this, the child appears twice
      * in the chain and child_count is inflated. */
-    LeptrisElement old_parent = leptris_node_parent(child);
+    LeptrisElement old_parent = leptris_node_parent_inline(child);
     if (old_parent) {
         leptris_node_unlink(child);
     }
