@@ -1,13 +1,14 @@
 ## [Unreleased]
 
-## [1.9.161] - 2026-09-13
+## [1.9.161] - 2026-09-14
 
 ### Performance
 
-- S10 count3 kernels — deferred horizontal reduction (simd)
+- **NEON count3 kernels: deferred horizontal reduction** — the fused copy+count pre-scan that sizes the parse arena ran at ~16 GB/s, capped not by the copy but by one horizontal vaddvq reduction per character class per vector. Both kernels now accumulate per-class 0/1 masks into u16 lanes and reduce horizontally once every 1024 chunks (lane ceiling 4096). A 48 KB copy+count drops from 3000 to 2000 ns (-33%); the attr-heavy and text-heavy parse rows each improve ~1 us (PR #1056).
 
+### Testing
 
-
+- New test_simd_count specs pin exact counts through every SIMD/scalar-tail boundary, all-match saturation densities, and a 70k mixed input — they caught a vpadalq source-type mixup in the first draft of the kernel change. 1475 tests green.
 ## [1.9.160] - 2026-09-14
 
 ### Performance
