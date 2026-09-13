@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.159] - 2026-09-13
+
+### Added
+
+- leptris_document_add_comment — document-level comment writer (#1032) (dom)
+
+### Fixed
+
+- portable getpid for the per-process fixture paths (MSVC) (test)
+- per-process /tmp fixture paths in XpointerForms (#1018) (test)
+
+### Performance
+
+- doc-entry chain replaces the 256-bucket sweep at free (map)
+- inline int32 edge codecs across node headers (dom)
+- keep parser state register-promoted; no &p escapes (parse)
+- inline tree-edge encoding in the parse loop (parse)
+
+
+
 ## [1.9.158] - 2026-09-13
 ### Changed
 
