@@ -437,7 +437,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             }
         }
     }
-    return out;
+    return 1;
 }
 
 LEPTRIS_DESCRIPTOR_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc, LeptrisElement ctx,
