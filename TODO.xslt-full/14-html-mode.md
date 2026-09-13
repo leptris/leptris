@@ -479,3 +479,30 @@ needed; investigate before burning slices on B-tail conflicts).
 Method per slice: H5DUMP the family, WHATWG section cite, RED spec,
 fix, corpus floor + parity floor + 17 legs. html_parse.c is the only
 file family.
+
+## Slice A findings (2026-09-14, WIP — html_parse.c reverted, nothing
+## half-committed): frameset dispatch lives in the HEAD-PHASE loop
+
+Probe evidence (extern-globals in the frameset branch at ~4519):
+reach=0 for ALL plain-text-unsafe shapes — the <frameset> token NEVER
+reaches the body-context start-tag branch. Architecture: the builder
+runs PHASE LOOPS (a head-phase loop then a body/top-level loop at
+~3900-4519+); <frameset> immediately after explicit <html> is
+dispatched by the HEAD-phase handler (a separate region), which opens
+it as a plain element (case 3 converts by luck of the commit-side
+body-slot synthesis at ~5261: `if (!has_body) h_new_child(...,
+b.frameset ? "frameset" : "body")`).
+
+Done in the working tree then reverted (correct pieces for the next
+attempt, re-apply):
+- HBuilder.frameset_ok flag + init(1) + h_clears_frameset_ok()
+  enumerated list (13.2.5.4.4: pre/listing/li/dd/dt/plaintext/button/
+  applet/marquee/object/table/area/br/embed/img/keygen/wbr/input/hr/
+  textarea/xmp/iframe/noembed/noframes/select) + the gate change
+  (`!b.frameset && b.depth <= 1 && b.frameset_ok` replacing
+  depth==0+h_body_still_empty).
+STILL MISSING: (1) find the HEAD-PHASE loop's start-tag dispatch and
+route <frameset> through the frameset_ok gate there; (2) non-ws TEXT
+flush must clear frameset_ok; (3) NUL-in-text truncation: h_decode_ww
+truncates runs at NUL (probe: 'a\0a' -> text 'a' — expected 'aa';
+WHATWG in-body NUL is dropped byte-wise, not run-terminating).
