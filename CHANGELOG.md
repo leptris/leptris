@@ -1,18 +1,12 @@
 ## [Unreleased]
 
-## [1.9.162] - 2026-09-13
+## [1.9.162] - 2026-09-14
 
 ### Added
 
-- tree-shaped schema-descriptor materialization (#1039) (descriptor)
-
-### Fixed
-
-- declare exports with the house LEPTRIS_API macro (descriptor)
-- MSVC SAL name collision + walk tail return type (descriptor)
-
-
-
+- **Tree-shaped schema-descriptor materialization (#1039)** — the C ABI hosts (lutaml-model via the bindings) compile against. `leptris_plan_build` deep-copies a POD `leptris_plan_spec` (element plans, attribute rows, child rows, namespace forms, flags) into an engine-owned pool; `leptris_plan_walk` materializes a whole subtree against the plan tree in one native pass and returns a standalone value tree that outlives the document. Row kinds `SCALAR | COLLECTION | NESTED | RAW | CONTENT | CALLBACK` — the CALLBACK escape hatch carries raw value + document byte position + the host's type_tag echo so bindings finish custom procs/polymorphism. Namespace forms NONE/EXACT/ANY with an `NS_LENIENT` flag for the #754 out-of-namespace adoption semantics; `MIXED_CONTENT`/`CDATA` gate text runs. `leptris_plan_abi_version()` (v1) lets bindings refuse mismatched descriptors at load; the ABI is frozen at v1.
+- New public `leptris_node_byte_offset` surfaces the issue-#223 lazy byte positions CALLBACK rows promise.
+- 6 conformance specs in `test/abi/test_descriptor.cpp` (nested/collections/attrs, raw+callback+mixed content, ns forms + leniency, spec-string copies, result-outlives-document, NULL-tolerant accessors). Suite 1481/1481.
 ## [1.9.161] - 2026-09-14
 
 ### Performance
