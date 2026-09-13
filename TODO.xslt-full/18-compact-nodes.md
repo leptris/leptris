@@ -184,6 +184,19 @@ scan — next candidates: fused simple-open-tag fast path, attr raw-view
 per-attr cost (S3). Board: text 21-22 vs ~14, attr 53-55 vs 33,
 append 239 vs 113, set-attr 294 vs 144, create AHEAD.
 
+
+## S6 (PR #1051 commit 3): inline int32 codecs everywhere — attr 57-59 -> 54us
+
+compact.h gained encode_inline/decode_inline (NULL/sentinel/out-of-range
+fall back to compact.c — overflow-table semantics identical); all five
+node headers use them; dp_edge deduped into the shared inline. Inter-
+leaved: attr-heavy -7%; MUTATION ROWS NEUTRAL — the append/set-attr
+bottleneck is NOT the codec calls (each ~1ns). Board after S4a+S5+S6:
+create AHEAD; text 21-22 vs ~14; attr 54 vs 33; append ~250 vs 113;
+set-attr ~308 vs 144. Mutation remains redesign-class per the #1031
+verdict (safety ladder + doc resolution + name carves) — next lever
+there needs profiling of element_modify/element.c first, not guessing.
+
 ## S4 design (text-small 24 -> <14us; after v1.9.158): text-node bump block
 Parse already borrows content (text_create_borrowed, zero-copy). Cost = 56B struct
 pool_alloc per node. Lever: per-doc contiguous text block (mut_elem_carve pattern):
