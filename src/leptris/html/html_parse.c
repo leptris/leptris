@@ -2691,6 +2691,17 @@ typedef struct {
      * tag (NULL = nothing, or an explicit <html> owns the run). */
     int head_tag_seen;
     LeptrisNodeRef head_tag_tail;
+    /* #659 "after head" (tests19:3): </head> ends the head phase —
+     * later comments are html children BETWEEN head and body.
+     * #659 "after body" (tests19:21): </body> records the last
+     * top-chain node — nodes appended later stay html children
+     * AFTER the body. */
+    int head_end_seen;
+    LeptrisNodeRef head_end_tail;
+    /* #659 "after body" (tests19:21): </body> was seen — later
+     * comments/PIs divert to the html level (children after the
+     * body); text and elements keep flowing into the body. */
+    int after_body;
     /* #659 two-mode split: leptris_parse_html_string is the WHATWG
      * engine (full "in head" set: script/style/noscript/template
      * ... lift into the implied head); the new
@@ -3985,6 +3996,8 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
     size_t prefix_count = 0;
     int past_head_tag =
         (b->head_tag_seen && !b->head_tag_tail);
+    int past_head_end =
+        (b->head_end_seen && !b->head_end_tail);
     if (!(b->lift_closed && !b->lift_boundary)) {
         while (head_end) {
             /* WHATWG "in head": comments (and PI-ish bogus
@@ -3995,6 +4008,12 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             if (hty == LEPTRIS_NODE_TYPE_COMMENT ||
                 hty == LEPTRIS_NODE_TYPE_PI) {
                 if (b->whatwg_head_set) {
+                    if (past_head_end) {
+                        /* After </head>: the comment is an html
+                         * child between head and body (the body
+                         * path peels it off the rest). */
+                        break;
+                    }
                     if (!head_start && !past_head_tag) {
                         /* Before head: html prefix (13.2.6.3.2 —
                          * the current node is the html element). */
@@ -4002,11 +4021,15 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                         prefix_count++;
                         if (head_end == b->head_tag_tail)
                             past_head_tag = 1;
+                        if (head_end == b->head_end_tail)
+                            past_head_end = 1;
                         head_end =
                             leptris_node_get_next_sibling(head_end);
                         continue;
                     }
                     if (!head_start) head_start = head_end;
+                    if (head_end == b->head_end_tail)
+                        past_head_end = 1;
                     head_end = leptris_node_get_next_sibling(head_end);
                     continue;
                 }
@@ -4108,6 +4131,79 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
         }
     }
 
+    /* #659 after-head / after-body comments (tests19:3/21): a
+     * comment tokenized after the head element closed stays a
+     * child of the html element BETWEEN head and body; after a
+     * </body>, comments/PIs diverted to the top chain stay html
+     * children AFTER the body (text/elements reprocessed into the
+     * body). Peel them off the rest first. */
+    LeptrisNodeRef suffix_first = NULL, suffix_last = NULL;
+    LeptrisNodeRef after_tail = NULL;
+    if (b->whatwg_head_set && !b->frameset && rest) {
+        if (b->head_end_seen) {
+            /* Front peel: leading comments/PIs of the rest. */
+            LeptrisNodeRef c = rest;
+            while (c &&
+                   (leptris_node_get_type(c) ==
+                        LEPTRIS_NODE_TYPE_COMMENT ||
+                    leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_PI)) {
+                suffix_last = c;
+                c = leptris_node_get_next_sibling(c);
+            }
+            if (suffix_last) {
+                suffix_first = rest;
+                rest = leptris_node_get_next_sibling(suffix_last);
+                for (LeptrisNodeRef s2 = suffix_first; s2 && s2 != rest; ) {
+                    LeptrisNodeRef sn = leptris_node_get_next_sibling(s2);
+                    if (leptris_node_get_type(s2) ==
+                        LEPTRIS_NODE_TYPE_COMMENT)
+                        leptris_comment_set_parent(
+                            (LeptrisCommentNode*)s2, html);
+                    else
+                        leptris_pi_set_parent((LeptrisPINode*)s2, html);
+                    s2 = sn;
+                }
+            }
+            /* The head element closed with a tag pair — commit it
+             * even when its run was empty, AHEAD of the after-head
+             * comments (tests19:3: html > [head, comment, body]). */
+            if (!head_spliced) {
+                LeptrisElement head = h_create_unattached(b, "head");
+                if (head) {
+                    head_spliced = 1;
+                    html_first_new = head;
+                    if (prefix_last)
+                        leptris_node_set_next_sibling(
+                            prefix_last, (LeptrisNodeRef)head);
+                    else
+                        leptris_elem_set_first_child(
+                            html, (LeptrisNodeRef)head);
+                    leptris_element_set_parent(head, html);
+                }
+            }
+        } else if (b->after_body) {
+            /* Tail peel: trailing comments/PIs of the rest (the
+             * diverted after-body ones) stay html children after
+             * the body. */
+            LeptrisNodeRef prev = NULL;
+            LeptrisNodeRef c = rest;
+            while (c) {
+                if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_COMMENT &&
+                    leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_PI)
+                    prev = c;
+                c = leptris_node_get_next_sibling(c);
+            }
+            if (prev) {
+                after_tail = leptris_node_get_next_sibling(prev);
+                if (after_tail)
+                    leptris_node_set_next_sibling(prev, NULL);
+            } else {
+                after_tail = rest;
+                rest = NULL;
+            }
+        }
+    }
+
     /* <body> (or <frameset>, #659) owns the rest, then links in
      * as html's last child. When the rest already IS a parsed
      * frameset (the replace-body path), it stays as its own
@@ -4164,17 +4260,46 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
     leptris_elem_set_first_child(body, rest);
     body->child_count = elems;
     if (last) leptris_node_set_next_sibling(last, NULL);
-    /* html's chain is now exactly [prefix?, head?, body] — the rest
-     * left html when it moved into body. */
-    if (head_spliced)
+    /* html's chain is now exactly [prefix?, head?, suffix?, body]
+     * — the rest left html when it moved into body. */
+    if (suffix_first) {
+        leptris_node_set_next_sibling(suffix_last, (LeptrisNodeRef)body);
+        if (head_spliced)
+            leptris_node_set_next_sibling(
+                (LeptrisNodeRef)html_first_new, suffix_first);
+        else if (prefix_last)
+            leptris_node_set_next_sibling(prefix_last, suffix_first);
+        else
+            leptris_elem_set_first_child(html, suffix_first);
+    } else if (head_spliced) {
         leptris_node_set_next_sibling((LeptrisNodeRef)html_first_new,
                                       (LeptrisNodeRef)body);
-    else if (prefix_last)
+    } else if (prefix_last) {
         leptris_node_set_next_sibling(prefix_last, (LeptrisNodeRef)body);
-    else
+    } else {
         leptris_elem_set_first_child(html, (LeptrisNodeRef)body);
+    }
+    /* After-body tail: html children AFTER the body. */
+    if (after_tail) {
+        leptris_node_set_next_sibling((LeptrisNodeRef)body, after_tail);
+        for (LeptrisNodeRef t2 = after_tail; t2; ) {
+            LeptrisNodeRef tn = leptris_node_get_next_sibling(t2);
+            if (leptris_node_get_type(t2) == LEPTRIS_NODE_TYPE_COMMENT)
+                leptris_comment_set_parent((LeptrisCommentNode*)t2, html);
+            else if (leptris_node_get_type(t2) == LEPTRIS_NODE_TYPE_PI)
+                leptris_pi_set_parent((LeptrisPINode*)t2, html);
+            else
+                leptris_element_set_parent((LeptrisElement)t2, html);
+            html->child_count++;
+            t2 = tn;
+        }
+    }
     leptris_element_set_parent(body, html);
     html->child_count = (uint16_t)prefix_count;
+    if (suffix_first)
+        for (LeptrisNodeRef s2 = suffix_first; s2 && s2 != (LeptrisNodeRef)body;
+             s2 = leptris_node_get_next_sibling(s2))
+            html->child_count++;
     if (head_spliced) html->child_count++;
     html->child_count++;
 }
@@ -4274,6 +4399,10 @@ static LeptrisDocument html_parse_shared(
                         else
                             b.prolog_head = (LeptrisNodeRef)c;
                         b.prolog_tail = (LeptrisNodeRef)c;
+                    } else if (b.after_body && b.depth > 0) {
+                        /* #659 after body: comments divert to the
+                         * html level — children after the body. */
+                        h_top_append(&b, (LeptrisNodeRef)c);
                     } else {
                         h_append(&b, (LeptrisNodeRef)c);
                     }
@@ -4576,6 +4705,36 @@ static LeptrisDocument html_parse_shared(
                             continue;
                         }
                     }
+                    /* #659 after body (tests19:21): </body> with no
+                     * open body starts the after-body phase — later
+                     * comments/PIs become html children after the
+                     * body; text and elements reprocess into the
+                     * body (nothing is popped). */
+                    if (b.whatwg && strcmp(lname, "body") == 0) {
+                        int body_open = 0;
+                        for (size_t d2 = b.depth; d2 > 0; d2--) {
+                            const char* on2 =
+                                leptris_element_name(b.open[d2 - 1]);
+                            if (on2 && strcmp(on2, "body") == 0) {
+                                body_open = 1;
+                                break;
+                            }
+                        }
+                        if (!body_open) {
+                            b.after_body = 1;
+                            p = q;
+                            text = p;
+                            continue;
+                        }
+                    } else if (b.whatwg && strcmp(lname, "head") == 0) {
+                        for (size_t d2 = b.depth; d2 > 0; d2--)
+                            if (h_ieq_raw(leptris_element_name(
+                                              b.open[d2 - 1]), "head")) {
+                                b.head_end_seen = 1;
+                                b.head_end_tail = b.top_tail;
+                                break;
+                            }
+                    }
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
                         /* #659: foreign slots store the
@@ -4674,6 +4833,21 @@ static LeptrisDocument html_parse_shared(
                             break;
                         }
                     }
+                }
+            } else if (b.whatwg && nlen == 4 &&
+                       (h_lower(ns[0]) == 'h' || h_lower(ns[0]) == 'b')) {
+                /* #659 structural end tags with nothing open:
+                 * </head> ends the head phase (tests19:3), </body>
+                 * starts the after-body phase (tests19:21). */
+                if (h_lower(ns[0]) == 'h' && h_lower(ns[1]) == 'e' &&
+                    h_lower(ns[2]) == 'a' && h_lower(ns[3]) == 'd') {
+                    b.head_end_seen = 1;
+                    b.head_end_tail = b.top_tail;
+                } else if (h_lower(ns[0]) == 'b' &&
+                           h_lower(ns[1]) == 'o' &&
+                           h_lower(ns[2]) == 'd' &&
+                           h_lower(ns[3]) == 'y') {
+                    b.after_body = 1;
                 }
             }
             p = q;
@@ -4828,9 +5002,12 @@ static LeptrisDocument html_parse_shared(
                 continue;
             }
         } else if (b.whatwg && b.frameset &&
-                   (strcmp(name, "html") == 0 ||
-                    strcmp(name, "head") == 0 ||
-                    strcmp(name, "body") == 0)) {
+                   (strcmp(name, "head") == 0 ||
+                    strcmp(name, "body") == 0 ||
+                    (!b.html_seen && strcmp(name, "html") == 0))) {
+            /* html drops WITHOUT the merge gate only when none was
+             * seen; a second <html> merges attrs (tests19:38) via
+             * the html_seen branch below. */
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;
