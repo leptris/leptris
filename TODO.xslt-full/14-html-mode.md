@@ -557,3 +557,27 @@ variants - all NET-NEGATIVE (best 1196 = -27 vs 1223):
   #script-on cases (12) which the runner SKIPS - check which corpus
   files use them before chasing their trees.
 NOTE: h5dump shows the runner prints diffs OURS-FIRST.
+
+## Update 2026-09-14 (p): CORRECTION — slice A reverted; the +17 was
+## a stale-build artifact; branch floor back to main-parity 1206
+
+The 'shipped +17' reading in update (o) was FALSE: it came from the
+buildtest dir whose objects mixed branch states all day (the phantom
+1223). Clean fresh-dir truth: main 1206; the committed slice A
+measured 1168 (-38) — AND the commit was stash-contaminated (it
+carried the slice-B h_nul_fffd_copy + raw-text rewrite from a
+botched 'git checkout stash@{0} -- <file>' that STAGED the stash
+version). Reverted at bf284b58 (html_parse.c = main state; docs +
+spec kept). Branch floor verified 1206 on a fresh build.
+
+RE-LAND PLAN for slice A (all pieces verified individually in
+probes, none regressed when isolated... EXCEPT the commit as a
+whole was never cleanly measured): re-apply ONLY (1) frameset_ok
+flag+helper, (2) the gate depth<=1 && frameset_ok, (3) the
+start-tag-entry raw-span non-ws scan — NO decode NUL change, NO
+h_nul_fffd_copy — then measure on a FRESH build dir vs main. Corpus
+discipline: EVERY html_parse.c comparison needs fresh build dirs
+for BOTH sides (extend the twins rule; git restore backdates mtimes
+and make skips rebuilds — touch the source after every restore).
+The scriptdata/tests16 'broke 64' from update (o) measured the
+CONTAMINATED commit — do not trust those file attributions.
