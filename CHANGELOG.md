@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: before-head prefix + second `<html>` merge (#659 family C part 1)** — WHATWG "before head" (13.2.6.3.2): comment/PI tokens before the head phase begins are children of the html element, ahead of the spliced `<head>`. The commit-time head/body split is now three-way (html prefix / head run / body rest): a structural `<head>` tag records the boundary so comments after it are head content while earlier ones stay prefix, and the missing-head ensure step inserts `<head>` after the prefix instead of force-first (which stranded the comment between head and body). A second `<html>` start tag now merges its attributes onto the existing html element and drops ("in template" keeps the wholesale drop). html5lib corpus 1238 -> 1243 (+5, 0 breaks against a clean-main twin); Nokogiri parity floor held at 784/1555; suite 1489/1489; specs `BeforeHeadCommentsStayHtmlChildren`, `SecondHtmlTagMergesAttributes`.
 
 
 ## [1.9.165] - 2026-09-14
