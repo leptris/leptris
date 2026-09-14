@@ -611,3 +611,31 @@ close/re-entry), E (ruby closes), F (after-head text), G (misc
 tests1). #1039 closed (C side = v1.9.162); open issues now: #1015
 (C14N four-family divergences), #878 (RNG), #682 (dispatch 2x bar),
 #659.
+
+## Update 2026-09-14 (r): script-data machine v2 — 12 fixed / 15
+## broke (net -3); WIP saved; TWO hard evidence lessons
+
+v2 = the 16-state machine (SD_DATA..SD_DBL_END_NAME, verbatim
+ * 13.2.5.5-.33 transitions) + h_nul_fffd_copy on the raw path. EOF
+ * U+FFFD: the corpus emits NO tail EVER (tests16:269 '<!--' and
+ * :284 '<!--a' both end clean — the earlier 'domjs expects tails'
+ * evidence was PHANTOM: those five inputs do not exist in the
+ * corpus; they were misread dumps). v2 in /tmp/machine-v2.c.
+ * Fresh-dir: fixed 12 (domjs 4-8 script NUL->FFFD family +
+ * scriptdata01), broke 15 (tests16:64-69 + 161-166,
+ * scriptdata01:15/24, domjs:10): all in the DOUBLE-ESCAPED end-tag
+ * chain — corpus case 64 (runner-numbered) expects '<!--<script></
+ * scr...ipt>-->' shapes where my dbl->data drop then close differs.
+ *
+ * LESSON 1 (repeat of the corpus-numbering trap): the runner's
+ * case numbers (redlist, dumps) DO NOT match naive python
+ * split('#data') extraction — multi-line data/quirks shift the
+ * index. Use H5DBG=1 + the runner's own numbering; ad-hoc
+ * extraction produced phantom evidence twice now.
+ * LESSON 2: the redlist prints OURS FIRST ("'ours' != 'expected'")
+ * — Compare writes o-before-x. Every earlier direction reading
+ * must be re-derived from h5dump's labeled sections only.
+ *
+ * RESUME: H5DBG the 15 broke cases (runner numbering), fix the
+ * dbl end-tag chain per their inputs, re-measure on buildsm (fresh
+ * dir). v1.9.163 shipped (#1013 + slice A); floors 1226/784.
