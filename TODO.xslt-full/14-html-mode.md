@@ -581,3 +581,7 @@ for BOTH sides (extend the twins rule; git restore backdates mtimes
 and make skips rebuilds — touch the source after every restore).
 The scriptdata/tests16 'broke 64' from update (o) measured the
 CONTAMINATED commit — do not trust those file attributions.
+
+NOTE: FramesetOkFlagGatesBodyReplacement on the branch is the RED
+driver for the re-land (it fails against the reverted code by
+design — the branch is the campaign branch, not merge-ready).
