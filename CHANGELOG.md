@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.163] - 2026-09-14
+
+### Fixed
+
+- frameset-ok gate + body-text NUL drop, cleanly re-landed (#659 slice A) (html)
+- SVG adjust-table key typo — attributeType stayed lowercase (#1013) (html)
+- frameset-ok flag + in-body NUL handling (#659 slice A) (html)
+
+
+
 ## [1.9.162] - 2026-09-14
 
 ### Added
