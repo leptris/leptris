@@ -700,3 +700,33 @@ conversation in-context). COMMIT EARLY: never leave a completed
 slice uncommitted in a /tmp worktree; push branches after every
 slice. Remaining family-C tail: tests19:3/21/30/38 (head/body
 attr-merge + after-head shapes), then D (select), E (ruby), F, G.
+
+## Update 2026-09-14 (u): family C part 2 — after-head suffix +
+## after-body tail; corpus 1243 -> 1248, 0 breaks
+
+Four edges, all in html_parse.c:
+- </head> sets head_end_seen + head_end_tail (top-chain tail at tag
+  time). The walk breaks at comments PAST that node (positionally —
+  comments before it stay head content, the past_head_end flag
+  walks like past_head_tag); the body path front-peels them as
+  html children BETWEEN head and body, and commits an EMPTY head
+  when the tag pair carried no content (tests19:3:
+  html>[head, comment, body]). The first draft forgot the
+  first_child/prefix link on that commit — content after </head>
+  VANISHED (tests18:6, tests25:19 caught it: html.first_child
+  still pointed into body-owned nodes).
+- </body> (no open body element) sets after_body — NOTHING pops.
+  Comments/PIs divert to the top chain (h_top_append) and the body
+  path tail-peels trailing comment/PI nodes as html children AFTER
+  the body; text and elements keep flowing into the body
+  (tests19:21, tests2:34, webkit01:21 — the pop-everything draft
+  broke 5 table cases: in-table </body> must be ignored, and
+  after-body text reprocesses into the body).
+- The in-frameset html drop no longer fires when html_seen — the
+  second <html> attr merge wins (tests19:38).
+- tests19:30 (dd sibling close) left for the li-family slice (G).
+
+Corpus 1243 -> 1248 (+10: comments01:16, tests1:34, tests14:6,
+tests19:2/3/21/37/38, tests2:52, tests3:4), 0 breaks vs clean-main
+twin; parity 784 held; suite 1490/1490; spec
+AfterHeadAndAfterBodyComments.

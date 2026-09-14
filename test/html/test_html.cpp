@@ -377,6 +377,21 @@ TEST(HtmlParse, BeforeHeadCommentsStayHtmlChildren) {
               "<meta charset=\"utf8\"/></head><body/></html>");
 }
 
+TEST(HtmlParse, AfterHeadAndAfterBodyComments) {
+    /* #659 "after head" (13.2.6.4.3): a comment after the head
+     * element closed is an html child BETWEEN head and body
+     * (tests19:3); "after body" (13.2.6.4.20): after </body>, a
+     * comment is an html child AFTER the body while text keeps
+     * flowing into the body (tests19:21, tests25:19). */
+    EXPECT_EQ(Html("<!doctype html><head></head></p><!--foo-->"),
+              "<!DOCTYPE html><html><head/><!--foo--><body/></html>");
+    EXPECT_EQ(Html("<!doctype html><div></body><!--foo-->"),
+              "<!DOCTYPE html><html><head/><body><div/></body>"
+              "<!--foo--></html>");
+    EXPECT_EQ(Html("<!DOCTYPE html><head></head></keygen>A"),
+              "<!DOCTYPE html><html><head/><body>A</body></html>");
+}
+
 TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
     /* #659 (13.2.6.3): a second <html> start tag merges its
      * attributes onto the existing html element and is dropped
