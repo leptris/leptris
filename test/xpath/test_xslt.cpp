@@ -4015,6 +4015,37 @@ TEST(Xslt30, NextIterationChainsParams) {
         "<o>10</o>");
 }
 
+TEST(Xslt30, IterateSequenceParamKeepsPriorValues) {
+    /* #1066: a sequence accumulated through xsl:next-iteration
+     * must keep every prior member's VALUE — the scratch-varset
+     * snapshot dropped owns_synthetic_text, so variable lookups
+     * borrowed the binding's synthetic members and the scope pop
+     * freed them (joined came out ",,gamma"; Saxon: the full
+     * alpha,beta,gamma). */
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "<out><xsl:iterate select='r/item'>"
+        "<xsl:param name='labels' select='()'/>"
+        "<xsl:variable name='label' select='string(name)'/>"
+        "<xsl:if test='$label != \"\"'>"
+        "<row label=\"{upper-case($label)}\"/>"
+        "</xsl:if>"
+        "<xsl:next-iteration>"
+        "<xsl:with-param name='labels' select='($labels, $label)'/>"
+        "</xsl:next-iteration>"
+        "<xsl:on-completion>"
+        "<count><xsl:value-of select='count($labels)'/></count>"
+        "<joined><xsl:value-of select='string-join($labels, \",\")'/></joined>"
+        "</xsl:on-completion>"
+        "</xsl:iterate></out></xsl:template>",
+        "<r><item><name>alpha</name></item>"
+        "<item><name>beta</name></item>"
+        "<item><name>gamma</name></item></r>")),
+        "<out><row label=\"ALPHA\"/><row label=\"BETA\"/>"
+        "<row label=\"GAMMA\"/><count>3</count>"
+        "<joined>alpha,beta,gamma</joined></out>");
+}
+
 TEST(Xslt30, CopySelectNamespaceDocumentDefault) {
     /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09 batch C).
      * NOTE: @default is XSLT 4.0 (Saxon 12.7 rejects it
