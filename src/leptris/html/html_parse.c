@@ -21,7 +21,6 @@
 #include "../dom/pi.h"
 #include <stdint.h>
 #include <string.h>
-#include <stdio.h>
 
 /* HTML named character references, single-codepoint set
  * (generated from the WHATWG list; HTML4 252-set + common
@@ -2405,47 +2404,8 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                 continue;
             }
         }
-        /* WHATWG in-body character tokens: U+0000 is a parse error
-         * and the token is IGNORED — drop the byte, keep the run
-         * (plain-text-unsafe.dat 4: 'a\0a' must decode to "aa").
-         * Attribute values map NUL to U+FFFD (handled in the attr
-         * path callers). */
-        if (whatwg && !in_attr && *s == '\0') {
-            s++;
-            continue;
-        }
         if (len + 1 >= cap) { out = NULL; return NULL; }
         out[len++] = *s++;
-    }
-    out[len] = 0;
-    return out;
-}
-
-/* WHATWG raw-text/RCDATA NUL mapping: U+0000 emits U+FFFD
- * (EF BF BD) in script data, RCDATA, and the other raw states —
- * unlike body text, where NUL tokens are dropped. The mapped copy
- * holds no NUL bytes, so it is a clean C string. eof_fffd appends
- * the U+FFFD the script-data-escaped EOF rules emit (13.2.5.24/.28/
- * .30/.32). */
-static char* h_nul_fffd_copy(LeptrisMemoryPool* pool, const char* s,
-                             size_t n, int eof_fffd) {
-    size_t cap = n * 3 + 4 + 1;
-    char* out = (char*)leptris_pool_alloc(pool, cap);
-    if (!out) return NULL;
-    size_t len = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (s[i] == '\0') {
-            out[len++] = (char)0xEF;
-            out[len++] = (char)0xBF;
-            out[len++] = (char)0xBD;
-        } else {
-            out[len++] = s[i];
-        }
-    }
-    if (eof_fffd) {
-        out[len++] = (char)0xEF;
-        out[len++] = (char)0xBF;
-        out[len++] = (char)0xBD;
     }
     out[len] = 0;
     return out;
@@ -2477,8 +2437,6 @@ typedef struct {
      * content REPLACES the body — the commit synthesis emits
      * html > [head, frameset]. */
     int frameset;
-    /* 13.2.5.4.4 frameset-ok (see h_clears_frameset_ok). */
-    int frameset_ok;
     /* #659: structural <head>/<body> tags are dropped but their
      * ATTRIBUTES land on the synthesized elements (name/value
      * pool-string pairs). */
@@ -2740,18 +2698,6 @@ static int h_is_int_point(HBuilder* b, size_t idx) {
             }
         }
     }
-    return 0;
-}
-
-/* 13.2.5.4.4: start tags that set frameset-ok to false. */
-static int h_clears_frameset_ok(const char* n) {
-    static const char* const yes[] = {
-        "pre", "listing", "li", "dd", "dt", "plaintext", "button",
-        "applet", "marquee", "object", "table", "area", "br",
-        "embed", "img", "keygen", "wbr", "input", "hr", "textarea",
-        "xmp", "iframe", "noembed", "noframes", "select", NULL};
-    for (int i = 0; yes[i]; i++)
-        if (strcmp(n, yes[i]) == 0) return 1;
     return 0;
 }
 
@@ -3960,7 +3906,6 @@ static LeptrisDocument html_parse_shared(
     }
     HBuilder b;
     memset(&b, 0, sizeof(b));
-    b.frameset_ok = 1;
     b.doc = doc;
     b.pool = doc->pool;
     b.whatwg = whatwg;
@@ -4510,12 +4455,6 @@ static LeptrisDocument html_parse_shared(
         /* Start tag. Even a dropped structural tag ends the
          * initial insertion mode — later comments are in-flow. */
         b.left_initial = 1;
-        /* 13.2.5.4.4: non-whitespace body text (NUL ignored) clears
-         * frameset-ok. The pending run [text, p) is body text here. */
-        if (b.whatwg && b.frameset_ok && text < p) {
-            for (const char* c = text; c < p; c++)
-                if (*c != 0 && !h_is_ws(*c)) { b.frameset_ok = 0; break; }
-        }
         const char* ns = p + 1;
         const char* q = ns;
         while (q < end && !h_is_ws(*q) && *q != '>' && *q != '/') q++;
@@ -4553,11 +4492,8 @@ static LeptrisDocument html_parse_shared(
          * body content replaces the body; after content it is
          * ignored. Inside an open frameset it nests. html/head/
          * body tokens in frameset context are dropped. */
-        if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name)) {
-            b.frameset_ok = 0;
-        }
         if (b.whatwg && strcmp(name, "frameset") == 0) {
-            if (!b.frameset && b.depth <= 1 && b.frameset_ok) {
+            if (!b.frameset && b.depth == 0 && h_body_still_empty(&b)) {
                 b.frameset = 1;
                 /* falls through: the normal open pushes it */
             } else if (!(b.frameset && b.depth > 0)) {
@@ -5068,7 +5004,6 @@ static LeptrisDocument html_parse_shared(
                          strcmp(name, "xmp") == 0));
         if (raw_name && !self_closing && elem_ns == H_NS_HTML) {
             const char* rs = q;
-            int esc = 0, dbl = 0;   /* script-data escape states */
             if (strcmp(name, "plaintext") == 0) {
                 rs = end;   /* eats the rest of the input */
             } else if (b.whatwg && strcmp(name, "script") == 0) {
@@ -5078,6 +5013,7 @@ static LeptrisDocument html_parse_shared(
                  * closes while "<script" + delimiter enters
                  * double-escaped (one </script> only drops back);
                  * "-->"/"--!>" re-enter plain script data. */
+                int esc = 0, dbl = 0;
                 while (rs < end) {
                     if (rs[0] == '<') {
                         int is_end = rs + 1 < end && rs[1] == '/';
@@ -5155,24 +5091,11 @@ static LeptrisDocument html_parse_shared(
                         cs++;
                         clen--;
                     }
-                    char* mapped = h_nul_fffd_copy(b.pool, cs, clen, 0);
                     char* dec =
-                        h_decode_ww(b.pool, mapped, mapped + clen, 0, b.whatwg);
+                        h_decode_ww(b.pool, cs, cs + clen, 0, b.whatwg);
                     if (dec) {
                         LeptrisTextNode* t = leptris_text_create(
                             dec, strlen(dec), b.pool);
-                        if (t)
-                            leptris_element_append_child_internal_doc(
-                                e, (LeptrisNodeRef)t, b.doc);
-                    }
-                } else if (b.whatwg) {
-                    int eof_fffd = strcmp(name, "script") == 0 &&
-                                   rs >= end && (esc || dbl);
-                    char* mapped =
-                        h_nul_fffd_copy(b.pool, cs, clen, eof_fffd);
-                    if (mapped) {
-                        LeptrisTextNode* t = leptris_text_create(
-                            mapped, strlen(mapped), b.pool);
                         if (t)
                             leptris_element_append_child_internal_doc(
                                 e, (LeptrisNodeRef)t, b.doc);
