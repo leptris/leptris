@@ -1325,9 +1325,12 @@ TEST(HtmlParse, ScriptDataEscapedStates) {
               "<html><head><script>&lt;!--&lt;script&gt;&lt;/script&gt;"
               "&lt;script&gt;&lt;/script&gt;</script></head><body/>"
               "</html>");
+    /* --!> inside DOUBLE-escaped is not an exit (the corpus pins
+     * this: tests16:70 keeps </script>X as script text; only
+     * </script> drops one level, and EOF never closes). */
     EXPECT_EQ(Html("<script><!--<script>--!></script>X"),
               "<html><head><script>&lt;!--&lt;script&gt;--!&gt;"
-              "</script></head><body>X</body></html>");
+              "&lt;/script&gt;X</script></head><body/></html>");
 }
 
 TEST(HtmlParse, RcdataAndRawtextFamily) {

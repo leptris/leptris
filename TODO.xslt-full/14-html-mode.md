@@ -639,3 +639,35 @@ v2 = the 16-state machine (SD_DATA..SD_DBL_END_NAME, verbatim
  * RESUME: H5DBG the 15 broke cases (runner numbering), fix the
  * dbl end-tag chain per their inputs, re-measure on buildsm (fresh
  * dir). v1.9.163 shipped (#1013 + slice A); floors 1226/784.
+
+## Update 2026-09-14 (s): machine v2 LANDED — 3 root causes, 0
+## breaks / 12 net fixes; corpus 1226 -> 1238, parity 784 held
+
+The 15 breaks all decoded against the WHATWG text (dumps +
+why-strings, direction from the labeled h5dump sections):
+
+1. SD_DBL_LT '/'-match went to SD_DATA. </script> while
+   double-escaped drops ONE level to ESCAPED (13.2.5.20), never
+   to data — that single edge was the whole 64-69/161-166 chain
+   (re-entry: after the drop, the next '<script>' re-enters
+   double and the next </script> drops one level again; the
+   corpus expects the LAST </script> to close from ESC).
+2. SD_ESC_LT alpha branch: name matched 'script' but the
+   DELIMITER check failed ('<sCrIpt\'') — state fell through to
+   SD_DBL_END_NAME (i.e. double). 13.2.5.23: non-delimiter after
+   the name stays ESCAPED (scriptdata01:15/24).
+3. Consume-instead-of-RECONSUME in the three less-than-sign
+   states: '<' followed by '<' ate the second '<', so
+   '<</script>' never closed (domjs:10 '<!-- foo-<'). 13.2.5.10/
+   .22/.18: anything-else RECONSUMES in (escaped|double) data.
+
+Also: the unit spec HtmlParse.ScriptDataEscapedStates pinned the
+OLD behavior for corpus case 70 ('--!>' in double-escaped exiting
+to data + close) — updated to the corpus-pinned tree (the script
+keeps '</script>X'; 70 is in the FIXED set). Corpus is the gate.
+
+Measured: fresh buildsm2 dir; breaks 0, fixes 12 (domjs 4-8/15-17,
+plain-text 10, scriptdata01:20, tests16:70/167); test_html 76/76;
+full suite 1483/1483; parity 784/1555 held. Ship as v1.9.165.
+Next: family C (second-html merge), D (select close/re-entry),
+E (ruby), F (after-head text), G (tests1 misc).
