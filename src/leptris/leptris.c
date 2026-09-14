@@ -1013,6 +1013,20 @@ LEPTRIS_API LeptrisElement leptris_document_root(struct leptris_document* doc) {
     return (LeptrisElement)doc->root;
 }
 
+LEPTRIS_API LeptrisNodeRef leptris_document_first_child(
+    struct leptris_document* doc) {
+    if (!doc) return NULL;
+    leptris_document_ensure_promoted(doc);
+    /* #580 document-children chain; chain-less documents fall back
+     * to the root element — the same view as the document node's
+     * first-child semantics. */
+    if (doc->doc_children_head) {
+        return (LeptrisNodeRef)doc->doc_children_head;
+    }
+    return (LeptrisNodeRef)(doc->new_dom_root ? doc->new_dom_root
+                                              : doc->root);
+}
+
 LEPTRIS_API LeptrisDTD* leptris_document_get_dtd(LeptrisDocument doc) {
     if (!doc) return NULL;
     if (!doc->dtd) {

@@ -158,6 +158,23 @@ LEPTRIS_API void leptris_document_free(LeptrisDocument doc);
 LEPTRIS_API LeptrisElement leptris_document_root(LeptrisDocument doc);
 
 /**
+ * Get the first child of the document node (any node kind:
+ * prolog comment/PI, the root element, ...)
+ *
+ * Document-children model (#580): the document's children are the
+ * [prolog nodes..., root, epilog nodes...] chain. Documents built
+ * without document-level nodes fall back to the root element.
+ * Walk with leptris_node_next_sibling.
+ *
+ * @param doc Document
+ * @return First document child or NULL
+ *
+ * Memory: Node is owned by document. Do not free separately.
+ */
+LEPTRIS_API LeptrisNodeRef leptris_document_first_child(
+    LeptrisDocument doc);
+
+/**
  * Eagerly convert all StringViews to NULL-terminated strings
  *
  * PERFORMANCE OPTIMIZATION: Call this after parsing to optimize for

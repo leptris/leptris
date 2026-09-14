@@ -2257,10 +2257,6 @@ static uint32_t h_numref_fix(long v) {
 static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                          const char* e, int in_attr, int whatwg,
                          size_t* out_len);
-static char* h_decode_ww(LeptrisMemoryPool* pool, const char* s,
-                         const char* e, int in_attr, int whatwg) {
-    return h_decode_ex(pool, s, e, in_attr, whatwg, NULL);
-}
 /* Body-text decode: WHATWG in-body NUL tokens are ignored — the
  * decoded run drops the byte instead of truncating at it (the
  * returned length is the compacted one; the string is NUL-free). */
@@ -2550,7 +2546,6 @@ static const char* h_script_scan(const char* rs, const char* end,
                     /* <script (open) inside escaped -> double. The
                      * delimiter gates entry: '<sCrIpt\'' stays
                      * escaped (13.2.5.23). */
-                    const char* nm3 = p;
                     int k3 = 0;
                     while (p < end && k3 < 6) {
                         if (h_lower(*p) != "script"[k3]) break;
@@ -2589,7 +2584,6 @@ static const char* h_script_scan(const char* rs, const char* end,
                 if (c == '/') {
                     st = SD_DBL_END_NAME;
                     p++;
-                    const char* nm4 = p;
                     int k4 = 0;
                     while (p < end && k4 < 6) {
                         if (h_lower(*p) != "script"[k4]) break;
@@ -2707,6 +2701,10 @@ typedef struct {
      * AFTER the body. */
     int head_end_seen;
     LeptrisNodeRef head_end_tail;
+    /* #659 </html> was seen (tests1:93): everything after it is
+     * body content — even head-eligible elements (</head> alone
+     * keeps processing them into the head, 13.2.6.4.3). */
+    int after_html;
     /* #659 "after body" (tests19:21): </body> was seen — later
      * comments/PIs divert to the html level (children after the
      * body); text and elements keep flowing into the body. */
@@ -3391,14 +3389,22 @@ static void h_insert_before(HBuilder* b, LeptrisElement parent,
 static void h_append(HBuilder* b, LeptrisNodeRef n) {
     if (b->whatwg && !b->left_initial &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
+        int nonws = 0;
         const char* t = leptris_text_node_get_content(n);
         if (t)
             for (const char* q = t; *q; q++)
                 if (*q != ' ' && *q != '\t' && *q != '\n' &&
                     *q != '\r') {
-                    b->left_initial = 1;
+                    nonws = 1;
                     break;
                 }
+        if (nonws) {
+            b->left_initial = 1;
+        } else {
+            /* "before html" whitespace is ignored (13.2.6.2.1,
+             * tests2:50) — no document-level text node. */
+            return;
+        }
     }
     /* #659 in-column-group on a template current node: only col
      * starts live there; every other token, non-whitespace text
@@ -4052,8 +4058,8 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                  * inserts whitespace into the current node; tests1:51);
                  * non-whitespace text switches to body. */
                 if (b->whatwg_head_set && head_start) {
-                    const char* tx = leptris_text_node_get_content(
-                        (LeptrisTextNode*)head_end);
+                    const char* tx =
+                        leptris_text_node_get_content(head_end);
                     int ws = 1;
                     if (tx)
                         for (const char* w = tx; *w; w++)
@@ -4068,6 +4074,11 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             }
             if (hty != LEPTRIS_NODE_TYPE_ELEMENT)
                 break;
+            /* After </html>: later content is body content, even
+             * head-eligible elements (tests1:93). After </head>
+             * alone, head elements still process INTO the head
+             * (13.2.6.4.3; template.dat:104, tests3:1/2). */
+            if (past_head_end && b->after_html) break;
             const char* hn = leptris_element_name((LeptrisElement)head_end);
             /* An explicit <head> child IS the head element — adopt
              * it; the head run ends at it (tests1:7/8). */
@@ -4093,6 +4104,8 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             if (!head_el)
                 break;
             if (!head_start) head_start = head_end;
+            if (head_end == b->head_end_tail)
+                past_head_end = 1;
             head_end = leptris_node_get_next_sibling(head_end);
             /* A structural <body> ends the head phase. */
             if (b->lift_boundary && head_end == b->lift_boundary) {
@@ -4670,6 +4683,12 @@ static LeptrisDocument html_parse_shared(
                 }
             }
             /* End tag: ends the initial insertion mode too. */
+            if (b.whatwg && !b.left_initial && text < p) {
+                int ws_only = 1;
+                for (const char* c = text; c < p; c++)
+                    if (*c != 0 && !h_is_ws(*c)) { ws_only = 0; break; }
+                if (ws_only) text = p;
+            }
             b.left_initial = 1;
             /* End tag: name, then skip to '>'. */
             const char* ns = p + 2;
@@ -4764,6 +4783,14 @@ static LeptrisDocument html_parse_shared(
                             text = p;
                             continue;
                         }
+                    }
+                    /* #659 </html> closing an explicit html
+                     * element starts the after-html phase (the
+                     * depth-0 branch covers bare </html>). */
+                    if (b.whatwg && strcmp(lname, "html") == 0) {
+                        b.after_html = 1;
+                        b.head_end_seen = 1;
+                        b.head_end_tail = b.top_tail;
                     }
                     /* #659 after body (tests19:21): </body> with no
                      * open body starts the after-body phase — later
@@ -4898,11 +4925,20 @@ static LeptrisDocument html_parse_shared(
                        (h_lower(ns[0]) == 'h' || h_lower(ns[0]) == 'b')) {
                 /* #659 structural end tags with nothing open:
                  * </head> ends the head phase (tests19:3), </body>
-                 * starts the after-body phase (tests19:21). */
+                 * starts the after-body phase (tests19:21), and
+                 * </html> ends the head phase too — content after
+                 * it belongs to the body (tests1:93). */
                 if (h_lower(ns[0]) == 'h' && h_lower(ns[1]) == 'e' &&
                     h_lower(ns[2]) == 'a' && h_lower(ns[3]) == 'd') {
                     b.head_end_seen = 1;
                     b.head_end_tail = b.top_tail;
+                } else if (h_lower(ns[0]) == 'h' &&
+                           h_lower(ns[1]) == 't' &&
+                           h_lower(ns[2]) == 'm' &&
+                           h_lower(ns[3]) == 'l') {
+                    b.head_end_seen = 1;
+                    b.head_end_tail = b.top_tail;
+                    b.after_html = 1;
                 } else if (h_lower(ns[0]) == 'b' &&
                            h_lower(ns[1]) == 'o' &&
                            h_lower(ns[2]) == 'd' &&
@@ -4983,6 +5019,15 @@ static LeptrisDocument html_parse_shared(
 
         /* Start tag. Even a dropped structural tag ends the
          * initial insertion mode — later comments are in-flow. */
+        /* "before html" whitespace-only text before the first tag
+         * is ignored (13.2.6.2.1, tests2:50) — drop the pending
+         * run before the mode flips. */
+        if (b.whatwg && !b.left_initial && text < p) {
+            int ws_only = 1;
+            for (const char* c = text; c < p; c++)
+                if (*c != 0 && !h_is_ws(*c)) { ws_only = 0; break; }
+            if (ws_only) text = p;
+        }
         b.left_initial = 1;
         /* 13.2.5.4.4: non-whitespace body text (NUL ignored — an
          * ignored token cannot clear the flag) clears frameset-ok;
@@ -5016,8 +5061,14 @@ static LeptrisDocument html_parse_shared(
         if (b.depth == 0 && !b.frameset &&
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
             if (strcmp(name, "body") == 0) {
-                b.lift_closed = 1;
-                if (!b.lift_boundary) b.lift_boundary = b.top_tail;
+                /* Only the FIRST structural <body> marks the
+                 * lift boundary — a later one would re-enable the
+                 * head lift after body content began (tests1:88:
+                 * <body><body> keeps base/link/meta in body). */
+                if (!b.lift_closed) {
+                    b.lift_closed = 1;
+                    b.lift_boundary = b.top_tail;
+                }
             } else {
                 /* Before-head ends here: later comments are head
                  * content; earlier ones stay html-prefix children. */
@@ -5100,8 +5151,10 @@ static LeptrisDocument html_parse_shared(
 
         /* #659 "in frameset" (WHATWG 13.2.6.4.18): inside
          * frameset content only frameset/frame/noframes is live;
-         * other start tags drop, non-whitespace text drops. */
-        if (b.whatwg && b.frameset && b.depth > 0 &&
+         * other start tags drop, non-whitespace text drops. Also
+         * after </html> (after-html reprocesses into the frameset
+         * body, tests19:42). */
+        if (b.whatwg && b.frameset && (b.depth > 0 || b.after_html) &&
             strcmp(name, "frameset") != 0 &&
             strcmp(name, "frame") != 0 &&
             strcmp(name, "noframes") != 0) {
@@ -5708,11 +5761,17 @@ static LeptrisDocument html_parse_shared(
         size_t dlen = 0;
         char* dec = h_decode_body(b.pool, text, end, b.whatwg, &dlen);
         if (dec && *dec) {
-            LeptrisTextNode* t =
-                leptris_text_create(dec, dlen, b.pool);
-            if (t) {
-                h_reconstruct(&b);
-                h_append(&b, (LeptrisNodeRef)t);
+            /* #659 after </html> with a frameset body, non-ws text
+             * reprocesses into the frameset and drops (13.2.6.4.18,
+             * tests19:41/42). */
+            int drop = b.whatwg && b.after_html && b.frameset;
+            if (!drop) {
+                LeptrisTextNode* t =
+                    leptris_text_create(dec, dlen, b.pool);
+                if (t) {
+                    h_reconstruct(&b);
+                    h_append(&b, (LeptrisNodeRef)t);
+                }
             }
         }
     }

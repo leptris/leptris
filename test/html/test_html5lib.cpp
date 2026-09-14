@@ -382,7 +382,7 @@ void CollectElement(LeptrisElement e, ONode* out) {
     }
 }
 
-ONode CollectDocument(LeptrisDocument d) {
+ONode CollectDocument(LeptrisDocument d, int doc_children) {
     ONode doc;
     doc.kind = -1;   /* document level */
     LeptrisDoctype dt_handle = leptris_document_internal_subset(d);
@@ -395,11 +395,24 @@ ONode CollectDocument(LeptrisDocument d) {
             doc.children.push_back(dt);
         }
     }
-    LeptrisElement root = leptris_document_root(d);
-    if (root) {
-        ONode rootn;
-        CollectElement(root, &rootn);
-        doc.children.push_back(rootn);
+    if (doc_children) {
+        /* #580 document-children chain: [prolog nodes..., root,
+         * epilog nodes...] — html5lib's expected trees carry
+         * prolog comments at the document level (tests1:38-49).
+         * The parity meter keeps the root-only view: its committed
+         * Nokogiri reference trees were captured without
+         * document-level nodes. */
+        for (LeptrisNodeRef c = leptris_document_first_child(d); c;
+             c = leptris_node_next_sibling(c)) {
+            CollectChildren(c, &doc);
+        }
+    } else {
+        LeptrisElement root = leptris_document_root(d);
+        if (root) {
+            ONode rootn;
+            CollectElement(root, &rootn);
+            doc.children.push_back(rootn);
+        }
     }
     return doc;
 }
@@ -586,7 +599,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
                 failures.push_back(c.id + ": parse failed");
                 continue;
             }
-            ONode ours = CollectDocument(d);
+            ONode ours = CollectDocument(d, 1);
             Coalesce(&ours);
             NormalizeExpected(&c.doc, 0);
             std::string why;
@@ -690,7 +703,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
                 pfails.push_back(c.id + ": parse failed");
                 continue;
             }
-            ONode ours = CollectDocument(d);
+            ONode ours = CollectDocument(d, 0);
             Coalesce(&ours);
             NormalizeExpected(&c.doc, 1);
             std::string why;
