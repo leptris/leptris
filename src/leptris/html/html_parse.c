@@ -2849,8 +2849,18 @@ static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
                                       b->whatwg, NULL)
                         : (char*)"";
         if (aname && aval) {
-            attrs[(*n)++] = aname;
-            attrs[(*n)++] = aval;
+            /* Merge semantics: a same-named attribute (within one
+             * tag or on a later structural one) is IGNORED — the
+             * first value wins (13.2.5.3 / "not already present":
+             * <body foo=bar><body foo=baz yo=mama> keeps
+             * foo=bar, webkit01:17). */
+            int dup = 0;
+            for (int j = 0; j + 1 < *n; j += 2)
+                if (strcmp(attrs[j], aname) == 0) { dup = 1; break; }
+            if (!dup) {
+                attrs[(*n)++] = aname;
+                attrs[(*n)++] = aval;
+            }
         }
     }
 }
