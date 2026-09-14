@@ -21,6 +21,7 @@
 #include "../dom/pi.h"
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 /* HTML named character references, single-codepoint set
  * (generated from the WHATWG list; HTML4 252-set + common
@@ -2404,6 +2405,15 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                 continue;
             }
         }
+        /* WHATWG in-body character tokens: U+0000 is a parse error
+         * and the token is IGNORED — drop the byte, keep the run
+         * (plain-text-unsafe.dat 4: 'a\0a' must decode to "aa").
+         * Attribute values map NUL to U+FFFD (handled in the attr
+         * path callers). */
+        if (whatwg && !in_attr && *s == '\0') {
+            s++;
+            continue;
+        }
         if (len + 1 >= cap) { out = NULL; return NULL; }
         out[len++] = *s++;
     }
@@ -2437,6 +2447,8 @@ typedef struct {
      * content REPLACES the body — the commit synthesis emits
      * html > [head, frameset]. */
     int frameset;
+    /* 13.2.5.4.4 frameset-ok (see h_clears_frameset_ok). */
+    int frameset_ok;
     /* #659: structural <head>/<body> tags are dropped but their
      * ATTRIBUTES land on the synthesized elements (name/value
      * pool-string pairs). */
@@ -2698,6 +2710,18 @@ static int h_is_int_point(HBuilder* b, size_t idx) {
             }
         }
     }
+    return 0;
+}
+
+/* 13.2.5.4.4: start tags that set frameset-ok to false. */
+static int h_clears_frameset_ok(const char* n) {
+    static const char* const yes[] = {
+        "pre", "listing", "li", "dd", "dt", "plaintext", "button",
+        "applet", "marquee", "object", "table", "area", "br",
+        "embed", "img", "keygen", "wbr", "input", "hr", "textarea",
+        "xmp", "iframe", "noembed", "noframes", "select", NULL};
+    for (int i = 0; yes[i]; i++)
+        if (strcmp(n, yes[i]) == 0) return 1;
     return 0;
 }
 
@@ -3906,6 +3930,7 @@ static LeptrisDocument html_parse_shared(
     }
     HBuilder b;
     memset(&b, 0, sizeof(b));
+    b.frameset_ok = 1;
     b.doc = doc;
     b.pool = doc->pool;
     b.whatwg = whatwg;
@@ -4455,6 +4480,12 @@ static LeptrisDocument html_parse_shared(
         /* Start tag. Even a dropped structural tag ends the
          * initial insertion mode — later comments are in-flow. */
         b.left_initial = 1;
+        /* 13.2.5.4.4: non-whitespace body text (NUL ignored) clears
+         * frameset-ok. The pending run [text, p) is body text here. */
+        if (b.whatwg && b.frameset_ok && text < p) {
+            for (const char* c = text; c < p; c++)
+                if (*c != 0 && !h_is_ws(*c)) { b.frameset_ok = 0; break; }
+        }
         const char* ns = p + 1;
         const char* q = ns;
         while (q < end && !h_is_ws(*q) && *q != '>' && *q != '/') q++;
@@ -4492,8 +4523,11 @@ static LeptrisDocument html_parse_shared(
          * body content replaces the body; after content it is
          * ignored. Inside an open frameset it nests. html/head/
          * body tokens in frameset context are dropped. */
+        if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name)) {
+            b.frameset_ok = 0;
+        }
         if (b.whatwg && strcmp(name, "frameset") == 0) {
-            if (!b.frameset && b.depth == 0 && h_body_still_empty(&b)) {
+            if (!b.frameset && b.depth <= 1 && b.frameset_ok) {
                 b.frameset = 1;
                 /* falls through: the normal open pushes it */
             } else if (!(b.frameset && b.depth > 0)) {

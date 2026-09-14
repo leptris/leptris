@@ -1486,3 +1486,42 @@ TEST(HtmlParse, TemplateInsertionModes) {
     EXPECT_EQ(Html("<body><template><div><tr></tr></div></template>"),
               "<template><div/></template>");
 }
+
+namespace {
+/* Length-explicit WHATWG parse for inputs with embedded NUL bytes
+ * (std::strlen stops at them). */
+std::string HtmlN(const char* in, size_t len) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_html_string(in, len, &st);
+    if (!doc) return "(parse-failed)";
+    char* out = leptris_document_serialize(doc, nullptr);
+    std::string r = out ? out : "(null)";
+    leptris_free_string(out);
+    leptris_document_free(doc);
+    const char* decl = "<?xml version=\"1.0\"?>";
+    if (r.compare(0, std::strlen(decl), decl) == 0) {
+        size_t rest = std::strlen(decl);
+        if (rest < r.size() && r[rest] == '\n') rest++;
+        r = r.substr(rest);
+    }
+    return r;
+}
+}  // namespace
+
+TEST(HtmlParse, FramesetOkFlagGatesBodyReplacement) {
+    /* 13.2.5.4.4: a <frameset> replaces the body only while
+     * frameset-ok holds. NUL is an ignored in-body token — it does
+     * NOT clear the flag (plain-text-unsafe.dat 2/3/5/6); whitespace
+     * does not either. */
+    EXPECT_EQ(HtmlN("<html>\x00" " <frameset></frameset>", 29),
+              "<html><head/><frameset/></html>");
+    EXPECT_EQ(HtmlN("<html> \x00" " <frameset></frameset>", 30),
+              "<html><head/><frameset/></html>");
+    EXPECT_EQ(Html("<frameset></frameset>"),
+              "<html><head/><frameset/></html>");
+    /* Non-whitespace body text clears frameset-ok: the frameset
+     * token is ignored and the body keeps the text, with the NUL
+     * dropped byte-wise from the run ('a\0a' -> "aa"; case 4). */
+    EXPECT_EQ(HtmlN("<html>a\x00" "a<frameset></frameset>", 30),
+              "<html><head/><body>aa</body></html>");
+}
