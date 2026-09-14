@@ -392,6 +392,17 @@ TEST(HtmlParse, AfterHeadAndAfterBodyComments) {
               "<!DOCTYPE html><html><head/><body>A</body></html>");
 }
 
+TEST(HtmlParse, DdDtStartsCloseSiblings) {
+    /* #659 (13.2.6.4.7): a dd/dt start closes the nearest open
+     * dd/dt in scope — sibling definition items even with content
+     * in between (tests19:30). */
+    EXPECT_EQ(Html("<!doctype html><dd><optgroup><dd>"),
+              "<!DOCTYPE html><html><head/><body><dd><optgroup/>"
+              "</dd><dd/></body></html>");
+    EXPECT_EQ(Html("<dt>a<dd>b"),
+              "<dt>a</dt><dd>b</dd>");
+}
+
 TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
     /* #659 (13.2.6.3): a second <html> start tag merges its
      * attributes onto the existing html element and is dropped

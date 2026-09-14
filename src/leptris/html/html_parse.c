@@ -5190,6 +5190,31 @@ static LeptrisDocument html_parse_shared(
         /* Implied end tags this start tag triggers (HTML rules
          * only — foreign content has none). */
         if (elem_ns == H_NS_HTML) {
+            /* WHATWG: a dd/dt start closes the NEAREST open dd/dt
+             * in default scope — sibling definition items even
+             * with content in between (13.2.6.4.7, tests19:30:
+             * <dd><optgroup><dd> -> dd>[optgroup] + sibling dd). */
+            if (b.whatwg && (strcmp(name, "dd") == 0 ||
+                             strcmp(name, "dt") == 0)) {
+                for (size_t d = b.depth; d > 0; d--) {
+                    const char* on =
+                        leptris_element_name(b.open[d - 1]);
+                    if (!on) break;
+                    if (strcmp(on, "dd") == 0 || strcmp(on, "dt") == 0) {
+                        b.depth = d - 1;
+                        break;
+                    }
+                    if (h_ieq_raw(on, "applet") ||
+                        h_ieq_raw(on, "caption") ||
+                        h_ieq_raw(on, "table") || h_ieq_raw(on, "td") ||
+                        h_ieq_raw(on, "th") || h_ieq_raw(on, "marquee") ||
+                        h_ieq_raw(on, "object") ||
+                        h_ieq_raw(on, "template") ||
+                        h_ieq_raw(on, "button") ||
+                        h_ieq_raw(on, "select") || h_ieq_raw(on, "html"))
+                        break;
+                }
+            }
             /* WHATWG: block starts close an open p in BUTTON
              * SCOPE — formatting elements do not fence the scan,
              * they stay dangling in the active formatting list
