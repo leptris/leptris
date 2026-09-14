@@ -524,3 +524,36 @@ entirely. Then re-apply the banked frameset_ok pieces + the two text
 fixes (non-ws flush clears frameset_ok; h_decode_ww drops NUL bytes
 instead of truncating runs). Corpus floors at this point: 1206/345,
 parity 784/771. v1.9.162 shipped the #1039 descriptor ABI.
+
+## Update 2026-09-14 (o): SLICE A SHIPPED on feat/html-complete — 1206
+## -> 1223 (+17); slice B needs the FAITHFUL script-data machine
+
+Slice A (committed): frameset-ok flag (13.2.5.4.4 enumerated start
+tags + non-ws body text clear it; NUL ignored) gating the body
+replacement at depth<=1, and in-body NUL dropped byte-wise in
+WHATWG text decode. Corpus 1206 -> 1223 (+17), parity 784 held,
+suite 1476/1476. Spec FramesetOkFlagGatesBodyReplacement (needs
+LENGTH-EXPLICIT inputs - strlen stops at NUL; C hex-escape gotcha:
+"\x00" "a" must be split, \x00a is 0xA).
+
+Slice B (raw-text NUL->FFFD + EOF tails) attempted THREE coarse
+variants - all NET-NEGATIVE (best 1196 = -27 vs 1223):
+- NUL->EF BF BD in script/style raws + RCDATA via h_nul_fffd_copy
+  (fixed 9 domjs cases: the a='\0' family) BUT the EOF-tail rule
+  falsified every approximation:
+  * (esc||dbl)&&!lt  -> 1176  * esc&&!dbl&&!lt -> 1196
+- html5lib evidence pairs: domjs 5-8 (<!--..- EOF) EXPECT the
+  U+FFFD tail; tests16:122 (<script><!-- EOF, SAME-looking shape)
+  expects NONE (differing only in dash-state depth); domjs 9-11
+  (trailing '<S' tag attempt) expect NONE; tests16:38 (double-
+  escaped via <script ) expects NONE. The coarse esc/dbl/lt flags
+  cannot split '<!--'-EOF vs '<!--'-EOF-across-files: the DASH
+  states (escaped-dash, escaped-dash-dash, double-dash*) carry the
+  tail and the escaped/double-escaped PLAIN states do not, while
+  less-than/end-tag-NAME states never do. VERDICT (the template
+  lesson again): implement the 12 script-data states verbatim
+  (13.2.5.5-.33) with their exact EOF rows; the mapping helper and
+  the case evidence are in this entry. ALSO: tests16 carries
+  #script-on cases (12) which the runner SKIPS - check which corpus
+  files use them before chasing their trees.
+NOTE: h5dump shows the runner prints diffs OURS-FIRST.
