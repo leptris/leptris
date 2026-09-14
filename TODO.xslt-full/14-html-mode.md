@@ -749,3 +749,22 @@ stacked feat/html-dd-dt branch as the replacement). v1.9.166's py-
 wheel publish job failed (also hit v1.9.164, not 165 — PyPI-side
 intermittent; tag+GitHub Release published fine; failed job
 rerun-dispatched).
+
+## Update 2026-09-15 (w): family G slice 1 — image rename, explicit
+## head adoption, in-head ws; corpus 1258 -> 1265, 0 breaks
+
+Three edges: <image> renamed <img> before dispatch (13.2.6.4.7,
+tests1:90 + 1); an explicit <head> CHILD of html is ADOPTED as the
+head element in the split (never wrapped in a synthesized one —
+tests1:7/8 gave body>[head]); whitespace-only text after head
+content stays in the head run (13.2.6.4.4, tests1:51 + bonus).
+Suite 1494/1494; parity 784 held; spec
+ExplicitHeadIsAdoptedAndKeepsWsText. Branch total vs main: +27
+(1238 -> 1265).
+
+CI STILL DOWN (2026-09-15): workflow_dispatch works (probe run
+created) but push/pull_request EVENTS create no runs repo-wide —
+fresh overnight push = 0 runs. All workflows active, permissions
+on, githubstatus green. The 17-leg gate on #1070 cannot run until
+GitHub event delivery recovers; the b8t652ug4 watcher polls for
+the first check-run on the branch head.
