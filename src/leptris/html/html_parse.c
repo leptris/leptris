@@ -2421,6 +2421,36 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
     return out;
 }
 
+/* WHATWG raw-text/RCDATA NUL mapping: U+0000 emits U+FFFD
+ * (EF BF BD) in script data, RCDATA, and the other raw states —
+ * unlike body text, where NUL tokens are dropped. The mapped copy
+ * holds no NUL bytes, so it is a clean C string. eof_fffd appends
+ * the U+FFFD the script-data-escaped EOF rules emit (13.2.5.24/.28/
+ * .30/.32). */
+static char* h_nul_fffd_copy(LeptrisMemoryPool* pool, const char* s,
+                             size_t n, int eof_fffd) {
+    size_t cap = n * 3 + 4 + 1;
+    char* out = (char*)leptris_pool_alloc(pool, cap);
+    if (!out) return NULL;
+    size_t len = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '\0') {
+            out[len++] = (char)0xEF;
+            out[len++] = (char)0xBF;
+            out[len++] = (char)0xBD;
+        } else {
+            out[len++] = s[i];
+        }
+    }
+    if (eof_fffd) {
+        out[len++] = (char)0xEF;
+        out[len++] = (char)0xBF;
+        out[len++] = (char)0xBD;
+    }
+    out[len] = 0;
+    return out;
+}
+
 /* ---- builder ---- */
 typedef struct {
     struct leptris_document* doc;
@@ -5038,6 +5068,7 @@ static LeptrisDocument html_parse_shared(
                          strcmp(name, "xmp") == 0));
         if (raw_name && !self_closing && elem_ns == H_NS_HTML) {
             const char* rs = q;
+            int esc = 0, dbl = 0;   /* script-data escape states */
             if (strcmp(name, "plaintext") == 0) {
                 rs = end;   /* eats the rest of the input */
             } else if (b.whatwg && strcmp(name, "script") == 0) {
@@ -5047,7 +5078,6 @@ static LeptrisDocument html_parse_shared(
                  * closes while "<script" + delimiter enters
                  * double-escaped (one </script> only drops back);
                  * "-->"/"--!>" re-enter plain script data. */
-                int esc = 0, dbl = 0;
                 while (rs < end) {
                     if (rs[0] == '<') {
                         int is_end = rs + 1 < end && rs[1] == '/';
@@ -5125,11 +5155,24 @@ static LeptrisDocument html_parse_shared(
                         cs++;
                         clen--;
                     }
+                    char* mapped = h_nul_fffd_copy(b.pool, cs, clen, 0);
                     char* dec =
-                        h_decode_ww(b.pool, cs, cs + clen, 0, b.whatwg);
+                        h_decode_ww(b.pool, mapped, mapped + clen, 0, b.whatwg);
                     if (dec) {
                         LeptrisTextNode* t = leptris_text_create(
                             dec, strlen(dec), b.pool);
+                        if (t)
+                            leptris_element_append_child_internal_doc(
+                                e, (LeptrisNodeRef)t, b.doc);
+                    }
+                } else if (b.whatwg) {
+                    int eof_fffd = strcmp(name, "script") == 0 &&
+                                   rs >= end && (esc || dbl);
+                    char* mapped =
+                        h_nul_fffd_copy(b.pool, cs, clen, eof_fffd);
+                    if (mapped) {
+                        LeptrisTextNode* t = leptris_text_create(
+                            mapped, strlen(mapped), b.pool);
                         if (t)
                             leptris_element_append_child_internal_doc(
                                 e, (LeptrisNodeRef)t, b.doc);
