@@ -403,6 +403,18 @@ TEST(HtmlParse, DdDtStartsCloseSiblings) {
               "<dt>a</dt><dd>b</dd>");
 }
 
+TEST(HtmlParse, RubyAnnotationBoxesAreSiblings) {
+    /* #659 (13.2.6.4.12/.13): every ruby-child start closes a
+     * current rb/rt/rp; rb/rtc also close an open rtc, but rt/rp
+     * nest INSIDE it (ruby.dat:3-18). */
+    EXPECT_EQ(Html("<ruby>a<rb>b<rtc>"),
+              "<ruby>a<rb>b</rb><rtc/></ruby>");
+    EXPECT_EQ(Html("<ruby>a<rt>b<rb>"),
+              "<ruby>a<rt>b</rt><rb/></ruby>");
+    EXPECT_EQ(Html("<ruby>a<rtc>b<rt>c<rt>d"),
+              "<ruby>a<rtc>b<rt>c</rt><rt>d</rt></rtc></ruby>");
+}
+
 TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
     /* #659 (13.2.6.3): a second <html> start tag merges its
      * attributes onto the existing html element and is dropped
