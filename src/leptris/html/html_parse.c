@@ -2223,8 +2223,6 @@ static uint32_t h_entity_lookup(const char* name, size_t len) {
     return 0;
 }
 /* Text-context decode (no attribute literal guard). */
-static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
-                         const char* e, int in_attr, int whatwg);
 /* WHATWG 13.2.5.84 numeric-reference end states: the C1 range
  * remaps through the Windows-1252 table (rows without an entry
  * stay as-is); everything else out of range, and surrogates and
@@ -2247,9 +2245,29 @@ static uint32_t h_numref_fix(long v) {
     return (uint32_t)v;
 }
 
+static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
+                         const char* e, int in_attr, int whatwg,
+                         size_t* out_len);
 static char* h_decode_ww(LeptrisMemoryPool* pool, const char* s,
                          const char* e, int in_attr, int whatwg) {
-    return h_decode_ex(pool, s, e, in_attr, whatwg);
+    return h_decode_ex(pool, s, e, in_attr, whatwg, NULL);
+}
+/* Body-text decode: WHATWG in-body NUL tokens are ignored — the
+ * decoded run drops the byte instead of truncating at it (the
+ * returned length is the compacted one; the string is NUL-free). */
+static char* h_decode_body(LeptrisMemoryPool* pool, const char* s,
+                           const char* e, int whatwg, size_t* out_len) {
+    size_t n = 0;
+    char* d = h_decode_ex(pool, s, e, 0, whatwg, &n);
+    if (!d) return NULL;
+    size_t r = 0, w = 0;
+    while (r < n) {
+        if (d[r] != 0) d[w++] = d[r];
+        r++;
+    }
+    d[w] = 0;
+    if (out_len) *out_len = w;
+    return d;
 }
 static size_t h_utf8_encode(uint32_t cp, char* out) {
     if (cp < 0x80) { out[0] = (char)cp; return 1; }
@@ -2309,7 +2327,8 @@ static int h_is_legacy_ent(const char* s, size_t n) {
 }
 
 static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
-                         const char* e, int in_attr, int whatwg) {
+                         const char* e, int in_attr, int whatwg,
+                         size_t* out_len) {
     size_t cap = (size_t)(e - s) + 8;
     char* out = (char*)leptris_pool_alloc(pool, cap);
     if (!out) return NULL;
@@ -2408,6 +2427,7 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
         out[len++] = *s++;
     }
     out[len] = 0;
+    if (out_len) *out_len = len;
     return out;
 }
 
@@ -2437,6 +2457,11 @@ typedef struct {
      * content REPLACES the body — the commit synthesis emits
      * html > [head, frameset]. */
     int frameset;
+    /* 13.2.5.4.4 frameset-ok: true until non-whitespace body text
+     * or one of the enumerated start tags; a <frameset> converts
+     * the body only while this is true (NUL chars are ignored in
+     * body and do NOT clear it — plain-text-unsafe.dat 2/3/5/6). */
+    int frameset_ok;
     /* #659: structural <head>/<body> tags are dropped but their
      * ATTRIBUTES land on the synthesized elements (name/value
      * pool-string pairs). */
@@ -2583,7 +2608,7 @@ static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
             q = scan;
         }
         char* aval = vs ? h_decode_ex(b->pool, vs, vs + vlen, 1,
-                                      b->whatwg)
+                                      b->whatwg, NULL)
                         : (char*)"";
         if (aname && aval) {
             attrs[(*n)++] = aname;
@@ -2698,6 +2723,18 @@ static int h_is_int_point(HBuilder* b, size_t idx) {
             }
         }
     }
+    return 0;
+}
+
+/* 13.2.5.4.4: start tags that set frameset-ok to false. */
+static int h_clears_frameset_ok(const char* n) {
+    static const char* const yes[] = {
+        "pre", "listing", "li", "dd", "dt", "plaintext", "button",
+        "applet", "marquee", "object", "table", "area", "br",
+        "embed", "img", "keygen", "wbr", "input", "hr", "textarea",
+        "xmp", "iframe", "noembed", "noframes", "select", NULL};
+    for (int i = 0; yes[i]; i++)
+        if (strcmp(n, yes[i]) == 0) return 1;
     return 0;
 }
 
@@ -3906,6 +3943,7 @@ static LeptrisDocument html_parse_shared(
     }
     HBuilder b;
     memset(&b, 0, sizeof(b));
+    b.frameset_ok = 1;
     b.doc = doc;
     b.pool = doc->pool;
     b.whatwg = whatwg;
@@ -3927,10 +3965,11 @@ static LeptrisDocument html_parse_shared(
         if (k1 == '!') {
             /* Flush pending text first. */
             if (text < p) {
-                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
-                        dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                     if (t) {
                         h_reconstruct(&b);
                         h_append(&b, (LeptrisNodeRef)t);
@@ -4153,11 +4192,12 @@ static LeptrisDocument html_parse_shared(
                 const char* ns2 = p + 2;
                 if (b.whatwg && ns2 >= end) {
                     if (text < p) {
-                        char* dec = h_decode_ww(b.pool, text, p, 0,
-                                                b.whatwg);
+                        size_t dlen = 0;
+                        char* dec = h_decode_body(b.pool, text, p,
+                                                  b.whatwg, &dlen);
                         if (dec && *dec) {
                             LeptrisTextNode* t = leptris_text_create(
-                                dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                             if (t) h_append(&b, (LeptrisNodeRef)t);
                         }
                     }
@@ -4171,11 +4211,12 @@ static LeptrisDocument html_parse_shared(
                 if (b.whatwg && !((*ns2 >= 'a' && *ns2 <= 'z') ||
                                   (*ns2 >= 'A' && *ns2 <= 'Z'))) {
                     if (text < p) {
-                        char* dec = h_decode_ww(b.pool, text, p, 0,
-                                                b.whatwg);
+                        size_t dlen = 0;
+                        char* dec = h_decode_body(b.pool, text, p,
+                                                  b.whatwg, &dlen);
                         if (dec && *dec) {
                             LeptrisTextNode* t = leptris_text_create(
-                                dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                             if (t) h_append(&b, (LeptrisNodeRef)t);
                         }
                     }
@@ -4198,10 +4239,11 @@ static LeptrisDocument html_parse_shared(
             if (q < end) q++;
             /* Flush pending text before closing. */
             if (text < p) {
-                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
-                        dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                     if (t) {
                         h_reconstruct(&b);
                         h_append(&b, (LeptrisNodeRef)t);
@@ -4392,10 +4434,11 @@ static LeptrisDocument html_parse_shared(
              * libxml2 keeps a PI node whose data INCLUDES the
              * trailing '?' — content runs to the first '>'. */
             if (text < p) {
-                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
-                        dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                     if (t) {
                         h_reconstruct(&b);
                         h_append(&b, (LeptrisNodeRef)t);
@@ -4455,12 +4498,24 @@ static LeptrisDocument html_parse_shared(
         /* Start tag. Even a dropped structural tag ends the
          * initial insertion mode — later comments are in-flow. */
         b.left_initial = 1;
+        /* 13.2.5.4.4: non-whitespace body text (NUL ignored — an
+         * ignored token cannot clear the flag) clears frameset-ok;
+         * the pending run [text, p) is body text here. */
+        if (b.whatwg && b.frameset_ok && text < p) {
+            for (const char* c = text; c < p; c++)
+                if (*c != 0 && !h_is_ws(*c)) { b.frameset_ok = 0; break; }
+        }
+
         const char* ns = p + 1;
         const char* q = ns;
         while (q < end && !h_is_ws(*q) && *q != '>' && *q != '/') q++;
         size_t nlen = (size_t)(q - ns);
         char* name = h_pooled_lower(b.pool, ns, nlen);
         if (!name) goto done;
+        /* 13.2.5.4.4: the enumerated start tags clear frameset-ok. */
+        if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name)) {
+            b.frameset_ok = 0;
+        }
 
         /* Structural tags at top level (no explicit <html> open):
          * WHATWG's implicit head/body phases — the commit-time
@@ -4493,16 +4548,20 @@ static LeptrisDocument html_parse_shared(
          * ignored. Inside an open frameset it nests. html/head/
          * body tokens in frameset context are dropped. */
         if (b.whatwg && strcmp(name, "frameset") == 0) {
-            if (!b.frameset && b.depth == 0 && h_body_still_empty(&b)) {
+            /* depth<=1: at most the (explicit or synthesized) html
+             * element is open; frameset-ok is the spec gate and the
+             * body is removed wholesale when it converts. */
+            if (!b.frameset && b.depth <= 1 && b.frameset_ok) {
                 b.frameset = 1;
                 /* falls through: the normal open pushes it */
             } else if (!(b.frameset && b.depth > 0)) {
                 /* Dropped token: flush pending text first. */
                 if (text < p) {
-                    char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                    size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
                     if (dec && *dec) {
                         LeptrisTextNode* t = leptris_text_create(
-                            dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                         if (t) h_append(&b, (LeptrisNodeRef)t);
                     }
                 }
@@ -4527,10 +4586,11 @@ static LeptrisDocument html_parse_shared(
              * (html5lib template.dat:64-67 — attrs do NOT merge
              * onto the outer elements). */
             if (text < p) {
-                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
-                        dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                     if (t) h_append(&b, (LeptrisNodeRef)t);
                 }
             }
@@ -4548,8 +4608,9 @@ static LeptrisDocument html_parse_shared(
             strcmp(name, "frame") != 0 &&
             strcmp(name, "noframes") != 0) {
             if (text < p) {
-                char* dec =
-                    h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                size_t dlen = 0;
+                    char* dec =
+                        h_decode_body(b.pool, text, p, b.whatwg, &dlen);
                 if (dec && *dec) {
                     int ws = 1;
                     for (const char* q2 = dec; *q2; q2++)
@@ -4559,7 +4620,7 @@ static LeptrisDocument html_parse_shared(
                         }
                     if (ws) {
                         LeptrisTextNode* t = leptris_text_create(
-                            dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                         if (t)
                             h_append(&b, (LeptrisNodeRef)t);
                     }
@@ -4573,10 +4634,11 @@ static LeptrisDocument html_parse_shared(
 
         /* Flush pending text before the element. */
         if (text < p) {
-            char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+            size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
             if (dec && *dec) {
                 LeptrisTextNode* t =
-                    leptris_text_create(dec, strlen(dec), b.pool);
+                    leptris_text_create(dec, dlen, b.pool);
                 if (t) {
                     h_reconstruct(&b);
                     h_append(&b, (LeptrisNodeRef)t);
@@ -4787,10 +4849,11 @@ static LeptrisDocument html_parse_shared(
         }
         if (tmpl_act == 1) {
             if (text < p) {
-                char* dec = h_decode_ww(b.pool, text, p, 0, b.whatwg);
+                size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
-                        dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                     if (t) h_append(&b, (LeptrisNodeRef)t);
                 }
             }
@@ -4971,7 +5034,7 @@ static LeptrisDocument html_parse_shared(
             char* aval;
             if (vs) {
                 aval = h_decode_ex(b.pool, vs, vs + vlen, 1,
-                                   b.whatwg);
+                                   b.whatwg, NULL);
             } else {
                 /* Minimized (boolean) attribute: value is the EMPTY
                  * string (html5lib/Nokogiri DOM: checked=""). */
@@ -5091,11 +5154,12 @@ static LeptrisDocument html_parse_shared(
                         cs++;
                         clen--;
                     }
-                    char* dec =
-                        h_decode_ww(b.pool, cs, cs + clen, 0, b.whatwg);
+                    size_t dlen = 0;
+                    char* dec = h_decode_ex(b.pool, cs, cs + clen, 0,
+                                            b.whatwg, &dlen);
                     if (dec) {
                         LeptrisTextNode* t = leptris_text_create(
-                            dec, strlen(dec), b.pool);
+                        dec, dlen, b.pool);
                         if (t)
                             leptris_element_append_child_internal_doc(
                                 e, (LeptrisNodeRef)t, b.doc);
@@ -5140,10 +5204,11 @@ static LeptrisDocument html_parse_shared(
 
     /* Trailing text. */
     if (text < end) {
-        char* dec = h_decode_ww(b.pool, text, end, 0, b.whatwg);
+        size_t dlen = 0;
+        char* dec = h_decode_body(b.pool, text, end, b.whatwg, &dlen);
         if (dec && *dec) {
             LeptrisTextNode* t =
-                leptris_text_create(dec, strlen(dec), b.pool);
+                leptris_text_create(dec, dlen, b.pool);
             if (t) {
                 h_reconstruct(&b);
                 h_append(&b, (LeptrisNodeRef)t);
