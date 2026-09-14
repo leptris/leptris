@@ -191,16 +191,20 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
                         xpath_nodeset_free(xv->value.v.nodeset_value);
                     xv->value.v.nodeset_value = NULL;
                     if (v->value && v->value->value.nodeset_value) {
-                        XPathNodeSet* copy =
-                            xpath_nodeset_new_with_capacity(
-                                v->value->value.nodeset_value->count);
-                        if (copy) {
-                            for (size_t i = 0;
-                                 i < v->value->value.nodeset_value->count; i++)
-                                xpath_nodeset_add(copy,
-                                    v->value->value.nodeset_value->nodes[i]);
-                            xpath_variable_set_nodeset(xv, copy);
-                        }
+                        /* Deep copy (#1066): owned synthetic text
+                         * members must be COPIED with their
+                         * owns_synthetic_text flag — a plain pointer
+                         * copy drops the flag, so the variable-lookup
+                         * guard (which deep-copies only when the
+                         * varset nodeset owns its synthetics) skips
+                         * and sequence consumers alias the binding's
+                         * nodes. xsl:iterate param-threaded sequences
+                         * then read freed storage after the scope
+                         * pop ("alpha,beta,gamma" -> ",,gamma").
+                         * Document nodes are still borrowed. */
+                        XPathNodeSet* copy = xpath_nodeset_deep_copy(
+                            v->value->value.nodeset_value);
+                        if (copy) xpath_variable_set_nodeset(xv, copy);
                     }
                 }
                 break;
@@ -1908,12 +1912,17 @@ static struct leptris_xpath_result* result_clone_borrowed(
             out->value.boolean_value = src->value.boolean_value;
             break;
         case XPATH_RESULT_NODESET: {
-            XPathNodeSet* sn = src->value.nodeset_value;
-            XPathNodeSet* dn = xpath_nodeset_new();
-            if (!dn) break;
-            for (size_t i = 0; sn && i < sn->count; i++)
-                xpath_nodeset_add(dn, sn->nodes[i]);
-            out->value.nodeset_value = dn;
+            /* Deep copy (#1066): an OWNING nodeset's synthetic text
+             * members must not stay aliased — the source (an
+             * xsl:iterate param) is freed on the next-iteration
+             * frame rebuild while the pushed binding lives on, and
+             * the variable-lookup deep-copy guard keys on
+             * owns_synthetic_text (a borrowed clone clears it, so
+             * accumulated sequence items dangled -> empty strings).
+             * Document nodes are still borrowed; owned synthetics
+             * are copied. */
+            out->value.nodeset_value =
+                xpath_nodeset_deep_copy(src->value.nodeset_value);
             break;
         }
         default: break;
