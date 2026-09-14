@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: script-data state machine v2 (#659 family B)** — the complete WHATWG 13.2.5.5-.33 state set (16 states) replaces the coarse escaped/double-escaped flags inside `<script>`: close-tag boundary via the scanner, raw-text NUL -> U+FFFD, no EOF tail (the corpus emits none). Three spec edges fixed in the double-escaped chain: `</script>` while double-escaped drops one level to escaped (never plain data — this makes the re-entry chain work, tests16:64-69/161-166); double-escape entry requires the delimiter after the tag name (`<sCrIpt'` stays escaped, scriptdata01:15/24); the less-than-sign states reconsume the current character (`<!-- foo-<</script>` now closes, domjs-unsafe:10). html5lib corpus 1226 -> 1238 (0 breaks, 12 net fixes); Nokogiri parity floor held at 784/1555; suite 1483/1483.
 
 
 ## [1.9.164] - 2026-09-14
