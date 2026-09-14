@@ -1525,3 +1525,23 @@ TEST(HtmlParse, FramesetOkFlagGatesBodyReplacement) {
     EXPECT_EQ(HtmlN("<html>a\x00" "a<frameset></frameset>", 30),
               "<html><head/><body>aa</body></html>");
 }
+
+TEST(HtmlParse, ForeignAttrAdjustTablesKeepSvgAndMathmlCase) {
+    /* #1013: WHATWG adjust-tables apply inside foreign content —
+     * element names (foreignObject/linearGradient) already adjust;
+     * ATTRIBUTES must too (viewBox, attributeType, definitionURL).
+     * The attributeType entry had a typo'd key ("attribution") so
+     * <svg attributeType=...> stayed lowercased (tests11:1-3). */
+    EXPECT_EQ(Html("<svg viewBox=\"0 0 1 1\" attributeType=\"CSS\">"
+                   "<foreignObject><p>x</p></foreignObject>"
+                   "<linearGradient id=\"g\"/></svg>"),
+              "<svg viewBox=\"0 0 1 1\" attributeType=\"CSS\">"
+              "<foreignObject><p>x</p></foreignObject>"
+              "<linearGradient id=\"g\"/></svg>");
+    /* MathML: definitionurl -> definitionURL (the corpus casing,
+     * tests19:12). */
+    EXPECT_EQ(Html("<math definitionurl=\"foo\"/>"),
+              "<math definitionURL=\"foo\"/>");
+    /* HTML attrs OUTSIDE foreign content stay lowercase. */
+    EXPECT_EQ(Html("<p ATTRIBUTETYPE=\"x\"/>"), "<p attributetype=\"x\"/>");
+}

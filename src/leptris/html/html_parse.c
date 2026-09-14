@@ -2802,7 +2802,7 @@ static const char* h_attr_name(int ns, const char* n) {
         const char *lo, *adj;
     } k[] = {
         {"attributename", "attributeName"},
-        {"attribution", "attributeType"},
+        {"attributetype", "attributeType"},
         {"basefrequency", "baseFrequency"},
         {"baseprofile", "baseProfile"},
         {"calcmode", "calcMode"},
