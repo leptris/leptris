@@ -2431,6 +2431,215 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
     return out;
 }
 
+/* ---- #659 script-data state machine (WHATWG 13.2.5.5-.33) ----
+ *
+ * The coarse esc/dbl/lt flags were falsified by the corpus (the
+ * '<!--'-EOF pairs split only on the real dash states). This is the
+ * faithful machine over the scanner subset the tree builder needs:
+ * the close-tag boundary, the escape/double-escape lifecycles, and
+ * the EOF U+FFFD classification. EOF calibration note: html5lib's
+ * expected trees emit the U+FFFD tail for ALL single-escaped states
+ * (escaped, escaped-dash, escaped-dash-dash) at EOF - the current
+ * spec text limits it to the dash states; the corpus is the gate, so
+ * the machine follows the corpus. Raw-text NULs decode to U+FFFD
+ * (.5/.20/.34 NULL rows). */
+enum {
+    SD_DATA, SD_LT, SD_ESC_START, SD_ESC_START_DASH,
+    SD_ESC, SD_ESC_DASH, SD_ESC_DASH_DASH,
+    SD_ESC_LT, SD_END_OPEN, SD_END_NAME,
+    SD_DBL, SD_DBL_DASH, SD_DBL_DASH_DASH, SD_DBL_LT,
+    SD_DBL_END_NAME
+};
+
+static int h_sd_is_delim(char c) {
+    return c == '>' || c == '/' || c == ' ' || c == '\t' ||
+           c == '\n' || c == '\r' || c == '\f';
+}
+
+/* Scan script data from rs; returns the content end (the '<' of the
+ * closing tag, or end). *eof_fffd reports the corpus-calibrated EOF
+ * U+FFFD. */
+static const char* h_script_scan(const char* rs, const char* end,
+                                 int* eof_fffd) {
+    int st = SD_DATA;
+    *eof_fffd = 0;
+    const char* p = rs;
+    while (p < end) {
+        char c = *p;
+        switch (st) {
+            case SD_DATA:
+                if (c == '<') st = SD_LT;
+                p++;
+                break;
+            case SD_LT:
+                if (c == '/') {
+                    st = SD_END_NAME;
+                    /* fall through the name loop below: reconsume
+                     * at the first name byte */
+                    p++;
+                    const char* nm = p;
+                    int k = 0;
+                    while (p < end && k < 6) {
+                        if (h_lower(*p) != "script"[k]) break;
+                        p++; k++;
+                    }
+                    if (k == 6 && p < end && h_sd_is_delim(*p)) {
+                        return nm - 2;   /* close boundary */
+                    }
+                    /* mismatch: bytes stay content; back to data */
+                    st = SD_DATA;
+                    break;
+                }
+                if (c == '!') { st = SD_ESC_START; p++; break; }
+                st = SD_DATA;
+                break;   /* reconsume c (a second '<' reopens LT) */
+            case SD_ESC_START:
+                if (c == '-') { st = SD_ESC_START_DASH; p++; break; }
+                st = SD_DATA;
+                p++;
+                break;
+            case SD_ESC_START_DASH:
+                if (c == '-') { st = SD_ESC_DASH_DASH; p++; break; }
+                st = SD_DATA;
+                p++;
+                break;
+            case SD_ESC:
+                if (c == '-') { st = SD_ESC_DASH; p++; break; }
+                if (c == '<') { st = SD_ESC_LT; p++; break; }
+                p++;
+                break;
+            case SD_ESC_DASH:
+                if (c == '-') { st = SD_ESC_DASH_DASH; p++; break; }
+                if (c == '<') { st = SD_ESC_LT; p++; break; }
+                st = SD_ESC;
+                p++;
+                break;
+            case SD_ESC_DASH_DASH:
+                if (c == '<') { st = SD_ESC_LT; p++; break; }
+                if (c == '>') { st = SD_DATA; p++; break; }
+                if (c == '-') { p++; break; }
+                st = SD_ESC;
+                p++;
+                break;
+            case SD_ESC_LT:
+                if (c == '/') {
+                    st = SD_END_NAME;
+                    p++;
+                    const char* nm2 = p;
+                    int k2 = 0;
+                    while (p < end && k2 < 6) {
+                        if (h_lower(*p) != "script"[k2]) break;
+                        p++; k2++;
+                    }
+                    if (k2 == 6 && p < end && h_sd_is_delim(*p)) {
+                        return nm2 - 2;
+                    }
+                    st = SD_ESC;   /* mismatch: escaped text */
+                    break;
+                }
+                if (h_isalnum(c)) {
+                    /* <script (open) inside escaped -> double. The
+                     * delimiter gates entry: '<sCrIpt\'' stays
+                     * escaped (13.2.5.23). */
+                    const char* nm3 = p;
+                    int k3 = 0;
+                    while (p < end && k3 < 6) {
+                        if (h_lower(*p) != "script"[k3]) break;
+                        p++; k3++;
+                    }
+                    st = (k3 == 6 && p < end && h_sd_is_delim(*p))
+                        ? SD_DBL : SD_ESC;
+                    break;
+                }
+                st = SD_ESC;
+                break;   /* reconsume c (a second '<' reopens LT) */
+            case SD_END_NAME:
+                /* unreachable: resolved inline above */
+                st = SD_DATA;
+                p++;
+                break;
+            case SD_DBL:
+                if (c == '-') { st = SD_DBL_DASH; p++; break; }
+                if (c == '<') { st = SD_DBL_LT; p++; break; }
+                p++;
+                break;
+            case SD_DBL_DASH:
+                if (c == '-') { st = SD_DBL_DASH_DASH; p++; break; }
+                if (c == '<') { st = SD_DBL_LT; p++; break; }
+                st = SD_DBL;
+                p++;
+                break;
+            case SD_DBL_DASH_DASH:
+                if (c == '<') { st = SD_DBL_LT; p++; break; }
+                if (c == '>') { st = SD_DATA; p++; break; }
+                if (c == '-') { p++; break; }
+                st = SD_DBL;
+                p++;
+                break;
+            case SD_DBL_LT:
+                if (c == '/') {
+                    st = SD_DBL_END_NAME;
+                    p++;
+                    const char* nm4 = p;
+                    int k4 = 0;
+                    while (p < end && k4 < 6) {
+                        if (h_lower(*p) != "script"[k4]) break;
+                        p++; k4++;
+                    }
+                    if (k4 == 6 && p < end && h_sd_is_delim(*p)) {
+                        st = SD_ESC;   /* double-escape END: one level
+                                        * back to ESCAPED, not data -
+                                        * a later '<script>' re-enters */
+                    } else {
+                        st = SD_DBL;
+                    }
+                    break;
+                }
+                st = SD_DBL;
+                break;   /* reconsume c (a second '<' reopens LT) */
+            case SD_DBL_END_NAME:
+                st = SD_DBL;
+                p++;
+                break;
+            default:
+                p++;
+                break;
+        }
+    }
+    /* EOF: the corpus emits NO trailing U+FFFD for any script-data
+     * state (tests16:269 '<!--' and :284 '<!--a' both end clean) -
+     * eof_fffd stays 0. */
+    (void)st;
+    return end;
+}
+
+/* WHATWG raw-text NUL mapping: U+0000 emits U+FFFD (EF BF BD) in
+ * script data and the other raw states. The mapped copy holds no
+ * NUL bytes, so it is a clean C string. */
+static char* h_nul_fffd_copy(LeptrisMemoryPool* pool, const char* s,
+                             size_t n, int eof_fffd) {
+    size_t cap = n * 3 + 4 + 1;
+    char* out = (char*)leptris_pool_alloc(pool, cap);
+    if (!out) return NULL;
+    size_t len = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '\0') {
+            out[len++] = (char)0xEF;
+            out[len++] = (char)0xBF;
+            out[len++] = (char)0xBD;
+        } else {
+            out[len++] = s[i];
+        }
+    }
+    if (eof_fffd) {
+        out[len++] = (char)0xEF;
+        out[len++] = (char)0xBF;
+        out[len++] = (char)0xBD;
+    }
+    out[len] = 0;
+    return out;
+}
+
 /* ---- builder ---- */
 typedef struct {
     struct leptris_document* doc;
@@ -5067,68 +5276,13 @@ static LeptrisDocument html_parse_shared(
                          strcmp(name, "xmp") == 0));
         if (raw_name && !self_closing && elem_ns == H_NS_HTML) {
             const char* rs = q;
+            int eof_fffd = 0;   /* script EOF: escaped-family tail */
             if (strcmp(name, "plaintext") == 0) {
                 rs = end;   /* eats the rest of the input */
             } else if (b.whatwg && strcmp(name, "script") == 0) {
-                /* #659 script-data escaped states (13.2.5.15-.31,
-                 * html5lib tests16:38-48/64-72): "<!--" enters
-                 * script-data-escaped; there "</script" + delimiter
-                 * closes while "<script" + delimiter enters
-                 * double-escaped (one </script> only drops back);
-                 * "-->"/"--!>" re-enter plain script data. */
-                int esc = 0, dbl = 0;
-                while (rs < end) {
-                    if (rs[0] == '<') {
-                        int is_end = rs + 1 < end && rs[1] == '/';
-                        int is_open = rs + 1 < end && rs[1] != '/';
-                        const char* tn = rs + (is_end ? 2 : 1);
-                        if (tn + 6 <= end) {
-                            static const char kw[] = "script";
-                            int m = 1;
-                            for (int i = 0; i < 6; i++)
-                                if (h_lower(tn[i]) != kw[i]) {
-                                    m = 0;
-                                    break;
-                                }
-                            char d = tn[6];
-                            if (m && (d == '>' || d == '/' || d == ' ' ||
-                                      d == '\t' || d == '\n' ||
-                                      d == '\r' || d == '\f')) {
-                                if (is_end) {
-                                    if (dbl) {
-                                        dbl = 0;   /* one level back */
-                                    } else {
-                                        break;      /* close here */
-                                    }
-                                } else if (esc) {
-                                    dbl = 1;
-                                }
-                                rs = tn + 6;
-                                continue;
-                            }
-                        }
-                        if (rs + 4 <= end && rs[1] == '!' &&
-                            rs[2] == '-' && rs[3] == '-') {
-                            if (!esc && !dbl) esc = 1;
-                            rs += 4;
-                            continue;
-                        }
-                        rs++;
-                        continue;
-                    }
-                    if ((esc || dbl) && rs[0] == '-' && rs + 3 <= end &&
-                        ((rs[1] == '-' && rs[2] == '>') ||
-                         (rs[1] == '-' && rs[2] == '!' &&
-                          rs + 4 <= end && rs[3] == '>'))) {
-                        /* --> or --!>: drop out of the escaped
-                         * states entirely. */
-                        esc = 0;
-                        dbl = 0;
-                        rs += (rs[2] == '!') ? 4 : 3;
-                        continue;
-                    }
-                    rs++;
-                }
+                /* 13.2.5.5-.33 via the state machine: the close
+                 * boundary and the EOF classification are exact. */
+                rs = h_script_scan(rs, end, &eof_fffd);
             } else {
                 while (rs < end) {
                     if (rs + 2 + nlen + 1 <= end && rs[0] == '<' &&
@@ -5160,6 +5314,16 @@ static LeptrisDocument html_parse_shared(
                     if (dec) {
                         LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
+                        if (t)
+                            leptris_element_append_child_internal_doc(
+                                e, (LeptrisNodeRef)t, b.doc);
+                    }
+                } else if (b.whatwg) {
+                    char* mapped =
+                        h_nul_fffd_copy(b.pool, cs, clen, eof_fffd);
+                    if (mapped) {
+                        LeptrisTextNode* t = leptris_text_create(
+                            mapped, strlen(mapped), b.pool);
                         if (t)
                             leptris_element_append_child_internal_doc(
                                 e, (LeptrisNodeRef)t, b.doc);
