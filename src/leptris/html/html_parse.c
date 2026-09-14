@@ -4003,6 +4003,9 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
     LeptrisNodeRef head_start = NULL;      /* first head-run node */
     LeptrisNodeRef prefix_last = NULL;
     size_t prefix_count = 0;
+    /* #659 an explicit <head> child of html IS the head element —
+     * adopt it, never wrap it in a synthesized one (tests1:7/8). */
+    LeptrisNodeRef explicit_head = NULL;
     int past_head_tag =
         (b->head_tag_seen && !b->head_tag_tail);
     int past_head_end =
@@ -4044,9 +4047,35 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                 }
                 break;
             }
+            if (hty == LEPTRIS_NODE_TYPE_TEXT) {
+                /* "in head" whitespace stays head content (13.2.6.4.4
+                 * inserts whitespace into the current node; tests1:51);
+                 * non-whitespace text switches to body. */
+                if (b->whatwg_head_set && head_start) {
+                    const char* tx = leptris_text_node_get_content(
+                        (LeptrisTextNode*)head_end);
+                    int ws = 1;
+                    if (tx)
+                        for (const char* w = tx; *w; w++)
+                            if (!h_is_ws(*w)) { ws = 0; break; }
+                    if (ws) {
+                        head_end =
+                            leptris_node_get_next_sibling(head_end);
+                        continue;
+                    }
+                }
+                break;
+            }
             if (hty != LEPTRIS_NODE_TYPE_ELEMENT)
                 break;
             const char* hn = leptris_element_name((LeptrisElement)head_end);
+            /* An explicit <head> child IS the head element — adopt
+             * it; the head run ends at it (tests1:7/8). */
+            if (h_ieq_raw(hn, "head")) {
+                explicit_head = head_end;
+                head_end = leptris_node_get_next_sibling(head_end);
+                break;
+            }
             /* #659 two modes: WHATWG lifts the full "in head" set;
              * the html4-compat entry lifts only title/meta/link/
              * base (libxml2 leaves leading script/style in body). */
@@ -4086,17 +4115,22 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
     }
 
     /* <head> spliced in as the first child (after any html prefix),
-     * owning the head run. */
+     * owning the head run. An explicit <head> child is ADOPTED as
+     * the head element itself (tests1:7/8). */
     LeptrisElement html_first_new = NULL;
     int head_spliced = 0;
-    if (head_start) {
-        LeptrisElement head = h_create_unattached(b, "head");
+    if (head_start || explicit_head) {
+        int adopt = explicit_head != NULL;
+        LeptrisElement head =
+            adopt ? (LeptrisElement)explicit_head
+                  : h_create_unattached(b, "head");
         if (head) {
             head_spliced = 1;
             html_first_new = head;
             size_t hn = 0;
             LeptrisNodeRef hlast = NULL;
-            for (LeptrisNodeRef c = head_start; c && c != head_end; ) {
+            for (LeptrisNodeRef c = head_start;
+                 c && c != (adopt ? explicit_head : head_end); ) {
                 LeptrisNodeRef next = leptris_node_get_next_sibling(c);
                 /* The run can carry comments (WHATWG in-head) —
                  * set_parent must go through the node-kind setter,
@@ -4124,9 +4158,26 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                 hn++;
                 c = next;
             }
-            leptris_elem_set_first_child(head, head_start);
-            leptris_elem_set_last_child(head, hlast);
-            head->child_count = hn;
+            if (!adopt) {
+                leptris_elem_set_first_child(head, head_start);
+                leptris_elem_set_last_child(head, hlast);
+                head->child_count = hn;
+            } else if (hlast) {
+                /* Adopted head keeps its own children; the run
+                 * appends after them. */
+                LeptrisNodeRef lc =
+                    leptris_node_first_child((LeptrisNodeRef)head);
+                while (lc &&
+                       leptris_node_get_next_sibling(lc))
+                    lc = leptris_node_get_next_sibling(lc);
+                if (lc) {
+                    leptris_node_set_next_sibling(lc, head_start);
+                } else {
+                    leptris_elem_set_first_child(head, head_start);
+                }
+                leptris_elem_set_last_child(head, hlast);
+                head->child_count = (uint16_t)(head->child_count + hn);
+            }
             if (hlast) leptris_node_set_next_sibling(hlast, NULL);
             leptris_node_set_next_sibling((LeptrisNodeRef)head, rest);
             if (prefix_last) {

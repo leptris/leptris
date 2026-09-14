@@ -421,6 +421,21 @@ TEST(HtmlParse, ImageStartTagIsRenamedImg) {
     EXPECT_EQ(Html("<p><image></p>"), "<p><img/></p>");
 }
 
+TEST(HtmlParse, ExplicitHeadIsAdoptedAndKeepsWsText) {
+    /* #659: an explicit <head> child of html IS the head element —
+     * adopted, never wrapped (tests1:7/8); "in head" whitespace
+     * stays head content while non-ws text switches to body
+     * (tests1:51). */
+    EXPECT_EQ(Html("<html><head>"),
+              "<html><head/><body/></html>");
+    EXPECT_EQ(Html("<html><head></head>"),
+              "<html><head/><body/></html>");
+    EXPECT_EQ(Html("<!DOCTYPE html><script> <!-- </script> --> "
+                   "</script> EOF"),
+              "<!DOCTYPE html><html><head><script> &lt;!-- "
+              "</script></head><body> --&gt;  EOF</body></html>");
+}
+
 TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
     /* #659 (13.2.6.3): a second <html> start tag merges its
      * attributes onto the existing html element and is dropped
