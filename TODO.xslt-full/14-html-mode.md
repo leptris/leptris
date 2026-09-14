@@ -585,3 +585,29 @@ CONTAMINATED commit — do not trust those file attributions.
 NOTE: FramesetOkFlagGatesBodyReplacement on the branch is the RED
 driver for the re-land (it fails against the reverted code by
 design — the branch is the campaign branch, not merge-ready).
+
+## Update 2026-09-14 (q): CLEAN RE-LAND — 1206 -> 1226 (+20); #1013
+## CLOSED-SIDE; #1039 closed
+
+#1013 (foreign adjust-tables): everything already existed EXCEPT one
+typo'd table key — "attribution" instead of "attributetype" (the
+close-tag foreign matcher was already case-insensitive for adjusted
+names; h_svg_name + h_attr_name were complete). One-key fix; corpus
++3 (tests11:1-3, the 56-attr torture case). definitionURL casing
+confirmed against tests19:12 (capital URL).
+
+Slice A re-landed CLEAN (PR #1060): frameset_ok flag + depth<=1 gate
++ h_decode_body (decoder out-length NUL drop — the naive compact
+helper cannot work: a C-string scan stops at the embedded NUL being
+compacted; the LENGTH must come from the decoder). Fresh-dir floors:
+1206 -> 1209 (typo) -> 1226 (slice A); parity 784 held; suite
+1477/1477. The reverted first attempt's -38 was ENTIRELY the stash
+contamination, not the frameset work.
+
+Campaign state: 329 html5lib reds remain. NEXT per the ledger: the
+12-state script-data machine (slice B — the coarse esc/dbl/lt model
+is falsified), then C (second-html merge rules), D (select
+close/re-entry), E (ruby closes), F (after-head text), G (misc
+tests1). #1039 closed (C side = v1.9.162); open issues now: #1015
+(C14N four-family divergences), #878 (RNG), #682 (dispatch 2x bar),
+#659.
