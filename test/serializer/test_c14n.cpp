@@ -359,3 +359,79 @@ TEST(C14NXml11, AcceptsVersion11WithoutCrash) {
     leptris_free_string(out);
     leptris_document_free(doc);
 }
+
+/* ---- #1015: C14N 1.1 divergence families (canon's 16-case edge
+ * corpus). All four RED against the native lane when filed. ---- */
+
+TEST(C14n11, AttributeOrderNoNamespaceFirstThenPerNamespace) {
+    /* Spec §2.3: no-namespace attrs sorted by name, THEN namespaced
+     * attrs (by URI, then name). Native emitted ns attrs before the
+     * no-ns block AND misordered z vs x:n. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<e z=\"1\" a=\"2\" m=\"3\" x:n=\"4\" xmlns:x=\"urn:x\"/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_1, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(std::string(out),
+              "<e xmlns:x=\"urn:x\" a=\"2\" m=\"3\" z=\"1\""
+              " x:n=\"4\"></e>") << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(C14n11, PrefixedElementKeepsPrefix) {
+    /* §2.1: prefixes stay; native dropped x: from <x:b/> (namespace
+     * changed!). Also the rebinding case: p: under a re-bound p
+     * keeps its prefixes. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<root xmlns=\"urn:r\" xmlns:x=\"urn:x\"><x:b/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_1, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out, "<x:b></x:b>"), nullptr) << out;
+    EXPECT_EQ(std::strstr(out, "<b></b>"), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(C14n11, TextAndAttributeEscaping) {
+    /* Spec: '&' '<' '>' escaped in text; '&' '<' '"' TAB CR LF
+     * escaped in attribute values. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<r>t > w</r>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_1, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out, "t &gt; w"), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+
+    const char xml2[] = "<unicode><x y=\"&#9;\">z</x></unicode>";
+    LeptrisDocument doc2 = leptris_parse_string(xml2, std::strlen(xml2), &st);
+    ASSERT_NE(doc2, nullptr);
+    char* out2 = leptris_c14n_canonicalize(doc2, LEPTRIS_C14N_1_1, 0);
+    ASSERT_NE(out2, nullptr);
+    EXPECT_NE(std::strstr(out2, "y=\"&#x9;\""), nullptr) << out2;
+    leptris_free_string(out2);
+    leptris_document_free(doc2);
+}
+
+TEST(C14n11, DocumentLevelPIsKept) {
+    /* §2.4/PImode: prolog and epilog processing instructions stay
+     * outside the document element. Native dropped them. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<?xml version=\"1.0\"?><?target data?><r/><?after d2?>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_1, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out, "<?target data?>"), nullptr) << out;
+    EXPECT_NE(std::strstr(out, "<?after d2?>"), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}

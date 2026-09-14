@@ -47,17 +47,18 @@
 /**
  * Helper function to escape text for C14N output
  *
- * C14N 1.0 escaping rules:
- * - In text content: < and & must be escaped
- * - In attribute values: <, &, and " must be escaped
+ * C14N escaping rules (REC-xml-c14n §2.3, issue #1015):
+ * - In text content: <, >, & and CR are escaped (&lt; &gt; &amp; &#xD;)
+ * - In attribute values: <, & and " are escaped (&lt; &amp; &quot;);
+ *   TAB, CR and LF use numeric refs (&#x9; &#xD; &#xA;)
  *
  * Returns a newly allocated string that must be freed
  */
 static char* c14n_escape_text(const char* text, int is_attribute_value) {
     if (!text) return NULL;
 
-    /* Count how much space we need
-     * C14N spec requires: <, &, \r always escaped; " escaped in attributes */
+    /* Count how much space we need (counts are the FULL replacement
+     * length — the delta overallocates, which is safe). */
     size_t len = strlen(text);
     size_t escape_count = 0;
     for (size_t i = 0; i < len; i++) {
@@ -67,8 +68,16 @@ static char* c14n_escape_text(const char* text, int is_attribute_value) {
             escape_count += 5;  /* &amp; */
         } else if (text[i] == '\r') {
             escape_count += 5;  /* &#xD; (C14N requires \r to be escaped) */
-        } else if (is_attribute_value && text[i] == '"') {
-            escape_count += 6;  /* &quot; */
+        } else if (is_attribute_value) {
+            if (text[i] == '"') {
+                escape_count += 6;  /* &quot; */
+            } else if (text[i] == '\t') {
+                escape_count += 5;  /* &#x9; */
+            } else if (text[i] == '\n') {
+                escape_count += 5;  /* &#xA; */
+            }
+        } else if (text[i] == '>') {
+            escape_count += 4;  /* &gt; */
         }
     }
 
@@ -82,7 +91,7 @@ static char* c14n_escape_text(const char* text, int is_attribute_value) {
     char* escaped = (char*)malloc(new_len + 1);
     if (!escaped) return NULL;
 
-    /* Escape characters (C14N spec: <, &, \r always escaped; " escaped in attributes) */
+    /* Escape characters (mirror of the counting loop above) */
     size_t j = 0;
     for (size_t i = 0; i < len; i++) {
         if (text[i] == '<') {
@@ -94,9 +103,22 @@ static char* c14n_escape_text(const char* text, int is_attribute_value) {
         } else if (text[i] == '\r') {
             memcpy(&escaped[j], "&#xD;", 5);
             j += 5;
-        } else if (is_attribute_value && text[i] == '"') {
-            memcpy(&escaped[j], "&quot;", 6);
-            j += 6;
+        } else if (is_attribute_value) {
+            if (text[i] == '"') {
+                memcpy(&escaped[j], "&quot;", 6);
+                j += 6;
+            } else if (text[i] == '\t') {
+                memcpy(&escaped[j], "&#x9;", 5);
+                j += 5;
+            } else if (text[i] == '\n') {
+                memcpy(&escaped[j], "&#xA;", 5);
+                j += 5;
+            } else {
+                escaped[j++] = text[i];
+            }
+        } else if (text[i] == '>') {
+            memcpy(&escaped[j], "&gt;", 4);
+            j += 4;
         } else {
             escaped[j++] = text[i];
         }
@@ -168,8 +190,11 @@ static LEPTRIS_THREAD_LOCAL int c14n_include_comments = 0;
 static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* size, size_t* capacity) {
     if (!elem) return;
 
-    /* Get element name */
+    /* Get element name. #1015: canonical form keeps the original
+     * prefix (REC-xml-c14n §2.1) — print prefix:local, mirroring
+     * c14n_serialize_element_excl. */
     const char* name = leptris_element_get_name(elem);
+    const char* prefix = leptris_element_get_prefix(elem);
 
     /* Get attribute count using accessor */
     uint8_t attr_count = leptris_element_attribute_count(elem);
@@ -218,7 +243,12 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
     }
 
     /* Start opening tag */
-    len = snprintf(temp, sizeof(temp), "<%s", name ? name : "element");
+    if (prefix) {
+        len = snprintf(temp, sizeof(temp), "<%s:%s", prefix,
+                       name ? name : "element");
+    } else {
+        len = snprintf(temp, sizeof(temp), "<%s", name ? name : "element");
+    }
     APPEND_STRING(temp, len);
 
     /* Add namespace declarations, sorted by prefix with the default
@@ -295,7 +325,13 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
     /* Close opening tag */
     if (!has_children && !has_content) {
         /* Empty element: <tag></tag> (NOT <tag/>) */
-        len = snprintf(temp, sizeof(temp), "></%s>", name ? name : "element");
+        if (prefix) {
+            len = snprintf(temp, sizeof(temp), "></%s:%s>", prefix,
+                           name ? name : "element");
+        } else {
+            len = snprintf(temp, sizeof(temp), "></%s>",
+                           name ? name : "element");
+        }
         APPEND_STRING(temp, len);
     } else {
         len = snprintf(temp, sizeof(temp), ">");
@@ -364,13 +400,37 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
         }
 
         /* Closing tag */
-        len = snprintf(temp, sizeof(temp), "</%s>", name ? name : "element");
+        if (prefix) {
+            len = snprintf(temp, sizeof(temp), "</%s:%s>", prefix,
+                           name ? name : "element");
+        } else {
+            len = snprintf(temp, sizeof(temp), "</%s>",
+                           name ? name : "element");
+        }
         APPEND_STRING(temp, len);
     }
 
     /* Cleanup */
     if (sorted_attrs) free(sorted_attrs);
 
+cleanup:
+    return;
+}
+
+/* Append one PI in canonical form: <?target data?> (empty data →
+ * <?target?>). Shared by the prolog and epilog (#1015) passes. */
+static void c14n_append_pi(LeptrisPINode* pi, char** buffer, size_t* size,
+                           size_t* capacity) {
+    if (!pi || !pi->target) return;
+
+    char temp[512];
+    int len = snprintf(temp, sizeof(temp), "<?%s", pi->target);
+    APPEND_STRING(temp, len);
+    if (pi->data && *pi->data) {
+        APPEND_STRING(" ", 1);
+        APPEND_STRING(pi->data, (int)strlen(pi->data));
+    }
+    APPEND_STRING("?>", 2);
 cleanup:
     return;
 }
@@ -398,84 +458,34 @@ LEPTRIS_API char* leptris_c14n_canonicalize(struct leptris_document* doc, int ve
     if (!buf) return NULL;
     buf[0] = '\0';
 
-    /* Add document-level processing instructions before the root
-     * element (issue #580: the document child chain, prolog nodes
-     * only — C14N document order). */
+    /* Document-level PIs (issue #580): the document child chain in
+     * C14N document order — prolog PIs before the root, epilog PIs
+     * (#1015) after it. The XML declaration is not a node. */
     LeptrisNode* c14n_root_node = (LeptrisNode*)root;
+    char* buffer = buf;
     for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
          c = leptris_node_get_next_sibling(c)) {
         if (c == c14n_root_node) break;
-        if (c->type != LEPTRIS_NODE_TYPE_PI) continue;
-        LeptrisPINode* pi = (LeptrisPINode*)c;
-        char temp[1024];
-        int len;
-        if (pi->target) {
-            len = snprintf(temp, sizeof(temp), "<?%s", pi->target);
-            while (size + len + 1 > capacity) {
-                size_t new_cap = capacity * 2;
-                char* new_buf = (char*)realloc(buf, new_cap);
-                if (!new_buf) {
-                    free(buf);
-                    return NULL;
-                }
-                buf = new_buf;
-                capacity = new_cap;
-            }
-            memcpy(buf + size, temp, len);
-            size += len;
-            buf[size] = '\0';
-
-            if (pi->data && *pi->data) {
-                len = 1;
-                while (size + len + 1 > capacity) {
-                    size_t new_cap = capacity * 2;
-                    char* new_buf = (char*)realloc(buf, new_cap);
-                    if (!new_buf) {
-                        free(buf);
-                        return NULL;
-                    }
-                    buf = new_buf;
-                    capacity = new_cap;
-                }
-                memcpy(buf + size, " ", len);
-                size += len;
-                buf[size] = '\0';
-
-                len = (int)strlen(pi->data);
-                while (size + len + 1 > capacity) {
-                    size_t new_cap = capacity * 2;
-                    char* new_buf = (char*)realloc(buf, new_cap);
-                    if (!new_buf) {
-                        free(buf);
-                        return NULL;
-                    }
-                    buf = new_buf;
-                    capacity = new_cap;
-                }
-                memcpy(buf + size, pi->data, len);
-                size += len;
-                buf[size] = '\0';
-            }
-            len = 2;
-            while (size + len + 1 > capacity) {
-                size_t new_cap = capacity * 2;
-                char* new_buf = (char*)realloc(buf, new_cap);
-                if (!new_buf) {
-                    free(buf);
-                    return NULL;
-                }
-                buf = new_buf;
-                capacity = new_cap;
-            }
-            memcpy(buf + size, "?>", len);
-            size += len;
-            buf[size] = '\0';
-        }
+        if (c->type == LEPTRIS_NODE_TYPE_PI)
+            c14n_append_pi((LeptrisPINode*)c, &buffer, &size, &capacity);
     }
 
     /* Serialize document in C14N format */
-    char* buffer = buf;
     c14n_serialize_element(root, &buffer, &size, &capacity);
+    if (!buffer) return NULL;
+
+    /* Epilog PIs (#1015): document order continues past the root
+     * element — PIs after it belong to the canonical form. */
+    int past_root = 0;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c == c14n_root_node) {
+            past_root = 1;
+            continue;
+        }
+        if (past_root && c->type == LEPTRIS_NODE_TYPE_PI)
+            c14n_append_pi((LeptrisPINode*)c, &buffer, &size, &capacity);
+    }
     buf = buffer;
 
     /* Note: Line ending normalization is done during parsing per XML 1.0 spec.
