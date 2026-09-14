@@ -2104,17 +2104,26 @@ static int h_closes_ww(const char* open, const char* start) {
     /* Heading starts pop a current heading (13.2.6.4.7 "in
      * body": <h1>x<h2> -> siblings). */
     if (h_is_heading(open) && h_is_heading(start)) return 1;
+    /* 13.2.6.4.12 "in ruby" / .6.4.7: every ruby-child start
+     * (rb/rt/rp/rtc) closes a CURRENT rb/rt/rp/rtc — annotation
+     * boxes are siblings (ruby.dat:3-18: <ruby>a<rb>b<rtc> ->
+     * ruby > [a, rb, rtc]). */
     int is_ruby_start = strcmp(start, "rb") == 0 ||
                         strcmp(start, "rt") == 0 ||
-                        strcmp(start, "rp") == 0;
+                        strcmp(start, "rp") == 0 ||
+                        strcmp(start, "rtc") == 0;
     if (is_ruby_start || strcmp(start, "listing") == 0 ||
         strcmp(start, "plaintext") == 0) {
         if (strcmp(open, "p") == 0) return 1;
         if (!is_ruby_start) return 0;
-        if (strcmp(open, "rb") == 0) return 1;
-        if (strcmp(start, "rb") == 0) return 0;
-        if (strcmp(open, "rt") == 0 || strcmp(open, "rp") == 0)
+        if (strcmp(open, "rb") == 0 || strcmp(open, "rt") == 0 ||
+            strcmp(open, "rp") == 0)
             return 1;
+        /* "in rtc" (13.2.6.4.13): rt/rp nest INSIDE an open rtc;
+         * rb/rtc close it (ruby.dat:12/14 vs :11/13). */
+        if (strcmp(open, "rtc") == 0)
+            return strcmp(start, "rb") == 0 ||
+                   strcmp(start, "rtc") == 0;
     }
     return 0;
 }

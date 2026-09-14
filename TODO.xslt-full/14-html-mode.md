@@ -730,3 +730,22 @@ Corpus 1243 -> 1248 (+10: comments01:16, tests1:34, tests14:6,
 tests19:2/3/21/37/38, tests2:52, tests3:4), 0 breaks vs clean-main
 twin; parity 784 held; suite 1490/1490; spec
 AfterHeadAndAfterBodyComments.
+
+## Update 2026-09-14 (v): family E CLOSED — ruby sibling boxes;
+## corpus 1250 -> 1258 (1238 -> 1258 total this branch), 0 breaks
+
+h_closes_ww ruby rules per 13.2.6.4.12 "in ruby" + .6.4.13
+"in rtc": EVERY ruby-child start (rb/rt/rp/rtc — rtc was missing
+entirely) closes a current rb/rt/rp; rb and rtc ALSO close an open
+rtc, while rt/rp nest INSIDE it (<ruby>a<rtc>b<rt>c -> the rt is
+rtc content). The old 'start rb closes nothing' exception was
+wrong (ruby.dat:6/16). All 7 ruby.dat reds green (3/6/8/11/13/16/
+18). Spec RubyAnnotationBoxesAreSiblings. Suite 1492/1492; parity
+784 held.
+
+CI NOTE: GitHub Actions event delivery stalled repo-wide ~14:19
+(no check runs for PR #1069's opened event; #1070 opened on the
+stacked feat/html-dd-dt branch as the replacement). v1.9.166's py-
+wheel publish job failed (also hit v1.9.164, not 165 — PyPI-side
+intermittent; tag+GitHub Release published fine; failed job
+rerun-dispatched).
