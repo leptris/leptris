@@ -4,12 +4,10 @@
 
 ### Fixed
 
-- frameset-ok gate + body-text NUL drop, cleanly re-landed (#659 slice A) (html)
-- SVG adjust-table key typo — attributeType stayed lowercase (#1013) (html)
-- frameset-ok flag + in-body NUL handling (#659 slice A) (html)
+- **HTML: foreign adjust-table key typo (#1013)** — the SVG attribute table mapped "attribution" instead of "attributetype", so `<svg attributeType=...>` serialized lowercased while every other adjusted attribute (viewBox, gradientTransform, definitionURL, ...) was already correct. The issue's repro (`<svg viewBox="0 0 1 1"><foreignObject>`) now round-trips exactly; html5lib corpus 1206 -> 1209 (the 56-attribute torture case cleared).
+- **HTML: frameset-ok + in-body NUL (slice A)** — WHATWG 13.2.5.4.4's frameset-ok flag now gates the `<frameset>` body replacement (enumerated start tags and non-whitespace body text clear it; NUL never does), and body-text flushes drop in-run NUL bytes via the decoder's out-length instead of truncating the run at them ('a\0a' decodes to "aa"). Corpus 1209 -> 1226 (+17); the Nokogiri parity floor held at 784.
 
-
-
+Measured on fresh build directories throughout; specs ForeignAttrAdjustTablesKeepSvgAndMathmlCase and FramesetOkFlagGatesBodyReplacement. 1477/1477.
 ## [1.9.162] - 2026-09-14
 
 ### Added
