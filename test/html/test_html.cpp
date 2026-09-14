@@ -415,6 +415,12 @@ TEST(HtmlParse, RubyAnnotationBoxesAreSiblings) {
               "<ruby>a<rtc>b<rt>c</rt><rt>d</rt></rtc></ruby>");
 }
 
+TEST(HtmlParse, ImageStartTagIsRenamedImg) {
+    /* #659 (13.2.6.4.7): <image> is renamed <img> and
+     * reprocessed (tests1:90). */
+    EXPECT_EQ(Html("<p><image></p>"), "<p><img/></p>");
+}
+
 TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
     /* #659 (13.2.6.3): a second <html> start tag merges its
      * attributes onto the existing html element and is dropped
