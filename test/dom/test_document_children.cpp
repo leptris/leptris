@@ -242,3 +242,29 @@ TEST(DocumentChildren, AddCommentOnRootlessDocument) {
     leptris_free_string(out);
     leptris_document_free(doc);
 }
+
+
+TEST(DocumentChildren, PublicFirstChildWalksTheChain) {
+    /* #580 follow-up: the public read path for the document
+     * children chain (leptris_document_first_child), needed by
+     * hosts to see prolog/epilog nodes without internals. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<!--note--><root/><!--after-->";
+    LeptrisDocument doc =
+        leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisNodeRef c = leptris_document_first_child(doc);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_node_get_type(c), LEPTRIS_NODE_TYPE_COMMENT);
+    c = leptris_node_next_sibling(c);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_node_get_type(c), LEPTRIS_NODE_TYPE_ELEMENT);
+    EXPECT_STREQ(leptris_element_name((LeptrisElement)c), "root");
+    c = leptris_node_next_sibling(c);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_node_get_type(c), LEPTRIS_NODE_TYPE_COMMENT);
+    EXPECT_EQ(leptris_node_next_sibling(c), nullptr);
+    EXPECT_EQ(leptris_document_first_child(nullptr), nullptr);
+    leptris_document_free(doc);
+}

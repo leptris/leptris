@@ -965,6 +965,13 @@ LEPTRIS_API void leptris_document_adopt_child(LeptrisDocument parent,
  */
 LEPTRIS_API LeptrisElement leptris_document_root(LeptrisDocument doc);
 
+/* #580 document-children chain: [prolog nodes..., root, epilog
+ * nodes...]. Chain-less documents fall back to the root element.
+ * Walk with leptris_node_next_sibling.
+ * Memory: node is owned by the document. */
+LEPTRIS_API LeptrisNodeRef leptris_document_first_child(
+    LeptrisDocument doc);
+
 /**
  * Get document encoding string
  *

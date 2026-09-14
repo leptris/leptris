@@ -768,3 +768,36 @@ fresh overnight push = 0 runs. All workflows active, permissions
 on, githubstatus green. The 17-leg gate on #1070 cannot run until
 GitHub event delivery recovers; the b8t652ug4 watcher polls for
 the first check-run on the branch head.
+
+## Update 2026-09-15 (x): family G slice 2 — document-children
+## collector; corpus 1265 -> 1297 (+59 total), 0 breaks, parity 785
+
+The runner's CollectDocument only read [doctype, root] — every
+document-level prolog-comment case (the tests1:38-49 bogus family)
+could NEVER pass. Fixes:
+- New public LEPTRIS_API leptris_document_first_child (leptris.h +
+  dom/document.h + leptris.c): the #580 chain's public read path —
+  hosts could not see prolog/epilog nodes at all. Spec
+  PublicFirstChildWalksTheChain.
+- The html5lib meter collects the full document-children chain;
+  the PARITY meter keeps the root-only view (its committed
+  Nokogiri reference trees were captured without document-level
+  nodes — regenerating them is follow-up work; the split avoids a
+  false -15 parity drop).
+- </head> vs </html> strictness split: after </head>, head-eligible
+  elements still process INTO the head (13.2.6.4.3;
+  template.dat:104, tests3:1/2, tests7:3/4); after </html>
+  (after_html flag, both bare and explicit-html close paths)
+  everything is body content (tests1:93). Frameset + after-html:
+  start tags and non-ws text drop (tests19:41/42).
+- "before html" whitespace-only text is ignored (13.2.6.2.1,
+  tests2:50) — dropped at both tag-entry flush sites AND in
+  h_append's initial-phase check (the flag order matters: start
+  tags set left_initial BEFORE flushing).
+- Only the FIRST structural <body> marks the lift boundary
+  (tests1:88 second-body no longer re-enables the head lift).
+- Warning cleanup: unused nm3/nm4 (script machine leftovers) and
+  the dead h_decode_ww wrapper removed.
+
+Corpus 1297/1555 (83.2%); parity 785/1555 (floor +1); suite
+1494/1494. Branch total vs main 1238: +59.
