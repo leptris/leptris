@@ -364,6 +364,29 @@ TEST(HtmlParse, HeadCommentsNestIntoHead) {
     leptris_document_free(d3);
 }
 
+TEST(HtmlParse, BeforeHeadCommentsStayHtmlChildren) {
+    /* #659 "before head" (13.2.6.3.2): a comment tokenized before
+     * the head phase begins is a child of the HTML element, ahead
+     * of the spliced <head> (tests19:2/3, comments01:16). */
+    EXPECT_EQ(Html("<!doctype html><html></p><!--foo-->"),
+              "<!DOCTYPE html><html><!--foo--><head/><body/></html>");
+    /* A structural <head> tag ends before-head: later comments are
+     * head content again (tests19:87). */
+    EXPECT_EQ(Html("<head><!--c--><meta charset=\"utf8\">"),
+              "<html><head><!--c-->"
+              "<meta charset=\"utf8\"/></head><body/></html>");
+}
+
+TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
+    /* #659 (13.2.6.3): a second <html> start tag merges its
+     * attributes onto the existing html element and is dropped
+     * (tests19:37/38). */
+    EXPECT_EQ(Html("<!doctype html><html a=b><body></html>"
+                   "<html c=d>"),
+              "<!DOCTYPE html><html a=\"b\" c=\"d\"><head/><body/>"
+              "</html>");
+}
+
 TEST(HtmlParse, StrayEndTagsAreIgnoredOrPop) {
     /* libxml2 shape (stray </i> ignored, no clone) — the WHATWG
      * entry keeps the adopted empty <i> (adoption agency). */

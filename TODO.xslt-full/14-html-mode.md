@@ -671,3 +671,32 @@ plain-text 10, scriptdata01:20, tests16:70/167); test_html 76/76;
 full suite 1483/1483; parity 784/1555 held. Ship as v1.9.165.
 Next: family C (second-html merge), D (select close/re-entry),
 E (ruby), F (after-head text), G (tests1 misc).
+
+## Update 2026-09-14 (t): family C part 1 — before-head prefix +
+## second-html merge; corpus 1238 -> 1243, 0 breaks
+
+Three coupled pieces (all in html_parse.c):
+- h_split_head_body three-way split: html-prefix (leading
+  comments/PIs) stays on the html element AHEAD of the spliced
+  head; the head run starts at head_start (first head-eligible
+  element OR first comment after a structural <head> tag); body
+  links after head; child_count includes the prefix.
+- Structural <head> records head_tag_seen + head_tag_tail (the
+  top-chain tail at tag time) — comments BEFORE it are prefix,
+  AFTER it are head content (tests19:87 vs HeadCommentsNestIntoHead
+  both green).
+- The ensure step inserts a missing <head> AFTER the prefix /
+  before body (was: force-first — that misplaced the prefix
+  comment between head and body, caught by the new unit spec).
+- Second <html> start tag (html_seen): attrs stash onto html_attrs
+  and the tag drops (tests19:37/38; "in template" stays a full
+  drop, template.dat:64-67).
+
+Corpus: +5 (comments01:16, tests14:6, tests19:2, tests19:37,
+tests2:52), 0 breaks; parity 784 held; suite 1489/1489.
+LESSON (session): the Mac REBOOTED and wiped /tmp — both worktrees
+and the uncommitted family-C edits were lost (redone from the
+conversation in-context). COMMIT EARLY: never leave a completed
+slice uncommitted in a /tmp worktree; push branches after every
+slice. Remaining family-C tail: tests19:3/21/30/38 (head/body
+attr-merge + after-head shapes), then D (select), E (ruby), F, G.
