@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **C14N: element prefixes, spec escaping, epilog PIs (#1015)** — three divergence families against the C14N edge corpus: the inclusive serializer printed local names only (`<x:b/>` canonicalized to `<b>`, silently changing namespace; prefixes now kept at open and close, mirroring the exclusive serializer), escaping now follows REC-xml-c14n 2.3 (text escapes `>` as `&gt;`; attribute values emit `&#x9;`/`&#xD;`/`&#xA;` for TAB/CR/LF alongside `&lt;`/`&amp;`/`&quot;`), and processing instructions after the document element are no longer dropped (document order continues past the root; prolog and epilog passes share one append helper, deleting 70 lines of hand-rolled buffer growth). Attribute ordering 2.3 was already correct and is now spec-pinned. Specs `C14n11.*` in `test/serializer/test_c14n.cpp`; suite 1487/1487.
 
 
 ## [1.9.163] - 2026-09-14
