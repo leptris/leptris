@@ -4947,6 +4947,10 @@ static LeptrisDocument html_parse_shared(
         size_t nlen = (size_t)(q - ns);
         char* name = h_pooled_lower(b.pool, ns, nlen);
         if (!name) goto done;
+        /* #659 (13.2.6.4.7): <image> is renamed <img> and
+         * reprocessed (tests1:90). */
+        if (b.whatwg && strcmp(name, "image") == 0)
+            name = h_pooled_lower(b.pool, "img", 3);
         /* 13.2.5.4.4: the enumerated start tags clear frameset-ok. */
         if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name)) {
             b.frameset_ok = 0;
