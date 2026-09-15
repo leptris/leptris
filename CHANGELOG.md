@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.172] - 2026-09-15
+
+### Fixed
+
+- run the canonical cached bytecode after a twin-compile store (#1079) (xpath)
+
+
+
 ## [1.9.171] - 2026-09-15
 
 <!-- Edit this section with the actual release notes. -->
