@@ -593,6 +593,25 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e) {
                 end--;
             in->select_is_dot = end - sel == 1 && *sel == '.' &&
                                 !strchr(sel, '{');
+            /* select="@name" fast path (#682): a single unprefixed
+             * attribute step — leptris_element_attribute's bare-name
+             * rule (no-namespace only, #542) is exactly the XPath
+             * unprefixed attribute name test. Prefixed names keep
+             * the full path (prefix-error semantics differ). */
+            if (end - sel >= 2 && *sel == '@' && !strchr(sel, '{')) {
+                const char* nm = sel + 1;
+                int ok = (*nm == '_' || (*nm >= 'a' && *nm <= 'z') ||
+                          (*nm >= 'A' && *nm <= 'Z'));
+                for (const char* c = nm + ok; ok && c < end; c++) {
+                    if (*c == ':' || *c == '{') { ok = 0; break; }
+                    if (!(*c == '_' || *c == '-' || *c == '.' ||
+                          (*c >= 'a' && *c <= 'z') ||
+                          (*c >= 'A' && *c <= 'Z') ||
+                          (*c >= '0' && *c <= '9')))
+                        { ok = 0; break; }
+                }
+                if (ok) in->select_attr_name = nm;
+            }
         }
         const char* doe = leptris_element_attribute(e, "disable-output-escaping");
         in->doe = doe && strcmp(doe, "yes") == 0;

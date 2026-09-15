@@ -1196,6 +1196,13 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
     if (in->select_is_dot) {
         extern char* get_node_text(void* n);
         sv = get_node_text(node);
+    } else if (in->select_attr_name) {
+        /* #682: one unprefixed attribute step — same string as the
+         * one-attribute nodeset (value or "" when absent, both
+         * value_of_string paths agree) without the eval machinery. */
+        const char* v =
+            leptris_element_attribute(node, in->select_attr_name);
+        sv = leptris_strdup(v ? v : "");
     } else {
         struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
         if (!r) return 0;
