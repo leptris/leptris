@@ -187,7 +187,45 @@ static LEPTRIS_THREAD_LOCAL int c14n_include_comments = 0;
 /**
  * Recursive helper to serialize element in C14N format
  */
+/* #1096: in-scope namespace bindings during the C14N descent. A
+ * redeclaration that binds a prefix to the SAME URI an ancestor
+ * already binds is redundant — C14N omits it; a rebind to a
+ * different URI renders (it changes the scope). The xml prefix is
+ * implicitly bound to its standard URI everywhere and never
+ * renders. Stack frames are prepended, so the head is the nearest
+ * binding. */
+struct c14n_ns_frame {
+    const char* prefix;   /* NULL/empty = default namespace */
+    const char* uri;
+    struct c14n_ns_frame* next;
+};
+
+static int c14n_ns_same_prefix(const struct c14n_ns_frame* f,
+                               const char* prefix) {
+    const char* fp = f->prefix ? f->prefix : "";
+    const char* pp = prefix ? prefix : "";
+    return strcmp(fp, pp) == 0;
+}
+
+/* Nearest in-scope binding for prefix, or NULL. */
+static const struct c14n_ns_frame* c14n_ns_lookup(
+    const struct c14n_ns_frame* scope, const char* prefix) {
+    for (const struct c14n_ns_frame* f = scope; f; f = f->next)
+        if (c14n_ns_same_prefix(f, prefix)) return f;
+    return NULL;
+}
+
+static void c14n_serialize_element_scoped(LeptrisElement elem, char** buffer,
+                                          size_t* size, size_t* capacity,
+                                          struct c14n_ns_frame* scope);
+
 static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* size, size_t* capacity) {
+    c14n_serialize_element_scoped(elem, buffer, size, capacity, NULL);
+}
+
+static void c14n_serialize_element_scoped(LeptrisElement elem, char** buffer,
+                                         size_t* size, size_t* capacity,
+                                         struct c14n_ns_frame* scope) {
     if (!elem) return;
 
     /* Get element name. #1015: canonical form keeps the original
@@ -215,9 +253,6 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
             qsort(sorted_attrs, si, sizeof(struct leptris_attribute*), compare_attributes);
         }
     }
-
-    /* For namespace declarations - TODO: Implement namespace tracking in compact mode */
-    /* Currently namespaces are stored in prefix/namespace_uri fields, not as a list */
 
     /* Append opening tag: <name */
     char temp[4096];
@@ -257,6 +292,12 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
     for (struct leptris_namespace* n = leptris_elem_namespaces(elem); n; n = n->next) {
         ns_count++;
     }
+    /* #1096: frame list for this element's bindings — prepended to
+     * the inherited scope after emission, freed when the element's
+     * children are done. */
+    struct c14n_ns_frame* pushed = NULL;
+    struct c14n_ns_frame** push_tail = &pushed;
+    size_t pushed_count = 0;
     if (ns_count > 0) {
         struct leptris_namespace** sorted_ns =
             (struct leptris_namespace**)malloc(ns_count * sizeof(struct leptris_namespace*));
@@ -268,6 +309,19 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
             qsort(sorted_ns, ni, sizeof(struct leptris_namespace*), compare_namespaces);
             for (size_t i = 0; i < ni; i++) {
                 struct leptris_namespace* ns = sorted_ns[i];
+                /* xml is implicitly bound to its standard URI
+                 * everywhere — never rendered (#1096). */
+                if (ns->prefix && strcmp(ns->prefix, "xml") == 0 &&
+                    ns->uri &&
+                    strcmp(ns->uri, "http://www.w3.org/XML/1998/namespace") == 0)
+                    continue;
+                /* Redundant redeclaration: an ancestor already binds
+                 * this prefix to the same URI — omit (#1096). */
+                const struct c14n_ns_frame* in_scope =
+                    c14n_ns_lookup(scope, ns->prefix);
+                if (in_scope && ns->uri && in_scope->uri &&
+                    strcmp(in_scope->uri, ns->uri) == 0)
+                    continue;
                 /* Serialize namespace as xmlns:prefix="uri" or xmlns="uri" for default */
                 if (ns->prefix) {
                     len = snprintf(temp, sizeof(temp), " xmlns:%s=\"%s\"", ns->prefix, ns->uri);
@@ -278,6 +332,29 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
             }
             free(sorted_ns);
         }
+        /* Push EVERY declaration (rendered or skipped): skipped ones
+         * re-state an identical binding, so their frame equals what
+         * the ancestor's already says; rebinds shadow correctly via
+         * head-first lookup. */
+        for (struct leptris_namespace* n = leptris_elem_namespaces(elem); n; n = n->next) {
+            struct c14n_ns_frame* f =
+                (struct c14n_ns_frame*)malloc(sizeof(*f));
+            if (!f) break;
+            f->prefix = n->prefix;
+            f->uri = n->uri;
+            f->next = NULL;
+            *push_tail = f;
+            push_tail = &f->next;
+            pushed_count++;
+        }
+    }
+    if (pushed) {
+        /* Splice: pushed frames go UNDER the inherited scope (they're
+         * nearer, so they must be reached first by the lookup). */
+        struct c14n_ns_frame* pushed_last = pushed;
+        while (pushed_last->next) pushed_last = pushed_last->next;
+        pushed_last->next = scope;
+        scope = pushed;
     }
 
     /* Add sorted attributes */
@@ -341,7 +418,8 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
         LeptrisNode* sub_child = (LeptrisNode*)leptris_node_first_child_internal((LeptrisNode*)elem);
         while (sub_child) {
             if (sub_child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
-                c14n_serialize_element((LeptrisElement)sub_child, buffer, size, capacity);
+                c14n_serialize_element_scoped((LeptrisElement)sub_child,
+                                              buffer, size, capacity, scope);
                 sub_child = leptris_node_get_next_sibling(sub_child);
             } else if (sub_child->type == LEPTRIS_NODE_TYPE_TEXT) {
                 const char* text = leptris_text_get_content((LeptrisTextNode*)sub_child);
@@ -410,7 +488,15 @@ static void c14n_serialize_element(LeptrisElement elem, char** buffer, size_t* s
         APPEND_STRING(temp, len);
     }
 
-    /* Cleanup */
+    /* Cleanup: release exactly this element's pushed frames — the
+     * chain was spliced onto the inherited scope, so the walk must
+     * stop after pushed_count links (#1096). */
+    for (size_t i = 0; i < pushed_count && pushed; i++) {
+        struct c14n_ns_frame* nf = pushed->next;
+        free(pushed);
+        pushed = nf;
+    }
+
     if (sorted_attrs) free(sorted_attrs);
 
 cleanup:
@@ -870,8 +956,58 @@ LEPTRIS_API char* leptris_c14n_canonicalize_ex(
     leptris_document_ensure_promoted(doc);
     LeptrisElement root = (LeptrisElement)doc->new_dom_root;
     if (!root) return NULL;
-    return leptris_c14n_canonicalize_subtree_ex(
+    char* body = leptris_c14n_canonicalize_subtree_ex(
         root, version, mode, inclusive_ns_prefixes, with_comments);
+    if (!body) return NULL;
+
+    /* #1096: the WHOLE-document entry keeps document-level PIs in
+     * C14N document order — prolog before the root, epilog after
+     * (#580 chain; the plain entry already did, the mode: entry
+     * delegated to the element-scoped subtree call and dropped
+     * them). Build the two segments, then splice around body. */
+    size_t pro_cap = 64, pro_len = 0;
+    char* prolog = (char*)malloc(pro_cap);
+    size_t epi_cap = 64, epi_len = 0;
+    char* epilog = (char*)malloc(epi_cap);
+    if (!prolog || !epilog) {
+        free(prolog); free(epilog);
+        return body;
+    }
+    prolog[0] = '\0';
+    epilog[0] = '\0';
+    LeptrisNode* c14n_root_node = (LeptrisNode*)root;
+    int past_root = 0;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c == c14n_root_node) {
+            past_root = 1;
+            continue;
+        }
+        if (c->type != LEPTRIS_NODE_TYPE_PI) continue;
+        if (past_root)
+            c14n_append_pi((LeptrisPINode*)c, &epilog, &epi_len, &epi_cap);
+        else
+            c14n_append_pi((LeptrisPINode*)c, &prolog, &pro_len, &pro_cap);
+    }
+    if (pro_len == 0 && epi_len == 0) {
+        free(prolog);
+        free(epilog);
+        return body;
+    }
+    size_t body_len = strlen(body);
+    char* out = (char*)malloc(pro_len + body_len + epi_len + 1);
+    if (!out) {
+        free(prolog); free(epilog);
+        return body;
+    }
+    memcpy(out, prolog, pro_len);
+    memcpy(out + pro_len, body, body_len);
+    memcpy(out + pro_len + body_len, epilog, epi_len);
+    out[pro_len + body_len + epi_len] = '\0';
+    free(prolog);
+    free(epilog);
+    free(body);
+    return out;
 }
 
 LEPTRIS_API char* leptris_c14n_canonicalize_subtree_ex(
