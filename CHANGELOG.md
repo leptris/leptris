@@ -7055,9 +7055,10 @@ fall back to the legacy parser.
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: after-frameset whitespace prefix + corpus multi-line quotes (#659)** — in the after-frameset phase a whitespace PREFIX of a flushed text run survives (13.2.6.4.19 processes character tokens one at a time; the non-whitespace drop now truncates the node to its leading whitespace instead of discarding it). The html5lib harness now consumes an expected TEXT token whose quote spans physical lines (a greedy first draft ate 43 cases; the landed guard fires only for an unterminated text token and never past a directive). Corpus 1305 -> 1309 (+10, 0 breaks vs a clean-main twin); parity 785 held; suite 1497/1497.
+- **XPath: twin-compile store freed the bytecode the caller then ran (#1079)** — upstream fix merged to main (separate PR).
 
 
 ## [0.4.3] - Y-08-07
