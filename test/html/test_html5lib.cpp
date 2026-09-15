@@ -308,6 +308,31 @@ std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
                     i++;
                     while (i < lines.size() && lines[i].compare(0, 1, "|") == 0) {
                         doclines.push_back(lines[i]);
+                        /* html5lib suite: an expected TEXT may span
+                         * physical lines — a text token whose quote
+                         * is still open (tests6:8's "\n" is a raw
+                         * newline between two lines). Consume
+                         * continuations until the quote closes;
+                         * NEVER run past a directive line. */
+                        size_t bd = 0;
+                        const std::string& dl = doclines.back();
+                        std::string body =
+                            dl.size() > 2 ? dl.substr(2) : std::string();
+                        while (bd < body.size() && body[bd] == ' ') bd++;
+                        if (bd < body.size() && body[bd] == '"' &&
+                            body[body.size() - 1] != '"') {
+                            std::string merged = dl;
+                            while (i + 1 < lines.size() &&
+                                   lines[i + 1].compare(0, 1, "#") != 0) {
+                                merged += "\n";
+                                merged += lines[i + 1];
+                                i++;
+                                if (lines[i].size() &&
+                                    lines[i][lines[i].size() - 1] == '"')
+                                    break;
+                            }
+                            doclines.back() = merged;
+                        }
                         i++;
                     }
                 } else if (l.compare(0, 10, "#script-on") == 0) {
