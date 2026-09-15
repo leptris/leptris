@@ -51,6 +51,13 @@ void leptris_free_hook(void* ptr) {
     else free(ptr);
 }
 
+/* Nonzero when a thread-local allocator override is installed.
+ * The pool recycler must stand down so custom-allocator accounting
+ * and failure injection keep seeing every malloc/free pair. */
+int leptris_custom_allocator_active(void) {
+    return (g_leptris_alloc_function || g_leptris_dealloc_function) ? 1 : 0;
+}
+
 /* ---- Version API ---- */
 
 LEPTRIS_API const char* leptris_version(void) {
@@ -66,8 +73,10 @@ LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch) 
 LEPTRIS_API void leptris_thread_cleanup(void) {
     extern void leptris_xpath_drain_thread_caches(void);
     extern void leptris_root_doc_drain_thread_caches(void);
+    extern void leptris_pool_drain_recycler(void);
     leptris_xpath_drain_thread_caches();
     leptris_root_doc_drain_thread_caches();
+    leptris_pool_drain_recycler();
 }
 
 /* ---- Memory management API ---- */
