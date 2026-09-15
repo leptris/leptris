@@ -4,6 +4,8 @@
 
 #include "../../include/leptris.h"
 #include "doctype.h"
+#include "node.h"
+#include "../leptris_internal.h"
 #include "../memory/pool.h"
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +52,26 @@ LeptrisDoctypeNode* leptris_doctype_create(const char* name,
  * compatibility with callers that explicitly invoke it. */
 void leptris_doctype_free(LeptrisDoctypeNode* doctype) {
     (void)doctype;
+}
+
+/* #1094: programmatic DOCTYPE — create on a document (name +
+ * external identifiers), symmetric with what parsing accepts. The
+ * serializer emits it in document position once set. */
+LEPTRIS_API LeptrisDoctype leptris_document_set_doctype(
+    LeptrisDocument doc, const char* name,
+    const char* public_id, const char* system_id) {
+    if (!doc || !name || !*name) return NULL;
+    leptris_document_ensure_promoted(doc);
+    if (!doc->pool) return NULL;
+    LeptrisDoctypeNode* dt =
+        leptris_doctype_create(name, strlen(name), doc->pool);
+    if (!dt) return NULL;
+    if (public_id && *public_id)
+        leptris_doctype_set_public_id(dt, public_id, doc->pool);
+    if (system_id && *system_id)
+        leptris_doctype_set_system_id(dt, system_id, doc->pool);
+    doc->doctype = dt;
+    return (LeptrisDoctype)dt;
 }
 
 LEPTRIS_API const char* leptris_doctype_get_name(LeptrisDoctypeNode* doctype) {

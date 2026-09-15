@@ -95,7 +95,13 @@ typedef enum {
     /* Document node (XPath root). Values 7/8 are reserved for the
      * XPath-synthetic internal kinds (namespace/text) — see
      * leptris_internal.h — so the public document node sits at 9. */
-    LEPTRIS_NODE_TYPE_DOCUMENT = 9
+    LEPTRIS_NODE_TYPE_DOCUMENT = 9,
+    /* Unexpanded entity reference (&name;) — produced by the parser
+     * only under LEPTRIS_PARSE_KEEP_ENTITY_REFS (#1094), or created
+     * via leptris_entity_ref_node_create. Serializes back as
+     * &name;; text reads resolve it against the predefined entities
+     * and the DTD entity table. */
+    LEPTRIS_NODE_TYPE_ENTITY_REF = 10
 } LeptrisNodeKind;
 
 /* Kind of a node inside an XPath nodeset result. Nodesets are mixed:
@@ -215,7 +221,11 @@ typedef struct leptris_iterparse* LeptrisIterparse;
 typedef enum {
     LEPTRIS_PARSE_DEFAULT     = 0,
     LEPTRIS_PARSE_DROP_WS_TEXT = 1u,
-    LEPTRIS_PARSE_DTDATTR     = 2u
+    LEPTRIS_PARSE_DTDATTR     = 2u,
+    /* Keep &name; references unexpanded as ENTITY_REF nodes in the
+     * tree (#1094): text runs split around them and reads resolve
+     * them lazily (libxml2's default, pre-NOENT). */
+    LEPTRIS_PARSE_KEEP_ENTITY_REFS = 4u
 } LeptrisParseFlags;
 
 /* ============================================================================

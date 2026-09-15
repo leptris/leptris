@@ -18,6 +18,7 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include "entity_ref.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -289,7 +290,8 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
         new_node_ptr->type != LEPTRIS_NODE_TYPE_TEXT &&
         new_node_ptr->type != LEPTRIS_NODE_TYPE_CDATA &&
         new_node_ptr->type != LEPTRIS_NODE_TYPE_COMMENT &&
-        new_node_ptr->type != LEPTRIS_NODE_TYPE_PI) {
+        new_node_ptr->type != LEPTRIS_NODE_TYPE_PI &&
+        new_node_ptr->type != LEPTRIS_NODE_TYPE_ENTITY_REF) {
         return LEPTRIS_ERROR_INVALID_ARG;
     }
 
@@ -356,6 +358,10 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
             case LEPTRIS_NODE_TYPE_PI:
                 leptris_pi_set_parent((LeptrisPINode*)new_node_ptr, parent);
                 break;
+            case LEPTRIS_NODE_TYPE_ENTITY_REF:
+                leptris_entity_ref_set_parent(
+                    (LeptrisEntityRefNode*)new_node_ptr, parent);
+                break;
             default: break;
         }
     }
@@ -385,7 +391,8 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
         new_node_ptr->type != LEPTRIS_NODE_TYPE_TEXT &&
         new_node_ptr->type != LEPTRIS_NODE_TYPE_CDATA &&
         new_node_ptr->type != LEPTRIS_NODE_TYPE_COMMENT &&
-        new_node_ptr->type != LEPTRIS_NODE_TYPE_PI) {
+        new_node_ptr->type != LEPTRIS_NODE_TYPE_PI &&
+        new_node_ptr->type != LEPTRIS_NODE_TYPE_ENTITY_REF) {
         return LEPTRIS_ERROR_INVALID_ARG;
     }
 
@@ -436,6 +443,10 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
                 break;
             case LEPTRIS_NODE_TYPE_PI:
                 leptris_pi_set_parent((LeptrisPINode*)new_node_ptr, parent);
+                break;
+            case LEPTRIS_NODE_TYPE_ENTITY_REF:
+                leptris_entity_ref_set_parent(
+                    (LeptrisEntityRefNode*)new_node_ptr, parent);
                 break;
             default: break;
         }
@@ -1332,6 +1343,16 @@ LeptrisElement leptris_element_append_copy(LeptrisElement parent, LeptrisElement
                     leptris_element_append_child_internal(copy,
                                                           (LeptrisNode*)pc);
             }
+        } else if (child_node->type == LEPTRIS_NODE_TYPE_ENTITY_REF) {
+            LeptrisEntityRefNode* er = (LeptrisEntityRefNode*)child;
+            if (er->name) {
+                LeptrisEntityRefNode* ec = leptris_entity_ref_create(
+                    er->name, strlen(er->name),
+                    leptris_element_get_pool(copy));
+                if (ec)
+                    leptris_element_append_child_internal(copy,
+                                                          (LeptrisNode*)ec);
+            }
         }
 
         /* CRITICAL FIX: Get next sibling using generic accessor
@@ -2026,6 +2047,12 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
                 pi->data ? pi->data : "",
                 pi->data ? strlen(pi->data) : 0, pool);
             if (cc) leptris_pi_set_parent((LeptrisPINode*)cc, copy);
+        } else if (ty == LEPTRIS_NODE_TYPE_ENTITY_REF) {
+            LeptrisEntityRefNode* er = (LeptrisEntityRefNode*)c;
+            cc = (LeptrisNodeRef)leptris_entity_ref_create(
+                er->name, er->name ? strlen(er->name) : 0, pool);
+            if (cc)
+                leptris_entity_ref_set_parent((LeptrisEntityRefNode*)cc, copy);
         }
         if (!cc) continue;
         if (!first) {

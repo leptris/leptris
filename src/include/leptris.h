@@ -478,6 +478,33 @@ LEPTRIS_API LeptrisNodeRef leptris_pi_node_create(LeptrisDocument doc,
                                                 const char* data);
 
 /**
+ * Create a new Entity Reference node (&name;) owned by the given
+ * document (#1094).
+ *
+ * The node serializes back as "&name;" and text-content reads
+ * resolve it against the predefined entities and the document's
+ * DTD entity table.
+ *
+ * @param doc Owning document
+ * @param name Entity name (e.g. "foo" for &foo;). Must be a
+ *             non-empty NUL-terminated string.
+ * @return New node handle, or NULL on error
+ *
+ * Memory: Node is owned by doc; released by leptris_document_free.
+ *         name is pool-copied.
+ */
+LEPTRIS_API LeptrisNodeRef leptris_entity_ref_node_create(LeptrisDocument doc,
+                                                          const char* name);
+
+/**
+ * Read an entity-reference node's name (#1094).
+ *
+ * @return The entity name (e.g. "foo" for &foo;), or NULL when
+ *         node is NULL or not an entity-reference node.
+ */
+LEPTRIS_API const char* leptris_entity_ref_node_name(LeptrisNodeRef node);
+
+/**
  * Replace a Text node's content (issue #167).
  *
  * @param node Node handle (must be TEXT or CDATA)
@@ -983,6 +1010,36 @@ LEPTRIS_API LeptrisNodeRef leptris_document_first_child(
 LEPTRIS_API const char* leptris_document_encoding(LeptrisDocument doc);
 
 /**
+ * XML declaration surface (#1094). Getters read the parsed or
+ * previously-set values; the setters pool-copy and mark the
+ * document as declaration-bearing so serialization emits
+ * <?xml ...?> in document position.
+ *
+ * standalone: -1 = not set, 0 = "no", 1 = "yes".
+ */
+LEPTRIS_API const char* leptris_document_version(LeptrisDocument doc);
+LEPTRIS_API int leptris_document_standalone(LeptrisDocument doc);
+LEPTRIS_API LeptrisStatus leptris_document_set_version(
+    LeptrisDocument doc, const char* version);
+LEPTRIS_API LeptrisStatus leptris_document_set_encoding(
+    LeptrisDocument doc, const char* encoding);
+LEPTRIS_API LeptrisStatus leptris_document_set_standalone(
+    LeptrisDocument doc, int standalone);
+
+/**
+ * Programmatic DOCTYPE (#1094): create and set the document's
+ * DOCTYPE (root name + optional PUBLIC/SYSTEM external
+ * identifiers). Serializes in document position once set; read
+ * back with the leptris_doctype_* getters on the returned node.
+ *
+ * Memory: The node is owned by the document; the input strings are
+ * pool-copied.
+ */
+LEPTRIS_API LeptrisDoctype leptris_document_set_doctype(
+    LeptrisDocument doc, const char* name,
+    const char* public_id, const char* system_id);
+
+/**
  * Get the document's internal DTD subset — the DOCTYPE declaration
  * (TODO 148 Phase 2).
  *
@@ -1147,6 +1204,28 @@ LEPTRIS_API LeptrisNodeRef leptris_document_remove_pi(LeptrisDocument doc,
 LEPTRIS_API LeptrisNodeRef leptris_document_add_pi(LeptrisDocument doc,
                                                    const char* target,
                                                    const char* data);
+
+/**
+ * Append a document-level PI at the END of the document-children
+ * chain (epilog — after the root element), #1094. Node identity,
+ * prolog/epilog anchoring and removal are the document-children
+ * chain: walk with leptris_document_first_child +
+ * leptris_node_get_next_sibling; remove with
+ * leptris_document_remove_child.
+ */
+LEPTRIS_API LeptrisNodeRef leptris_document_append_pi(LeptrisDocument doc,
+                                                      const char* target,
+                                                      const char* data);
+
+/**
+ * Remove a document-level PI or comment node from the document
+ * children chain (#1094). The node itself stays document-owned.
+ *
+ * @return LEPTRIS_OK, or LEPTRIS_ERROR_NOT_FOUND when the node is
+ *         not in the chain.
+ */
+LEPTRIS_API LeptrisStatus leptris_document_remove_child(
+    LeptrisDocument doc, LeptrisNodeRef node);
 
 /**
  * Append a document-level comment (epilog position: after the root

@@ -14,6 +14,7 @@
 #include "cdata.h"
 #include "comment.h"
 #include "pi.h"
+#include "entity_ref.h"
 #include "../leptris_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -333,6 +334,8 @@ LeptrisNode* leptris_node_get_next_sibling(LeptrisNode* node) {
             return leptris_comment_next_sibling((LeptrisCommentNode*)node);
         case LEPTRIS_NODE_TYPE_PI:
             return leptris_pi_next_sibling((LeptrisPINode*)node);
+        case LEPTRIS_NODE_TYPE_ENTITY_REF:
+            return leptris_entity_ref_next_sibling((LeptrisEntityRefNode*)node);
         case LEPTRIS_NODE_TYPE_DOCTYPE:
         default:
             /* DOCTYPE and other node types don't have siblings in this implementation */
@@ -366,6 +369,9 @@ void leptris_node_set_next_sibling(LeptrisNode* node, LeptrisNode* sibling) {
             break;
         case LEPTRIS_NODE_TYPE_PI:
             leptris_pi_set_next_sibling((LeptrisPINode*)node, sibling);
+            break;
+        case LEPTRIS_NODE_TYPE_ENTITY_REF:
+            leptris_entity_ref_set_next_sibling((LeptrisEntityRefNode*)node, sibling);
             break;
         case LEPTRIS_NODE_TYPE_DOCTYPE:
         default:

@@ -16,6 +16,7 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include "entity_ref.h"
 #include "element.h"
 #include "doctype.h"
 #include "document_node.h"
@@ -31,6 +32,7 @@ static void text_serialize    (LeptrisNode* self, struct SerializeBuffer* buf);
 static void comment_serialize (LeptrisNode* self, struct SerializeBuffer* buf);
 static void cdata_serialize   (LeptrisNode* self, struct SerializeBuffer* buf);
 static void pi_serialize      (LeptrisNode* self, struct SerializeBuffer* buf);
+static void entity_ref_serialize(LeptrisNode* self, struct SerializeBuffer* buf);
 static void doctype_serialize (LeptrisNode* self, struct SerializeBuffer* buf);
 
 static const LeptrisNodeVTable kElementVtable = {
@@ -64,6 +66,12 @@ static const LeptrisNodeVTable kDoctypeVtable = {
     .type_enum  = LEPTRIS_NODE_TYPE_DOCTYPE,
 };
 
+static const LeptrisNodeVTable kEntityRefVtable = {
+    .serialize  = entity_ref_serialize,
+    .type_name  = "entity_ref",
+    .type_enum  = LEPTRIS_NODE_TYPE_ENTITY_REF,
+};
+
 static const LeptrisNodeVTable kDocumentVtable = {
     .serialize  = document_serialize_impl,
     .type_name  = "document",
@@ -83,6 +91,7 @@ static const LeptrisNodeVTable* const g_node_vtables[LEPTRIS_NODE_TYPE_COUNT] = 
     NULL,              /* 7: NAMESPACE — XPath-synthetic */
     NULL,              /* 8: TEXT — XPath-synthetic */
     &kDocumentVtable,  /* 9: DOCUMENT */
+    &kEntityRefVtable,/* 10: ENTITY_REF */
 };
 
 const LeptrisNodeVTable* leptris_node_vtable_for(LeptrisNodeTypeEnum type) {
@@ -117,6 +126,10 @@ static void pi_serialize(LeptrisNode* self, struct SerializeBuffer* buf) {
 
 static void doctype_serialize(LeptrisNode* self, struct SerializeBuffer* buf) {
     serialize_doctype_internal((LeptrisDoctypeNode*)self, buf);
+}
+
+static void entity_ref_serialize(LeptrisNode* self, struct SerializeBuffer* buf) {
+    serialize_entity_ref_internal((LeptrisEntityRefNode*)self, buf);
 }
 
 static void document_serialize_impl(LeptrisNode* self,

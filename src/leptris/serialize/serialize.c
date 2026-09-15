@@ -774,6 +774,15 @@ void serialize_pi_internal(LeptrisPINode* pi, SerializeBuffer* buf) {
     buffer_append(buf, buf->html_method ? ">" : "?>");
 }
 
+/* #1094: entity references serialize back as &name; — the name is
+ * an entity name, never escaped (escaping would corrupt the ref). */
+void serialize_entity_ref_internal(LeptrisEntityRefNode* ref, SerializeBuffer* buf) {
+    if (!ref) return;
+    buffer_append(buf, "&");
+    if (ref->name) buffer_append(buf, ref->name);
+    buffer_append(buf, ";");
+}
+
 void serialize_doctype_internal(LeptrisDoctypeNode* doctype, SerializeBuffer* buf) {
     if (!doctype || !doctype->name) return;
 
@@ -2057,14 +2066,18 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
         const char* enc = encoding ? encoding : doc->encoding;
         if (enc) {
             buffer_append(buf, " encoding=\"");
-            if ((extended && extended->decl_encoding_verbatim &&
+            if (doc->decl_encoding_verbatim ||
+                (extended && extended->decl_encoding_verbatim &&
                  options && options->encoding) ||
                 (enc[0] == 'U' || enc[0] == 'u')) {
-                /* Verbatim: either a UTF-8-spelled name, or an
-                 * explicit request from a caller that transcodes the
-                 * body to match (the XSLT layer, bug-140). The
-                 * parse-echo fallback below only applies to
-                 * encodings inherited from a parsed document. */
+                /* Verbatim: a UTF-8-spelled name; an explicit
+                 * request from a caller that transcodes the body to
+                 * match (the XSLT layer, bug-140); or a document
+                 * whose encoding was DECLARED programmatically
+                 * (#1094 set_encoding — the body was never
+                 * transcoded, re-spelling would lie). The parse-
+                 * echo fallback below only applies to encodings
+                 * inherited from a parsed document. */
                 buffer_append(buf, enc);
 #ifdef LEPTRIS_HAS_ICONV
             } else if (enc[0]) {

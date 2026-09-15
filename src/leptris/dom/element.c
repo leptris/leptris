@@ -20,6 +20,7 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include "entity_ref.h"
 #include "../../include/leptris.h"  /* for LEPTRIS_API on public exports */
 #include "doctype.h"
 #include "node.h"  /* For leptris_node_get_next_sibling */
@@ -704,7 +705,8 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
     /* SAFETY: Verify node type field is valid before accessing it
      * Small values like 0x4 or 0x1 in the type field suggest the pointer is corrupted */
     if (child->type < LEPTRIS_NODE_TYPE_ELEMENT ||
-        child->type > LEPTRIS_NODE_TYPE_DOCTYPE) {
+        (child->type > LEPTRIS_NODE_TYPE_DOCTYPE &&
+         child->type != LEPTRIS_NODE_TYPE_ENTITY_REF)) {
         /* Invalid node type - corrupted pointer */
         return;
     }
@@ -713,7 +715,8 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
         child->type != LEPTRIS_NODE_TYPE_TEXT &&
         child->type != LEPTRIS_NODE_TYPE_CDATA &&
         child->type != LEPTRIS_NODE_TYPE_COMMENT &&
-        child->type != LEPTRIS_NODE_TYPE_PI) {
+        child->type != LEPTRIS_NODE_TYPE_PI &&
+        child->type != LEPTRIS_NODE_TYPE_ENTITY_REF) {
         return;  /* Only allow these node types as children */
     }
 
@@ -798,6 +801,10 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
             case LEPTRIS_NODE_TYPE_PI:
                 leptris_pi_set_parent((LeptrisPINode*)child, elem);
                 break;
+            case LEPTRIS_NODE_TYPE_ENTITY_REF:
+                leptris_entity_ref_set_parent(
+                    (LeptrisEntityRefNode*)child, elem);
+                break;
             default:
                 break;
         }
@@ -822,7 +829,8 @@ void leptris_element_prepend_child_internal(LeptrisElement elem, LeptrisNode* ch
     /* SAFETY: Verify node type field is valid before accessing it
      * Small values like 0x4 or 0x1 in the type field suggest the pointer is corrupted */
     if (child->type < LEPTRIS_NODE_TYPE_ELEMENT ||
-        child->type > LEPTRIS_NODE_TYPE_DOCTYPE) {
+        (child->type > LEPTRIS_NODE_TYPE_DOCTYPE &&
+         child->type != LEPTRIS_NODE_TYPE_ENTITY_REF)) {
         /* Invalid node type - corrupted pointer */
         return;
     }
@@ -831,7 +839,8 @@ void leptris_element_prepend_child_internal(LeptrisElement elem, LeptrisNode* ch
         child->type != LEPTRIS_NODE_TYPE_TEXT &&
         child->type != LEPTRIS_NODE_TYPE_CDATA &&
         child->type != LEPTRIS_NODE_TYPE_COMMENT &&
-        child->type != LEPTRIS_NODE_TYPE_PI) {
+        child->type != LEPTRIS_NODE_TYPE_PI &&
+        child->type != LEPTRIS_NODE_TYPE_ENTITY_REF) {
         return;  /* Only allow these node types as children */
     }
 
@@ -894,6 +903,10 @@ void leptris_element_prepend_child_internal(LeptrisElement elem, LeptrisNode* ch
             case LEPTRIS_NODE_TYPE_PI:
                 leptris_pi_set_parent((LeptrisPINode*)child, elem);
                 break;
+            case LEPTRIS_NODE_TYPE_ENTITY_REF:
+                leptris_entity_ref_set_parent(
+                    (LeptrisEntityRefNode*)child, elem);
+                break;
             default:
                 break;
         }
@@ -928,6 +941,12 @@ static size_t calculate_text_length_recursive(LeptrisNode* node) {
             if (cdata->content) {
                 len += strlen(cdata->content);
             }
+        } else if (child->type == LEPTRIS_NODE_TYPE_ENTITY_REF) {
+            /* #1094: an unexpanded reference contributes its
+             * replacement text (predefined or DTD-declared). */
+            const char* v = leptris_entity_ref_resolve(
+                (LeptrisEntityRefNode*)child);
+            if (v) len += strlen(v);
         } else if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
             /* Recursively include text from child elements */
             len += calculate_text_length_recursive(child);
@@ -959,6 +978,14 @@ static void copy_text_content_recursive(LeptrisNode* node, char* result, size_t*
                 size_t len = strlen(cdata->content);
                 memcpy(result + *offset, cdata->content, len);
                 *offset += len;
+            }
+        } else if (child->type == LEPTRIS_NODE_TYPE_ENTITY_REF) {
+            const char* v = leptris_entity_ref_resolve(
+                (LeptrisEntityRefNode*)child);
+            if (v) {
+                size_t vlen = strlen(v);
+                memcpy(result + *offset, v, vlen);
+                *offset += vlen;
             }
         } else if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
             /* Recursively include text from child elements */

@@ -152,3 +152,50 @@ LEPTRIS_API void leptris_explicit_cleanup(void) {
 LEPTRIS_API const char* leptris_document_encoding(struct leptris_document* doc) {
     return doc ? doc->encoding : NULL;
 }
+
+/* ---- #1094: XML declaration surface (read + mutate) ----
+ * The declaration serializes in document position when present
+ * (had_declaration); the setters create that presence. */
+
+LEPTRIS_API const char* leptris_document_version(struct leptris_document* doc) {
+    return doc ? doc->xml_version : NULL;
+}
+
+LEPTRIS_API int leptris_document_standalone(struct leptris_document* doc) {
+    return doc ? doc->standalone : -1;
+}
+
+/* document_free releases xml_version/encoding with LEPTRIS_FREE,
+ * so the setters malloc-copy (and release any prior set value). */
+LEPTRIS_API LeptrisStatus leptris_document_set_version(
+    struct leptris_document* doc, const char* version) {
+    if (!doc) return LEPTRIS_ERROR_NULL_ARG;
+    if (!version || !*version) return LEPTRIS_ERROR_INVALID_ARG;
+    char* copy = leptris_strdup(version);
+    if (!copy) return LEPTRIS_ERROR_MEMORY;
+    if (doc->xml_version) leptris_free(doc->xml_version);
+    doc->xml_version = copy;
+    doc->had_declaration = 1;
+    return LEPTRIS_OK;
+}
+
+LEPTRIS_API LeptrisStatus leptris_document_set_encoding(
+    struct leptris_document* doc, const char* encoding) {
+    if (!doc) return LEPTRIS_ERROR_NULL_ARG;
+    if (!encoding || !*encoding) return LEPTRIS_ERROR_INVALID_ARG;
+    char* copy = leptris_strdup(encoding);
+    if (!copy) return LEPTRIS_ERROR_MEMORY;
+    if (doc->encoding) leptris_free(doc->encoding);
+    doc->encoding = copy;
+    doc->had_declaration = 1;
+    doc->decl_encoding_verbatim = 1;
+    return LEPTRIS_OK;
+}
+
+LEPTRIS_API LeptrisStatus leptris_document_set_standalone(
+    struct leptris_document* doc, int standalone) {
+    if (!doc) return LEPTRIS_ERROR_NULL_ARG;
+    doc->standalone = standalone ? 1 : 0;
+    doc->had_declaration = 1;
+    return LEPTRIS_OK;
+}
