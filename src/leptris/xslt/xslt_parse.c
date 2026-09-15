@@ -1863,6 +1863,19 @@ void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
             }
         }
     }
+    /* #866 value-index sizing: one slot per literal-predicate
+     * pattern across the sheet (distinct keys only shrink that),
+     * doubled for open addressing. Growth replaces the old fixed
+     * 128-slot/96-entry cliff that silently degraded to full scans
+     * past 96 predicate patterns (#682: 7.6x on the 120-template
+     * dispatch bench). */
+    size_t npred = 0;
+    for (XsltTemplate* t = sheet->templates; t; t = t->next)
+        for (const XsltPattern* pa = t->matches; pa; pa = pa->next)
+            if (pa->pred_literal) npred++;
+    size_t pkey_cap = 16;
+    while (pkey_cap < npred * 2) pkey_cap <<= 1;
+
     if (!sheet->modes && n) {
         /* Single pass: the bucket array is sized to the match-
          * template count (an upper bound on distinct modes); each
@@ -1910,26 +1923,32 @@ void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
                                           pa->leaf_name, pa->pred_attr,
                                           pa->pred_val);
                         if (kl <= 0 || (size_t)kl >= sizeof(kb)) continue;
-                        size_t kh2 = tpl_name_hash(kb) & 127;
+                        size_t kh2 = tpl_name_hash(kb) & (pkey_cap - 1);
                         struct xslt_pkey* k2 = NULL;
                         while (b->pkeys && kh2 < b->pkeycap &&
                                b->pkeys[kh2].key) {
                             if (strcmp(b->pkeys[kh2].key, kb) == 0) {
                                 k2 = &b->pkeys[kh2]; break;
                             }
-                            kh2 = (kh2 + 1) & 127;
+                            kh2 = (kh2 + 1) & (pkey_cap - 1);
                         }
                         if (!k2) {
                             if (!b->pkeys) {
                                 b->pkeys = (struct xslt_pkey*)calloc(
-                                    128, sizeof(struct xslt_pkey));
+                                    pkey_cap, sizeof(struct xslt_pkey));
                                 if (!b->pkeys) continue;
-                                b->pkeycap = 128;
+                                b->pkeycap = pkey_cap;
                             }
-                            /* #875: a full table must not make the
-                             * pattern unreachable — route it to the
-                             * scanned remainder so it still fires. */
-                            if (b->npkeys >= 96) { has_other = 1; continue; }
+                            /* #875: a table at its load ceiling must
+                             * not make the pattern unreachable — route
+                             * it to the scanned remainder so it still
+                             * fires. Unreachable in practice: pkey_cap
+                             * covers every literal pattern in the
+                             * sheet at a <=50% load. */
+                            if (b->npkeys >= pkey_cap - pkey_cap / 4) {
+                                has_other = 1;
+                                continue;
+                            }
                             k2 = &b->pkeys[kh2];
                             k2->key = leptris_strdup(kb);
                             if (!k2->key) continue;
@@ -2007,10 +2026,10 @@ const struct xslt_pkey* xslt_bucket_pred_key(
     char kb[64 + 48 + 96 + 8];
     int kl = snprintf(kb, sizeof(kb), "%s\x1f%s\x1f%s", elem, attr, val);
     if (kl <= 0 || (size_t)kl >= sizeof(kb)) return NULL;
-    size_t kh = tpl_name_hash(kb) & 127;
+    size_t kh = tpl_name_hash(kb) & (b->pkeycap - 1);
     while (b->pkeys[kh].key) {
         if (strcmp(b->pkeys[kh].key, kb) == 0) return &b->pkeys[kh];
-        kh = (kh + 1) & 127;
+        kh = (kh + 1) & (b->pkeycap - 1);
     }
     return NULL;
 }
