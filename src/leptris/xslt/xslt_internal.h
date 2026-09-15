@@ -208,6 +208,11 @@ typedef struct xslt_instr {
     int select_is_dot;              /* VALUE_OF @select is exactly "."
                                        — the string-value fast path
                                        skips the eval machinery (#682). */
+    const char* select_attr_name;  /* VALUE_OF @select is exactly
+                                      "@name" (unprefixed) — direct
+                                      lookup, no eval machinery (#682);
+                                      points into the stylesheet
+                                      element's select attribute. */
 
     /* TEXT (3.0 §10.4.2): the text carries {expr} value templates —
      * expand at execution (sheet-level expand-text="yes"). */
