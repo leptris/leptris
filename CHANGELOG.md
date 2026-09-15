@@ -5,9 +5,15 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: five #659 conformance slices (PR #1070)** — html5lib tree-construction corpus 1243 -> 1298 (+55, 0 breaks vs a clean-main twin); Nokogiri parity 784 -> 785.
+  - *After-head comments and after-body phase* — `</head>` records the boundary (comments past it are html children between head and body); `</body>` starts the after-body phase (comments/PIs divert to html AFTER the body; text and elements keep flowing into it; nothing pops).
+  - *dd/dt sibling close* — a `dd`/`dt` start closes the nearest open dd/dt in default scope (mirrors the p-in-button-scope scan; the contiguous implied-end pop cannot reach past intervening elements).
+  - *Ruby annotation boxes* — every ruby-child start (rb/rt/rp/rtc) closes a current rb/rt/rp; rb/rtc also close an open rtc, rt/rp nest inside it (all 7 ruby.dat reds).
+  - *`<image>` renamed `<img>`* (13.2.6.4.7); an explicit `<head>` child is ADOPTED as the head element instead of being wrapped in a synthesized one; whitespace-only text after head content stays in the head run; the in-frameset second `<html>` merges attributes; structural-tag attribute merges are first-wins.
+  - *Document-children public read path* — new `LEPTRIS_API leptris_document_first_child` (the #580 chain had no public accessor; hosts could not see prolog/epilog nodes). The html5lib meter now compares document-level nodes (unlocking ~48 prolog-comment cases); `</html>` ends the head phase strictly (content after it is body; frameset drops stray tags/text); "before html" whitespace is ignored; only the first structural `<body>` marks the head-lift boundary.
+  - Suite 1494/1494; specs `AfterHeadAndAfterBodyComments`, `DdDtStartsCloseSiblings`, `RubyAnnotationBoxesAreSiblings`, `ImageStartTagIsRenamedImg`, `ExplicitHeadIsAdoptedAndKeepsWsText`, `DocumentChildren.PublicFirstChildWalksTheChain`.
 
 
 ## [1.9.167] - 2026-09-15
