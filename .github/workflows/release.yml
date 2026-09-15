@@ -245,22 +245,18 @@ jobs:
           echo "::notice::Release: https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
 
   # ─────────────────────────────────────────────────────────────────────────
-  # leptris (py) wheel (PyPI, trusted publisher).
+  # leptris (py) wheel — published by leptris-py's OWN workflow run.
   #
-  # The tag push above does NOT fire python-publish.yml's own
-  # `push: tags` trigger — tags created with GITHUB_TOKEN never
-  # trigger other workflows. Call it here instead.
+  # PyPI trusted publishers match the OIDC token's repository claim
+  # against the registered repo (leptris/leptris-py). A workflow_call
+  # from THIS repo runs the reusable workflow under the CALLER's
+  # identity (repository: leptris/leptris), which can never match —
+  # every wheel publish since v1.9.164 failed on that mismatch.
+  # Instead, trigger the publish from leptris-py itself after this
+  # release lands:
+  #
+  #   gh workflow run release.yml -R leptris/leptris-py --ref main
+  #
+  # (that dispatch mints repository: leptris/leptris-py and matches
+  # the registration; the pin bump lives in leptris-py.)
   # ─────────────────────────────────────────────────────────────────────────
-  leptris-py:
-    name: Build and publish leptris (py) wheel
-    needs: [tag-and-release]
-    if: needs.tag-and-release.result == 'success'
-    # Reusable workflow in the split-out binding repo
-    # (leptris/leptris-py, package "leptris"); the pin lives there
-    # in libleptris-version.txt.
-    uses: leptris/leptris-py/.github/workflows/release.yml@main
-    with:
-      publish: true
-    permissions:
-      id-token: write
-      contents: read
