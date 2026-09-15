@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+## [1.9.176] - 2026-09-15
+
+### Added
+
+- node-surface parity — entity refs, declaration, DOCTYPE, doc-PIs (#1094) (dom)
+
+### Fixed
+
+- redundant ns redeclarations, xmlns:xml, and doc PIs on the mode: entry (#1096) (c14n)
+- C99-clean timer for the lifecycle bench (bench)
+
+### Performance
+
+- recycle document pool blocks between create/free waves (#1093) (pool)
+- grow the #866 predicate value-index with the sheet (xslt)
+- seed merged fn registries from the global standard snapshot (xpath)
+
+
+
 ## [1.9.175] - 2026-09-15
 
 <!-- Edit this section with the actual release notes. -->
