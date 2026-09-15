@@ -5148,10 +5148,15 @@ static LeptrisDocument html_parse_shared(
         /* Structural tags at top level (no explicit <html> open):
          * WHATWG's implicit head/body phases — the commit-time
          * synthesis provides the real elements, so the bare tags
-         * themselves disappear. Inside an explicit <html> they are
-         * ordinary elements (honored as-is). Their ATTRIBUTES are
+         * themselves disappear. Also DIRECTLY inside an explicit
+         * <html> element (tests1:11/13/101: <html><head><body>
+         * keeps the body out of the head). Their ATTRIBUTES are
          * stashed and land on the synthesized elements. */
-        if (b.depth == 0 && !b.frameset &&
+        int structural_ctx =
+            b.depth == 0 ||
+            (b.whatwg && b.depth == 1 && b.open[0] &&
+             h_ieq_raw(leptris_element_name(b.open[0]), "html"));
+        if (structural_ctx && !b.frameset &&
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
             if (strcmp(name, "body") == 0) {
                 /* Only the FIRST structural <body> marks the
