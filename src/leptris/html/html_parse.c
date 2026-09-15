@@ -4692,6 +4692,23 @@ static LeptrisDocument html_parse_shared(
                     continue;
                 }
             }
+            /* #659 eof-in-tag: an unterminated END tag at EOF is
+             * dropped too (same 13.2.5.44 rule). */
+            if (b.whatwg && !memchr(p, '>', (size_t)(end - p))) {
+                if (text < p) {
+                    size_t dlen = 0;
+                    char* dec = h_decode_body(b.pool, text, p,
+                                              b.whatwg, &dlen);
+                    if (dec && *dec) {
+                        LeptrisTextNode* t =
+                            leptris_text_create(dec, dlen, b.pool);
+                        if (t) h_append(&b, (LeptrisNodeRef)t);
+                    }
+                }
+                p = end;
+                text = p;
+                continue;
+            }
             /* End tag: ends the initial insertion mode too. */
             if (b.whatwg && !b.left_initial && text < p) {
                 int ws_only = 1;
@@ -5045,6 +5062,25 @@ static LeptrisDocument html_parse_shared(
         if (b.whatwg && b.frameset_ok && text < p) {
             for (const char* c = text; c < p; c++)
                 if (*c != 0 && !h_is_ws(*c)) { b.frameset_ok = 0; break; }
+        }
+
+        /* #659 eof-in-tag (13.2.5.44): an unterminated tag at EOF is
+         * a parse error — the tag is dropped, pending text lands,
+         * parsing ends (webkit01:4: '<di' -> empty body). */
+        if (b.whatwg && !memchr(p, '>', (size_t)(end - p))) {
+            if (text < p) {
+                size_t dlen = 0;
+                char* dec = h_decode_body(b.pool, text, p, b.whatwg,
+                                          &dlen);
+                if (dec && *dec) {
+                    LeptrisTextNode* t =
+                        leptris_text_create(dec, dlen, b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
+            }
+            p = end;
+            text = p;
+            continue;
         }
 
         const char* ns = p + 1;
