@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **XSLT 3.0: xsl:iterate sequence params keep prior values (#1066)** — an xsl:next-iteration with-param accumulating a sequence (`($labels, $label)`) lost every prior member's value: joined came out ",,gamma" where Saxon produces "alpha,beta,gamma". The scratch-varset snapshot backing variable lookups copied nodeset member pointers while dropping owns_synthetic_text — the exact flag the evaluator's lookup deep-copy guard keys on — so sequence consumers "owned" pointers still belonging to the previous param value, and the frame rebuild freed them. The snapshot (and the param-clone path) now use xpath_nodeset_deep_copy: document nodes still borrow, owned synthetic members copy with the flag. Spec `Xslt30.IterateSequenceParamKeepsPriorValues` (the issue's verbatim stylesheet); suite 1488/1488; libxslt suite 205/205.
 
 
 ## [1.9.166] - 2026-09-14
