@@ -5886,6 +5886,16 @@ static LeptrisDocument html_parse_shared(
         if (self_closing || h_is_void(name)) b.depth--;
         p = q;
         text = p;
+        /* 13.2.6.4.7: a single U+000A immediately after <pre>,
+         * <listing>, or <textarea> is IGNORED (the serializer
+         * re-indents these elements; tests3:5-8). One-shot byte
+         * skip at open time. */
+        if (b.whatwg && !self_closing && p < end && *p == '\n' &&
+            (strcmp(name, "pre") == 0 || strcmp(name, "listing") == 0 ||
+             strcmp(name, "textarea") == 0)) {
+            p++;
+            text = p;
+        }
     }
 
     /* Trailing text. */
