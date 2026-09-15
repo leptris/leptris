@@ -4737,6 +4737,17 @@ static LeptrisDocument html_parse_shared(
                     }
                 }
             }
+            /* #659 13.2.6.4.7: </br> acts as a <br> start tag with
+             * its attributes DROPPED — at ANY depth, including
+             * top level where nothing is open (webkit01:18/20). */
+            if (b.whatwg && nlen == 2 && h_lower(ns[0]) == 'b' &&
+                h_lower(ns[1]) == 'r') {
+                h_open_element(&b, "br");
+                if (b.depth > 0) b.depth--;   /* br is void */
+                p = q;
+                text = p;
+                continue;
+            }
             if (nlen && b.depth > 0) {
                 /* Find the matching open element (nearest first);
                  * void-element end tags are ignored. */
@@ -4746,14 +4757,6 @@ static LeptrisDocument html_parse_shared(
                 for (size_t i = 0; i < cl; i++)
                     lname[i] = h_lower(ns[i]);
                 lname[cl] = 0;
-                /* #659 (WHATWG): </br> is treated as <br>. */
-                if (b.whatwg && strcmp(lname, "br") == 0) {
-                    h_open_element(&b, "br");
-                    b.depth--;   /* br is void */
-                    p = q;
-                    text = p;
-                    continue;
-                }
                 if (!h_is_void(lname)) {
                     /* #659 (WHATWG): heading end tags pop through
                      * the NEAREST heading (any h1-h6), not just

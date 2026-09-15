@@ -528,6 +528,11 @@ static inline void leptris_elem_split_qname(LeptrisElement e,
         }
     }
     if (!colon) return;
+    /* A colon with NO local part (a trailing ':') is not a QName
+     * split — garbage tag names like the tokenizer's 'rdar:' keep
+     * their whole token as the local name (html5lib semantics,
+     * webkit01:14); splitting produced an empty element name. */
+    if (colon[1] == '\0') return;
     /* Lane 18 P1: read the doc backpointer BEFORE the split moves
      * the name — then re-stamp it in a fresh slot so namebp
      * resolution survives (public creates no longer register in
