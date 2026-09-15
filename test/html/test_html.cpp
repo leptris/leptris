@@ -445,8 +445,8 @@ TEST(HtmlParse, BrEndTagActsAsBrStartAtAnyDepth) {
     EXPECT_EQ(Html("<body></br foo=\"bar\"></body>"), "<br/>");
     EXPECT_EQ(Html("<body></body></br foo=\"bar\">"), "<br/>");
     EXPECT_EQ(Html("<rdar://problem/6869687>"),
-              "<html><head/><body><rdar: problem=\"\""
-              " 6869687=\"\"/></body></html>");
+              "<rdar: problem=\"\""
+              " 6869687=\"\"/>");
 }
 
 TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
