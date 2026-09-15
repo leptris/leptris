@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: after-frameset phase (#659)** — WHATWG 13.2.6.4.19: `</frameset>` closing the body-level frameset switches the phase — later start tags drop (except frame/noframes), non-whitespace text drops, whitespace stays an html child. The phase flag is set on both generic end-tag match paths (the plain and template-aware pops). Corpus 1299 -> 1305 (+6 incl. the webkit01 `</br foo="bar">` follow-ons from v1.9.170's trio, tests9/10/18 frameset tails; 0 breaks vs a clean-main twin); parity 785 held; suite 1497/1497.
 
 
 ## [1.9.170] - 2026-09-15
