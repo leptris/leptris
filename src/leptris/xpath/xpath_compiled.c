@@ -162,8 +162,17 @@ static struct leptris_xpath_result* compiled_eval_context(
         LeptrisXPathBytecode* bc = hit ? ce.bc : NULL;
         if (hit && !bc) {
             bc = leptris_xpath_compile_ast(compiled->ast);
-            if (bc) xpath_ast_cache_store_bc(compiled->expr,
-                                             compiled->expr_len, bc);
+            if (bc) {
+                xpath_ast_cache_store_bc(compiled->expr,
+                                         compiled->expr_len, bc);
+                /* #1079: a twin compile may have won the slot and
+                 * store freed OUR bytecode as the loser — re-read
+                 * the canonical cached bytecode for the run (the
+                 * entry is pinned, so it cannot be evicted here). */
+                LeptrisXPathBytecode* canonical = xpath_ast_cache_get_bc(
+                    compiled->expr, compiled->expr_len);
+                if (canonical) bc = canonical;
+            }
         }
         if (bc) {
             result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
