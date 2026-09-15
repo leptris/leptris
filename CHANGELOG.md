@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: `</br>` as start tag at any depth; trailing-colon names never split (#659)** — 13.2.6.4.7: `</br>` acts as a `<br>` start tag with its attributes dropped at ANY depth (the conversion previously sat inside the depth>0 gate, so `<body></br foo="bar">` produced nothing; webkit01:18/20). `leptris_elem_split_qname`: a colon with no local part is not a QName split — garbage tokenizer names like `rdar:` keep their whole token as the element name instead of an empty local name (webkit01:14; no valid XML name ends in `:`). Corpus 1299 -> 1302 (0 breaks vs a clean-main twin); parity 785 held; suite 1496/1496.
 
 
 ## [1.9.169] - 2026-09-15
