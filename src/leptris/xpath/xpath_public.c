@@ -862,7 +862,30 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
 
     XPathFunctionRegistry* reg = xpath_function_registry_new();
     if (!reg) return NULL;
-    xpath_function_registry_init_standard(reg);
+    /* #682: seed from the process-global standard registry (memcpy)
+     * instead of re-registering ~200 functions through the
+     * strcmp-chain inserter — the rebuild runs on every transform
+     * enter (the xslt_state swap invalidates the doc cache), and
+     * the O(n^2) inserts dominated the xslt-apply row (63% of
+     * samples: init_standard -> register_fn31 strcmp storms). Names
+     * are static literals neither registry owns; free() releases
+     * only the arrays, so the clone is safe. */
+    {
+        const XPathFunctionRegistry* std =
+            xpath_function_registry_get_standard();
+        if (std && std->count) {
+            reg->functions =
+                LEPTRIS_ALLOC_N(XPathFunctionDef, std->count);
+            if (!reg->functions) {
+                xpath_function_registry_free(reg);
+                return NULL;
+            }
+            memcpy(reg->functions, std->functions,
+                   std->count * sizeof(XPathFunctionDef));
+            reg->count = std->count;
+            reg->capacity = std->count;
+        }
+    }
 
     /* EXSLT pack (TODO.concurrency/06): native handlers registered
      * alongside (and after) the standard library. */
