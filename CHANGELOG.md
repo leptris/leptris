@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: structural head/body inside an explicit `<html>` (WHATWG entry) (#659)** — inside an explicit `<html>` element, `<head>`/`<body>` start tags are still structural (`<html><head><body>` yields `html > [head, body]`; tests1:11/13/101, template:106). The extension is gated on the WHATWG entry only — the html4/libxml2-compat entry keeps ordinary-element semantics, which is what the committed Nokogiri reference trees record (the ungated draft dropped the parity meter 785 -> 776; both green after). Corpus 1309 -> 1315 (+6, 0 breaks vs a clean-main twin); parity 785 held; suite 1497/1497.
 
 
 ## [1.9.172] - 2026-09-15
