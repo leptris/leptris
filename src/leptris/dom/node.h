@@ -95,7 +95,7 @@ struct leptris_node_vtable {
 const LeptrisNodeVTable* leptris_node_vtable_for(LeptrisNodeTypeEnum type);
 
 /* Number of entries in the registry (one per LeptrisNodeTypeEnum value). */
-#define LEPTRIS_NODE_TYPE_COUNT 10
+#define LEPTRIS_NODE_TYPE_COUNT 11
 
 /* Node creation.
  *
@@ -150,6 +150,7 @@ void leptris_node_increment_version(LeptrisNode* node);
 #define LEPTRIS_NODE_IS_COMMENT(node)   ((node) && (node)->type == LEPTRIS_NODE_TYPE_COMMENT)
 #define LEPTRIS_NODE_IS_CDATA(node)     ((node) && (node)->type == LEPTRIS_NODE_TYPE_CDATA)
 #define LEPTRIS_NODE_IS_PI(node)        ((node) && (node)->type == LEPTRIS_NODE_TYPE_PI)
+#define LEPTRIS_NODE_IS_ENTITY_REF(node) ((node) && (node)->type == LEPTRIS_NODE_TYPE_ENTITY_REF)
 #define LEPTRIS_NODE_IS_DOCTYPE(node)   ((node) && (node)->type == LEPTRIS_NODE_TYPE_DOCTYPE)
 #define LEPTRIS_NODE_IS_ATTRIBUTE(node) ((node) && (node)->type == LEPTRIS_NODE_TYPE_ATTRIBUTE)
 

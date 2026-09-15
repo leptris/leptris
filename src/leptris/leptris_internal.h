@@ -153,6 +153,8 @@ struct leptris_document {
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */
+    int decl_encoding_verbatim;     /* #1094: set_encoding declared the
+                                     * body's encoding; never re-spell it */
     int had_declaration;            /* 1 if input had <?xml?>, 0 otherwise */
     /* 1 if ANY namespace declaration exists anywhere in the
      * document (parse or mutation). XPath 1.0 §2.3: an unprefixed

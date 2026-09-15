@@ -19,6 +19,7 @@
 #include "../dom/comment.h"
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
+#include "../dom/entity_ref.h"
 #include "../dom/doctype.h"
 
 /* ============================================================================
@@ -181,6 +182,7 @@ void serialize_text_internal(LeptrisTextNode* text, SerializeBuffer* buf);
 void serialize_comment_internal(LeptrisCommentNode* comment, SerializeBuffer* buf);
 void serialize_cdata_internal(LeptrisCDATANode* cdata, SerializeBuffer* buf);
 void serialize_pi_internal(LeptrisPINode* pi, SerializeBuffer* buf);
+void serialize_entity_ref_internal(LeptrisEntityRefNode* ref, SerializeBuffer* buf);
 void serialize_doctype_internal(LeptrisDoctypeNode* doctype, SerializeBuffer* buf);
 
 #endif /* LEPTRIS_SERIALIZE_H */

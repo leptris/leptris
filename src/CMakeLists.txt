@@ -41,6 +41,7 @@ set(LEPTRIS_SOURCES
     leptris/dom/comment.c
     leptris/dom/cdata.c
     leptris/dom/pi.c
+    leptris/dom/entity_ref.c
     leptris/dom/doctype.c
 
     # Memory management

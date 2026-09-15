@@ -13,6 +13,7 @@
 #include "comment.h"
 #include "cdata.h"
 #include "pi.h"
+#include "entity_ref.h"
 #include "document_node.h"
 #include "root_doc_map.h"
 #include "edges.h"
@@ -226,6 +227,50 @@ LEPTRIS_API LeptrisNodeRef leptris_document_add_pi(LeptrisDocument doc,
     return n;
 }
 
+/* #1094: epilog twin of add_pi — the PI lands at the END of the
+ * document-children chain (after the root element), the position
+ * Nokogiri's Document#add_child gives. */
+LEPTRIS_API LeptrisNodeRef leptris_document_append_pi(LeptrisDocument doc,
+                                                      const char* target,
+                                                      const char* data) {
+    if (!doc || !target || !*target) return NULL;
+    LeptrisNodeRef n = leptris_pi_node_create(doc, target, data);
+    if (!n) return NULL;
+    LeptrisNode* tail = (LeptrisNode*)doc->doc_children_tail;
+    if (tail) {
+        leptris_node_set_next_sibling(tail, (LeptrisNode*)n);
+    } else {
+        doc->doc_children_head = n;
+    }
+    doc->doc_children_tail = n;
+    return n;
+}
+
+/* #1094: remove a document-level chain node (PI/comment) — the
+ * doc chain has no parent element, so leptris_node_unlink (which
+ * resolves the parent first) cannot serve it. */
+LEPTRIS_API LeptrisStatus leptris_document_remove_child(
+    LeptrisDocument doc, LeptrisNodeRef node) {
+    if (!doc || !node) return LEPTRIS_ERROR_NULL_ARG;
+    if (node->type != LEPTRIS_NODE_TYPE_PI &&
+        node->type != LEPTRIS_NODE_TYPE_COMMENT)
+        return LEPTRIS_ERROR_INVALID_ARG;
+    LeptrisNode* prev = NULL;
+    LeptrisNode* c = (LeptrisNode*)doc->doc_children_head;
+    while (c && c != (LeptrisNode*)node) {
+        prev = c;
+        c = leptris_node_get_next_sibling(c);
+    }
+    if (!c) return LEPTRIS_ERROR_NOT_FOUND;
+    LeptrisNode* next = leptris_node_get_next_sibling(c);
+    if (prev) leptris_node_set_next_sibling(prev, next);
+    else doc->doc_children_head = next;
+    if (doc->doc_children_tail == (LeptrisNode*)node)
+        doc->doc_children_tail = prev;
+    leptris_node_set_next_sibling((LeptrisNode*)node, NULL);
+    return LEPTRIS_OK;
+}
+
 /* #1032: the add_pi twin for comments — document-level comments
  * parse and serialize (#578) but had no writer. Appends at the END
  * of the document children chain (epilog, after the root element):
@@ -331,6 +376,28 @@ LEPTRIS_API LeptrisNodeRef leptris_pi_node_create(LeptrisDocument doc,
                                          data, strlen(data), doc->pool);
     if (n) n->owner_doc = doc;
     return (LeptrisNodeRef)n;
+}
+
+/* #1094: create an unexpanded &name; entity-reference node. Attach
+ * under an element with leptris_element_append_child (cast through
+ * the element-typed signature, issue #216 ABI pattern); serializes
+ * back as "&name;". */
+LEPTRIS_API LeptrisNodeRef leptris_entity_ref_node_create(LeptrisDocument doc,
+                                                          const char* name) {
+    if (!doc || !name || !*name) return NULL;
+    leptris_document_ensure_promoted(doc);
+    if (!doc->pool) return NULL;
+    LeptrisEntityRefNode* n = leptris_entity_ref_create(
+        name, strlen(name), doc->pool);
+    if (n) n->owner_doc = doc;
+    return (LeptrisNodeRef)n;
+}
+
+/* #1094: node-typed reader for bindings — the entity's name. */
+LEPTRIS_API const char* leptris_entity_ref_node_name(LeptrisNodeRef node) {
+    LeptrisEntityRefNode* r =
+        LEPTRIS_NODE_AS_ENTITY_REF((LeptrisNode*)node);
+    return r ? leptris_entity_ref_get_name(r) : NULL;
 }
 
 LEPTRIS_API LeptrisStatus leptris_text_node_set_content(LeptrisNodeRef node,

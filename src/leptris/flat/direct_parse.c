@@ -28,6 +28,7 @@
 #include "../dom/comment.h"
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
+#include "../dom/entity_ref.h"
 #include "../dom/doctype.h"
 #include "../common/string_view.h"
 #include "../common/chartype.h"
@@ -124,6 +125,10 @@ typedef struct {
     /* LEPTRIS_PARSE_DROP_WS_TEXT: skip creating nodes for
      * whitespace-only text runs (pugixml-default semantics). */
     int drop_ws_text;
+    /* LEPTRIS_PARSE_KEEP_ENTITY_REFS (#1094): keep &name; references
+     * as ENTITY_REF nodes; text runs split around them. Character
+     * references (&#...;) still expand — they are not entities. */
+    int keep_entity_refs;
     /* TODO 159 Phase G: parser-local last-attr cache for the element
      * currently being parsed. Eliminates the O(N) walk-to-find-tail
      * in dp_add_attr_inline — O(1) wiring per attr instead of O(N),
@@ -214,20 +219,27 @@ static LEPTRIS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
  * (#450) ALL node types use unscaled int32 sibling edges — every
  * compact-encoding range assumption broke at document scale; the
  * uniform encoding removes the overflow table from the parse path. */
-static const size_t dp_ns_off_int32[5] = {
+static const size_t dp_ns_off_int32[6] = {
     offsetof(struct leptris_element,  next_sibling_off),
     offsetof(LeptrisTextNode,        next_sibling_off),
     offsetof(LeptrisCommentNode,     next_sibling_off),
     offsetof(LeptrisCDATANode,       next_sibling_off),
     offsetof(LeptrisPINode,          next_sibling_off),
+    offsetof(LeptrisEntityRefNode,   next_sibling_off),
 };
-static const size_t dp_par_off[5] = {
+static const size_t dp_par_off[6] = {
     offsetof(struct leptris_element,  parent_off),
     offsetof(LeptrisTextNode,        parent_off),
     offsetof(LeptrisCommentNode,     parent_off),
     offsetof(LeptrisCDATANode,       parent_off),
     offsetof(LeptrisPINode,          parent_off),
+    offsetof(LeptrisEntityRefNode,   parent_off),
 };
+/* LeptrisNodeKind → table index: 0-4 identity, ENTITY_REF (10) → 5,
+ * anything else → 6 (out of range, no edge). */
+static inline unsigned dp_edge_idx(unsigned t) {
+    return t <= 4u ? t : (t == 10u ? 5u : 6u);
+}
 
 /* Wire child into parent's child chain. Uses compile-time offset
  * tables for branchless type dispatch — no switch, no branch predict.
@@ -238,23 +250,23 @@ static const size_t dp_par_off[5] = {
  * encoder's overflow-table path. */
 static inline void dp_wire_child(DParser* p, LeptrisElement parent,
                                   LeptrisNode* child) {
-    unsigned t = (unsigned)child->type;
-    if (t < 5) {
+    unsigned ti = dp_edge_idx((unsigned)child->type);
+    if (ti < 6) {
         int32_t* par_field =
-            (int32_t*)((char*)child + dp_par_off[t]);
+            (int32_t*)((char*)child + dp_par_off[ti]);
         *par_field = leptris_compact_int32_encode_inline(
             child, parent, par_field);
     }
 
     LeptrisNode* prev_last = p->last_child_stack[p->depth - 1];
     if (prev_last) {
-        unsigned pt = (unsigned)prev_last->type;
-        if (pt <= LEPTRIS_NODE_TYPE_PI) {
+        unsigned pi = dp_edge_idx((unsigned)prev_last->type);
+        if (pi < 6) {
             /* All sibling edges: unscaled int32 byte offsets (#450 —
              * cp16 ranges cannot hold cross-block sibling links on
              * large documents). */
             int32_t* sib_field =
-                (int32_t*)((char*)prev_last + dp_ns_off_int32[pt]);
+                (int32_t*)((char*)prev_last + dp_ns_off_int32[pi]);
             *sib_field = leptris_compact_int32_encode_inline(
                 prev_last, child, sib_field);
         }
@@ -264,7 +276,7 @@ static inline void dp_wire_child(DParser* p, LeptrisElement parent,
     }
     p->last_child_stack[p->depth - 1] = child;
 
-    if (t == LEPTRIS_NODE_TYPE_ELEMENT) {
+    if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
         parent->child_count++;
     }
 }
@@ -932,7 +944,8 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
 static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                      int owns_buffer,
                                                      int drop_ws_text,
-                                                     int apply_dtd_attrs) {
+                                                     int apply_dtd_attrs,
+                                                     int keep_entity_refs) {
     /* Set when the owns_buffer==2 path made our slack-backed copy. */
     int buf_is_owned_copy = 0;
 
@@ -1126,6 +1139,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * copy carries the zeroed slack. */
     p.probe_slack = owns_buffer == 1 && buf_is_owned_copy;
     p.drop_ws_text = drop_ws_text;
+    p.keep_entity_refs = keep_entity_refs;
     p.dtd = NULL;
     /* Only ever set to 1 in the loop; without the zero here the
      * field rides the stack (MSVC C4701) and doc->has_namespaces
@@ -1229,6 +1243,54 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * &foo; without the DTD at access time. Without a DTD,
              * stay borrowed and let leptris_text_get_content expand
              * predefined entities lazily. */
+            /* #1094 KEEP_ENTITY_REFS: split the run at each
+             * &name; — text segments stay borrowed (predefined and
+             * character references still expand lazily on read);
+             * named references become ENTITY_REF nodes. A '&' that
+             * is not a well-formed reference stays literal text. */
+            if (p.keep_entity_refs && memchr(text_start, '&', tlen)) {
+                const char* seg = text_start;
+                const char* tq = text_start;
+                const char* t_end = text_start + tlen;
+                while (tq < t_end) {
+                    if (*tq != '&') { tq++; continue; }
+                    const char* nm = tq + 1;
+                    while (nm < t_end && nm - tq - 1 < 64 &&
+                           IS_NAME_CHAR(*nm))
+                        nm++;
+                    if (nm == tq + 1 || nm >= t_end || *nm != ';') {
+                        tq++;   /* lone '&' or over-long: literal */
+                        continue;
+                    }
+                    if (tq > seg) {
+                        LeptrisTextNode* rt =
+                            dp_text_create(&p, seg, (size_t)(tq - seg));
+                        if (!rt) goto fail;
+                        rt->base.line = text_off;
+                        if (!rt->base.frozen) rt->base.frozen = 1;
+                        dp_wire_child(&p, p.open_stack[p.depth - 1],
+                                      (LeptrisNode*)rt);
+                    }
+                    LeptrisEntityRefNode* er = leptris_entity_ref_create(
+                        tq + 1, (size_t)(nm - tq - 1), pool);
+                    if (!er) goto fail;
+                    er->base.line = text_off;
+                    dp_wire_child(&p, p.open_stack[p.depth - 1],
+                                  (LeptrisNode*)er);
+                    tq = nm + 1;
+                    seg = tq;
+                }
+                if (t_end > seg) {
+                    LeptrisTextNode* rt =
+                        dp_text_create(&p, seg, (size_t)(t_end - seg));
+                    if (!rt) goto fail;
+                    rt->base.line = text_off;
+                    if (!rt->base.frozen) rt->base.frozen = 1;
+                    dp_wire_child(&p, p.open_stack[p.depth - 1],
+                                  (LeptrisNode*)rt);
+                }
+                continue;
+            }
             LeptrisTextNode* tn;
             if (p.dtd && tlen > 0 &&
                 memchr(text_start, '&', tlen) != NULL) {
@@ -1711,7 +1773,7 @@ fail:
  * arena holds only nodes and strings. */
 struct leptris_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
-    return direct_parse_internal((char*)xml, len, 2, 0, 0);
+    return direct_parse_internal((char*)xml, len, 2, 0, 0, 0);
 }
 
 /* Public flagged entry (LEPTRIS_PARSE_DROP_WS_TEXT et al.). */
@@ -1722,6 +1784,8 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                  (parse_flags & LEPTRIS_PARSE_DROP_WS_TEXT)
                                      ? 1 : 0,
                                  (parse_flags & LEPTRIS_PARSE_DTDATTR)
+                                     ? 1 : 0,
+                                 (parse_flags & LEPTRIS_PARSE_KEEP_ENTITY_REFS)
                                      ? 1 : 0);
 }
 
@@ -1729,5 +1793,5 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
 struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     if (!buf || len == 0) return NULL;
     buf[len] = '\0';  /* Ensure NUL termination */
-    return direct_parse_internal(buf, len, 0, 0, 0);
+    return direct_parse_internal(buf, len, 0, 0, 0, 0);
 }
