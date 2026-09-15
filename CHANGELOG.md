@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: eof-in-tag drops the unterminated tag (#659)** — WHATWG 13.2.5.44: EOF inside a tag is a parse error; the tag token is never emitted, pending text before it still lands, and parsing ends. Applied to both the start-tag and end-tag sections (existence check for `>` from the tag start — O(tag) on closed tags). `'<di'` now yields the empty `html > [head, body]` tree (webkit01:4). Corpus 1298 -> 1299 (0 breaks); suite 1496/1496.
 
 
 ## [1.9.168] - 2026-09-15
