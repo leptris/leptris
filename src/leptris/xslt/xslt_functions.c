@@ -1519,7 +1519,10 @@ static void xslt_register_handler(XPathFunctionRegistry* r, const char* name,
                                         max_args, user_data);
 }
 
-void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
+/* Stateless bridge half (names/arities process-static): the
+ * registry template (#682) builds this with a sentinel exec and
+ * patches user_data per transform-enter. */
+void xslt_register_bridge_static(XPathFunctionRegistry* r, void* exec) {
     if (!r) return;
     xslt_register_handler(r, "current", xslt_fn_current_real, 0, 0, exec);
     xslt_register_handler(r, "current-group", xslt_fn_current_group,
@@ -1566,19 +1569,26 @@ void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
             r->functions[i].user_data = exec;
     }
 
-    /* Stylesheet-defined EXSLT functions (func:function): one
-     * registry entry per definition, user_data = the binding. */
-    if (exec) {
-        XsltExec* ex = (XsltExec*)exec;
-        XsltUfnBinding* arr = ufn_bindings(ex);
-        if (arr) {
-            size_t i = 0;
-            for (const XsltUserFunc* f = ex->sheet->funcs; f;
-                 f = f->next, i++)
-                xslt_register_handler(r, f->name, xslt_fn_user_func,
-                                      0, 8, &arr[i]);
-        }
+}
+
+/* Stylesheet-defined EXSLT functions (func:function): one registry
+ * entry per definition, user_data = the binding. Per-exec state —
+ * never part of the static template. */
+void xslt_register_ufn_handlers(XPathFunctionRegistry* r, XsltExec* ex) {
+    if (!r || !ex) return;
+    XsltUfnBinding* arr = ufn_bindings(ex);
+    if (arr) {
+        size_t i = 0;
+        for (const XsltUserFunc* f = ex->sheet->funcs; f;
+             f = f->next, i++)
+            xslt_register_handler(r, f->name, xslt_fn_user_func,
+                                  0, 8, &arr[i]);
     }
+}
+
+void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
+    xslt_register_bridge_static(r, exec);
+    xslt_register_ufn_handlers(r, (XsltExec*)exec);
 }
 
 /* The original exec-scoped builder is kept for the future cache
