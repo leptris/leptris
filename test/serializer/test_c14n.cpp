@@ -277,6 +277,53 @@ TEST(C14nConformance, AttributesSortedByUriThenLocal) {
     leptris_document_free(doc);
 }
 
+
+// ---- #1096: extended-entry (mode:) C14N parity ----
+
+TEST(C14n1096, RedundantRedeclarationOmitted) {
+    const char xml[] =
+        "<root xmlns:a=\"http://a.com\"><child xmlns:a=\"http://a.com\"/></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_1, LEPTRIS_C14N_MODE_CANONICAL, NULL, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out, "<root xmlns:a=\"http://a.com\">"), nullptr) << out;
+    EXPECT_EQ(std::strstr(out, "<child xmlns:a="), nullptr) << out;
+    EXPECT_NE(std::strstr(out, "<child></child>"), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(C14n1096, XmlNamespaceDeclarationOmitted) {
+    const char xml[] = "<root xmlns:xml=\"http://www.w3.org/XML/1998/namespace\"/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_1, LEPTRIS_C14N_MODE_CANONICAL, NULL, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(std::strstr(out, "xmlns:xml"), nullptr) << out;
+    EXPECT_NE(std::strstr(out, "<root></root>"), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(C14n1096, DocumentLevelPIsKeptOnExtendedEntry) {
+    const char xml[] = "<?target data?><r/><?after d2?>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_1, LEPTRIS_C14N_MODE_CANONICAL, NULL, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(std::strstr(out, "<?target data?>"), nullptr) << out;
+    EXPECT_NE(std::strstr(out, "<?after d2?>"), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
 }  // namespace
 
 // ---- TODO 85: C14N 1.1 + exclusive canonicalization -------------------
