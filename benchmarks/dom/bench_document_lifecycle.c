@@ -7,13 +7,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include "leptris.h"
+#include "utils.h"
 
 static double now_ns(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (double)t.tv_sec * 1e9 + (double)t.tv_nsec;
+    return benchmark_time_us() * 1000.0;
 }
 
 /* One moxml-shaped build: fresh document, two elements + one text,
