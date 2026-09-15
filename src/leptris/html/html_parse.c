@@ -4529,7 +4529,12 @@ static LeptrisDocument html_parse_shared(
                  * just skipped. */
                 const char* q = p + 2;
                 int is_dt = 0;
-                if (end - q >= 7 && !doc->doctype &&
+                /* 13.2.6.4.x: a DOCTYPE token outside the INITIAL
+                 * insertion mode is a parse error and is IGNORED —
+                 * a first doctype after any tag/text never becomes
+                 * the document doctype (domjs-unsafe:28-34,
+                 * 42-43). */
+                if (end - q >= 7 && !doc->doctype && !b.left_initial &&
                     !h_in_head_noscript(&b)) {
                     static const char kw[] = "doctype";
                     is_dt = 1;
@@ -4644,9 +4649,37 @@ static LeptrisDocument html_parse_shared(
                                       ? (size_t)(ce - cs)
                                       : (size_t)(end - cs);
                     if (clen) {
-                        LeptrisTextNode* t = leptris_text_create(
-                            cs, clen, b.pool);
-                        if (t) h_append(&b, (LeptrisNodeRef)t);
+                        /* NUL in foreign CDATA is U+FFFD (13.2.5.2
+                         * character token rule; plain-text-unsafe
+                         * 11). */
+                        size_t nuls = 0;
+                        for (const char* c2 = cs; c2 < cs + clen; c2++)
+                            if (*c2 == '\0') nuls++;
+                        if (nuls) {
+                            char* buf = (char*)leptris_pool_alloc(
+                                b.pool, clen + 2 * nuls);
+                            if (buf) {
+                                size_t o = 0;
+                                for (const char* c2 = cs;
+                                     c2 < cs + clen; c2++) {
+                                    if (*c2 == '\0') {
+                                        buf[o++] = (char)0xEF;
+                                        buf[o++] = (char)0xBF;
+                                        buf[o++] = (char)0xBD;
+                                    } else {
+                                        buf[o++] = *c2;
+                                    }
+                                }
+                                LeptrisTextNode* t =
+                                    leptris_text_create(buf, o, b.pool);
+                                if (t)
+                                    h_append(&b, (LeptrisNodeRef)t);
+                            }
+                        } else {
+                            LeptrisTextNode* t = leptris_text_create(
+                                cs, clen, b.pool);
+                            if (t) h_append(&b, (LeptrisNodeRef)t);
+                        }
                     }
                     p = (ce + 3 <= end) ? ce + 3 : end;
                 } else {
