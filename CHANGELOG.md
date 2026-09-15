@@ -2,20 +2,57 @@
 
 ## [1.9.176] - 2026-09-15
 
+Ruby-binding and moxml parity wave: four surfaces the adapter
+stack was faking in Ruby are now native, plus two engine-side perf
+walls.
+
 ### Added
 
-- node-surface parity — entity refs, declaration, DOCTYPE, doc-PIs (#1094) (dom)
+- node-surface parity — entity refs, declaration, DOCTYPE, doc-PIs
+  (#1094). New ENTITY_REF node kind (10) with the
+  LEPTRIS_PARSE_KEEP_ENTITY_REFS parse flag: &name; references stay
+  unexpanded first-class nodes (text runs split around them,
+  character references still expand), serialize back verbatim, and
+  text reads resolve them against the predefined entities and the
+  DTD entity table. leptris_entity_ref_node_create +
+  _node_name for programmatic use. XML declaration surface
+  (set/get version, encoding, standalone; set_encoding emits the
+  declared name verbatim). Programmatic DOCTYPE
+  (leptris_document_set_doctype with PUBLIC/SYSTEM ids). Doc-PI
+  parity: leptris_document_append_pi (epilog twin of add_pi) and
+  identity-based leptris_document_remove_child. With these, moxml's
+  CustomizedLeptris marker machinery and TextSegment delete from
+  the Ruby side.
+- node-surface parity specs: test/dom/test_node_surface_parity.cpp
+  (15).
 
 ### Fixed
 
-- redundant ns redeclarations, xmlns:xml, and doc PIs on the mode: entry (#1096) (c14n)
-- C99-clean timer for the lifecycle bench (bench)
+- C14N (#1096): redundant namespace redeclarations are omitted
+  (ancestor-scope binding stack threaded through the canonical
+  walk), xmlns:xml with the standard URI never renders, and the
+  mode: entry (canonicalize_ex) keeps document-level PIs in C14N
+  document order instead of delegating to the element-scoped
+  subtree call. Unblocks canon's C14N lane flip.
+- C99-clean timer for the lifecycle bench (CLOCK_MONOTONIC is
+  POSIX, not C99 — strict Linux builds failed).
 
 ### Performance
 
-- recycle document pool blocks between create/free waves (#1093) (pool)
-- grow the #866 predicate value-index with the sheet (xslt)
-- seed merged fn registries from the global standard snapshot (xpath)
+- document lifecycle (#1093): leptris_pool_destroy parks the
+  default-shape pool blocks on thread-local lists with an adaptive
+  limit (grows one slot per unmet pop, shrinks and frees the oldest
+  when demand fades); document_create pops an exact-size match
+  instead of first-touching fresh arena pages. Stands down under
+  custom allocators; leptris_thread_cleanup drains. Batched GC-shape
+  builds: 4347 -> 288 ns/doc (15x); tight cycle 1056 -> 208 ns (5x).
+- XSLT template dispatch (#682): the #866 predicate value-index
+  grows with the sheet (pow2 at <=50% load) instead of rerouting
+  patterns past a fixed 96-entry cutoff to full engine scans.
+  pred-pattern dispatch 120 templates/2400 items:
+  18.18 -> 2.31 ms (7.9x); flat at 400 templates.
+- XPath: merged fn registries seed from the global standard
+  snapshot.
 
 
 
