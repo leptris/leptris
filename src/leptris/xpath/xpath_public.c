@@ -18,6 +18,8 @@
 #include "../dom/text.h"
 #include "../dom/comment.h"
 #include "../dom/cdata.h"
+#include "../common/port.h"  /* LEPTRIS_MUTEX_*: registry template init */
+#include <stdint.h>
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
@@ -847,6 +849,86 @@ LEPTRIS_API LeptrisStatus leptris_exslt_enable(LeptrisDocument doc) {
     return LEPTRIS_OK;
 }
 
+/* ---- #682 phase 3: registry templates ----
+ *
+ * A transform-enter swaps doc->xslt_state and invalidates the doc's
+ * registry cache, so the first eval of EVERY apply rebuilt the
+ * merged registry through the strcmp-chain inserter (O(n^2) dedup
+ * over ~240 entries) — 44% of the xslt-apply transform time in
+ * sampling. The merged content is process-static except (a) the
+ * per-apply exec in user_data on the bridge/EXSLT slots and (b)
+ * stylesheet-defined / custom functions. So build the static part
+ * once per exslt flag into a template (sentinel marks the per-exec
+ * slots) and make every transform-enter build one memcpy + patch. */
+#define FN_UD_SENTINEL ((void *)(uintptr_t)1)
+
+typedef struct FnRegistryTemplate {
+    XPathFunctionDef* functions;   /* read-only after build */
+    size_t count;
+    size_t* ud_slots;              /* indices with per-exec user_data */
+    size_t n_ud_slots;
+} FnRegistryTemplate;
+
+static FnRegistryTemplate g_fn_templates[2]; /* [0] plain, [1] exslt */
+static leptris_mutex_t g_fn_template_mutex = LEPTRIS_MUTEX_INIT;
+
+static const FnRegistryTemplate* fn_registry_template(int with_exslt) {
+    FnRegistryTemplate* t = &g_fn_templates[with_exslt ? 1 : 0];
+    LEPTRIS_MUTEX_LOCK(&g_fn_template_mutex);
+    if (!t->functions) {
+        XPathFunctionRegistry* r = xpath_function_registry_new();
+        if (r) {
+            const XPathFunctionRegistry* std =
+                xpath_function_registry_get_standard();
+            if (std && std->count) {
+                r->functions =
+                    LEPTRIS_ALLOC_N(XPathFunctionDef, std->count);
+                if (r->functions) {
+                    memcpy(r->functions, std->functions,
+                           std->count * sizeof(XPathFunctionDef));
+                    r->count = r->capacity = std->count;
+                }
+            }
+            if (r->functions) {
+                if (with_exslt) {
+                    extern void leptris_exslt_register(
+                        XPathFunctionRegistry*);
+                    leptris_exslt_register(r);
+                }
+                extern void xslt_register_bridge_static(
+                    XPathFunctionRegistry*, void*);
+                xslt_register_bridge_static(r, FN_UD_SENTINEL);
+                /* register()'s fresh-append path leaves user_data
+                 * unwritten (realloc memory) — normalize everything
+                 * that is not the sentinel so the template is
+                 * deterministic, then record the patch slots. */
+                for (size_t i = 0; i < r->count; i++) {
+                    if (r->functions[i].user_data != FN_UD_SENTINEL)
+                        r->functions[i].user_data = NULL;
+                    else
+                        t->n_ud_slots++;
+                }
+                t->ud_slots = LEPTRIS_ALLOC_N(
+                    size_t, t->n_ud_slots ? t->n_ud_slots : 1);
+                if (t->ud_slots) {
+                    size_t k = 0;
+                    for (size_t i = 0; i < r->count; i++)
+                        if (r->functions[i].user_data == FN_UD_SENTINEL)
+                            t->ud_slots[k++] = i;
+                    t->functions = r->functions;
+                    t->count = r->count;
+                    r->functions = NULL;   /* adopted by the template */
+                } else {
+                    t->n_ud_slots = 0;
+                }
+            }
+            xpath_function_registry_free(r);
+        }
+    }
+    LEPTRIS_MUTEX_UNLOCK(&g_fn_template_mutex);
+    return t->functions ? t : NULL;
+}
+
 XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_document* doc) {
     if (!doc) return NULL;
     if (!doc->custom_xpath_fns && !doc->exslt_enabled &&
@@ -859,6 +941,35 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
      * otherwise rebuilds ~45 registrations per expression). */
     if (doc->cached_fn_registry)
         return (XPathFunctionRegistry*)doc->cached_fn_registry;
+
+    /* Transform-enter fast path: clone the template, patch the
+     * per-exec slots, append the (usually empty) stylesheet-func
+     * bindings. Falls through to the full build when the template
+     * is unavailable or the doc carries state the template cannot
+     * express (custom functions, Schematron bridge). */
+    if (doc->xslt_state && !doc->custom_xpath_fns && !doc->sch_state) {
+        const FnRegistryTemplate* t =
+            fn_registry_template(doc->exslt_enabled);
+        if (t) {
+            XPathFunctionRegistry* reg = xpath_function_registry_new();
+            if (!reg) return NULL;
+            reg->functions = LEPTRIS_ALLOC_N(XPathFunctionDef, t->count);
+            if (!reg->functions) {
+                xpath_function_registry_free(reg);
+                return NULL;
+            }
+            memcpy(reg->functions, t->functions,
+                   t->count * sizeof(XPathFunctionDef));
+            reg->count = reg->capacity = t->count;
+            for (size_t i = 0; i < t->n_ud_slots; i++)
+                reg->functions[t->ud_slots[i]].user_data = doc->xslt_state;
+            extern void xslt_register_ufn_handlers(
+                XPathFunctionRegistry*, void*);
+            xslt_register_ufn_handlers(reg, doc->xslt_state);
+            doc->cached_fn_registry = reg;
+            return reg;
+        }
+    }
 
     XPathFunctionRegistry* reg = xpath_function_registry_new();
     if (!reg) return NULL;

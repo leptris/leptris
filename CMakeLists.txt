@@ -145,6 +145,11 @@ else()
     message(STATUS "Target architecture: default (portable)")
 endif()
 
+# Check for compile flag support — must precede the first
+# check_c_compiler_flag use below (TODO 167 Phase C shared builds
+# failed to configure on Clang when it sat after it).
+include(CheckCCompilerFlag)
+
 # -fno-semantic-interposition for shared libs (TODO 167 Phase C).
 # Allows GCC/Clang to inline exported symbols into callers within the same
 # shared object, and lets LLVM's optimizer treat the public API as
@@ -260,9 +265,6 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 # Configuration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Check for compile flag support (TODO 167 Phase C uses check_c_compiler_flag).
-include(CheckCCompilerFlag)
 
 # Add cmake modules path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
