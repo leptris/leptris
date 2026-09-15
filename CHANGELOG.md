@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: mid-document DOCTYPE ignored; foreign CDATA NUL -> U+FFFD (#659)** — a DOCTYPE token outside the initial insertion mode is a parse error and is ignored: a first doctype arriving after any tag/text no longer becomes the document doctype (domjs-unsafe:28-34/42-43, tests19:44). NUL in foreign (SVG/MathML) CDATA maps to U+FFFD (13.2.5.2; plain-text-unsafe:11). Corpus 1315 -> 1326 (+11, 0 breaks vs a clean-main twin); **Nokogiri parity 785 -> 793 (+8)**; suite 1497/1497.
 
 
 ## [1.9.173] - 2026-09-15
