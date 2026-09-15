@@ -16,6 +16,18 @@
 #include "../dom/text.h"
 #include "../xpath/xpath_internal.h"  /* xpath_ast_cache_owner_* (#682 Phase 2) */
 #include "../dom/cdata.h"
+#include "../dom/element_index.h"  /* index_invalidate: append parity */
+
+/* Result-tree appends: the exec already holds the owning document
+ * (ex->result — swapped in sync during RTF capture), so append via
+ * the doc-resolved internal instead of the public wrapper, which
+ * re-derives the doc by root-climb + map lookup per node (#682). */
+static void out_append_child(XsltExec* ex, LeptrisElement parent,
+                             void* child) {
+    leptris_element_append_child_internal_doc(
+        parent, (LeptrisNode*)child, ex->result);
+    leptris_element_index_invalidate(ex->result);
+}
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -296,7 +308,7 @@ static LeptrisElement out_place_elem(XsltExec* ex, LeptrisElement parent,
             ex->root_sib_tail = (LeptrisNodeRef)e;
         }
     } else {
-        leptris_element_append_child(parent, e);
+        out_append_child(ex, parent, e);
     }
     return e;
 }
@@ -396,7 +408,7 @@ static void out_append_text(XsltExec* ex, LeptrisElement parent,
     if (!text || !*text) return;
     if (parent) {
         LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
-        if (t) leptris_element_append_child(parent, (LeptrisElement)t);
+        if (t) out_append_child(ex, parent, t);
         return;
     }
     /* No insertion point yet: fragment-level text. BEFORE the first
@@ -1060,7 +1072,7 @@ static int op_text(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
             LeptrisNodeRef t = leptris_text_node_create(ex->result, text);
             if (t) {
                 ((LeptrisTextNode*)t)->base.raw = 1;
-                leptris_element_append_child(parent, (LeptrisElement)t);
+                out_append_child(ex, parent, t);
             }
             free(tvt);
             return 0;
@@ -3916,8 +3928,7 @@ static int op_comment(XsltExec* ex, const XsltInstr* in,
         LeptrisNodeRef cm = leptris_comment_node_create(ex->result,
                                                         in->text);
         if (cm && ex->pending_parent)
-            leptris_element_append_child(ex->pending_parent,
-                                         (LeptrisElement)cm);
+            out_append_child(ex, ex->pending_parent, cm);
         else if (cm)
             xslt_append_fragment_node(ex, cm);
         return 0;
