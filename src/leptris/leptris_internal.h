@@ -800,6 +800,7 @@ typedef enum {
 /* Forward declarations for memory allocation hooks */
 void* leptris_alloc_hook(size_t size);
 void leptris_free_hook(void* ptr);
+int leptris_custom_allocator_active(void);
 
 /* Use standard C memory functions instead of Ruby macros */
 #define LEPTRIS_ALLOC(type) \

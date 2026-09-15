@@ -7,6 +7,7 @@
  * - Batch deallocation (free all pages at once)
  */
 
+#include "../common/port.h"         /* LEPTRIS_THREAD_LOCAL */
 #include "../common/string_view.h"  /* Full LeptrisStringView definition */
 #include "pool.h"                    /* Pool API */
 #include "../leptris_internal.h"      /* Custom allocation hooks */
@@ -51,6 +52,112 @@ struct memory_page {
 /* ============================================================================
  * Pool Lifecycle
  * ============================================================================ */
+
+/* #1093 pool-block recycler. Ruby-shaped builders GC-own documents:
+ * one batch's frees land after the next batch's creates, so every
+ * create first-touches fresh arena pages (a fresh document_create
+ * is two 32KB mallocs) and every GC sweep pays the teardown.
+ * leptris_pool_destroy parks the default-shape blocks (the inline
+ * pool+first-page malloc and same-size chain pages) on capped
+ * thread-local lists; create pops an exact-size match instead of
+ * touching the allocator. Same-thread reuse only, pages stay warm.
+ * Stands down under custom allocators (accounting/failure
+ * injection) and per-pool hooks.
+ *
+ * The list limit is ADAPTIVE: parked-block demand is the caller's
+ * wave size (a GC batch, a build loop) and is unknown up front.
+ * Grow one slot per unmet pop; when parks pile up with no pops
+ * between them, shrink the limit and trim the oldest block so a
+ * burst's memory returns once the pattern fades. Bounds:
+ * [MIN, MAX] blocks x block size parked per list per thread. */
+struct pool_parked {
+    struct pool_parked* next;
+    size_t size;
+};
+#define POOL_RECYCLE_MIN 2
+#define POOL_RECYCLE_MAX 64
+struct pool_recycle_list {
+    struct pool_parked* head;
+    size_t n;
+    size_t limit;
+    size_t idle;
+};
+static LEPTRIS_THREAD_LOCAL struct pool_recycle_list t_recycle_pools;
+static LEPTRIS_THREAD_LOCAL struct pool_recycle_list t_recycle_pages;
+
+static int pool_recycle_active(void) {
+    return !leptris_custom_allocator_active();
+}
+
+/* leptris_thread_cleanup: return every parked block to the
+ * allocator so a finishing thread holds no pool memory. */
+void leptris_pool_drain_recycler(void) {
+    struct pool_recycle_list* lists[2] = {&t_recycle_pools, &t_recycle_pages};
+    for (int i = 0; i < 2; i++) {
+        struct pool_parked* p = lists[i]->head;
+        while (p) {
+            struct pool_parked* next = p->next;
+            leptris_free_hook(p);
+            p = next;
+        }
+        lists[i]->head = NULL;
+        lists[i]->n = 0;
+        lists[i]->limit = 0;
+        lists[i]->idle = 0;
+    }
+}
+
+static void* pool_recycle_pop(struct pool_recycle_list* rl, size_t size) {
+    struct pool_parked** prev = &rl->head;
+    for (struct pool_parked* p = rl->head; p; p = p->next) {
+        if (p->size == size) {
+            *prev = p->next;
+            rl->n--;
+            rl->idle = 0;
+            return p;
+        }
+        prev = &p->next;
+    }
+    if (rl->limit < POOL_RECYCLE_MAX) rl->limit++;
+    return NULL;
+}
+
+static int pool_recycle_park(struct pool_recycle_list* rl, void* block,
+                             size_t size) {
+    if (rl->n < rl->limit) {
+        struct pool_parked* p = (struct pool_parked*)block;
+        p->next = rl->head;
+        p->size = size;
+        rl->head = p;
+        rl->n++;
+        rl->idle = 0;
+        return 1;
+    }
+    if (rl->idle >= rl->limit && rl->limit > POOL_RECYCLE_MIN) {
+        rl->limit--;
+        if (rl->n > rl->limit) {
+            struct pool_parked** prev = &rl->head;
+            struct pool_parked* tail = rl->head;
+            while (tail->next) { prev = &tail->next; tail = tail->next; }
+            *prev = NULL;
+            rl->n--;
+            leptris_free_hook(tail);
+        }
+    }
+    rl->idle++;
+    return 0;
+}
+
+/* The inline-block total a create of `page_size` asks for — the
+ * exact formula of leptris_pool_create_with_page_size, shared with
+ * the park side so sizes always match. */
+static size_t pool_inline_block_size(size_t page_size) {
+    size_t header_size =
+        sizeof(LeptrisMemoryPool) + sizeof(struct memory_page) - 1;
+    header_size = (header_size + LEPTRIS_POOL_ALIGNMENT - 1) &
+                  ~(LEPTRIS_POOL_ALIGNMENT - 1);
+    return header_size + page_size;
+}
 
 /* Helper to allocate a new page */
 static MemoryPage* allocate_new_page(size_t page_size) {
@@ -135,10 +242,21 @@ LeptrisMemoryPool* leptris_pool_create_with_page_size(size_t page_size) {
     header_size = (header_size + LEPTRIS_POOL_ALIGNMENT - 1) &
                   ~(LEPTRIS_POOL_ALIGNMENT - 1);
     size_t total_size = header_size + page_size;
-    char* block = (char*)leptris_alloc_hook(total_size);
-    if (!block) return NULL;
+    char* block = NULL;
+    if (pool_recycle_active()) {
+        block = (char*)pool_recycle_pop(&t_recycle_pools, total_size);
+    }
+    if (!block) {
+        block = (char*)leptris_alloc_hook(total_size);
+        if (!block) return NULL;
+    }
 
     LeptrisMemoryPool* pool = (LeptrisMemoryPool*)block;
+    /* A recycled block carries stale bytes (the parked-list header
+     * overwrote the pool struct); fresh mallocs may be zero only by
+     * accident of the allocator. Zero the struct + page header so
+     * both paths initialize identically. */
+    memset(pool, 0, sizeof(*pool));
     struct memory_page* page = (struct memory_page*)(block + sizeof(LeptrisMemoryPool));
     page->next = NULL;
     page->page_size = page_size;
@@ -164,7 +282,21 @@ LeptrisMemoryPool* leptris_pool_create_with_page_size(size_t page_size) {
      * to avoid wasting memory on small documents. For 4KB pages used with
      * small files, the single page is typically sufficient. */
     if (page_size >= 8192) {
-        MemoryPage* next_page = allocate_new_page(page_size);
+        MemoryPage* next_page = NULL;
+        if (pool_recycle_active()) {
+            next_page = (MemoryPage*)pool_recycle_pop(
+                &t_recycle_pages,
+                sizeof(struct memory_page) - 1 + page_size);
+        }
+        if (next_page) {
+            /* The parked-list header clobbered next/page_size;
+             * restore the full header the fresh path would set. */
+            next_page->next = NULL;
+            next_page->page_size = page_size;
+            next_page->busy_size = 0;
+        } else {
+            next_page = allocate_new_page(page_size);
+        }
         if (next_page) {
             page->next = next_page;
             pool->page_count++;
@@ -217,6 +349,8 @@ void leptris_pool_destroy(LeptrisMemoryPool* pool) {
     /* Free pages. The first page may be inline with the pool struct
      * (when first_page_inline is set) — in that case, skip freeing
      * it directly; the pool-struct free below reclaims both. */
+    const int can_recycle = pool_recycle_active() &&
+                            !pool->alloc_hook && !pool->dealloc_hook;
     int first_inline = pool->first_page_inline;
     MemoryPage* page = pool->first_page;
     if (page) {
@@ -226,13 +360,25 @@ void leptris_pool_destroy(LeptrisMemoryPool* pool) {
         }
         while (page) {
             MemoryPage* next = page->next;
-            leptris_free_hook(page);
+            if (can_recycle &&
+                pool_recycle_park(&t_recycle_pages, page,
+                                  sizeof(struct memory_page) - 1 +
+                                      page->page_size)) {
+                /* parked */
+            } else {
+                leptris_free_hook(page);
+            }
             page = next;
         }
     }
 
     /* When the first page was inline, freeing the pool struct frees
      * both the pool and the first page (they share one malloc). */
+    if (can_recycle && first_inline &&
+        pool_recycle_park(&t_recycle_pools, pool,
+                          pool_inline_block_size(pool->page_size))) {
+        return;
+    }
     leptris_free_hook(pool);
 }
 

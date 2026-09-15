@@ -256,4 +256,76 @@ TEST(PoolStress, HashTableWithManyEntries) {
     leptris_pool_destroy(pool);
 }
 
+/* ---- #1093 pool-block recycler ----
+ *
+ * document_create/document_free cycles park the pool's blocks on
+ * thread-local lists; the next create pops them instead of
+ * mallocing. Two invariants:
+ *   1. A recycled pool initializes identically — repeated
+ *      build/serialize/free cycles must produce byte-identical
+ *      output (stale busy_size or page headers corrupt the second
+ *      cycle's allocations).
+ *   2. The recycler stands down under a custom allocator so
+ *      accounting and failure injection still see every
+ *      malloc/free pair. */
+
+TEST(LeptrisMemoryPool, RecycledBlocksProduceIdenticalDocuments) {
+    /* Batches larger than the adaptive limit so recycling engages
+     * mid-batch and blocks survive across iterations. */
+    for (int iter = 0; iter < 8; iter++) {
+        enum { BATCH = 24 };
+        LeptrisDocument docs[BATCH];
+        for (int i = 0; i < BATCH; i++) {
+            docs[i] = leptris_document_create();
+            ASSERT_NE(docs[i], nullptr);
+            LeptrisElement root = leptris_element_create(docs[i], "root");
+            ASSERT_NE(root, nullptr);
+            LeptrisElement child = leptris_element_create(docs[i], "child");
+            ASSERT_NE(child, nullptr);
+            ASSERT_EQ(leptris_element_set_attribute(child, "k", "v"), 0);
+            ASSERT_EQ(leptris_element_set_text(child, "payload"), 0);
+            ASSERT_EQ(leptris_element_append_child(root, child), 0);
+            ASSERT_EQ(leptris_document_set_root(docs[i], root), 0);
+        }
+        for (int i = 0; i < BATCH; i++) {
+            char* xml = leptris_document_serialize(docs[i], NULL);
+            ASSERT_NE(xml, nullptr);
+            EXPECT_STREQ(xml, "<root><child k=\"v\">payload</child></root>");
+            leptris_free_string(xml);
+            leptris_document_free(docs[i]);
+        }
+    }
+}
+
+static size_t g_alloc_count = 0;
+static size_t g_free_count = 0;
+static void* counting_alloc(size_t n) {
+    g_alloc_count++;
+    return malloc(n);
+}
+static void counting_free(void* p) {
+    g_free_count++;
+    free(p);
+}
+
+TEST(LeptrisMemoryPool, RecyclerStandsDownUnderCustomAllocator) {
+    leptris_set_memory_management_functions(counting_alloc, counting_free);
+    g_alloc_count = g_free_count = 0;
+    {
+        for (int i = 0; i < 50; i++) {
+            LeptrisDocument doc = leptris_document_create();
+            ASSERT_NE(doc, nullptr);
+            LeptrisElement root = leptris_element_create(doc, "r");
+            ASSERT_NE(root, nullptr);
+            ASSERT_EQ(leptris_document_set_root(doc, root), 0);
+            leptris_document_free(doc);
+        }
+    }
+    leptris_set_memory_management_functions(NULL, NULL);
+    /* Every allocation the custom allocator saw came back to it —
+     * recycling never withholds a block while an override is
+     * installed. */
+    EXPECT_EQ(g_alloc_count, g_free_count);
+}
+
 }  // namespace
