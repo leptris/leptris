@@ -5,9 +5,9 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Fixed
 
-- (describe changes here)
+- **HTML: single LF after `<pre>`/`<listing>`/`<textarea>` ignored (#659)** — 13.2.6.4.7: a U+000A immediately after these start tags is not content (the serializer re-indents them; `<pre>\n</pre>` is empty, `\nfoo` parses as `foo`). One-shot byte skip at open time. Corpus 1326 -> 1330 (+4, 0 breaks vs a clean-main twin); parity 793 held; suite 1497/1497.
 
 
 ## [1.9.174] - 2026-09-15
