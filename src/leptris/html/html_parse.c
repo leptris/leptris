@@ -2705,6 +2705,11 @@ typedef struct {
      * body content — even head-eligible elements (</head> alone
      * keeps processing them into the head, 13.2.6.4.3). */
     int after_html;
+    /* #659 "after frameset" (13.2.6.4.19, tests6:8-12): the
+     * frameset element CLOSED — later start tags drop except
+     * noframes/frame, whitespace text stays an html child,
+     * non-whitespace text drops. */
+    int after_frameset;
     /* #659 "after body" (tests19:21): </body> was seen — later
      * comments/PIs divert to the html level (children after the
      * body); text and elements keep flowing into the body. */
@@ -3397,6 +3402,19 @@ static void h_insert_before(HBuilder* b, LeptrisElement parent,
 }
 
 static void h_append(HBuilder* b, LeptrisNodeRef n) {
+    /* "after frameset": non-whitespace text drops; whitespace
+     * stays an html child (13.2.6.4.19, tests6:8). Only at top
+     * level — noframes content is raw text inside the element. */
+    if (b->whatwg && b->after_frameset && b->depth == 0 &&
+        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
+        const char* t = leptris_text_node_get_content(n);
+        int ws = 1;
+        if (t)
+            for (const char* q = t; *q; q++)
+                if (*q != ' ' && *q != '\t' && *q != '\n' &&
+                    *q != '\r') { ws = 0; break; }
+        if (!ws) return;
+    }
     if (b->whatwg && !b->left_initial &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
         int nonws = 0;
@@ -4768,6 +4786,13 @@ static LeptrisDocument html_parse_shared(
                                 leptris_element_name(b.open[d - 1]);
                             if (hn && h_is_heading(hn)) {
                                 h_pop_to(&b, d - 1);
+                                /* #659 "after frameset"
+                                 * (13.2.6.4.19): </frameset>
+                                 * closing the body-level frameset
+                                 * switches the phase (tests6:8-12). */
+                                if (b.whatwg && b.frameset &&
+                                    strcmp(lname, "frameset") == 0)
+                                    b.after_frameset = 1;
                                 popped = 1;
                                 break;
                             }
@@ -4910,6 +4935,11 @@ static LeptrisDocument html_parse_shared(
                                     break;
                             }
                             h_pop_to(&b, d - 1);
+                            /* #659 "after frameset" phase switch —
+                             * second match path (template-aware). */
+                            if (b.whatwg && b.frameset &&
+                                strcmp(lname, "frameset") == 0)
+                                b.after_frameset = 1;
                             /* #659 content-level closes restore the
                              * template's saved mode (the reset-
                              * appropriately template clause):
@@ -5203,7 +5233,8 @@ static LeptrisDocument html_parse_shared(
          * other start tags drop, non-whitespace text drops. Also
          * after </html> (after-html reprocesses into the frameset
          * body, tests19:42). */
-        if (b.whatwg && b.frameset && (b.depth > 0 || b.after_html) &&
+        if (b.whatwg && b.frameset &&
+            (b.depth > 0 || b.after_html || b.after_frameset) &&
             strcmp(name, "frameset") != 0 &&
             strcmp(name, "frame") != 0 &&
             strcmp(name, "noframes") != 0) {
