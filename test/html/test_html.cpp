@@ -436,6 +436,19 @@ TEST(HtmlParse, ExplicitHeadIsAdoptedAndKeepsWsText) {
               "</script></head><body> --&gt;  EOF</body></html>");
 }
 
+TEST(HtmlParse, BrEndTagActsAsBrStartAtAnyDepth) {
+    /* #659 (13.2.6.4.7): </br> is a <br> start tag with attrs
+     * dropped — even at top level with nothing open
+     * (webkit01:18/20); a trailing-colon tag name keeps its whole
+     * token as the local name, never splitting to an empty one
+     * (webkit01:14). */
+    EXPECT_EQ(Html("<body></br foo=\"bar\"></body>"), "<br/>");
+    EXPECT_EQ(Html("<body></body></br foo=\"bar\">"), "<br/>");
+    EXPECT_EQ(Html("<rdar://problem/6869687>"),
+              "<html><head/><body><rdar: problem=\"\""
+              " 6869687=\"\"/></body></html>");
+}
+
 TEST(HtmlParse, SecondHtmlTagMergesAttributes) {
     /* #659 (13.2.6.3): a second <html> start tag merges its
      * attributes onto the existing html element and is dropped
