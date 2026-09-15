@@ -3413,7 +3413,21 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             for (const char* q = t; *q; q++)
                 if (*q != ' ' && *q != '\t' && *q != '\n' &&
                     *q != '\r') { ws = 0; break; }
-        if (!ws) return;
+        if (!ws) {
+            /* Character-by-character (13.2.6.4.19): a whitespace
+             * PREFIX survives — html5lib emits separate character
+             * tokens, our runs are coalesced. Truncate to the
+             * prefix; drop only when there is none (tests6:8). */
+            const char* w2 = t;
+            while (*w2 == ' ' || *w2 == '\t' || *w2 == '\n' ||
+                   *w2 == '\r')
+                w2++;
+            if (w2 > t) {
+                ((char*)t)[w2 - t] = '\0';
+            } else {
+                return;
+            }
+        }
     }
     if (b->whatwg && !b->left_initial &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
