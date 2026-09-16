@@ -5,6 +5,7 @@
 #include "leptris.h"
 /* #1125 pristine-buffer gate: reach doc->xml_buffer directly. */
 #include "../leptris/leptris_internal.h"
+#include "../leptris/memory/pool.h"
 
 #include <cstring>
 #include <string>
@@ -1546,6 +1547,34 @@ TEST(NodeSourcePosition, ReportsParserRecordedElementColumns) {
     EXPECT_EQ(pos.line, 0);
     EXPECT_EQ(pos.col_start, 0);
     EXPECT_EQ(pos.col_end, 0);
+
+    leptris_document_free(doc);
+}
+
+TEST(OneArenaPerDocument, CreatedDocumentsAreArenaBacked) {
+    /* #1127: every document owns exactly one arena — created
+     * documents must not run the pool's page machinery. */
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    struct leptris_document* d = (struct leptris_document*)doc;
+    ASSERT_NE(d->pool, nullptr);
+    EXPECT_NE(d->pool->arena, nullptr);
+
+    /* The mutation surface still works over the arena. */
+    LeptrisElement root = leptris_element_create(doc, "r");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
+    for (int i = 0; i < 500; i++) {
+        LeptrisElement c = leptris_element_create(doc, "c");
+        ASSERT_NE(c, nullptr);
+        ASSERT_EQ(leptris_element_append_child(root, c), LEPTRIS_OK);
+        char v[16];
+        snprintf(v, sizeof(v), "%d", i);
+        ASSERT_EQ(leptris_element_set_attribute(c, "i", v), LEPTRIS_OK);
+    }
+    LeptrisElement first = leptris_element_first_child_any(root);
+    ASSERT_NE(first, nullptr);
+    EXPECT_STREQ(leptris_element_attribute(first, "i"), "0");
 
     leptris_document_free(doc);
 }

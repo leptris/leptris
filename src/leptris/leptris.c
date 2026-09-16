@@ -174,12 +174,24 @@ void leptris_parse_options_init(leptris_parse_options* opts) {
  * from the thread-local setting, standalone unset (-1).
  */
 LEPTRIS_API LeptrisDocument leptris_document_create(void) {
-    extern LeptrisMemoryPool* leptris_pool_create(void);
+    extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
+        LeptrisArena*, int);
     extern void* leptris_pool_alloc(LeptrisMemoryPool* pool, size_t size);
     extern void* leptris_pool_get_base(LeptrisMemoryPool* pool);
+    extern LeptrisArena* leptris_arena_create(size_t);
+    extern void leptris_arena_destroy(LeptrisArena*);
 
-    LeptrisMemoryPool* pool = leptris_pool_create();
-    if (!pool) return NULL;
+    /* #1127: every document owns exactly one arena — created
+     * documents take the same arena-backed pool the parser uses
+     * (overflow extends via tracked blocks; the pool's page
+     * machinery no longer runs for documents). */
+    LeptrisArena* arena = leptris_arena_create(64 * 1024);
+    if (!arena) return NULL;
+    LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
+    if (!pool) {
+        leptris_arena_destroy(arena);
+        return NULL;
+    }
 
     struct leptris_document* doc =
         (struct leptris_document*)leptris_pool_alloc(pool, sizeof(struct leptris_document));
