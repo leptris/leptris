@@ -160,6 +160,32 @@ TEST(RngParse, RejectsUnknownPatternElement) {
     EXPECT_EQ(rng, nullptr);
 }
 
+TEST(RngParse, SkipsForeignNamespaceAnnotations) {
+    /* RELAX NG §"grammar": elements in a foreign namespace — the
+     * DTD-compatibility annotations (a:documentation et al.), or any
+     * other foreign element — are ignored. Production schemas
+     * (metanorma's isodoc-compile.rng) are saturated with them. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] =
+        "<grammar xmlns='" RNGNS "'"
+        " xmlns:a='http://relaxng.org/ns/compatibility/annotations/1.0'"
+        " datatypeLibrary='http://www.w3.org/2001/XMLSchema-datatypes'>"
+        "<start><element name='e'>"
+        "<a:documentation>docs</a:documentation>"
+        "<attribute name='id'>"
+        "<a:documentation>the id</a:documentation>"
+        "<data type='token'/>"
+        "</attribute>"
+        "</element></start></grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << "annotations must be skipped, not rejected";
+    ASSERT_NE(rng, nullptr);
+    const RngGrammar* g = ((struct leptris_relaxng*)rng)->grammar;
+    EXPECT_EQ(count_kind(g->start, RNG_ATTRIBUTE), 1u);
+    EXPECT_EQ(count_kind(g->start, RNG_DATA), 1u);
+    leptris_rng_free(rng);
+}
+
 TEST(RngParse, RejectsUncombinedRedefinition) {
     LeptrisStatus st = LEPTRIS_OK;
     const char schema[] = SCHEMA(
