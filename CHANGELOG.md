@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.188] - 2026-09-16
+
+### Added
+
+- externalRef — foreign grammar spliced as the pattern body (rng)
+- anyName name class for elements and attributes (rng)
+
+### Fixed
+
+- leptris_rng_parse_file publishes schema-parse detail (rng)
+
+
+
 ## [1.9.187] - 2026-09-16
 
 ### Fixed
