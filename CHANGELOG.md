@@ -4,8 +4,25 @@
 
 ### Performance
 
-- scratch-copy scanner; delete the #1125 log machinery (#682) (parse)
-
+- **Parse: scratch-copy scanner — attr-heavy parse 472 → 70 µs
+  (13.5x → 2.06x vs pugixml), #1125 log machinery deleted.** The
+  immutable-buffer implementation shipped in v1.9.182 logged every
+  in-place NUL and every borrowed string, then replayed both at
+  parse end; the arena sizing predated that materialization, so
+  mid-replay the pool exhausted and every remaining string cost two
+  system mallocs — 39,684 allocations for one 48 KB attr-heavy
+  document (v1.9.178: 8), plus ~500 KB of log-doubling realloc
+  copies per parse. The scanner now NUL-terminates in place on a
+  scratch COPY of the input while doc->xml_buffer keeps a pristine
+  copy — byte-identical to the input by construction — and all
+  borrowed views live in the scratch for the document's lifetime.
+  Net −162 lines; leptris_parse_string_inplace never writes the
+  caller's buffer at all. New deterministic gate
+  ParseAllocationDiscipline.AttrHeavyParseStaysPoolBacked (counted
+  allocations, no timing) plus
+  ImmutableBuffer.InplaceLeavesCallerBufferUnmodified. Full ctest
+  1530/1530; text-heavy 39 → 32 µs; set-attr remains at 0.95x
+  (ahead of pugixml).
 
 
 ## [1.9.184] - 2026-09-16
