@@ -4,8 +4,23 @@
 
 ### Fixed
 
-- skip foreign-namespace annotation elements in patterns (rng)
-- after-body mode restore — non-ws text returns comments to the body (#659) (html)
+- **RNG: foreign-namespace annotation elements are skipped in
+  patterns.** RELAX NG ignores elements in foreign namespaces —
+  the DTD-compatibility annotations (`a:documentation` et al.)
+  are annotations, not patterns — but the pattern walk rejected
+  them as unknown pattern elements, so annotation-saturated
+  production schemas (metanorma's `isodoc-compile.rng` family)
+  failed to compile at all. Gate (TDD red-first):
+  `RngParse.SkipsForeignNamespaceAnnotations`. Full ctest
+  1532/1532; Jing message gate 19/19.
+- **HTML: after-body mode restore (#659).** "After body" is a
+  real insertion mode, not a permanent divert: non-whitespace
+  text switches it back to "in body" (text and later comments
+  flow into the still-open body), whitespace inserts without the
+  switch, and each `</body>`/`</html>` token re-arms the comment
+  divert (webkit01:24-26 vs tests19:21). `</body>`/`</html>` no
+  longer pop — the insertion point stays inside the body.
+  html5lib corpus 1385 → 1390; nokogiri parity floor 793 held.
 
 
 
