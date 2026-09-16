@@ -2,12 +2,19 @@
 
 ## [1.9.181] - 2026-09-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
-
 ### Changed
 
-- (describe changes here)
+- #1126: unified error-narration records. `dom/diag.{h,c}` defines
+  one structured `LeptrisDiag` per validation failure — kind,
+  offending node, parser-recorded position, rendered message — and
+  the RNG handle stores the records directly (the parallel
+  err_line/err_col/err_msg arrays are gone). The KIND selects the
+  Jing reporting convention (end column for incomplete/
+  character-content errors, start-tag column otherwise), replacing
+  the message-text sniffing. New gate `RngDiagKinds` pins the kind
+  enum to the corpus semantics; the Jing parity gate stays 19/19
+  exact message + line + column. XSD/Schematron will consume the
+  same records when validation lands (#1075).
 
 
 ## [1.9.180] - 2026-09-16
