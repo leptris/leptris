@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+## [1.9.184] - 2026-09-16
+
+### Fixed
+
+- #1137: RNG regression since v1.9.179 — documents omitting an
+  <optional> element failed validation. Root cause: the #1121
+  name-mismatch diagnostic inside element_ok ran during backtracking
+  probes; its failure bookkeeping engaged the matcher's
+  short-circuit, so every subsequent pattern in the model failed and
+  valid documents turned invalid. New diag_probe() records in the
+  diagnose pass only — verdict probes are side-effect-free again
+  (the pre-#1121 matcher semantics, diagnostic value preserved).
+  Gate: RngRegression.OmittedOptionalElementStaysValid (both the
+  omitted and present forms). Full ctest 1324/1324; verdict gate
+  38/38; Jing message gate 19/19.
+
+
+
 ## [1.9.183] - 2026-09-16
 
 ### Changed
