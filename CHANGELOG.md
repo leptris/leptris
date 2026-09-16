@@ -2,10 +2,31 @@
 
 ## [1.9.179] - 2026-09-16
 
+### Added
+
+- #878: RELAX NG validation errors now accumulate — the validator
+  no longer stops at the first failure. New accessors
+  `leptris_rng_error_count` / `_message` / `_line` enumerate every
+  error from the last `leptris_rng_validate` call;
+  `leptris_rng_error` keeps returning the first message
+  (back-compat).
+
 ### Fixed
 
-- Jing-parity failure diagnosis — full message vocabulary (#878) (rng)
-- accumulate per-element errors + per-error accessors (#878) (rng)
+- #878: RNG failure messages match Jing's exact vocabulary,
+  attribution, and ordering. The verdict pass runs quiet
+  (speculative backtracking no longer duplicates or misattributes
+  errors); on failure a derivative-style diagnostic walk re-walks
+  the instance and emits Jing's wording: `element "X" not allowed
+  anywhere/here; expected ...` (with the end-tag/text/name set
+  rendering), `not allowed yet; missing required element ...`
+  (with Jing's skip-recovery so follow-up errors match), `element
+  "P" incomplete; missing required element ...`, attribute
+  missing/extra/value forms, and `character content of element "P"
+  invalid; must be an integer / equal to "v" / token "t" invalid`
+  (list). New conformance gate `test_rng_corpus_msg`: 19/19 exact
+  message-text parity against the Jing references; verdicts 38/38;
+  full ctest 1314/1314.
 
 
 
