@@ -22,6 +22,12 @@ typedef struct {
     char err[512];
     int failed;
     int depth;   /* ref-recursion guard (cyclic defines) */
+    /* #878 sub-fix #3: the verdict pass runs quiet (no error
+     * recording — speculative backtracking would duplicate);
+     * rng_diagnose walks the failure and emits the Jing-shaped
+     * per-element list. */
+    int quiet;
+    void* diag_pool;  /* diagnose allocations, freed on exit */
 } RngVal;
 
 /* #878: append (not bail) so the binding can surface every
@@ -39,6 +45,7 @@ static void fail(RngVal* v, LeptrisElement e, const char* fmt,
         v->failed = 1;
         snprintf(v->err, sizeof(v->err), "%d:0: error: %s", line, msg);
     }
+    if (v->quiet) return;  /* verdict pass — diagnose reports later */
     struct leptris_relaxng* r = v->r;
     if (!r) return;
     if (r->err_count == r->err_cap) {
@@ -57,6 +64,27 @@ static void fail(RngVal* v, LeptrisElement e, const char* fmt,
     r->err_col[r->err_count]  = 0;   /* sub-fix #1 (next slice) */
     r->err_msg[r->err_count]  = leptris_strdup(msg);
     if (r->err_msg[r->err_count]) r->err_count++;
+}
+
+/* #878: three-format-arg fail for the Jing message vocabulary. */
+static void fail3(RngVal* v, LeptrisElement e, const char* fmt,
+                  const char* a, const char* b, const char* c) {
+    char msg[256];
+    if (a && b && c) snprintf(msg, sizeof(msg), fmt, a, b, c);
+    else if (a && b) snprintf(msg, sizeof(msg), fmt, a, b);
+    else if (a) snprintf(msg, sizeof(msg), fmt, a);
+    else snprintf(msg, sizeof(msg), "%s", fmt);
+    /* Reuse fail() for the recording mechanics by re-formatting
+     * into a plain string — call with the composed message. */
+    fail(v, e, "%s", msg, NULL);
+}
+
+/* "an integer" / "a string" — Jing's article. */
+static const char* art(const char* dt) {
+    if (!dt || !*dt) return "a";
+    char c = (char)tolower((unsigned char)dt[0]);
+    return (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u')
+               ? "an" : "a";
 }
 
 static RngDefine* find_define(RngGrammar* g, const char* name) {
@@ -607,17 +635,757 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     return 1;
 }
 
+/* =====================================================================
+ * #878 sub-fix #3 — Jing-parity failure diagnosis.
+ *
+ * The verdict pass above runs with v->quiet set: speculative
+ * backtracking makes mid-match fail() calls duplicate and mis-
+ * attribute. When validation fails, this pass walks the instance
+ * against the content model with derivative-style semantics
+ * (position state = list of remaining items) and emits Jing's
+ * message vocabulary, in Jing's order:
+ *
+ *   element "X" not allowed anywhere; expected <set>   (name never valid)
+ *   element "X" not allowed here; expected <set>       (wrong position)
+ *   element "X" not allowed yet; missing required element "A"
+ *   element "P" incomplete; missing required element "A"
+ *   element "P" incomplete; expected <set>
+ *   element "P" missing required attribute "A"
+ *   found attribute "A", but no attributes allowed here
+ *   value of attribute "A" is invalid; must be equal to "v"
+ *   character content of element "P" invalid; must be an integer
+ *   character content of element "P" invalid; must be equal to "v"
+ *   character content of element "P" invalid; token "t" invalid; ...
+ * ===================================================================== */
+
+/* Diagnose allocations share a leading link pointer so one free
+ * walk can release both cell and pattern nodes. */
+typedef struct DiagAny {
+    struct DiagAny* link;
+} DiagAny;
+
+/* A remaining-position item list. */
+typedef struct DiagCell {
+    struct DiagAny hdr;
+    RngPattern* item;
+    struct DiagCell* next;
+} DiagCell;
+
+/* Synthetic patterns: shallow copies / repeat wrappers. */
+typedef struct DiagPat {
+    struct DiagAny hdr;
+    RngPattern p;
+} DiagPat;
+
+static DiagCell* dcell_new(RngVal* v, RngPattern* item, DiagCell* next) {
+    DiagCell* c = (DiagCell*)calloc(1, sizeof(DiagCell));
+    if (!c) return NULL;
+    c->hdr.link = (DiagAny*)v->diag_pool;
+    v->diag_pool = c;
+    c->item = item;
+    c->next = next;
+    return c;
+}
+
+static RngPattern* dpat_new(RngVal* v, RngPatternKind kind,
+                            RngPattern* child) {
+    DiagPat* d = (DiagPat*)calloc(1, sizeof(DiagPat));
+    if (!d) return NULL;
+    d->hdr.link = (DiagAny*)v->diag_pool;
+    v->diag_pool = d;
+    d->p.kind = kind;
+    d->p.first_child = child;
+    return &d->p;
+}
+
+static RngPattern* dpat_copy(RngVal* v, const RngPattern* src) {
+    RngPattern* p = dpat_new(v, src->kind, src->first_child);
+    if (!p) return NULL;
+    p->name = src->name;
+    p->ns = src->ns;
+    p->datatype = src->datatype;
+    p->datatype_lib = src->datatype_lib;
+    p->value = src->value;
+    p->define = src->define;
+    return p;
+}
+
+static void diag_pool_free(RngVal* v) {
+    DiagAny* p = (DiagAny*)v->diag_pool;
+    while (p) {
+        DiagAny* next = p->link;
+        free(p);
+        p = next;
+    }
+    v->diag_pool = NULL;
+}
+
+/* Resolve REF chains to their body (depth-guarded). */
+static RngPattern* deref(RngVal* v, RngPattern* p) {
+    int guard = 0;
+    while (p && p->kind == RNG_REF && guard++ < 200) {
+        if (p->define && p->define->body) p = p->define->body;
+        else {
+            RngDefine* d = find_define(v->g, p->name);
+            if (!d || !d->body) return NULL;
+            p = d->body;
+        }
+    }
+    return p;
+}
+
+/* Nullable: can the item match zero occurrences? */
+static int nullable_item(RngVal* v, RngPattern* p) {
+    p = deref(v, p);
+    if (!p) return 0;
+    switch (p->kind) {
+        case RNG_EMPTY: case RNG_TEXT: case RNG_OPTIONAL:
+        case RNG_ZERO_OR_MORE: case RNG_MIXED: case RNG_LIST:
+            return 1;
+        case RNG_ONE_OR_MORE:
+            return nullable_item(v, p->first_child);
+        case RNG_CHOICE: {
+            for (RngPattern* c = p->first_child; c; c = c->next)
+                if (nullable_item(v, c)) return 1;
+            return 0;
+        }
+        case RNG_GROUP: {
+            for (RngPattern* c = p->first_child; c; c = c->next)
+                if (!nullable_item(v, c)) return 0;
+            return 1;
+        }
+        case RNG_INTERLEAVE: {
+            for (RngPattern* c = p->first_child; c; c = c->next)
+                if (!nullable_item(v, c)) return 0;
+            return 1;
+        }
+        default:
+            return 0;
+    }
+}
+
+static int nullable_state(RngVal* v, DiagCell* s) {
+    for (DiagCell* c = s; c; c = c->next)
+        if (!nullable_item(v, c->item)) return 0;
+    return 1;
+}
+
+/* FIRST element names of an item (dedup not done here). */
+static void first_names_item(RngVal* v, RngPattern* p,
+                             const char* out[32], int* n) {
+    p = deref(v, p);
+    if (!p || *n >= 31) return;
+    switch (p->kind) {
+        case RNG_ELEMENT:
+            if (p->name) out[(*n)++] = p->name;
+            return;
+        case RNG_CHOICE: case RNG_GROUP: case RNG_INTERLEAVE:
+        case RNG_OPTIONAL: case RNG_ZERO_OR_MORE: case RNG_ONE_OR_MORE:
+        case RNG_MIXED:
+            for (RngPattern* c = p->first_child; c; c = c->next)
+                first_names_item(v, c, out, n);
+            return;
+        default:
+            return;
+    }
+}
+
+static void first_names_state(RngVal* v, DiagCell* s,
+                              const char* out[32], int* n) {
+    *n = 0;
+    for (DiagCell* c = s; c; c = c->next)
+        first_names_item(v, c->item, out, n);
+    /* dedupe, keep first occurrence order */
+    for (int i = 0; i < *n; i++)
+        for (int j = i + 1; j < *n; j++)
+            if (out[j] && out[i] && strcmp(out[i], out[j]) == 0) out[j] = NULL;
+    int w = 0;
+    for (int i = 0; i < *n; i++)
+        if (out[i]) out[w++] = out[i];
+    *n = w;
+}
+
+/* Is `x` a possible element name anywhere in the content subtree? */
+static int name_in_tree(RngVal* v, RngPattern* p, const char* x) {
+    p = deref(v, p);
+    if (!p) return 0;
+    if (p->kind == RNG_ELEMENT)
+        return p->name && strcmp(p->name, x) == 0;
+    for (RngPattern* c = p->first_child; c; c = c->next)
+        if (name_in_tree(v, c, x)) return 1;
+    return 0;
+}
+
+/* Render the Jing "expected" set for a position: "the element
+ * end-tag", "text", then element names — ", " separated, " or "
+ * before the last. */
+static void render_expected(RngVal* v, DiagCell* s, int text_ok,
+                            char* out, size_t cap) {
+    const char* names[32];
+    int n = 0;
+    first_names_state(v, s, names, &n);
+    out[0] = 0;
+    const char* parts[40];
+    int heap_part[40];
+    int np = 0;
+    if (nullable_state(v, s)) {
+        parts[np] = "the element end-tag";
+        heap_part[np++] = 0;
+    }
+    if (text_ok) {
+        parts[np] = "text";
+        heap_part[np++] = 0;
+    }
+    for (int i = 0; i < n && np < 38; i++) {
+        char buf[128];
+        /* Jing prefixes only the FIRST element NAME; later ones
+         * are bare: element "a" or "b" (end-tag/text don't count). */
+        if (i == 0)
+            snprintf(buf, sizeof(buf), "element \"%s\"", names[i]);
+        else
+            snprintf(buf, sizeof(buf), "\"%s\"", names[i]);
+        char* dup = (char*)malloc(strlen(buf) + 1);
+        if (!dup) break;
+        strcpy(dup, buf);
+        parts[np] = dup;
+        heap_part[np++] = 1;
+    }
+    size_t w = 0;
+    for (int i = 0; i < np && w < cap - 1; i++) {
+        const char* sep = i == 0 ? "" : (i == np - 1 ? " or " : ", ");
+        int wrote = snprintf(out + w, cap - w, "%s%s", sep, parts[i]);
+        if (wrote < 0) break;
+        w += (size_t)wrote;
+    }
+    for (int i = 0; i < np; i++)
+        if (heap_part[i]) free((void*)parts[i]);
+}
+
+/* Consume element `x` at position `s`. Returns the new state (which
+ * may be NULL = end of content) or NULL-with-*ok=0 when not
+ * consumable. Consuming item i requires items before it to be
+ * nullable (matched zero times). Repeat wrappers stay active. */
+static DiagCell* d_state(RngVal* v, DiagCell* s, const char* x, int* ok) {
+    *ok = 0;
+    for (DiagCell* c = s; c; c = c->next) {
+        RngPattern* item = c->item;
+        RngPattern* d = deref(v, item);
+        if (!d) return NULL;
+        RngPattern* repl = NULL;
+        int consumed = 0;
+        switch (d->kind) {
+            case RNG_ELEMENT:
+                if (d->name && strcmp(d->name, x) == 0) { consumed = 1; }
+                break;
+            case RNG_CHOICE:
+                for (RngPattern* a = d->first_child; a; a = a->next) {
+                    int sub = 0;
+                    DiagCell tmp; tmp.item = a; tmp.next = NULL;
+                    d_state(v, &tmp, x, &sub);
+                    if (sub) { consumed = 1; break; }
+                }
+                break;
+            case RNG_GROUP: {
+                /* Sequence inside an item: try prefix-nullable consume. */
+                DiagCell* inner = NULL;
+                for (RngPattern* ch = d->first_child; ch; ch = ch->next)
+                    inner = dcell_new(v, ch, inner);
+                /* build in order */
+                DiagCell* rev = NULL;
+                for (DiagCell* ic = inner; ic; ) {
+                    DiagCell* nx = ic->next;
+                    ic->next = rev; rev = ic; ic = nx;
+                }
+                int sub = 0;
+                DiagCell* r = d_state(v, rev, x, &sub);
+                if (sub) {
+                    consumed = 1;
+                    if (r) {
+                        /* rebuild a GROUP holding the remainder */
+                        RngPattern* kids = NULL;
+                        for (DiagCell* ic = r; ic; ic = ic->next) {
+                            RngPattern* cp = dpat_copy(v, ic->item);
+                            if (!cp) { consumed = 0; break; }
+                            cp->next = kids; kids = cp;
+                        }
+                        RngPattern* ord = NULL;
+                        for (RngPattern* k = kids; k; ) {
+                            RngPattern* nx = k->next;
+                            k->next = ord; ord = k; k = nx;
+                        }
+                        repl = kids ? dpat_new(v, RNG_GROUP, ord) : NULL;
+                    }
+                }
+                break;
+            }
+            case RNG_INTERLEAVE: {
+                /* Any child may consume; the others stay. */
+                for (RngPattern* a = d->first_child; a; a = a->next) {
+                    DiagCell tmp; tmp.item = a; tmp.next = NULL;
+                    int sub = 0;
+                    d_state(v, &tmp, x, &sub);
+                    if (!sub) continue;
+                    consumed = 1;
+                    /* Survivors = other children (this one consumed
+                     * once; single-use children drop, repeats keep). */
+                    RngPattern* kids = NULL;
+                    for (RngPattern* o = d->first_child; o; o = o->next) {
+                        if (o == a) continue;
+                        RngPattern* cp = dpat_copy(v, o);
+                        if (!cp) { consumed = 0; break; }
+                        cp->next = kids; kids = cp;
+                    }
+                    RngPattern* ord = NULL;
+                    for (RngPattern* k = kids; k; ) {
+                        RngPattern* nx = k->next;
+                        k->next = ord; ord = k; k = nx;
+                    }
+                    repl = ord ? dpat_new(v, RNG_INTERLEAVE, ord) : NULL;
+                    break;
+                }
+                break;
+            }
+            case RNG_OPTIONAL:
+            case RNG_ZERO_OR_MORE: {
+                DiagCell tmp; tmp.item = d->first_child; tmp.next = NULL;
+                int sub = 0;
+                d_state(v, &tmp, x, &sub);
+                if (sub) {
+                    consumed = 1;
+                    if (d->kind == RNG_ZERO_OR_MORE)
+                        repl = item;  /* stays active */
+                    /* OPTIONAL: occurrence used up */
+                }
+                break;
+            }
+            case RNG_ONE_OR_MORE: {
+                DiagCell tmp; tmp.item = d->first_child; tmp.next = NULL;
+                int sub = 0;
+                d_state(v, &tmp, x, &sub);
+                if (sub) {
+                    consumed = 1;
+                    repl = dpat_new(v, RNG_ZERO_OR_MORE, d->first_child);
+                }
+                break;
+            }
+            case RNG_MIXED: {
+                /* Elements come from the inner wrapper; mixed stays. */
+                DiagCell* inner = NULL;
+                for (RngPattern* ch = d->first_child; ch; ch = ch->next)
+                    inner = dcell_new(v, ch, inner);
+                DiagCell* rev = NULL;
+                for (DiagCell* ic = inner; ic; ) {
+                    DiagCell* nx = ic->next;
+                    ic->next = rev; rev = ic; ic = nx;
+                }
+                int sub = 0;
+                d_state(v, rev, x, &sub);
+                if (sub) { consumed = 1; repl = item; }
+                break;
+            }
+            default:
+                break;
+        }
+        if (consumed) {
+            *ok = 1;
+            DiagCell* tail = c->next;
+            DiagCell* head = tail;
+            if (repl) head = dcell_new(v, repl, tail);
+            return head;
+        }
+        if (!nullable_item(v, item)) return NULL;  /* blocked here */
+    }
+    return NULL;  /* nothing left to consume */
+}
+
+/* The first required (non-nullable) element name in the state. */
+static const char* first_required_name(RngVal* v, DiagCell* s) {
+    for (DiagCell* c = s; c; c = c->next) {
+        if (nullable_item(v, c->item)) continue;
+        const char* names[32];
+        int n = 0;
+        DiagCell tmp; tmp.item = c->item; tmp.next = NULL;
+        first_names_state(v, &tmp, names, &n);
+        if (n > 0) return names[0];
+        return NULL;
+    }
+    return NULL;
+}
+
+/* Deep-walk the element's content and emit Jing-shaped errors. */
+static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e);
+
+/* Diagnose a matched child element's own content (quiet verdict,
+ * then recurse on failure). */
+static void diagnose_child(RngVal* v, RngPattern* content,
+                           LeptrisElement kid) {
+    const char* x = leptris_element_name(kid);
+    if (!x) return;
+    /* Find the ELEMENT pattern for this name in the content tree. */
+    RngPattern* found = NULL;
+    for (RngPattern* c = content; c && !found; c = c->next) {
+        RngPattern* d = deref(v, c);
+        if (!d) continue;
+        if (d->kind == RNG_ELEMENT && d->name && strcmp(d->name, x) == 0)
+            { found = d; break; }
+        for (RngPattern* inner = d->first_child; inner && !found;
+             inner = inner->next) {
+            RngPattern* di = deref(v, inner);
+            if (di && di->kind == RNG_ELEMENT && di->name &&
+                strcmp(di->name, x) == 0)
+                found = di;
+        }
+    }
+    if (!found) return;
+    if (v->depth > 100) return;
+    v->depth++;
+    int saved_quiet = v->quiet;
+    v->quiet = 1;
+    int ok = element_ok(v, found, kid);
+    v->quiet = saved_quiet;
+    int saved_failed = v->failed;
+    v->failed = 0;
+    if (!ok) diagnose_element(v, found, kid);
+    v->failed = saved_failed;
+    v->depth--;
+}
+
+static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
+    /* Count attribute patterns (direct children in the core subset). */
+    int n_attr_patterns = 0;
+    for (RngPattern* c = p->first_child; c; c = c->next)
+        if (c->kind == RNG_ATTRIBUTE) n_attr_patterns++;
+    /* Extra attributes. */
+    for (struct leptris_attribute* a = leptris_element_get_first_attribute(e);
+         a; a = leptris_attr_next(a)) {
+        const char* name = attr_cname(a);
+        int consumed = 0;
+        for (RngPattern* c = p->first_child; c && !consumed; c = c->next)
+            if (c->kind == RNG_ATTRIBUTE && c->name &&
+                strcmp(c->name, name) == 0)
+                consumed = 1;
+        if (consumed) {
+            /* Value constraint check. */
+            for (RngPattern* c = p->first_child; c; c = c->next) {
+                if (c->kind != RNG_ATTRIBUTE || !c->name ||
+                    strcmp(c->name, name) != 0)
+                    continue;
+                const char* got = leptris_element_attribute(e, name);
+                if (!attr_content_satisfied(c, got ? got : "")) {
+                    /* The constraining leaf: VALUE or DATA. */
+                    for (RngPattern* leaf = c->first_child; leaf;
+                         leaf = leaf->next) {
+                        if (leaf->kind == RNG_VALUE && leaf->value) {
+                            fail(v, e,
+                                 "value of attribute \"%s\" is invalid; "
+                                 "must be equal to \"%s\"",
+                                 name, leaf->value);
+                            break;
+                        }
+                        if (leaf->kind == RNG_DATA) {
+                            char dtb[64];
+                            snprintf(dtb, sizeof(dtb), "%s %s",
+                                     art(leaf->datatype),
+                                     leaf->datatype
+                                         ? leaf->datatype : "string");
+                            fail3(v, e,
+                                  "value of attribute \"%s\" is invalid; "
+                                  "must be %s",
+                                  name, dtb, NULL);
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        } else if (n_attr_patterns == 0) {
+            fail(v, e, "found attribute \"%s\", but no attributes "
+                       "allowed here", name, NULL);
+        } else {
+            fail(v, e, "attribute \"%s\" not allowed", name, NULL);
+        }
+    }
+    /* Missing required attributes (declared order). */
+    for (RngPattern* c = p->first_child; c; c = c->next) {
+        if (c->kind != RNG_ATTRIBUTE || !c->name) continue;
+        if (!leptris_element_attribute(e, c->name))
+            fail(v, e, "element \"%s\" missing required attribute \"%s\"",
+                 p->name, c->name);
+    }
+}
+
+/* Text/data/value/list diagnosis with Jing wording. */
+static void diagnose_text(RngVal* v, RngPattern* p, LeptrisElement e) {
+    const char* t = leptris_element_text(e);
+    t = t ? t : "";
+    for (RngPattern* c = p->first_child; c; c = c->next) {
+        if (c->kind == RNG_ATTRIBUTE) continue;
+        if (c->kind == RNG_LIST) {
+            /* Tokenize; the first offending token reports. */
+            char buf[512];
+            snprintf(buf, sizeof(buf), "%s", t);
+            /* The leaf tokens must match (homogeneous in the core
+             * subset): unwrap repeats to the first data/value. */
+            RngPattern* leaf = c->first_child;
+            while (leaf &&
+                   (leaf->kind == RNG_ONE_OR_MORE ||
+                    leaf->kind == RNG_ZERO_OR_MORE ||
+                    leaf->kind == RNG_OPTIONAL))
+                leaf = leaf->first_child;
+            for (char* tok = strtok(buf, " \t\r\n"); tok;
+                 tok = strtok(NULL, " \t\r\n")) {
+                if (leaf && token_matches_leaf(tok, leaf)) continue;
+                if (leaf && leaf->kind == RNG_VALUE && leaf->value)
+                    fail3(v, e,
+                          "character content of element \"%s\" invalid; "
+                          "token \"%s\" invalid; must be equal to \"%s\"",
+                          p->name, tok, leaf->value);
+                else if (leaf && leaf->kind == RNG_DATA) {
+                    char dtb[64];
+                    snprintf(dtb, sizeof(dtb), "%s %s", art(leaf->datatype),
+                             leaf->datatype ? leaf->datatype : "string");
+                    fail3(v, e,
+                          "character content of element \"%s\" invalid; "
+                          "token \"%s\" invalid; must be %s",
+                          p->name, tok, dtb);
+                }
+                else
+                    fail(v, e,
+                         "character content of element \"%s\" invalid; "
+                         "token \"%s\" invalid", p->name, tok);
+                return;
+            }
+            continue;
+        }
+        if (c->kind == RNG_VALUE) {
+            if (strcmp(t, c->value ? c->value : "") != 0) {
+                fail(v, e,
+                     "character content of element \"%s\" invalid; "
+                     "must be equal to \"%s\"", p->name,
+                     c->value ? c->value : "");
+                return;
+            }
+            continue;
+        }
+        if (c->kind == RNG_DATA) {
+            if (!data_matches(c, t)) {
+                char dtb[64];
+                snprintf(dtb, sizeof(dtb), "%s %s", art(c->datatype),
+                         c->datatype ? c->datatype : "string");
+                fail3(v, e,
+                      "character content of element \"%s\" invalid; "
+                      "must be %s", p->name, dtb, NULL);
+                return;
+            }
+            continue;
+        }
+    }
+}
+
+static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
+    if (!p || !e) return;
+    diagnose_attrs(v, p, e);
+
+    if (!has_element_patterns(p->first_child)) {
+        /* Text-level content. */
+        LeptrisNodeRef sub[64];
+        size_t sn = elem_children(e, sub, 64);
+        if (sn) {
+            fail(v, (LeptrisElement)sub[0],
+                 "element \"%s\" not allowed anywhere; expected the "
+                 "element end-tag or text",
+                 leptris_element_name((LeptrisElement)sub[0]), NULL);
+            return;
+        }
+        if (!all_text_ws(e)) diagnose_text(v, p, e);
+        return;
+    }
+
+    /* Element-content walk. */
+    LeptrisNodeRef kids[64];
+    size_t n = elem_children(e, kids, 64);
+    DiagCell* state = NULL;
+    /* Flatten bare GROUP children into cells so the skip/recovery
+     * walk can advance past individual items inside them (#878). */
+    for (RngPattern* c = p->first_child; c; c = c->next) {
+        if (c->kind == RNG_ATTRIBUTE) continue;
+        RngPattern* d = deref(v, c);
+        if (d && d != c && d->kind == RNG_GROUP && c->kind == RNG_REF) {
+            for (RngPattern* g = d->first_child; g; g = g->next)
+                state = dcell_new(v, g, state);
+            continue;
+        }
+        if (d && d->kind == RNG_GROUP && d == c) {
+            for (RngPattern* g = d->first_child; g; g = g->next)
+                state = dcell_new(v, g, state);
+            continue;
+        }
+        state = dcell_new(v, c, state);
+    }
+    {
+        DiagCell* rev = NULL;
+        for (DiagCell* c = state; c; ) {
+            DiagCell* nx = c->next;
+            c->next = rev; rev = c; c = nx;
+        }
+        state = rev;
+    }
+    int has_mixed = 0;
+    for (RngPattern* c = p->first_child; c; c = c->next)
+        if (deref(v, c) && deref(v, c)->kind == RNG_MIXED) has_mixed = 1;
+
+    for (size_t i = 0; i < n; i++) {
+        LeptrisElement kid = (LeptrisElement)kids[i];
+        const char* x = leptris_element_name(kid);
+        if (!x) continue;
+        int ok = 0;
+        DiagCell* ns = d_state(v, state, x, &ok);
+        if (ok) {
+            state = ns;
+            diagnose_child(v, p->first_child, kid);
+            continue;
+        }
+        /* Not consumable here. Classify per Jing. */
+        int in_model = 0;
+        for (RngPattern* c = p->first_child; c && !in_model; c = c->next)
+            in_model = name_in_tree(v, c, x);
+        char expected[512];
+        render_expected(v, state, has_mixed, expected, sizeof(expected));
+        if (in_model) {
+            /* Maybe it comes later — after a missing required
+             * prefix ("not allowed yet"). */
+            DiagCell* tmp = state;
+            const char* req = NULL;
+            DiagCell* hit = NULL;
+            int hit_ok = 0;
+            while (tmp) {
+                if (!req) {
+                    const char* r0 = first_required_name(v, tmp);
+                    if (r0 && strcmp(r0, x) != 0) req = r0;
+                }
+                DiagCell* r = d_state(v, tmp, x, &hit_ok);
+                if (hit_ok) { hit = r; break; }
+                tmp = tmp->next;
+            }
+            if (hit_ok && req) {
+                fail(v, kid,
+                     "element \"%s\" not allowed yet; missing required "
+                     "element \"%s\"", x, req);
+                state = hit;  /* recovery: skip prefix, consume x */
+                diagnose_child(v, p->first_child, kid);
+                continue;
+            }
+            fail(v, kid, "element \"%s\" not allowed here; expected %s",
+                 x, expected);
+        } else {
+            fail(v, kid, "element \"%s\" not allowed anywhere; expected %s",
+                 x, expected);
+        }
+        /* Skip the offending child; position unchanged. */
+    }
+    if (!nullable_state(v, state)) {
+        const char* names[32];
+        int nn = 0;
+        first_names_state(v, state, names, &nn);
+        if (nn == 1) {
+            fail(v, e, "element \"%s\" incomplete; missing required "
+                       "element \"%s\"", p->name, names[0]);
+        } else {
+            char expected[512];
+            render_expected(v, state, has_mixed, expected, sizeof(expected));
+            fail(v, e, "element \"%s\" incomplete; expected %s",
+                 p->name, expected);
+        }
+    }
+}
+
+/* Entry: the verdict pass failed — walk and report. */
+static void rng_diagnose(RngVal* v, struct leptris_relaxng* rng,
+                         LeptrisDocument doc) {
+    LeptrisElement root = leptris_document_root(doc);
+    if (!root) {
+        fail(v, NULL, "document has no root element", NULL, NULL);
+        return;
+    }
+    RngPattern* start = rng->grammar->start;
+    while (start) {
+        RngPattern* d = deref(v, start);
+        if (!d) break;
+        if (d->kind == RNG_GROUP && d->first_child && !d->first_child->next) {
+            start = d->first_child;
+            continue;
+        }
+        start = d;
+        break;
+    }
+    if (!start) return;
+    if (start->kind == RNG_CHOICE) {
+        /* Root-name mismatch: render the alternative names. */
+        int matched = 0;
+        const char* names[32];
+        int n = 0;
+        for (RngPattern* a = start->first_child; a; a = a->next) {
+            RngPattern* alt = deref(v, a);
+            if (alt->kind == RNG_GROUP && alt->first_child &&
+                !alt->first_child->next)
+                alt = deref(v, alt->first_child);
+            if (alt->kind != RNG_ELEMENT || !alt->name) continue;
+            if (names_match(alt, root)) {
+                /* The root matched this alternative; its CONTENT is
+                 * what failed. */
+                diagnose_element(v, alt, root);
+                matched = 1;
+                break;
+            }
+            if (n < 31) names[n++] = alt->name;
+        }
+        if (!matched && n > 0) {
+            char buf[512];
+            size_t w = 0;
+            for (int i = 0; i < n; i++) {
+                const char* sep = i == 0 ? "" :
+                                  (i == n - 1 ? " or " : ", ");
+                /* First name carries the element prefix (Jing). */
+                if (i == 0)
+                    w += snprintf(buf + w, sizeof(buf) - w,
+                                  "%selement \"%s\"", sep, names[i]);
+                else
+                    w += snprintf(buf + w, sizeof(buf) - w,
+                                  "%s\"%s\"", sep, names[i]);
+            }
+            fail(v, root, "element \"%s\" not allowed anywhere; expected %s",
+                 leptris_element_name(root), buf);
+        }
+        return;
+    }
+    if (start->kind == RNG_ELEMENT) {
+        if (names_match(start, root))
+            diagnose_element(v, start, root);
+        else
+            fail(v, root, "element \"%s\" not allowed anywhere; "
+                          "expected element \"%s\"",
+                 leptris_element_name(root),
+                 start->name ? start->name : "?");
+        return;
+    }
+    /* Other shapes (ref at start was deref'd above). */
+    diagnose_element(v, start, root);
+}
+
 int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
     if (!rng || !rng->grammar || !rng->grammar->start || !doc) return 0;
     RngVal v;
     memset(&v, 0, sizeof(v));
     v.g = rng->grammar;
     v.r = rng;
+    /* #878 sub-fix #3: the verdict pass is quiet (speculative
+     * backtracking must not record); the diagnose pass reports. */
+    v.quiet = 1;
 
     LeptrisElement root = leptris_document_root(doc);
     if (!root) {
-        fail(&v, NULL, "document has no root element", NULL, NULL);
-        rng->error = leptris_strdup(v.err);
+        rng->error = leptris_strdup("0:0: error: document has no root "
+                                    "element");
         return 0;
     }
 
@@ -629,6 +1397,7 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
         if (start->kind == RNG_REF) {
             RngDefine* d = find_define(v.g, start->name);
             if (!d || !d->body) {
+                v.quiet = 0;
                 fail(&v, root, "reference to undefined pattern",
                      start->name, NULL);
                 rng->error = leptris_strdup(v.err);
@@ -668,20 +1437,19 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
     } else if (start->kind == RNG_ELEMENT) {
         ok = element_ok(&v, start, root);
     }
-    if (!ok && !v.failed) {
-        /* #878: only emit the catch-all when no per-element
-         * failure was already recorded (else we'd duplicate
-         * "element X not allowed here" on top of the
-         * per-element list). */
-        if (!v.r || v.r->err_count == 0) {
-            fail(&v, root, "element \"%s\" not allowed here",
-                 leptris_element_name(root), NULL);
-        }
+
+    if (!ok) {
+        /* Diagnose with Jing's vocabulary (records into the
+         * per-error list). */
+        v.quiet = 0;
+        v.failed = 0;
+        v.err[0] = 0;
+        rng_diagnose(&v, rng, doc);
+        diag_pool_free(&v);
     }
-    /* #878: leptris_rng_error (back-compat) carries the FIRST
-     * accumulated message — synthesize the "line:0: error: msg"
-     * shape from per-error[0] when available, else fall back to
-     * v.err. */
+
+    /* leptris_rng_error (back-compat) carries the FIRST accumulated
+     * message in the "line:0: error: msg" shape. */
     if (v.r && v.r->err_count > 0) {
         char back[512];
         snprintf(back, sizeof(back), "%d:0: error: %s",
@@ -690,5 +1458,5 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
     } else {
         rng->error = v.failed ? leptris_strdup(v.err) : NULL;
     }
-    return ok && !v.failed;
+    return ok;
 }
