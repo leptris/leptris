@@ -4937,6 +4937,43 @@ static LeptrisDocument html_parse_shared(
                             continue;
                         }
                     }
+                    /* #659 13.2.6.4.17: </p> with no p in button
+                     * scope inserts an EMPTY <p> and closes it
+                     * (tests1:29) — the stray tag still leaves a
+                     * node. */
+                    if (b.whatwg && strcmp(lname, "p") == 0) {
+                        int p_open = 0;
+                        for (size_t d2 = b.depth; d2 > 0; d2--) {
+                            const char* on2 =
+                                leptris_element_name(b.open[d2 - 1]);
+                            if (!on2) break;
+                            if (strcmp(on2, "p") == 0) {
+                                p_open = 1;
+                                break;
+                            }
+                            if (h_ieq_raw(on2, "button") ||
+                                h_ieq_raw(on2, "applet") ||
+                                h_ieq_raw(on2, "caption") ||
+                                h_ieq_raw(on2, "table") ||
+                                h_ieq_raw(on2, "td") ||
+                                h_ieq_raw(on2, "th") ||
+                                h_ieq_raw(on2, "marquee") ||
+                                h_ieq_raw(on2, "object") ||
+                                h_ieq_raw(on2, "select") ||
+                                h_ieq_raw(on2, "template") ||
+                                h_is_int_point(&b, d2 - 1))
+                                break;
+                        }
+                        if (!p_open) {
+                            LeptrisElement pe =
+                                h_open_element(&b, "p");
+                            (void)pe;
+                            if (b.depth > 0) b.depth--;
+                            p = q;
+                            text = p;
+                            continue;
+                        }
+                    }
                     /* #659 adoption agency (WHATWG 13.2.6.4.7):
                      * formatting end tags run the agency — it
                      * consumes the tag when a formatting entry
@@ -5436,6 +5473,21 @@ static LeptrisDocument html_parse_shared(
          * start tag is dropped; its text content joins the
          * select's text. */
         if (b.whatwg && h_in_select(&b) &&
+            strcmp(name, "select") == 0) {
+            /* 13.2.6.4.11: a <select> start tag inside a select
+             * ACTS AS its end tag — no nesting (tests1:30). */
+            for (size_t d2 = b.depth; d2 > 0; d2--)
+                if (strcmp(leptris_element_name(b.open[d2 - 1]),
+                           "select") == 0) {
+                    b.depth = d2 - 1;
+                    break;
+                }
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+        if (b.whatwg && h_in_select(&b) &&
             strcmp(name, "option") != 0 &&
             strcmp(name, "optgroup") != 0 &&
             strcmp(name, "select") != 0 &&
@@ -5563,6 +5615,42 @@ static LeptrisDocument html_parse_shared(
                         h_ieq_raw(on, "template") ||
                         h_ieq_raw(on, "button") ||
                         h_ieq_raw(on, "select") || h_ieq_raw(on, "html"))
+                        break;
+                }
+            }
+            /* 13.2.6.4.11: a li/dd/dt start tag closes the
+             * previous li/dd/dt in LIST-ITEM scope — div, p and
+             * formatting elements do NOT fence the scan (only the
+             * scope boundaries + ol/ul do), so <li><div><li>
+             * restarts the li (tests1:103). */
+            if (b.whatwg_adopt &&
+                (strcmp(name, "li") == 0 || strcmp(name, "dd") == 0 ||
+                 strcmp(name, "dt") == 0)) {
+                for (size_t d = b.depth; d > 0; d--) {
+                    const char* on =
+                        leptris_element_name(b.open[d - 1]);
+                    if (!on) break;
+                    if ((strcmp(name, "li") == 0 &&
+                         strcmp(on, "li") == 0) ||
+                        (strcmp(name, "li") != 0 &&
+                         (strcmp(on, "dd") == 0 ||
+                          strcmp(on, "dt") == 0))) {
+                        b.depth = d - 1;
+                        break;
+                    }
+                    if (strcmp(name, "li") == 0 &&
+                        (strcmp(on, "ol") == 0 || strcmp(on, "ul") == 0))
+                        break;
+                    if (h_ieq_raw(on, "applet") ||
+                        h_ieq_raw(on, "caption") ||
+                        h_ieq_raw(on, "table") ||
+                        h_ieq_raw(on, "td") ||
+                        h_ieq_raw(on, "th") ||
+                        h_ieq_raw(on, "marquee") ||
+                        h_ieq_raw(on, "object") ||
+                        h_ieq_raw(on, "template") ||
+                        h_ieq_raw(on, "html") ||
+                        h_is_int_point(&b, d - 1))
                         break;
                 }
             }
