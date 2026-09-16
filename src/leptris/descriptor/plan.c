@@ -423,6 +423,13 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                         dp_result_free_rec(v);
                         return 0;
                     }
+                    /* #1113: the collection echoes its producing
+                     * row's wire_name/type_tag — the documented
+                     * contract, same as scalar/nested rows, so a
+                     * consumer can attribute it among multiple
+                     * collection rows. */
+                    coll->name = dp_strdup(row->wire_name);
+                    coll->type_tag = row->type_tag;
                     emitted = 1;
                 }
                 struct leptris_plan_result* coll =
