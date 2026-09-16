@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [1.9.177] - 2026-09-16
+
+### Fixed
+
+- NUL rules in bogus comments and foreign text; frameset is not a foreign breakout (#659) (html)
+
+### Performance
+
+- value-of @name rides the exact-name attr walk directly (xslt)
+- hash-prefilter find_attr_expanded's no-namespace walk (dom)
+- result-tree appends skip the per-node doc re-derivation (xslt)
+- value-of @name fast path — direct attribute lookup (xslt)
+- registry templates — transform-enter builds memcpy, not strcmp (xslt)
+
+
+
 ## [1.9.176] - 2026-09-15
 
 Ruby-binding and moxml parity wave: four surfaces the adapter
