@@ -707,6 +707,26 @@ TEST(RngInclude, MissingHrefIsAnError) {
     EXPECT_EQ(parse_file("no-href.rng"), nullptr);
 }
 
+TEST(RngInclude, ExternalRefLoadsForeignGrammar) {
+    /* externalRef: the referenced grammar's start becomes the
+     * pattern body (basicdoc.rng's MathML reference). */
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = parse_file("ext-main.rng");
+    ASSERT_NE(rng, nullptr) << leptris_last_error();
+    const char doc[] = "<r><lib>hi</lib></r>";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    const char bad_xml[] = "<r><nope/></r>";
+    LeptrisDocument bad = leptris_parse_string(
+        bad_xml, strlen(bad_xml), &st);
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, bad), 0);
+    leptris_document_free(d);
+    leptris_document_free(bad);
+    leptris_rng_free(rng);
+}
+
 TEST(RngInclude, FileSchemaErrorsPublishDetail) {
     /* The FILE entry must publish schema-parse detail to
      * leptris_last_error like the string entry — it used to free

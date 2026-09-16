@@ -14,6 +14,7 @@
 
 typedef enum {
     RNG_EMPTY = 0,
+    RNG_EXTERNAL_REF,
     RNG_NOT_ALLOWED,
     RNG_TEXT,
     RNG_ELEMENT,

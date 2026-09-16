@@ -203,8 +203,19 @@ static RngPattern* parse_pattern(RngGrammar* g, LeptrisElement e,
             return NULL;
         }
         return p;   /* children invalid per spec; no walk */
-    } else if (is_rng(e, "parentRef") || is_rng(e, "externalRef")) {
-        snprintf(err, errsz, "%s: not supported in phase 1", n);
+    } else if (is_rng(e, "externalRef")) {
+        /* Lowered to a placeholder; the resolution pass (with the
+         * base dir) splices in the referenced grammar's start. */
+        p = pat_new(RNG_EXTERNAL_REF);
+        p->name = dup_attr(e, "href");
+        if (!p->name) {
+            snprintf(err, errsz, "externalRef: missing @href");
+            free(p);
+            return NULL;
+        }
+        return p;   /* no children per spec */
+    } else if (is_rng(e, "parentRef")) {
+        snprintf(err, errsz, "parentRef: not supported");
         return NULL;
     } else {
         snprintf(err, errsz, "unknown pattern element: %s",
@@ -515,6 +526,106 @@ static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
     return 1;
 }
 
+/* externalRef resolution: the referenced grammar's START splices
+ * in place of the placeholder node, and its defines merge into the
+ * host grammar (refs inside the external grammar must resolve). */
+static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
+                                 const char* base_dir, unsigned depth,
+                                 char* err, size_t errsz) {
+    for (RngPattern** link = slot; *link; ) {
+        RngPattern* p = *link;
+        if (p->kind == RNG_EXTERNAL_REF) {
+            if (!base_dir) {
+                snprintf(err, errsz,
+                         "externalRef %s: no base URI "
+                         "(use leptris_rng_parse_file)", p->name);
+                return 0;
+            }
+            if (depth >= 8) {
+                snprintf(err, errsz,
+                         "externalRef %s: too deep (cycle?)", p->name);
+                return 0;
+            }
+            char path[1024];
+            if (p->name[0] == '/')
+                snprintf(path, sizeof(path), "%s", p->name);
+            else
+                snprintf(path, sizeof(path), "%s/%s", base_dir, p->name);
+            size_t len = 0;
+            char* buf = slurp_file(path, &len);
+            if (!buf) {
+                snprintf(err, errsz, "externalRef %s: cannot open",
+                         p->name);
+                return 0;
+            }
+            LeptrisStatus st = LEPTRIS_OK;
+            LeptrisDocument edoc = leptris_parse_string(buf, len, &st);
+            free(buf);
+            if (!edoc) {
+                snprintf(err, errsz,
+                         "externalRef %s: not well-formed XML", p->name);
+                return 0;
+            }
+            char nbase[1024];
+            snprintf(nbase, sizeof(nbase), "%s", path);
+            char* slash = strrchr(nbase, '/');
+            if (slash) *slash = 0;
+            struct leptris_relaxng* ex = rng_parse_doc(edoc, nbase[0] ? nbase : NULL);
+            leptris_document_free(edoc);
+            if (!ex || !ex->grammar || ex->error) {
+                snprintf(err, errsz, "externalRef %s: %s", p->name,
+                         (ex && ex->error) ? ex->error
+                                           : "grammar parse failed");
+                if (ex) {
+                    ex->grammar = NULL;   /* freed below via splice */
+                    /* free just the shell */
+                    free(ex->error);
+                    free(ex);
+                }
+                return 0;
+            }
+            RngGrammar* ig = ex->grammar;
+            if (!ig->start) {
+                snprintf(err, errsz,
+                         "externalRef %s: grammar has no start", p->name);
+                rng_grammar_free(ig);
+                free(ex);
+                return 0;
+            }
+            /* Recurse into the spliced body first (its own
+             * externalRefs resolve against nbase). */
+            if (!resolve_external_refs(g, &ig->start, nbase[0] ? nbase : NULL,
+                                       depth + 1, err, errsz)) {
+                rng_grammar_free(ig);
+                free(ex);
+                return 0;
+            }
+            /* Merge the external grammar's defines into the host. */
+            if (ig->defines) {
+                RngDefine** tail = &g->defines;
+                while (*tail) tail = &(*tail)->next;
+                *tail = ig->defines;
+                ig->defines = NULL;
+            }
+            /* Splice: placeholder replaced by the external start. */
+            ig->start->next = p->next;
+            *link = ig->start;
+            ig->start = NULL;
+            free(p->name);
+            free(p);
+            rng_grammar_free(ig);
+            free(ex);
+            continue;   /* link already advanced via splice */
+        }
+        if (p->first_child &&
+            !resolve_external_refs(g, &p->first_child, base_dir,
+                                   depth, err, errsz))
+            return 0;
+        link = &p->next;
+    }
+    return 1;
+}
+
 struct leptris_relaxng* rng_parse_document(LeptrisDocument doc) {
     return rng_parse_doc(doc, NULL);
 }
@@ -542,7 +653,32 @@ static struct leptris_relaxng* rng_parse_doc(LeptrisDocument doc,
         if (!parse_grammar_body(rng->grammar, root, base_dir, 0, err,
                                 sizeof(err))) {
             rng->error = leptris_strdup(err[0] ? err : "grammar parse failed");
-        } else if (!rng->grammar->start) {
+            return rng;
+        }
+        int refs_ok = 1;
+        if (rng->grammar->start)
+            refs_ok = resolve_external_refs(rng->grammar,
+                                            &rng->grammar->start,
+                                            base_dir, 0, err,
+                                            sizeof(err));
+        /* Placeholders inside define bodies resolve too (basicdoc's
+         * <define name="mathml"><externalRef .../> lives in a
+         * define, not under start). */
+        for (RngDefine* d = refs_ok ? rng->grammar->defines : NULL; d;
+             d = d->next) {
+            if (!d->body) continue;
+            if (!resolve_external_refs(rng->grammar, &d->body,
+                                       base_dir, 0, err, sizeof(err))) {
+                refs_ok = 0;
+                break;
+            }
+        }
+        if (!refs_ok) {
+            rng->error = leptris_strdup(err[0] ? err
+                                               : "externalRef failed");
+            return rng;
+        }
+        if (!rng->grammar->start) {
             rng->error = leptris_strdup("grammar: no <start>");
         }
         return rng;
