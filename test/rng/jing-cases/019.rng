@@ -1,0 +1,7 @@
+<element name="library" xmlns="http://relaxng.org/ns/structure/1.0">
+  <oneOrMore><element name="book">
+    <attribute name="id"><text/></attribute>
+    <optional><element name="title"><text/></element></optional>
+    <element name="author"><text/></element>
+  </element></oneOrMore>
+</element>

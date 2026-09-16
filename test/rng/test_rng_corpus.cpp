@@ -1,4 +1,4 @@
-// test/rng/test_rng_corpus.cpp — #878 conformance gate: 19 schema/
+// test/rng/test_rng_corpus.cpp — #878 conformance gate: 20 schema/
 // instance pairs vendored in test/rng/jing-cases/. Reference verdicts
 // were recorded from Jing (rc 0 = valid, 1 = invalid) and are mirrored
 // in the table below; leptris_rng_validate must agree on every pair.
@@ -47,6 +47,7 @@ const RngCase kCases[] = {
     {"016", "nested-elems", true, false},
     {"017", "attr-value", true, false},
     {"018", "two-attrs", true, false},
+    {"019", "optional-omitted", true, false},
 };
 
 std::string slurp(const std::string& path) {
@@ -121,10 +122,10 @@ TEST(RngCorpus, MatchesJingVerdicts) {
         }
         leptris_rng_free(rng);
     }
-    /* Full agreement: 38/38 Jing verdicts. Exact on purpose — every
+    /* Full agreement: 40/40 Jing verdicts. Exact on purpose — every
      * future divergence is an immediate red. */
     EXPECT_EQ(agree, run);
-    EXPECT_EQ(run, 38);
+    EXPECT_EQ(run, 40);
 }
 
 }  // namespace
