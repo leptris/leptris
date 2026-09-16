@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+## [1.9.182] - 2026-09-16
+
+### Added
+
+- #1125: the parse buffer is now immutable. Every in-place NUL the
+  zero-copy parser writes is logged with its original byte, and every
+  borrowed string that relies on it is logged for pool
+  materialization; on success the strings materialize into pool
+  storage and the original bytes are restored — `doc->xml_buffer`
+  ends the parse byte-identical to the input (OOM mid-materialize
+  falls back to the old behavior; never a torn state). Covers element
+  names/prefixes, attr names/values, raw attrs, xmlns URIs,
+  comment/CDATA content, and PI target/data. `leptris_parse_string_
+  inplace` callers' buffers now come back unmodified. Gate:
+  ImmutableBuffer.XmlBufferStaysByteIdenticalToInput; full ctest
+  1322/1322, Jing parity 19/19, leaks 0.
+
+
+
 ## [1.9.181] - 2026-09-16
 
 ### Changed
