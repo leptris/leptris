@@ -18,6 +18,132 @@ LeptrisDocument parse(const char* xml) {
     return d ? d : (LeptrisDocument)0;
 }
 
+
+// ---- #1115: rule-level ns forms + position on all kinds ----------
+
+TEST(Plan1115, RuleLevelNsFormsMatchSiblingsByUri) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(
+        "<root xmlns:a='urn:a' xmlns:b='urn:b'>"
+        "<a:item>one</a:item><b:item>two</b:item>"
+        "<item>bare</item></root>", strlen("<root xmlns:a='urn:a' xmlns:b='urn:b'>"
+        "<a:item>one</a:item><b:item>two</b:item>"
+        "<item>bare</item></root>"), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    /* Two sibling rows with the SAME wire_name but different
+     * rule-level ns forms — mixed qualification under one parent. */
+    leptris_child_plan kids[3] = {};
+    kids[0].wire_name = "item";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    kids[0].ns_uri = "urn:a";
+    kids[1].wire_name = "item";
+    kids[1].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[1].type_tag = 2;
+    kids[1].child_plan_index = -1;
+    kids[1].ns_form = LEPTRIS_PLAN_NS_ANY;
+    kids[2].wire_name = "item";
+    kids[2].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[2].type_tag = 3;
+    kids[2].child_plan_index = -1;   /* ns_form 0: no-namespace only */
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 3;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+    /* Row order: EXACT(urn:a) -> one; ANY -> EVERY item (ns-bound
+     * or not): one, two, bare; unset form -> the no-namespace
+     * item: bare again. */
+    ASSERT_EQ(leptris_plan_value_count(r), 5u);
+
+    LeptrisPlanResult a = leptris_plan_value_at(r, 0);
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(leptris_plan_value_type_tag(a), 1);
+    EXPECT_STREQ(leptris_plan_value_string(a), "one");
+
+    LeptrisPlanResult any1 = leptris_plan_value_at(r, 1);
+    ASSERT_NE(any1, nullptr);
+    EXPECT_EQ(leptris_plan_value_type_tag(any1), 2);
+    EXPECT_STREQ(leptris_plan_value_string(any1), "one");
+    LeptrisPlanResult any2 = leptris_plan_value_at(r, 2);
+    ASSERT_NE(any2, nullptr);
+    EXPECT_EQ(leptris_plan_value_type_tag(any2), 2);
+    EXPECT_STREQ(leptris_plan_value_string(any2), "two");
+
+    LeptrisPlanResult any3 = leptris_plan_value_at(r, 3);
+    ASSERT_NE(any3, nullptr);
+    EXPECT_EQ(leptris_plan_value_type_tag(any3), 2);
+    EXPECT_STREQ(leptris_plan_value_string(any3), "bare");
+
+    LeptrisPlanResult bare = leptris_plan_value_at(r, 4);
+    ASSERT_NE(bare, nullptr);
+    EXPECT_EQ(leptris_plan_value_type_tag(bare), 3);
+    EXPECT_STREQ(leptris_plan_value_string(bare), "bare");
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1115, EveryValueKindCarriesPosition) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(
+        "<root><first>x</first><items>i1</items><items>i2</items>"
+        "<last>y</last></root>", strlen("<root><first>x</first><items>i1</items><items>i2</items>"
+        "<last>y</last></root>"), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_child_plan kids[3] = {};
+    kids[0] = {"first", LEPTRIS_PLAN_KIND_SCALAR, 1, -1};
+    kids[1] = {"items", LEPTRIS_PLAN_KIND_COLLECTION, 2, -1};
+    kids[2] = {"last", LEPTRIS_PLAN_KIND_SCALAR, 3, -1};
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 3;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 3u);
+
+    size_t p_first = leptris_plan_value_position(leptris_plan_value_at(r, 0));
+    size_t p_coll = leptris_plan_value_position(leptris_plan_value_at(r, 1));
+    size_t p_last = leptris_plan_value_position(leptris_plan_value_at(r, 2));
+    /* Parse-created nodes carry byteOffset+1 (#223); the values
+     * echo it — nonzero and in document order across rows. */
+    EXPECT_GT(p_first, 0u);
+    EXPECT_GT(p_coll, p_first);
+    EXPECT_GT(p_last, p_coll);
+    /* Collection ITEMS carry their own offsets, ordered. */
+    LeptrisPlanResult coll = leptris_plan_value_at(r, 1);
+    size_t p_i1 = leptris_plan_value_position(leptris_plan_value_at(coll, 0));
+    size_t p_i2 = leptris_plan_value_position(leptris_plan_value_at(coll, 1));
+    EXPECT_GT(p_i1, 0u);
+    EXPECT_GT(p_i2, p_i1);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
 }  // namespace
 
 TEST(PlanAbi, VersionIsOneAndSpecVersionIsChecked) {
