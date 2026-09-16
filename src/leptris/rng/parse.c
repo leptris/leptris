@@ -57,6 +57,13 @@ static void parse_children_into(RngGrammar* g, LeptrisElement e,
     for (LeptrisNodeRef c = leptris_node_first_child((LeptrisNodeRef)e); c;
          c = leptris_node_next_sibling(c)) {
         if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        /* Foreign-namespace children are annotations and other
+         * non-pattern content (RELAX NG §4.6: the DTD-compatibility
+         * a:documentation/a:summary elements, or any foreign
+         * namespace) — ignored, never patterns. Production schemas
+         * (metanorma isodoc-compile.rng) are saturated with them. */
+        const char* cns = leptris_element_get_namespace_uri((LeptrisElement)c);
+        if (!cns || strcmp(cns, RNG_NS) != 0) continue;
         RngPattern* p = parse_pattern(g, (LeptrisElement)c, err, errsz);
         if (!p) return;
         pat_append(wrap, p);
