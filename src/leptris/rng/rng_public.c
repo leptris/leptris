@@ -50,6 +50,10 @@ LEPTRIS_API LeptrisRelaxNG leptris_rng_parse_file(const char* path,
         return NULL;
     }
     if (rng->error) {
+        /* The string entry publishes detail; the file entry MUST
+         * too — callers read leptris_last_error() for the reason
+         * (isodoc-compile.rng triage died on an empty channel). */
+        leptris_set_error(LEPTRIS_ERROR_PARSE_FAILED, rng->error);
         leptris_rng_free((LeptrisRelaxNG)rng);
         if (status) *status = LEPTRIS_ERROR_PARSE;
         return NULL;

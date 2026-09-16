@@ -1,0 +1,7 @@
+<grammar xmlns='http://relaxng.org/ns/structure/1.0'>
+  <!-- A FILE-sourced schema with a real construct error: the file
+       entry must publish the detail to leptris_last_error just
+       like the string entry (was: silent NULL with an empty
+       channel, which masked the isodoc-compile.rng triage). -->
+  <start><element name='e'><bogus/></element></start>
+</grammar>
