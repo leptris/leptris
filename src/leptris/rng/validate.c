@@ -69,6 +69,31 @@ static void diag(RngVal* v, LeptrisDiagKind kind, LeptrisElement e,
     }
 }
 
+/* #1137: SPECULATIVE probes (backtracking alternatives, optional
+ * fallbacks) must never poison the matcher's v->failed short-circuit
+ * — an omitted <optional> child probes, fails on the name, falls
+ * back to zero-match, and the rest of the model must still run.
+ * Record in the diagnose pass only; no verdict bookkeeping. */
+static void diag_probe(RngVal* v, LeptrisDiagKind kind, LeptrisElement e,
+                       const char* fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 4, 5)))
+#endif
+    ;
+
+static void diag_probe(RngVal* v, LeptrisDiagKind kind, LeptrisElement e,
+                       const char* fmt, ...) {
+    if (v->quiet || !v->r) return;
+    char msg[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    leptris_diag_emit(&v->r->diags, &v->r->diag_count,
+                      &v->r->diag_cap, kind, (LeptrisNodeRef)e,
+                      "%s", msg);
+}
+
 /* "an integer" / "a string" — Jing's article. */
 static const char* art(const char* dt) {
     if (!dt || !*dt) return "a";
@@ -577,11 +602,12 @@ static size_t fold_list(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
 
 static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     if (!names_match(p, e)) {
-        /* #878: surface the name mismatch (the engine used to
-         * silently return 0, dropping the per-element error). */
-        diag(v, LEPTRIS_DIAG_NOT_ALLOWED_HERE,  e,
-        "element \"%s\" not allowed here",
-             leptris_element_name(e), NULL);
+        /* #878/#1137: surface the name mismatch in the diagnose
+         * pass only — the verdict probe must not poison the
+         * matcher's short-circuit. */
+        diag_probe(v, LEPTRIS_DIAG_NOT_ALLOWED_HERE, e,
+                   "element \"%s\" not allowed here",
+                   leptris_element_name(e));
         return 0;
     }
     if (!match_attrs(v, p, e)) return 0;
