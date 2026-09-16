@@ -1211,9 +1211,28 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
     } else if (in->select_attr_name) {
         /* #682: one unprefixed attribute step — same string as the
          * one-attribute nodeset (value or "" when absent, both
-         * value_of_string paths agree) without the eval machinery. */
-        const char* v =
-            leptris_element_attribute(node, in->select_attr_name);
+         * value_of_string paths agree) without the eval machinery.
+         * The lookup rides the hash-prefiltered exact-name walk
+         * directly: a colon-free needle can only match an attr whose
+         * FULL name is the needle, which is exactly the bare-name
+         * rule (#542). Entity-bearing values fall back to the public
+         * accessor for the lazy decode; non-element context nodes
+         * yield the empty axis. */
+        const char* v = NULL;
+        if (((LeptrisNode*)node)->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            struct leptris_attribute* a = leptris_dom_attr_find(
+                node, in->select_attr_name,
+                leptris_cstr_len16(in->select_attr_name));
+            if (a) {
+                if (attr_has_entities(a)) {
+                    v = leptris_element_attribute(node,
+                                                  in->select_attr_name);
+                } else {
+                    LeptrisStringView vs = leptris_attr_value_sv(a);
+                    v = vs.length ? vs.data : "";
+                }
+            }
+        }
         sv = leptris_strdup(v ? v : "");
     } else {
         struct leptris_xpath_result* r = xslt_eval(ex, in->select, node);
