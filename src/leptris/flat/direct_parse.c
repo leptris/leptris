@@ -1064,7 +1064,13 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     }
     size_t quote_count = dq_count + sq_count;
     size_t est_elems = lt_count + 8;
+#define DP_ELEM_CHUNK 64u
     size_t elem_bytes = est_elems * sizeof(struct leptris_element);
+    /* Chunked zeroing over-allocation: elements are zeroed 64 at a
+     * time as the carve cursor advances (see the carve site), so the
+     * final chunk's memset may run past the last used element — up to
+     * one chunk past est_elems. */
+    size_t elem_pad = DP_ELEM_CHUNK * sizeof(struct leptris_element);
     size_t attr_bytes = (quote_count / 2 + 64) * sizeof(struct leptris_attribute);
     /* len bounds all text/name/value content copies (substrings of the
      * document), but each text/comment NODE costs ~48-56 B of struct
@@ -1076,7 +1082,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     size_t node_overhead = est_elems * 64;
     size_t text_room = len + node_overhead;
     size_t slack = len / 2 + 64 * 1024;  /* mutation headroom + floor */
-    size_t arena_size = elem_bytes + attr_bytes + text_room + slack;
+    size_t arena_size = elem_bytes + elem_pad + attr_bytes + text_room + slack;
     LeptrisArena* arena = leptris_arena_create(arena_size);
     if (!arena) {
         leptris_arena_buffer_release(buf, len + 1 + 64);
@@ -1120,7 +1126,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     cpi_stride = (cpi_stride + 7u) & ~(size_t)7u;
     size_t cpi_bytes = lt_count * cpi_stride;  /* each markup node starts with '<' */
     char* combined = (char*)leptris_pool_alloc(
-        pool, elem_bytes + attr_bytes + text_bytes + cpi_bytes);
+        pool, elem_bytes + elem_pad + attr_bytes + text_bytes + cpi_bytes);
     if (!combined) {
         leptris_pool_destroy(pool);
         leptris_arena_buffer_release(buf, len + 1 + 64);
@@ -1129,18 +1135,22 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         return NULL;
     }
     LeptrisElement elem_block = (LeptrisElement)combined;
-    memset(elem_block, 0, elem_bytes);
+    /* Sub-blocks sit AFTER the pad — the final chunk memset may
+     * write into it, and it must never touch carved attr/text/cpi
+     * nodes (this exact overlap wiped doc-level PIs). */
+    char* elem_end = combined + elem_bytes + elem_pad;
     struct leptris_attribute* attr_block =
-        (struct leptris_attribute*)(combined + elem_bytes);
+        (struct leptris_attribute*)(elem_end);
     struct leptris_text_node* text_block =
-        (struct leptris_text_node*)(combined + elem_bytes + attr_bytes);
-    char* cpi_block = combined + elem_bytes + attr_bytes + text_bytes;
+        (struct leptris_text_node*)(elem_end + attr_bytes);
+    char* cpi_block = elem_end + attr_bytes + text_bytes;
     /* No memset on attr_block — dp_add_attr_inline initializes every
      * field of each attr it uses. (Elements keep the bulk memset:
      * carve-time zeroing measured 1-2 us SLOWER — interleaved in-loop
      * stores cost more than the streaming pass saves, even though the
      * reservation tail is ~2x the carved elements on mixed docs.) */
     size_t elem_idx = 0;
+    size_t elem_zeroed = 0;
 
     /* 4. Create document. Pool-allocated to save one malloc per
      * parse (TODO 154 Phase B). The doc_pool_allocated flag tells
@@ -1422,6 +1432,17 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 ? (uint32_t)(p.pos - p.buf) + 1u : 0u;
             LeptrisElement elem;
             if (elem_idx < est_elems) {
+                if (elem_idx >= elem_zeroed) {
+                    /* Zero 64 elements per streaming pass instead of
+                     * one bulk memset of the whole (2x-over-reserved
+                     * on paired-tag documents) block — 17% of a
+                     * text-heavy parse was bzero. The pad reservation
+                     * makes the final chunk safe. */
+                    memset(&elem_block[elem_zeroed], 0,
+                           DP_ELEM_CHUNK *
+                               sizeof(struct leptris_element));
+                    elem_zeroed += DP_ELEM_CHUNK;
+                }
                 elem = &elem_block[elem_idx++];
             } else {
                 /* Bulk block exhausted — fall back to pool_alloc.
