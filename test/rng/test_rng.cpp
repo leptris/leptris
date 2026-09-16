@@ -224,6 +224,40 @@ TEST(RngErrors, AccumulatesAndExposesPerError) {
     leptris_rng_free(schema);
 }
 
+// ---- #1137: optional omitted must stay valid ----------------------
+
+TEST(RngRegression, OmittedOptionalElementStaysValid) {
+    /* v1.9.179 regression: the speculative probe of an omitted
+     * <optional> child poisoned the matcher's failed short-circuit,
+     * turning valid documents invalid. */
+    const char* sch =
+        "<element name='library' xmlns='" RNGNS "'>"
+        "<oneOrMore><element name='book'>"
+        "<attribute name='id'><text/></attribute>"
+        "<optional><element name='title'><text/></element></optional>"
+        "<element name='author'><text/></element>"
+        "</element></oneOrMore></element>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_NE(rng, nullptr);
+    const char* ins =
+        "<library><book id='1'><author>A</author></book></library>";
+    LeptrisDocument d = leptris_parse_string(ins, strlen(ins), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1)
+        << "omitted optional must validate (Jing: valid)";
+    /* The title PRESENT form stays valid too. */
+    const char* ins2 =
+        "<library><book id='1'><title>T</title><author>A</author>"
+        "</book></library>";
+    LeptrisDocument d2 = leptris_parse_string(ins2, strlen(ins2), NULL);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d2), 1);
+    leptris_document_free(d);
+    leptris_document_free(d2);
+    leptris_rng_free(rng);
+}
+
 // ---- #1126: structured kinds on the diag records ------------------
 
 TEST(RngDiagKinds, CorpusCasesCarryTheirKinds) {
