@@ -1790,10 +1790,11 @@ fail:
                     attr_capacity);
         }
     }
-    leptris_pool_destroy(pool);
     /* The eagerly-built line-break table is malloc'd, not pool-owned
-     * — the fail path never reaches leptris_document_free. */
+     * — the fail path never reaches leptris_document_free. Free it
+     * BEFORE pool_destroy reclaims the doc struct. */
     free(doc->line_breaks);
+    leptris_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't LEPTRIS_FREE(doc) (TODO 154). */
     if (owns_buffer == 1)
