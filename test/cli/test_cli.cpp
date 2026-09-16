@@ -123,9 +123,24 @@ TEST(CliParse, ReadsFromStdin) {
     EXPECT_NE(r.out.find("<root>hi</root>"), std::string::npos);
 }
 
+/* Fixture dir: getenv keeps a manual override; the compile-time
+ * definition is the default. gtest PRE_TEST discovery does not
+ * carry an ENVIRONMENT property to the runtime, and out-of-tree
+ * builds have no ../test relative to the build dir — without this
+ * fallback every fixture-reading CLI spec fails there. */
+static const char* cli_source_dir() {
+    const char* env = std::getenv("LEPTRIS_SOURCE_DIR");
+    if (env && env[0]) return env;
+#ifdef LEPTRIS_SOURCE_DIR
+    return LEPTRIS_SOURCE_DIR;
+#else
+    return nullptr;
+#endif
+}
+
 TEST(CliParse, ReadsFile) {
     /* Absolute path — the test cwd is the build dir, not the source tree. */
-    const char* src_dir = std::getenv("LEPTRIS_SOURCE_DIR");
+    const char* src_dir = cli_source_dir();
     std::string fixture = src_dir && src_dir[0]
         ? std::string(src_dir) + "/test/fixtures/basic.xml"
         : "../test/fixtures/basic.xml";
@@ -336,8 +351,17 @@ TEST(CliValidate, MissingSchemaIsIoError) {
  * wrapping, so spaced expressions ride a query FILE instead. */
 static std::string write_xq_file(const char* query) {
     /* Relative to cwd (the build dir): /tmp does not exist on
-     * Windows runners. */
-    std::string path = "leptris_xq_query.tmp";
+     * Windows runners. Per-process suffix: the build dir is shared
+     * by every test binary, and a fixed name collides when specs
+     * run concurrently (direct invocation, ctest ignoring
+     * RUN_SERIAL). */
+#ifdef _WIN32
+    std::string path = "leptris_xq_query_" +
+                       std::to_string(_getpid()) + ".tmp";
+#else
+    std::string path = "leptris_xq_query_" +
+                       std::to_string(getpid()) + ".tmp";
+#endif
     FILE* fp = std::fopen(path.c_str(), "wb");
     if (fp) {
         std::fwrite(query, 1, std::strlen(query), fp);
@@ -361,7 +385,7 @@ TEST(CliXquery, EvaluatesFlworFromInlineExpression) {
 }
 
 TEST(CliXquery, SourceDocumentAndConstructors) {
-    const char* src_dir = std::getenv("LEPTRIS_SOURCE_DIR");
+    const char* src_dir = cli_source_dir();
     std::string books = src_dir && src_dir[0]
         ? std::string(src_dir) + "/test/xquery/books.xml"
         : "../test/xquery/books.xml";
