@@ -582,10 +582,10 @@ LEPTRIS_API LeptrisStatus leptris_node_unlink(LeptrisNodeRef node) {
  * node_line + node_compare (issue #172).
  * ============================================================================ */
 
-/* High bit of base.line marks a RESOLVED line; otherwise the field
- * holds byteOffset+1 into doc->xml_buffer (lazy line tracking — the
- * parse scans carry no '\n' compares). */
-#define LEPTRIS_LINE_RESOLVED 0x80000000u
+/* Parser-created nodes keep byteOffset+1 in base.line; element nodes
+ * additionally store parser-recorded start/end tag offsets (#1124).
+ * The field is never overwritten with a cached line number anymore:
+ * source-position callers need the raw offset to remain available. */
 
 /* Reach the owning document from any node: elements go through the
  * root map; other node types hop their parent edge first. */
@@ -645,26 +645,60 @@ static const uint32_t* doc_line_breaks(struct leptris_document* doc,
 }
 
 LEPTRIS_API int leptris_node_line(LeptrisNodeRef node) {
-    if (!node) return 0;
-    uint32_t v = node->line;
-    if (v == 0) return 0;                       /* unknown */
-    if (v & LEPTRIS_LINE_RESOLVED) return (int)(v & ~LEPTRIS_LINE_RESOLVED);
-    /* Offset-encoded: resolve against the document buffer. */
+    LeptrisSourcePosition pos;
+    leptris_node_source_position(node, &pos);
+    return pos.line;
+}
+
+LEPTRIS_API void leptris_node_source_position(LeptrisNodeRef node,
+                                              LeptrisSourcePosition* out) {
+    if (!out) return;
+    out->line = 0;
+    out->col_start = 0;
+    out->col_end = 0;
+    if (!node || node->line == 0) return;
+
     struct leptris_document* doc = node_document(node);
-    if (!doc || !doc->xml_buffer) return 0;
-    size_t off = (size_t)(v - 1);
-    if (off > doc->xml_buffer_len) return 0;    /* defensive */
+    if (!doc || !doc->xml_buffer) return;
+    size_t start_off = (size_t)node->line - 1u;
+    if (start_off > doc->xml_buffer_len) return;
     size_t n_ = 0;
     const uint32_t* brks = doc_line_breaks(doc, &n_);
-    if (!brks) return 0;
-    /* line = 1 + number of newlines strictly before the node start */
+    if (!brks) return;
+
     size_t lo = 0, hi = n_;
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
-        if (brks[mid] < off) lo = mid + 1; else hi = mid;
+        if (brks[mid] < start_off) lo = mid + 1; else hi = mid;
     }
-    node->line = LEPTRIS_LINE_RESOLVED | (uint32_t)(lo + 1);
-    return (int)(lo + 1);
+    out->line = (int)(lo + 1);
+
+    if (node->type != LEPTRIS_NODE_TYPE_ELEMENT) return;
+    LeptrisElement elem = (LeptrisElement)node;
+    size_t start_tag_end = elem->start_tag_end_off;
+    size_t element_end = elem->element_end_off;
+    if (start_tag_end > doc->xml_buffer_len || element_end > doc->xml_buffer_len)
+        return;
+
+    size_t start_line = 0, start_hi = n_;
+    while (start_line < start_hi) {
+        size_t mid = start_line + (start_hi - start_line) / 2;
+        if (brks[mid] < start_tag_end) start_line = mid + 1;
+        else start_hi = mid;
+    }
+    size_t start_line_off = start_line == 0 ? 0 : (size_t)brks[start_line - 1] + 1;
+    out->col_start = (int)(start_tag_end - start_line_off) + 1;
+
+    if (element_end != 0) {
+        size_t end_line = 0, end_hi = n_;
+        while (end_line < end_hi) {
+            size_t mid = end_line + (end_hi - end_line) / 2;
+            if (brks[mid] < element_end) end_line = mid + 1;
+            else end_hi = mid;
+        }
+        size_t end_line_off = end_line == 0 ? 0 : (size_t)brks[end_line - 1] + 1;
+        out->col_end = (int)(element_end - end_line_off) + 1;
+    }
 }
 
 LEPTRIS_API void* leptris_node_get_binding_wrapper(LeptrisNodeRef node) {

@@ -27,6 +27,7 @@ typedef struct {
      * rng_diagnose walks the failure and emits the Jing-shaped
      * per-element list. */
     int quiet;
+    int use_end_column;
     void* diag_pool;  /* diagnose allocations, freed on exit */
 } RngVal;
 
@@ -36,14 +37,26 @@ typedef struct {
  * short-circuits downstream work. */
 static void fail(RngVal* v, LeptrisElement e, const char* fmt,
                  const char* a, const char* b) {
-    int line = e ? leptris_node_line((LeptrisNodeRef)e) : 0;
+    int line = 0;
+    int col = 0;
+    if (e) {
+        LeptrisSourcePosition pos;
+        leptris_node_source_position((LeptrisNodeRef)e, &pos);
+        line = pos.line;
+        /* Jing reports incomplete/text errors at the element end;
+         * all element/attribute errors use the start-tag column. */
+        col = (v->use_end_column || strstr(fmt, "incomplete") != NULL ||
+               strstr(fmt, "character content") != NULL)
+                  ? pos.col_end : pos.col_start;
+    }
     char msg[256];
     if (a && b) snprintf(msg, sizeof(msg), fmt, a, b);
     else if (a) snprintf(msg, sizeof(msg), fmt, a);
     else snprintf(msg, sizeof(msg), "%s", fmt);
     if (!v->failed) {
         v->failed = 1;
-        snprintf(v->err, sizeof(v->err), "%d:0: error: %s", line, msg);
+        snprintf(v->err, sizeof(v->err), "%d:%d: error: %s", line,
+                 col, msg);
     }
     if (v->quiet) return;  /* verdict pass — diagnose reports later */
     struct leptris_relaxng* r = v->r;
@@ -61,7 +74,7 @@ static void fail(RngVal* v, LeptrisElement e, const char* fmt,
     }
     if (r->err_count >= r->err_cap) return;
     r->err_line[r->err_count] = line;
-    r->err_col[r->err_count]  = 0;   /* sub-fix #1 (next slice) */
+    r->err_col[r->err_count]  = col;
     r->err_msg[r->err_count]  = leptris_strdup(msg);
     if (r->err_msg[r->err_count]) r->err_count++;
 }
@@ -69,6 +82,8 @@ static void fail(RngVal* v, LeptrisElement e, const char* fmt,
 /* #878: three-format-arg fail for the Jing message vocabulary. */
 static void fail3(RngVal* v, LeptrisElement e, const char* fmt,
                   const char* a, const char* b, const char* c) {
+    int old_end = v->use_end_column;
+    if (strstr(fmt, "character content") != NULL) v->use_end_column = 1;
     char msg[256];
     if (a && b && c) snprintf(msg, sizeof(msg), fmt, a, b, c);
     else if (a && b) snprintf(msg, sizeof(msg), fmt, a, b);
@@ -77,6 +92,7 @@ static void fail3(RngVal* v, LeptrisElement e, const char* fmt,
     /* Reuse fail() for the recording mechanics by re-formatting
      * into a plain string — call with the composed message. */
     fail(v, e, "%s", msg, NULL);
+    v->use_end_column = old_end;
 }
 
 /* "an integer" / "a string" — Jing's article. */
@@ -1169,12 +1185,14 @@ static void diagnose_text(RngVal* v, RngPattern* p, LeptrisElement e) {
         }
         if (c->kind == RNG_DATA) {
             if (!data_matches(c, t)) {
+                v->use_end_column = 1;
                 char dtb[64];
                 snprintf(dtb, sizeof(dtb), "%s %s", art(c->datatype),
                          c->datatype ? c->datatype : "string");
                 fail3(v, e,
                       "character content of element \"%s\" invalid; "
                       "must be %s", p->name, dtb, NULL);
+                v->use_end_column = 0;
                 return;
             }
             continue;
@@ -1449,11 +1467,11 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
     }
 
     /* leptris_rng_error (back-compat) carries the FIRST accumulated
-     * message in the "line:0: error: msg" shape. */
+     * message in the "line:column: error: msg" shape. */
     if (v.r && v.r->err_count > 0) {
         char back[512];
-        snprintf(back, sizeof(back), "%d:0: error: %s",
-                 v.r->err_line[0], v.r->err_msg[0]);
+        snprintf(back, sizeof(back), "%d:%d: error: %s",
+                 v.r->err_line[0], v.r->err_col[0], v.r->err_msg[0]);
         rng->error = leptris_strdup(back);
     } else {
         rng->error = v.failed ? leptris_strdup(v.err) : NULL;

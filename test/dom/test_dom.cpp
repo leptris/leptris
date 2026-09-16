@@ -1493,6 +1493,61 @@ TEST(NodeLine, ReportsOneBasedLineOfParsedNodes) {
     leptris_document_free(doc);
 }
 
+TEST(NodeSourcePosition, ReportsParserRecordedElementColumns) {
+    const char xml[] =
+        "<root><a x='1'/><b>text</b><multi\n"
+        "  attr='v'>\n"
+        "  <child/>\n"
+        "</multi></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    LeptrisElement b = leptris_element_next_sibling_any(a);
+    ASSERT_NE(b, nullptr);
+    LeptrisElement multi = leptris_element_next_sibling_any(b);
+    ASSERT_NE(multi, nullptr);
+    LeptrisElement child = leptris_element_first_child_any(multi);
+    ASSERT_NE(child, nullptr);
+
+    LeptrisSourcePosition pos;
+    leptris_node_source_position(leptris_element_as_node(root), &pos);
+    EXPECT_EQ(pos.line, 1);
+    EXPECT_EQ(pos.col_start, 7);   /* after <root> */
+    EXPECT_EQ(pos.col_end, 16);    /* after </root> on line 4 */
+
+    leptris_node_source_position(leptris_element_as_node(a), &pos);
+    EXPECT_EQ(pos.line, 1);
+    EXPECT_EQ(pos.col_start, 17);  /* after <a x='1'/> */
+    EXPECT_EQ(pos.col_end, 17);
+
+    leptris_node_source_position(leptris_element_as_node(b), &pos);
+    EXPECT_EQ(pos.line, 1);
+    EXPECT_EQ(pos.col_start, 20);  /* after <b> */
+    EXPECT_EQ(pos.col_end, 28);    /* after </b> */
+
+    leptris_node_source_position(leptris_element_as_node(multi), &pos);
+    EXPECT_EQ(pos.line, 1);        /* opening '<' is on line 1 */
+    EXPECT_EQ(pos.col_start, 12);  /* after attr='v'> on line 2 */
+    EXPECT_EQ(pos.col_end, 9);     /* after </multi> on line 4 */
+
+    leptris_node_source_position(leptris_element_as_node(child), &pos);
+    EXPECT_EQ(pos.line, 3);
+    EXPECT_EQ(pos.col_start, 11);  /* after <child/> */
+    EXPECT_EQ(pos.col_end, 11);
+
+    leptris_node_source_position(nullptr, &pos);
+    EXPECT_EQ(pos.line, 0);
+    EXPECT_EQ(pos.col_start, 0);
+    EXPECT_EQ(pos.col_end, 0);
+
+    leptris_document_free(doc);
+}
+
 /* TODO.bindings/01 — the mutation/construction surface, proven end
  * to end: build from scratch, serialize, reparse, verify. */
 TEST(DomBuilder, RoundTripsThroughSerialization) {

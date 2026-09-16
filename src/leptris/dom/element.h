@@ -8,7 +8,7 @@
  *
  * COMPACT ARCHITECTURE:
  * Uses compressed pointer encoding for minimal memory footprint.
- * - ~96 bytes per element (vs 192 bytes in legacy design = 2x reduction!)
+ * - ~72 bytes per element (source offsets + compressed pointers)
  * - 1-2 byte compressed pointers instead of 8-byte pointers
  * - Better cache locality and faster tree traversal
  */
@@ -310,8 +310,8 @@ static inline LeptrisStringView attr_get_namespace_uri_view(struct leptris_attri
  * Uses compressed pointers and inline strings for minimal memory footprint.
  * This enables better cache locality and faster tree traversal.
  *
- * Size: ~96 bytes (vs 192 bytes in legacy design = 2x reduction!)
- *
+ * Size: ~72 bytes (source positions are parser-recorded; the
+ * previous 64-byte cache-line pin is intentionally retired). *
  * Key features:
  * - 1-byte compressed pointers for child/sibling/attribute (±504 bytes)
  * - 2-byte compressed pointer for parent (±262KB)
@@ -402,6 +402,14 @@ struct leptris_element {
      * last_attribute_off is GONE — same reasoning. Append walks the
      * list. Saves 4 bytes per element. */
     int32_t first_attribute_off;
+
+    /* Parser-recorded source offsets (#1124). Raw byte offsets into
+     * doc->xml_buffer, not the old base.line sentinel encoding:
+     * - start_tag_end_off: byte just after the start tag's '>'
+     * - element_end_off: byte just after the element's final '>'
+     * 0 means unknown (mutation-created nodes). */
+    uint32_t start_tag_end_off;
+    uint32_t element_end_off;
 
     /* TODO 155 Phase A: `document` field is GONE — element now fits
      * one 64-byte cache line. Non-root elements reach their document
@@ -627,8 +635,8 @@ static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
 #  endif
 #endif
 
-LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 64,
-    "leptris_element must fit one cache line (TODO 155 Phase A)");
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 72,
+    "leptris_element source positions layout: 72 bytes");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 40,
     "round 19 attr layout: 16+16+4+2+2 = 40");

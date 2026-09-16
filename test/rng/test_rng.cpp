@@ -342,8 +342,9 @@ TEST(RngValidate, ErrorCarriesJingShape) {
     EXPECT_EQ(leptris_rng_validate(rng, d), 0);
     const char* err = leptris_rng_error(rng);
     ASSERT_NE(err, nullptr);
-    /* Jing shape: "line:col: error: message". */
-    EXPECT_NE(strstr(err, "1:0: error:"), nullptr) << err;
+    /* Jing shape: "line:column: error: message" — the parser-recorded
+     * start-tag column for <e/> is 5 (the byte after '>'). */
+    EXPECT_NE(strstr(err, "1:5: error:"), nullptr) << err;
     EXPECT_NE(strstr(err, "attribute"), nullptr) << err;
     leptris_document_free(d);
     leptris_rng_free(rng);

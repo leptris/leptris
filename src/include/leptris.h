@@ -569,6 +569,26 @@ LEPTRIS_API LeptrisStatus leptris_node_unlink(LeptrisNodeRef node);
  */
 LEPTRIS_API int leptris_node_line(LeptrisNodeRef node);
 
+/** Parser-recorded source position for an element node (#1124). */
+typedef struct {
+    int line;       /* 1-based line, 0 when unknown */
+    int col_start;  /* 1-based column after the start tag's '>' */
+    int col_end;    /* 1-based column after the element's final '>' */
+} LeptrisSourcePosition;
+
+/**
+ * Get full parser-recorded source position for an element node.
+ *
+ * The parser records exact byte offsets while it scans tags. The
+ * columns follow Jing's diagnostic convention: col_start points to
+ * the byte after the start-tag '>'; col_end points to the byte after
+ * the element's final '>'. Programmatically-created nodes return
+ * zeros. Non-element parsed nodes currently return line with zero
+ * columns.
+ */
+LEPTRIS_API void leptris_node_source_position(LeptrisNodeRef node,
+                                              LeptrisSourcePosition* out);
+
 /**
  * Get the binding wrapper pointer cached on this node (#262).
  *
@@ -823,9 +843,9 @@ LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
 LEPTRIS_API int leptris_rng_validate(LeptrisRelaxNG rng,
                                      LeptrisDocument doc);
 /* Last parse error detail (NULL when the handle is valid).
- * For validation: returns the FIRST validation error (Jing
- * "line:0: error: message" shape; column is 0 in this phase —
- * sub-fix #1 next slice). */
+ * For validation: returns the FIRST validation error in
+ * "line:column: error: message" shape, with parser-recorded
+ * Jing-compatible positions. */
 LEPTRIS_API const char* leptris_rng_error(LeptrisRelaxNG rng);
 /* Number of accumulated validation errors from the last
  * leptris_rng_validate call. Reset to 0 at the start of every
@@ -838,6 +858,8 @@ LEPTRIS_API const char* leptris_rng_error_message(LeptrisRelaxNG rng,
                                                   size_t i);
 /* Nth accumulated error's parse line (1-based, 0 unknown). */
 LEPTRIS_API int leptris_rng_error_line(LeptrisRelaxNG rng, size_t i);
+/* Nth accumulated error's parser-recorded column (1-based). */
+LEPTRIS_API int leptris_rng_error_column(LeptrisRelaxNG rng, size_t i);
 
 
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
