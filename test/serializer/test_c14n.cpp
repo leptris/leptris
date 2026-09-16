@@ -324,6 +324,61 @@ TEST(C14n1096, DocumentLevelPIsKeptOnExtendedEntry) {
     leptris_document_free(doc);
 }
 
+
+// ---- #1117: whitespace-only PI data + doc-level separators ----
+
+TEST(C14n1117, WhitespaceOnlyPiDataDropped) {
+    const char xml[] = "<?pi-without-data     ?><r/><?p2   ?>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_1, 0);
+    ASSERT_NE(out, nullptr);
+    /* Whitespace-only PI data is no data (libxml2 ground truth). */
+    EXPECT_EQ(std::strstr(out, "<?pi-without-data?>"), out) << out;
+    EXPECT_NE(std::strstr(out, "<?p2?>"), nullptr) << out;
+    EXPECT_EQ(std::strstr(out, "     ?"), nullptr) << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(C14n1117, DocLevelNodesGetNewlineSeparators) {
+    const char xml[] = "<?a x?><?b y?><r/><!--c--><?d z?>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize(doc, LEPTRIS_C14N_1_1, 0);
+    ASSERT_NE(out, nullptr);
+    /* A newline FOLLOWS every document-level node except the
+     * last (libxml2 ground truth; the plain entry keeps the
+     * with_comments=0 default, so the doc comment drops). */
+    EXPECT_STREQ(out,
+        "<?a x?>\n<?b y?>\n<r></r>\n<?d z?>") << out;
+    leptris_free_string(out);
+    /* with_comments=1 keeps the document comment, separator and
+     * all. */
+    char* wc = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_1, LEPTRIS_C14N_MODE_CANONICAL, NULL, 1);
+    ASSERT_NE(wc, nullptr);
+    EXPECT_STREQ(wc,
+        "<?a x?>\n<?b y?>\n<r></r>\n<!--c-->\n<?d z?>") << wc;
+    leptris_free_string(wc);
+    leptris_document_free(doc);
+}
+
+TEST(C14n1117, ExtendedEntryMatchesDocLevelConvention) {
+    const char xml[] = "<?a x?><r/><?b z?>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_c14n_canonicalize_ex(
+        doc, LEPTRIS_C14N_1_1, LEPTRIS_C14N_MODE_CANONICAL, NULL, 0);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<?a x?>\n<r></r>\n<?b z?>") << out;
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
 }  // namespace
 
 // ---- TODO 85: C14N 1.1 + exclusive canonicalization -------------------
