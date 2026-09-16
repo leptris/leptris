@@ -10,6 +10,7 @@
  */
 #include "rng_internal.h"
 #include "../dom/element.h"
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -27,72 +28,45 @@ typedef struct {
      * rng_diagnose walks the failure and emits the Jing-shaped
      * per-element list. */
     int quiet;
-    int use_end_column;
     void* diag_pool;  /* diagnose allocations, freed on exit */
 } RngVal;
 
-/* #878: append (not bail) so the binding can surface every
- * failure (Jing parity — it reports all, the engine used to stop
- * at the first). The v->failed short-circuit elsewhere still
- * short-circuits downstream work. */
-static void fail(RngVal* v, LeptrisElement e, const char* fmt,
-                 const char* a, const char* b) {
+/* #1126: one kind-aware emitter through dom/diag. The KIND
+ * selects the Jing reporting convention (which column, which
+ * vocabulary family). The verdict pass stays quiet — speculative
+ * backtracking must not record — so the diagnose walk is the only
+ * recorder; the legacy first-message bookkeeping runs in both. */
+static void diag(RngVal* v, LeptrisDiagKind kind, LeptrisElement e,
+                 const char* fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 4, 5)))
+#endif
+    ;
+
+static void diag(RngVal* v, LeptrisDiagKind kind, LeptrisElement e,
+                 const char* fmt, ...) {
+    char msg[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+
     int line = 0;
-    int col = 0;
     if (e) {
         LeptrisSourcePosition pos;
         leptris_node_source_position((LeptrisNodeRef)e, &pos);
         line = pos.line;
-        /* Jing reports incomplete/text errors at the element end;
-         * all element/attribute errors use the start-tag column. */
-        col = (v->use_end_column || strstr(fmt, "incomplete") != NULL ||
-               strstr(fmt, "character content") != NULL)
-                  ? pos.col_end : pos.col_start;
     }
-    char msg[256];
-    if (a && b) snprintf(msg, sizeof(msg), fmt, a, b);
-    else if (a) snprintf(msg, sizeof(msg), fmt, a);
-    else snprintf(msg, sizeof(msg), "%s", fmt);
+
+    if (!v->quiet && v->r) {
+        leptris_diag_emit(&v->r->diags, &v->r->diag_count,
+                          &v->r->diag_cap, kind, (LeptrisNodeRef)e,
+                          "%s", msg);
+    }
     if (!v->failed) {
         v->failed = 1;
-        snprintf(v->err, sizeof(v->err), "%d:%d: error: %s", line,
-                 col, msg);
+        snprintf(v->err, sizeof(v->err), "%d:0: error: %s", line, msg);
     }
-    if (v->quiet) return;  /* verdict pass — diagnose reports later */
-    struct leptris_relaxng* r = v->r;
-    if (!r) return;
-    if (r->err_count == r->err_cap) {
-        int nc = r->err_cap ? r->err_cap * 2 : 8;
-        int* nl = (int*)realloc(r->err_line, sizeof(int) * (size_t)nc);
-        int* nc_ = (int*)realloc(r->err_col,  sizeof(int) * (size_t)nc);
-        char** nm = (char**)realloc(r->err_msg, sizeof(char*) * (size_t)nc);
-        if (!nl || !nc_ || !nm) return;
-        r->err_line = nl;
-        r->err_col  = nc_;
-        r->err_msg  = nm;
-        r->err_cap  = nc;
-    }
-    if (r->err_count >= r->err_cap) return;
-    r->err_line[r->err_count] = line;
-    r->err_col[r->err_count]  = col;
-    r->err_msg[r->err_count]  = leptris_strdup(msg);
-    if (r->err_msg[r->err_count]) r->err_count++;
-}
-
-/* #878: three-format-arg fail for the Jing message vocabulary. */
-static void fail3(RngVal* v, LeptrisElement e, const char* fmt,
-                  const char* a, const char* b, const char* c) {
-    int old_end = v->use_end_column;
-    if (strstr(fmt, "character content") != NULL) v->use_end_column = 1;
-    char msg[256];
-    if (a && b && c) snprintf(msg, sizeof(msg), fmt, a, b, c);
-    else if (a && b) snprintf(msg, sizeof(msg), fmt, a, b);
-    else if (a) snprintf(msg, sizeof(msg), fmt, a);
-    else snprintf(msg, sizeof(msg), "%s", fmt);
-    /* Reuse fail() for the recording mechanics by re-formatting
-     * into a plain string — call with the composed message. */
-    fail(v, e, "%s", msg, NULL);
-    v->use_end_column = old_end;
 }
 
 /* "an integer" / "a string" — Jing's article. */
@@ -258,7 +232,8 @@ static int check_required_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
             case RNG_ATTRIBUTE: {
                 const char* got = leptris_element_attribute(e, c->name);
                 if (!got) {
-                    fail(v, e, "attribute \"%s\" is required but missing",
+                    diag(v, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,  e,
+        "attribute \"%s\" is required but missing",
                          c->name, NULL);
                     return 0;
                 }
@@ -282,7 +257,8 @@ static int match_attrs(RngVal* v, RngPattern* content, LeptrisElement e) {
     for (struct leptris_attribute* a = leptris_element_get_first_attribute(e);
          a; a = leptris_attr_next(a)) {
         if (!pattern_consumes_attr(v, content, e, attr_cname(a))) {
-            fail(v, e, "attribute \"%s\" not allowed", attr_cname(a), NULL);
+            diag(v, LEPTRIS_DIAG_ATTR_NOT_ALLOWED,  e,
+        "attribute \"%s\" not allowed", attr_cname(a), NULL);
             return 0;
         }
     }
@@ -417,11 +393,13 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
         case RNG_REF: {
             RngDefine* d = find_define(v->g, p->name);
             if (!d || !d->body) {
-                fail(v, NULL, "reference to undefined pattern", p->name, NULL);
+                diag(v, LEPTRIS_DIAG_INVALID,  NULL,
+        "reference to undefined pattern", p->name, NULL);
                 return (size_t)-1;
             }
             if (v->depth > 200) {
-                fail(v, NULL, "reference \"%s\" recursion too deep",
+                diag(v, LEPTRIS_DIAG_INVALID,  NULL,
+        "reference \"%s\" recursion too deep",
                      p->name, NULL);
                 return (size_t)-1;
             }
@@ -523,7 +501,8 @@ static int list_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
         }
 
         if (li >= nl) {
-            fail(v, e, "list token \"%s\" not allowed", tok, NULL);
+            diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "list token \"%s\" not allowed", tok, NULL);
             return 0;
         }
         RngPattern* c = leaves[li];
@@ -532,7 +511,8 @@ static int list_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
              c->kind == RNG_OPTIONAL)
                 ? c->first_child : c;
         if (!token_matches_leaf(tok, leaf)) {
-            fail(v, e, "list token \"%s\" does not match", tok, NULL);
+            diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "list token \"%s\" does not match", tok, NULL);
             return 0;
         }
         consumed_any[li] = 1;
@@ -544,14 +524,16 @@ static int list_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     for (size_t k = 0; k < nl; k++) {
         RngPattern* c = leaves[k];
         if (c->kind == RNG_ONE_OR_MORE && !consumed_any[k]) {
-            fail(v, e, "list: a oneOrMore leaf requires at least one token",
+            diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "list: a oneOrMore leaf requires at least one token",
                  NULL, NULL);
             return 0;
         }
         /* Plain leaves past the consumed point are missing tokens. */
         if (c->kind != RNG_ONE_OR_MORE && c->kind != RNG_ZERO_OR_MORE &&
             c->kind != RNG_OPTIONAL && !consumed_any[k]) {
-            fail(v, e, "list: missing token for a required leaf", NULL, NULL);
+            diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "list: missing token for a required leaf", NULL, NULL);
             return 0;
         }
     }
@@ -585,7 +567,8 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     if (!names_match(p, e)) {
         /* #878: surface the name mismatch (the engine used to
          * silently return 0, dropping the per-element error). */
-        fail(v, e, "element \"%s\" not allowed here",
+        diag(v, LEPTRIS_DIAG_NOT_ALLOWED_HERE,  e,
+        "element \"%s\" not allowed here",
              leptris_element_name(e), NULL);
         return 0;
     }
@@ -601,7 +584,8 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
             }
             if (c->kind == RNG_EMPTY) {
                 if (!all_text_ws(e)) {
-                    fail(v, e, "element \"%s\" must be empty", p->name, NULL);
+                    diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "element \"%s\" must be empty", p->name, NULL);
                     return 0;
                 }
                 continue;
@@ -613,14 +597,16 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
                     RngPattern* inner = c->first_child;
                     if (c->kind == RNG_ONE_OR_MORE) {
                         if (!inner || !text_leaf_ok(v, inner, e)) {
-                            fail(v, e, "element \"%s\": content mismatch",
+                            diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "element \"%s\": content mismatch",
                                  p->name, NULL);
                             return 0;
                         }
                     }
                     continue;
                 }
-                fail(v, e, "element \"%s\": content mismatch", p->name, NULL);
+                diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "element \"%s\": content mismatch", p->name, NULL);
                 return 0;
             }
         }
@@ -628,8 +614,8 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
             LeptrisNodeRef sub[64];
             size_t sn = elem_children(e, sub, 64);
             if (sn) {
-                fail(v, (LeptrisElement)sub[0],
-                     "element \"%s\" not allowed here",
+                diag(v, LEPTRIS_DIAG_NOT_ALLOWED_HERE,  (LeptrisElement)sub[0],
+        "element \"%s\" not allowed here",
                      leptris_element_name((LeptrisElement)sub[0]), NULL);
                 return 0;
             }
@@ -643,8 +629,8 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     size_t r = fold_list(v, p->first_child, kids, n, 0);
     if (r == (size_t)-1) return 0;
     if (r != n) {
-        fail(v, (LeptrisElement)kids[r],
-             "element \"%s\" not allowed here",
+        diag(v, LEPTRIS_DIAG_NOT_ALLOWED_HERE,  (LeptrisElement)kids[r],
+        "element \"%s\" not allowed here",
              leptris_element_name((LeptrisElement)kids[r]), NULL);
         return 0;
     }
@@ -1092,8 +1078,8 @@ static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
                     for (RngPattern* leaf = c->first_child; leaf;
                          leaf = leaf->next) {
                         if (leaf->kind == RNG_VALUE && leaf->value) {
-                            fail(v, e,
-                                 "value of attribute \"%s\" is invalid; "
+                            diag(v, LEPTRIS_DIAG_ATTR_VALUE_INVALID,  e,
+        "value of attribute \"%s\" is invalid; "
                                  "must be equal to \"%s\"",
                                  name, leaf->value);
                             break;
@@ -1104,8 +1090,8 @@ static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
                                      art(leaf->datatype),
                                      leaf->datatype
                                          ? leaf->datatype : "string");
-                            fail3(v, e,
-                                  "value of attribute \"%s\" is invalid; "
+                            diag(v, LEPTRIS_DIAG_ATTR_VALUE_INVALID,  e,
+        "value of attribute \"%s\" is invalid; "
                                   "must be %s",
                                   name, dtb, NULL);
                             break;
@@ -1115,17 +1101,20 @@ static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
                 break;
             }
         } else if (n_attr_patterns == 0) {
-            fail(v, e, "found attribute \"%s\", but no attributes "
+            diag(v, LEPTRIS_DIAG_ATTR_NOT_ALLOWED,  e,
+        "found attribute \"%s\", but no attributes "
                        "allowed here", name, NULL);
         } else {
-            fail(v, e, "attribute \"%s\" not allowed", name, NULL);
+            diag(v, LEPTRIS_DIAG_ATTR_NOT_ALLOWED,  e,
+        "attribute \"%s\" not allowed", name, NULL);
         }
     }
     /* Missing required attributes (declared order). */
     for (RngPattern* c = p->first_child; c; c = c->next) {
         if (c->kind != RNG_ATTRIBUTE || !c->name) continue;
         if (!leptris_element_attribute(e, c->name))
-            fail(v, e, "element \"%s\" missing required attribute \"%s\"",
+            diag(v, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,  e,
+        "element \"%s\" missing required attribute \"%s\"",
                  p->name, c->name);
     }
 }
@@ -1152,22 +1141,22 @@ static void diagnose_text(RngVal* v, RngPattern* p, LeptrisElement e) {
                  tok = strtok(NULL, " \t\r\n")) {
                 if (leaf && token_matches_leaf(tok, leaf)) continue;
                 if (leaf && leaf->kind == RNG_VALUE && leaf->value)
-                    fail3(v, e,
-                          "character content of element \"%s\" invalid; "
+                    diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "character content of element \"%s\" invalid; "
                           "token \"%s\" invalid; must be equal to \"%s\"",
                           p->name, tok, leaf->value);
                 else if (leaf && leaf->kind == RNG_DATA) {
                     char dtb[64];
                     snprintf(dtb, sizeof(dtb), "%s %s", art(leaf->datatype),
                              leaf->datatype ? leaf->datatype : "string");
-                    fail3(v, e,
-                          "character content of element \"%s\" invalid; "
+                    diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "character content of element \"%s\" invalid; "
                           "token \"%s\" invalid; must be %s",
                           p->name, tok, dtb);
                 }
                 else
-                    fail(v, e,
-                         "character content of element \"%s\" invalid; "
+                    diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "character content of element \"%s\" invalid; "
                          "token \"%s\" invalid", p->name, tok);
                 return;
             }
@@ -1175,8 +1164,8 @@ static void diagnose_text(RngVal* v, RngPattern* p, LeptrisElement e) {
         }
         if (c->kind == RNG_VALUE) {
             if (strcmp(t, c->value ? c->value : "") != 0) {
-                fail(v, e,
-                     "character content of element \"%s\" invalid; "
+                diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "character content of element \"%s\" invalid; "
                      "must be equal to \"%s\"", p->name,
                      c->value ? c->value : "");
                 return;
@@ -1185,14 +1174,12 @@ static void diagnose_text(RngVal* v, RngPattern* p, LeptrisElement e) {
         }
         if (c->kind == RNG_DATA) {
             if (!data_matches(c, t)) {
-                v->use_end_column = 1;
                 char dtb[64];
                 snprintf(dtb, sizeof(dtb), "%s %s", art(c->datatype),
                          c->datatype ? c->datatype : "string");
-                fail3(v, e,
-                      "character content of element \"%s\" invalid; "
+                diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID,  e,
+        "character content of element \"%s\" invalid; "
                       "must be %s", p->name, dtb, NULL);
-                v->use_end_column = 0;
                 return;
             }
             continue;
@@ -1209,8 +1196,8 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
         LeptrisNodeRef sub[64];
         size_t sn = elem_children(e, sub, 64);
         if (sn) {
-            fail(v, (LeptrisElement)sub[0],
-                 "element \"%s\" not allowed anywhere; expected the "
+            diag(v, LEPTRIS_DIAG_NOT_ALLOWED_ANYWHERE,  (LeptrisElement)sub[0],
+        "element \"%s\" not allowed anywhere; expected the "
                  "element end-tag or text",
                  leptris_element_name((LeptrisElement)sub[0]), NULL);
             return;
@@ -1286,17 +1273,19 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
                 tmp = tmp->next;
             }
             if (hit_ok && req) {
-                fail(v, kid,
-                     "element \"%s\" not allowed yet; missing required "
+                diag(v, LEPTRIS_DIAG_NOT_ALLOWED_YET,  kid,
+        "element \"%s\" not allowed yet; missing required "
                      "element \"%s\"", x, req);
                 state = hit;  /* recovery: skip prefix, consume x */
                 diagnose_child(v, p->first_child, kid);
                 continue;
             }
-            fail(v, kid, "element \"%s\" not allowed here; expected %s",
+            diag(v, LEPTRIS_DIAG_NOT_ALLOWED_HERE,  kid,
+        "element \"%s\" not allowed here; expected %s",
                  x, expected);
         } else {
-            fail(v, kid, "element \"%s\" not allowed anywhere; expected %s",
+            diag(v, LEPTRIS_DIAG_NOT_ALLOWED_ANYWHERE,  kid,
+        "element \"%s\" not allowed anywhere; expected %s",
                  x, expected);
         }
         /* Skip the offending child; position unchanged. */
@@ -1306,12 +1295,14 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
         int nn = 0;
         first_names_state(v, state, names, &nn);
         if (nn == 1) {
-            fail(v, e, "element \"%s\" incomplete; missing required "
+            diag(v, LEPTRIS_DIAG_INCOMPLETE,  e,
+        "element \"%s\" incomplete; missing required "
                        "element \"%s\"", p->name, names[0]);
         } else {
             char expected[512];
             render_expected(v, state, has_mixed, expected, sizeof(expected));
-            fail(v, e, "element \"%s\" incomplete; expected %s",
+            diag(v, LEPTRIS_DIAG_INCOMPLETE,  e,
+        "element \"%s\" incomplete; expected %s",
                  p->name, expected);
         }
     }
@@ -1322,7 +1313,8 @@ static void rng_diagnose(RngVal* v, struct leptris_relaxng* rng,
                          LeptrisDocument doc) {
     LeptrisElement root = leptris_document_root(doc);
     if (!root) {
-        fail(v, NULL, "document has no root element", NULL, NULL);
+        diag(v, LEPTRIS_DIAG_INVALID,  NULL,
+        "document has no root element", NULL, NULL);
         return;
     }
     RngPattern* start = rng->grammar->start;
@@ -1371,7 +1363,8 @@ static void rng_diagnose(RngVal* v, struct leptris_relaxng* rng,
                     w += snprintf(buf + w, sizeof(buf) - w,
                                   "%s\"%s\"", sep, names[i]);
             }
-            fail(v, root, "element \"%s\" not allowed anywhere; expected %s",
+            diag(v, LEPTRIS_DIAG_NOT_ALLOWED_ANYWHERE,  root,
+        "element \"%s\" not allowed anywhere; expected %s",
                  leptris_element_name(root), buf);
         }
         return;
@@ -1380,7 +1373,8 @@ static void rng_diagnose(RngVal* v, struct leptris_relaxng* rng,
         if (names_match(start, root))
             diagnose_element(v, start, root);
         else
-            fail(v, root, "element \"%s\" not allowed anywhere; "
+            diag(v, LEPTRIS_DIAG_NOT_ALLOWED_ANYWHERE,  root,
+        "element \"%s\" not allowed anywhere; "
                           "expected element \"%s\"",
                  leptris_element_name(root),
                  start->name ? start->name : "?");
@@ -1416,7 +1410,8 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
             RngDefine* d = find_define(v.g, start->name);
             if (!d || !d->body) {
                 v.quiet = 0;
-                fail(&v, root, "reference to undefined pattern",
+                diag(&v, LEPTRIS_DIAG_INVALID,  root,
+        "reference to undefined pattern",
                      start->name, NULL);
                 rng->error = leptris_strdup(v.err);
                 return 0;
@@ -1467,11 +1462,15 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
     }
 
     /* leptris_rng_error (back-compat) carries the FIRST accumulated
-     * message in the "line:column: error: msg" shape. */
-    if (v.r && v.r->err_count > 0) {
+     * message in the "line:column: error: msg" shape — the column
+     * picked by the record's kind (Jing convention). */
+    if (v.r && v.r->diag_count > 0) {
         char back[512];
+        LeptrisDiag* d0 = &v.r->diags[0];
+        int col = leptris_diag_kind_uses_end_col(d0->kind)
+                      ? d0->col_end : d0->col_start;
         snprintf(back, sizeof(back), "%d:%d: error: %s",
-                 v.r->err_line[0], v.r->err_col[0], v.r->err_msg[0]);
+                 d0->line, col, d0->message);
         rng->error = leptris_strdup(back);
     } else {
         rng->error = v.failed ? leptris_strdup(v.err) : NULL;
