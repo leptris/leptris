@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.179] - 2026-09-16
+
+### Fixed
+
+- Jing-parity failure diagnosis — full message vocabulary (#878) (rng)
+- accumulate per-element errors + per-error accessors (#878) (rng)
+
+
+
 ## [1.9.178] - 2026-09-16
 
 ### Added
