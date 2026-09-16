@@ -347,6 +347,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                 if (!v) return 0;
                 v->name = dp_strdup(row->wire_name);
                 v->type_tag = row->type_tag;
+                v->position = leptris_node_byte_offset(n);
                 if (!v->name || !dp_value_push(out, v)) {
                     dp_result_free_rec(v);
                     return 0;
@@ -368,9 +369,22 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             const char* local = NULL;
             leptris_element_expanded_name(child, &local, NULL, NULL);
             if (!local || strcmp(local, row->wire_name) != 0) continue;
-            if (!dp_ns_binds(child, LEPTRIS_PLAN_NS_NONE, NULL, lenient))
+            /* #1115: a row-level ns form owns the match; unset
+             * rows keep the historical no-namespace (+LENIENT)
+             * behavior. */
+            if (row->ns_form) {
+                if (!dp_ns_binds(child, row->ns_form, row->ns_uri, 0))
+                    continue;
+            } else if (!dp_ns_binds(child, LEPTRIS_PLAN_NS_NONE, NULL,
+                                    lenient)) {
                 continue;
+            }
 
+            /* #1115: every value kind carries the source node's
+             * byte offset (0 unknown) — document-order
+             * interleavings across rows no longer need CALLBACK
+             * compilation. */
+            size_t node_off = leptris_node_byte_offset(n);
             struct leptris_plan_result* v = NULL;
             if (row->kind == LEPTRIS_PLAN_KIND_RAW) {
                 char* ser = leptris_element_serialize(child, NULL);
@@ -391,9 +405,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     dp_result_free_rec(v);
                     return 0;
                 }
-                /* Parse-created nodes carry byteOffset+1 (the
-                 * issue #223 lazy scheme); 0 = unknown. */
-                v->position = leptris_node_byte_offset(n);
+                v->position = node_off;
             } else {
                 /* SCALAR item or COLLECTION item: text content. */
                 const char* text = leptris_element_text(child);
@@ -407,6 +419,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             }
             v->name = dp_strdup(row->wire_name);
             v->type_tag = row->type_tag;
+            v->position = node_off;
             if (!v->name) {
                 dp_result_free_rec(v);
                 return 0;
@@ -427,9 +440,11 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                      * row's wire_name/type_tag — the documented
                      * contract, same as scalar/nested rows, so a
                      * consumer can attribute it among multiple
-                     * collection rows. */
+                     * collection rows. #1115: it also carries the
+                     * first item's node offset. */
                     coll->name = dp_strdup(row->wire_name);
                     coll->type_tag = row->type_tag;
+                    coll->position = node_off;   /* first item's node */
                     emitted = 1;
                 }
                 struct leptris_plan_result* coll =

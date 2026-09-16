@@ -76,6 +76,15 @@ typedef struct {
     uint8_t type_tag;      /* host-defined; echoed back verbatim */
     int32_t child_plan_index; /* NESTED: index into leptris_plan_spec.plans;
                                * -1 for non-nested kinds */
+    /* #1115 (additive to the frozen v1 ABI; trailing fields keep
+     * existing aggregate initializers valid). Rule-level
+     * namespace form: consulted at child-match time so siblings
+     * can require different URIs under one parent. NONE (0, the
+     * zero value) keeps the historical no-namespace+NS_LENIENT
+     * behavior — the fields are consulted only when set. */
+    uint8_t ns_form;       /* LeptrisPlanNsForm */
+    uint8_t pad0;
+    const char* ns_uri;    /* LEPTRIS_PLAN_NS_EXACT only */
 } leptris_child_plan;
 
 typedef struct {
