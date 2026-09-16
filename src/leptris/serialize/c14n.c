@@ -1063,9 +1063,8 @@ LEPTRIS_API char* leptris_c14n_canonicalize_ex(
         if (c->type != LEPTRIS_NODE_TYPE_PI) continue;
         if (past_root) {
             c14n_append_pi((LeptrisPINode*)c, &epilog, &epi_len, &epi_cap);
-            /* #1117: 
- after each document-level node except the
-             * document's last child. */
+            /* #1117: a newline follows each document-level node
+             * except the document's last child. */
             LeptrisNode* nn = leptris_node_get_next_sibling(c);
             if (nn) c14n_append_raw("\n", 1, &epilog, &epi_len, &epi_cap);
         } else {
