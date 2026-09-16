@@ -949,6 +949,14 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         /* The newline-offset table indexes the buffer; nothing can
          * resolve lines after it is gone. */
     }
+    /* #1125 scratch: string-view backing — every borrowed parse
+     * string dies with it. Released on every path, including
+     * inplace documents (the scratch is always ours). */
+    if (doc->parse_scratch) {
+        leptris_arena_buffer_release(
+            doc->parse_scratch, doc->xml_buffer_len + 1 + 64);
+        doc->parse_scratch = NULL;
+    }
     /* Free mutation element blocks (round 18). */
     while (doc->mut_elem_blocks) {
         struct leptris_mut_elem_block* next = doc->mut_elem_blocks->next;

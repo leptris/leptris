@@ -1614,6 +1614,83 @@ TEST(ImmutableBuffer, XmlBufferStaysByteIdenticalToInput) {
     leptris_document_free(doc);
 }
 
+/* #682/#1125 discipline: a string-dense parse must stay inside the
+ * document's arena. The #1125 materialization copies every borrowed
+ * string into pool storage at parse end; if the arena sizing formula
+ * does not account for those copies, the pool silently degrades to
+ * one tracked malloc per string (measured: 39,684 system allocations
+ * for this 48 KB document, a 6x parse regression). The parse path
+ * must remain O(1)-ish in allocator calls regardless of attribute
+ * count. */
+TEST(ParseAllocationDiscipline, AttrHeavyParseStaysPoolBacked) {
+    std::string xml = "<r>";
+    for (int e = 0; e < 100; e++) {
+        xml += "<e";
+        for (int a = 0; a < 50; a++) {
+            char attr[32];
+            snprintf(attr, sizeof(attr), " a%d=\"v%d\"", a, a);
+            xml += attr;
+        }
+        xml += "></e>";
+    }
+    xml += "</r>";
+
+    static long allocs = 0;
+    leptris_allocation_function prev_alloc =
+        leptris_get_memory_allocation_function();
+    leptris_deallocation_function prev_free =
+        leptris_get_memory_deallocation_function();
+    auto counting = +[](size_t n) {
+        allocs++;
+        return malloc(n);
+    };
+    leptris_set_memory_management_functions(counting, free);
+
+    allocs = 0;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+    long parse_allocs = allocs;
+
+    leptris_set_memory_management_functions(prev_alloc, prev_free);
+
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    /* Baseline is ~8 (arena, pool, hash, line table, logs); the
+     * headroom tolerates new bookkeeping, not per-string fallback. */
+    EXPECT_LE(parse_allocs, 64)
+        << "parse fell back to per-allocation mallocs (" << parse_allocs
+        << ") — the arena is exhausted before materialization completes";
+
+    leptris_document_free(doc);
+}
+
+/* The #1125 promise for the inplace entry: the CALLER's buffer
+ * comes back unmodified — the parser scans a scratch copy, never
+ * the caller's memory (beyond the documented [len] terminator). */
+TEST(ImmutableBuffer, InplaceLeavesCallerBufferUnmodified) {
+    char xml[128];
+    int n = snprintf(xml, sizeof(xml),
+                     "<root a='1' b=\"two\"><c x='v'>t &amp; u</c></root>");
+    ASSERT_GT(n, 0);
+    char copy[128];
+    memcpy(copy, xml, (size_t)n + 1);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string_inplace(xml, (size_t)n, &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "root");
+    EXPECT_STREQ(leptris_element_attribute(root, "b"), "two");
+
+    EXPECT_EQ(memcmp(xml, copy, (size_t)n), 0)
+        << "in-place parse wrote into the caller's buffer";
+
+    leptris_document_free(doc);
+}
+
 /* TODO.bindings/01 — the mutation/construction surface, proven end
  * to end: build from scratch, serialize, reparse, verify. */
 TEST(DomBuilder, RoundTripsThroughSerialization) {
