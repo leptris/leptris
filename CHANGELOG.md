@@ -1,5 +1,27 @@
 ## [Unreleased]
 
+## [1.9.186] - 2026-09-16
+
+### Performance
+
+- **Parse: chunked element-block zeroing — text parse −8% on
+  tag-dense documents (#682 text floor).** The element bulk block
+  was zeroed in one memset sized from est_elems = lt_count + 8,
+  which counts close tags — ~2x the carved element count on
+  paired-tag documents (720 KB zeroed for 360 KB of elements on an
+  84 KB text twin; the bzero was 17% of the whole parse). Elements
+  are now zeroed 64 at a time as the carve cursor advances, with a
+  one-chunk pad reservation and the attr/text/cpi sub-blocks moved
+  after the pad. The first cut placed the pad inside the sub-blocks
+  and the chunk memset wiped doc-level PI/comment nodes — caught
+  red by the C14N doc-level suites before shipping. Plain x10
+  187 → 172 µs; attr-heavy 68 µs; entity mode holds 1.2x vs
+  pugixml. The residual ~2x text floor is structural (72-byte
+  elements, #1124 positions, the two-buffer immutable-parse
+  contract) and belongs to the lane-18 node-layout redesign. Full
+  ctest 1531/1531.
+
+
 ## [1.9.185] - 2026-09-16
 
 ### Performance
