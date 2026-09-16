@@ -4,12 +4,31 @@
 
 ### Added
 
-- externalRef — foreign grammar spliced as the pattern body (rng)
-- anyName name class for elements and attributes (rng)
+- **RNG: `externalRef` — the referenced grammar's `<start>` splices
+  in as the pattern body**, its defines merging into the host
+  grammar so refs inside the external grammar resolve. Placeholders
+  resolve under `<start>` AND inside define bodies (the mathml
+  externalRef lives in a define — the start-only walk left
+  unresolved placeholders that aborted the validator). Depth-
+  guarded, href-relative, requires `leptris_rng_parse_file`. This
+  was the last RELAX NG construct the metanorma schema chain
+  needed. Gate: `RngInclude.ExternalRefLoadsForeignGrammar`. Known
+  follow-up: the full isodoc-compile.rng chain still aborts
+  nondeterministically on the merged MathML4 grammar (stack-depth
+  recursion hardening pending).
+- **RNG: `anyName` name class** for elements and attributes
+  (RELAX NG 4.14; biblio.rng's recursive AnyElement define). The
+  parser consumes name-class children; names_match, attr
+  consumption, and required-attr checks honor the wildcard. Gate:
+  `RngParse.AnyNameNameClassMatchesAnyElement`.
 
 ### Fixed
 
-- leptris_rng_parse_file publishes schema-parse detail (rng)
+- **RNG: `leptris_rng_parse_file` publishes schema-parse detail**
+  to `leptris_last_error` — the file entry used to return NULL with
+  an empty channel, masking every real schema-parse reason (the
+  metanorma isodoc triage died on this). Gate:
+  `RngInclude.FileSchemaErrorsPublishDetail`.
 
 
 
