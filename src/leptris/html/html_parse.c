@@ -2719,6 +2719,13 @@ typedef struct {
      * comments/PIs divert to the html level (children after the
      * body); text and elements keep flowing into the body. */
     int after_body;
+    /* #659 after-body mode restore (webkit01:24-27): a non-ws
+     * character token in "after body"/"after after body" switches
+     * the mode back to "in body" — subsequent comments then belong
+     * INSIDE the body again. Whitespace inserts without the
+     * switch, so the divert stays armed. Re-armed by each
+     * </body>/</html> token. */
+    int after_body_done;
     /* #659 two-mode split: leptris_parse_html_string is the WHATWG
      * engine (full "in head" set: script/style/noscript/template
      * ... lift into the implied head); the new
@@ -3508,6 +3515,16 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 return;
             }
         }
+    }
+    if (b->whatwg && (b->after_body || b->after_html) &&
+        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
+        const char* tt = leptris_text_node_get_content(n);
+        int nonws = 0;
+        if (tt)
+            for (const char* q = tt; *q; q++)
+                if (*q != ' ' && *q != '\t' && *q != '\n' &&
+                    *q != '\r') { nonws = 1; break; }
+        if (nonws) b->after_body_done = 1;
     }
     if (b->whatwg && !b->left_initial &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
@@ -4378,7 +4395,7 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                     leptris_element_set_parent(head, html);
                 }
             }
-        } else if (b->after_body) {
+        } else if (b->after_body && !b->after_body_done) {
             /* Tail peel: trailing comments/PIs of the rest (the
              * diverted after-body ones) stay html children after
              * the body. */
@@ -4609,9 +4626,12 @@ static LeptrisDocument html_parse_shared(
                         else
                             b.prolog_head = (LeptrisNodeRef)c;
                         b.prolog_tail = (LeptrisNodeRef)c;
-                    } else if (b.after_body && b.depth > 0) {
+                    } else if (b.after_body && !b.after_body_done &&
+                               b.depth > 0) {
                         /* #659 after body: comments divert to the
-                         * html level — children after the body. */
+                         * html level — children after the body.
+                         * Canceled once non-ws text restores
+                         * "in body" mode (webkit01:24). */
                         h_top_append(&b, (LeptrisNodeRef)c);
                     } else {
                         h_append(&b, (LeptrisNodeRef)c);
@@ -5016,13 +5036,22 @@ static LeptrisDocument html_parse_shared(
                             continue;
                         }
                     }
-                    /* #659 </html> closing an explicit html
-                     * element starts the after-html phase (the
-                     * depth-0 branch covers bare </html>). */
+                    /* #659 </html> closing an explicit html element
+                     * starts the after-html phase (the depth-0
+                     * branch covers bare </html>). Nothing pops —
+                     * the insertion point stays in the open body, so
+                     * later text/elements keep flowing into it
+                     * (webkit01:24-27; 13.2.6.1's "reprocess in
+                     * body"). */
                     if (b.whatwg && strcmp(lname, "html") == 0) {
                         b.after_html = 1;
+                        b.after_body = 1;
+                        b.after_body_done = 0;
                         b.head_end_seen = 1;
                         b.head_end_tail = b.top_tail;
+                        p = q;
+                        text = p;
+                        continue;
                     }
                     /* #659 after body (tests19:21): </body> with no
                      * open body starts the after-body phase — later
@@ -5045,6 +5074,15 @@ static LeptrisDocument html_parse_shared(
                             text = p;
                             continue;
                         }
+                        /* Body IS open: 13.2.6.1's </body> rule
+                         * switches the phase WITHOUT popping — the
+                         * stack keeps [html, body], so reprocessed
+                         * content lands inside the body. */
+                        b.after_body = 1;
+                        b.after_body_done = 0;
+                        p = q;
+                        text = p;
+                        continue;
                     } else if (b.whatwg && strcmp(lname, "head") == 0) {
                         for (size_t d2 = b.depth; d2 > 0; d2--)
                             if (h_ieq_raw(leptris_element_name(
