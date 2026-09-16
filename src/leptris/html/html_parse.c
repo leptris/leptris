@@ -2661,6 +2661,11 @@ typedef struct {
      * kept ahead of the tree at commit (html4 keeps the libxml2
      * shape). */
     int left_initial;
+    /* #659: a non-head-only start tag has been seen — the parser
+     * is in (implicit) body territory. Gates the 13.2.6.4.17
+     * stray-</p> rule: before-head/in-head contexts IGNORE the
+     * tag instead (HtmlParse.BeforeHeadCommentsStayHtmlChildren). */
+    int body_seen;
     LeptrisNodeRef prolog_head, prolog_tail;
     /* #659 master mode flag (the per-slice flags below derive from
      * the same html_parse_shared arg). */
@@ -4941,7 +4946,8 @@ static LeptrisDocument html_parse_shared(
                      * scope inserts an EMPTY <p> and closes it
                      * (tests1:29) — the stray tag still leaves a
                      * node. */
-                    if (b.whatwg && strcmp(lname, "p") == 0) {
+                    if (b.whatwg && b.body_seen &&
+                        strcmp(lname, "p") == 0) {
                         int p_open = 0;
                         for (size_t d2 = b.depth; d2 > 0; d2--) {
                             const char* on2 =
@@ -5299,6 +5305,21 @@ static LeptrisDocument html_parse_shared(
         /* 13.2.5.4.4: the enumerated start tags clear frameset-ok. */
         if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name)) {
             b.frameset_ok = 0;
+        }
+        /* #659 in-body proxy: anything that is not head-only
+         * content or a structural tag means body content. */
+        if (b.whatwg && !b.body_seen) {
+            static const char* const k_head_only[] = {
+                "base", "basefont", "bgsound", "link", "meta",
+                "noscript", "script", "style", "template", "title",
+                "html", "head", "body", "frameset", NULL};
+            int head_only = 0;
+            for (int i = 0; k_head_only[i]; i++)
+                if (strcmp(name, k_head_only[i]) == 0) {
+                    head_only = 1;
+                    break;
+                }
+            if (!head_only) b.body_seen = 1;
         }
 
         /* Structural tags at top level (no explicit <html> open):
