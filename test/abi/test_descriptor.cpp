@@ -93,6 +93,11 @@ TEST(PlanWalk, NestedScalarsAttributesCollections) {
     LeptrisPlanResult items = leptris_plan_value_at(r, 1);
     ASSERT_NE(items, nullptr);
     EXPECT_EQ(leptris_plan_value_kind(items), LEPTRIS_PLAN_VALUE_COLLECTION);
+    /* #1113: the collection echoes its producing row's wire_name
+     * and type_tag, like scalar/nested rows — the accessor's
+     * documented contract. */
+    EXPECT_STREQ(leptris_plan_value_name(items), "item");
+    EXPECT_EQ(leptris_plan_value_type_tag(items), 2);
     ASSERT_EQ(leptris_plan_value_count(items), 2u);
     EXPECT_STREQ(leptris_plan_value_string(leptris_plan_value_at(items, 0)), "a");
     EXPECT_STREQ(leptris_plan_value_string(leptris_plan_value_at(items, 1)), "b");
