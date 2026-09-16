@@ -505,6 +505,14 @@ cleanup:
 
 /* Append one PI in canonical form: <?target data?> (empty data →
  * <?target?>). Shared by the prolog and epilog (#1015) passes. */
+/* #1117: raw byte append for document-level separators. */
+static void c14n_append_raw(const char* bytes, int len, char** buffer,
+                            size_t* size, size_t* capacity) {
+    APPEND_STRING(bytes, len);
+cleanup:
+    return;
+}
+
 static void c14n_append_pi(LeptrisPINode* pi, char** buffer, size_t* size,
                            size_t* capacity) {
     if (!pi || !pi->target) return;
@@ -512,7 +520,15 @@ static void c14n_append_pi(LeptrisPINode* pi, char** buffer, size_t* size,
     char temp[512];
     int len = snprintf(temp, sizeof(temp), "<?%s", pi->target);
     APPEND_STRING(temp, len);
-    if (pi->data && *pi->data) {
+    /* #1117: whitespace-only PI data is NO data (libxml2 ground
+     * truth: <?pi-without-data     ?> renders <?pi-without-data?>). */
+    const char* probe = pi->data;
+    if (probe) {
+        while (*probe == ' ' || *probe == '\t' || *probe == '\n' ||
+               *probe == '\r')
+            probe++;
+    }
+    if (probe && *probe) {
         APPEND_STRING(" ", 1);
         APPEND_STRING(pi->data, (int)strlen(pi->data));
     }
@@ -549,16 +565,38 @@ LEPTRIS_API char* leptris_c14n_canonicalize(struct leptris_document* doc, int ve
      * (#1015) after it. The XML declaration is not a node. */
     LeptrisNode* c14n_root_node = (LeptrisNode*)root;
     char* buffer = buf;
+    /* #1117: every document-level node is followed by a newline
+     * except the document's LAST child (libxml2 convention). */
+    size_t doc_tail_n = 0;
+    LeptrisNode* doc_last = NULL;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c == c14n_root_node) continue;
+        doc_tail_n++;
+        doc_last = c;
+    }
     for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c;
          c = leptris_node_get_next_sibling(c)) {
         if (c == c14n_root_node) break;
         if (c->type == LEPTRIS_NODE_TYPE_PI)
             c14n_append_pi((LeptrisPINode*)c, &buffer, &size, &capacity);
+        else if (c->type == LEPTRIS_NODE_TYPE_COMMENT &&
+                 c14n_include_comments) {
+            const char* cc = leptris_comment_get_content(
+                (LeptrisCommentNode*)c);
+            char temp[512];
+            int len = cc ? snprintf(temp, sizeof(temp), "<!--%s-->", cc)
+                         : snprintf(temp, sizeof(temp), "<!---->");
+            c14n_append_raw(temp, len, &buffer, &size, &capacity);
+        }
+        c14n_append_raw("\n", 1, &buffer, &size, &capacity);
     }
 
     /* Serialize document in C14N format */
     c14n_serialize_element(root, &buffer, &size, &capacity);
     if (!buffer) return NULL;
+    if (doc_tail_n)
+        c14n_append_raw("\n", 1, &buffer, &size, &capacity);
 
     /* Epilog PIs (#1015): document order continues past the root
      * element — PIs after it belong to the canonical form. */
@@ -569,8 +607,22 @@ LEPTRIS_API char* leptris_c14n_canonicalize(struct leptris_document* doc, int ve
             past_root = 1;
             continue;
         }
-        if (past_root && c->type == LEPTRIS_NODE_TYPE_PI)
+        if (!past_root || c == c14n_root_node) continue;
+        if (c->type == LEPTRIS_NODE_TYPE_PI) {
             c14n_append_pi((LeptrisPINode*)c, &buffer, &size, &capacity);
+            if (c != doc_last)
+                c14n_append_raw("\n", 1, &buffer, &size, &capacity);
+        } else if (c->type == LEPTRIS_NODE_TYPE_COMMENT &&
+                   c14n_include_comments) {
+            const char* cc = leptris_comment_get_content(
+                (LeptrisCommentNode*)c);
+            char temp[512];
+            int len = cc ? snprintf(temp, sizeof(temp), "<!--%s-->", cc)
+                         : snprintf(temp, sizeof(temp), "<!---->");
+            c14n_append_raw(temp, len, &buffer, &size, &capacity);
+            if (c != doc_last)
+                c14n_append_raw("\n", 1, &buffer, &size, &capacity);
+        }
     }
     buf = buffer;
 
@@ -956,9 +1008,16 @@ LEPTRIS_API char* leptris_c14n_canonicalize_ex(
     leptris_document_ensure_promoted(doc);
     LeptrisElement root = (LeptrisElement)doc->new_dom_root;
     if (!root) return NULL;
+    /* Keep the with_comments flag live for the doc-level splice
+     * below (subtree_ex restores it on exit). */
+    int saved_wc = c14n_include_comments;
+    c14n_include_comments = with_comments ? 1 : 0;
     char* body = leptris_c14n_canonicalize_subtree_ex(
         root, version, mode, inclusive_ns_prefixes, with_comments);
-    if (!body) return NULL;
+    if (!body) {
+        c14n_include_comments = saved_wc;
+        return NULL;
+    }
 
     /* #1096: the WHOLE-document entry keeps document-level PIs in
      * C14N document order — prolog before the root, epilog after
@@ -983,11 +1042,37 @@ LEPTRIS_API char* leptris_c14n_canonicalize_ex(
             past_root = 1;
             continue;
         }
+        if (c->type == LEPTRIS_NODE_TYPE_COMMENT &&
+            c14n_include_comments) {
+            const char* cc = leptris_comment_get_content(
+                (LeptrisCommentNode*)c);
+            char cbuf[512];
+            int clen = cc ? snprintf(cbuf, sizeof(cbuf), "<!--%s-->", cc)
+                          : snprintf(cbuf, sizeof(cbuf), "<!---->");
+            c14n_append_raw(cbuf, clen, past_root ? &epilog : &prolog,
+                            past_root ? &epi_len : &pro_len,
+                            past_root ? &epi_cap : &pro_cap);
+            LeptrisNode* nn = leptris_node_get_next_sibling(c);
+            if (nn)
+                c14n_append_raw("\n", 1,
+                                past_root ? &epilog : &prolog,
+                                past_root ? &epi_len : &pro_len,
+                                past_root ? &epi_cap : &pro_cap);
+            continue;
+        }
         if (c->type != LEPTRIS_NODE_TYPE_PI) continue;
-        if (past_root)
+        if (past_root) {
             c14n_append_pi((LeptrisPINode*)c, &epilog, &epi_len, &epi_cap);
-        else
+            /* #1117: 
+ after each document-level node except the
+             * document's last child. */
+            LeptrisNode* nn = leptris_node_get_next_sibling(c);
+            if (nn) c14n_append_raw("\n", 1, &epilog, &epi_len, &epi_cap);
+        } else {
             c14n_append_pi((LeptrisPINode*)c, &prolog, &pro_len, &pro_cap);
+            /* The root follows every prolog node. */
+            c14n_append_raw("\n", 1, &prolog, &pro_len, &pro_cap);
+        }
     }
     if (pro_len == 0 && epi_len == 0) {
         free(prolog);
@@ -995,18 +1080,23 @@ LEPTRIS_API char* leptris_c14n_canonicalize_ex(
         return body;
     }
     size_t body_len = strlen(body);
-    char* out = (char*)malloc(pro_len + body_len + epi_len + 1);
+    /* #1117: the body (root) is itself a document-level node —
+     * epilog nodes follow it with a separator. */
+    size_t sep = epi_len ? 1 : 0;
+    char* out = (char*)malloc(pro_len + body_len + sep + epi_len + 1);
     if (!out) {
         free(prolog); free(epilog);
         return body;
     }
     memcpy(out, prolog, pro_len);
     memcpy(out + pro_len, body, body_len);
-    memcpy(out + pro_len + body_len, epilog, epi_len);
-    out[pro_len + body_len + epi_len] = '\0';
+    if (sep) out[pro_len + body_len] = '\n';
+    memcpy(out + pro_len + body_len + sep, epilog, epi_len);
+    out[pro_len + body_len + sep + epi_len] = '\0';
     free(prolog);
     free(epilog);
     free(body);
+    c14n_include_comments = saved_wc;
     return out;
 }
 
