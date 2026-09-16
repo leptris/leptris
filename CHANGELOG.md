@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.180] - 2026-09-16
+
+### Added
+
+- parser-recorded source positions (#1124) (dom)
+
+### Fixed
+
+- free the line-break table on inplace documents too (LSan) (dom)
+- free the line-break table before pool_destroy reclaims doc (UAF) (parse)
+- free the eager line-break table on the fail path (ASAN) (parse)
+
+
+
 ## [1.9.179] - 2026-09-16
 
 ### Added
