@@ -48,7 +48,6 @@ set(LEPTRIS_SOURCES
     # Memory management
     leptris/memory/pool.c
     leptris/memory/arena.c
-    leptris/memory/compact_allocator.c
     leptris/dom/compact.c
     leptris/dom/root_doc_map.c
     leptris/leptris_memory.c
