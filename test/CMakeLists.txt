@@ -108,6 +108,9 @@ target_compile_definitions(test_rng PRIVATE
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)
 target_compile_definitions(test_rng_corpus PRIVATE
     LEPTRIS_RNG_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/jing-cases")
+leptris_add_test(test_rng_corpus_msg rng/test_rng_corpus_msg.cpp)
+target_compile_definitions(test_rng_corpus_msg PRIVATE
+    LEPTRIS_RNG_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/jing-cases")
 leptris_add_test(test_simd_text  common/test_simd_text.cpp)
 leptris_add_test(test_simd_spans common/test_simd_spans.cpp)
 leptris_add_test(test_pool       memory/test_pool.cpp)
