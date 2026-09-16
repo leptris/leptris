@@ -49,6 +49,9 @@ struct RngPattern {
     char* datatype_lib;  /* DATA/VALUE datatypeLibrary */
     char* value;         /* VALUE text, PARAM value */
     RngDefine* define;   /* resolved target for REF (phase 2 link) */
+    int any_name;        /* ELEMENT/ATTRIBUTE with an <anyName> name
+                          * class - matches any name (RELAX NG 4.14,
+                          * biblio.rng's recursive AnyElement). */
 };
 
 /* A named <define>. combine="choice|interleave" merges bodies at
