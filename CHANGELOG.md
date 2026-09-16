@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.184] - 2026-09-16
+
+### Fixed
+
+- clear the failure latch when OPTIONAL skips (#1137) (rng)
+
+
+
 ## [1.9.183] - 2026-09-16
 
 ### Changed
