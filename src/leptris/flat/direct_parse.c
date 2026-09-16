@@ -48,6 +48,15 @@ int leptris_element_add_namespace(struct leptris_element* elem,
 
 #define DP_MAX_DEPTH 256
 
+typedef struct DpRestore { uint32_t off; char orig; } DpRestore;
+typedef struct DpMat { void* slot; const char* src; uint32_t len; } DpMat;
+
+typedef struct DpLogs {
+    char* buf;                 /* the parse buffer (offset base) */
+    DpRestore* r; size_t rn, rcap;
+    DpMat* m;   size_t mn, mcap;
+} DpLogs;
+
 typedef struct {
     char* buf;
     char* pos;
@@ -85,6 +94,8 @@ typedef struct {
      * unknown, matching the pre-#223 behavior). */
     int line_offsets_ok;
     int had_declaration;
+    /* #1125 immutable-buffer logs (see the DpLogs block above). */
+    DpLogs logs;
     /* Bulk-allocated attribute block. Pre-allocated from pool so the
      * common case is a bump-pointer off the block — no per-attr
      * pool_alloc, no name interning, no value pool_strdup. Overflow
@@ -157,6 +168,90 @@ typedef struct {
      * (&foo; where foo is declared in the DTD) resolve correctly. */
     LeptrisDTD* dtd;
 } DParser;
+
+/* ---- #1125: immutable-buffer logs --------------------------------
+ *
+ * The zero-copy parse NUL-terminates names/values in place. To keep
+ * doc->xml_buffer byte-identical to the input, every in-place NUL is
+ * logged with its original byte (restore), and every borrowed string
+ * that relies on that NUL is logged for pool materialization (mat).
+ * On success dp_logs_replay materializes the strings into pool
+ * storage, repoints the owning fields, and restores the bytes. */
+
+
+
+static int dp_logs_nul(DpLogs* L, char* at) {
+    if (L->rn == L->rcap) {
+        size_t nc = L->rcap ? L->rcap * 2 : 64;
+        DpRestore* nr = (DpRestore*)realloc(
+            L->r, nc * sizeof(DpRestore));
+        if (!nr) return -1;
+        L->r = nr;
+        L->rcap = nc;
+    }
+    L->r[L->rn].off = (uint32_t)(size_t)(at - L->buf);
+    L->r[L->rn].orig = *at;
+    L->rn++;
+    *at = '\0';
+    return 0;
+}
+
+static int dp_logs_mat(DpLogs* L, void* slot, const char* src,
+                       size_t len) {
+    if (L->mn == L->mcap) {
+        size_t nc = L->mcap ? L->mcap * 2 : 64;
+        DpMat* nm = (DpMat*)realloc(L->m, nc * sizeof(DpMat));
+        if (!nm) return -1;
+        L->m = nm;
+        L->mcap = nc;
+    }
+    L->m[L->mn].slot = slot;
+    L->m[L->mn].src = src;
+    L->m[L->mn].len = (uint32_t)len;
+    L->mn++;
+    return 0;
+}
+
+/* Success path. If any pool copy fails, the restore is skipped
+ * entirely — the buffer keeps its NULs and every view stays valid
+ * (the pre-#1125 behavior); never a torn state. */
+static void dp_logs_replay(DpLogs* L, LeptrisMemoryPool* pool) {
+    for (size_t i = 0; i < L->mn; i++) {
+        const DpMat* e = &L->m[i];
+        char* copy = (char*)leptris_pool_alloc(pool, e->len + 1);
+        if (!copy) return;
+        memcpy(copy, e->src, e->len);
+        copy[e->len] = '\0';
+        *(void**)e->slot = copy;
+    }
+    for (size_t i = 0; i < L->rn; i++)
+        L->buf[L->r[i].off] = L->r[i].orig;
+    free(L->m);
+    L->m = NULL;
+    L->mn = L->mcap = 0;
+    free(L->r);
+    L->r = NULL;
+    L->rn = L->rcap = 0;
+}
+
+/* Fail path: the document is discarded; just release the logs. */
+static void dp_logs_discard(DpLogs* L) {
+    free(L->m);
+    L->m = NULL;
+    L->mn = L->mcap = 0;
+    free(L->r);
+    L->r = NULL;
+    L->rn = L->rcap = 0;
+}
+
+/* DParser-convenience wrappers. */
+static inline int dp_nul(DParser* p, char* at) {
+    return dp_logs_nul(&p->logs, at);
+}
+static inline int dp_mat(DParser* p, void* slot, const char* src,
+                         size_t len) {
+    return dp_logs_mat(&p->logs, slot, src, len);
+}
 
 static inline void dp_skip_ws(DParser* p) {
     /* Sentinel-terminated (parse endgame): the parse buffer always
@@ -344,6 +439,14 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
 
     attr->name_view = leptris_sv_from_ptr(name, name_len);
     leptris_attr_value_set_heap(attr, leptris_sv_from_ptr(val, val_len));
+    /* #1125: the name NUL (at name_end) and the value NUL (at the
+     * closing quote) get restored after parse — both views must
+     * materialize. The normalized/entity-expanded replacements below
+     * overwrite the value view; only the survivor pays the copy. */
+    if (dp_mat(p, (void*)&attr->name_view.data, name, name_len))
+        return -1;
+    int val_borrowed = !has_ws;   /* has_ws already pool-copied */
+    const char* val_src = val;
     /* Round 19 packed tail: single name_hash store carries both the
      * lazy-hash sentinel (0) and the entity flag (bit 15). Entity
      * routing (has_amp from the caller's fused scan):
@@ -360,6 +463,7 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
                 &dsv, p->dtd, p->pool);
             if (expanded) {
                 leptris_attr_value_set_heap(attr, leptris_sv_from_cstr(expanded));
+                val_borrowed = 0;
             } else {
                 ent = 1;
             }
@@ -367,6 +471,10 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
             ent = 1;
         }
     }
+    if (val_borrowed &&
+        leptris_attr_value_sv(attr).data == val_src &&
+        dp_mat(p, (void*)&attr->value.heap.data, val_src, val_len))
+        return -1;
     attr->name_hash = (uint16_t)(ent << 15);
     attr->ns_cache_off = 0;  /* TODO 173: side cache allocated on demand */
     /* #542 fused into the parse loop (was the post-loop
@@ -446,7 +554,8 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
 static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
                                              LeptrisMemoryPool* pool,
                                              struct leptris_document* doc,
-                                             LeptrisDTD** dtd_io) {
+                                             LeptrisDTD** dtd_io,
+                                             DpLogs* logs) {
     char* pos = *pos_io;
     LeptrisDTD* dtd = *dtd_io;
     pos += 2; /* skip "<!" */
@@ -547,11 +656,11 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
      * values point into the mutable buffer copy. */
     if (dt) {
         if (public_id && public_id_len > 0) {
-            public_id[public_id_len] = '\0';
+            if (dp_logs_nul(logs, public_id + public_id_len)) return -1;
             leptris_doctype_set_public_id(dt, public_id, pool);
         }
         if (system_id && system_id_len > 0) {
-            system_id[system_id_len] = '\0';
+            if (dp_logs_nul(logs, system_id + system_id_len)) return -1;
             leptris_doctype_set_system_id(dt, system_id, pool);
         }
     }
@@ -563,7 +672,7 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
      * returns it (#253). */
     if (subset_start && subset_end > subset_start) {
         /* NUL-terminate the subset text in the buffer. */
-        *subset_end = '\0';
+        if (dp_logs_nul(logs, subset_end)) return -1;
         if (dt) {
             leptris_doctype_set_internal_subset(
                 dt, subset_start, pool);
@@ -588,8 +697,10 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
  * direct_parse_internal grew the hot attr loop's neighborhood and
  * regressed K=100 by ~1.5% (code layout, not work). Called once
  * per element; the call cost is ~1ns against 51us at K=5. */
-static LEPTRIS_ALWAYS_INLINE void dp_split_hash_name(LeptrisElement elem, char* name_start,
-                               size_t name_len, LeptrisMemoryPool* pool) {
+static LEPTRIS_ALWAYS_INLINE int dp_split_hash_name(DParser* p,
+                               LeptrisElement elem, char* name_start,
+                               size_t name_len) {
+    LeptrisMemoryPool* pool = p->pool;
     char* colon = NULL;
     uint16_t h = 0x811C;
     /* A colon needs prefix (>=1) + ':' + local (>=1) = 3 bytes; 1-2
@@ -606,15 +717,24 @@ static LEPTRIS_ALWAYS_INLINE void dp_split_hash_name(LeptrisElement elem, char* 
     }
     elem->name_hash = h;
     if (colon) {
-        *colon = '\0';
+        if (dp_nul(p, colon)) return -1;
         leptris_elem_set_prefix(elem, name_start, pool);
+        /* The prefix cache BORROWS name_start (NUL'd at the colon)
+         * — materialize it; restore would orphan the terminator. */
+        if (elem->ns_cache &&
+            dp_mat(p, &elem->ns_cache->prefix, name_start,
+                   (size_t)(colon - name_start)))
+            return -1;
         elem->name = colon + 1;
         size_t local_len = name_len - (size_t)(colon + 1 - name_start);
         elem->name_len = (local_len > 254) ? 0xFF : (uint8_t)local_len;
+        if (dp_mat(p, &elem->name, colon + 1, local_len)) return -1;
     } else {
         elem->name = name_start;
         elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
+        if (dp_mat(p, &elem->name, name_start, name_len)) return -1;
     }
+    return 0;
 }
 
 /* Parse attributes for an element. Writes attr structs into the
@@ -622,7 +742,8 @@ static LEPTRIS_ALWAYS_INLINE void dp_split_hash_name(LeptrisElement elem, char* 
  * Names are NUL-terminated in-place AFTER '=' is consumed; values
  * are NUL-terminated in-place at the closing quote. */
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
-                       const char* qname, const char* value);
+                       const char* qname, size_t qname_len,
+                       const char* value, size_t value_len);
 static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
                                                 LeptrisElement elem);
 
@@ -684,7 +805,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         p->pos++;
         /* '=' consumed — the delimiter byte at name_end is no longer
          * needed. Safe to NUL-terminate the name in-place now. */
-        *name_end = '\0';
+        if (dp_nul(p, name_end)) return -1;
         dp_skip_ws(p);
 
         /* Quoted value — FUSED scan (TODO 184): one pass finds the
@@ -738,7 +859,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         }
     value_done:
         p->pos = val_end;
-        *p->pos = '\0'; /* Safe: overwrites closing quote, not a delimiter */
+        if (dp_nul(p, p->pos)) return -1; /* closing quote, not a delimiter */
         size_t val_len = p->pos - val_start;
         p->pos++; /* skip the NUL */
 
@@ -775,6 +896,12 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
                     &nsv, p->dtd, p->pool);
                 if (nuri) ns->uri = nuri;
             }
+            /* #1125: the URI borrows the attr-value bytes; the
+             * closing-quote NUL restores. Materialize unless the
+             * DTD expansion already owns a copy. */
+            if (ns->uri == val_start &&
+                dp_mat(p, &ns->uri, val_start, val_len))
+                return -1;
             ns->next = NULL;
             /* TODO 155 Phase A: parser has the pool directly; use it
              * to allocate ns_cache without going through the
@@ -799,7 +926,8 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             }
             p->current_elem_last_ns = ns;
             p->saw_namespace = 1;
-            if (dp_raw_attr(p, elem, name_start, ns->uri) != 0) return -1;
+            if (dp_raw_attr(p, elem, name_start, name_len,
+                            val_start, val_len) != 0) return -1;
             continue;
         }
 
@@ -808,7 +936,8 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
                                 val_start, val_len, has_amp, has_ws,
                                 attr_colon) != 0)
             return -1;
-        if (dp_raw_attr(p, elem, name_start, val_start) != 0) return -1;
+        if (dp_raw_attr(p, elem, name_start, name_len,
+                        val_start, val_len) != 0) return -1;
     }
     /* for (;;): every exit is a return inside the loop (0 = tag
      * closed, 1 = self-closing, -1 = error) — there is no
@@ -845,7 +974,8 @@ static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
  * pool_alloc + tail walk was the largest single cost of attr-heavy
  * parses (39% of attr-heavy-5k). */
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
-                       const char* qname, const char* value) {
+                       const char* qname, size_t qname_len,
+                       const char* value, size_t value_len) {
     struct leptris_ns_cache* cache = dp_ensure_cache(p, elem);
     if (!cache) return 0;
     struct leptris_raw_attr* ra;
@@ -860,6 +990,10 @@ static int dp_raw_attr(DParser* p, LeptrisElement elem,
     }
     ra->qname = qname;
     ra->value = value;
+    /* #1125: both borrow NUL-terminated buffer strings. */
+    if (dp_mat(p, (void*)&ra->qname, qname, qname_len) ||
+        dp_mat(p, (void*)&ra->value, value, value_len))
+        return -1;
     ra->next = NULL;
     if (p->raw_last) {
         p->raw_last->next = ra;
@@ -1175,6 +1309,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * gets garbage on namespace-less documents. */
     p.saw_namespace = 0;
     p.line_offsets_ok = len < 0x7FFFFFFFu;
+    p.logs.buf = buf;
+    p.logs.r = NULL;
+    p.logs.rn = p.logs.rcap = 0;
+    p.logs.m = NULL;
+    p.logs.mn = p.logs.mcap = 0;
 
     /* Skip BOM. */
     if (len >= 3 && (unsigned char)buf[0] == 0xEF &&
@@ -1394,9 +1533,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
 
             /* NOW safe to NUL-terminate the name — dp_parse_attrs
              * has finished scanning the open tag. */
-            name_start[name_len] = '\0';
+            if (dp_nul(&p, name_start + name_len)) goto fail;
 
-            dp_split_hash_name(elem, name_start, name_len, p.pool);
+            if (dp_split_hash_name(&p, elem, name_start, name_len))
+                goto fail;
 
             /* Wire into parent. */
             if (p.depth > 0) {
@@ -1515,11 +1655,13 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     p.pos, (size_t)(p.end - p.pos), '-', '-', '>');
                 if (hit < 0) goto fail;
                 p.pos += hit;
-                *p.pos = '\0'; /* NUL-terminate content */
+                if (dp_nul(&p, p.pos)) goto fail; /* NUL-term content */
                 LeptrisCommentNode* cn = (LeptrisCommentNode*)
                     dp_cpi_carve(&p, LEPTRIS_NODE_TYPE_COMMENT);
                 if (cn) {
                     cn->content = start;  /* zero-copy, buf-lifetime */
+                    if (dp_mat(&p, &cn->content, start,
+                               (size_t)(p.pos - start))) goto fail;
                 } else {
                     cn = leptris_comment_create(start, p.pos - start, pool);
                     if (!cn) goto fail;
@@ -1545,11 +1687,13 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     p.pos, (size_t)(p.end - p.pos), ']', ']', '>');
                 if (hit < 0) goto fail;
                 p.pos += hit;
-                *p.pos = '\0';
+                if (dp_nul(&p, p.pos)) goto fail;
                 LeptrisCDATANode* cd = (LeptrisCDATANode*)
                     dp_cpi_carve(&p, LEPTRIS_NODE_TYPE_CDATA);
                 if (cd) {
                     cd->content = start;  /* zero-copy, buf-lifetime */
+                    if (dp_mat(&p, &cd->content, start,
+                               (size_t)(p.pos - start))) goto fail;
                 } else {
                     cd = leptris_cdata_create(start, p.pos - start, pool);
                     if (!cd) goto fail;
@@ -1570,7 +1714,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 char* dpos = p.pos;
                 LeptrisDTD* ddtd = p.dtd;
                 if (dp_parse_doctype(&dpos, p.end, p.pool, p.doc,
-                                     &ddtd) != 0)
+                                     &ddtd, &p.logs) != 0)
                     goto fail;
                 p.pos = dpos;
                 p.dtd = ddtd;
@@ -1593,8 +1737,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * '?'; clobbering it would leave nothing for the data
              * scan to find and fail the whole parse. */
             char* data_start = p.pos;
+            size_t target_len = (size_t)(p.pos - target_start);
             if (*p.pos != '?') {
-                *p.pos = '\0';
+                if (dp_nul(&p, p.pos)) goto fail;
                 p.pos++;
                 data_start = p.pos;
             }
@@ -1605,7 +1750,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 p.pos = q;
             }
             if (p.pos + 1 >= p.end || p.pos[1] != '>') goto fail;
-            *p.pos = '\0'; /* NUL-terminate data */
+            if (dp_nul(&p, p.pos)) goto fail; /* NUL-terminate data */
             size_t data_len = p.pos - data_start;
             p.pos += 2;
 
@@ -1633,7 +1778,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     char* pval = scan;
                     while (*scan && *scan != q) scan++;
                     if (*scan != q) break;
-                    *scan = '\0';
+                    if (dp_nul(&p, scan)) goto fail;
                     scan++;
 
                     if (pname_len == 7 && memcmp(pname, "version", 7) == 0) {
@@ -1653,6 +1798,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             if (pi) {
                 pi->target = target_start;  /* zero-copy, buf-lifetime */
                 pi->data = data_start;
+                if (dp_mat(&p, &pi->target, target_start,
+                           target_len) ||
+                    dp_mat(&p, &pi->data, data_start, data_len))
+                    goto fail;
                 (void)data_len;
             } else {
                 pi = leptris_pi_create(
@@ -1757,6 +1906,12 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         }
     }
 
+    /* #1125: materialize the borrowed NUL-terminated strings into
+     * pool storage, then restore every parser NUL — doc->xml_buffer
+     * ends the parse byte-identical to the input. (Runs after the
+     * encoding/version strdups above, which read the buffer.) */
+    dp_logs_replay(&p.logs, pool);
+
     return doc;
 
 fail:
@@ -1794,6 +1949,7 @@ fail:
      * — the fail path never reaches leptris_document_free. Free it
      * BEFORE pool_destroy reclaims the doc struct. */
     free(doc->line_breaks);
+    dp_logs_discard(&p.logs);
     leptris_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't LEPTRIS_FREE(doc) (TODO 154). */
