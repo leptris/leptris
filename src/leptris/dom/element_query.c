@@ -261,6 +261,12 @@ static struct leptris_attribute* find_attr_expanded(
         LeptrisElement elem, const char* uri, const char* local) {
     size_t ll = strlen(local);
     struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
+    /* No-namespace search: the 15-bit name-hash prefilter (TODO 172
+     * / S9, as in leptris_dom_attr_find). A hash+length+memcmp hit
+     * against a colon-free needle implies the attr name carries no
+     * colon, so the per-attr memchr is gone from the common path —
+     * value-of @name and attribute axes ride this (#682). */
+    uint16_t lh = uri_is_none(uri) ? attr_hash15(local, ll) : 0;
     while (attr) {
         const char* n = attr->name_view.data;
         size_t nl = attr->name_view.length;
@@ -268,7 +274,8 @@ static struct leptris_attribute* find_attr_expanded(
         const char* colon = nl ? memchr(n, ':', nl) : NULL;
         if (uri_is_none(uri)) {
             if (colon) goto next;                    /* namespaced */
-            if (nl == ll && memcmp(n, local, ll) == 0) return attr;
+            if (attr_name_hash(attr) == lh &&
+                leptris_memeq_short(n, local, ll)) return attr;
         } else {
             if (!colon) goto next;                   /* no namespace */
             size_t pl = (size_t)(colon - n);
