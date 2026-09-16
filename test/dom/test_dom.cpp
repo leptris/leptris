@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include "leptris.h"
+/* #1125 pristine-buffer gate: reach doc->xml_buffer directly. */
+#include "../leptris/leptris_internal.h"
 
 #include <cstring>
 #include <string>
@@ -1544,6 +1546,41 @@ TEST(NodeSourcePosition, ReportsParserRecordedElementColumns) {
     EXPECT_EQ(pos.line, 0);
     EXPECT_EQ(pos.col_start, 0);
     EXPECT_EQ(pos.col_end, 0);
+
+    leptris_document_free(doc);
+}
+
+TEST(ImmutableBuffer, XmlBufferStaysByteIdenticalToInput) {
+    /* #1125: the parse buffer must survive parsing verbatim — the
+     * zero-copy NUL-termination must not permanently clobber name
+     * delimiters, quotes, or text content. */
+    const char xml[] =
+        "<?xml version='1.0'?>\n"
+        "<root a='1' b=\"two\">\n"
+        "  <child x='v'>text &amp; more</child>\n"
+        "  <!-- comment -->\n"
+        "  <![CDATA[raw <>&]]>\n"
+        "  <?pi data?>\n"
+        "  <p:n xmlns:p='urn:p'/>\n"
+        "</root>\n";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, sizeof(xml) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* The DOM must still be correct (names, attrs, text) — and the
+     * source buffer byte-identical to the input. */
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "root");
+    const char* a = leptris_element_attribute(root, "a");
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(a, "1");
+
+    struct leptris_document* d = (struct leptris_document*)doc;
+    ASSERT_NE(d->xml_buffer, nullptr);
+    EXPECT_EQ(d->xml_buffer_len, sizeof(xml) - 1);
+    EXPECT_EQ(memcmp(d->xml_buffer, xml, sizeof(xml) - 1), 0)
+        << "parse buffer was mutated in place";
 
     leptris_document_free(doc);
 }
