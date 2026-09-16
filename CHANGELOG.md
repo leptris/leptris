@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.182] - 2026-09-16
+
+### Added
+
+- immutable buffer — NUL undo log + pool materialization (#1125) (parse)
+
+
+
 ## [1.9.181] - 2026-09-16
 
 ### Changed
