@@ -70,7 +70,14 @@ struct RngGrammar {
 /* The public opaque handle. */
 struct leptris_relaxng {
     RngGrammar* grammar;
-    char* error;         /* first parse error (Jing-shaped later) */
+    /* #878: per-error list — the FIRST message is also kept in
+     * the legacy `error` slot for leptris_rng_error() back-compat. */
+    char* error;
+    int err_count;
+    int err_cap;
+    int* err_line;       /* parse-line of the offending element (0 unknown) */
+    int* err_col;        /* column 0 — real tracking is a future sub-fix */
+    char** err_msg;
 };
 
 /* parse.c */

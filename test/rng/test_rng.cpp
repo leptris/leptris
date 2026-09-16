@@ -186,6 +186,39 @@ TEST(RngParse, BareElementRoot) {
     leptris_rng_free(rng);
 }
 
+
+// ---- #878: accumulate multiple errors + expose per-error fields ----
+
+TEST(RngErrors, AccumulatesAndExposesPerError) {
+    /* schema declares RELAX NG namespace via xmlns. */
+    const char* sch =
+        "<element xmlns='http://relaxng.org/ns/structure/1.0' name='r'>"
+        "<choice><element name='a'/>"
+        "<element name='b'/></choice></element>";
+    LeptrisStatus st = LEPTRIS_OK; LeptrisRelaxNG schema = leptris_rng_parse(
+        sch, std::strlen(sch), &st);
+    ASSERT_NE(schema, nullptr);
+    const char* ins = "<r xmlns='urn:t'><x/><y/></r>";
+    LeptrisDocument doc = leptris_parse_string(
+        ins, std::strlen(ins), NULL);
+    int valid = leptris_rng_validate(schema, doc);
+    EXPECT_EQ(valid, 0);
+    /* Two wrong children — Jing reports both; the engine used to
+     * stop at the first. */
+    EXPECT_EQ(leptris_rng_error_count(schema), 2u);
+    /* Each error carries a non-zero line (the offending element's
+     * source line, via the #223 lazy scheme) and a message. */
+    EXPECT_GT(leptris_rng_error_line(schema, 0), 0u);
+    EXPECT_GT(leptris_rng_error_line(schema, 1), 0u);
+    EXPECT_NE(leptris_rng_error_message(schema, 0), nullptr);
+    EXPECT_NE(leptris_rng_error_message(schema, 1), nullptr);
+    /* First-error accessor remains backward-compatible. */
+    EXPECT_NE(leptris_rng_error(schema), nullptr);
+    /* Out-of-range index returns NULL and the count is stable. */
+    EXPECT_EQ(leptris_rng_error_message(schema, 99), nullptr);
+    leptris_document_free(doc);
+    leptris_rng_free(schema);
+}
 }  // namespace
 
 /* ---- phase 2: the core validator ------------------------------ */
