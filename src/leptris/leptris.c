@@ -921,6 +921,11 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
      * For in-place parsing, the document also owns the buffer for consistency
      * The buffer is freed here to ensure StringViews remain valid for document lifetime
      * For stack-allocated buffers (files <= 4KB), xml_buffer_needs_free = 0 */
+    /* The newline-offset table is malloc'd unconditionally at parse
+     * (#1124 eager build) — free it on every path, including
+     * inplace documents that don't own the xml_buffer. */
+    free(doc->line_breaks);
+    doc->line_breaks = NULL;
     if (doc->xml_buffer && doc->xml_buffer_needs_free) {
         /* Release through the retained-buffer free list (see
          * memory/arena.c): large inputs would otherwise be munmapped
@@ -931,8 +936,6 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         doc->xml_buffer = NULL;
         /* The newline-offset table indexes the buffer; nothing can
          * resolve lines after it is gone. */
-        free(doc->line_breaks);
-        doc->line_breaks = NULL;
     }
     /* Free mutation element blocks (round 18). */
     while (doc->mut_elem_blocks) {
