@@ -319,8 +319,17 @@ std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
                         std::string body =
                             dl.size() > 2 ? dl.substr(2) : std::string();
                         while (bd < body.size() && body[bd] == ' ') bd++;
+                        /* A quoted expectation may span lines: a
+                         * LONE opening quote ("| \"" — content is
+                         * just the quote char) opens a continuation
+                         * that runs until a line ending with '"'.
+                         * Quote PARITY is not the signal: expected
+                         * text can contain escaped inner quotes on
+                         * one line (nokogiri-tree-tests:1152) and
+                         * would over-merge. */
                         if (bd < body.size() && body[bd] == '"' &&
-                            body[body.size() - 1] != '"') {
+                            (body.size() - bd == 1 ||
+                             body[body.size() - 1] != '"')) {
                             std::string merged = dl;
                             while (i + 1 < lines.size() &&
                                    lines[i + 1].compare(0, 1, "#") != 0) {
@@ -628,6 +637,15 @@ TEST(Html5LibCorpus, TreeConstruction) {
             Coalesce(&ours);
             NormalizeExpected(&c.doc, 0);
             std::string why;
+            if (getenv("H5DATA")) {
+                const char* want = getenv("H5DATA");
+                if (c.id == want) {
+                    printf("[data] %zu bytes:", c.data.size());
+                    for (unsigned char ch : c.data)
+                        printf(" %02x", ch);
+                    printf("\n[data] %s\n", c.data.c_str());
+                }
+            }
             if (getenv("H5DBG") && c.id == "tests1.dat:1") {
                 printf("[dbg] expected kind=%d nchild=%zu | ours kind=%d nchild=%zu\n",
                        (int)c.doc.kind, c.doc.children.size(),
