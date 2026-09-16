@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.185] - 2026-09-16
+
+### Performance
+
+- scratch-copy scanner; delete the #1125 log machinery (#682) (parse)
+
+
+
 ## [1.9.184] - 2026-09-16
 
 ### Fixed
