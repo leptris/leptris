@@ -17,21 +17,46 @@
 
 typedef struct {
     RngGrammar* g;
+    struct leptris_relaxng* r;  /* the public handle (for #878
+                                    per-error list). */
     char err[512];
     int failed;
     int depth;   /* ref-recursion guard (cyclic defines) */
 } RngVal;
 
+/* #878: append (not bail) so the binding can surface every
+ * failure (Jing parity — it reports all, the engine used to stop
+ * at the first). The v->failed short-circuit elsewhere still
+ * short-circuits downstream work. */
 static void fail(RngVal* v, LeptrisElement e, const char* fmt,
                  const char* a, const char* b) {
-    if (v->failed) return;
-    v->failed = 1;
     int line = e ? leptris_node_line((LeptrisNodeRef)e) : 0;
     char msg[256];
     if (a && b) snprintf(msg, sizeof(msg), fmt, a, b);
     else if (a) snprintf(msg, sizeof(msg), fmt, a);
     else snprintf(msg, sizeof(msg), "%s", fmt);
-    snprintf(v->err, sizeof(v->err), "%d:0: error: %s", line, msg);
+    if (!v->failed) {
+        v->failed = 1;
+        snprintf(v->err, sizeof(v->err), "%d:0: error: %s", line, msg);
+    }
+    struct leptris_relaxng* r = v->r;
+    if (!r) return;
+    if (r->err_count == r->err_cap) {
+        int nc = r->err_cap ? r->err_cap * 2 : 8;
+        int* nl = (int*)realloc(r->err_line, sizeof(int) * (size_t)nc);
+        int* nc_ = (int*)realloc(r->err_col,  sizeof(int) * (size_t)nc);
+        char** nm = (char**)realloc(r->err_msg, sizeof(char*) * (size_t)nc);
+        if (!nl || !nc_ || !nm) return;
+        r->err_line = nl;
+        r->err_col  = nc_;
+        r->err_msg  = nm;
+        r->err_cap  = nc;
+    }
+    if (r->err_count >= r->err_cap) return;
+    r->err_line[r->err_count] = line;
+    r->err_col[r->err_count]  = 0;   /* sub-fix #1 (next slice) */
+    r->err_msg[r->err_count]  = leptris_strdup(msg);
+    if (r->err_msg[r->err_count]) r->err_count++;
 }
 
 static RngDefine* find_define(RngGrammar* g, const char* name) {
@@ -513,7 +538,13 @@ static size_t fold_list(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
 }
 
 static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
-    if (!names_match(p, e)) return 0;
+    if (!names_match(p, e)) {
+        /* #878: surface the name mismatch (the engine used to
+         * silently return 0, dropping the per-element error). */
+        fail(v, e, "element \"%s\" not allowed here",
+             leptris_element_name(e), NULL);
+        return 0;
+    }
     if (!match_attrs(v, p, e)) return 0;
 
     if (!has_element_patterns(p->first_child)) {
@@ -581,6 +612,7 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
     RngVal v;
     memset(&v, 0, sizeof(v));
     v.g = rng->grammar;
+    v.r = rng;
 
     LeptrisElement root = leptris_document_root(doc);
     if (!root) {
@@ -637,9 +669,26 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
         ok = element_ok(&v, start, root);
     }
     if (!ok && !v.failed) {
-        fail(&v, root, "element \"%s\" not allowed here",
-             leptris_element_name(root), NULL);
+        /* #878: only emit the catch-all when no per-element
+         * failure was already recorded (else we'd duplicate
+         * "element X not allowed here" on top of the
+         * per-element list). */
+        if (!v.r || v.r->err_count == 0) {
+            fail(&v, root, "element \"%s\" not allowed here",
+                 leptris_element_name(root), NULL);
+        }
     }
-    rng->error = v.failed ? leptris_strdup(v.err) : NULL;
+    /* #878: leptris_rng_error (back-compat) carries the FIRST
+     * accumulated message — synthesize the "line:0: error: msg"
+     * shape from per-error[0] when available, else fall back to
+     * v.err. */
+    if (v.r && v.r->err_count > 0) {
+        char back[512];
+        snprintf(back, sizeof(back), "%d:0: error: %s",
+                 v.r->err_line[0], v.r->err_msg[0]);
+        rng->error = leptris_strdup(back);
+    } else {
+        rng->error = v.failed ? leptris_strdup(v.err) : NULL;
+    }
     return ok && !v.failed;
 }

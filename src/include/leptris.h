@@ -816,13 +816,28 @@ LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
 /* Validate an instance document against the parsed schema
  * (phase-2 core subset: element/attribute/text/data/value/
  * choice/group/interleave/repeats/ref). Returns 1 valid; on 0,
- * leptris_rng_error carries the first failure in Jing's
- * "line:col: error: message" shape (column always 0 in this
- * phase; the instance's line numbers). */
+ * every failure is appended to a per-validate list (Jing parity
+ * — the engine used to stop at the first). leptris_rng_error
+ * keeps returning the FIRST message (back-compat); the per-error
+ * accessors below enumerate every entry. */
 LEPTRIS_API int leptris_rng_validate(LeptrisRelaxNG rng,
                                      LeptrisDocument doc);
-/* Last parse error detail (NULL when the handle is valid). */
+/* Last parse error detail (NULL when the handle is valid).
+ * For validation: returns the FIRST validation error (Jing
+ * "line:0: error: message" shape; column is 0 in this phase —
+ * sub-fix #1 next slice). */
 LEPTRIS_API const char* leptris_rng_error(LeptrisRelaxNG rng);
+/* Number of accumulated validation errors from the last
+ * leptris_rng_validate call. Reset to 0 at the start of every
+ * validate call. */
+LEPTRIS_API size_t leptris_rng_error_count(LeptrisRelaxNG rng);
+/* Nth accumulated error's message (NULL when i is out of
+ * range). The string is schema/instance-owned and lives until
+ * the next validate call or leptris_rng_free. */
+LEPTRIS_API const char* leptris_rng_error_message(LeptrisRelaxNG rng,
+                                                  size_t i);
+/* Nth accumulated error's parse line (1-based, 0 unknown). */
+LEPTRIS_API int leptris_rng_error_line(LeptrisRelaxNG rng, size_t i);
 
 
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,

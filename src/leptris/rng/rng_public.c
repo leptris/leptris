@@ -33,6 +33,12 @@ LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng) {
     if (!r) return;
     rng_grammar_free(r->grammar);
     free(r->error);
+    if (r->err_msg) {
+        for (int i = 0; i < r->err_count; i++) free(r->err_msg[i]);
+        free(r->err_msg);
+    }
+    free(r->err_line);
+    free(r->err_col);
     free(r);
 }
 
@@ -58,13 +64,36 @@ LEPTRIS_API LeptrisRelaxNG leptris_rng_parse_file(const char* path,
 
 LEPTRIS_API int leptris_rng_validate(LeptrisRelaxNG rng,
                                       LeptrisDocument doc) {
-    if (!rng || !doc) return 0;
-    free(((struct leptris_relaxng*)rng)->error);
-    ((struct leptris_relaxng*)rng)->error = NULL;
-    return rng_validate_document((struct leptris_relaxng*)rng, doc);
+    struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+    if (!r || !doc) return 0;
+    free(r->error);
+    r->error = NULL;
+    if (r->err_msg) {
+        for (int i = 0; i < r->err_count; i++) free(r->err_msg[i]);
+        r->err_count = 0;
+    }
+    return rng_validate_document(r, doc);
 }
 
 LEPTRIS_API const char* leptris_rng_error(LeptrisRelaxNG rng) {
     struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
     return r ? r->error : NULL;
+}
+
+LEPTRIS_API size_t leptris_rng_error_count(LeptrisRelaxNG rng) {
+    struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+    return r ? (size_t)r->err_count : 0u;
+}
+
+LEPTRIS_API const char* leptris_rng_error_message(LeptrisRelaxNG rng,
+                                                  size_t i) {
+    struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+    if (!r || i >= (size_t)r->err_count) return NULL;
+    return r->err_msg[i];
+}
+
+LEPTRIS_API int leptris_rng_error_line(LeptrisRelaxNG rng, size_t i) {
+    struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+    if (!r || i >= (size_t)r->err_count) return 0;
+    return r->err_line[i];
 }
