@@ -686,6 +686,18 @@ TEST(RngInclude, MissingHrefIsAnError) {
     EXPECT_EQ(parse_file("no-href.rng"), nullptr);
 }
 
+TEST(RngInclude, FileSchemaErrorsPublishDetail) {
+    /* The FILE entry must publish schema-parse detail to
+     * leptris_last_error like the string entry — it used to free
+     * the handle and return NULL with an empty channel, masking
+     * every real reason (the metanorma isodoc triage died on
+     * this). */
+    EXPECT_EQ(parse_file("bad-construct.rng"), nullptr);
+    const char* err = leptris_last_error();
+    ASSERT_NE(err, nullptr);
+    EXPECT_NE(strstr(err, "unknown pattern"), nullptr) << err;
+}
+
 TEST(RngInclude, MissingFileIsAnError) {
     EXPECT_EQ(parse_file("does-not-exist.rng"), nullptr);
 }
