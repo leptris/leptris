@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.187] - 2026-09-16
+
+### Fixed
+
+- skip foreign-namespace annotation elements in patterns (rng)
+- after-body mode restore — non-ws text returns comments to the body (#659) (html)
+
+
+
 ## [1.9.186] - 2026-09-16
 
 ### Performance
