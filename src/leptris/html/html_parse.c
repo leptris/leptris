@@ -2979,6 +2979,55 @@ static int h_is_int_point(HBuilder* b, size_t idx) {
     return 0;
 }
 
+static char* h_decode_foreign(LeptrisMemoryPool* pool, const char* s,
+                              const char* e, int whatwg,
+                              size_t* out_len);
+
+/* The CURRENT insertion point is foreign (and not an HTML
+ * integration point): foreign processing rules apply. */
+static int h_top_foreign(HBuilder* b) {
+    return b->depth > 0 && b->open_ns[b->depth - 1] != H_NS_HTML &&
+           !h_is_int_point(b, b->depth - 1);
+}
+
+/* Text decode routed by insertion context: foreign content maps
+ * NUL -> U+FFFD; body drops it. Integration points (foreignObject,
+ * desc, title, MathML text) take BODY rules — they are HTML
+ * insertion points. */
+static char* h_decode_text(HBuilder* b, const char* s, const char* e,
+                           size_t* out_len) {
+    if (h_top_foreign(b))
+        return h_decode_foreign(b->pool, s, e, b->whatwg, out_len);
+    return h_decode_body(b->pool, s, e, b->whatwg, out_len);
+}
+
+/* Foreign-content text decode (13.2.6.5): a NUL character token
+ * is a parse error but STILL becomes U+FFFD in the tree (unlike
+ * in-body, where it drops). */
+static char* h_decode_foreign(LeptrisMemoryPool* pool, const char* s,
+                              const char* e, int whatwg,
+                              size_t* out_len) {
+    size_t n = 0;
+    char* d = h_decode_ex(pool, s, e, 0, whatwg, &n);
+    if (!d) return NULL;
+    char* out = (char*)leptris_pool_alloc(pool, 3 * n + 1);
+    if (!out) return NULL;
+    size_t w = 0;
+    for (size_t r = 0; r < n; r++) {
+        if (d[r] == 0) {
+            out[w++] = (char)0xEF;
+            out[w++] = (char)0xBF;
+            out[w++] = (char)0xBD;
+        } else {
+            out[w++] = d[r];
+        }
+    }
+    out[w] = 0;
+    if (out_len) *out_len = w;
+    return out;
+}
+
+
 /* 13.2.5.4.4: start tags that set frameset-ok to false. */
 static int h_clears_frameset_ok(const char* n) {
     static const char* const yes[] = {
@@ -3525,9 +3574,11 @@ static void h_bogus_comment(HBuilder* b, const char* data,
     size_t o = 0;
     for (size_t i = 0; i < len; i++) {
         if (data[i] == 0) {
+            /* U+FFFD is EF BF BD — this site had BD/BF swapped
+             * (plain-text-unsafe:12/13). */
             buf[o++] = (char)0xEF;
-            buf[o++] = (char)0xBD;
             buf[o++] = (char)0xBF;
+            buf[o++] = (char)0xBD;
         } else {
             buf[o++] = data[i];
         }
@@ -4458,7 +4509,7 @@ static LeptrisDocument html_parse_shared(
             /* Flush pending text first. */
             if (text < p) {
                 size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -4722,8 +4773,7 @@ static LeptrisDocument html_parse_shared(
                 if (b.whatwg && ns2 >= end) {
                     if (text < p) {
                         size_t dlen = 0;
-                        char* dec = h_decode_body(b.pool, text, p,
-                                                  b.whatwg, &dlen);
+                        char* dec = h_decode_text(&b, text, p, &dlen);
                         if (dec && *dec) {
                             LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -4741,8 +4791,7 @@ static LeptrisDocument html_parse_shared(
                                   (*ns2 >= 'A' && *ns2 <= 'Z'))) {
                     if (text < p) {
                         size_t dlen = 0;
-                        char* dec = h_decode_body(b.pool, text, p,
-                                                  b.whatwg, &dlen);
+                        char* dec = h_decode_text(&b, text, p, &dlen);
                         if (dec && *dec) {
                             LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -4762,8 +4811,7 @@ static LeptrisDocument html_parse_shared(
             if (b.whatwg && !memchr(p, '>', (size_t)(end - p))) {
                 if (text < p) {
                     size_t dlen = 0;
-                    char* dec = h_decode_body(b.pool, text, p,
-                                              b.whatwg, &dlen);
+                    char* dec = h_decode_text(&b, text, p, &dlen);
                     if (dec && *dec) {
                         LeptrisTextNode* t =
                             leptris_text_create(dec, dlen, b.pool);
@@ -4792,7 +4840,7 @@ static LeptrisDocument html_parse_shared(
             /* Flush pending text before closing. */
             if (text < p) {
                 size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -5064,7 +5112,7 @@ static LeptrisDocument html_parse_shared(
              * trailing '?' — content runs to the first '>'. */
             if (text < p) {
                 size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -5150,8 +5198,7 @@ static LeptrisDocument html_parse_shared(
         if (b.whatwg && !memchr(p, '>', (size_t)(end - p))) {
             if (text < p) {
                 size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg,
-                                          &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t =
                         leptris_text_create(dec, dlen, b.pool);
@@ -5224,7 +5271,11 @@ static LeptrisDocument html_parse_shared(
          * body content replaces the body; after content it is
          * ignored. Inside an open frameset it nests. html/head/
          * body tokens in frameset context are dropped. */
-        if (b.whatwg && strcmp(name, "frameset") == 0) {
+        if (b.whatwg && strcmp(name, "frameset") == 0 &&
+            !h_top_foreign(&b)) {
+            /* frameset is NOT in the 13.2.6.5 breakout list: inside
+             * foreign content it is a plain foreign element
+             * (plain-text-unsafe:16-23). */
             /* depth<=1: at most the (explicit or synthesized) html
              * element is open; frameset-ok is the spec gate and the
              * body is removed wholesale when it converts. */
@@ -5235,7 +5286,7 @@ static LeptrisDocument html_parse_shared(
                 /* Dropped token: flush pending text first. */
                 if (text < p) {
                     size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                     if (dec && *dec) {
                         LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -5267,7 +5318,7 @@ static LeptrisDocument html_parse_shared(
              * onto the outer elements). */
             if (text < p) {
                 size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -5292,8 +5343,7 @@ static LeptrisDocument html_parse_shared(
             strcmp(name, "noframes") != 0) {
             if (text < p) {
                 size_t dlen = 0;
-                    char* dec =
-                        h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                    char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     int ws = 1;
                     for (const char* q2 = dec; *q2; q2++)
@@ -5318,7 +5368,7 @@ static LeptrisDocument html_parse_shared(
         /* Flush pending text before the element. */
         if (text < p) {
             size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
             if (dec && *dec) {
                 LeptrisTextNode* t =
                     leptris_text_create(dec, dlen, b.pool);
@@ -5389,7 +5439,7 @@ static LeptrisDocument html_parse_shared(
         if (b.whatwg && strcmp(name, "html") == 0 && b.html_seen) {
             if (text < p) {
                 size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(dec, dlen,
                                                              b.pool);
@@ -5580,7 +5630,7 @@ static LeptrisDocument html_parse_shared(
         if (tmpl_act == 1) {
             if (text < p) {
                 size_t dlen = 0;
-                char* dec = h_decode_body(b.pool, text, p, b.whatwg, &dlen);
+                char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
                     LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
@@ -5901,7 +5951,7 @@ static LeptrisDocument html_parse_shared(
     /* Trailing text. */
     if (text < end) {
         size_t dlen = 0;
-        char* dec = h_decode_body(b.pool, text, end, b.whatwg, &dlen);
+        char* dec = h_decode_text(&b, text, end, &dlen);
         if (dec && *dec) {
             /* #659 after </html> with a frameset body, non-ws text
              * reprocesses into the frameset and drops (13.2.6.4.18,
