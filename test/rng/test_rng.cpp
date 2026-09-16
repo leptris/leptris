@@ -186,6 +186,27 @@ TEST(RngParse, SkipsForeignNamespaceAnnotations) {
     leptris_rng_free(rng);
 }
 
+TEST(RngParse, AnyNameNameClassMatchesAnyElement) {
+    /* <element><anyName/> is the wildcard name class (RELAX NG
+     * 4.14): biblio.rng's recursive AnyElement define. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><element name='r'>"
+        "<oneOrMore><element><anyName/>"
+        "<attribute><anyName/></attribute><text/>"
+        "</element></oneOrMore>"
+        "</element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << "anyName must parse";
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r xmlns='urn:t'><x a='1'>t</x><y>b='2'>u</y></r>";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
 TEST(RngParse, RejectsUncombinedRedefinition) {
     LeptrisStatus st = LEPTRIS_OK;
     const char schema[] = SCHEMA(

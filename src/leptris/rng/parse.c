@@ -64,6 +64,13 @@ static void parse_children_into(RngGrammar* g, LeptrisElement e,
          * (metanorma isodoc-compile.rng) are saturated with them. */
         const char* cns = leptris_element_get_namespace_uri((LeptrisElement)c);
         if (!cns || strcmp(cns, RNG_NS) != 0) continue;
+        /* Name-class children of element/attribute patterns are
+         * consumed by the parent's name handling (anyName checked
+         * above), not content patterns. */
+        if (is_rng((LeptrisElement)c, "anyName") ||
+            is_rng((LeptrisElement)c, "nsName") ||
+            is_rng((LeptrisElement)c, "name"))
+            continue;
         RngPattern* p = parse_pattern(g, (LeptrisElement)c, err, errsz);
         if (!p) return;
         pat_append(wrap, p);
@@ -80,18 +87,43 @@ static RngPattern* parse_pattern(RngGrammar* g, LeptrisElement e,
         p->name = dup_attr(e, "name");
         p->ns = dup_attr(e, "ns");
         if (!p->name) {
-            snprintf(err, errsz, "element: missing @name");
-            free(p);
-            return NULL;
+            /* Child name class: <anyName/> is the wildcard (4.14).
+             * <name>/<nsName> name classes stay unsupported — named
+             * schemas use the @name attribute for those. */
+            int any = 0;
+            for (LeptrisNodeRef c =
+                     leptris_node_first_child((LeptrisNodeRef)e);
+                 c; c = leptris_node_next_sibling(c)) {
+                if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                if (is_rng((LeptrisElement)c, "anyName")) { any = 1; break; }
+            }
+            if (!any) {
+                snprintf(err, errsz, "element: missing @name");
+                free(p);
+                return NULL;
+            }
+            p->any_name = 1;
         }
     } else if (is_rng(e, "attribute")) {
         p = pat_new(RNG_ATTRIBUTE);
         p->name = dup_attr(e, "name");
         p->ns = dup_attr(e, "ns");
         if (!p->name) {
-            snprintf(err, errsz, "attribute: missing @name");
-            free(p);
-            return NULL;
+            int any = 0;
+            for (LeptrisNodeRef c =
+                     leptris_node_first_child((LeptrisNodeRef)e);
+                 c; c = leptris_node_next_sibling(c)) {
+                if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                if (is_rng((LeptrisElement)c, "anyName")) { any = 1; break; }
+            }
+            if (!any) {
+                snprintf(err, errsz, "attribute: missing @name");
+                free(p);
+                return NULL;
+            }
+            p->any_name = 1;
         }
     } else if (is_rng(e, "choice") || is_rng(e, "interleave") ||
                is_rng(e, "group")) {

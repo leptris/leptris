@@ -191,6 +191,13 @@ static int all_text_ws(LeptrisElement e) {
 }
 
 static int names_match(const RngPattern* p, LeptrisElement e) {
+    if (p->any_name) {
+        if (p->ns) {
+            const char* uri = leptris_element_get_namespace_uri(e);
+            if (!uri || strcmp(p->ns, uri) != 0) return 0;
+        }
+        return 1;
+    }
     const char* n = leptris_element_name(e);
     if (!n || strcmp(p->name, n) != 0) return 0;
     if (p->ns) {
@@ -229,6 +236,10 @@ static int pattern_consumes_attr(RngVal* v, RngPattern* p,
     for (RngPattern* c = p->first_child; c; c = c->next) {
         switch (c->kind) {
             case RNG_ATTRIBUTE:
+                if (c->any_name) {
+                    const char* got = leptris_element_attribute(e, name);
+                    return attr_content_satisfied(c, got ? got : "");
+                }
                 if (c->name && strcmp(c->name, name) == 0) {
                     const char* got = leptris_element_attribute(e, name);
                     return attr_content_satisfied(c, got ? got : "");
@@ -255,6 +266,7 @@ static int check_required_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
     for (RngPattern* c = p->first_child; c; c = c->next) {
         switch (c->kind) {
             case RNG_ATTRIBUTE: {
+                if (c->any_name) break;   /* wildcard: satisfiable */
                 const char* got = leptris_element_attribute(e, c->name);
                 if (!got) {
                     diag(v, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,  e,
