@@ -109,6 +109,23 @@ bool load_ref(const std::string& path,
     return true;
 }
 
+/* "path:LINE:COL: error: msg" -> source position. */
+struct LineCol {
+    int line;
+    int col;
+};
+
+LineCol line_col_only(const std::string& line) {
+    LineCol result{0, 0};
+    size_t p1 = line.find(':');
+    size_t p2 = p1 == std::string::npos ? std::string::npos
+                                       : line.find(':', p1 + 1);
+    if (p1 == std::string::npos || p2 == std::string::npos) return result;
+    result.line = std::atoi(line.c_str() + p1 + 1);
+    result.col = std::atoi(line.c_str() + p2 + 1);
+    return result;
+}
+
 /* Split a "path:line:col: error: msg" line and pull out the
     // post-error message. */
 std::string message_only(const std::string& line) {
@@ -143,8 +160,12 @@ TEST(RngCorpusMessages, MatchesJingMessageText) {
         }
         if (!cur.empty()) expected.push_back(cur);
 
-        /* Strip the path prefix off each expected message. */
-        for (auto& m : expected) m = message_only(m);
+        /* Split each expected line into position + message. */
+        std::vector<LineCol> expected_pos;
+        for (auto& m : expected) {
+            expected_pos.push_back(line_col_only(m));
+            m = message_only(m);
+        }
 
         /* Schema + instance paths from the key stem (e.g. "003.bad"). */
         std::string stem = key.substr(0, key.find('.'));
@@ -183,6 +204,17 @@ TEST(RngCorpusMessages, MatchesJingMessageText) {
                 ADD_FAILURE() << stem << " message[" << i
                               << "] mismatch:\n  jing:    " << expected[i]
                               << "\n  leptris: " << m;
+                ok = false;
+            }
+            int got_line = leptris_rng_error_line(rng, i);
+            int got_col = leptris_rng_error_column(rng, i);
+            if (got_line != expected_pos[i].line ||
+                got_col != expected_pos[i].col) {
+                ADD_FAILURE() << stem << " position[" << i
+                              << "] mismatch:\n  jing:    "
+                              << expected_pos[i].line << ":"
+                              << expected_pos[i].col << "\n  leptris: "
+                              << got_line << ":" << got_col;
                 ok = false;
             }
         }

@@ -97,3 +97,9 @@ LEPTRIS_API int leptris_rng_error_line(LeptrisRelaxNG rng, size_t i) {
     if (!r || i >= (size_t)r->err_count) return 0;
     return r->err_line[i];
 }
+
+LEPTRIS_API int leptris_rng_error_column(LeptrisRelaxNG rng, size_t i) {
+    struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+    if (!r || i >= (size_t)r->err_count) return 0;
+    return r->err_col[i];
+}

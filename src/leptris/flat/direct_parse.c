@@ -1098,6 +1098,35 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     doc->xml_buffer_len = len;
     doc->xml_buffer_needs_free = owns_buffer;
     doc->xml_buffer_slack = buf_is_owned_copy ? 64u : 0u;
+    if (len < 0x7FFFFFFFu) {
+        size_t cap = 256, n_ = 0;
+        uint32_t* brks = (uint32_t*)malloc(cap * sizeof(uint32_t));
+        if (!brks) {
+            leptris_pool_destroy(pool);
+            if (owns_buffer == 1)
+                leptris_arena_buffer_release(buf, len + 1 + 64);
+            return NULL;
+        }
+        for (size_t i = 0; i < len; i++) {
+            if (buf[i] != '\n') continue;
+            if (n_ == cap) {
+                cap *= 2;
+                uint32_t* grown = (uint32_t*)realloc(
+                    brks, cap * sizeof(uint32_t));
+                if (!grown) {
+                    free(brks);
+                    leptris_pool_destroy(pool);
+                    if (owns_buffer == 1)
+                        leptris_arena_buffer_release(buf, len + 1 + 64);
+                    return NULL;
+                }
+                brks = grown;
+            }
+            brks[n_++] = (uint32_t)i;
+        }
+        doc->line_breaks = brks;
+        doc->line_break_count = n_;
+    }
     /* No leptris_compact_set_current_document — direct_parse is
      * overflow-table-free. All compact pointer edges use direct
      * offset arithmetic, never touching the shared thread-local
@@ -1359,6 +1388,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             /* Parse attributes (scans from the delimiter position). */
             int self_closing = dp_parse_attrs(&p, elem);
             if (self_closing < 0) goto fail;
+            elem->start_tag_end_off = p.line_offsets_ok
+                ? (uint32_t)(p.pos - p.buf) : 0u;
+            if (self_closing) elem->element_end_off = elem->start_tag_end_off;
 
             /* NOW safe to NUL-terminate the name — dp_parse_attrs
              * has finished scanning the open tag. */
@@ -1458,6 +1490,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                               close_local_len) != 0) {
                 goto fail;
             }
+            open->element_end_off = p.line_offsets_ok
+                ? (uint32_t)(p.pos - p.buf) : 0u;
             p.depth--;
             /* Clear the closed level's tail cache (AFTER the
              * decrement: at max depth the pre-decrement index would

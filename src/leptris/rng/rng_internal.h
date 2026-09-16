@@ -76,7 +76,7 @@ struct leptris_relaxng {
     int err_count;
     int err_cap;
     int* err_line;       /* parse-line of the offending element (0 unknown) */
-    int* err_col;        /* column 0 — real tracking is a future sub-fix */
+    int* err_col;        /* parser-recorded Jing-compatible column */
     char** err_msg;
 };
 
