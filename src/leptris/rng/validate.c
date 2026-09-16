@@ -355,7 +355,19 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
         }
         case RNG_OPTIONAL: {
             size_t r = match_seq(v, p->first_child, kids, n, idx);
-            return r == (size_t)-1 ? idx : r;
+            if (r == (size_t)-1) {
+                /* The branch is skippable: an inner mismatch is
+                 * speculative, not a failure — clear the latch like
+                 * ZERO_OR_MORE/CHOICE do, or the stuck failure
+                 * poisons every later match (regression since the
+                 * #878 vocabulary pass made silent mismatches
+                 * loud; optional-omitted documents validated
+                 * false). */
+                v->failed = 0;
+                v->err[0] = 0;
+                return idx;
+            }
+            return r;
         }
         case RNG_ZERO_OR_MORE: {
             for (;;) {

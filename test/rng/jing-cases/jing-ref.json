@@ -188,5 +188,15 @@
   "rc": 1,
   "out": "018.bad.xml:1:11: error: element \"a\" missing required attribute \"q\"",
   "err": ""
+ },
+ "019.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "019.bad": {
+  "rc": 1,
+  "out": "019.bad.xml:1:46: error: element \"book\" incomplete; missing required element \"author\"",
+  "err": ""
  }
 }
