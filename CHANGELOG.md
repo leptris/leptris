@@ -4,13 +4,30 @@
 
 ### Added
 
-- parser-recorded source positions (#1124) (dom)
+- #1124: parser-recorded source positions. Every element carries
+  `start_tag_end_off` + `element_end_off` (raw byte offsets stamped
+  at the tag boundaries the parser scans), and the document's
+  newline table is built eagerly before any NUL-termination — so
+  positions survive on multi-line start tags. New public API
+  `leptris_node_source_position(node, out)` returns
+  `{line, col_start, col_end}` (Jing convention: the column of the
+  byte after the start tag's `>` / the element's final `>`), and
+  `leptris_rng_error_column` exposes the column per validation
+  error. `leptris_node_line` becomes a thin wrapper; the
+  RESOLVED-bit caching that destroyed the raw offset is gone. The
+  RNG Jing parity gate now asserts exact message + line + column:
+  19/19 — all four #878 error-parity gaps are closed engine-side.
+  The element layout grows to 72 bytes (the 64-byte cache-line pin
+  is retired; foundation for #1125/#1127).
 
 ### Fixed
 
-- free the line-break table on inplace documents too (LSan) (dom)
-- free the line-break table before pool_destroy reclaims doc (UAF) (parse)
-- free the eager line-break table on the fail path (ASAN) (parse)
+- Parse failure paths: the eagerly-built line-break table is now
+  freed before the pool reclaims the document struct (use-after-
+  free caught by Linux ASAN), on the parse-fail path (leak), and
+  on inplace documents — the last was a latent pre-existing leak
+  (the free was gated on `xml_buffer_needs_free`, which inplace
+  docs don't set).
 
 
 
