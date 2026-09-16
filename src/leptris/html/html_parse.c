@@ -2996,9 +2996,35 @@ static int h_top_foreign(HBuilder* b) {
  * insertion points. */
 static char* h_decode_text(HBuilder* b, const char* s, const char* e,
                            size_t* out_len) {
+    char* dec;
     if (h_top_foreign(b))
-        return h_decode_foreign(b->pool, s, e, b->whatwg, out_len);
-    return h_decode_body(b->pool, s, e, b->whatwg, out_len);
+        dec = h_decode_foreign(b->pool, s, e, b->whatwg, out_len);
+    else
+        dec = h_decode_body(b->pool, s, e, b->whatwg, out_len);
+    /* 13.2.6.4.7: a non-whitespace character token sets
+     * frameset-ok to "not ok". Routing through the DECODED value
+     * makes the rule context-exact: a dropped in-body NUL is an
+     * ignored token (no clear — plain-text-unsafe:2/3), and the
+     * U+FFFD it becomes in FOREIGN content is the NULL rule's own
+     * token, not an "any other" character (no clear — :19/20);
+     * ordinary characters clear everywhere (:21). One home, every
+     * flush site. */
+    if (dec && b->whatwg && b->frameset_ok) {
+        int foreign = h_top_foreign(b);
+        for (const char* c = dec; *c; ) {
+            if ((unsigned char)c[0] == 0xEF &&
+                (unsigned char)c[1] == 0xBF &&
+                (unsigned char)c[2] == 0xBD) {
+                if (!foreign) { b->frameset_ok = 0; break; }
+                c += 3;
+                continue;
+            }
+            if ((unsigned char)*c < 0x80 && h_is_ws(*c)) { c++; continue; }
+            b->frameset_ok = 0;
+            break;
+        }
+    }
+    return dec;
 }
 
 /* Foreign-content text decode (13.2.6.5): a NUL character token
@@ -4376,13 +4402,26 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
      * wrapper — no synthesized shell around it. */
     LeptrisElement body = NULL;
     if (b->frameset && rest) {
+        /* 13.2.6.4.9 frameset conversion: the body element — with
+         * everything accumulated in it — is REMOVED. Everything in
+         * the rest run BEFORE the frameset element was body
+         * content and drops with it (plain-text-unsafe:19-23);
+         * the first frameset element is what replaces the body. */
         LeptrisNodeRef c0 = rest;
-        while (c0 && leptris_node_get_type(c0) !=
-                        LEPTRIS_NODE_TYPE_ELEMENT)
+        LeptrisNodeRef prev0 = NULL;
+        while (c0) {
+            if (leptris_node_get_type(c0) == LEPTRIS_NODE_TYPE_ELEMENT &&
+                h_ieq_raw(leptris_element_name((LeptrisElement)c0),
+                          "frameset"))
+                break;
+            prev0 = c0;
             c0 = leptris_node_get_next_sibling(c0);
-        if (c0 && h_ieq_raw(leptris_element_name((LeptrisElement)c0),
-                            "frameset"))
+        }
+        if (c0) {
+            if (prev0)
+                leptris_node_set_next_sibling(prev0, NULL);
             body = (LeptrisElement)c0;
+        }
     }
     if (body) {
         /* Already owns its children and its place in html's
@@ -5279,8 +5318,21 @@ static LeptrisDocument html_parse_shared(
             /* depth<=1: at most the (explicit or synthesized) html
              * element is open; frameset-ok is the spec gate and the
              * body is removed wholesale when it converts. */
-            if (!b.frameset && b.depth <= 1 && b.frameset_ok) {
+            if (!b.frameset && b.frameset_ok) {
+                /* 13.2.6.4.9: the conversion removes the body
+                 * element and everything open above it — the new
+                 * frameset opens at html level, not inside the
+                 * current insertion point (plain-text-unsafe:23:
+                 * <svg><p><frameset> converts; p's subtree drops
+                 * with the body). */
                 b.frameset = 1;
+                /* Keep an EXPLICIT <html> on the stack — the
+                 * finisher's explicit-html path keys off it
+                 * (plain-text-unsafe:2/3 regressed without). */
+                b.depth =
+                    (b.depth > 0 && b.open[0] &&
+                     h_ieq_raw(leptris_element_name(b.open[0]), "html"))
+                        ? 1 : 0;
                 /* falls through: the normal open pushes it */
             } else if (!(b.frameset && b.depth > 0)) {
                 /* Dropped token: flush pending text first. */
