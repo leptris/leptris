@@ -175,11 +175,14 @@ void xpath_function_registry_register(
         }
     }
 
-    /* Add function */
+    /* Add function. user_data must be written explicitly: the
+     * array is realloc'd, so a skipped field carries heap garbage
+     * until someone patches it (#1111). */
     registry->functions[registry->count].name = name;
     registry->functions[registry->count].handler = handler;
     registry->functions[registry->count].min_args = min_args;
     registry->functions[registry->count].max_args = max_args;
+    registry->functions[registry->count].user_data = NULL;
     registry->count++;
 }
 
