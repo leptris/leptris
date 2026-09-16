@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+## [1.9.183] - 2026-09-16
+
+### Changed
+
+- #1127: one arena per document. `leptris_document_create` now
+  routes through `leptris_arena_create` + the arena-backed pool —
+  the same allocation path the parser uses; the pool's page
+  machinery no longer runs for documents. The dead
+  `compact_allocator` (compiled since the compact-mode era,
+  referenced by nothing) is deleted: 313 lines removed, the memory
+  subsystem is `arena.c` + `pool.c`. Gate:
+  `OneArenaPerDocument.CreatedDocumentsAreArenaBacked`.
+- Perf-gate reliability: `SmallDocumentParseIsFast` measured a
+  healthy parse/memcpy ratio of 160–180, but sustained CPU
+  contention on shared macOS runners inflates the CPU-bound parse
+  side past the 1000 threshold (observed 1001.8) even through the
+  min-of-4 filter. Threshold 1500 keeps >4x margin against a real
+  10x regression (>= 1700) and absorbs the contention band.
+
+This release completes the four-move clean-architecture queue:
+#1124 (parser-recorded positions) → #1126 (unified error narration)
+→ #1125 (immutable parse buffer) → #1127 (one arena).
+
+
 ## [1.9.182] - 2026-09-16
 
 ### Added
