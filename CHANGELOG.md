@@ -4,18 +4,39 @@
 
 ### Added
 
-- the #1115 engine changes (stashed mid-flow; complements the spec commit) (descriptor)
-- rule-level ns forms on ChildPlan + position on all value kinds (#1115) (descriptor)
+- #1114 / #1115 / #1118: descriptor plan surfaces — collection
+  results echo the producing row's wire_name/type_tag (the
+  documented accessor contract), ChildPlan gains rule-level
+  ns_form (+ns_uri) for mixed-qualification schemas, and every
+  value kind carries the source node's byte offset (parse nodes:
+  byteOffset+1) for document-order interleavings across rows. The
+  trailing fields are additive to the frozen v1 ABI — existing
+  aggregate initializers keep working.
+- #1117: C14N 1.1 ground truth vs local libxml2 xmllint --c14n11:
+  whitespace-only PI data renders as no data, and document-level
+  nodes serialize with a newline after every node except the
+  document's last child (prolog nodes, the root when epilog
+  follows, and epilog siblings). Family 1 (inter-element whitespace)
+  is the existing parse knob — `LEPTRIS_PARSE_DROP_WS_TEXT` is
+  our `XML_PARSE_NOBLANKS` equivalent.
 
 ### Fixed
 
-- whitespace-only PI data dropped; doc-level node separators (#1117) (c14n)
-- the stray-</p> rule is in-body only (#659) (html)
-- in-select select end-tag, stray </p>, li/dd/dt scope closes (#659) (html)
-- collection results echo the producing row's wire_name/type_tag (#1113) (descriptor)
-- initialize user_data on registry fresh-append (#1111) (xpath)
-- CLI specs work in out-of-tree builds (#1109) (test)
-- frameset conversion + frameset-ok semantics; harness quote/scanner fixes (#659) (html)
+- #659 corpus: in-select `<select>` start tag acts as its end
+  tag (no nesting), stray `</p>` inserts an empty `<p>` only when
+  the parser is in body territory (the body_seen flag), and
+  li/dd/dt start tags close the previous li/dd/dt in LIST-ITEM
+  scope (the scope boundaries, not div/p/formatting). The
+  html5lib corpus harness also gained a quote-parity-safe
+  multi-line expectation parser and a `H5DATA=<case-id>` debug
+  hook dumping the scanner's assembled input bytes.
+- #1113: descriptor plan walk — collection wrappers now carry
+  the producing row's wire_name/type_tag (test_descriptor 8/8).
+- #1117: `canonicalize_ex` now holds its with_comments flag
+  across its doc-level splice (subtree_ex was restoring early, so
+  doc comments were always dropped).
+- #1107: CLI specs work in out-of-tree builds.
+- #1111: registry fresh-append initializes user_data.
 
 
 
