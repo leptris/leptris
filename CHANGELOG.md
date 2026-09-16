@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+## [1.9.178] - 2026-09-16
+
+### Added
+
+- the #1115 engine changes (stashed mid-flow; complements the spec commit) (descriptor)
+- rule-level ns forms on ChildPlan + position on all value kinds (#1115) (descriptor)
+
+### Fixed
+
+- whitespace-only PI data dropped; doc-level node separators (#1117) (c14n)
+- the stray-</p> rule is in-body only (#659) (html)
+- in-select select end-tag, stray </p>, li/dd/dt scope closes (#659) (html)
+- collection results echo the producing row's wire_name/type_tag (#1113) (descriptor)
+- initialize user_data on registry fresh-append (#1111) (xpath)
+- CLI specs work in out-of-tree builds (#1109) (test)
+- frameset conversion + frameset-ok semantics; harness quote/scanner fixes (#659) (html)
+
+
+
 ## [1.9.177] - 2026-09-16
 
 ### Fixed
