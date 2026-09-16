@@ -22,6 +22,7 @@ set(LEPTRIS_SOURCES
     leptris/core.c
     # DOM nodes
     leptris/dom/node.c
+    leptris/dom/diag.c
     leptris/dom/digest.c
     leptris/sch/schematron.c
     leptris/diff/diff.c

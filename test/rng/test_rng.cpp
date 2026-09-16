@@ -223,6 +223,119 @@ TEST(RngErrors, AccumulatesAndExposesPerError) {
     leptris_document_free(doc);
     leptris_rng_free(schema);
 }
+
+// ---- #1126: structured kinds on the diag records ------------------
+
+TEST(RngDiagKinds, CorpusCasesCarryTheirKinds) {
+    /* 003: <r><c/></r> vs choice(a|b) — child error then parent
+     * incomplete. */
+    {
+        const char* sch =
+            "<element xmlns='" RNGNS "' name='r'>"
+            "<choice><element name='a'/><element name='b'/></choice>"
+            "</element>";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+        ASSERT_NE(rng, nullptr);
+        const char* ins = "<r><c/></r>";
+        LeptrisDocument d = leptris_parse_string(ins, strlen(ins), NULL);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+        struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+        ASSERT_EQ(r->diag_count, 2);
+        EXPECT_EQ(r->diags[0].kind, LEPTRIS_DIAG_NOT_ALLOWED_ANYWHERE);
+        EXPECT_EQ(r->diags[1].kind, LEPTRIS_DIAG_INCOMPLETE);
+        leptris_document_free(d);
+        leptris_rng_free(rng);
+    }
+    /* 006: group(a,b) vs <b/><a/> — not-allowed-yet + overflow. */
+    {
+        const char* sch =
+            "<element xmlns='" RNGNS "' name='r'>"
+            "<group><element name='a'/><element name='b'/></group>"
+            "</element>";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+        ASSERT_NE(rng, nullptr);
+        const char* ins = "<r><b/><a/></r>";
+        LeptrisDocument d = leptris_parse_string(ins, strlen(ins), NULL);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+        struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+        ASSERT_EQ(r->diag_count, 2);
+        EXPECT_EQ(r->diags[0].kind, LEPTRIS_DIAG_NOT_ALLOWED_YET);
+        EXPECT_EQ(r->diags[1].kind, LEPTRIS_DIAG_NOT_ALLOWED_HERE);
+        leptris_document_free(d);
+        leptris_rng_free(rng);
+    }
+    /* 009 / 017 / 000 / 001: character content, attr value, missing
+     * attr, extra attr. */
+    {
+        const char* sch =
+            "<element xmlns='" RNGNS "' name='n'>"
+            "<data type='integer'/></element>";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+        ASSERT_NE(rng, nullptr);
+        const char* ins = "<n>x</n>";
+        LeptrisDocument d = leptris_parse_string(ins, strlen(ins), NULL);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+        struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+        ASSERT_EQ(r->diag_count, 1);
+        EXPECT_EQ(r->diags[0].kind, LEPTRIS_DIAG_CHAR_CONTENT_INVALID);
+        leptris_document_free(d);
+        leptris_rng_free(rng);
+    }
+    {
+        const char* sch =
+            "<element xmlns='" RNGNS "' name='v'><value>yes</value></element>";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+        ASSERT_NE(rng, nullptr);
+        const char* ins = "<v>no</v>";
+        LeptrisDocument d = leptris_parse_string(ins, strlen(ins), NULL);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+        struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+        ASSERT_EQ(r->diag_count, 1);
+        EXPECT_EQ(r->diags[0].kind, LEPTRIS_DIAG_CHAR_CONTENT_INVALID);
+        leptris_document_free(d);
+        leptris_rng_free(rng);
+    }
+    {
+        const char* sch =
+            "<element xmlns='" RNGNS "' name='a'><attribute name='x'/></element>";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+        ASSERT_NE(rng, nullptr);
+        const char* ins = "<a/>";
+        LeptrisDocument d = leptris_parse_string(ins, strlen(ins), NULL);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+        struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+        ASSERT_EQ(r->diag_count, 1);
+        EXPECT_EQ(r->diags[0].kind, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR);
+        leptris_document_free(d);
+        leptris_rng_free(rng);
+    }
+    {
+        const char* sch =
+            "<element xmlns='" RNGNS "' name='a'><empty/></element>";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+        ASSERT_NE(rng, nullptr);
+        const char* ins = "<a x='1'/>";
+        LeptrisDocument d = leptris_parse_string(ins, strlen(ins), NULL);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+        struct leptris_relaxng* r = (struct leptris_relaxng*)rng;
+        ASSERT_EQ(r->diag_count, 1);
+        EXPECT_EQ(r->diags[0].kind, LEPTRIS_DIAG_ATTR_NOT_ALLOWED);
+        leptris_document_free(d);
+        leptris_rng_free(rng);
+    }
+}
 }  // namespace
 
 /* ---- phase 2: the core validator ------------------------------ */

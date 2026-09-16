@@ -9,6 +9,7 @@
 #define LEPTRIS_RNG_INTERNAL_H
 
 #include "../include/leptris.h"
+#include "../dom/diag.h"
 #include <stddef.h>
 
 typedef enum {
@@ -70,14 +71,13 @@ struct RngGrammar {
 /* The public opaque handle. */
 struct leptris_relaxng {
     RngGrammar* grammar;
-    /* #878: per-error list — the FIRST message is also kept in
-     * the legacy `error` slot for leptris_rng_error() back-compat. */
+    /* #1126: the unified diag records — kind, offender, position,
+     * rendered message. The FIRST message is mirrored into the
+     * legacy `error` slot for leptris_rng_error() back-compat. */
     char* error;
-    int err_count;
-    int err_cap;
-    int* err_line;       /* parse-line of the offending element (0 unknown) */
-    int* err_col;        /* parser-recorded Jing-compatible column */
-    char** err_msg;
+    LeptrisDiag* diags;
+    int diag_count;
+    int diag_cap;
 };
 
 /* parse.c */
