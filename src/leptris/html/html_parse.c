@@ -2127,6 +2127,11 @@ static int h_closes_ww(const char* open, const char* start) {
     /* Heading starts pop a current heading (13.2.6.4.7 "in
      * body": <h1>x<h2> -> siblings). */
     if (h_is_heading(open) && h_is_heading(start)) return 1;
+    /* tests6:42: a <table> start inside a table closes the open
+     * table - the new table is a following SIBLING, not a child
+     * (<table><table> -> body > [table, table]). */
+    if (strcmp(open, "table") == 0 && strcmp(start, "table") == 0)
+        return 1;
     /* webkit02:28-35: in select, an <hr> closes the open
      * optgroup layers - hr is a select child, not optgroup
      * content. */
@@ -2972,7 +2977,7 @@ static int h_fosterable(HBuilder* b, LeptrisNodeRef n) {
              h_ieq_raw(nname, "col") || h_ieq_raw(nname, "colgroup") ||
              h_ieq_raw(nname, "tbody") || h_ieq_raw(nname, "form") ||
              h_ieq_raw(nname, "script") || h_ieq_raw(nname, "style") ||
-             h_ieq_raw(nname, "template") || h_ieq_raw(nname, "input"));
+             h_ieq_raw(nname, "template"));
 }
 
 /* WHATWG formatting elements (the adoption agency's subject). */
@@ -5966,6 +5971,21 @@ static LeptrisDocument html_parse_shared(
                 text = p;
                 continue;
             }
+        }
+
+        /* 13.2.6.4.11: input/keygen/textarea in select close the
+         * select and REPROCESS in body - <select><keygen> gives
+         * siblings (tests7:14/31). */
+        if (b.whatwg && h_in_select(&b) &&
+            (strcmp(name, "input") == 0 ||
+             strcmp(name, "keygen") == 0 ||
+             strcmp(name, "textarea") == 0)) {
+            for (size_t d2 = b.depth; d2 > 0; d2--)
+                if (strcmp(leptris_element_name(b.open[d2 - 1]),
+                           "select") == 0) {
+                    b.depth = d2 - 1;
+                    break;
+                }
         }
 
         /* #659 "in head noscript" (scripting off): head content
