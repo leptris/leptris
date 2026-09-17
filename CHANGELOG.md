@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.192] - 2026-09-17
+
+### Fixed
+
+- the diagnostic walk sees attributes behind refs (Root-Attributes) (rng)
+- base-dir derivation handles Windows path separators (rng)
+- base-dir derivation handles Windows path separators (rng)
+
+
+
 ## [1.9.191] - 2026-09-17
 
 ### Fixed
