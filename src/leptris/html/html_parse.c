@@ -5422,16 +5422,15 @@ static LeptrisDocument html_parse_shared(
                                          strcmp(on, "div") != 0 &&
                                          strcmp(on, "p") != 0;
                             } else {
-                                /* Block-level targets (address,
-                                 * div, list items...) close
-                                 * THROUGH the fence; phrasing
-                                 * strays stay fenced (tests20:41:
-                                 * </address> pops the button). */
+                                /* </address> closes through the
+                                 * fence (tests20:41); everything
+                                 * else fences - div still stops
+                                 * at marquee (tests1:26). */
                                 fenced = (h_ieq_raw(on, "button") ||
                                           h_ieq_raw(on, "marquee") ||
                                           h_ieq_raw(on, "object") ||
                                           h_ieq_raw(on, "applet")) &&
-                                         !h_p_closes(lname);
+                                         strcmp(lname, "address") != 0;
                             }
                             if (fenced) break;
                         }
