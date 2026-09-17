@@ -5182,6 +5182,25 @@ static LeptrisDocument html_parse_shared(
                                 tag_match = strcmp(on, lname) == 0;
                             }
                         }
+                        /* #659 in-body any-other-end-tag: crossing
+                         * a scope-fencing element that is not the
+                         * target takes the target out of reach - the
+                         * token is ignored (tests1:25: </span> inside
+                         * an open button). The corpus keeps closes
+                         * working through list/block containers, so
+                         * the fence is the classic scope set only. */
+                        if (b.whatwg && on &&
+                            b.open_ns[d - 1] == H_NS_HTML &&
+                            !tag_match &&
+                            !h_is_formatting(lname) &&
+                            strcmp(lname, "template") != 0 &&
+                            !h_is_heading(lname) &&
+                            (h_ieq_raw(on, "button") ||
+                             h_ieq_raw(on, "marquee") ||
+                             h_ieq_raw(on, "object") ||
+                             h_ieq_raw(on, "applet"))) {
+                            break;
+                        }
                         if (on && tag_match) {
                             /* Scope guard (WHATWG): a foreign
                              * integration point between the

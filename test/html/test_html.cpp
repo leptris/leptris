@@ -937,6 +937,16 @@ TEST(HtmlParse, ExplicitBodyDisablesFramesetReplacement) {
               "<!DOCTYPE html><html><head/><body/></html>");
 }
 
+TEST(HtmlParse, SpecialElementFencesStrayEndTag) {
+    /* Vendored tests1:25: the any-other-end-tag walk stops at a
+     * SPECIAL element that is not the target - </span> inside an
+     * open <button> is ignored and "bar" joins the button's text
+     * (13.2.6.4.7 step 3). */
+    EXPECT_EQ(Html("<!DOCTYPE html><span><button>foo</span>bar"),
+              "<!DOCTYPE html><html><head/><body><span><button>"
+              "foobar</button></span></body></html>");
+}
+
 TEST(HtmlForeign, SvgInsideMathmlSubtreeIsSvgNamespaced) {
     /* Vendored corpus tests10:52-54, tests12:1-2, tests9:4,
      * tests20:64: <svg> is a namespace ROOT wherever it starts -
