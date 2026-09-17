@@ -1784,6 +1784,66 @@ TEST(HtmlParse, HtmlEndTagInForeignPopsForeignScope) {
     EXPECT_EQ(Html("<math></p><foo>"), "<math/><p/><foo/>");
 }
 
+/* 13.2.6.3: a second <html> start tag merges only attributes
+ * NOT already present (first wins) - <html xml:lang=bar><html
+ * xml:lang=foo> keeps bar (tests14:4). Applies after </html> in a
+ * frameset document too (tests19:38: <html c=d>...</html><html
+ * a=b> keeps BOTH). */
+TEST(HtmlTwoModes, SecondHtmlAttrMergeFirstWins) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] =
+        "<!DOCTYPE html><html xml:lang=bar><html xml:lang=foo>";
+    LeptrisDocument doc = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    int n = 0;
+    const char* v = nullptr;
+    for (LeptrisAttribute a = leptris_element_first_attribute(root); a;
+         a = leptris_attribute_next(a)) {
+        n++;
+        if (strcmp(leptris_attribute_get_name(a), "xml:lang") == 0)
+            v = leptris_attribute_get_value(root, a);
+    }
+    EXPECT_EQ(n, 1);
+    EXPECT_STRNE(v, nullptr);
+    if (v) EXPECT_STREQ(v, "bar");
+    leptris_document_free(doc);
+
+    const char in2[] =
+        "<!doctype html><html c=d><body></html><html a=b>";
+    LeptrisDocument d2 = leptris_parse_html_string(in2, sizeof(in2) - 1, &st);
+    ASSERT_NE(d2, nullptr);
+    LeptrisElement r2 = leptris_document_root(d2);
+    ASSERT_NE(r2, nullptr);
+    int have_c = 0, have_a = 0;
+    for (LeptrisAttribute at = leptris_element_first_attribute(r2); at;
+         at = leptris_attribute_next(at)) {
+        const char* an = leptris_attribute_get_name(at);
+        if (strcmp(an, "c") == 0) have_c = 1;
+        if (strcmp(an, "a") == 0) have_a = 1;
+    }
+    EXPECT_TRUE(have_c);
+    EXPECT_TRUE(have_a);
+    leptris_document_free(d2);
+}
+
+/* 13.2.6.4.7: a <body> start tag once the body exists (explicit
+ * or implied) is ignored - attrs merge, frameset-ok clears
+ * (tests19:81: <div><body><frameset> keeps the body). */
+TEST(HtmlParse, BodyStartWhenBodyOpenIsIgnored) {
+    EXPECT_EQ(Html("<div><body>x"), "<div>x</div>");
+    EXPECT_EQ(Html("<div><body><frameset>"), "<div/>");
+}
+
+/* <frame> outside a frameset body is dropped - "in body" has no
+ * frame insertion rule (tests19:76). */
+TEST(HtmlParse, FrameOutsideFramesetDrops) {
+    EXPECT_EQ(Html("<svg>a</svg><frameset><frame>"), "<svg>a</svg>");
+    EXPECT_EQ(Html("<frameset> </frameset><frame>"),
+              "<html><head/><frameset> </frameset></html>");
+}
+
 TEST(HtmlParse, AfterFramesetWhitespaceStaysHtmlChild) {
     /* 13.2.6.4.19: whitespace text in "after frameset" is inserted
      * into the current node (html); non-whitespace reprocesses into
