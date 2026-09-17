@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.189] - 2026-09-17
+
+### Fixed
+
+- combine-merge UAF; XSD \i/\c classes; whole-value anchor (rng)
+
+
+
 ## [1.9.188] - 2026-09-16
 
 ### Added
