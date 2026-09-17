@@ -1762,6 +1762,19 @@ TEST(HtmlParse, HtmlEndTagInForeignPopsForeignScope) {
     EXPECT_EQ(Html("<math></p><foo>"), "<math/><p/><foo/>");
 }
 
+TEST(HtmlParse, AfterFramesetWhitespaceStaysHtmlChild) {
+    /* 13.2.6.4.19: whitespace text in "after frameset" is inserted
+     * into the current node (html); non-whitespace reprocesses into
+     * the frameset and drops. Trailing run after </html> too
+     * (tests6:46, tests19:41/42). */
+    EXPECT_EQ(Html("<html><frameset></frameset></html> "),
+              "<html><head/><frameset/> </html>");
+    EXPECT_EQ(Html("<frameset></frameset>\n"),
+              "<html><head/><frameset/>\n</html>");
+    EXPECT_EQ(Html("<html><frameset></frameset></html> x"),
+              "<html><head/><frameset/></html>");
+}
+
 TEST(HtmlParse, SelectInsertsHr) {
     /* Vendored corpus webkit02.dat 26/27: an <hr> start tag in
      * "in select" is an ordinary insert; a current <option> pops

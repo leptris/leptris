@@ -6543,8 +6543,17 @@ static LeptrisDocument html_parse_shared(
         if (dec && *dec) {
             /* #659 after </html> with a frameset body, non-ws text
              * reprocesses into the frameset and drops (13.2.6.4.18,
-             * tests19:41/42). */
-            int drop = b.whatwg && b.after_html && b.frameset;
+             * tests19:41/42). Whitespace stays an html child after
+             * the frameset (13.2.6.4.19, tests6:46). */
+            int drop = 0;
+            if (b.whatwg && b.after_html && b.frameset) {
+                for (const char* w = dec; *w; w++)
+                    if (*w != ' ' && *w != '\t' &&
+                        *w != '\n' && *w != '\r') {
+                        drop = 1;
+                        break;
+                    }
+            }
             if (!drop) {
                 LeptrisTextNode* t =
                     leptris_text_create(dec, dlen, b.pool);
