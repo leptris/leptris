@@ -5475,11 +5475,11 @@ static LeptrisDocument html_parse_shared(
                 }
             if (!head_only) {
                 b.body_seen = 1;
-                /* Implied body content closes the head-lift window
-                 * at the last node before it (a later fostered or
-                 * after-body title/meta is BODY content, never head
-                 * - tests7:2/5, tests15:4/6). */
-                if (!b.lift_closed) {
+                /* WHATWG only: implied body content closes the
+                 * head-lift window at the last node before it (a
+                 * later fostered or after-body title/meta is BODY
+                 * content, never head - tests7:2/5, tests15:4/6). */
+                if (b.whatwg && !b.lift_closed) {
                     b.lift_closed = 1;
                     b.lift_boundary = b.top_tail;
                 }
@@ -5501,7 +5501,7 @@ static LeptrisDocument html_parse_shared(
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
             if (strcmp(name, "body") == 0) {
                 b.body_tag_seen = 1;
-                b.frameset_ok = 0;
+                if (b.whatwg) b.frameset_ok = 0;
                 /* Only the FIRST structural <body> marks the
                  * lift boundary — a later one would re-enable the
                  * head lift after body content began (tests1:88:
@@ -6288,9 +6288,11 @@ static LeptrisDocument html_parse_shared(
         /* 13.2.5: a solidus on an HTML-namespace start tag sets the
          * self-closing flag, but the flag is IGNORED for non-void
          * HTML elements (parse error, div stays open -
-         * webkit01:46). Only foreign self-closing elements pop. */
+         * webkit01:46). Only foreign self-closing elements pop.
+         * html4 keeps libxml2's honored-slash shape. */
         if (h_is_void(name) ||
-            (self_closing && elem_ns != H_NS_HTML))
+            (self_closing &&
+             (elem_ns != H_NS_HTML || !b.whatwg)))
             b.depth--;
         p = q;
         text = p;
