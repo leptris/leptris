@@ -198,5 +198,15 @@
   "rc": 1,
   "out": "019.bad.xml:1:46: error: element \"book\" incomplete; missing required element \"author\"",
   "err": ""
+ },
+ "020.ok": {
+  "rc": 0,
+  "out": "",
+  "err": ""
+ },
+ "020.bad": {
+  "rc": 1,
+  "out": "020.bad.xml:1:24: error: element \"book\" incomplete; missing required element \"title\"",
+  "err": ""
  }
 }

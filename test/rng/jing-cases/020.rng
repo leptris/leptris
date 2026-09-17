@@ -1,0 +1,3 @@
+<element name="library" xmlns="http://relaxng.org/ns/structure/1.0">
+  <oneOrMore><externalRef href="020-book.rng"/></oneOrMore>
+</element>

@@ -176,8 +176,10 @@ TEST(RngCorpusMessages, MatchesJingMessageText) {
         ASSERT_FALSE(ins_text.empty()) << stem;
 
         LeptrisStatus st = LEPTRIS_OK;
-        LeptrisRelaxNG rng = leptris_rng_parse(
-            sch_text.data(), sch_text.size(), &st);
+        /* File-based entry: externalRef cases need the schema's dir
+         * as base URI (the in-memory entry has none by contract). */
+        LeptrisRelaxNG rng = leptris_rng_parse_file(
+            (dir + "/" + stem + ".rng").c_str(), &st);
         ASSERT_NE(rng, nullptr) << stem << " parse failed: " << st;
         LeptrisDocument d = leptris_parse_string(
             ins_text.data(), ins_text.size(), &st);
