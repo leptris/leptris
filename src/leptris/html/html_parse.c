@@ -3688,6 +3688,17 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 }
         if (nonws) return;
     }
+    /* 13.2.6.4.13 "in column group": non-whitespace text pops the
+     * colgroup and reprocesses in table - the in-table rules then
+     * foster it before the table (tables01:4). */
+    if (b->whatwg && b->depth > 0 &&
+        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
+        b->open_ns[b->depth - 1] == H_NS_HTML &&
+        h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
+                  "colgroup") &&
+        h_fosterable(b, n)) {
+        b->depth--;
+    }
     if (b->depth > 0) {
         LeptrisElement top = b->open[b->depth - 1];
         /* #659 foster (WHATWG only): text/elements in table context
@@ -5185,6 +5196,9 @@ static LeptrisDocument html_parse_shared(
                 h_lower(ns[1]) == 'r') {
                 h_open_element(&b, "br");
                 if (b.depth > 0) b.depth--;   /* br is void */
+                /* br IS body content - a stray </p> after this
+                 * now inserts its empty <p> (tests1:110). */
+                b.body_seen = 1;
                 p = q;
                 text = p;
                 continue;
@@ -6300,12 +6314,16 @@ static LeptrisDocument html_parse_shared(
             {
                 const char* topn =
                     leptris_element_name(b.open[b.depth - 1]);
-                int tableish =
-                    h_ieq_raw(topn, "table") ||
+                /* A caption start clears a row/section back to the
+                 * table - caption is a TABLE child (tables01:13). */
+                int rowish =
                     h_ieq_raw(topn, "tbody") ||
                     h_ieq_raw(topn, "thead") ||
                     h_ieq_raw(topn, "tfoot") ||
-                    h_ieq_raw(topn, "tr") ||
+                    h_ieq_raw(topn, "tr");
+                int tableish =
+                    h_ieq_raw(topn, "table") ||
+                    (rowish && strcmp(name, "caption") != 0) ||
                     h_ieq_raw(topn, "caption") ||
                     h_ieq_raw(topn, "colgroup");
                 /* 13.2.6.4.9 "in caption": a td/th/tr start pops
