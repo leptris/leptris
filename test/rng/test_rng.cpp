@@ -207,6 +207,29 @@ TEST(RngParse, AnyNameNameClassMatchesAnyElement) {
     leptris_rng_free(rng);
 }
 
+TEST(RngParse, CombineSurvivesAcrossMerges) {
+    /* @combine may sit on the FIRST declaration: later same-name
+     * defines merge without repeating it. The merge path used to
+     * free d->combine and re-store the dangling pointer (ASAN:
+     * use-after-free on the metanorma include chain). */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><ref name='c'/></start>"
+        "<define name='c' combine='choice'>"
+        "<element name='a'><empty/></element></define>"
+        "<define name='c'><element name='b'><empty/></element></define>"
+        "<define name='c'><element name='d'><empty/></element></define>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<d/>";
+    LeptrisDocument d2 = leptris_parse_string(doc, sizeof(doc) - 1, NULL);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d2), 1);
+    leptris_document_free(d2);
+    leptris_rng_free(rng);
+}
+
 TEST(RngParse, RejectsUncombinedRedefinition) {
     LeptrisStatus st = LEPTRIS_OK;
     const char schema[] = SCHEMA(
@@ -838,6 +861,35 @@ TEST(RngParse, RejectsIllegalParamName) {
     LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
     EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
     EXPECT_EQ(rng, nullptr);
+}
+
+TEST(RngParse, XmlNameClassesInPatterns) {
+    /* XSD \i (NameStartChar) and \c (NameChar) escapes - the XML
+     * ID pattern "\i\c*|\c+#\c+" appears throughout the
+     * metanorma schemas. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><element name='r'>"
+        "<data type='string'>"
+        "<param name='pattern'>\\i\\c*|\\c+#\\c+</param>"
+        "</data></element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+    const char good[] = "<r>abc</r>";
+    const char good2[] = "<r>a#b</r>";
+    const char bad[] = "<r>1ab</r>";
+    LeptrisDocument d1 = leptris_parse_string(good, sizeof(good) - 1, NULL);
+    LeptrisDocument d2 = leptris_parse_string(good2, sizeof(good2) - 1, NULL);
+    LeptrisDocument d3 = leptris_parse_string(bad, sizeof(bad) - 1, NULL);
+    ASSERT_TRUE(d1 && d2 && d3);
+    EXPECT_EQ(leptris_rng_validate(rng, d1), 1);
+    EXPECT_EQ(leptris_rng_validate(rng, d2), 1);
+    EXPECT_EQ(leptris_rng_validate(rng, d3), 0);
+    leptris_document_free(d1);
+    leptris_document_free(d2);
+    leptris_document_free(d3);
+    leptris_rng_free(rng);
 }
 
 TEST(RngParse, RejectsUnsupportedPatternConstruct) {

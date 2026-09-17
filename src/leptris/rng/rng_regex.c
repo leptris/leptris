@@ -22,6 +22,10 @@
 #include <string.h>
 
 enum {
+    RRE_END,   /* sentinel: the entire-value anchor (XSD patterns
+                * match the WHOLE value). Threaded as the top-level
+                * continuation so ALT/REP backtracking must satisfy
+                * it — a partial left alternative no longer wins. */
     RRE_CHAR,
     RRE_CLASS,
     RRE_DOT,
@@ -84,6 +88,23 @@ static void cls_add_builtin(RreNode* n, char c) {
             cls_add(n, '\f');
             cls_add(n, '\v');
             break;
+        case 'i':   /* XML NameStartChar */
+            for (int i = 'a'; i <= 'z'; i++) cls_add(n, (unsigned char)i);
+            for (int i = 'A'; i <= 'Z'; i++) cls_add(n, (unsigned char)i);
+            cls_add(n, '_');
+            cls_add(n, ':');
+            for (int i = 0x80; i < 0x100; i++) cls_add(n, (unsigned char)i);
+            break;
+        case 'c':   /* XML NameChar = \i + digits . - */
+            for (int i = 'a'; i <= 'z'; i++) cls_add(n, (unsigned char)i);
+            for (int i = 'A'; i <= 'Z'; i++) cls_add(n, (unsigned char)i);
+            for (int i = '0'; i <= '9'; i++) cls_add(n, (unsigned char)i);
+            cls_add(n, '_');
+            cls_add(n, ':');
+            cls_add(n, '.');
+            cls_add(n, '-');
+            for (int i = 0x80; i < 0x100; i++) cls_add(n, (unsigned char)i);
+            break;
         default:
             break;
     }
@@ -109,18 +130,21 @@ static RreNode* parse_class(RreParser* ps) {
             ps->p++;
             char e = *ps->p++;
             if (e == 'd' || e == 'D' || e == 'w' || e == 'W' ||
-                e == 's' || e == 'S') {
+                e == 's' || e == 'S' || e == 'i' || e == 'I' ||
+                e == 'c' || e == 'C') {
                 RreNode* tmp = node_new(RRE_CLASS);
                 if (!tmp) {
                     node_free(n);
                     return NULL;
                 }
                 cls_add_builtin(tmp, e);
+                int neg_b = e == 'D' || e == 'W' || e == 'S' ||
+                            e == 'I' || e == 'C';
                 for (int i = 0; i < 256; i++)
                     if (((tmp->cls[i >> 3] >> (i & 7)) & 1) ==
-                        (e == 'D' || e == 'W' || e == 'S' ? 0 : 1))
+                        (neg_b ? 0 : 1))
                         cls_add(n, (unsigned char)i);
-                if (e == 'D' || e == 'W' || e == 'S') {
+                if (neg_b) {
                     /* Negated built-in: everything except the set. */
                     memset(n->cls, 0xff, sizeof(n->cls));
                     for (int i = 0; i < 256; i++)
@@ -176,11 +200,12 @@ static RreNode* parse_atom(RreParser* ps) {
     if (*ps->p == '\\' && ps->p[1]) {
         char e = ps->p[1];
         if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' ||
-            e == 'S') {
+            e == 'S' || e == 'i' || e == 'I' || e == 'c' || e == 'C') {
             ps->p += 2;
             RreNode* n = node_new(RRE_CLASS);
             if (!n) return NULL;
-            if (e == 'd' || e == 'w' || e == 's') {
+            if (e == 'd' || e == 'w' || e == 's' || e == 'i' ||
+                e == 'c') {
                 cls_add_builtin(n, e);
             } else {
                 memset(n->cls, 0xff, sizeof(n->cls));
@@ -189,7 +214,10 @@ static RreNode* parse_atom(RreParser* ps) {
                     node_free(n);
                     return NULL;
                 }
-                cls_add_builtin(tmp, e == 'D' ? 'd' : e == 'W' ? 'w' : 's');
+                cls_add_builtin(tmp, e == 'D' ? 'd'
+                                  : e == 'W' ? 'w'
+                                  : e == 'S' ? 's'
+                                  : e == 'I' ? 'i' : 'c');
                 for (int i = 0; i < 256; i++)
                     if ((tmp->cls[i >> 3] >> (i & 7)) & 1)
                         n->cls[i >> 3] &= (unsigned char)~(1u << (i & 7));
@@ -336,6 +364,8 @@ static const char* rre_run(const RreCont* k, const char* s) {
 static const char* rre_match(RreNode* n, const char* s,
                              const RreCont* k) {
     switch (n->kind) {
+        case RRE_END:
+            return *s == 0 ? rre_run(k, s) : NULL;
         case RRE_CHAR:
             if (*s == (char)n->ch) return rre_run(k, s + 1);
             return NULL;
@@ -413,7 +443,11 @@ int rng_regex_matches(const char* pat, const char* text) {
         node_free(n);
         return 0;
     }
-    const char* r = rre_match(n, text, NULL);
+    RreNode end;
+    memset(&end, 0, sizeof(end));
+    end.kind = RRE_END;
+    RreCont k = {&end, NULL};
+    const char* r = rre_match(n, text, &k);
     node_free(n);
-    return r && *r == 0;
+    return r != NULL;
 }
