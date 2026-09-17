@@ -3603,19 +3603,16 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 if (*q != ' ' && *q != '\t' && *q != '\n' &&
                     *q != '\r') { ws = 0; break; }
         if (!ws) {
-            /* Char-by-char reality (13.2.6.4.18): a whitespace
-             * PREFIX of the coalesced run inserts into the
-             * frameset; the rest drops (tests2:7: "  test" ->
-             * "  "). Truncate in place, like after-frameset. */
-            const char* w2 = t;
-            while (*w2 == ' ' || *w2 == '\t' || *w2 == '\n' ||
-                   *w2 == '\r')
-                w2++;
-            if (w2 > t) {
-                ((char*)t)[w2 - t] = '\0';
-            } else {
-                return;
-            }
+            /* Every whitespace character inserts, every
+             * non-whitespace one drops (tests2:7: " te st" ->
+             * "  "). Filter in place, like after-frameset. */
+            char* o = (char*)t;
+            char* w2 = o;
+            for (const char* r = t; *r; r++)
+                if (*r == ' ' || *r == '\t' || *r == '\n' ||
+                    *r == '\r') *w2++ = *r;
+            if (w2 == o) return;
+            *w2 = '\0';
         }
     }
     /* "after frameset": non-whitespace text drops; whitespace
@@ -3630,19 +3627,16 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 if (*q != ' ' && *q != '\t' && *q != '\n' &&
                     *q != '\r') { ws = 0; break; }
         if (!ws) {
-            /* Character-by-character (13.2.6.4.19): a whitespace
-             * PREFIX survives — html5lib emits separate character
-             * tokens, our runs are coalesced. Truncate to the
-             * prefix; drop only when there is none (tests6:8). */
-            const char* w2 = t;
-            while (*w2 == ' ' || *w2 == '\t' || *w2 == '\n' ||
-                   *w2 == '\r')
-                w2++;
-            if (w2 > t) {
-                ((char*)t)[w2 - t] = '\0';
-            } else {
-                return;
-            }
+            /* Every whitespace character inserts, every
+             * non-whitespace one drops (tests2:7: " te st" ->
+             * "  "). Filter in place, like after-frameset. */
+            char* o = (char*)t;
+            char* w2 = o;
+            for (const char* r = t; *r; r++)
+                if (*r == ' ' || *r == '\t' || *r == '\n' ||
+                    *r == '\r') *w2++ = *r;
+            if (w2 == o) return;
+            *w2 = '\0';
         }
     }
     if (b->whatwg && (b->after_body || b->after_html) &&
@@ -5170,7 +5164,14 @@ static LeptrisDocument html_parse_shared(
                         break;
                     }
                 }
-                if (!match_foreign && !crossed_ip) {
+                if (!match_foreign && !crossed_ip &&
+                    (strcmp(lname0, "br") == 0 ||
+                     strcmp(lname0, "p") == 0)) {
+                    /* Only </br>/</p> pop the foreign scope and
+                     * reprocess in body (13.2.6.5); any other
+                     * unmatched end tag is ignored - tests20:63's
+                     * </svg> inside <annotation-xml> changes
+                     * nothing. */
                     while (b.depth > 0 &&
                            b.open_ns[b.depth - 1] != H_NS_HTML &&
                            !h_is_int_point(&b, b.depth - 1))
@@ -5421,10 +5422,16 @@ static LeptrisDocument html_parse_shared(
                                          strcmp(on, "div") != 0 &&
                                          strcmp(on, "p") != 0;
                             } else {
-                                fenced = h_ieq_raw(on, "button") ||
-                                         h_ieq_raw(on, "marquee") ||
-                                         h_ieq_raw(on, "object") ||
-                                         h_ieq_raw(on, "applet");
+                                /* Block-level targets (address,
+                                 * div, list items...) close
+                                 * THROUGH the fence; phrasing
+                                 * strays stay fenced (tests20:41:
+                                 * </address> pops the button). */
+                                fenced = (h_ieq_raw(on, "button") ||
+                                          h_ieq_raw(on, "marquee") ||
+                                          h_ieq_raw(on, "object") ||
+                                          h_ieq_raw(on, "applet")) &&
+                                         !h_p_closes(lname);
                             }
                             if (fenced) break;
                         }
@@ -6165,6 +6172,15 @@ static LeptrisDocument html_parse_shared(
                 if (on &&
                     (h_closes(on, name) ||
                      (b.whatwg && h_closes_ww(on, name)))) {
+                    /* The vendored reference keeps <table> INSIDE
+                     * an open p in the bare shape (tests3:24,
+                     * tests20:42) but closes it under an explicit
+                     * <body> (tests3:23) - gate on the structural
+                     * body tag. */
+                    if (b.whatwg && !b.body_tag_seen &&
+                        h_ieq_raw(on, "p") &&
+                        strcmp(name, "table") == 0)
+                        break;
                     /* #659 "in template" start-tag fence (13.2.4.2):
                      * an open template is a scope boundary — a start
                      * tag never pops it; table-context starts become
