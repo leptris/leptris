@@ -369,6 +369,95 @@ TEST(RngRegression, AttributeListBehindRefIsConsumed) {
     leptris_rng_free(rng);
 }
 
+TEST(RngRegression, RootAttrsBehindDefineElement) {
+    /* The metanorma shape: start -> ref -> define -> element, with
+     * the element's FIRST content child a ref to an attribute-list
+     * define. Gate 1159's fix covered the direct case; this one
+     * reproduces the isodoc-compile divergence (false "found
+     * attribute flavor ..." on the real chain). */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><ref name='standard-document'/></start>"
+        "<define name='standard-document'>"
+        "<element name='metanorma'>"
+        "<ref name='root-attrs'/>"
+        "<ref name='bibdata'/>"
+        "</element></define>"
+        "<define name='root-attrs'>"
+        "<attribute name='type'><value>semantic</value></attribute>"
+        "<attribute name='version'/>"
+        "</define>"
+        "<define name='bibdata'>"
+        "<element name='bibdata'><text/></element>"
+        "</define>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] =
+        "<metanorma version='1' type='semantic'><bibdata>b</bibdata>"
+        "</metanorma>";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    if (leptris_rng_validate(rng, d) != 1) {
+        const LeptrisRngErrorRecord* rep = NULL;
+        size_t n = leptris_rng_error_report(rng, &rep);
+        for (size_t i = 0; i < n; i++)
+            fprintf(stderr, "[dbg] %s:%ld:%ld %s\n", rep[i].kind,
+                    (long)rep[i].line, (long)rep[i].column,
+                    rep[i].message);
+    }
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(RngRegression, RootAttrsNamespacedForm) {
+    /* The real chain's namespace form: grammar default ns=... and
+     * the instance root carrying xmlns=... - does the element/attr
+     * matching still see Root-Attributes? */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'"
+        " ns='https://www.metanorma.org/ns/standoc'>"
+        "<start><ref name='standard-document'/></start>"
+        "<define name='standard-document'>"
+        "<element name='metanorma'>"
+        "<ref name='root-attrs'/>"
+        "<ref name='bibdata'/>"
+        "</element></define>"
+        "<define name='root-attrs'>"
+        "<attribute name='type'><choice>"
+        "<value>semantic</value><value>presentation</value>"
+        "</choice></attribute>"
+        "<attribute name='version'/>"
+        "<attribute name='schema-version'/>"
+        "<attribute name='flavor'/>"
+        "</define>"
+        "<define name='bibdata'>"
+        "<element name='bibdata'><text/></element>"
+        "</define></grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] =
+        "<metanorma xmlns='https://www.metanorma.org/ns/standoc'"
+        " version='1' type='semantic' schema-version='v2' flavor='standoc'>"
+        "<bibdata>b</bibdata></metanorma>";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    if (leptris_rng_validate(rng, d) != 1) {
+        const LeptrisRngErrorRecord* rep = NULL;
+        size_t n = leptris_rng_error_report(rng, &rep);
+        for (size_t i = 0; i < n; i++)
+            fprintf(stderr, "[dbg] %s:%ld:%ld %s\n", rep[i].kind,
+                    (long)rep[i].line, (long)rep[i].column,
+                    rep[i].message);
+    }
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
 TEST(RngRegression, OmittedOptionalElementStaysValid) {
     /* v1.9.179 regression: the speculative probe of an omitted
      * <optional> child poisoned the matcher's failed short-circuit,

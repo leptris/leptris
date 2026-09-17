@@ -1115,25 +1115,60 @@ static void diagnose_child(RngVal* v, RngPattern* content,
     v->depth--;
 }
 
+/* Collect attribute patterns reachable from `p`'s content list —
+ * direct children plus define bodies behind refs (Root-Attributes)
+ * and containers. Bounds: candidate list capped at 64; cycles cut
+ * by the seen-set. */
+static int collect_attr_patterns(RngVal* v, RngPattern* head,
+                                 RngPattern** out, int n, int cap,
+                                 RngPattern** seen, int* nseen) {
+    for (RngPattern* c = head; c && n < cap; c = c->next) {
+        int visited = 0;
+        for (int i = 0; i < *nseen; i++)
+            if (seen[i] == c) { visited = 1; break; }
+        if (visited) continue;
+        if (*nseen < 128) seen[(*nseen)++] = c;
+        if (c->kind == RNG_ATTRIBUTE) {
+            out[n++] = c;
+        } else if (c->kind == RNG_OPTIONAL ||
+                   c->kind == RNG_ZERO_OR_MORE ||
+                   c->kind == RNG_GROUP ||
+                   c->kind == RNG_INTERLEAVE ||
+                   c->kind == RNG_CHOICE) {
+            n = collect_attr_patterns(v, c->first_child, out, n,
+                                      cap, seen, nseen);
+        } else if (c->kind == RNG_REF) {
+            RngDefine* d = find_define(v->g, c->name);
+            if (d && d->body)
+                n = collect_attr_patterns(v, d->body, out, n,
+                                          cap, seen, nseen);
+        }
+    }
+    return n;
+}
+
 static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
-    /* Count attribute patterns (direct children in the core subset). */
-    int n_attr_patterns = 0;
-    for (RngPattern* c = p->first_child; c; c = c->next)
-        if (c->kind == RNG_ATTRIBUTE) n_attr_patterns++;
+    /* Attribute patterns include define bodies behind refs
+     * (basicdoc's Root-Attributes) and containers - the verdict
+     * path's list_consumes_attr semantics, mirrored here. */
+    RngPattern* cands[64];
+    RngPattern* seen[128];
+    int nseen = 0;
+    int n_attr_patterns = collect_attr_patterns(
+        v, p->first_child, cands, 0, 64, seen, &nseen);
     /* Extra attributes. */
     for (struct leptris_attribute* a = leptris_element_get_first_attribute(e);
          a; a = leptris_attr_next(a)) {
         const char* name = attr_cname(a);
         int consumed = 0;
-        for (RngPattern* c = p->first_child; c && !consumed; c = c->next)
-            if (c->kind == RNG_ATTRIBUTE && c->name &&
-                strcmp(c->name, name) == 0)
+        for (int i = 0; i < n_attr_patterns && !consumed; i++)
+            if (cands[i]->name && strcmp(cands[i]->name, name) == 0)
                 consumed = 1;
         if (consumed) {
             /* Value constraint check. */
-            for (RngPattern* c = p->first_child; c; c = c->next) {
-                if (c->kind != RNG_ATTRIBUTE || !c->name ||
-                    strcmp(c->name, name) != 0)
+            for (int i = 0; i < n_attr_patterns; i++) {
+                RngPattern* c = cands[i];
+                if (!c->name || strcmp(c->name, name) != 0)
                     continue;
                 const char* got = leptris_element_attribute(e, name);
                 if (!attr_content_satisfied(c, got ? got : "")) {
@@ -1173,8 +1208,9 @@ static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
         }
     }
     /* Missing required attributes (declared order). */
-    for (RngPattern* c = p->first_child; c; c = c->next) {
-        if (c->kind != RNG_ATTRIBUTE || !c->name) continue;
+    for (int i = 0; i < n_attr_patterns; i++) {
+        RngPattern* c = cands[i];
+        if (!c->name) continue;
         if (!leptris_element_attribute(e, c->name))
             diag(v, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,  e,
         "element \"%s\" missing required attribute \"%s\"",
