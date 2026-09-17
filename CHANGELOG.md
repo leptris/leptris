@@ -1,5 +1,32 @@
 ## [Unreleased]
 
+## [1.9.189] - 2026-09-17
+
+### Fixed
+
+- **RNG: the metanorma schema chain compiles and validates end to
+  end.** Three fixes, each with ASAN both-stacks evidence:
+  (1) `add_define`'s combine-merge path freed `d->combine` and
+  re-stored the dangling pointer whenever a redefinition carried no
+  `@combine`, then `strcmp`'d it — a heap-use-after-free on every
+  include merge with inherited combine; the caller's combine now
+  replaces, otherwise the existing one stays. (2) XSD `\i`
+  (NameStartChar) and `\c` (NameChar) escapes in pattern params —
+  the XML ID pattern `\i\c*|\c+#\c+` runs throughout basicdoc.rng;
+  positive, negated, in-class, and standalone forms. (3) The
+  whole-value anchor now rides the match continuation (`RRE_END`
+  sentinel), so alternation and quantifier backtracking must
+  satisfy it — a partial left alternative can no longer shadow a
+  fully-matching right one. `isodoc-compile.rng` (full include +
+  externalRef chain through the W3C MathML4 grammar) compiles;
+  validating real standoc documents produces structured
+  line:column Jing-form errors (verdict verified correct against
+  the grammar's actual root). Gates: `RngParse.CombineSurvives-
+  AcrossMerges`, `RngParse.XmlNameClassesInPatterns`. RNG suite
+  50/50; full ctest 1537/1537.
+
+
+
 ## [1.9.188] - 2026-09-16
 
 ### Added
