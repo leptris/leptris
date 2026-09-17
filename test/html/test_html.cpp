@@ -771,6 +771,28 @@ TEST(HtmlTwoModes, DoctypeIsRecorded) {
     leptris_document_free(d4);
 }
 
+/* 13.2.5: `>` right after the DOCTYPE keyword is the
+ * missing-doctype-name error, but the doctype token is still
+ * emitted - with an EMPTY name (doctype01.dat:4/5). */
+TEST(HtmlTwoModes, DoctypeWithoutNameIsRecordedEmpty) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char in[] = "<!DOCTYPE>Hello";
+    LeptrisDocument doc = leptris_parse_html_string(in, sizeof(in) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisDoctype dt = leptris_document_internal_subset(doc);
+    ASSERT_NE(dt, nullptr);
+    EXPECT_STREQ(leptris_doctype_get_root_name(dt), "");
+    leptris_document_free(doc);
+
+    const char in2[] = "<!DOCTYPE >Hello";
+    LeptrisDocument d2 = leptris_parse_html_string(in2, sizeof(in2) - 1, &st);
+    ASSERT_NE(d2, nullptr);
+    LeptrisDoctype dt2 = leptris_document_internal_subset(d2);
+    ASSERT_NE(dt2, nullptr);
+    EXPECT_STREQ(leptris_doctype_get_root_name(dt2), "");
+    leptris_document_free(d2);
+}
+
 /* #659: WHATWG insertion modes — every document is html>[head,
  * body] whatever the bare structural tags look like; the html4
  * entry keeps libxml2's shape (no empty head). */
