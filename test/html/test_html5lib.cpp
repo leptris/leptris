@@ -110,7 +110,14 @@ bool ParseExpected(const std::vector<std::string>& lines, XNode* doc,
             size_t e = c.size();
             if (c.size() >= 2 && c[c.size() - 1] == '"') e = c.size() - 1;
             n.text = Unescape(c.substr(1, e - 1));
-        } else if (!c.empty() && c[0] == '<') {
+        } else if (!c.empty() && c[0] == '<' &&
+                   /* An attribute line may START with '<' - the
+                    * tokenizer's invalid-character-in-attribute-name
+                    * shape <img <="" FAIL> dumps as `<=""` (the
+                    * name is just "<"), which is NOT an element:
+                    * an element name is never '=' right after the
+                    * '<' (webkit01:45). */
+                   !(c.size() > 1 && c[1] == '=')) {
             n.kind = XNode::ELEM;
             size_t e = 1;
             while (e < c.size() && c[e] != ' ' && c[e] != '>') e++;
@@ -585,7 +592,9 @@ bool Compare(const XNode& x, const ONode& o, std::string* why) {
 static std::string H5DumpTree(const ONode& n, int depth) {
     std::string s((size_t)depth * 2, ' ');
     s += "<" + n.name + " ns='" + n.ns + "' text='" +
-         n.text.substr(0, 24) + "'>\n";
+         n.text.substr(0, 24) + "'";
+    for (auto& a : n.attrs) s += " " + a.first + "='" + a.second + "'";
+    s += ">\n";
     for (const auto& c : n.children) s += H5DumpTree(c, depth + 1);
     return s;
 }
