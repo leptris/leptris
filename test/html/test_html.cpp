@@ -957,6 +957,17 @@ TEST(HtmlParse, FormattingCloseBehindTableIsIgnored) {
               "</td></tr></tbody></table></b>");
 }
 
+TEST(HtmlParse, SolidusOnHtmlStartTagIsIgnored) {
+    /* Vendored webkit01:46: `<div id='foo'/>` - the self-closing
+     * flag is ignored for HTML-namespace non-void elements; the
+     * div stays open and "A" is its child (13.2.5). Foreign
+     * elements still honor it. */
+    EXPECT_EQ(Html("<ul><li><div id='foo'/>A</li><li>B</li></ul>"),
+              "<ul><li><div id=\"foo\">A</div></li><li>B</li></ul>");
+    EXPECT_EQ(Html("<svg><circle/></svg>"),
+              "<svg><circle/></svg>");
+}
+
 TEST(HtmlForeign, SvgInsideMathmlSubtreeIsSvgNamespaced) {
     /* Vendored corpus tests10:52-54, tests12:1-2, tests9:4,
      * tests20:64: <svg> is a namespace ROOT wherever it starts -
