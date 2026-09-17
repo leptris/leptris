@@ -5447,6 +5447,7 @@ static LeptrisDocument html_parse_shared(
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
             if (strcmp(name, "body") == 0) {
                 b.body_tag_seen = 1;
+                b.frameset_ok = 0;
                 /* Only the FIRST structural <body> marks the
                  * lift boundary — a later one would re-enable the
                  * head lift after body content began (tests1:88:

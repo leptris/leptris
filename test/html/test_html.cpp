@@ -921,6 +921,22 @@ TEST(HtmlParse, HeadContentAfterBodyContentStaysInBody) {
               "</body></html>");
 }
 
+TEST(HtmlParse, QualifiedHtmlNamesKeepTheirColon) {
+    /* Vendored tests14:1/3: in HTML mode, an unknown qualified
+     * tag name is retained literally (xyz:abc), not split to the
+     * local part as an XML QName. */
+    EXPECT_EQ(Html("<!DOCTYPE html><html><body><xyz:abc></xyz:abc>"),
+              "<!DOCTYPE html><html><head/><body><xyz:abc/></body></html>");
+}
+
+TEST(HtmlParse, ExplicitBodyDisablesFramesetReplacement) {
+    /* tests19:45/81: an explicit body start tag clears
+     * frameset-ok; a later frameset token is ignored rather than
+     * replacing the body. */
+    EXPECT_EQ(Html("<!doctype html><body><frameset>"),
+              "<!DOCTYPE html><html><head/><body/></html>");
+}
+
 TEST(HtmlForeign, SvgInsideMathmlSubtreeIsSvgNamespaced) {
     /* Vendored corpus tests10:52-54, tests12:1-2, tests9:4,
      * tests20:64: <svg> is a namespace ROOT wherever it starts -
