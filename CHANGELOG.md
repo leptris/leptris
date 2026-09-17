@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [1.9.191] - 2026-09-17
+
+### Fixed
+
+- **RNG: attribute lists behind a `<ref>` are consumed.**
+  `pattern_consumes_attr` scanned only a pattern's children, but a
+  define body is a sibling list — attributes reached through a
+  `<ref>` (basicdoc.rng's `Root-Attributes`) were never considered
+  and every metanorma root attribute reported as a false
+  `"found attribute X, but no attributes allowed here"`. The scan
+  now runs over list members (`list_consumes_attr`), with the ref
+  case iterating the define body's own list. Gate (TDD red-first):
+  `RngRegression.AttributeListBehindRefIsConsumed`. Full ctest
+  1539/1539.
+
+
 ## [1.9.190] - 2026-09-17
 
 ### Added
