@@ -44,7 +44,7 @@ extern "C" {
 #      define LEPTRIS_API
 #    endif
 #  else
-#    define LEPTRIS_API __attribute__((visibility("default")))
+#    define LEPTRIS_API __attribute__((visibility("default"), used))
 #  endif
 #endif
 #endif  /* LEPTRIS_FOR_BINDGEN */
