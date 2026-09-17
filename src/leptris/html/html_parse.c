@@ -2736,6 +2736,9 @@ typedef struct {
     /* #659 form pointer: a <form> start tag while a form is open
      * is ignored (13.2.6.4.7); </form> clears it. */
     int form_open;
+    /* #659 the CURRENT start tag is <input type=hidden> (raw
+     * scan; the element's attrs are not set at foster time). */
+    int input_hidden_tag;
     /* #659 "before head" boundary (tests19:87): a structural <head>
      * tag starts the head phase — comments after it are head
      * content, comments before it stay html-prefix children.
@@ -2970,6 +2973,9 @@ static int h_fosterable(HBuilder* b, LeptrisNodeRef n) {
     }
     if (ty != LEPTRIS_NODE_TYPE_ELEMENT) return 0;
     const char* nname = leptris_element_name((LeptrisElement)n);
+    /* 13.2.6.4.9: <input type=hidden> in a table is inserted AT
+     * the spot - no fostering (tests7:16-20). */
+    if (b->input_hidden_tag && h_ieq_raw(nname, "input")) return 0;
     return !(h_ieq_raw(nname, "table") || h_ieq_raw(nname, "tbody") ||
              h_ieq_raw(nname, "thead") || h_ieq_raw(nname, "tfoot") ||
              h_ieq_raw(nname, "tr") || h_ieq_raw(nname, "td") ||
@@ -5716,6 +5722,9 @@ static LeptrisDocument html_parse_shared(
             name = h_pooled_lower(b.pool, "img", 3);
         /* 13.2.5.4.4: the enumerated start tags clear frameset-ok;
          * <input type=hidden> does not (webkit01:51). */
+        b.input_hidden_tag =
+            b.whatwg && nlen == 5 && strcmp(name, "input") == 0 &&
+            h_input_type_hidden(q, end);
         if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name) &&
             !(nlen == 5 && strcmp(name, "input") == 0 &&
               h_input_type_hidden(q, end))) {
