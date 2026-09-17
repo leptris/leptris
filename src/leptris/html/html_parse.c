@@ -2127,6 +2127,12 @@ static int h_closes_ww(const char* open, const char* start) {
     /* Heading starts pop a current heading (13.2.6.4.7 "in
      * body": <h1>x<h2> -> siblings). */
     if (h_is_heading(open) && h_is_heading(start)) return 1;
+    /* webkit02:28-35: in select, an <hr> closes the open
+     * optgroup layers - hr is a select child, not optgroup
+     * content. */
+    if (strcmp(open, "optgroup") == 0 &&
+        (strcmp(start, "hr") == 0 || strcmp(start, "select") == 0))
+        return 1;
     /* 13.2.6.4.12 "in ruby" / .6.4.7: every ruby-child start
      * (rb/rt/rp/rtc) closes a CURRENT rb/rt/rp/rtc — annotation
      * boxes are siblings (ruby.dat:3-18: <ruby>a<rb>b<rtc> ->
