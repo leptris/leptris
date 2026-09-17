@@ -335,6 +335,40 @@ TEST(RngErrors, ErrorReportReturnsTheWholeStructuredList) {
     leptris_rng_free(schema);
 }
 
+TEST(RngRegression, AttributeListBehindRefIsConsumed) {
+    /* basicdoc's Root-Attributes shape: the element's content starts
+     * with <ref name="Root-Attributes"/> whose define body is a LIST
+     * of attribute patterns. pattern_consumes_attr only scanned a
+     * pattern's CHILDREN, so attributes behind a ref were never
+     * consumed - every metanorma root attribute was a false
+     * "not allowed here". */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><element name='r'>"
+        "<ref name='root-attrs'/>"
+        "<text/>"
+        "</element></start>"
+        "<define name='root-attrs'>"
+        "<attribute name='type'><value>semantic</value></attribute>"
+        "<attribute name='version'/>"
+        "</define>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r version='1' type='semantic'>t</r>";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    if (leptris_rng_validate(rng, d) != 1) {
+        const LeptrisRngErrorRecord* rep = NULL;
+        size_t n = leptris_rng_error_report(rng, &rep);
+        for (size_t i = 0; i < n; i++)
+            fprintf(stderr, "[dbg] %s %s\n", rep[i].kind, rep[i].message);
+    }
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
 TEST(RngRegression, OmittedOptionalElementStaysValid) {
     /* v1.9.179 regression: the speculative probe of an omitted
      * <optional> child poisoned the matcher's failed short-circuit,

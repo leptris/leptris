@@ -229,11 +229,23 @@ static int attr_content_satisfied(RngPattern* attr, const char* value) {
     return !has_leaf;
 }
 
+/* Does any pattern in the LIST starting at `head` consume the
+ * attribute `name`? A define body is a SIBLING LIST (add_define
+ * stores the wrap's first child with the rest chained via ->next),
+ * so the scan is over list members - not their children. */
+static int list_consumes_attr(RngVal* v, RngPattern* head,
+                               LeptrisElement e, const char* name);
+
 /* Does `p` (a pattern that may contain attribute patterns among its
  * children) consume the attribute `name`? */
 static int pattern_consumes_attr(RngVal* v, RngPattern* p,
                                  LeptrisElement e, const char* name) {
-    for (RngPattern* c = p->first_child; c; c = c->next) {
+    return list_consumes_attr(v, p->first_child, e, name);
+}
+
+static int list_consumes_attr(RngVal* v, RngPattern* head,
+                               LeptrisElement e, const char* name) {
+    for (RngPattern* c = head; c; c = c->next) {
         switch (c->kind) {
             case RNG_ATTRIBUTE:
                 if (c->any_name) {
@@ -251,7 +263,8 @@ static int pattern_consumes_attr(RngVal* v, RngPattern* p,
                 break;
             case RNG_REF: {
                 RngDefine* d = find_define(v->g, c->name);
-                if (d && d->body && pattern_consumes_attr(v, d->body, e, name))
+                if (d && d->body &&
+                    list_consumes_attr(v, d->body, e, name))
                     return 1;
                 break;
             }
