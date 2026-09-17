@@ -458,6 +458,284 @@ TEST(RngRegression, RootAttrsNamespacedForm) {
     leptris_rng_free(rng);
 }
 
+TEST(RngRegression, AttributeCellDoesNotBlockChildWalk) {
+    /* The bibdata divergence shape: element content = [ref to an
+     * attribute-list define, element child]. The diagnostic walk
+     * treated the attribute cell as non-nullable and BLOCKED there,
+     * so the valid child rendered "not allowed here; expected ...
+     * bibdata ..." - contradictory. Attributes never gate element
+     * order. */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char schema[] = SCHEMA(
+        "<start><element name='r'>"
+        "<ref name='attrs'/>"
+        "<ref name='bib'/>"
+        "</element></start>"
+        "<define name='attrs'>"
+        "<attribute name='type'/>"
+        "</define>"
+        "<define name='bib'>"
+        "<element name='bibdata'><text/></element>"
+        "</define>");
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r type='t'><bibdata>b</bibdata></r>";
+    LeptrisDocument d = leptris_parse_string(doc, sizeof(doc) - 1, NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    if (leptris_rng_validate(rng, d) != 1) {
+        const LeptrisRngErrorRecord* rep = NULL;
+        size_t n = leptris_rng_error_report(rng, &rep);
+        for (size_t i = 0; i < n; i++)
+            fprintf(stderr, "[dbg] %s:%ld %s\n", rep[i].kind,
+                    (long)rep[i].line, rep[i].message);
+    }
+    /* The incomplete form reports the missing child, not a bogus
+     * not-allowed-here for the present one. */
+    const char doc2[] = "<r type='t'/>";
+    LeptrisDocument d2 = leptris_parse_string(doc2, sizeof(doc2) - 1, NULL);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d2), 0);
+    const LeptrisRngErrorRecord* rep2 = NULL;
+    size_t n2 = leptris_rng_error_report(rng, &rep2);
+    ASSERT_GT(n2, 0u);
+    EXPECT_NE(strstr(rep2[0].message, "incomplete"), nullptr)
+        << rep2[0].message;
+    leptris_document_free(d2);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(RngRegression, DefineBodyListDrivesTheDiagnosticWalk) {
+    /* metanorma's isodoc.rng shape: the metanorma element's content
+     * refs Root-Attributes (a define whose body is a LIST of
+     * attribute patterns), bibdata, optional metanorma-extension,
+     * then DocumentBody (a define body LIST: optional preface +
+     * sections). A failure INSIDE bibdata must diagnose there -
+     * never as a top-level "bibdata not allowed here" whose own
+     * expected list names bibdata. */
+    const char* sch = SCHEMA(
+        "<start><element name='r'>"
+        "<ref name='attrs'/>"
+        "<ref name='bib'/>"
+        "<optional><ref name='misc'/></optional>"
+        "<ref name='body'/>"
+        "</element></start>"
+        "<define name='attrs'>"
+        "<attribute name='version'/>"
+        "<attribute name='type'><choice>"
+        "<value>semantic</value><value>presentation</value>"
+        "</choice></attribute>"
+        "</define>"
+        "<define name='bib'>"
+        "<element name='bibdata'><ref name='bibkids'/></element>"
+        "</define>"
+        "<define name='bibkids'>"
+        "<optional><element name='title'><text/></element></optional>"
+        "<element name='language'><text/></element>"
+        "</define>"
+        "<define name='misc'>"
+        "<element name='metanorma-extension'>"
+        "<oneOrMore><ref name='any'/></oneOrMore>"
+        "</element>"
+        "</define>"
+        "<define name='any'>"
+        "<element><anyName/><zeroOrMore><choice>"
+        "<attribute><anyName/></attribute><text/>"
+        "</choice></zeroOrMore></element>"
+        "</define>"
+        "<define name='body'>"
+        "<optional><element name='preface'><text/></element></optional>"
+        "<element name='sections'><text/></element>"
+        "</define>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+
+    /* Invalid only inside bibdata: the sole reported error is the
+     * stray child there; every well-placed sibling stays silent. */
+    const char doc[] =
+        "<r version='1' type='semantic'>"
+        "<bibdata><title>T</title><language>en</language><bad/></bibdata>"
+        "<metanorma-extension><semantic-metadata>x</semantic-metadata>"
+        "</metanorma-extension>"
+        "<sections>S</sections>"
+        "</r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GT(n, 0u);
+    int saw_bad = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (strstr(rep[i].message, "bad")) saw_bad = 1;
+        EXPECT_EQ(strstr(rep[i].message, "bibdata\" not allowed"), nullptr)
+            << rep[i].message;
+        EXPECT_EQ(strstr(rep[i].message, "metanorma-extension"), nullptr)
+            << rep[i].message;
+        EXPECT_EQ(strstr(rep[i].message, "sections\" not allowed"), nullptr)
+            << rep[i].message;
+        EXPECT_EQ(strstr(rep[i].message, "semantic-metadata"), nullptr)
+            << rep[i].message;
+    }
+    EXPECT_EQ(saw_bad, 1);
+
+    /* The same document without the stray child validates (verdict
+     * path over the same ref/list/anyName shapes). */
+    const char doc2[] =
+        "<r version='1' type='semantic'>"
+        "<bibdata><title>T</title><language>en</language></bibdata>"
+        "<metanorma-extension><semantic-metadata>x</semantic-metadata>"
+        "</metanorma-extension>"
+        "<sections>S</sections>"
+        "</r>";
+    LeptrisDocument d2 = leptris_parse_string(doc2, strlen(doc2), NULL);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d2), 1);
+    leptris_document_free(d2);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(RngRegression, AnyNameElementConsumedByDiagWalk) {
+    /* An <element><anyName/> wildcard reached through a ref inside
+     * a repeat wrapper: the diagnostic walk must consume any child
+     * name and report the real failure (the missing required
+     * sibling), not "not allowed anywhere". */
+    const char* sch = SCHEMA(
+        "<start><element name='r'>"
+        "<oneOrMore><ref name='any'/></oneOrMore>"
+        "<element name='tail'><text/></element>"
+        "</element></start>"
+        "<define name='any'>"
+        "<element><anyName/><zeroOrMore><choice>"
+        "<attribute><anyName/></attribute><text/>"
+        "</choice></zeroOrMore></element>"
+        "</define>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r><foo whatever='1'>a</foo></r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GT(n, 0u);
+    EXPECT_EQ(n, 1u);
+    EXPECT_NE(strstr(rep[0].message, "incomplete"), nullptr)
+        << rep[0].message;
+    EXPECT_NE(strstr(rep[0].message, "tail"), nullptr) << rep[0].message;
+    EXPECT_EQ(strstr(rep[0].message, "foo"), nullptr) << rep[0].message;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(RngRegression, AttrValueConstraintBehindRefIsEnforcedAndEnumerated) {
+    /* metanorma's ParagraphAttributes shape: the attribute's value
+     * leaves live behind a ref (Alignments). The verdict must
+     * enforce them, and the diagnostic must enumerate the allowed
+     * values sorted, or-joined - Jing's formatDataDerivFailures. */
+    const char* sch = SCHEMA(
+        "<start><element name='r'>"
+        "<optional><attribute name='align'><ref name='vals'/></attribute>"
+        "</optional><text/></element></start>"
+        "<define name='vals'><choice>"
+        "<value>right</value><value>left</value>"
+        "<value>center</value><value>justified</value>"
+        "</choice></define>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r align='mid-air'>t</r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GT(n, 0u);
+    EXPECT_NE(strstr(rep[0].message,
+        "value of attribute \"align\" is invalid; must be equal "
+        "to \"center\", \"justified\", \"left\" or \"right\""),
+        nullptr) << rep[0].message;
+    const char ok[] = "<r align='center'>t</r>";
+    LeptrisDocument d2 = leptris_parse_string(ok, strlen(ok), NULL);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d2), 1);
+    leptris_document_free(d2);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(RngRegression, IncompleteNamesTheFirstRequiredElement) {
+    /* Jing matchEndTag: requiredElementNames() - the first
+     * non-nullable position's names (choice intersects, group
+     * takes the leftmost non-nullable member); optional siblings
+     * never appear in the message. */
+    const char* sch = SCHEMA(
+        "<start><element name='r'>"
+        "<optional><element name='title'><text/></element></optional>"
+        "<element name='owner'><text/></element>"
+        "<optional><element name='scope'><text/></element></optional>"
+        "</element></start>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r><title>t</title></r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GT(n, 0u);
+    EXPECT_NE(strstr(rep[0].message,
+        "element \"r\" incomplete; missing required element "
+        "\"owner\""), nullptr) << rep[0].message;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(RngRegression, DeepAttrErrorThroughNestedRefsIsReported) {
+    /* A value-constrained attribute on an element reached through
+     * nested refs (sections -> clause -> p): the diagnostic walk
+     * must descend and report it, not fail silently. */
+    const char* sch = SCHEMA(
+        "<start><element name='r'>"
+        "<ref name='body'/>"
+        "</element></start>"
+        "<define name='body'><ref name='sect'/></define>"
+        "<define name='sect'><element name='clause'>"
+        "<element name='p'>"
+        "<optional><attribute name='align'><ref name='vals'/>"
+        "</attribute></optional>"
+        "<text/></element>"
+        "</element></define>"
+        "<define name='vals'><choice>"
+        "<value>left</value><value>right</value>"
+        "</choice></define>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r><clause><p align='mid-air'>t</p></clause></r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GT(n, 0u);
+    EXPECT_NE(strstr(rep[0].message, "attribute \"align\""), nullptr)
+        << rep[0].message;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
 TEST(RngRegression, OmittedOptionalElementStaysValid) {
     /* v1.9.179 regression: the speculative probe of an omitted
      * <optional> child poisoned the matcher's failed short-circuit,
