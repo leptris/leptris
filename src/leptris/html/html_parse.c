@@ -2916,13 +2916,27 @@ static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
     }
 }
 
-/* Apply stashed structural attributes to a synthesized element. */
+/* Apply stashed structural attributes to a synthesized element.
+ * "Not already present" - an attribute the element already has
+ * (from an explicit <html ...>/<body ...> tag) is NOT overwritten:
+ * the first value wins (13.2.6.3, tests14:4). */
 static void h_apply_attrs(HBuilder* b, LeptrisElement e, char** attrs,
                           int n) {
-    for (int i = 0; i + 1 < n; i += 2)
-        leptris_element_add_attribute(
-            e, leptris_sv_from_cstr(attrs[i]),
-            leptris_sv_from_cstr(attrs[i + 1]), b->pool);
+    for (int i = 0; i + 1 < n; i += 2) {
+        int have = 0;
+        for (LeptrisAttribute a = leptris_element_first_attribute(e); a;
+             a = leptris_attribute_next(a)) {
+            const char* an = leptris_attribute_get_name(a);
+            if (an && strcmp(an, attrs[i]) == 0) {
+                have = 1;
+                break;
+            }
+        }
+        if (!have)
+            leptris_element_add_attribute(
+                e, leptris_sv_from_cstr(attrs[i]),
+                leptris_sv_from_cstr(attrs[i + 1]), b->pool);
+    }
 }
 
 
@@ -5810,7 +5824,8 @@ static LeptrisDocument html_parse_shared(
             (b.depth > 0 || b.after_html || b.after_frameset) &&
             strcmp(name, "frameset") != 0 &&
             strcmp(name, "frame") != 0 &&
-            strcmp(name, "noframes") != 0) {
+            strcmp(name, "noframes") != 0 &&
+            strcmp(name, "html") != 0) {
             if (text < p) {
                 size_t dlen = 0;
                     char* dec = h_decode_text(&b, text, p, &dlen);
@@ -5971,6 +5986,49 @@ static LeptrisDocument html_parse_shared(
                 }
             }
             h_stash_attrs(&b, q, end, b.html_attrs, &b.html_attr_n);
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+
+        /* 13.2.6.4.7: a <body> start tag once the body exists
+         * (explicit or implied) is IGNORED - attributes merge onto
+         * the body, frameset-ok clears, the tag itself disappears
+         * (tests19:81: <div><body><frameset> keeps the body). */
+        if (b.whatwg && strcmp(name, "body") == 0 && b.body_seen &&
+            !b.frameset) {
+            if (text < p) {
+                size_t dlen = 0;
+                char* dec = h_decode_text(&b, text, p, &dlen);
+                if (dec && *dec) {
+                    LeptrisTextNode* t = leptris_text_create(dec, dlen,
+                                                             b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
+            }
+            h_stash_attrs(&b, q, end, b.body_attrs, &b.body_attr_n);
+            b.frameset_ok = 0;
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+
+        /* <frame> outside a frameset body drops - "in body" has no
+         * frame insertion rule (tests19:76: the frame that follows
+         * an ignored <frameset> vanishes). */
+        if (b.whatwg && strcmp(name, "frame") == 0 &&
+            (!b.frameset || b.after_frameset)) {
+            if (text < p) {
+                size_t dlen = 0;
+                char* dec = h_decode_text(&b, text, p, &dlen);
+                if (dec && *dec) {
+                    LeptrisTextNode* t = leptris_text_create(dec, dlen,
+                                                             b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
+            }
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;
