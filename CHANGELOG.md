@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+## [1.9.192] - 2026-09-17
+
+### Fixed
+
+- **RNG: the diagnostic walk sees attributes behind refs.**
+  `diagnose_attrs` counted attribute patterns among an element's
+  direct children only; basicdoc.rng's `Root-Attributes` sits
+  behind a `<ref>`, so every metanorma root attribute rendered as
+  a false `"found attribute X, but no attributes allowed here"`
+  even though the verdict path consumed them correctly.
+  `collect_attr_patterns` flattens refs, define bodies, and
+  containers into the candidate list (cycle-guarded); the
+  extra-attribute, value-constraint, and missing-required scans all
+  use it. Two metanorma-shape regression gates (define-nested
+  element; namespaced grammar). Chain divergence on the metanorma
+  spec corpus: 11 errors → 7, all root-attribute false positives
+  gone. Full ctest 1541/1541; RNG suite 54/54.
+- base-dir derivation handles Windows path separators (rng)
+
+
+
 ## [1.9.191] - 2026-09-17
 
 ### Fixed
