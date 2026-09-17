@@ -296,6 +296,45 @@ TEST(RngErrors, AccumulatesAndExposesPerError) {
 
 // ---- #1137: optional omitted must stay valid ----------------------
 
+TEST(RngErrors, ErrorReportReturnsTheWholeStructuredList) {
+    /* The report shape: ONE call returns the full validation
+     * report - every record carrying kind, message, offender,
+     * line, and column. No per-index accessor stitching. */
+    const char* sch =
+        "<element xmlns='http://relaxng.org/ns/structure/1.0' name='r'>"
+        "<choice><element name='a'/>"
+        "<element name='b'/></choice></element>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG schema = leptris_rng_parse(sch, std::strlen(sch), &st);
+    ASSERT_NE(schema, nullptr);
+    const char* ins = "<r xmlns='urn:t'><x/><y/></r>";
+    LeptrisDocument doc = leptris_parse_string(ins, std::strlen(ins), NULL);
+    ASSERT_EQ(leptris_rng_validate(schema, doc), 0);
+
+    const LeptrisRngErrorRecord* report = nullptr;
+    size_t n = leptris_rng_error_report(schema, &report);
+    ASSERT_EQ(n, 3u);
+    ASSERT_NE(report, nullptr);
+    EXPECT_STREQ(report[0].kind, "not-allowed-anywhere");
+    EXPECT_NE(strstr(report[0].message, "not allowed anywhere"), nullptr);
+    EXPECT_STREQ(report[0].offender, "x");
+    EXPECT_GT(report[0].line, 0u);
+    EXPECT_GE(report[0].column, 0u);
+    EXPECT_STREQ(report[2].kind, "incomplete");
+    EXPECT_NE(strstr(report[2].message, "incomplete"), nullptr);
+
+    /* A valid document reports an empty report (count 0). */
+    const char* ok_ins = "<r xmlns='urn:t'><a/></r>";
+    LeptrisDocument ok = leptris_parse_string(ok_ins, strlen(ok_ins), NULL);
+    ASSERT_EQ(leptris_rng_validate(schema, ok), 1);
+    const LeptrisRngErrorRecord* empty = (const LeptrisRngErrorRecord*)1;
+    EXPECT_EQ(leptris_rng_error_report(schema, &empty), 0u);
+
+    leptris_document_free(ok);
+    leptris_document_free(doc);
+    leptris_rng_free(schema);
+}
+
 TEST(RngRegression, OmittedOptionalElementStaysValid) {
     /* v1.9.179 regression: the speculative probe of an omitted
      * <optional> child poisoned the matcher's failed short-circuit,

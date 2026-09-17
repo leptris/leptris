@@ -590,6 +590,35 @@ LEPTRIS_API void leptris_node_source_position(LeptrisNodeRef node,
                                               LeptrisSourcePosition* out);
 
 /**
+ * One RELAX NG validation error, in the structured report shape.
+ * Returned as a whole-list report via leptris_rng_error_report() -
+ * no per-index accessor stitching. All strings are handle-owned
+ * and live until the next validate call or leptris_rng_free.
+ */
+typedef struct {
+    const char* kind;     /* failure class, stable name:
+                           * "not-allowed-anywhere", "not-allowed-here",
+                           * "not-allowed-yet", "incomplete",
+                           * "missing-required-attr", "attr-not-allowed",
+                           * "attr-value-invalid", "char-content-invalid" */
+    const char* message;  /* Jing-parity rendered message */
+    const char* offender; /* offending element/attribute name, or NULL */
+    unsigned line;        /* 1-based source line, 0 when unknown */
+    unsigned column;      /* 1-based Jing-convention column */
+} LeptrisRngErrorRecord;
+
+/**
+ * Get the full RELAX NG validation error report in one call.
+ *
+ * @param rng  compiled schema handle after a leptris_rng_validate call
+ * @param out  receives the handle-owned record array (may be NULL when
+ *             the count is 0; left untouched on a NULL rng)
+ * @return     record count; 0 for a valid document
+ */
+LEPTRIS_API size_t leptris_rng_error_report(
+    LeptrisRelaxNG rng, const LeptrisRngErrorRecord** out);
+
+/**
  * Get the binding wrapper pointer cached on this node (#262).
  *
  * Language bindings (Ruby FFI, Python ctypes, etc.) set this on
