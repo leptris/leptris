@@ -6285,7 +6285,13 @@ static LeptrisDocument html_parse_shared(
                 h_afe_marker_push(&b);
             }
         }
-        if (self_closing || h_is_void(name)) b.depth--;
+        /* 13.2.5: a solidus on an HTML-namespace start tag sets the
+         * self-closing flag, but the flag is IGNORED for non-void
+         * HTML elements (parse error, div stays open -
+         * webkit01:46). Only foreign self-closing elements pop. */
+        if (h_is_void(name) ||
+            (self_closing && elem_ns != H_NS_HTML))
+            b.depth--;
         p = q;
         text = p;
         /* 13.2.6.4.7: a single U+000A immediately after <pre>,
