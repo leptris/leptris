@@ -1,0 +1,4 @@
+<element name="book" xmlns="http://relaxng.org/ns/structure/1.0">
+  <attribute name="id"><text/></attribute>
+  <element name="title"><text/></element>
+</element>

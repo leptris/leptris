@@ -1,4 +1,4 @@
-// test/rng/test_rng_corpus.cpp — #878 conformance gate: 20 schema/
+// test/rng/test_rng_corpus.cpp — #878 conformance gate: 21 schema/
 // instance pairs vendored in test/rng/jing-cases/. Reference verdicts
 // were recorded from Jing (rc 0 = valid, 1 = invalid) and are mirrored
 // in the table below; leptris_rng_validate must agree on every pair.
@@ -48,6 +48,7 @@ const RngCase kCases[] = {
     {"017", "attr-value", true, false},
     {"018", "two-attrs", true, false},
     {"019", "optional-omitted", true, false},
+    {"020", "externalref-bare-root", true, false},
 };
 
 std::string slurp(const std::string& path) {
@@ -62,9 +63,10 @@ std::string slurp(const std::string& path) {
 }
 
 LeptrisRelaxNG parse_schema(const std::string& path) {
-    std::string sch = slurp(path);
+    /* File-based entry: externalRef cases need the file's dir as
+     * base URI (the in-memory entry has none by contract). */
     LeptrisStatus st = LEPTRIS_OK;
-    LeptrisRelaxNG rng = leptris_rng_parse(sch.data(), sch.size(), &st);
+    LeptrisRelaxNG rng = leptris_rng_parse_file(path.c_str(), &st);
     if (!rng) ADD_FAILURE() << path << ": parse failed, status " << st;
     return rng;
 }
@@ -125,7 +127,7 @@ TEST(RngCorpus, MatchesJingVerdicts) {
     /* Full agreement: 40/40 Jing verdicts. Exact on purpose — every
      * future divergence is an immediate red. */
     EXPECT_EQ(agree, run);
-    EXPECT_EQ(run, 40);
+    EXPECT_EQ(run, 42);
 }
 
 }  // namespace

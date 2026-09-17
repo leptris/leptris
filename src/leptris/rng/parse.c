@@ -691,10 +691,20 @@ static struct leptris_relaxng* rng_parse_doc(LeptrisDocument doc,
         return rng;
     }
 
-    /* Bare <element> as root: implicit grammar with one start. */
+    /* Bare <element> as root: implicit grammar with one start.
+     * externalRef placeholders here need the same resolution pass
+     * the <grammar> branch runs — a bare root can nest them (e.g.
+     * <oneOrMore><externalRef .../></oneOrMore>); without this the
+     * placeholder survives into validation and rejects everything
+     * (Jing accepts the schema). */
     RngPattern* p = parse_pattern(rng->grammar, root, err, sizeof(err));
     if (!p) {
         rng->error = leptris_strdup(err);
+        return rng;
+    }
+    if (!resolve_external_refs(rng->grammar, &p, base_dir, 0, err,
+                               sizeof(err))) {
+        rng->error = leptris_strdup(err[0] ? err : "externalRef failed");
         return rng;
     }
     rng->grammar->start = p;
