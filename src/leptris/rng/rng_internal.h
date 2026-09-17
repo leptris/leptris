@@ -80,6 +80,11 @@ struct leptris_relaxng {
      * legacy `error` slot for leptris_rng_error() back-compat. */
     char* error;
     LeptrisDiag* diags;
+    /* Materialized structured report (leptris_rng_error_report);
+     * rebuilt per call, freed with the handle. void* to avoid a
+     * public-header dependency in internal types. */
+    void* report;
+    size_t report_count;
     int diag_count;
     int diag_cap;
 };
