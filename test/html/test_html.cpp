@@ -1844,6 +1844,26 @@ TEST(HtmlParse, FrameOutsideFramesetDrops) {
               "<html><head/><frameset> </frameset></html>");
 }
 
+/* 13.2.6.4.7: a <form> start tag while the form pointer is set
+ * (a form is open) is IGNORED - <form><form> yields ONE form
+ * (tests6:13); the same inside a table (tests20:46/47). */
+TEST(HtmlParse, SecondFormIsIgnored) {
+    EXPECT_EQ(Html("<form><form>"), "<form/>");
+    EXPECT_EQ(Html("<form>x<form>y"), "<form>xy</form>");
+    EXPECT_EQ(Html("<form><table><form></table></form>"),
+              "<form><table/></form>");
+    EXPECT_EQ(Html("<table><form><form></table>"),
+              "<table><form/></table>");
+}
+
+/* 13.2.6.4.9 "in caption": a table-cell start pops the caption
+ * and reprocesses in table - <table><caption><td> gives
+ * table > [caption, tbody > tr > td] (tests6:16). */
+TEST(HtmlParse, TdInCaptionPopsCaption) {
+    EXPECT_EQ(Html("<table><caption><td>"),
+              "<table><caption/><tbody><tr><td/></tr></tbody></table>");
+}
+
 TEST(HtmlParse, AfterFramesetWhitespaceStaysHtmlChild) {
     /* 13.2.6.4.19: whitespace text in "after frameset" is inserted
      * into the current node (html); non-whitespace reprocesses into
