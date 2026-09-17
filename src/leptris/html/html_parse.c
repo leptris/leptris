@@ -26,6 +26,29 @@
  * (generated from the WHATWG list; HTML4 252-set + common
  * punctuation). Names are matched case-SENSITIVELY. */
 typedef struct { const char* name; uint32_t cp; } HtmlEnt;
+/* WHATWG multi-codepoint entities (the main table is
+ * single-codepoint; these expand to two). */
+typedef struct { const char* name; uint32_t cp1, cp2; } HtmlEnt2;
+static const HtmlEnt2 k_html_entities2[] = {
+    {"NotEqualTilde", 0x2242, 0x0338},
+    {"NotSubset",     0x2282, 0x20D2},
+    {"ThickSpace",    0x205F, 0x200A},
+    {"NotSuperset",   0x2283, 0x20D2},
+    {"NotPrecedes",   0x227A, 0x20D2},
+    {"NotSucceeds",   0x227B, 0x20D2},
+    {"varsubsetneq",  0x228A, 0xFE00},
+    {NULL, 0, 0}};
+static int h_entity2_lookup(const char* name, size_t len,
+                            uint32_t* cp1, uint32_t* cp2) {
+    for (int i = 0; k_html_entities2[i].name; i++)
+        if (strlen(k_html_entities2[i].name) == len &&
+            strncmp(k_html_entities2[i].name, name, len) == 0) {
+            *cp1 = k_html_entities2[i].cp1;
+            *cp2 = k_html_entities2[i].cp2;
+            return 1;
+        }
+    return 0;
+}
 static const HtmlEnt k_html_entities[] = {
     {"AElig", 0x000C6},
     {"AMP", 0x00026},
@@ -2340,7 +2363,7 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
     size_t len = 0;
     while (s < e) {
         if (*s == '&') {
-            uint32_t cp = 0;
+            uint32_t cp = 0, cp2 = 0;
             const char* adv = NULL;
             /* WHATWG 12.2.5.78: numeric references decode with
              * or without the ';' (html4/libxml2 mode keeps the
@@ -2407,7 +2430,12 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                 for (size_t tl = probe; tl > 0 && !cp; tl--) {
                     if (tl == probe && semi) {
                         cp = h_entity_lookup(s + 1, tl);
-                        if (cp) adv = sc + 1;
+                        if (cp) {
+                            adv = sc + 1;
+                        } else if (h_entity2_lookup(s + 1, tl, &cp,
+                                                    &cp2)) {
+                            adv = sc + 1;
+                        }
                     }
                     if (whatwg && !cp && !(tl == probe && semi) &&
                         h_is_legacy_ent(s + 1, tl)) {
@@ -2422,8 +2450,10 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                 }
             }
             if (cp && adv) {
-                if (len + 4 >= cap) { /* bounded: probe <= 40 bytes */ }
+                if (len + 8 >= cap) { /* bounded: probe <= 40 bytes */ }
                 len += h_utf8_encode(cp, out + len);
+                if (cp2)
+                    len += h_utf8_encode(cp2, out + len);
                 s = adv;
                 continue;
             }
@@ -3541,9 +3571,39 @@ static void h_insert_before(HBuilder* b, LeptrisElement parent,
 }
 
 static void h_append(HBuilder* b, LeptrisNodeRef n) {
+    /* "in frameset" (13.2.6.4.18): non-whitespace text is IGNORED
+     * with a frameset open ANYWHERE on top; whitespace inserts
+     * into the frameset (tests2:6/7: "  test" keeps only "  ").
+     * noframes content is raw text, never reaching here. */
+    if (b->whatwg && b->depth > 0 &&
+        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
+        h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
+                  "frameset")) {
+        const char* t = leptris_text_node_get_content(n);
+        int ws = 1;
+        if (t)
+            for (const char* q = t; *q; q++)
+                if (*q != ' ' && *q != '\t' && *q != '\n' &&
+                    *q != '\r') { ws = 0; break; }
+        if (!ws) {
+            /* Char-by-char reality (13.2.6.4.18): a whitespace
+             * PREFIX of the coalesced run inserts into the
+             * frameset; the rest drops (tests2:7: "  test" ->
+             * "  "). Truncate in place, like after-frameset. */
+            const char* w2 = t;
+            while (*w2 == ' ' || *w2 == '\t' || *w2 == '\n' ||
+                   *w2 == '\r')
+                w2++;
+            if (w2 > t) {
+                ((char*)t)[w2 - t] = '\0';
+            } else {
+                return;
+            }
+        }
+    }
     /* "after frameset": non-whitespace text drops; whitespace
      * stays an html child (13.2.6.4.19, tests6:8). Only at top
-     * level — noframes content is raw text inside the element. */
+     * level. */
     if (b->whatwg && b->after_frameset && b->depth == 0 &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
         const char* t = leptris_text_node_get_content(n);
