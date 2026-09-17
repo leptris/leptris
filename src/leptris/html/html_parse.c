@@ -4472,19 +4472,23 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
     if (b->whatwg_head_set && !b->frameset &&
         (rest || b->head_end_seen)) {
         if (b->head_end_seen) {
-            /* Front peel: leading comments/PIs of the rest. */
+            /* Front peel: leading comments/PIs of the rest. Uses
+             * its OWN last-marker so the ws-registered suffix
+             * segment is MERGED (ws first, then comments), never
+             * clobbered (webkit01:35/36). */
             LeptrisNodeRef c = rest;
+            LeptrisNodeRef peel_last = NULL;
             while (c &&
                    (leptris_node_get_type(c) ==
                         LEPTRIS_NODE_TYPE_COMMENT ||
                     leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_PI)) {
-                suffix_last = c;
+                peel_last = c;
                 c = leptris_node_get_next_sibling(c);
             }
-            if (suffix_last) {
-                suffix_first = rest;
-                rest = leptris_node_get_next_sibling(suffix_last);
-                for (LeptrisNodeRef s2 = suffix_first; s2 && s2 != rest; ) {
+            if (peel_last) {
+                LeptrisNodeRef peel_first = rest;
+                rest = leptris_node_get_next_sibling(peel_last);
+                for (LeptrisNodeRef s2 = peel_first; s2 && s2 != rest; ) {
                     LeptrisNodeRef sn = leptris_node_get_next_sibling(s2);
                     if (leptris_node_get_type(s2) ==
                         LEPTRIS_NODE_TYPE_COMMENT)
@@ -4494,6 +4498,12 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                         leptris_pi_set_parent((LeptrisPINode*)s2, html);
                     s2 = sn;
                 }
+                if (suffix_last)
+                    leptris_node_set_next_sibling(suffix_last,
+                                                  peel_first);
+                else
+                    suffix_first = peel_first;
+                suffix_last = peel_last;
             }
             /* The head element closed with a tag pair — commit it
              * even when its run was empty, AHEAD of the after-head
@@ -5588,6 +5598,19 @@ static LeptrisDocument html_parse_shared(
              h_ieq_raw(leptris_element_name(b.open[0]), "html"));
         if (structural_ctx && !b.frameset &&
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
+            /* Flush pending text first: the branch continues below,
+             * never reaching the generic pre-element flush - the
+             * after-</head> whitespace must land on the chain to
+             * become an html child (webkit01:35). */
+            if (text < p) {
+                size_t dlen = 0;
+                char* dec = h_decode_text(&b, text, p, &dlen);
+                if (dec && *dec) {
+                    LeptrisTextNode* t =
+                        leptris_text_create(dec, dlen, b.pool);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
+            }
             if (strcmp(name, "body") == 0) {
                 b.body_tag_seen = 1;
                 if (b.whatwg) b.frameset_ok = 0;
