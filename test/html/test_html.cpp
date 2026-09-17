@@ -1904,6 +1904,28 @@ TEST(HtmlParse, ForeignEndTagNoMatchNotBrPIsIgnored) {
               "<math><annotation-xml>x</annotation-xml></math>");
 }
 
+/* 13.2.6.4.13 "in column group": non-whitespace text pops the
+ * colgroup and reprocesses in table - fostered BEFORE the table
+ * (tables01:4). */
+TEST(HtmlParse, ColgroupTextFosters) {
+    EXPECT_EQ(Html("<table><colgroup></html>foo"),
+              "foo<table><colgroup/></table>");
+}
+
+/* A <caption> start with a row/section open clears back to the
+ * table - caption is a TABLE child (tables01:13). */
+TEST(HtmlParse, CaptionStartClearsToTable) {
+    EXPECT_EQ(Html("<table><tr><caption>"),
+              "<table><tbody><tr/></tbody><caption/></table>");
+}
+
+/* A stray </p> with NO body content still inserts an empty <p>
+ * (tests1:110). */
+TEST(HtmlParse, StrayPWithNoBodyInsertsEmptyP) {
+    EXPECT_EQ(Html("</strong></b></br></p>"),
+              "<br/><p/>");
+}
+
 TEST(HtmlParse, AfterFramesetWhitespaceStaysHtmlChild) {
     /* 13.2.6.4.19: whitespace text in "after frameset" is inserted
      * into the current node (html); non-whitespace reprocesses into
