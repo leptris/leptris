@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.190] - 2026-09-17
+
+### Added
+
+- leptris_rng_error_report — the whole validation report in one call (rng)
+
+### Fixed
+
+- resolve externalRef in bare-<element> schemas (rng)
+
+
+
 ## [1.9.189] - 2026-09-17
 
 ### Fixed
