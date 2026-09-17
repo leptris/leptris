@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.191] - 2026-09-17
+
+### Fixed
+
+- attribute lists behind ref are consumed (Root-Attributes) (rng)
+
+
+
 ## [1.9.190] - 2026-09-17
 
 ### Added
