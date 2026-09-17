@@ -422,7 +422,7 @@ ONode CollectDocument(LeptrisDocument d, int doc_children) {
     LeptrisDoctype dt_handle = leptris_document_internal_subset(d);
     if (dt_handle) {
         const char* dn = leptris_doctype_get_root_name(dt_handle);
-        if (dn && *dn) {
+        if (dn) {
             ONode dt;
             dt.kind = 3;
             dt.name = dn;

@@ -4925,7 +4925,11 @@ static LeptrisDocument html_parse_shared(
                     while (q < end && *q != '>') q++;
                     p = (q < end) ? q + 1 : end;
 
-                    if (nlen) {
+                    /* `>` right after the keyword still emits a
+                     * doctype - with an EMPTY name (13.2.5 "missing-
+                     * doctype-name", doctype01.dat:4/5). WHATWG
+                     * mode only; html4 keeps the drop. */
+                    if (nlen || b.whatwg) {
                         /* WHATWG lowercases the doctype name;
                          * libxml2 (the html4/parity mode) preserves
                          * the case as written. */
