@@ -360,8 +360,7 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
     }
     char nbase[1024];
     snprintf(nbase, sizeof(nbase), "%s", path);
-    char* slash = strrchr(nbase, '/');
-    if (slash) *slash = 0;
+    rng_dir_of(nbase);
 
     char ierr[256];
     ierr[0] = 0;
@@ -536,6 +535,18 @@ static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
 /* externalRef resolution: the referenced grammar's START splices
  * in place of the placeholder node, and its defines merge into the
  * host grammar (refs inside the external grammar must resolve). */
+/* Chop the last path component (either separator — Windows paths
+ * carry backslashes; strrchr('/') alone left the filename in the
+ * "directory" and every relative href resolved against a bogus
+ * base). Returns s. */
+static char* rng_dir_of(char* s) {
+    char* slash = strrchr(s, '/');
+    char* bslash = strrchr(s, '\\');
+    if (bslash && (!slash || bslash > slash)) slash = bslash;
+    if (slash) *slash = 0;
+    return s;
+}
+
 static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
                                  const char* base_dir, unsigned depth,
                                  char* err, size_t errsz) {
@@ -554,7 +565,8 @@ static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
                 return 0;
             }
             char path[1024];
-            if (p->name[0] == '/')
+            if (p->name[0] == '/' || p->name[0] == '\\'
+                || (p->name[0] && p->name[1] == ':'))
                 snprintf(path, sizeof(path), "%s", p->name);
             else
                 snprintf(path, sizeof(path), "%s/%s", base_dir, p->name);
@@ -575,8 +587,7 @@ static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
             }
             char nbase[1024];
             snprintf(nbase, sizeof(nbase), "%s", path);
-            char* slash = strrchr(nbase, '/');
-            if (slash) *slash = 0;
+            rng_dir_of(nbase);
             struct leptris_relaxng* ex = rng_parse_doc(edoc, nbase[0] ? nbase : NULL);
             leptris_document_free(edoc);
             if (!ex || !ex->grammar || ex->error) {
@@ -794,11 +805,7 @@ struct leptris_relaxng* rng_parse_file(const char* path) {
     /* Include hrefs resolve relative to the schema file's directory. */
     char base[512];
     snprintf(base, sizeof(base), "%s", path);
-    char* slash = strrchr(base, '/');
-    if (slash)
-        *slash = 0;
-    else
-        base[0] = 0;
+    rng_dir_of(base);
 
     struct leptris_relaxng* rng =
         rng_parse_doc(doc, base[0] ? base : NULL);
