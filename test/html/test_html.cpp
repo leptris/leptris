@@ -947,6 +947,16 @@ TEST(HtmlParse, SpecialElementFencesStrayEndTag) {
               "foobar</button></span></body></html>");
 }
 
+TEST(HtmlParse, FormattingCloseBehindTableIsIgnored) {
+    /* Vendored tests1:21/94: </b> inside a table cell with the <b>
+     * opened ABOVE the table - the formatting element is not in
+     * scope, so the adoption agency ignores the token and KEEPS
+     * the entry (13.2.6.4.7); the cell continues normally. */
+    EXPECT_EQ(Html("<b><table><td></b><i></table>"),
+              "<b><table><tbody><tr><td><i/>"
+              "</td></tr></tbody></table></b>");
+}
+
 TEST(HtmlForeign, SvgInsideMathmlSubtreeIsSvgNamespaced) {
     /* Vendored corpus tests10:52-54, tests12:1-2, tests9:4,
      * tests20:64: <svg> is a namespace ROOT wherever it starts -

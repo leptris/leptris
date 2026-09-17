@@ -3924,6 +3924,32 @@ static int h_afe_end(HBuilder* b, const char* subject) {
             h_afe_remove_idx(b, fi);
             return 1;
         }
+        /* AAA scope step: the formatting element must be IN SCOPE.
+         * A scope terminator between the current node and it
+         * (a table cell boundary etc.) ignores the token and KEEPS
+         * the entry (tests1:21/94: </b> inside a cell with <b>
+         * opened above the table). */
+        {
+            int in_scope = 1;
+            for (size_t k = b->depth; k > (size_t)si + 1; k--) {
+                const char* kn =
+                    leptris_element_name(b->open[k - 1]);
+                if (b->open_ns[k - 1] != H_NS_HTML ||
+                    h_ieq_raw(kn, "applet") ||
+                    h_ieq_raw(kn, "caption") ||
+                    h_ieq_raw(kn, "table") ||
+                    h_ieq_raw(kn, "td") ||
+                    h_ieq_raw(kn, "th") ||
+                    h_ieq_raw(kn, "marquee") ||
+                    h_ieq_raw(kn, "object") ||
+                    h_ieq_raw(kn, "template") ||
+                    h_is_int_point(b, (int)(k - 1))) {
+                    in_scope = 0;
+                    break;
+                }
+            }
+            if (!in_scope) return 1;
+        }
         int fbi = -1;
         for (size_t k = (size_t)si + 1; k < b->depth; k++) {
             /* Only HTML-namespace elements are furthest-block
@@ -5183,23 +5209,32 @@ static LeptrisDocument html_parse_shared(
                             }
                         }
                         /* #659 in-body any-other-end-tag: crossing
-                         * a scope-fencing element that is not the
-                         * target takes the target out of reach - the
-                         * token is ignored (tests1:25: </span> inside
-                         * an open button). The corpus keeps closes
-                         * working through list/block containers, so
-                         * the fence is the classic scope set only. */
+                         * a fencing element that is not the target
+                         * ignores the token. FORMATTING targets (the
+                         * AAA fallback - the entry sat behind a scope
+                         * marker or is absent) fence at any special
+                         * element except address/div/p; other targets
+                         * fence only at the classic scope set (the
+                         * corpus keeps list/block closes working
+                         * through them - tests1:25/34). */
                         if (b.whatwg && on &&
                             b.open_ns[d - 1] == H_NS_HTML &&
                             !tag_match &&
-                            !h_is_formatting(lname) &&
                             strcmp(lname, "template") != 0 &&
-                            !h_is_heading(lname) &&
-                            (h_ieq_raw(on, "button") ||
-                             h_ieq_raw(on, "marquee") ||
-                             h_ieq_raw(on, "object") ||
-                             h_ieq_raw(on, "applet"))) {
-                            break;
+                            !h_is_heading(lname)) {
+                            int fenced;
+                            if (h_is_formatting(lname)) {
+                                fenced = h_is_special_ww(on) &&
+                                         strcmp(on, "address") != 0 &&
+                                         strcmp(on, "div") != 0 &&
+                                         strcmp(on, "p") != 0;
+                            } else {
+                                fenced = h_ieq_raw(on, "button") ||
+                                         h_ieq_raw(on, "marquee") ||
+                                         h_ieq_raw(on, "object") ||
+                                         h_ieq_raw(on, "applet");
+                            }
+                            if (fenced) break;
                         }
                         if (on && tag_match) {
                             /* Scope guard (WHATWG): a foreign
