@@ -2722,6 +2722,9 @@ typedef struct {
      * — later <html> starts merge attributes onto it and drop
      * (13.2.6.3: every mode but "in template"). */
     int html_seen;
+    /* #659 form pointer: a <form> start tag while a form is open
+     * is ignored (13.2.6.4.7); </form> clears it. */
+    int form_open;
     /* #659 "before head" boundary (tests19:87): a structural <head>
      * tag starts the head phase — comments after it are head
      * content, comments before it stay html-prefix children.
@@ -5201,6 +5204,8 @@ static LeptrisDocument html_parse_shared(
                     lname[i] = h_lower(ns[i]);
                 lname[cl] = 0;
                 if (!h_is_void(lname)) {
+                    if (b.whatwg && strcmp(lname, "form") == 0)
+                        b.form_open = 0;
                     /* #659 (WHATWG): heading end tags pop through
                      * the NEAREST heading (any h1-h6), not just
                      * the same name — the rest is normal matching. */
@@ -5970,6 +5975,19 @@ static LeptrisDocument html_parse_shared(
             if (!ns_ok) b.depth--;   /* pop; reprocess below */
         }
 
+        /* 13.2.6.4.7: a <form> start tag with the form pointer
+         * already set (a form still open) is IGNORED - <form><form>
+         * is one form (tests6:13); likewise inside a table
+         * (tests20:46/47). </form> clears the pointer. */
+        if (b.whatwg && strcmp(name, "form") == 0 && b.form_open) {
+            /* The generic pre-element flush above already drained
+             * the pending run. */
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
+
         /* #659 second (or later) <html> start tag (tests19:37/38):
          * WHATWG merges the token's attributes onto the existing
          * html element and ignores the token itself. Applies in
@@ -5998,15 +6016,6 @@ static LeptrisDocument html_parse_shared(
          * (tests19:81: <div><body><frameset> keeps the body). */
         if (b.whatwg && strcmp(name, "body") == 0 && b.body_seen &&
             !b.frameset) {
-            if (text < p) {
-                size_t dlen = 0;
-                char* dec = h_decode_text(&b, text, p, &dlen);
-                if (dec && *dec) {
-                    LeptrisTextNode* t = leptris_text_create(dec, dlen,
-                                                             b.pool);
-                    if (t) h_append(&b, (LeptrisNodeRef)t);
-                }
-            }
             h_stash_attrs(&b, q, end, b.body_attrs, &b.body_attr_n);
             b.frameset_ok = 0;
             while (q < end && *q != '>') q++;
@@ -6020,15 +6029,6 @@ static LeptrisDocument html_parse_shared(
          * an ignored <frameset> vanishes). */
         if (b.whatwg && strcmp(name, "frame") == 0 &&
             (!b.frameset || b.after_frameset)) {
-            if (text < p) {
-                size_t dlen = 0;
-                char* dec = h_decode_text(&b, text, p, &dlen);
-                if (dec && *dec) {
-                    LeptrisTextNode* t = leptris_text_create(dec, dlen,
-                                                             b.pool);
-                    if (t) h_append(&b, (LeptrisNodeRef)t);
-                }
-            }
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;
@@ -6290,6 +6290,15 @@ static LeptrisDocument html_parse_shared(
                     h_ieq_raw(topn, "tr") ||
                     h_ieq_raw(topn, "caption") ||
                     h_ieq_raw(topn, "colgroup");
+                /* 13.2.6.4.9 "in caption": a td/th/tr start pops
+                 * the caption and reprocesses in table — the
+                 * caption is NOT a table context for cells
+                 * (tests6:16: <table><caption><td>). */
+                if (h_ieq_raw(topn, "caption") &&
+                    (strcmp(name, "td") == 0 ||
+                     strcmp(name, "th") == 0 ||
+                     strcmp(name, "tr") == 0))
+                    tableish = 0;
                 if (!tableish &&
                     (strcmp(name, "caption") == 0 ||
                      strcmp(name, "col") == 0 ||
@@ -6400,6 +6409,7 @@ static LeptrisDocument html_parse_shared(
                                : h_open_element(&b, name);
         if (!e) goto done;
         if (strcmp(name, "html") == 0) b.html_seen = 1;
+        if (strcmp(name, "form") == 0) b.form_open = 1;
         if (b.whatwg && elem_ns == H_NS_HTML &&
             strcmp(name, "template") == 0 && b.depth > 0) {
             b.tmpl_mode[b.depth - 1] = H_TPLM_TEMPLATE;
