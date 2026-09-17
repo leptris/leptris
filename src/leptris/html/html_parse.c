@@ -6414,6 +6414,12 @@ static LeptrisDocument html_parse_shared(
                             b.depth = d2;
                             break;
                         }
+                        if (on2 && h_ieq_raw(on2, "tr") &&
+                            (strcmp(name, "td") == 0 ||
+                             strcmp(name, "th") == 0)) {
+                            b.depth = d2;
+                            break;
+                        }
                     }
                 }
             }
