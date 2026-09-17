@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.194] - 2026-09-17
+
+### Fixed
+
+- define-body sibling lists everywhere + Jing-parity attr/incomplete messages (rng)
+
+
+
 ## [1.9.192] - 2026-09-17
 
 ### Fixed
