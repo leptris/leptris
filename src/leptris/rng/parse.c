@@ -15,6 +15,18 @@
 
 #define RNG_NS "http://relaxng.org/ns/structure/1.0"
 
+/* Chop the last path component (either separator — Windows paths
+ * carry backslashes; strrchr('/') alone left the filename in the
+ * "directory" and every relative href resolved against a bogus
+ * base). Returns s. */
+static char* rng_dir_of(char* s) {
+    char* slash = strrchr(s, '/');
+    char* bslash = strrchr(s, '\\');
+    if (bslash && (!slash || bslash > slash)) slash = bslash;
+    if (slash) *slash = 0;
+    return s;
+}
+
 static RngPattern* pat_new(RngPatternKind kind) {
     RngPattern* p = (RngPattern*)calloc(1, sizeof(*p));
     if (p) p->kind = kind;
@@ -535,18 +547,6 @@ static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
 /* externalRef resolution: the referenced grammar's START splices
  * in place of the placeholder node, and its defines merge into the
  * host grammar (refs inside the external grammar must resolve). */
-/* Chop the last path component (either separator — Windows paths
- * carry backslashes; strrchr('/') alone left the filename in the
- * "directory" and every relative href resolved against a bogus
- * base). Returns s. */
-static char* rng_dir_of(char* s) {
-    char* slash = strrchr(s, '/');
-    char* bslash = strrchr(s, '\\');
-    if (bslash && (!slash || bslash > slash)) slash = bslash;
-    if (slash) *slash = 0;
-    return s;
-}
-
 static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
                                  const char* base_dir, unsigned depth,
                                  char* err, size_t errsz) {
