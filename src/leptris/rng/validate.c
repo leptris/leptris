@@ -211,22 +211,55 @@ static int names_match(const RngPattern* p, LeptrisElement e) {
 static int match_attrs(RngVal* v, RngPattern* content, LeptrisElement e);
 static int token_matches_leaf(const char* tok, RngPattern* leaf);
 
-/* Does the attribute pattern's content (value/data leaves) accept the
+/* Does the attribute pattern's content (value/data leaves, also
+ * behind refs and choices - metanorma's Alignments) accept the
  * instance value? Empty content implies <text/> (any value). */
-static int attr_content_satisfied(RngPattern* attr, const char* value) {
+static int attr_leaves_satisfied(RngVal* v, RngPattern* head,
+                                 const char* value, int* has_leaf,
+                                 int depth);
+static int attr_content_satisfied(RngVal* v, RngPattern* attr,
+                                  const char* value) {
     int has_leaf = 0;
-    for (RngPattern* c = attr->first_child; c; c = c->next) {
-        if (c->kind == RNG_CHOICE) {
-            for (RngPattern* a = c->first_child; a; a = a->next)
-                if (token_matches_leaf(value, a)) return 1;
-            has_leaf = 1;
-            continue;
-        }
-        if (c->kind != RNG_VALUE && c->kind != RNG_DATA) continue;
-        has_leaf = 1;
-        if (token_matches_leaf(value, c)) return 1;
-    }
+    if (attr_leaves_satisfied(v, attr->first_child, value, &has_leaf, 0))
+        return 1;
     return !has_leaf;
+}
+
+static int attr_leaves_satisfied(RngVal* v, RngPattern* head,
+                                 const char* value, int* has_leaf,
+                                 int depth) {
+    if (depth > 32) return 0;
+    for (RngPattern* c = head; c; c = c->next) {
+        switch (c->kind) {
+            case RNG_CHOICE:
+                if (attr_leaves_satisfied(v, c->first_child, value,
+                                          has_leaf, depth + 1))
+                    return 1;
+                continue;
+            case RNG_VALUE:
+            case RNG_DATA:
+                *has_leaf = 1;
+                if (token_matches_leaf(value, c)) return 1;
+                continue;
+            case RNG_REF: {
+                RngDefine* d = find_define(v->g, c->name);
+                if (d && d->body &&
+                    attr_leaves_satisfied(v, d->body, value, has_leaf,
+                                          depth + 1))
+                    return 1;
+                continue;
+            }
+            case RNG_ONE_OR_MORE: case RNG_ZERO_OR_MORE:
+            case RNG_OPTIONAL: case RNG_GROUP:
+                if (attr_leaves_satisfied(v, c->first_child, value,
+                                          has_leaf, depth + 1))
+                    return 1;
+                continue;
+            default:
+                continue;
+        }
+    }
+    return 0;
 }
 
 /* Does any pattern in the LIST starting at `head` consume the
@@ -250,11 +283,11 @@ static int list_consumes_attr(RngVal* v, RngPattern* head,
             case RNG_ATTRIBUTE:
                 if (c->any_name) {
                     const char* got = leptris_element_attribute(e, name);
-                    return attr_content_satisfied(c, got ? got : "");
+                    return attr_content_satisfied(v, c, got ? got : "");
                 }
                 if (c->name && strcmp(c->name, name) == 0) {
                     const char* got = leptris_element_attribute(e, name);
-                    return attr_content_satisfied(c, got ? got : "");
+                    return attr_content_satisfied(v, c, got ? got : "");
                 }
                 break;
             case RNG_OPTIONAL: case RNG_ZERO_OR_MORE:
@@ -361,13 +394,22 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
             if (!leaf_matches(v, p, kids[idx])) return (size_t)-1;
             return idx + 1;
         case RNG_CHOICE: {
+            /* Alternatives that CONSUME a child win over zero-width
+             * ones (text/empty): a leading <text/> branch would
+             * otherwise end the choice without consuming and starve
+             * the element branches behind it (inline models:
+             * TextElement). */
+            size_t r0 = (size_t)-1;
             for (RngPattern* c = p->first_child; c; c = c->next) {
                 size_t r = match_seq(v, c, kids, n, idx);
-                if (r != (size_t)-1) return r;
+                if (r != (size_t)-1) {
+                    if (r > idx) return r;
+                    if (r0 == (size_t)-1) r0 = r;
+                }
                 v->failed = 0;   /* try next alternative */
                 v->err[0] = 0;
             }
-            return (size_t)-1;
+            return r0;
         }
         case RNG_GROUP: {
             size_t i = idx;
@@ -466,9 +508,18 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
                 return (size_t)-1;
             }
             v->depth++;
-            size_t r = match_seq(v, d->body, kids, n, idx);
+            /* A define body is a sibling LIST (implicit group):
+             * match every member, not just the head. */
+            size_t i = idx;
+            for (RngPattern* b = d->body; b; b = b->next) {
+                i = match_seq(v, b, kids, n, i);
+                if (i == (size_t)-1) {
+                    v->depth--;
+                    return (size_t)-1;
+                }
+            }
             v->depth--;
-            return r;
+            return i;
         }
         case RNG_MIXED: {
             /* mixed = interleave(content, text*) — phase 2: any order. */
@@ -806,6 +857,11 @@ static int nullable_item(RngVal* v, RngPattern* p) {
     switch (p->kind) {
         case RNG_EMPTY: case RNG_TEXT: case RNG_OPTIONAL:
         case RNG_ZERO_OR_MORE: case RNG_MIXED: case RNG_LIST:
+        case RNG_ATTRIBUTE:
+            /* Attributes are matched at the element level; they
+             * never make element CONTENT incomplete and never
+             * block the content walk (Jing checks them at the
+             * start-tag close, not in endTagDeriv). */
             return 1;
         case RNG_ONE_OR_MORE:
             return nullable_item(v, p->first_child);
@@ -870,14 +926,24 @@ static void first_names_state(RngVal* v, DiagCell* s,
     *n = w;
 }
 
-/* Is `x` a possible element name anywhere in the content subtree? */
-static int name_in_tree(RngVal* v, RngPattern* p, const char* x) {
-    p = deref(v, p);
-    if (!p) return 0;
+/* Is `x` a possible element name anywhere in the content subtree?
+ * Ref bodies are sibling lists: every member counts. Depth-capped -
+ * recursive grammars (section refs section) would otherwise loop. */
+static int name_in_tree(RngVal* v, RngPattern* p, const char* x,
+                        int depth) {
+    if (!p || depth > 64) return 0;
+    if (p->kind == RNG_REF) {
+        RngDefine* d = find_define(v->g, p->name);
+        if (!d || !d->body) return 0;
+        for (RngPattern* m = d->body; m; m = m->next)
+            if (name_in_tree(v, m, x, depth + 1)) return 1;
+        return 0;
+    }
     if (p->kind == RNG_ELEMENT)
-        return p->name && strcmp(p->name, x) == 0;
+        return p->any_name ||
+               (p->name && strcmp(p->name, x) == 0);
     for (RngPattern* c = p->first_child; c; c = c->next)
-        if (name_in_tree(v, c, x)) return 1;
+        if (name_in_tree(v, c, x, depth + 1)) return 1;
     return 0;
 }
 
@@ -940,8 +1006,14 @@ static DiagCell* d_state(RngVal* v, DiagCell* s, const char* x, int* ok) {
         int consumed = 0;
         switch (d->kind) {
             case RNG_ELEMENT:
-                if (d->name && strcmp(d->name, x) == 0) { consumed = 1; }
+                if ((d->name && strcmp(d->name, x) == 0) ||
+                    d->any_name) { consumed = 1; }
                 break;
+            case RNG_ATTRIBUTE:
+                /* Attributes are matched at the element level
+                 * (diagnose_attrs); they never consume children
+                 * and never gate content order. */
+                continue;
             case RNG_CHOICE:
                 for (RngPattern* a = d->first_child; a; a = a->next) {
                     int sub = 0;
@@ -1080,27 +1152,40 @@ static const char* first_required_name(RngVal* v, DiagCell* s) {
 /* Deep-walk the element's content and emit Jing-shaped errors. */
 static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e);
 
+/* Find the ELEMENT pattern for name `x` reachable from a content
+ * list - through refs (bodies are sibling lists) and containers,
+ * any depth (sections -> clause -> p). Depth-capped like
+ * name_in_tree. */
+static RngPattern* find_element_pattern(RngVal* v, RngPattern* p,
+                                        const char* x, int depth) {
+    if (!p || depth > 64) return NULL;
+    if (p->kind == RNG_REF) {
+        RngDefine* d = find_define(v->g, p->name);
+        if (!d || !d->body) return NULL;
+        for (RngPattern* m = d->body; m; m = m->next) {
+            RngPattern* r = find_element_pattern(v, m, x, depth + 1);
+            if (r) return r;
+        }
+        return NULL;
+    }
+    if (p->kind == RNG_ELEMENT)
+        return (p->name && strcmp(p->name, x) == 0) ? p : NULL;
+    for (RngPattern* c = p->first_child; c; c = c->next) {
+        RngPattern* r = find_element_pattern(v, c, x, depth + 1);
+        if (r) return r;
+    }
+    return NULL;
+}
+
 /* Diagnose a matched child element's own content (quiet verdict,
  * then recurse on failure). */
 static void diagnose_child(RngVal* v, RngPattern* content,
                            LeptrisElement kid) {
     const char* x = leptris_element_name(kid);
     if (!x) return;
-    /* Find the ELEMENT pattern for this name in the content tree. */
     RngPattern* found = NULL;
-    for (RngPattern* c = content; c && !found; c = c->next) {
-        RngPattern* d = deref(v, c);
-        if (!d) continue;
-        if (d->kind == RNG_ELEMENT && d->name && strcmp(d->name, x) == 0)
-            { found = d; break; }
-        for (RngPattern* inner = d->first_child; inner && !found;
-             inner = inner->next) {
-            RngPattern* di = deref(v, inner);
-            if (di && di->kind == RNG_ELEMENT && di->name &&
-                strcmp(di->name, x) == 0)
-                found = di;
-        }
-    }
+    for (RngPattern* c = content; c && !found; c = c->next)
+        found = find_element_pattern(v, c, x, 0);
     if (!found) return;
     if (v->depth > 100) return;
     v->depth++;
@@ -1117,10 +1202,13 @@ static void diagnose_child(RngVal* v, RngPattern* content,
 
 /* Collect attribute patterns reachable from `p`'s content list —
  * direct children plus define bodies behind refs (Root-Attributes)
- * and containers. Bounds: candidate list capped at 64; cycles cut
- * by the seen-set. */
+ * and containers. `optional[i]` marks candidates reached through
+ * optional/zeroOrMore/choice wrappers — they are never required.
+ * Bounds: candidate list capped at 64; cycles cut by the
+ * seen-set. */
 static int collect_attr_patterns(RngVal* v, RngPattern* head,
-                                 RngPattern** out, int n, int cap,
+                                 RngPattern** out, int* optional,
+                                 int n, int cap, int opt,
                                  RngPattern** seen, int* nseen) {
     for (RngPattern* c = head; c && n < cap; c = c->next) {
         int visited = 0;
@@ -1129,22 +1217,161 @@ static int collect_attr_patterns(RngVal* v, RngPattern* head,
         if (visited) continue;
         if (*nseen < 128) seen[(*nseen)++] = c;
         if (c->kind == RNG_ATTRIBUTE) {
-            out[n++] = c;
+            out[n] = c;
+            optional[n] = opt;
+            n++;
         } else if (c->kind == RNG_OPTIONAL ||
                    c->kind == RNG_ZERO_OR_MORE ||
                    c->kind == RNG_GROUP ||
                    c->kind == RNG_INTERLEAVE ||
                    c->kind == RNG_CHOICE) {
-            n = collect_attr_patterns(v, c->first_child, out, n,
-                                      cap, seen, nseen);
+            n = collect_attr_patterns(v, c->first_child, out,
+                                      optional, n, cap,
+                                      opt || c->kind != RNG_GROUP,
+                                      seen, nseen);
         } else if (c->kind == RNG_REF) {
             RngDefine* d = find_define(v->g, c->name);
             if (d && d->body)
-                n = collect_attr_patterns(v, d->body, out, n,
-                                          cap, seen, nseen);
+                n = collect_attr_patterns(v, d->body, out, optional,
+                                          n, cap, opt, seen, nseen);
         }
     }
     return n;
+}
+
+/* Jing formatDataDerivFailures: VALUE leaves reachable from an
+ * attribute's content - through refs (Alignments), choices and
+ * repeat wrappers - deduped, then sorted by the renderer. */
+static void collect_value_leaves(RngVal* v, RngPattern* head,
+                                 const char* out[], int* n, int cap,
+                                 int depth) {
+    if (depth > 32) return;
+    for (RngPattern* c = head; c && *n < cap; c = c->next) {
+        switch (c->kind) {
+            case RNG_VALUE:
+                if (!c->value) continue;
+                {
+                    int dup = 0;
+                    for (int i = 0; i < *n; i++)
+                        if (strcmp(out[i], c->value) == 0) { dup = 1; break; }
+                    if (!dup) out[(*n)++] = c->value;
+                }
+                continue;
+            case RNG_CHOICE: case RNG_ONE_OR_MORE:
+            case RNG_ZERO_OR_MORE: case RNG_OPTIONAL:
+            case RNG_GROUP:
+                collect_value_leaves(v, c->first_child, out, n, cap,
+                                     depth + 1);
+                continue;
+            case RNG_REF: {
+                RngDefine* d = find_define(v->g, c->name);
+                if (d && d->body)
+                    collect_value_leaves(v, d->body, out, n, cap,
+                                         depth + 1);
+                continue;
+            }
+            default:
+                continue;
+        }
+    }
+}
+
+/* Quoted, sorted, comma-joined with " or "/" and " before the
+ * last item - Jing's formatList over quoteValue'd strings. */
+static void render_quoted_list(const char* items[], int n,
+                               const char* lastjoin, char* out,
+                               size_t cap) {
+    for (int i = 1; i < n; i++) {
+        const char* k = items[i];
+        int j = i - 1;
+        while (j >= 0 && strcmp(items[j], k) > 0) {
+            items[j + 1] = items[j];
+            j--;
+        }
+        items[j + 1] = k;
+    }
+    size_t w = 0;
+    for (int i = 0; i < n && w < cap - 1; i++) {
+        const char* sep = i == 0 ? "" : (i == n - 1 ? " " : ", ");
+        if (i == n - 1 && n > 1) {
+            int wrote = snprintf(out + w, cap - w, "%s%s ", sep,
+                                 lastjoin);
+            if (wrote < 0) break;
+            w += (size_t)wrote;
+        } else {
+            int wrote = snprintf(out + w, cap - w, "%s", sep);
+            if (wrote < 0) break;
+            w += (size_t)wrote;
+        }
+        int wrote = snprintf(out + w, cap - w, "\"%s\"", items[i]);
+        if (wrote < 0) break;
+        w += (size_t)wrote;
+    }
+    out[w < cap ? w : cap - 1] = 0;
+}
+
+/* Jing RequiredElementsFunction: the required element names of a
+ * position. Element -> its name; choice -> branch intersection
+ * (empty if a branch has none); interleave/oneOrMore/mixed ->
+ * descend (union); member lists (groups, ref bodies) take the
+ * leftmost non-nullable member and stop. AnyName elements
+ * contribute nothing. */
+static int req_names(RngVal* v, RngPattern* p, const char* out[8],
+                     int depth) {
+    if (!p || depth > 64) return 0;
+    if (p->kind == RNG_REF) {
+        RngDefine* d = find_define(v->g, p->name);
+        if (!d || !d->body) return 0;
+        for (RngPattern* m = d->body; m; m = m->next)
+            if (!nullable_item(v, m))
+                return req_names(v, m, out, depth + 1);
+        return 0;
+    }
+    switch (p->kind) {
+        case RNG_ELEMENT:
+            if (p->name && !p->any_name) {
+                out[0] = p->name;
+                return 1;
+            }
+            return 0;
+        case RNG_CHOICE: {
+            const char* acc[8];
+            int have = 0;
+            for (RngPattern* c = p->first_child; c; c = c->next) {
+                const char* tmp[8];
+                int m = req_names(v, c, tmp, depth + 1);
+                if (m == 0) return 0;
+                if (!have) {
+                    memcpy(acc, tmp, sizeof(acc));
+                    have = m;
+                    continue;
+                }
+                int w = 0;
+                for (int i = 0; i < have; i++)
+                    for (int j = 0; j < m; j++)
+                        if (strcmp(acc[i], tmp[j]) == 0)
+                            acc[w++] = acc[i];
+                have = w;
+                if (!have) return 0;
+            }
+            memcpy(out, acc, sizeof(acc));
+            return have;
+        }
+        case RNG_INTERLEAVE: case RNG_ONE_OR_MORE: case RNG_MIXED: {
+            int n = 0;
+            for (RngPattern* c = p->first_child; c && n < 8;
+                 c = c->next)
+                n += req_names(v, c, out + n, depth + 1);
+            return n;
+        }
+        case RNG_GROUP:
+            for (RngPattern* c = p->first_child; c; c = c->next)
+                if (!nullable_item(v, c))
+                    return req_names(v, c, out, depth + 1);
+            return 0;
+        default:
+            return 0;
+    }
 }
 
 static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
@@ -1152,10 +1379,11 @@ static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
      * (basicdoc's Root-Attributes) and containers - the verdict
      * path's list_consumes_attr semantics, mirrored here. */
     RngPattern* cands[64];
+    int cand_opt[64];
     RngPattern* seen[128];
     int nseen = 0;
     int n_attr_patterns = collect_attr_patterns(
-        v, p->first_child, cands, 0, 64, seen, &nseen);
+        v, p->first_child, cands, cand_opt, 0, 64, 0, seen, &nseen);
     /* Extra attributes. */
     for (struct leptris_attribute* a = leptris_element_get_first_attribute(e);
          a; a = leptris_attr_next(a)) {
@@ -1171,28 +1399,36 @@ static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
                 if (!c->name || strcmp(c->name, name) != 0)
                     continue;
                 const char* got = leptris_element_attribute(e, name);
-                if (!attr_content_satisfied(c, got ? got : "")) {
-                    /* The constraining leaf: VALUE or DATA. */
-                    for (RngPattern* leaf = c->first_child; leaf;
-                         leaf = leaf->next) {
-                        if (leaf->kind == RNG_VALUE && leaf->value) {
-                            diag(v, LEPTRIS_DIAG_ATTR_VALUE_INVALID,  e,
+                if (!attr_content_satisfied(v, c, got ? got : "")) {
+                    /* Jing formatDataDerivFailures: every VALUE
+                     * leaf reachable (refs, choices), deduped,
+                     * sorted, or-joined. */
+                    const char* vals[24];
+                    int nv = 0;
+                    collect_value_leaves(v, c->first_child, vals, &nv,
+                                         24, 0);
+                    if (nv > 0) {
+                        char buf[256];
+                        render_quoted_list(vals, nv, "or", buf,
+                                           sizeof(buf));
+                        diag(v, LEPTRIS_DIAG_ATTR_VALUE_INVALID,  e,
+        "value of attribute \"%s\" is invalid; must be "
+                             "equal to %s", name, buf);
+                    } else {
+                        for (RngPattern* leaf = c->first_child; leaf;
+                             leaf = leaf->next) {
+                            if (leaf->kind == RNG_DATA) {
+                                char dtb[64];
+                                snprintf(dtb, sizeof(dtb), "%s %s",
+                                         art(leaf->datatype),
+                                         leaf->datatype
+                                             ? leaf->datatype : "string");
+                                diag(v, LEPTRIS_DIAG_ATTR_VALUE_INVALID,  e,
         "value of attribute \"%s\" is invalid; "
-                                 "must be equal to \"%s\"",
-                                 name, leaf->value);
-                            break;
-                        }
-                        if (leaf->kind == RNG_DATA) {
-                            char dtb[64];
-                            snprintf(dtb, sizeof(dtb), "%s %s",
-                                     art(leaf->datatype),
-                                     leaf->datatype
-                                         ? leaf->datatype : "string");
-                            diag(v, LEPTRIS_DIAG_ATTR_VALUE_INVALID,  e,
-        "value of attribute \"%s\" is invalid; "
-                                  "must be %s",
-                                  name, dtb, NULL);
-                            break;
+                                      "must be %s",
+                                      name, dtb, NULL);
+                                break;
+                            }
                         }
                     }
                 }
@@ -1207,14 +1443,29 @@ static void diagnose_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
         "attribute \"%s\" not allowed", name, NULL);
         }
     }
-    /* Missing required attributes (declared order). */
-    for (int i = 0; i < n_attr_patterns; i++) {
-        RngPattern* c = cands[i];
-        if (!c->name) continue;
-        if (!leptris_element_attribute(e, c->name))
+    /* Missing required attributes. Optional wrappers (also choice
+     * branches) never require presence. One Jing message:
+     * singular, or the plural and-joined list. */
+    {
+        const char* missing[24];
+        int nm = 0;
+        for (int i = 0; i < n_attr_patterns && nm < 24; i++) {
+            RngPattern* c = cands[i];
+            if (!c->name || cand_opt[i]) continue;
+            if (!leptris_element_attribute(e, c->name))
+                missing[nm++] = c->name;
+        }
+        if (nm == 1) {
             diag(v, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,  e,
         "element \"%s\" missing required attribute \"%s\"",
-                 p->name, c->name);
+                 p->name, missing[0]);
+        } else if (nm > 1) {
+            char list[256];
+            render_quoted_list(missing, nm, "and", list, sizeof(list));
+            diag(v, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,  e,
+        "element \"%s\" missing required attributes %s",
+                 p->name, list);
+        }
     }
 }
 
@@ -1286,6 +1537,32 @@ static void diagnose_text(RngVal* v, RngPattern* p, LeptrisElement e) {
     }
 }
 
+/* Push walk cells for one content item. Refs splice their define
+ * body member by member — a body is a sibling LIST and the head
+ * alone is not the body (Root-Attributes, DocumentBody). Attribute
+ * members are element-level (diagnose_attrs) and never gate
+ * content order. Bare groups flatten the same way (#878). Depth
+ * caps recursive define splices. */
+static DiagCell* cell_push(RngVal* v, RngPattern* item, DiagCell* state,
+                           int depth) {
+    if (!item || depth > 8) return state;
+    if (item->kind == RNG_ATTRIBUTE) return state;
+    if (item->kind == RNG_REF) {
+        RngDefine* d = find_define(v->g, item->name);
+        if (d && d->body)
+            for (RngPattern* m = d->body; m; m = m->next)
+                state = cell_push(v, m, state, depth + 1);
+        return state;
+    }
+    RngPattern* g = deref(v, item);
+    if (g && g->kind == RNG_GROUP)
+        for (RngPattern* c = g->first_child; c; c = c->next)
+            state = cell_push(v, c, state, depth + 1);
+    else
+        state = dcell_new(v, item, state);
+    return state;
+}
+
 static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
     if (!p || !e) return;
     diagnose_attrs(v, p, e);
@@ -1309,23 +1586,11 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
     LeptrisNodeRef kids[64];
     size_t n = elem_children(e, kids, 64);
     DiagCell* state = NULL;
-    /* Flatten bare GROUP children into cells so the skip/recovery
-     * walk can advance past individual items inside them (#878). */
-    for (RngPattern* c = p->first_child; c; c = c->next) {
-        if (c->kind == RNG_ATTRIBUTE) continue;
-        RngPattern* d = deref(v, c);
-        if (d && d != c && d->kind == RNG_GROUP && c->kind == RNG_REF) {
-            for (RngPattern* g = d->first_child; g; g = g->next)
-                state = dcell_new(v, g, state);
-            continue;
-        }
-        if (d && d->kind == RNG_GROUP && d == c) {
-            for (RngPattern* g = d->first_child; g; g = g->next)
-                state = dcell_new(v, g, state);
-            continue;
-        }
-        state = dcell_new(v, c, state);
-    }
+    /* Cells see individual members: define bodies behind refs (the
+     * sibling list) and bare GROUP children flatten; attributes
+     * stay with diagnose_attrs (#878). */
+    for (RngPattern* c = p->first_child; c; c = c->next)
+        state = cell_push(v, c, state, 0);
     {
         DiagCell* rev = NULL;
         for (DiagCell* c = state; c; ) {
@@ -1352,7 +1617,7 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
         /* Not consumable here. Classify per Jing. */
         int in_model = 0;
         for (RngPattern* c = p->first_child; c && !in_model; c = c->next)
-            in_model = name_in_tree(v, c, x);
+            in_model = name_in_tree(v, c, x, 0);
         char expected[512];
         render_expected(v, state, has_mixed, expected, sizeof(expected));
         if (in_model) {
@@ -1390,13 +1655,26 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
         /* Skip the offending child; position unchanged. */
     }
     if (!nullable_state(v, state)) {
-        const char* names[32];
-        int nn = 0;
-        first_names_state(v, state, names, &nn);
-        if (nn == 1) {
+        /* Jing matchEndTag: requiredElementNames() of the leftmost
+         * non-nullable position - singular/plural "missing
+         * required element(s)", else the expected-content set. */
+        const char* req[8];
+        int nr = 0;
+        for (DiagCell* c = state; c; c = c->next) {
+            if (nullable_item(v, c->item)) continue;
+            nr = req_names(v, c->item, req, 0);
+            break;
+        }
+        if (nr == 1) {
             diag(v, LEPTRIS_DIAG_INCOMPLETE,  e,
         "element \"%s\" incomplete; missing required "
-                       "element \"%s\"", p->name, names[0]);
+                       "element \"%s\"", p->name, req[0]);
+        } else if (nr > 1) {
+            char list[256];
+            render_quoted_list(req, nr, "and", list, sizeof(list));
+            diag(v, LEPTRIS_DIAG_INCOMPLETE,  e,
+        "element \"%s\" incomplete; missing required "
+                       "elements %s", p->name, list);
         } else {
             char expected[512];
             render_expected(v, state, has_mixed, expected, sizeof(expected));
