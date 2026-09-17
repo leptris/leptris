@@ -3082,6 +3082,48 @@ static int h_clears_frameset_ok(const char* n) {
     return 0;
 }
 
+/* 13.2.5.4.4 exception: <input> clears frameset-ok UNLESS its type
+ * is "hidden" (case-insensitive) - scan the raw tag attributes
+ * (webkit01:51: <input type=hidden><frameset> still replaces). */
+static int h_input_type_hidden(const char* q, const char* end) {
+    while (q < end && *q != '>') {
+        while (q < end && h_is_ws(*q)) q++;
+        if (q >= end || *q == '>' || *q == '/') break;
+        const char* as = q;
+        while (q < end && !h_is_ws(*q) && *q != '=' && *q != '>')
+            q++;
+        size_t alen = (size_t)(q - as);
+        int is_type = (alen == 4);
+        for (size_t i = 0; is_type && i < 4; i++)
+            if (h_lower(as[i]) != "type"[i]) is_type = 0;
+        while (q < end && h_is_ws(*q)) q++;
+        if (q < end && *q == '=') {
+            q++;
+            while (q < end && h_is_ws(*q)) q++;
+            char quote = 0;
+            if (q < end && (*q == '"' || *q == '\'')) {
+                quote = *q;
+                q++;
+            }
+            const char* vs = q;
+            while (q < end && *q != '>' &&
+                   (quote ? *q != quote : !h_is_ws(*q)))
+                q++;
+            if (is_type) {
+                if ((size_t)(q - vs) != 6) return 0;
+                static const char hid[] = "hidden";
+                for (size_t i = 0; i < 6; i++)
+                    if (h_lower(vs[i]) != hid[i]) return 0;
+                return 1;
+            }
+            if (quote && q < end) q++;
+        } else if (is_type) {
+            return 0;   /* bare type attribute: not hidden */
+        }
+    }
+    return 0;
+}
+
 /* Start tags that DO reconstruct the active formatting list
  * before inserting (13.2.6.4.7): everything except the structural
  * head set, the block-level set (they close p instead), the table
@@ -4233,8 +4275,11 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             if (hty == LEPTRIS_NODE_TYPE_TEXT) {
                 /* "in head" whitespace stays head content (13.2.6.4.4
                  * inserts whitespace into the current node; tests1:51);
-                 * non-whitespace text switches to body. */
-                if (b->whatwg_head_set && head_start) {
+                 * non-whitespace text switches to body. AFTER </head>
+                 * the phase is "after head": even whitespace is an
+                 * html child between head and body
+                 * (webkit01:35). */
+                if (b->whatwg_head_set && head_start && !past_head_end) {
                     const char* tx =
                         leptris_text_node_get_content(head_end);
                     int ws = 1;
@@ -5455,8 +5500,11 @@ static LeptrisDocument html_parse_shared(
          * reprocessed (tests1:90). */
         if (b.whatwg && strcmp(name, "image") == 0)
             name = h_pooled_lower(b.pool, "img", 3);
-        /* 13.2.5.4.4: the enumerated start tags clear frameset-ok. */
-        if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name)) {
+        /* 13.2.5.4.4: the enumerated start tags clear frameset-ok;
+         * <input type=hidden> does not (webkit01:51). */
+        if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name) &&
+            !(nlen == 5 && strcmp(name, "input") == 0 &&
+              h_input_type_hidden(q, end))) {
             b.frameset_ok = 0;
         }
         /* #659 in-body proxy: anything that is not head-only
