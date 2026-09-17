@@ -4,11 +4,22 @@
 
 ### Added
 
-- leptris_rng_error_report — the whole validation report in one call (rng)
+- **RNG: `leptris_rng_error_report` — the whole validation report
+  in one call.** `LeptrisRngErrorRecord { kind, message, offender,
+  line, column }`, returned as a handle-owned array; count 0 when
+  valid. `kind` is the failure class (the #1126 diagnostic
+  taxonomy: "not-allowed-anywhere", "not-allowed-here",
+  "not-allowed-yet", "incomplete", "missing-required-attr",
+  "attr-not-allowed", "attr-value-invalid", "char-content-invalid")
+  and `offender` the attributed element name — both previously
+  unreachable from the public surface. The per-index accessors
+  remain for back-compat. Gate:
+  `RngErrors.ErrorReportReturnsTheWholeStructuredList`. Full ctest
+  1538/1538.
 
 ### Fixed
 
-- resolve externalRef in bare-<element> schemas (rng)
+- resolve externalRef in bare-`<element>` schemas (rng)
 
 
 
