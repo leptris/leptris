@@ -5230,8 +5230,39 @@ static LeptrisDocument html_parse_shared(
                     lname[i] = h_lower(ns[i]);
                 lname[cl] = 0;
                 if (!h_is_void(lname)) {
-                    if (b.whatwg && strcmp(lname, "form") == 0)
+                    if (b.whatwg && strcmp(lname, "form") == 0) {
+                        /* Vendored rule: </form> closes implied
+                         * end-tag layers (option/optgroup/li/dd/
+                         * dt/p), then pops the form ONLY when it
+                         * is the current node - <form><div></form>
+                         * keeps the form open (tests6:2); a bare
+                         * <form></form> closes (tests2). */
+                        while (b.depth > 0) {
+                            const char* fn2 = leptris_element_name(
+                                b.open[b.depth - 1]);
+                            if (fn2 &&
+                                (strcmp(fn2, "option") == 0 ||
+                                 strcmp(fn2, "optgroup") == 0 ||
+                                 strcmp(fn2, "li") == 0 ||
+                                 strcmp(fn2, "dd") == 0 ||
+                                 strcmp(fn2, "dt") == 0 ||
+                                 strcmp(fn2, "p") == 0)) {
+                                b.depth--;
+                                continue;
+                            }
+                            break;
+                        }
+                        if (b.depth > 0) {
+                            const char* ft = leptris_element_name(
+                                b.open[b.depth - 1]);
+                            if (ft && strcmp(ft, "form") == 0)
+                                b.depth--;
+                        }
                         b.form_open = 0;
+                        p = q;
+                        text = p;
+                        continue;
+                    }
                     /* #659 (WHATWG): heading end tags pop through
                      * the NEAREST heading (any h1-h6), not just
                      * the same name — the rest is normal matching. */
