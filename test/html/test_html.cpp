@@ -968,6 +968,17 @@ TEST(HtmlParse, SolidusOnHtmlStartTagIsIgnored) {
               "<svg><circle/></svg>");
 }
 
+TEST(HtmlParse, HiddenInputKeepsFramesetOk) {
+    /* Vendored webkit01:51/52: <input type=hidden> does NOT clear
+     * frameset-ok - a later <frameset> replaces the body; any
+     * other type clears it and the frameset token is ignored. */
+    EXPECT_EQ(Html("<!doctype html><input type=\"hidden\"><frameset>"),
+              "<!DOCTYPE html><html><head/><frameset/></html>");
+    EXPECT_EQ(Html("<!doctype html><input type=\"button\"><frameset>"),
+              "<!DOCTYPE html><html><head/><body><input type=\"button\"/>"
+              "</body></html>");
+}
+
 TEST(HtmlForeign, SvgInsideMathmlSubtreeIsSvgNamespaced) {
     /* Vendored corpus tests10:52-54, tests12:1-2, tests9:4,
      * tests20:64: <svg> is a namespace ROOT wherever it starts -
