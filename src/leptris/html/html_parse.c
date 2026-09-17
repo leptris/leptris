@@ -2188,7 +2188,7 @@ static int h_closes(const char* open, const char* start) {
         return 1;
     if (strcmp(open, "option") == 0 &&
         (strcmp(start, "option") == 0 || strcmp(start, "optgroup") == 0 ||
-         strcmp(start, "select") == 0))
+         strcmp(start, "select") == 0 || strcmp(start, "hr") == 0))
         return 1;
     if (strcmp(open, "optgroup") == 0 && strcmp(start, "optgroup") == 0)
         return 1;
@@ -4914,6 +4914,43 @@ static LeptrisDocument html_parse_shared(
                     }
                 }
             }
+            /* #659 tests26:17-20 - an HTML end tag with the foreign
+             * scope open that matches nothing in it pops the
+             * foreign scope and reprocesses in body (13.2.6.5
+             * any-other-end-tag); the body rules then apply to it
+             * (</p> leaves an empty <p>, </br> acts as <br>). */
+            if (b.whatwg && b.depth > 0 && nlen &&
+                b.open_ns[b.depth - 1] != H_NS_HTML) {
+                char lname0[24];
+                size_t cl0 = nlen < sizeof(lname0) - 1
+                                 ? nlen : sizeof(lname0) - 1;
+                for (size_t i = 0; i < cl0; i++)
+                    lname0[i] = h_lower(ns[i]);
+                lname0[cl0] = 0;
+                int match_foreign = 0, crossed_ip = 0;
+                for (size_t d = b.depth; d > 0; d--) {
+                    if (b.open_ns[d - 1] == H_NS_HTML) break;
+                    /* Integration points are scope boundaries: an
+                     * end tag beyond one belongs to the body rules
+                     * (which scope-check and likely ignore it). */
+                    if (h_is_int_point(&b, d - 1)) {
+                        crossed_ip = 1;
+                        break;
+                    }
+                    const char* on3 =
+                        leptris_element_name(b.open[d - 1]);
+                    if (on3 && h_ieq_raw(on3, lname0)) {
+                        match_foreign = 1;
+                        break;
+                    }
+                }
+                if (!match_foreign && !crossed_ip) {
+                    while (b.depth > 0 &&
+                           b.open_ns[b.depth - 1] != H_NS_HTML &&
+                           !h_is_int_point(&b, b.depth - 1))
+                        b.depth--;
+                }
+            }
             /* #659 13.2.6.4.7: </br> acts as a <br> start tag with
              * its attributes DROPPED — at ANY depth, including
              * top level where nothing is open (webkit01:18/20). */
@@ -4925,7 +4962,9 @@ static LeptrisDocument html_parse_shared(
                 text = p;
                 continue;
             }
-            if (nlen && b.depth > 0) {
+            if (nlen && (b.depth > 0 ||
+                         (b.whatwg && b.body_seen && nlen == 1 &&
+                          h_lower(ns[0]) == 'p'))) {
                 /* Find the matching open element (nearest first);
                  * void-element end tags are ignored. */
                 char lname[24];
@@ -5554,7 +5593,8 @@ static LeptrisDocument html_parse_shared(
             strcmp(name, "keygen") != 0 &&
             strcmp(name, "textarea") != 0 &&
             strcmp(name, "script") != 0 &&
-            strcmp(name, "template") != 0) {
+            strcmp(name, "template") != 0 &&
+            strcmp(name, "hr") != 0) {
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;
@@ -5942,6 +5982,30 @@ static LeptrisDocument html_parse_shared(
                         b.depth--;
                     }
                 }
+            }
+        }
+        /* #659 tests26:16 - a <button> start tag closes an open
+         * button in scope first: implied end tags, pop through it
+         * (13.2.6.4.7), then the new button inserts. */
+        if (b.whatwg && elem_ns == H_NS_HTML &&
+            strcmp(name, "button") == 0) {
+            for (size_t d2 = b.depth; d2 > 0; d2--) {
+                const char* on2 = leptris_element_name(b.open[d2 - 1]);
+                if (!on2) break;
+                if (strcmp(on2, "button") == 0) {
+                    b.depth = d2 - 1;
+                    break;
+                }
+                if (h_ieq_raw(on2, "applet") ||
+                    h_ieq_raw(on2, "caption") ||
+                    h_ieq_raw(on2, "table") ||
+                    h_ieq_raw(on2, "td") ||
+                    h_ieq_raw(on2, "th") ||
+                    h_ieq_raw(on2, "marquee") ||
+                    h_ieq_raw(on2, "object") ||
+                    h_ieq_raw(on2, "template") ||
+                    h_is_int_point(&b, d2 - 1))
+                    break;
             }
         }
         /* #659 reconstruct the active formatting elements before
