@@ -1643,3 +1643,34 @@ TEST(HtmlParse, ForeignAttrAdjustTablesKeepSvgAndMathmlCase) {
     /* HTML attrs OUTSIDE foreign content stay lowercase. */
     EXPECT_EQ(Html("<p ATTRIBUTETYPE=\"x\"/>"), "<p attributetype=\"x\"/>");
 }
+
+TEST(HtmlParse, ButtonStartClosesOpenButton) {
+    /* Vendored corpus tests26.dat 16: a <button> start tag in body
+     * with a button already in scope closes it first - implied
+     * end tags, pop through the button, then insert
+     * (13.2.6.4.7). */
+    EXPECT_EQ(Html("<button><p><button>"),
+              "<button><p/></button><button/>");
+}
+
+TEST(HtmlParse, HtmlEndTagInForeignPopsForeignScope) {
+    /* Vendored corpus tests26.dat 17-20: an HTML end tag while in
+     * foreign content pops the foreign scope and reprocesses in
+     * body: </p> with no p in button scope leaves an empty <p>,
+     * and </br> acts as a <br> start tag. */
+    EXPECT_EQ(Html("<svg></p><foo>"), "<svg/><p/><foo/>");
+    EXPECT_EQ(Html("<svg></br><foo>"), "<svg/><br/><foo/>");
+    EXPECT_EQ(Html("<math></p><foo>"), "<math/><p/><foo/>");
+}
+
+TEST(HtmlParse, SelectInsertsHr) {
+    /* Vendored corpus webkit02.dat 26/27: an <hr> start tag in
+     * "in select" is an ordinary insert; a current <option> pops
+     * first (sibling, like option-on-option). input/keygen/
+     * textarea still pop the select and reprocess in body, and a
+     * dropped tag's text joins the select's text (tests4). */
+    EXPECT_EQ(Html("<select><hr>"), "<select><hr/></select>");
+    EXPECT_EQ(Html("<select><option><hr>"),
+              "<select><option/><hr/></select>");
+    EXPECT_EQ(Html("<select><button>b</button>"), "<select>b</select>");
+}
