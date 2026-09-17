@@ -4226,6 +4226,10 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
      * ahead of the spliced <head> — an html prefix. Once head
      * content has begun, comments join the head run. */
     LeptrisNodeRef head_start = NULL;      /* first head-run node */
+    /* After-</head> whitespace (webkit01:35/36): skipped by the
+     * run walk and re-wired as html children between head and the
+     * rest (13.2.6.4.6 after-head inserts at the html level). */
+    LeptrisNodeRef ws_first = NULL, ws_last = NULL;
     LeptrisNodeRef prefix_last = NULL;
     size_t prefix_count = 0;
     /* #659 an explicit <head> child of html IS the head element —
@@ -4287,6 +4291,21 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                         for (const char* w = tx; *w; w++)
                             if (!h_is_ws(*w)) { ws = 0; break; }
                     if (ws) {
+                        head_end =
+                            leptris_node_get_next_sibling(head_end);
+                        continue;
+                    }
+                }
+                if (b->whatwg_head_set && past_head_end) {
+                    const char* tx =
+                        leptris_text_node_get_content(head_end);
+                    int ws = 1;
+                    if (tx)
+                        for (const char* w = tx; *w; w++)
+                            if (!h_is_ws(*w)) { ws = 0; break; }
+                    if (ws) {
+                        if (!ws_first) ws_first = head_end;
+                        ws_last = head_end;
                         head_end =
                             leptris_node_get_next_sibling(head_end);
                         continue;
@@ -4426,6 +4445,7 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
         }
     }
 
+
     /* #659 after-head / after-body comments (tests19:3/21): a
      * comment tokenized after the head element closed stays a
      * child of the html element BETWEEN head and body; after a
@@ -4434,7 +4454,23 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
      * body). Peel them off the rest first. */
     LeptrisNodeRef suffix_first = NULL, suffix_last = NULL;
     LeptrisNodeRef after_tail = NULL;
-    if (b->whatwg_head_set && !b->frameset && rest) {
+    /* The skipped after-head whitespace becomes the LEADING suffix
+     * segment - html children between head and body; the suffix
+     * machinery below links and counts them (webkit01:35/36). */
+    if (ws_first) {
+        for (LeptrisNodeRef w2 = ws_first; ; ) {
+            leptris_textnode_set_parent((LeptrisTextNode*)w2, html);
+            if (w2 == ws_last) break;
+            w2 = leptris_node_get_next_sibling(w2);
+        }
+        if (suffix_first)
+            leptris_node_set_next_sibling(ws_last, suffix_first);
+        else
+            suffix_last = ws_last;
+        suffix_first = ws_first;
+    }
+    if (b->whatwg_head_set && !b->frameset &&
+        (rest || b->head_end_seen)) {
         if (b->head_end_seen) {
             /* Front peel: leading comments/PIs of the rest. */
             LeptrisNodeRef c = rest;
@@ -5362,7 +5398,12 @@ static LeptrisDocument html_parse_shared(
                  * </head> ends the head phase (tests19:3), </body>
                  * starts the after-body phase (tests19:21), and
                  * </html> ends the head phase too — content after
-                 * it belongs to the body (tests1:93). */
+                 * it belongs to the body (tests1:93). Any of them
+                 * also ends the INITIAL mode, so trailing head
+                 * whitespace survives as an html child instead of
+                 * being eaten by the leading-whitespace drop
+                 * (webkit01:35/36). */
+                b.left_initial = 1;
                 if (h_lower(ns[0]) == 'h' && h_lower(ns[1]) == 'e' &&
                     h_lower(ns[2]) == 'a' && h_lower(ns[3]) == 'd') {
                     b.head_end_seen = 1;
