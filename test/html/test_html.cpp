@@ -1864,6 +1864,46 @@ TEST(HtmlParse, TdInCaptionPopsCaption) {
               "<table><caption/><tbody><tr><td/></tr></tbody></table>");
 }
 
+/* 13.2.6.4.18/.19: frameset text runs keep EVERY whitespace
+ * character and drop the non-whitespace ones (" te st" -> "  "),
+ * in frameset and after </frameset> alike (tests2:7/8). */
+TEST(HtmlParse, FramesetTextFiltersNonWhitespace) {
+    EXPECT_EQ(Html("<!DOCTYPE html><frameset> te st"),
+              "<!DOCTYPE html><html><head/><frameset>  ");
+    EXPECT_EQ(Html("<!DOCTYPE html><frameset></frameset> te st"),
+              "<!DOCTYPE html><html><head/><frameset/>  ");
+}
+
+/* tests20:41: </address> pops through an open button (a block
+ * close is not fenced by the button scope) - "a" lands in body. */
+TEST(HtmlParse, AddressEndPopsThroughButton) {
+    EXPECT_EQ(Html("<address><button></address>a"),
+              "<address><button/></address>a");
+}
+
+/* tests3:24 / tests20:42: <table> does NOT close an open p, and
+ * the stray </p> (no p in button scope past the table) inserts an
+ * empty p FOSTERED before the table - body > [p > [p, table]]. */
+TEST(HtmlParse, TableDoesNotCloseP) {
+    EXPECT_EQ(Html("<p><table></table>"),
+              "<p><table/></p>");
+    EXPECT_EQ(Html("<p><table></p>"),
+              "<p><p/><table/></p>");
+    /* Under an explicit <body> the reference closes the p
+     * (tests3:23). */
+    EXPECT_EQ(Html("<!doctype html><html><body><p><table></table>"),
+              "<!DOCTYPE html><html><head/><body><p/><table/></body></html>");
+}
+
+/* tests20:63: an HTML end tag in foreign content that matches
+ * nothing only pops for </br>/</p>; </svg> inside
+ * <math><annotation-xml> is ignored - "x" stays in the
+ * annotation-xml. */
+TEST(HtmlParse, ForeignEndTagNoMatchNotBrPIsIgnored) {
+    EXPECT_EQ(Html("<math><annotation-xml></svg>x"),
+              "<math><annotation-xml>x</annotation-xml></math>");
+}
+
 TEST(HtmlParse, AfterFramesetWhitespaceStaysHtmlChild) {
     /* 13.2.6.4.19: whitespace text in "after frameset" is inserted
      * into the current node (html); non-whitespace reprocesses into
