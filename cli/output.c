@@ -7,6 +7,9 @@
 #include "error.h"
 #include <stdlib.h>
 #include <string.h>
+/* fileno/isatty: musl hides them without a POSIX feature macro when
+ * no explicit unistd include orders the graph */
+#include <unistd.h>
 
 #if defined(_WIN32)
 #  include <io.h>

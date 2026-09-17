@@ -3,6 +3,7 @@
  */
 #include "arena.h"
 
+#include <stdint.h> /* uintptr_t: was transitive via glibc's mman graph */
 #include <stdlib.h>
 #include <string.h>
 #if defined(__linux__)
