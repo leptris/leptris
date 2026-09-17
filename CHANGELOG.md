@@ -4,7 +4,29 @@
 
 ### Fixed
 
-- define-body sibling lists everywhere + Jing-parity attr/incomplete messages (rng)
+- **RNG: define-body sibling lists + Jing-parity diagnostics
+  (metanorma parity).** A define body is a sibling list, but the
+  verdict and the diagnostic walk both matched only the body's
+  head pattern — refs to multi-member bodies (metanorma's
+  `DocumentBody` = `[optional preface][sections]`) never matched
+  their tail, so every valid metanorma document failed validation
+  on its own. The REF case now iterates the whole body (a body is
+  an implicit group); inside a CHOICE, alternatives that consume
+  a child now win over zero-width `<text/>`/empty branches (inline
+  `TextElement` models stopped starving). The diagnostic walk
+  gained the Jing semantics read from the reference
+  implementation (PatternMatcher.java): refs splice body members
+  into walk cells; attribute cells never consume children or gate
+  content order; anyName elements are consumable; the
+  invalid-attribute-value message enumerates every reachable
+  VALUE leaf through refs (Alignments), deduped, sorted,
+  or-joined; `incomplete` reports the leftmost required position
+  (singular/plural), and missing required attributes collapse to
+  one message with optionals exempt. The metanorma-standoc spec
+  corpus now yields exactly Jing's three errors, byte-identical
+  in position and wording (previously 7 divergent errors plus
+  silent failures). Five TDD gates; full ctest 1547/1547.
+  (#878 / metanorma/metanorma-standoc#1254)
 
 
 
