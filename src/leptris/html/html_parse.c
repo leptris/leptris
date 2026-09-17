@@ -2738,6 +2738,10 @@ typedef struct {
      * node appended before it (NULL = nothing was). */
     int lift_closed;
     LeptrisNodeRef lift_boundary;
+    /* #659: a STRUCTURAL <body> tag was seen (vs implied body
+     * content, which also closes the lift window). Only this ends
+     * the "in head noscript" phase outright. */
+    int body_tag_seen;
     /* #659 foster parenting: WHATWG 12.2.6.1 — text (and non-table
      * elements) arriving with a table-context insertion point go
      * BEFORE the table in its parent. libxml2 keeps them in the
@@ -2814,7 +2818,7 @@ static int h_body_still_empty(HBuilder* b) {
  * WHATWG 12.2.6.4.5 "in head noscript": head content and
  * comments stay inside; the first body-ish token pops it. */
 static int h_in_head_noscript(HBuilder* b) {
-    return b->whatwg && b->depth == 1 && !b->lift_closed &&
+    return b->whatwg && b->depth == 1 && !b->body_tag_seen &&
            h_ieq_raw(leptris_element_name(b->open[0]), "noscript") &&
            h_body_still_empty(b);
 }
@@ -3250,6 +3254,12 @@ static const char* h_attr_name(int ns, const char* n) {
  * text-integration keeps mglyph/malignmark MathML. */
 static int h_start_ns(HBuilder* b, const char* name) {
     if (b->depth == 0) return H_NS_HTML;
+    /* svg/math starts are namespace ROOTS wherever they appear
+     * (13.2.6.5 any-other-start-tag): <svg> inside a MathML
+     * subtree opens an SVG subtree, not a MathML child
+     * (tests10:52-54, tests12:1-2). */
+    if (strcmp(name, "svg") == 0) return H_NS_SVG;
+    if (strcmp(name, "math") == 0) return H_NS_MATH;
     int top = b->open_ns[b->depth - 1];
     if (top == H_NS_HTML) return H_NS_HTML;
     const char* tn = leptris_element_name(b->open[b->depth - 1]);
@@ -4963,8 +4973,12 @@ static LeptrisDocument html_parse_shared(
                 continue;
             }
             if (nlen && (b.depth > 0 ||
-                         (b.whatwg && b.body_seen && nlen == 1 &&
-                          h_lower(ns[0]) == 'p'))) {
+                         (b.whatwg &&
+                          ((nlen == 4 &&
+                            (strncmp(ns, "body", 4) == 0 ||
+                             strncmp(ns, "html", 4) == 0)) ||
+                           (b.body_seen && nlen == 1 &&
+                            h_lower(ns[0]) == 'p'))))) {
                 /* Find the matching open element (nearest first);
                  * void-element end tags are ignored. */
                 char lname[24];
@@ -5109,6 +5123,14 @@ static LeptrisDocument html_parse_shared(
                         }
                         if (!body_open) {
                             b.after_body = 1;
+                            /* </body> with no structural <body>:
+                             * after-body head-family content
+                             * reprocesses INTO the body, so the
+                             * lift window closes here (tests15:4). */
+                            if (!b.lift_closed) {
+                                b.lift_closed = 1;
+                                b.lift_boundary = b.top_tail;
+                            }
                             p = q;
                             text = p;
                             continue;
@@ -5389,14 +5411,25 @@ static LeptrisDocument html_parse_shared(
             static const char* const k_head_only[] = {
                 "base", "basefont", "bgsound", "link", "meta",
                 "noscript", "script", "style", "template", "title",
-                "html", "head", "body", "frameset", NULL};
+                "noframes", "html", "head", "body", "frameset",
+                NULL};
             int head_only = 0;
             for (int i = 0; k_head_only[i]; i++)
                 if (strcmp(name, k_head_only[i]) == 0) {
                     head_only = 1;
                     break;
                 }
-            if (!head_only) b.body_seen = 1;
+            if (!head_only) {
+                b.body_seen = 1;
+                /* Implied body content closes the head-lift window
+                 * at the last node before it (a later fostered or
+                 * after-body title/meta is BODY content, never head
+                 * - tests7:2/5, tests15:4/6). */
+                if (!b.lift_closed) {
+                    b.lift_closed = 1;
+                    b.lift_boundary = b.top_tail;
+                }
+            }
         }
 
         /* Structural tags at top level (no explicit <html> open):
@@ -5413,6 +5446,7 @@ static LeptrisDocument html_parse_shared(
         if (structural_ctx && !b.frameset &&
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
             if (strcmp(name, "body") == 0) {
+                b.body_tag_seen = 1;
                 /* Only the FIRST structural <body> marks the
                  * lift boundary — a later one would re-enable the
                  * head lift after body content began (tests1:88:

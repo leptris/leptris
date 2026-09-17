@@ -902,6 +902,47 @@ static LeptrisDocument ForeignDoc(const char* in) {
     return d;
 }
 
+TEST(HtmlParse, HeadContentAfterBodyContentStaysInBody) {
+    /* tests15:4/6, tests7:2/5: the head-lift window closes when
+     * body content begins - explicitly (</body>: meta lands in the
+     * body, after-body reprocessing) or by implication (a table is
+     * body content; a title inside it fosters OUT of the table into
+     * the body, it does not hoist into the head). */
+    EXPECT_EQ(Html("<!doctype html></body><meta>"),
+              "<!DOCTYPE html><html><head/><body><meta/></body>"
+              "</html>");
+    EXPECT_EQ(Html("<!doctype html><table><title>X</title></table>"),
+              "<!DOCTYPE html><html><head/><body><title>X</title>"
+              "<table/></body></html>");
+    /* Leading head content before implied body content still
+     * lifts (the window closes at the FIRST body content). */
+    EXPECT_EQ(Html("<title>a</title><p>b"),
+              "<html><head><title>a</title></head><body><p>b</p>"
+              "</body></html>");
+}
+
+TEST(HtmlForeign, SvgInsideMathmlSubtreeIsSvgNamespaced) {
+    /* Vendored corpus tests10:52-54, tests12:1-2, tests9:4,
+     * tests20:64: <svg> is a namespace ROOT wherever it starts -
+     * inside a MathML annotation-xml (no encoding: not an HTML
+     * integration point) it opens an SVG-namespaced subtree whose
+     * integration points apply, and it stays a child of the
+     * annotation-xml. */
+    LeptrisDocument d = ForeignDoc(
+        "<math><annotation-xml><svg><desc>x</desc></svg>"
+        "</annotation-xml><mi/></math>");
+    ASSERT_NE(d, nullptr);
+    const char* svg_ns = "namespace-uri(/html/body/*[name(.)=\"math\"]"
+                         "/*[name(.)=\"annotation-xml\"]"
+                         "/*[name(.)=\"svg\"])";
+    EXPECT_EQ(XQ(d, svg_ns), "http://www.w3.org/2000/svg");
+    /* desc is an SVG HTML integration point: x is HTML text. */
+    EXPECT_EQ(XQ(d, "count(/html/body/*[name(.)=\"math\"]"
+                    "/*[name(.)=\"annotation-xml\"]"
+                    "/*[name(.)=\"svg\"]/*[name(.)=\"desc\"])"), "1");
+    leptris_document_free(d);
+}
+
 TEST(HtmlForeign, SvgRootAndChildrenCarryNamespace) {
     LeptrisDocument d = ForeignDoc(
         "<svg viewBox=\"0 0 1 1\"><circle/></svg>");
