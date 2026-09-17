@@ -269,9 +269,16 @@ static int add_define(RngGrammar* g, char* name, char* combine,
         return 1;
     }
     free(name);
-    /* @combine may sit on either declaration. */
-    if (!combine) combine = d->combine;
-    free(d->combine);
+    /* @combine may sit on either declaration: the caller's value
+     * replaces (the old one dies); otherwise the existing one
+     * STAYS. Freeing d->combine and re-storing the same pointer
+     * left a dangling combine that the very next line strcmp'd
+     * (heap-use-after-free on the metanorma include merge). */
+    if (combine) {
+        free(d->combine);
+    } else {
+        combine = d->combine;
+    }
     d->combine = combine;
     /* Redefinition without combine on either is an error; with it,
      * merge into choice/interleave. */
