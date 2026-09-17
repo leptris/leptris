@@ -3735,6 +3735,24 @@ static LeptrisElement h_open_element(HBuilder* b, const char* name) {
     LeptrisStringView nv = leptris_sv_from_cstr(name);
     LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
     if (!e) return NULL;
+    /* HTML keeps qualified names literally (tests14:1/3): the DOM
+     * QName split nulled the colon in place (xyz:abc -> prefix xyz
+     * + local abc). Re-point at a fresh full copy; the serializer
+     * then joins nothing (prefix cleared) and element_name reports
+     * the whole token. */
+    if (strchr(name, ':')) {
+        LeptrisStringView fv = leptris_sv_from_cstr(name);
+        char* full = leptris_sv_to_cstr_pooled(&fv, b->pool);
+        if (full) {
+            e->name = full;
+            e->name_len =
+                (fv.length > 254) ? 0xFF : (uint8_t)fv.length;
+            e->name_hash = leptris_name_hash_compute(full);
+            e->header.flags &=
+                (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
+            leptris_elem_set_prefix(e, NULL, b->pool);
+        }
+    }
     /* Detached pre-registration: children append through the doc-
      * resolved internal; the root-map entry makes that work before
      * the element is attached (round-20 create contract). */
@@ -5796,10 +5814,48 @@ static LeptrisDocument html_parse_shared(
             strcmp(name, "script") != 0 &&
             strcmp(name, "template") != 0 &&
             strcmp(name, "hr") != 0) {
-            while (q < end && *q != '>') q++;
-            p = (q < end) ? q + 1 : end;
-            text = p;
-            continue;
+            /* NOTE: the raw-text family (plaintext/xmp/iframe/
+             * noembed/noframes) is NOT whitelisted - "in select"
+             * ignores anything-else start tags INCLUDING them, so
+             * their content parses as ordinary text and tags
+             * (tests18:15: <plaintext> inside a select). */
+            /* 13.2.6.4.12 "in select in table": a table-context
+             * tag with a table open BELOW the select closes the
+             * select first and REPROCESSES in table
+             * (tests17:1/3: <tr>/<td> land in the table, not the
+             * select). */
+            int is_tbl_tag =
+                strcmp(name, "tr") == 0 ||
+                strcmp(name, "td") == 0 ||
+                strcmp(name, "th") == 0 ||
+                strcmp(name, "tbody") == 0 ||
+                strcmp(name, "thead") == 0 ||
+                strcmp(name, "tfoot") == 0 ||
+                strcmp(name, "caption") == 0 ||
+                strcmp(name, "table") == 0;
+            int sel_idx = -1, tbl_idx = -1;
+            if (is_tbl_tag) {
+                for (size_t d2 = b.depth; d2 > 0; d2--) {
+                    const char* on2 =
+                        leptris_element_name(b.open[d2 - 1]);
+                    if (!on2) break;
+                    if (sel_idx < 0 && strcmp(on2, "select") == 0)
+                        sel_idx = (int)d2 - 1;
+                    if (strcmp(on2, "table") == 0) {
+                        tbl_idx = (int)d2 - 1;
+                        break;
+                    }
+                }
+            }
+            if (sel_idx >= 0 && tbl_idx >= 0 && sel_idx > tbl_idx) {
+                b.depth = (size_t)sel_idx;   /* pop the select;
+                                               * reprocess below */
+            } else {
+                while (q < end && *q != '>') q++;
+                p = (q < end) ? q + 1 : end;
+                text = p;
+                continue;
+            }
         }
 
         /* #659 "in head noscript" (scripting off): head content
