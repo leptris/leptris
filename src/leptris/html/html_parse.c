@@ -6170,7 +6170,10 @@ static LeptrisDocument html_parse_shared(
             while (b.depth > 0) {
                 const char* on = leptris_element_name(b.open[b.depth - 1]);
                 if (on &&
-                    (h_closes(on, name) ||
+                    ((h_closes(on, name) &&
+                      !(b.whatwg &&
+                        strcmp(on, "option") == 0 &&
+                        strcmp(name, "select") == 0)) ||
                      (b.whatwg && h_closes_ww(on, name)))) {
                     /* The vendored reference keeps <table> INSIDE
                      * an open p in the bare shape (tests3:24,
