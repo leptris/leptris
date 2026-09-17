@@ -3630,6 +3630,8 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                     *r == '\r') *w2++ = *r;
             if (w2 == o) return;
             *w2 = '\0';
+            ((LeptrisTextNode*)n)->content_len =
+                (size_t)(w2 - o);
         }
     }
     /* "after frameset": non-whitespace text drops; whitespace
@@ -3654,6 +3656,8 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                     *r == '\r') *w2++ = *r;
             if (w2 == o) return;
             *w2 = '\0';
+            ((LeptrisTextNode*)n)->content_len =
+                (size_t)(w2 - o);
         }
     }
     if (b->whatwg && (b->after_body || b->after_html) &&
@@ -4411,6 +4415,38 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                         head_end =
                             leptris_node_get_next_sibling(head_end);
                         continue;
+                    }
+                    /* Character-token granularity: the whitespace
+                     * PREFIX of a mixed run is head content; the
+                     * first non-ws char switches to body - split
+                     * the node (tests5:2/7/8: <style>...</style> --
+                     * > keeps the space in head, "--> x" in
+                     * body). */
+                    if (tx) {
+                        const char* w2 = tx;
+                        while (*w2 && h_is_ws(*w2)) w2++;
+                        if (w2 > tx && *w2) {
+                            LeptrisTextNode* tail =
+                                leptris_text_create(
+                                    w2, strlen(w2), b->pool);
+                            if (tail) {
+                                leptris_node_set_next_sibling(
+                                    (LeptrisNodeRef)tail,
+                                    leptris_node_get_next_sibling(
+                                        head_end));
+                                leptris_node_set_next_sibling(
+                                    head_end, (LeptrisNodeRef)tail);
+                                ((char*)tx)[w2 - tx] = '\0';
+                                /* content_len is authoritative -
+                                 * the node now ends at the NUL. */
+                                ((LeptrisTextNode*)head_end)
+                                    ->content_len =
+                                    (size_t)(w2 - tx);
+                                head_end = leptris_node_get_next_sibling(
+                                    head_end);
+                                continue;
+                            }
+                        }
                     }
                 }
                 if (b->whatwg_head_set && past_head_end) {

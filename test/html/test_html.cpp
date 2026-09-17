@@ -430,10 +430,14 @@ TEST(HtmlParse, ExplicitHeadIsAdoptedAndKeepsWsText) {
               "<html><head/><body/></html>");
     EXPECT_EQ(Html("<html><head></head>"),
               "<html><head/><body/></html>");
+    /* The whitespace between </script> and --> is a HEAD
+     * character token (13.2.6.4.4) - the body run starts at the
+     * first non-ws char (tests5:7 alignment; the corpus twin
+     * tests1:51 agrees). */
     EXPECT_EQ(Html("<!DOCTYPE html><script> <!-- </script> --> "
                    "</script> EOF"),
               "<!DOCTYPE html><html><head><script> &lt;!-- "
-              "</script></head><body> --&gt;  EOF</body></html>");
+              "</script> </head><body>--&gt;  EOF</body></html>");
 }
 
 TEST(HtmlParse, BrEndTagActsAsBrStartAtAnyDepth) {
@@ -1869,9 +1873,9 @@ TEST(HtmlParse, TdInCaptionPopsCaption) {
  * in frameset and after </frameset> alike (tests2:7/8). */
 TEST(HtmlParse, FramesetTextFiltersNonWhitespace) {
     EXPECT_EQ(Html("<!DOCTYPE html><frameset> te st"),
-              "<!DOCTYPE html><html><head/><frameset>  ");
+              "<!DOCTYPE html><html><head/><frameset>  </frameset></html>");
     EXPECT_EQ(Html("<!DOCTYPE html><frameset></frameset> te st"),
-              "<!DOCTYPE html><html><head/><frameset/>  ");
+              "<!DOCTYPE html><html><head/><frameset/>  </html>");
 }
 
 /* tests20:41: </address> pops through an open button (a block
