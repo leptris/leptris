@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.199] - 2026-09-18
+
+### Added
+
+- leptris validate --dtd; fix DTD content-model bugs (#1183) (cli)
+
+### Fixed
+
+- format_number_token stays 64-bit end to end (#1174) (xslt)
+- xsl:number values are 64-bit (ILP32 truncation, #1174) (xslt)
+- per-wordsize layout pins + inline-value gate for ILP32 (#1174) (dom)
+- free DTDError fields; guard DTD CLI tests off Windows (cli)
+- gate SSE2 paths on __SSE2__, not x86-ness (#1174) (common)
+
+### Performance
+
+- 256-entry LUT for the attribute-name scan (#1177) (html)
+
+
+
 ## [1.9.198] - 2026-09-18
 
 ### Fixed
