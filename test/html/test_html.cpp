@@ -1998,6 +1998,14 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* A stray </head> closes an (empty) head phase: the ws after it
+ * is AFTER-HEAD text and stays an html child between head and body
+ * (tests6:1). */
+TEST(HtmlParse, StrayHeadEndKeepsAfterHeadWs) {
+    EXPECT_EQ(Html("<!doctype html></head> <head>"),
+              "<!DOCTYPE html><html><head/> <body/></html>");
+}
+
 /* A <colgroup> outside any table context drops, exactly like
  * <col> (tests1:109's trailing group after </table>). */
 TEST(HtmlParse, ColgroupOutsideTableDrops) {

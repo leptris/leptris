@@ -3701,8 +3701,9 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
      * whitespace and drops (doctype01:31, tests19:79). Tightest
      * gate: document level, NOTHING appended yet, no head/body
      * phase, and the run has a non-ws tail. */
-    if (b->whatwg && !b->head_tag_seen && !b->body_seen &&
-        !b->frameset && !b->after_body && !b->after_html &&
+    if (b->whatwg && !b->head_tag_seen && !b->head_end_seen &&
+        !b->body_seen && !b->frameset && !b->after_body &&
+        !b->after_html &&
         (b->depth == 0
              ? !b->top_head
              : (b->depth == 1 && b->open[0] &&
@@ -5730,13 +5731,42 @@ static LeptrisDocument html_parse_shared(
                         text = p;
                         continue;
                     } else if (b.whatwg && strcmp(lname, "head") == 0) {
+                        int head_found2 = 0;
                         for (size_t d2 = b.depth; d2 > 0; d2--)
                             if (h_ieq_raw(leptris_element_name(
                                               b.open[d2 - 1]), "head")) {
                                 b.head_end_seen = 1;
                                 b.head_end_tail = b.top_tail;
+                                head_found2 = 1;
                                 break;
                             }
+                        /* 13.2.6.4.1 "before head": a stray </head>
+                         * acts as anything-else - an EMPTY head
+                         * is created and immediately closed
+                         * (tests6:1: the ws after it is
+                         * after-head, not before-head). */
+                        if (!head_found2 && !b.head_tag_seen &&
+                            !b.body_seen && !b.frameset) {
+                            if (text < p) {
+                                size_t dlen = 0;
+                                char* dec =
+                                    h_decode_text(&b, text, p, &dlen);
+                                if (dec && *dec) {
+                                    LeptrisTextNode* t =
+                                        leptris_text_create(
+                                            dec, dlen, b.pool);
+                                    if (t)
+                                        h_append(&b,
+                                                 (LeptrisNodeRef)t);
+                                }
+                            }
+                            b.head_tag_seen = 1;
+                            b.head_end_seen = 1;
+                            b.head_end_tail = b.top_tail;
+                            p = q;
+                            text = p;
+                            continue;
+                        }
                     }
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
