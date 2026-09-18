@@ -2280,3 +2280,31 @@ TEST(ExpandedNameBatch, OneCallEqualsTheThreeAccessors) {
     EXPECT_EQ(ln, nullptr);
     leptris_document_free(doc);
 }
+
+/* #1189: a namebp-carrying (unattached mutation) element whose
+ * address collides with the TLS memo root must resolve to its
+ * STATELESS document, not the memo's stale one - set_root must
+ * accept the same-document attach across varying allocation
+ * histories (parse-shaped docs interleave with programmatic
+ * creates; churn between iterations shifts the allocator). */
+TEST(Dom, SetRootAcceptsMutationElementAcrossRecycledAddresses) {
+    for (int i = 0; i < 200; i++) {
+        std::string xml;
+        switch (i % 3) {
+            case 0: xml = "<r><a/><old/></r>"; break;
+            case 1: xml = "<!-- x --><old/>"; break;
+            case 2: xml = "<old/>"; break;
+        }
+        LeptrisDocument d =
+            leptris_parse_string(xml.c_str(), xml.size(), NULL);
+        ASSERT_NE(d, nullptr);
+        void* noise = malloc((size_t)(64 * (i % 7 + 1)));
+        LeptrisElement el = leptris_element_create(d, "new");
+        ASSERT_NE(el, nullptr);
+        LeptrisStatus st = leptris_document_set_root(d, el);
+        EXPECT_EQ(st, LEPTRIS_OK)
+            << "iteration " << i << ": same-document attach rejected";
+        free(noise);
+        leptris_document_free(d);
+    }
+}
