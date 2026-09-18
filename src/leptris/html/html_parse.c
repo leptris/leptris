@@ -19,6 +19,8 @@
 #include "../dom/root_doc_map.h"
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -2833,6 +2835,9 @@ static char* h_pooled_lower(LeptrisMemoryPool* pool, const char* s,
 }
 
 static void h_top_append(HBuilder* b, LeptrisNodeRef n) {
+    if (getenv("HTML_DBG"))
+        fprintf(stderr, "[top_append] type=%d\n",
+                (int)leptris_node_get_type(n));
     if (!b->top_tail) b->top_head = n;
     else leptris_node_set_next_sibling(b->top_tail, n);
     b->top_tail = n;
@@ -5675,6 +5680,10 @@ static LeptrisDocument html_parse_shared(
                         }
                         if (!body_open) {
                             b.after_body = 1;
+                            /* The document's html exists now - a
+                             * later <html> merges attrs
+                             * (tests2:53). */
+                            b.html_seen = 1;
                             /* </body> with no structural <body>:
                              * after-body head-family content
                              * reprocesses INTO the body, so the
