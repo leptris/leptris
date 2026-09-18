@@ -41,6 +41,11 @@ constexpr int kNodeTypeElement = 0;
 std::vector<size_t> stress_sizes() {
 #ifdef LEPTRIS_STRESS_SANITIZER
     return {30u << 10, 90u << 10, 300u << 10, 1u << 20};
+#elif defined(__SIZEOF_SIZE_T__) && __SIZEOF_SIZE_T__ == 4
+    /* ILP32 (#1174): the 48MB run was sized for 64-bit address
+     * spaces; a -m32/-armv7 process cannot hold this workload. */
+    return {30u << 10, 90u << 10, 300u << 10,
+            1u << 20, 4u << 20, 16u << 20};
 #else
     return {30u << 10, 90u << 10, 300u << 10,
             1u << 20, 4u << 20, 16u << 20, 48u << 20};
