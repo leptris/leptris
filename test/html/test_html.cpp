@@ -1998,6 +1998,17 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* 13.2.6.4.11 "in cell": a nested <table> is CELL content - the
+ * cell fences the table-closes-table walk (bare <table><table>
+ * stays siblings, but inside a td the inner table nests;
+ * a <meta> inside it is in-cell content, not fostered).
+ * (tests7:6) */
+TEST(HtmlParse, NestedTableIsCellContent) {
+    EXPECT_EQ(Html("<table>X<tr><td><table> <meta></table></table>"),
+              "X<table><tbody><tr><td><meta/>"
+              "<table> </table></td></tr></tbody></table>");
+}
+
 /* 13.2.5.5 PLAINTEXT: raw to EOF - a literal </plaintext> is
  * CONTENT (tests18:23); character tokens still reconstruct the
  * active formatting list, so the text lands inside the clone
