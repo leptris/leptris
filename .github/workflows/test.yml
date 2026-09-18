@@ -202,7 +202,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/src -w /src debian:bookworm bash -ec '
             apt-get update -qq
-            apt-get install -y -qq cmake ninja-build gcc g++ libutf8proc-dev
+            apt-get install -y -qq cmake ninja-build gcc g++ git libutf8proc-dev
             cmake -B build -S . -G Ninja \
               -DBUILD_TESTING=ON \
               -DLEPTRIS_BUILD_CLI=ON \
