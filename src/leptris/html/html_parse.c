@@ -3720,6 +3720,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
         h_fosterable(b, n)) {
         b->depth--;
     }
+
     if (b->depth > 0) {
         LeptrisElement top = b->open[b->depth - 1];
         /* #659 foster (WHATWG only): text/elements in table context
@@ -4935,6 +4936,12 @@ static LeptrisDocument html_parse_shared(
                 size_t clen = cclose
                                   ? (size_t)(ce - cs)
                                   : (size_t)(end - cs);
+                if (!cclose)
+                    /* Unterminated at EOF: html5lib drops the
+                     * trailing dash run (tests2:59: <!--x-- keeps
+                     * data "x"). */
+                    while (clen > 0 && cs[clen - 1] == '-')
+                        clen--;
                 p = cclose ? ce + cclose : end;
                 LeptrisCommentNode* c = leptris_comment_create(
                     cs, clen, b.pool);
