@@ -2771,6 +2771,7 @@ typedef struct {
     int after_html;
     LeptrisNodeRef ab_body_last;
     int html_tag_seen;
+    LeptrisNodeRef epilog_first, epilog_last;
     /* #659 "after frameset" (13.2.6.4.19, tests6:8-12): the
      * frameset element CLOSED — later start tags drop except
      * noframes/frame, whitespace text stays an html child,
@@ -4563,6 +4564,30 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
         (b->head_end_seen && !b->head_end_tail);
     if (!(b->lift_closed && !b->lift_boundary)) {
         while (head_end) {
+            /* Past </html>: any comment/PI is a DOCUMENT epilog
+             * node - cut it from the chain wherever it appears
+             * (tests18:34). */
+            {
+                int hty0 = leptris_node_get_type(head_end);
+                if (b->whatwg && b->after_html &&
+                    (hty0 == LEPTRIS_NODE_TYPE_COMMENT ||
+                     hty0 == LEPTRIS_NODE_TYPE_PI)) {
+                    LeptrisNodeRef cn = leptris_node_get_next_sibling(
+                        head_end);
+                    if (walk_prev)
+                        leptris_node_set_next_sibling(walk_prev, cn);
+                    else
+                        orig_head = cn;
+                    if (!b->epilog_first)
+                        b->epilog_first = head_end;
+                    else
+                        leptris_node_set_next_sibling(b->epilog_last,
+                                                      head_end);
+                    b->epilog_last = head_end;
+                    head_end = cn;
+                    continue;
+                }
+            }
             /* WHATWG "in head": comments (and PI-ish bogus
              * comments) are head children — neutral in the run,
              * never ending it. html4 keeps libxml2's shape (they
@@ -4585,13 +4610,26 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                                                           cn);
                         else
                             orig_head = cn;
-                        if (!cm_first)
-                            cm_first = head_end;
-                        else
-                            leptris_node_set_next_sibling(cm_last,
-                                                          head_end);
-                        leptris_node_set_next_sibling(head_end, NULL);
-                        cm_last = head_end;
+                        if (b->after_html) {
+                            /* Past </html>: a DOCUMENT epilog
+                             * node, outside html entirely
+                             * (tests18:34). */
+                            if (!b->epilog_first)
+                                b->epilog_first = head_end;
+                            else
+                                leptris_node_set_next_sibling(
+                                    b->epilog_last, head_end);
+                            b->epilog_last = head_end;
+                        } else {
+                            if (!cm_first)
+                                cm_first = head_end;
+                            else
+                                leptris_node_set_next_sibling(
+                                    cm_last, head_end);
+                            leptris_node_set_next_sibling(head_end,
+                                                          NULL);
+                            cm_last = head_end;
+                        }
                         head_end = cn;
                         continue;
                     }
@@ -5014,6 +5052,21 @@ head_end = leptris_node_get_next_sibling(head_end);
         }
     }
 
+    /* Past-</html> epilog nodes leave html entirely: they are
+     * re-linked as the html root's following siblings (document
+     * children) after the body assembly below (tests18:34). */
+    if (b->epilog_first) {
+        LeptrisNodeRef c9 = b->epilog_first;
+        for (;;) {
+            if (leptris_node_get_type(c9) == LEPTRIS_NODE_TYPE_COMMENT)
+                leptris_comment_set_parent(
+                    (LeptrisCommentNode*)c9, NULL);
+            else
+                leptris_pi_set_parent((LeptrisPINode*)c9, NULL);
+            if (c9 == b->epilog_last) break;
+            c9 = leptris_node_get_next_sibling(c9);
+        }
+    }
     /* <body> (or <frameset>, #659) owns the rest, then links in
      * as html's last child. When the rest already IS a parsed
      * frameset (the replace-body path), it stays as its own
@@ -5233,7 +5286,12 @@ static LeptrisDocument html_parse_shared(
                                                 /* Past </html>: the comment is a DOCUMENT
                          * epilog node (webkit01:22/23/25/26/28,
                          * tests18:34). */
-                        h_top_append(&b, (LeptrisNodeRef)c);
+                        if (!b.epilog_first)
+                            b.epilog_first = (LeptrisNodeRef)c;
+                        else
+                            leptris_node_set_next_sibling(
+                                b.epilog_last, (LeptrisNodeRef)c);
+                        b.epilog_last = (LeptrisNodeRef)c;
                     } else if (b.after_body && b.after_body_done) {
                                                 /* In-body mode restored by non-ws text:
                          * the comment is body content - freeze
@@ -7863,6 +7921,18 @@ done:
         doc->doc_children_head = (LeptrisNodeRef)b.top_head;
     }
     doc->doc_children_tail = b.top_tail;
+    if (b.epilog_first && b.root) {
+        /* Past-</html> epilog: document-level siblings of the
+         * root, always last (tests18:34). */
+        if (b.top_tail)
+            leptris_node_set_next_sibling(b.top_tail,
+                                          b.epilog_first);
+        else
+            leptris_node_set_next_sibling((LeptrisNodeRef)b.root,
+                                          b.epilog_first);
+        b.top_tail = b.epilog_last;
+        doc->doc_children_tail = b.top_tail;
+    }
     return doc;
 }
 
