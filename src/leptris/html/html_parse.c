@@ -4492,7 +4492,8 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                         }
                     }
                 }
-                if (b->whatwg_head_set && past_head_end) {
+                if (b->whatwg_head_set && past_head_end &&
+                    !b->after_html) {
                     const char* tx =
                         leptris_text_node_get_content(head_end);
                     int ws = 1;
@@ -6210,6 +6211,27 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
+        /* <col> in body drops - it is table-structure only
+         * (tests25:7: <body><col>A keeps just "A"). */
+        if (b.whatwg && strcmp(name, "col") == 0) {
+            int col_tbl = 0;
+            for (size_t d2 = b.depth; d2 > 0; d2--) {
+                const char* on2 =
+                    leptris_element_name(b.open[d2 - 1]);
+                if (on2 && (h_ieq_raw(on2, "table") ||
+                            h_ieq_raw(on2, "colgroup") ||
+                            h_ieq_raw(on2, "template"))) {
+                    col_tbl = 1;
+                    break;
+                }
+            }
+            if (!col_tbl) {
+                while (q < end && *q != '>') q++;
+                p = (q < end) ? q + 1 : end;
+                text = p;
+                continue;
+            }
+        }
         /* <frame> outside a frameset body drops - "in body" has no
          * frame insertion rule (tests19:76: the frame that follows
          * an ignored <frameset> vanishes). */
