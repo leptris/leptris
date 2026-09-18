@@ -5209,7 +5209,11 @@ static LeptrisDocument html_parse_shared(
     const char* text = p;   /* pending text run start */
 
     while (p < end) {
-        if (*p != '<') { p++; continue; }
+        /* Lever 1 (TODO.max-perf): memchr skips text runs at
+         * libc SIMD speed instead of a per-byte loop. */
+        const void* lt = memchr(p, '<', (size_t)(end - p));
+        if (!lt) break;
+        p = (const char*)lt;
 
         /* Classify the markup construct. */
         if (p + 1 >= end) { p++; continue; }
