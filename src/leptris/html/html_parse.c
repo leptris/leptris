@@ -6147,6 +6147,29 @@ static LeptrisDocument html_parse_shared(
                     break;
                 }
             if (!head_only) {
+                /* 13.2.6.4.1: whitespace still in the "before
+                 * head" phase (no head yet, the html element -
+                 * explicit or implied - has no children) drops
+                 * when the first body-content token arrives
+                 * (tricky01:4: <html>\n<dl> keeps dl the first
+                 * body child). */
+                if (text < p && !b.head_tag_seen &&
+                    !b.body_tag_seen && !b.frameset) {
+                    int ws_only2 = 1;
+                    for (const char* c = text; c < p; c++)
+                        if (*c != 0 && !h_is_ws(*c)) {
+                            ws_only2 = 0;
+                            break;
+                        }
+                    if (ws_only2 &&
+                        (b.depth == 0 ||
+                         (b.depth == 1 && b.open[0] &&
+                          h_ieq_raw(leptris_element_name(b.open[0]),
+                                    "html") &&
+                          !leptris_node_first_child(
+                              (LeptrisNodeRef)b.open[0]))))
+                        text = p;
+                }
                 b.body_seen = 1;
                 /* WHATWG only: implied body content closes the
                  * head-lift window at the last node before it (a
