@@ -228,6 +228,11 @@ leptris_add_benchmark(bench_xslt_subtree_copy xslt/bench_subtree_copy.c utils.c)
 # direct_parse is the sole parser; use bench_parse for parse benchmarks.
 
 # ----------------------------------------------------------------------------
+# Incremental iterparse benchmark (#1178) — leptris only, no libxml2.
+# ----------------------------------------------------------------------------
+leptris_add_benchmark(bench_iterparse   sax/bench_iterparse.c)
+
+# ----------------------------------------------------------------------------
 # SAX benchmarks (leptris vs libxml2).  TODO 101.
 # ----------------------------------------------------------------------------
 if(LIBXML2_AVAILABLE)
