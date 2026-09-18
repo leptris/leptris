@@ -31,8 +31,9 @@ jobs:
       fail-fast: false
       matrix:
         # 24.04-arm: native aarch64-linux — the binding's wheels run
-        # there natively, so the engine suite should too
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        # there natively, so the engine suite should too.
+        # macos-15-intel: x86_64 macOS coverage (#1174 platform matrix).
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
 
     steps:
       - name: Checkout code
@@ -135,3 +136,40 @@ jobs:
           sudo apt-get install -y valgrind
           valgrind --leak-check=full --error-exitcode=1 --undef-value-errors=no \
             ./build/test/test_smoke
+
+  test-ilp32:
+    name: Test C Library (ILP32, x86 -m32)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-multilib g++-multilib
+
+      - name: Configure
+        run: |
+          # ILP32 gate (#1174): pins the 4-byte-pointer layout the
+          # armv7/i686 gem builds compile against. i686 and armv7
+          # layouts are identical for the pointer/int-only pinned
+          # structs. utf8proc/iconv system libs are 64-bit here, so
+          # keep the leg hermetic like the Windows one; gtest comes
+          # from FetchContent under the same -m32 flags.
+          cmake -B build -S . -G Ninja \
+            -DBUILD_TESTING=ON \
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF \
+            -DLEPTRIS_ENABLE_ICONV=OFF \
+            -DCMAKE_C_FLAGS=-m32 \
+            -DCMAKE_CXX_FLAGS=-m32
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure --build-config Release
+
