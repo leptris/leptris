@@ -155,9 +155,12 @@ jobs:
           # ILP32 gate (#1174): pins the 4-byte-pointer layout the
           # armv7/i686 gem builds compile against. i686 and armv7
           # layouts are identical for the pointer/int-only pinned
-          # structs. utf8proc/iconv system libs are 64-bit here, so
-          # keep the leg hermetic like the Windows one; gtest comes
-          # from FetchContent under the same -m32 flags.
+          # structs. -mfpmath=sse matches armv7's IEEE-double VFP
+          # math; plain -m32 keeps x87 80-bit intermediates and
+          # diverges on numerics (LibxsltSuite bug-187). utf8proc/
+          # iconv system libs are 64-bit here, so keep the leg
+          # hermetic like the Windows one; gtest comes from
+          # FetchContent under the same flags.
           cmake -B build -S . -G Ninja \
             -DBUILD_TESTING=ON \
             -DLEPTRIS_BUILD_CLI=ON \
@@ -165,7 +168,9 @@ jobs:
             -DLEPTRIS_ENABLE_UTF8PROC=OFF \
             -DLEPTRIS_ENABLE_ICONV=OFF \
             -DCMAKE_C_FLAGS=-m32 \
-            -DCMAKE_CXX_FLAGS=-m32
+            -DCMAKE_CXX_FLAGS=-m32 \
+            -DCMAKE_C_FLAGS_RELEASE="-m32 -msse2 -mfpmath=sse" \
+            -DCMAKE_CXX_FLAGS_RELEASE="-m32 -msse2 -mfpmath=sse"
 
       - name: Build
         run: cmake --build build

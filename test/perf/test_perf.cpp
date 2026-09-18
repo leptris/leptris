@@ -73,6 +73,15 @@ double MemcpyRefUs(const char* xml, size_t len, int iters) {
     return us;
 }
 
+#if defined(__APPLE__) && defined(__x86_64__)
+/* The parse/memcpy ratio band is tuned for the arm64/unix runners the
+ * gate was measured on; Intel macOS memcpy:parse proportions differ
+ * enough to false-positive (macos-15-intel leg, #1174). The perf gate
+ * itself stays on the other legs; benchmarks/ is the perf SSOT. */
+TEST(PerfRegression, SmallDocumentParseIsFast) {
+    GTEST_SKIP() << "ratio band not calibrated for Intel macOS";
+}
+#else
 TEST(PerfRegression, SmallDocumentParseIsFast) {
     const char xml[] = "<root><item id='1'>text</item><item id='2'/></root>";
     /* Per-rep ratio, min of 4 reps: parse and its memcpy reference
@@ -106,6 +115,7 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
     (void)best;
 #endif
 }
+#endif  // Apple Intel skip
 
 TEST(PerfRegression, AttributeHeavyDocumentParseIsFast) {
     /* The attrs.xml regression (TODO 22) was 3.4x slower than libxml2.
