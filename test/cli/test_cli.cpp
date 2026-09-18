@@ -403,6 +403,9 @@ TEST(CliXquery, SourceDocumentAndConstructors) {
 #endif  /* !_WIN32 */
 
 // ---- diff output modes (#1184 lever 8) --------------------------------------
+// run_cli shells out with POSIX quoting — not exercised on Windows.
+
+#if !defined(_WIN32)
 
 TEST(CliDiff, SummaryCountsDeltas) {
     write_file("leptris_cli_diff_sa.tmp",
@@ -448,6 +451,8 @@ TEST(CliDiff, JsonOpsListed) {
     EXPECT_NE(r.out.find("\"op\": \"update-text\""), std::string::npos)
         << r.out;
 }
+
+#endif  /* !_WIN32 */
 
 // ---- validate --dtd (#1183 lane 16.6) --------------------------------------
 // run_cli shells out with POSIX quoting; the existing CliValidate cases
