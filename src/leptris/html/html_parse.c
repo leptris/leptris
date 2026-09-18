@@ -2092,6 +2092,28 @@ static const HtmlEnt k_html_entities[] = {
 static int h_is_ws(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
 }
+
+/* 1 = byte continues an attribute name (stops at whitespace, '=',
+ * '>', '/'). One table load replaces the 4-way compare chain in the
+ * attr-name scan loops (#1177, lever 1 tail). */
+static const unsigned char h_attrname_lut[256] = {
+    1,1,1,1,1,1,1,1,1,0,0,1,0,0,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+};
 static char h_lower(char c) {
     return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
 }
@@ -2916,9 +2938,7 @@ static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
             continue;
         }
         const char* as = q;
-        while (q < end && !h_is_ws(*q) && *q != '=' && *q != '>' &&
-               *q != '/')
-            q++;
+        while (q < end && h_attrname_lut[(unsigned char)*q]) q++;
         size_t alen = (size_t)(q - as);
         if (!alen) {
             q++;
@@ -3571,9 +3591,7 @@ static int h_font_break(const char* q, const char* end) {
     while (q < end && *q != '>') {
         while (q < end && (h_is_ws(*q) || *q == '/')) q++;
         const char* as = q;
-        while (q < end && !h_is_ws(*q) && *q != '=' && *q != '>' &&
-               *q != '/')
-            q++;
+        while (q < end && h_attrname_lut[(unsigned char)*q]) q++;
         size_t alen = (size_t)(q - as);
         if (alen == 5 &&
             (memcmp(as, "color", 5) == 0 ||
@@ -7550,9 +7568,7 @@ static LeptrisDocument html_parse_shared(
                 continue;
             }
             const char* as = q;
-            while (q < end && !h_is_ws(*q) && *q != '=' && *q != '>' &&
-                   *q != '/')
-                q++;
+            while (q < end && h_attrname_lut[(unsigned char)*q]) q++;
             size_t alen = (size_t)(q - as);
             if (!alen) { q++; continue; }
             char* aname = h_pooled_lower(b.pool, as, alen);
