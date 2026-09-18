@@ -2408,6 +2408,12 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
                          * FFFD bucket with everything else; the
                          * missing semicolon is tolerated. */
                         cp = h_numref_fix(v);
+                        /* Input preprocessing (13.2.3.1): an
+                         * emitted U+000D normalizes to LF -
+                         * &#x000D;/&#13; yields a newline, not a
+                         * dropped control byte (plain-text-
+                         * unsafe:1). */
+                        if (cp == 0x000D) cp = 0x000A;
                         adv = q;
                         if (adv < e && *adv == ';') adv++;
                     } else {
@@ -4875,9 +4881,21 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                 c = leptris_node_get_next_sibling(c);
             }
             if (prev) {
-                after_tail = leptris_node_get_next_sibling(prev);
-                if (after_tail)
-                    leptris_node_set_next_sibling(prev, NULL);
+                /* WHITESPACE before the comment run: the ws is
+                 * already body content (after-body ws inserts
+                 * into the current node), so the comment joins
+                 * it INSIDE the body (webkit01:27). An ELEMENT
+                 * before the run (or a comment-only run) peels
+                 * the comments to the html level (tests19:21). */
+                if (leptris_node_get_type(prev) ==
+                    LEPTRIS_NODE_TYPE_TEXT) {
+                    after_tail = NULL;
+                } else {
+                    after_tail =
+                        leptris_node_get_next_sibling(prev);
+                    if (after_tail)
+                        leptris_node_set_next_sibling(prev, NULL);
+                }
             } else {
                 after_tail = rest;
                 rest = NULL;
