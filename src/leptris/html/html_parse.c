@@ -7110,6 +7110,29 @@ static LeptrisDocument html_parse_shared(
                         break;
                     tmpl_last_popped = on;
                     b.depth--;
+                } else if (b.whatwg && strcmp(name, "table") == 0) {
+                    /* A <table> start bursts across FOREIGN-ns
+                     * entries (svg/foreignObject subtrees) to the
+                     * open HTML table below - the sibling rule then
+                     * applies (tests01:18). HTML-ns barriers (p,
+                     * td/th cells, template) still stop it. */
+                    int d5 = (int)b.depth, found = -1;
+                    while (d5 > 0) {
+                        if (b.open_ns[d5 - 1] != H_NS_HTML) {
+                            d5--;
+                            continue;
+                        }
+                        if (h_ieq_raw(leptris_element_name(
+                                          b.open[d5 - 1]),
+                                      "table"))
+                            found = d5;
+                        break;
+                    }
+                    if (found > 0) {
+                        b.depth = (size_t)found;
+                        continue;
+                    }
+                    break;
                 } else break;
             }
             /* #659: a section element this token just closed means

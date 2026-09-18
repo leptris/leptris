@@ -1998,6 +1998,17 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* 13.2.6.4.12 "in select in table": the <table> start closes the
+ * select and reprocesses in the table context - bursting across
+ * the svg/foreignObject subtree; the table-in-table sibling rule
+ * then puts both tables at div level and the <s> fosters between
+ * them (tables01:18). */
+TEST(HtmlParse, TableStartBurstsForeignSelect) {
+    EXPECT_EQ(Html("<div><table><svg><foreignObject><select><table><s>"),
+              "<div><svg><foreignObject><select/></foreignObject></svg>"
+              "<table/><s/><table/></div>");
+}
+
 /* Past </html> a comment is a DOCUMENT epilog node - held on a
  * side list at parse and linked after the root at commit, so the
  * frameset assembly cannot wrap it into html (tests18:34). */
