@@ -31,6 +31,22 @@ def declared_public_symbols(root: Path):
     return names
 
 
+def unmarked_public_declarations(root: Path):
+    """Public-header leptris_* function declarations WITHOUT
+    LEPTRIS_API: they link fine into the static lib (the CLI works)
+    but never export for FFI consumers — the dtd.h class caught by
+    the ruby binding (#1183)."""
+    pat = re.compile(
+        r"^(?!LEPTRIS_API|static|typedef|struct|#|//|\*|/\*)(?:const\s+|unsigned\s+|struct\s+)*"
+        r"[A-Za-z_][\w\s\*]*?\b(leptris_[a-z_0-9]+)\s*\(",
+        flags=re.M,
+    )
+    found = set()
+    for h in (root / "src" / "include").rglob("*.h"):
+        for m in pat.finditer(h.read_text()):
+            found.add(m.group(1))
+    return found
+
 def exported_symbols(lib: Path):
     out = subprocess.run(
         ["nm", "-gU", str(lib)], capture_output=True, text=True, check=True
@@ -65,11 +81,15 @@ def main():
     undeclared = sorted(exported - declared)
     missing = sorted(declared - exported)
 
+    unmarked = sorted(unmarked_public_declarations(root) - declared)
+
     failures = []
     for n in undeclared:
         failures.append(f"UNDECLARED EXPORT {n}: exported but absent from src/include/")
     for n in missing:
         failures.append(f"MISSING EXPORT   {n}: declared public but not exported")
+    for n in unmarked:
+        failures.append(f"UNMARKED PUBLIC  {n}: declared in a public header without LEPTRIS_API")
 
     if failures:
         print("EXPORT SURFACE DRIFT:")
