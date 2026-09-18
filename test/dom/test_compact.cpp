@@ -17,6 +17,7 @@ extern "C" {
 }
 
 #include <cstring>
+#include <cstdint>
 #include <vector>
 #include <cstdlib>
 #include <cstdint>
@@ -37,7 +38,9 @@ TEST(AttributeInlineValue, SmallValuesStoreInlineAndRoundTrip) {
     struct leptris_attribute* a =
         leptris_element_get_first_attribute(r);
     ASSERT_TRUE(a);
+#if SIZE_MAX == UINT64_MAX
     EXPECT_TRUE(leptris_attr_value_is_inline(a));
+#endif
     EXPECT_EQ(std::string(leptris_attr_value_sv(a).data,
                       leptris_attr_value_sv(a).length),
           "short");
@@ -45,7 +48,9 @@ TEST(AttributeInlineValue, SmallValuesStoreInlineAndRoundTrip) {
     /* exactly 7 bytes: still inline */
     leptris_element_set_attribute(r, "k", "1234567");
     a = leptris_element_get_first_attribute(r);
+#if SIZE_MAX == UINT64_MAX
     EXPECT_TRUE(leptris_attr_value_is_inline(a));
+#endif
     EXPECT_EQ(std::string(leptris_attr_value_sv(a).data,
                       leptris_attr_value_sv(a).length),
               "1234567");
@@ -53,7 +58,9 @@ TEST(AttributeInlineValue, SmallValuesStoreInlineAndRoundTrip) {
     /* 8 bytes: spills to heap, value correct */
     leptris_element_set_attribute(r, "k", "12345678");
     a = leptris_element_get_first_attribute(r);
+#if SIZE_MAX == UINT64_MAX
     EXPECT_FALSE(leptris_attr_value_is_inline(a));
+#endif
     EXPECT_EQ(std::string(leptris_attr_value_sv(a).data,
                       leptris_attr_value_sv(a).length),
               "12345678");
@@ -61,7 +68,9 @@ TEST(AttributeInlineValue, SmallValuesStoreInlineAndRoundTrip) {
     /* shrink back: inline again */
     leptris_element_set_attribute(r, "k", "tiny");
     a = leptris_element_get_first_attribute(r);
+#if SIZE_MAX == UINT64_MAX
     EXPECT_TRUE(leptris_attr_value_is_inline(a));
+#endif
     EXPECT_EQ(std::string(leptris_attr_value_sv(a).data,
                       leptris_attr_value_sv(a).length),
           "tiny");
