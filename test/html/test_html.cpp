@@ -1941,6 +1941,31 @@ TEST(HtmlParse, PlaintextExitsColgroup) {
               "<table><colgroup/></table></body></html>");
 }
 
+/* 13.2.6.4.7 "any other end tag": an ORDINARY target (cite is
+ * neither special nor formatting) fences at EVERY special element -
+ * </cite> inside the div is ignored, D coalesces into "CD"
+ * (tests1:60). */
+TEST(HtmlParse, CiteEndTagFencesAtDiv) {
+    EXPECT_EQ(Html("<b>A<cite>B<div>C</cite>D"),
+              "<b>A<cite>B<div>CD</div></cite></b>");
+}
+
+/* 13.2.6.4.13: a <colgroup> start with a colgroup open pops it -
+ * the new group is a TABLE-level sibling, not nested content
+ * (tests1:107). */
+TEST(HtmlParse, ColgroupStartPopsColgroup) {
+    EXPECT_EQ(Html("<table><colgroup><col><colgroup><col><col></table>"),
+              "<table><colgroup><col/></colgroup>"
+              "<colgroup><col/><col/></colgroup></table>");
+}
+
+/* A <colgroup> outside any table context drops, exactly like
+ * <col> (tests1:109's trailing group after </table>). */
+TEST(HtmlParse, ColgroupOutsideTableDrops) {
+    EXPECT_EQ(Html("<table><colgroup></table><colgroup>A"),
+              "<table><colgroup/></table>A");
+}
+
 /* Without an open select, a <select> start NESTS in the open
  * optgroup/option (the hr/select optgroup closes are "in select"
  * rules only); </option> inside the select drops, D and E coalesce
