@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.197] - 2026-09-18
+
+### Performance
+
+- memchr text-run skip in the tokenizer main loop (html)
+
+
+
 ## [1.9.196] - 2026-09-18
 
 ### Fixed
