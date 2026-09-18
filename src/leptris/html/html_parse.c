@@ -3684,7 +3684,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
      * gate: document level, NOTHING appended yet, no head/body
      * phase, and the run has a non-ws tail. */
     if (b->whatwg && !b->head_tag_seen && !b->body_seen &&
-        !b->frameset &&
+        !b->frameset && !b->after_body && !b->after_html &&
         (b->depth == 0
              ? !b->top_head
              : (b->depth == 1 && b->open[0] &&
@@ -3703,6 +3703,8 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             LeptrisTextNode* tn9 = (LeptrisTextNode*)n;
             tn9->content = t9 + w9;
             tn9->content_len -= w9;
+        } else if (t9 && w9 && !t9[w9]) {
+            return;   /* pure before-head ws: dropped (tests7:7) */
         }
     }
     if (b->whatwg && !b->left_initial &&
@@ -5923,6 +5925,9 @@ static LeptrisDocument html_parse_shared(
                            h_lower(ns[2]) == 'd' &&
                            h_lower(ns[3]) == 'y') {
                     b.after_body = 1;
+                    /* The document's html exists now - a later
+                     * <html> merges attrs (tests2:53). */
+                    b.html_seen = 1;
                 }
             }
             p = q;
@@ -7155,9 +7160,27 @@ static LeptrisDocument html_parse_shared(
                             e, (LeptrisNodeRef)t, b.doc);
                 }
             }
-            /* Skip past the close tag. */
+            /* Skip past the close tag - quote-aware: a quoted
+             * attribute value in the close tag (</script foo=">")
+             * must not end it (scriptdata01:7). */
             const char* cq = rs;
-            while (cq < end && *cq != '>') cq++;
+            char cquote = 0;
+            int cafter_eq = 0;
+            while (cq < end) {
+                if (cquote) {
+                    if (*cq == cquote) cquote = 0;
+                } else if (*cq == '=') {
+                    cafter_eq = 1;
+                } else if (!h_is_ws(*cq)) {
+                    if (cafter_eq &&
+                        (*cq == '"' || *cq == '\''))
+                        cquote = *cq;
+                    else if (*cq == '>')
+                        break;
+                    cafter_eq = 0;
+                }
+                cq++;
+            }
             p = (cq < end) ? cq + 1 : end;
             b.depth--;   /* the raw element is complete */
             text = p;
