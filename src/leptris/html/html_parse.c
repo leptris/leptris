@@ -3683,8 +3683,15 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
      * whitespace and drops (doctype01:31, tests19:79). Tightest
      * gate: document level, NOTHING appended yet, no head/body
      * phase, and the run has a non-ws tail. */
-    if (b->whatwg && b->depth == 0 && !b->top_head &&
-        !b->head_tag_seen && !b->body_seen && !b->frameset &&
+    if (b->whatwg && !b->head_tag_seen && !b->body_seen &&
+        !b->frameset &&
+        (b->depth == 0
+             ? !b->top_head
+             : (b->depth == 1 && b->open[0] &&
+                h_ieq_raw(leptris_element_name(b->open[0]),
+                          "html") &&
+                !leptris_node_first_child(
+                    (LeptrisNodeRef)b->open[0]))) &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
         const char* t9 = leptris_text_node_get_content(n);
         size_t w9 = 0;
@@ -3750,15 +3757,35 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 if (!h_is_ws(*nq)) { ws_n = 0; break; }
         if (!ws_n) b->depth--;
     }
-    /* 13.2.6.4.13 "in column group": non-whitespace text pops the
-     * colgroup and reprocesses in table - the in-table rules then
-     * foster it before the table (tables01:4). */
+    /* 13.2.6.4.13 "in column group": non-whitespace text pops
+     * the colgroup and reprocesses in table - the in-table rules
+     * then foster it before the table (tables01:4). A MIXED run
+     * splits: the ws prefix stays colgroup text, the tail
+     * fosters (domjs-unsafe:37). */
     if (b->whatwg && b->depth > 0 &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
         b->open_ns[b->depth - 1] == H_NS_HTML &&
         h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
                   "colgroup") &&
         h_fosterable(b, n)) {
+        const char* ct = leptris_text_node_get_content(n);
+        size_t cw = 0;
+        if (ct)
+            while (ct[cw] == ' ' || ct[cw] == '\t' ||
+                   ct[cw] == '\n' || ct[cw] == '\r')
+                cw++;
+        if (ct && ct[cw] && cw > 0) {
+            LeptrisTextNode* tail =
+                leptris_text_create(ct + cw, strlen(ct + cw),
+                                    b->pool);
+            ((char*)ct)[cw] = '\0';
+            ((LeptrisTextNode*)n)->content_len = cw;
+            leptris_element_append_child_internal_doc(
+                b->open[b->depth - 1], n, b->doc);
+            b->depth--;
+            if (tail) h_append(b, (LeptrisNodeRef)tail);
+            return;
+        }
         b->depth--;
     }
 
@@ -5432,11 +5459,25 @@ static LeptrisDocument html_parse_shared(
                 if (!h_is_void(lname)) {
                     if (b.whatwg &&
                         strcmp(lname, "menuitem") == 0) {
-                        /* menuitem is void-shaped in the reference
-                         * - its end tag is ignored and the content
-                         * stays open (menuitem:8:
-                         * <menuitem><p></menuitem>x keeps x in
+                        /* Any-other-end-tag walk: close the
+                         * menuitem through NON-SPECIAL elements
+                         * (menuitem:10: <asdf></menuitem>x puts x
+                         * at body); a SPECIAL element crossed
+                         * ignores the tag (menuitem:8: x stays in
                          * the p). */
+                        int msp = 0;
+                        for (size_t d2 = b.depth; d2 > 0; d2--) {
+                            const char* on2 =
+                                leptris_element_name(b.open[d2 - 1]);
+                            if (!on2) break;
+                            if (strcmp(on2, "menuitem") == 0) {
+                                h_pop_to(&b, d2 - 1);
+                                msp = 1;
+                                break;
+                            }
+                            if (h_is_special_ww(on2)) break;
+                        }
+                        (void)msp;
                         p = q;
                         text = p;
                         continue;
@@ -6002,14 +6043,24 @@ static LeptrisDocument html_parse_shared(
             const char* scan = ns;
             char quote = 0;
             int closed = 0;
+            int after_eq = 0;
             while (scan < end) {
                 if (quote) {
                     if (*scan == quote) quote = 0;
-                } else if (*scan == '"' || *scan == '\'') {
+                } else if (*scan == '=') {
+                    after_eq = 1;
+                } else if (h_is_ws(*scan)) {
+                    /* ws keeps the eq state per attr grammar */
+                } else if (after_eq &&
+                           (*scan == '"' || *scan == '\'')) {
                     quote = *scan;
-                } else if (*scan == '>') {
-                    closed = 1;
-                    break;
+                    after_eq = 0;
+                } else {
+                    after_eq = 0;
+                    if (*scan == '>') {
+                        closed = 1;
+                        break;
+                    }
                 }
                 scan++;
             }
