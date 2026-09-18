@@ -9,6 +9,11 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# Release: serialize only — never cancel a publish mid-flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
