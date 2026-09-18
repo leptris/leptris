@@ -24,6 +24,8 @@
 #include "../../include/leptris/dtd.h"
 #include "model.h"
 #include "../memory/pool.h"  /* StringHashTable scratch tables (dtd-owned pool) */
+#include "../dom/text.h"
+#include "../dom/cdata.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -160,6 +162,33 @@ static int element_has_element_children(LeptrisElement elem) {
     return 0;
 }
 
+/* Return 1 if any child carries non-whitespace character data.
+ * Text content lives in LeptrisTextNode (length-field, possibly
+ * non-NUL-terminated); CDATA is NUL-terminated. Whitespace-only
+ * character data is inter-element formatting and stays allowed
+ * everywhere except EMPTY. */
+static int element_has_char_content(LeptrisElement elem) {
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(elem));
+    while (child) {
+        unsigned t = leptris_node_get_type(child);
+        if (t == LEPTRIS_NODE_TYPE_TEXT) {
+            const LeptrisTextNode* tn = (const LeptrisTextNode*)child;
+            for (size_t i = 0; i < tn->content_len; i++) {
+                if (!isspace((unsigned char)tn->content[i])) return 1;
+            }
+        } else if (t == LEPTRIS_NODE_TYPE_CDATA) {
+            const LeptrisCDATANode* cn = (const LeptrisCDATANode*)child;
+            if (cn->content) {
+                for (const char* p = cn->content; *p; p++) {
+                    if (!isspace((unsigned char)*p)) return 1;
+                }
+            }
+        }
+        child = leptris_node_next_sibling(child);
+    }
+    return 0;
+}
+
 /* Phase 3: check #REQUIRED ATTLIST attributes by iterating the DTD's
  * attribute hash table. The iterator context carries the element under
  * validation and the error struct so we can short-circuit on first
@@ -231,10 +260,25 @@ static int validate_element_recursive(LeptrisElement elem, LeptrisDTD* dtd,
                           name);
                 return 0;
             }
+            if (element_has_char_content(elem)) {
+                set_error(error,
+                          "Element declared EMPTY has character content",
+                          name);
+                return 0;
+            }
         }
         /* DTD_CONTENT_ANY: any content allowed, always valid. */
         if (decl->content_type == DTD_CONTENT_ANY) {
             /* Valid by definition; fall through. */
+        } else if (decl->content_type == DTD_CONTENT_CHILDREN &&
+                   element_has_char_content(elem)) {
+            /* Element content (§3.2.2) allows only whitespace
+             * between children — character data is invalid. */
+            set_error(error,
+                      "Element content model does not allow "
+                      "character data",
+                      name);
+            return 0;
         } else if (decl->content_model && decl->content_model[0]) {
             /* Phase 4: walk the element's actual element-type
              * children and match them against the parsed content
