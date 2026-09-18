@@ -167,10 +167,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DLEPTRIS_ENABLE_UTF8PROC=OFF \
             -DLEPTRIS_ENABLE_ICONV=OFF \
-            -DCMAKE_C_FLAGS=-m32 \
-            -DCMAKE_CXX_FLAGS=-m32 \
-            -DCMAKE_C_FLAGS_RELEASE="-m32 -msse2 -mfpmath=sse" \
-            -DCMAKE_CXX_FLAGS_RELEASE="-m32 -msse2 -mfpmath=sse"
+            -DCMAKE_C_FLAGS="-m32 -msse2 -mfpmath=sse" \
+            -DCMAKE_CXX_FLAGS="-m32 -msse2 -mfpmath=sse"
 
       - name: Build
         run: cmake --build build
