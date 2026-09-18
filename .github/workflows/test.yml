@@ -178,6 +178,5 @@ jobs:
         # and needs a 32-bit utf8proc that does not exist here; the
         # export surface is word-size independent (the Windows leg
         # excludes it for the same reason).
-        run: ctest --test-dir build --output-on-failure --build-config Release \
-          --exclude-regex 'SymbolExportCheck|XIncludeXpointer' 
+        run: ctest --test-dir build --output-on-failure --build-config Release --exclude-regex 'SymbolExportCheck' 
 
