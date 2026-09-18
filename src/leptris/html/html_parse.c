@@ -6580,11 +6580,16 @@ static LeptrisDocument html_parse_shared(
                     strcmp(name, "caption") == 0 ||
                     strcmp(name, "col") == 0 ||
                     strcmp(name, "colgroup") == 0;
+                /* A colgroup holds only col-group content: any
+                 * OTHER start exits it (clears to the table,
+                 * then fosters) - <colgroup><math> puts the math
+                 * BEFORE the table (tests9:17/10:16). */
                 int tableish =
                     h_ieq_raw(topn, "table") ||
                     (rowish && !group_start) ||
-                    h_ieq_raw(topn, "caption") ||
-                    h_ieq_raw(topn, "colgroup");
+                    (h_ieq_raw(topn, "caption") &&
+                     strcmp(name, "caption") != 0) ||
+                    (h_ieq_raw(topn, "colgroup") && group_start);
                 /* 13.2.6.4.9 "in caption": a td/th/tr start pops
                  * the caption and reprocesses in table — the
                  * caption is NOT a table context for cells
