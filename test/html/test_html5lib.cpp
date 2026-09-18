@@ -222,7 +222,8 @@ bool ParseExpected(const std::vector<std::string>& lines, XNode* doc,
  * completes at the next #data or EOF. Multiple #data sections mean
  * fragment-after-document — skipped (slice 1). */
 std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
-                            std::string* err, int truncate_at_nul) {
+                            std::string* err, int truncate_at_nul,
+                            int unescape_data) {
     std::vector<XCase> cases;
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) { *err = "open failed: " + path; return cases; }
@@ -295,7 +296,30 @@ std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
                     i++;
                     while (i < lines.size() &&
                            !(lines[i].size() && lines[i][0] == '#')) {
-                        c.data += lines[i];
+                        /* html5lib runner convention: "\n"/"\t"
+                         * in #data are ESCAPES for the raw bytes
+                         * (html5test-com:5: <a href='\nbar'> tests
+                         * a newline-leading attribute value). NOT
+                         * for the Nokogiri reference file - its
+                         * trees keep the literal backslash bytes
+                         * (nokogiri-tree-tests:275). */
+                        std::string dl2 = unescape_data ? lines[i] : "";
+                        for (size_t p2 = dl2.find('\\');
+                             p2 != std::string::npos &&
+                                 p2 + 1 < dl2.size();
+                             p2 = dl2.find('\\', p2 + 1)) {
+                            char e2 = dl2[p2 + 1];
+                            if (e2 == 'n' || e2 == 't' || e2 == 'r') {
+                                dl2[p2] = (e2 == 'n') ? '\n'
+                                         : (e2 == 't') ? '\t' : '\r';
+                                dl2.erase(p2 + 1, 1);
+                            }
+                        }
+                        if (!unescape_data) {
+                            c.data += lines[i];
+                        } else {
+                            c.data += dl2;
+                        }
                         c.data += '\n';
                         i++;
                     }
@@ -334,6 +358,26 @@ std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
                          * text can contain escaped inner quotes on
                          * one line (nokogiri-tree-tests:1152) and
                          * would over-merge. */
+                        /* An expected COMMENT may also span
+                         * physical lines: a comment line that
+                         * does not contain "-->" continues until
+                         * one does (comments01:4: the eof-in-
+                         * comment data carries a raw newline). */
+                        if (bd < body.size() && body[bd] == '<' &&
+                            body.compare(bd, 4, "<!--") == 0 &&
+                            body.find("-->", bd) == std::string::npos) {
+                            std::string merged = dl;
+                            while (i + 1 < lines.size() &&
+                                   lines[i + 1].compare(0, 1, "#") != 0) {
+                                merged += "\n";
+                                merged += lines[i + 1];
+                                i++;
+                                if (lines[i].find("-->") !=
+                                    std::string::npos)
+                                    break;
+                            }
+                            doclines.back() = merged;
+                        }
                         if (bd < body.size() && body[bd] == '"' &&
                             (body.size() - bd == 1 ||
                              body[body.size() - 1] != '"')) {
@@ -622,7 +666,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
     std::map<std::string, size_t> skip_why;
     for (const std::string& fn : files) {
         std::vector<XCase> cs =
-            ScanFile(dir + "/" + fn, fn, &err, 0);
+            ScanFile(dir + "/" + fn, fn, &err, 0, 1);
         if (!err.empty() && cs.empty()) {
             ADD_FAILURE() << fn << ": " << err;
             continue;
@@ -737,7 +781,7 @@ TEST(Html5LibCorpus, TreeConstruction) {
     {
         std::vector<XCase> cs =
             ScanFile(dir + "/../../nokogiri-tree-tests.dat",
-                     "nokogiri-tree-tests.dat", &err, 1);
+                     "nokogiri-tree-tests.dat", &err, 1, 0);
         ASSERT_TRUE(cs.empty() || err.empty()) << err;
         size_t ptotal = 0, ppassed = 0, pfailed = 0, pskip = 0;
         std::vector<std::string> pfails;
