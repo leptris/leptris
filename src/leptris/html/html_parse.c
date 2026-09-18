@@ -2739,6 +2739,10 @@ typedef struct {
     /* #659 the CURRENT start tag is <input type=hidden> (raw
      * scan; the element's attrs are not set at foster time). */
     int input_hidden_tag;
+    /* #659 set at </table>: text flushes just after do NOT
+     * reconstruct (tests1:21 X bare); formatting starts still
+     * do (tests1:31 a5 wraps <b>X</b>C). */
+    int post_table_text;
     /* #659 "before head" boundary (tests19:87): a structural <head>
      * tag starts the head phase — comments after it are head
      * content, comments before it stay html-prefix children.
@@ -5729,12 +5733,12 @@ static LeptrisDocument html_parse_shared(
                                     break;
                             }
                             h_pop_to(&b, d - 1);
-                            /* Old-suite rule (tests1:21/91):
-                             * </table> also closes formatting
-                             * elements BELOW the table on the
-                             * stack - content after it lands in
-                             * the container (b wraps the table;
-                             * X lands in the body). */
+                            /* Old-suite </table> rule: closes
+                             * formatting BELOW the table - only
+                             * entries the agency can still SEE
+                             * (marker-scoped); consumed ones stay
+                             * OPEN and own trailing TEXT content
+                             * (tests1:21). */
                             if (b.whatwg &&
                                 strcmp(lname, "table") == 0) {
                                 while (b.depth > 0) {
@@ -5744,10 +5748,25 @@ static LeptrisDocument html_parse_shared(
                                     if (fn3 &&
                                         b.open_ns[b.depth - 1] ==
                                             H_NS_HTML &&
-                                        h_is_formatting(fn3))
+                                        h_is_formatting(fn3) &&
+                                        h_afe_find(&b, fn3) >= 0)
                                         b.depth--;
                                     else
                                         break;
+                                }
+                                {
+                                    int mk2 = 0;
+                                    for (int mi2 = 0;
+                                         mi2 < b.afe_n; mi2++)
+                                        if (b.afe_marker[mi2])
+                                            mk2++;
+                                    /* Only with a still-open cell
+                                     * (table+cell markers) - with
+                                     * cells closed the fostered
+                                     * entries must reconstruct for
+                                     * the following TEXT (78). */
+                                    if (mk2 >= 2)
+                                        b.post_table_text = 1;
                                 }
                             }
                             /* #659 "after frameset" phase switch —
@@ -6854,8 +6873,10 @@ static LeptrisDocument html_parse_shared(
          * tokens and on formatting/ordinary element starts — NOT
          * on the structural/head/block/table set). */
         if (b.whatwg_adopt && elem_ns == H_NS_HTML &&
-            h_reconstructs(name))
+            h_reconstructs(name)) {
+            b.post_table_text = 0;
             h_reconstruct(&b);
+        }
 
         LeptrisElement e = (elem_ns != H_NS_HTML)
                                ? h_open_foreign(&b, name, elem_ns)
@@ -7114,7 +7135,7 @@ static LeptrisDocument html_parse_shared(
                 LeptrisTextNode* t =
                     leptris_text_create(dec, dlen, b.pool);
                 if (t) {
-                    h_reconstruct(&b);
+                    if (!b.post_table_text) h_reconstruct(&b);
                     h_append(&b, (LeptrisNodeRef)t);
                 }
             }
