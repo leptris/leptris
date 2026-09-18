@@ -6683,7 +6683,15 @@ static LeptrisDocument html_parse_shared(
                       !(b.whatwg &&
                         strcmp(on, "option") == 0 &&
                         strcmp(name, "select") == 0)) ||
-                     (b.whatwg && h_closes_ww(on, name)))) {
+                     (b.whatwg && h_closes_ww(on, name) &&
+                      /* The optgroup hr/select closes are "in
+                       * select" rules only - without an open
+                       * select the select NESTS in the optgroup
+                       * (tests1:35). */
+                      !(!h_in_select(&b) &&
+                        h_ieq_raw(on, "optgroup") &&
+                        (strcmp(name, "hr") == 0 ||
+                         strcmp(name, "select") == 0))))) {
                     /* The vendored reference keeps <table> INSIDE
                      * an open p in the bare shape (tests3:24,
                      * tests20:42) but closes it under an explicit

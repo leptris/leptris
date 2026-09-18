@@ -1941,6 +1941,15 @@ TEST(HtmlParse, PlaintextExitsColgroup) {
               "<table><colgroup/></table></body></html>");
 }
 
+/* Without an open select, a <select> start NESTS in the open
+ * optgroup/option (the hr/select optgroup closes are "in select"
+ * rules only); </option> inside the select drops, D and E coalesce
+ * (tests1:35). */
+TEST(HtmlParse, SelectNestsInOptgroupWithoutSelect) {
+    EXPECT_EQ(Html("A<option>B<optgroup>C<select>D</option>E"),
+              "A<option>B</option><optgroup>C<select>DE</select></optgroup>");
+}
+
 /* Vendored hidden-input placement: inside a form-over-table the
  * hidden input pops the still-empty form and lands as the
  * table's child; the plain input after it fosters to the body
