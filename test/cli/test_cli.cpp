@@ -401,3 +401,35 @@ TEST(CliXquery, SourceDocumentAndConstructors) {
               "<r price=\"20\">CC</r> <r price=\"12\">AA</r>\n");
 }
 #endif  /* !_WIN32 */
+
+// ---- validate --dtd (#1183 lane 16.6) --------------------------------------
+
+TEST(CliValidate, DtdValidPasses) {
+    write_file("leptris_cli_val.dtd",
+               "<!ELEMENT r (item+)>\n"
+               "<!ELEMENT item EMPTY>\n"
+               "<!ATTLIST item n CDATA #IMPLIED>\n");
+    write_file("leptris_cli_val_ok.xml", "<r><item/><item/></r>");
+    auto r = run_cli({"validate", "--dtd", "leptris_cli_val.dtd",
+                      "leptris_cli_val_ok.xml"});
+    EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("dtd: valid"), std::string::npos);
+}
+
+TEST(CliValidate, DtdInvalidFails) {
+    write_file("leptris_cli_val.dtd",
+               "<!ELEMENT r (item+)>\n"
+               "<!ELEMENT item EMPTY>\n");
+    write_file("leptris_cli_val_bad2.xml", "<r><item>x</item></r>");
+    auto r = run_cli({"validate", "--dtd", "leptris_cli_val.dtd",
+                      "leptris_cli_val_bad2.xml"});
+    EXPECT_EQ((r.exit_code >> 8) & 0xFF, 1) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("dtd: invalid"), std::string::npos);
+}
+
+TEST(CliValidate, MissingDtdIsIoError) {
+    write_file("leptris_cli_val_ok.xml", "<r/>");
+    auto r = run_cli({"validate", "--dtd", "leptris_cli_no_such.dtd",
+                      "leptris_cli_val_ok.xml"});
+    EXPECT_EQ((r.exit_code >> 8) & 0xFF, 3) << "stderr: " << r.err;
+}

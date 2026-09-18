@@ -144,10 +144,14 @@ static int match_particle(CMLexer* lx, const char** child_names,
     }
 
     int matched_any = 0;
-    if (*child_idx < child_count &&
-        strcmp(child_names[*child_idx], name) == 0) {
+    /* * and + consume EVERY run of matching children — a single
+     * compare left the run's tail unconsumed and failed valid
+     * documents like <r><item/><item/></r> against (item+). */
+    while (*child_idx < child_count &&
+           strcmp(child_names[*child_idx], name) == 0) {
         (*child_idx)++;
         matched_any = 1;
+        if (occurrence == 1 || occurrence == '?') break;
     }
 
     switch (occurrence) {

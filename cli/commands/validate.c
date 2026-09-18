@@ -4,6 +4,7 @@
  */
 
 #include "leptris.h"
+#include "leptris/dtd.h"
 #include "../cli.h"
 #include "../error.h"
 #include <stdio.h>
@@ -154,6 +155,7 @@ static int run_schematron(const char* path, const char* phase,
 static cli_result_t validate_execute(int argc, char** argv) {
     const char* rng_path = NULL;
     const char* sch_path = NULL;
+    const char* dtd_path = NULL;
     const char* phase = NULL;
     const char* xml_path = NULL;
     int want_svrl = 0;
@@ -164,6 +166,8 @@ static cli_result_t validate_execute(int argc, char** argv) {
                     strcmp(argv[i], "-s") == 0) &&
                    i + 1 < argc) {
             sch_path = argv[++i];
+        } else if (strcmp(argv[i], "--dtd") == 0 && i + 1 < argc) {
+            dtd_path = argv[++i];
         } else if (strcmp(argv[i], "--phase") == 0 && i + 1 < argc) {
             phase = argv[++i];
         } else if (strcmp(argv[i], "--svrl") == 0) {
@@ -172,10 +176,11 @@ static cli_result_t validate_execute(int argc, char** argv) {
                    strcmp(argv[i], "--help") == 0) {
             printf("Usage: leptris validate [OPTIONS] XML\n");
             printf("\n");
-            printf("Validate an XML document against RELAX NG");
-            printf(" and/or ISO Schematron schemas.\n");
+            printf("Validate an XML document against an external");
+            printf(" DTD, RELAX NG and/or\nISO Schematron schemas.\n");
             printf("\n");
             printf("Options:\n");
+            printf("  --dtd FILE          External DTD\n");
             printf("  --rng FILE          RELAX NG schema\n");
             printf("  --schematron FILE   ISO Schematron schema\n");
             printf("  --phase ID          Schematron phase to");
@@ -198,8 +203,8 @@ static cli_result_t validate_execute(int argc, char** argv) {
         cli_error("validate requires an XML document");
         return CLI_ERROR_ARGS;
     }
-    if (!rng_path && !sch_path) {
-        cli_error("validate needs --rng and/or --schematron");
+    if (!rng_path && !sch_path && !dtd_path) {
+        cli_error("validate needs --dtd and/or --rng and/or --schematron");
         return CLI_ERROR_ARGS;
     }
     LeptrisDocument doc = read_doc(xml_path);
@@ -208,6 +213,31 @@ static cli_result_t validate_execute(int argc, char** argv) {
         return CLI_ERROR_IO;
     }
     int invalid = 0;
+    if (dtd_path) {
+        size_t dtd_len = 0;
+        char* dtd_content = read_file(dtd_path, &dtd_len);
+        if (!dtd_content) {
+            cli_error("cannot read DTD: %s", dtd_path);
+            leptris_document_free(doc);
+            return CLI_ERROR_IO;
+        }
+        LeptrisDTD* dtd = leptris_dtd_parse(dtd_content, dtd_len);
+        free(dtd_content);
+        if (!dtd) {
+            cli_error("DTD parse failed: %s", dtd_path);
+            leptris_document_free(doc);
+            return CLI_ERROR_IO;
+        }
+        LeptrisDTDError derr = {0};
+        if (leptris_dtd_validate(doc, dtd, &derr)) {
+            printf("dtd: valid\n");
+        } else {
+            printf("dtd: invalid\n");
+            if (derr.message) printf("  %s\n", derr.message);
+            invalid = 1;
+        }
+        leptris_dtd_free(dtd);
+    }
     if (rng_path) {
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisRelaxNG rng = leptris_rng_parse_file(rng_path, &st);
