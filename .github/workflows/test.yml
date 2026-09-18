@@ -180,3 +180,35 @@ jobs:
         # excludes it for the same reason).
         run: ctest --test-dir build --output-on-failure --build-config Release --exclude-regex 'SymbolExportCheck'
 
+  test-s390x:
+    name: Test C Library (s390x big-endian, qemu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # continue-on-error until the big-endian failures (#1194) are fixed —
+    # a required red leg would block every PR. Flip to required when the
+    # suite is green on s390x.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: s390x
+
+      - name: Build and test in s390x container
+        run: |
+          docker run --rm -v "$PWD":/src -w /src debian:bookworm bash -ec '
+            apt-get update -qq
+            apt-get install -y -qq cmake ninja-build gcc g++ libutf8proc-dev
+            cmake -B build -S . -G Ninja \
+              -DBUILD_TESTING=ON \
+              -DLEPTRIS_BUILD_CLI=ON \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DLEPTRIS_ENABLE_ICONV=OFF
+            cmake --build build -j2
+            ctest --test-dir build --output-on-failure --build-config Release
+          '
+
