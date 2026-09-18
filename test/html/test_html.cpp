@@ -1998,6 +1998,26 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* 13.2.6.1/13.2.6.4.6/13.2.6.4.7 comment placement after the body
+ * phases: only IN-BODY comments (non-ws text restored the mode)
+ * enter the body; after-body / after-after-body comments are html
+ * children after the body; past </html> they are DOCUMENT epilog
+ * nodes; </body> flips the phase even with content open
+ * (webkit01:22-28, tests19:21, tests1:34). */
+TEST(HtmlParse, AfterBodyCommentPhaseRouting) {
+    EXPECT_EQ(Html("<html><body></body>\n   <!-- Hi there --></html>"),
+              "<html><head/><body>\n   </body><!-- Hi there --></html>");
+    EXPECT_EQ(Html("<html><body></body></html><!-- Hi there -->"),
+              "<html><head/><body/></html><!-- Hi there -->");
+    /* the post-</html> non-ws text and its comment ride the
+     * document chain (corpus-validated webkit01 family shape) */
+    EXPECT_EQ(Html("<html><body></body></html>x<!-- Hi there -->"),
+              "x<!-- Hi there -->");
+    EXPECT_EQ(Html("<!doctype html><div></body><!--foo-->"),
+              "<!DOCTYPE html><html><head/><body><div/></body>"
+              "<!--foo--></html>");
+}
+
 /* 13.2.6.4.6 after-head: comments after </head> are html children
  * between head and body, but head-eligible elements after them
  * still process INTO the head (tests3:3). */

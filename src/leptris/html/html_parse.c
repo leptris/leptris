@@ -2769,6 +2769,8 @@ typedef struct {
      * body content — even head-eligible elements (</head> alone
      * keeps processing them into the head, 13.2.6.4.3). */
     int after_html;
+    LeptrisNodeRef ab_body_last;
+    int html_tag_seen;
     /* #659 "after frameset" (13.2.6.4.19, tests6:8-12): the
      * frameset element CLOSED — later start tags drop except
      * noframes/frame, whitespace text stays an html child,
@@ -4919,6 +4921,48 @@ head_end = leptris_node_get_next_sibling(head_end);
                     suffix_first = peel_first;
                 suffix_last = peel_last;
             }
+            /* A comment tokenized BEFORE </html> but after
+             * </body> rides in the rest - peel the trailing run
+             * to the html level, exactly like the </body>-only
+             * path below (webkit01:27: body keeps the ws, the
+             * comment follows the body). */
+            if (b->after_body && !b->after_body_done) {
+                LeptrisNodeRef prev2 = NULL;
+                LeptrisNodeRef c2 = rest;
+                while (c2) {
+                    if (leptris_node_get_type(c2) !=
+                            LEPTRIS_NODE_TYPE_COMMENT &&
+                        leptris_node_get_type(c2) !=
+                            LEPTRIS_NODE_TYPE_PI)
+                        prev2 = c2;
+                    c2 = leptris_node_get_next_sibling(c2);
+                }
+                LeptrisNodeRef cand2 =
+                    prev2 ? leptris_node_get_next_sibling(prev2)
+                          : rest;
+                int body_mark2 = 0;
+                for (LeptrisNodeRef t3 = cand2; t3;
+                     t3 = leptris_node_get_next_sibling(t3))
+                    if (t3 == b->ab_body_last) {
+                        /* The run reaches in-body content - it
+                         * all stays with the body; decide BEFORE
+                         * cutting or the run is orphaned
+                         * (webkit01:25/26). */
+                        body_mark2 = 1;
+                        break;
+                    }
+                if (!body_mark2) {
+                    if (prev2) {
+                        after_tail = cand2;
+                        if (after_tail)
+                            leptris_node_set_next_sibling(prev2,
+                                                          NULL);
+                    } else {
+                        after_tail = rest;
+                        rest = NULL;
+                    }
+                }
+            }
             /* The head element closed with a tag pair — commit it
              * even when its run was empty, AHEAD of the after-head
              * comments (tests19:3: html > [head, comment, body]). */
@@ -4948,25 +4992,24 @@ head_end = leptris_node_get_next_sibling(head_end);
                     prev = c;
                 c = leptris_node_get_next_sibling(c);
             }
-            if (prev) {
-                /* WHITESPACE before the comment run: the ws is
-                 * already body content (after-body ws inserts
-                 * into the current node), so the comment joins
-                 * it INSIDE the body (webkit01:27). An ELEMENT
-                 * before the run (or a comment-only run) peels
-                 * the comments to the html level (tests19:21). */
-                if (leptris_node_get_type(prev) ==
-                    LEPTRIS_NODE_TYPE_TEXT) {
-                    after_tail = NULL;
-                } else {
-                    after_tail =
-                        leptris_node_get_next_sibling(prev);
+            LeptrisNodeRef cand =
+                prev ? leptris_node_get_next_sibling(prev) : rest;
+            int body_mark = 0;
+            for (LeptrisNodeRef t3 = cand; t3;
+                 t3 = leptris_node_get_next_sibling(t3))
+                if (t3 == b->ab_body_last) {
+                    body_mark = 1;
+                    break;
+                }
+            if (!body_mark) {
+                if (prev) {
+                    after_tail = cand;
                     if (after_tail)
                         leptris_node_set_next_sibling(prev, NULL);
+                } else {
+                    after_tail = rest;
+                    rest = NULL;
                 }
-            } else {
-                after_tail = rest;
-                rest = NULL;
             }
         }
     }
@@ -5186,12 +5229,43 @@ static LeptrisDocument html_parse_shared(
                             b.prolog_head = (LeptrisNodeRef)c;
                         b.prolog_tail = (LeptrisNodeRef)c;
                     } else if (b.after_body && !b.after_body_done &&
-                               b.depth > 0) {
-                        /* #659 after body: comments divert to the
-                         * html level — children after the body.
-                         * Canceled once non-ws text restores
-                         * "in body" mode (webkit01:24). */
+                               b.after_html) {
+                                                /* Past </html>: the comment is a DOCUMENT
+                         * epilog node (webkit01:22/23/25/26/28,
+                         * tests18:34). */
                         h_top_append(&b, (LeptrisNodeRef)c);
+                    } else if (b.after_body && b.after_body_done) {
+                                                /* In-body mode restored by non-ws text:
+                         * the comment is body content - freeze
+                         * that decision NOW (a later </html>
+                         * resets the done flag before the commit
+                         * split runs; webkit01:25/26). */
+                        b.ab_body_last = (LeptrisNodeRef)c;
+                        h_append(&b, (LeptrisNodeRef)c);
+                    } else if (b.after_body && !b.after_body_done &&
+                               b.depth > 0 && b.html_tag_seen) {
+                                                /* #659 after body / after after body, into
+                         * the EXPLICIT root: the commit split peels
+                         * the comment to the html level AFTER the
+                         * body (webkit01:22/23/27/28). */
+                        h_append(&b, (LeptrisNodeRef)c);
+                    } else if (b.after_body && !b.after_body_done) {
+                                                /* Synthesized-root docs: the comment rides
+                         * the top chain; the commit split peels it
+                         * to the html level after the body
+                         * (tests19:21, tests1:34). */
+                        h_top_append(&b, (LeptrisNodeRef)c);
+                    } else if (b.after_body && !b.after_body_done &&
+                               b.depth > 0) {
+                        /* #659 after body / after after body: the
+                         * comment lands in the open html - the
+                         * commit split peels it to the html level
+                         * AFTER the body (webkit01:22/23/25/26/27/28,
+                         * tests19:21) unless non-ws text restored
+                         * "in body" mode, where the whole rest
+                         * becomes body content (webkit01:24/25/26's
+                         * post-"x" comments). */
+                        h_append(&b, (LeptrisNodeRef)c);
                     } else {
                         h_append(&b, (LeptrisNodeRef)c);
                     }
@@ -5906,6 +5980,28 @@ static LeptrisDocument html_parse_shared(
                                  * past it. */
                                 if (h_is_special_ww(on2)) break;
                             }
+                        }
+                    }
+                    /* 13.2.6.1: </body> switches to "after body"
+                     * regardless of the stack shape - with a
+                     * synthesized body there is no body element on
+                     * the stack to match, and the phase flag must
+                     * still flip (tests19:21, tests1:34). */
+                    if (b.whatwg && !b.after_body && nlen == 4 &&
+                        h_lower(ns[0]) == 'b' &&
+                        h_lower(ns[1]) == 'o' &&
+                        h_lower(ns[2]) == 'd' &&
+                        h_lower(ns[3]) == 'y') {
+                        int body_open2 = 0;
+                        for (size_t d3 = 0; d3 < b.depth; d3++)
+                            if (b.open_ns[d3] == H_NS_HTML &&
+                                h_ieq_raw(leptris_element_name(
+                                              b.open[d3]),
+                                          "body"))
+                                body_open2 = 1;
+                        if (!body_open2) {
+                            b.after_body = 1;
+                            b.after_body_done = 0;
                         }
                     }
                     for (size_t d = b.depth; d > 0; d--) {
@@ -7304,7 +7400,10 @@ static LeptrisDocument html_parse_shared(
                                ? h_open_foreign(&b, name, elem_ns)
                                : h_open_element(&b, name);
         if (!e) goto done;
-        if (strcmp(name, "html") == 0) b.html_seen = 1;
+        if (strcmp(name, "html") == 0) {
+            b.html_seen = 1;
+            b.html_tag_seen = 1;
+        }
         if (b.whatwg && strcmp(name, "table") == 0)
             h_afe_table_marker_push(&b);   /* </table> (78) */
         if (strcmp(name, "form") == 0) b.form_open = 1;
