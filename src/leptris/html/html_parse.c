@@ -4187,7 +4187,14 @@ static int h_afe_end(HBuilder* b, const char* subject) {
                     break;
                 }
             }
-            if (!in_scope) return 1;
+            if (!in_scope) {
+                /* The scope-ignored end still removes the entry
+                 * - reconstruct must not resurrect it (tests1:21:
+                 * </b> behind the table; the b stays open on the
+                 * stack but never re-wraps). */
+                h_afe_remove_idx(b, fi);
+                return 1;
+            }
         }
         int fbi = -1;
         for (size_t k = (size_t)si + 1; k < b->depth; k++) {
@@ -5455,6 +5462,7 @@ static LeptrisDocument html_parse_shared(
                                     else
                                         break;
                                 }
+                                h_afe_clear_to_marker(&b);
                             }
                                 /* #659 "after frameset"
                                  * (13.2.6.4.19): </frameset>
@@ -6854,6 +6862,8 @@ static LeptrisDocument html_parse_shared(
                                : h_open_element(&b, name);
         if (!e) goto done;
         if (strcmp(name, "html") == 0) b.html_seen = 1;
+        if (b.whatwg && strcmp(name, "table") == 0)
+            h_afe_marker_push(&b);   /* cleared at </table> (78) */
         if (strcmp(name, "form") == 0) b.form_open = 1;
         if (b.whatwg && elem_ns == H_NS_HTML &&
             strcmp(name, "template") == 0 && b.depth > 0) {
