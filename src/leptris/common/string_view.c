@@ -16,7 +16,10 @@
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     #define LEPTRIS_HAS_NEON 1
     #include <arm_neon.h>
-#elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#elif defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86) && _M_IX86_FP >= 2)
+    /* Gate on __SSE2__, not __i386__: SSE2 is baseline on x86_64 but
+     * NOT on i686 (#1174) — there it needs -msse2 and plain -m32
+     * builds must take the scalar path. */
     #define LEPTRIS_HAS_SSE2 1
     #include <emmintrin.h>
 #else
