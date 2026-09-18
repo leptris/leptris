@@ -4543,6 +4543,13 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
      * run walk and re-wired as html children between head and the
      * rest (13.2.6.4.6 after-head inserts at the html level). */
     LeptrisNodeRef ws_first = NULL, ws_last = NULL;
+    /* After-</head> comments are DEFERRED (cut from the chain,
+     * re-linked as html children between head and body) while the
+     * walk keeps going - head-eligible elements after them still
+     * process INTO the head (13.2.6.4.6, tests3:3). */
+    LeptrisNodeRef cm_first = NULL, cm_last = NULL;
+    LeptrisNodeRef walk_prev = NULL;
+    int run_after_explicit = 0;
     LeptrisNodeRef prefix_last = NULL;
     size_t prefix_count = 0;
     /* #659 an explicit <head> child of html IS the head element —
@@ -4564,9 +4571,27 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                 if (b->whatwg_head_set) {
                     if (past_head_end) {
                         /* After </head>: the comment is an html
-                         * child between head and body (the body
-                         * path peels it off the rest). */
-                        break;
+                         * child between head and body - DEFER it,
+                         * CUT it out of the chain, keep walking.
+                         * The new segment tail is NULLED so the
+                         * suffix append cannot cycle back into
+                         * the chain. */
+                        LeptrisNodeRef cn =
+                            leptris_node_get_next_sibling(head_end);
+                        if (walk_prev)
+                            leptris_node_set_next_sibling(walk_prev,
+                                                          cn);
+                        else
+                            orig_head = cn;
+                        if (!cm_first)
+                            cm_first = head_end;
+                        else
+                            leptris_node_set_next_sibling(cm_last,
+                                                          head_end);
+                        leptris_node_set_next_sibling(head_end, NULL);
+                        cm_last = head_end;
+                        head_end = cn;
+                        continue;
                     }
                     if (!head_start && !past_head_tag) {
                         /* Before head: html prefix (13.2.6.3.2 —
@@ -4577,14 +4602,16 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                             past_head_tag = 1;
                         if (head_end == b->head_end_tail)
                             past_head_end = 1;
-                        head_end =
+                        walk_prev = head_end;
+head_end =
                             leptris_node_get_next_sibling(head_end);
                         continue;
                     }
                     if (!head_start) head_start = head_end;
                     if (head_end == b->head_end_tail)
                         past_head_end = 1;
-                    head_end = leptris_node_get_next_sibling(head_end);
+                    walk_prev = head_end;
+head_end = leptris_node_get_next_sibling(head_end);
                     continue;
                 }
                 break;
@@ -4604,7 +4631,8 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                         for (const char* w = tx; *w; w++)
                             if (!h_is_ws(*w)) { ws = 0; break; }
                     if (ws) {
-                        head_end =
+                        walk_prev = head_end;
+head_end =
                             leptris_node_get_next_sibling(head_end);
                         continue;
                     }
@@ -4652,7 +4680,8 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
                     if (ws) {
                         if (!ws_first) ws_first = head_end;
                         ws_last = head_end;
-                        head_end =
+                        walk_prev = head_end;
+head_end =
                             leptris_node_get_next_sibling(head_end);
                         continue;
                     }
@@ -4671,7 +4700,19 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
              * it; the head run ends at it (tests1:7/8). */
             if (h_ieq_raw(hn, "head")) {
                 explicit_head = head_end;
-                head_end = leptris_node_get_next_sibling(head_end);
+                walk_prev = head_end;
+                walk_prev = head_end;
+head_end = leptris_node_get_next_sibling(head_end);
+                /* With a </head> close the walk CONTINUES: later
+                 * style/script/title/... still process INTO the
+                 * adopted head (13.2.6.4.3 after-head in-head
+                 * rules; tests3:3). Without one, the run ends at
+                 * the explicit head as before (tests1:7/8). */
+                if (b->head_end_seen) {
+                    past_head_end = 1;
+                    run_after_explicit = 1;
+                    continue;
+                }
                 break;
             }
             /* #659 two modes: WHATWG lifts the full "in head" set;
@@ -4693,10 +4734,12 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             if (!head_start) head_start = head_end;
             if (head_end == b->head_end_tail)
                 past_head_end = 1;
-            head_end = leptris_node_get_next_sibling(head_end);
+            walk_prev = head_end;
+head_end = leptris_node_get_next_sibling(head_end);
             /* A structural <body> ends the head phase. */
             if (b->lift_boundary && head_end == b->lift_boundary) {
-                head_end = leptris_node_get_next_sibling(head_end);
+                walk_prev = head_end;
+head_end = leptris_node_get_next_sibling(head_end);
                 break;
             }
         }
@@ -4730,7 +4773,9 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             size_t hn = 0;
             LeptrisNodeRef hlast = NULL;
             for (LeptrisNodeRef c = head_start;
-                 c && c != (adopt ? explicit_head : head_end); ) {
+                 c && c != (adopt && !run_after_explicit
+                                ? explicit_head
+                                : head_end); ) {
                 LeptrisNodeRef next = leptris_node_get_next_sibling(c);
                 /* The run can carry comments (WHATWG in-head) —
                  * set_parent must go through the node-kind setter,
@@ -4814,6 +4859,29 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
         else
             suffix_last = ws_last;
         suffix_first = ws_first;
+        if (cm_first && suffix_last != cm_first) {
+            leptris_node_set_next_sibling(suffix_last, cm_first);
+            suffix_last = cm_last;
+        }
+    } else if (cm_first) {
+        for (LeptrisNodeRef s2 = cm_first; ; ) {
+            if (leptris_node_get_type(s2) == LEPTRIS_NODE_TYPE_COMMENT)
+                leptris_comment_set_parent(
+                    (LeptrisCommentNode*)s2, html);
+            else
+                leptris_pi_set_parent((LeptrisPINode*)s2, html);
+            if (s2 == cm_last) break;
+            s2 = leptris_node_get_next_sibling(s2);
+        }
+        if (suffix_first) {
+            if (suffix_last != cm_first) {
+                leptris_node_set_next_sibling(suffix_last, cm_first);
+                suffix_last = cm_last;
+            }
+        } else {
+            suffix_first = cm_first;
+            suffix_last = cm_last;
+        }
     }
     if (b->whatwg_head_set && !b->frameset &&
         (rest || b->head_end_seen)) {
