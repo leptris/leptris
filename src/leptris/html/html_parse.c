@@ -5572,12 +5572,23 @@ static LeptrisDocument html_parse_shared(
                                 /* </address> closes through the
                                  * fence (tests20:41); everything
                                  * else fences - div still stops
-                                 * at marquee (tests1:26). */
-                                fenced = (h_ieq_raw(on, "button") ||
-                                          h_ieq_raw(on, "marquee") ||
-                                          h_ieq_raw(on, "object") ||
-                                          h_ieq_raw(on, "applet")) &&
-                                         strcmp(lname, "address") != 0;
+                                 * at marquee (tests1:26). List
+                                 * items additionally fence at
+                                 * ul/ol - the LIST scope
+                                 * (tests1:104: </li> inside an
+                                 * open <ul> is ignored). */
+                                fenced = ((h_ieq_raw(on, "button") ||
+                                           h_ieq_raw(on, "marquee") ||
+                                           h_ieq_raw(on, "object") ||
+                                           h_ieq_raw(on, "applet")) &&
+                                          strcmp(lname, "address") !=
+                                              0) ||
+                                          ((strcmp(lname, "li") ==
+                                                0 ||
+                                            strcmp(lname, "dd") == 0 ||
+                                            strcmp(lname, "dt") == 0) &&
+                                           (h_ieq_raw(on, "ul") ||
+                                            h_ieq_raw(on, "ol")));
                             }
                             if (fenced) break;
                         }
@@ -6469,16 +6480,25 @@ static LeptrisDocument html_parse_shared(
             {
                 const char* topn =
                     leptris_element_name(b.open[b.depth - 1]);
-                /* A caption start clears a row/section back to the
-                 * table - caption is a TABLE child (tables01:13). */
+                /* A caption/col/colgroup start clears a
+                 * row/section/cell back to the table - the new
+                 * group is a TABLE child (tables01:13;
+                 * tests1:108/109: each mid-table <col> closes
+                 * the section and opens a fresh colgroup). */
                 int rowish =
                     h_ieq_raw(topn, "tbody") ||
                     h_ieq_raw(topn, "thead") ||
                     h_ieq_raw(topn, "tfoot") ||
-                    h_ieq_raw(topn, "tr");
+                    h_ieq_raw(topn, "tr") ||
+                    h_ieq_raw(topn, "td") ||
+                    h_ieq_raw(topn, "th");
+                int group_start =
+                    strcmp(name, "caption") == 0 ||
+                    strcmp(name, "col") == 0 ||
+                    strcmp(name, "colgroup") == 0;
                 int tableish =
                     h_ieq_raw(topn, "table") ||
-                    (rowish && strcmp(name, "caption") != 0) ||
+                    (rowish && !group_start) ||
                     h_ieq_raw(topn, "caption") ||
                     h_ieq_raw(topn, "colgroup");
                 /* 13.2.6.4.9 "in caption": a td/th/tr start pops
