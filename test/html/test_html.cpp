@@ -1998,6 +1998,16 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* Past </html> a comment is a DOCUMENT epilog node - held on a
+ * side list at parse and linked after the root at commit, so the
+ * frameset assembly cannot wrap it into html (tests18:34). */
+TEST(HtmlParse, AfterHtmlCommentIsDocumentEpilog) {
+    EXPECT_EQ(Html("<!doctype html><frameset></frameset></html>"
+                   "<noframes>abc</noframes><!--abc-->"),
+              "<!DOCTYPE html><html><head/><frameset/>"
+              "<noframes>abc</noframes></html><!--abc-->");
+}
+
 /* 13.2.6.1/13.2.6.4.6/13.2.6.4.7 comment placement after the body
  * phases: only IN-BODY comments (non-ws text restored the mode)
  * enter the body; after-body / after-after-body comments are html
