@@ -6782,6 +6782,15 @@ static LeptrisDocument html_parse_shared(
                         h_ieq_raw(on, "p") &&
                         strcmp(name, "table") == 0)
                         break;
+                    /* 13.2.6.4.11 "in cell": a nested <table> is
+                     * CELL content - the cell fences the
+                     * table-closes-table walk, the inner table
+                     * nests inside the td (tests7:6; bare
+                     * <table><table> still siblings, tests6:42). */
+                    if (b.whatwg &&
+                        strcmp(name, "table") == 0 &&
+                        (h_ieq_raw(on, "td") || h_ieq_raw(on, "th")))
+                        break;
                     /* #659 "in template" start-tag fence (13.2.4.2):
                      * an open template is a scope boundary — a start
                      * tag never pops it; table-context starts become
