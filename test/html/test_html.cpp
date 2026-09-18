@@ -1998,6 +1998,16 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* 13.2.6.4.6 after-head: comments after </head> are html children
+ * between head and body, but head-eligible elements after them
+ * still process INTO the head (tests3:3). */
+TEST(HtmlParse, AfterHeadCommentsDeferStyleContinuesIntoHead) {
+    EXPECT_EQ(Html("<head></head><!-- --><style>x</style><!-- -->"
+                   "<script>y</script>"),
+              "<html><head><style>x</style><script>y</script></head>"
+              "<!-- --><!-- --><body/></html>");
+}
+
 /* AA step 14 adopts the furthest block - it is UNLINKED from the
  * formatting element before the foster splice/append (no
  * double-linked subtree); 13.2.6.4.9: a whitespace-only run in a
