@@ -403,6 +403,10 @@ TEST(CliXquery, SourceDocumentAndConstructors) {
 #endif  /* !_WIN32 */
 
 // ---- validate --dtd (#1183 lane 16.6) --------------------------------------
+// run_cli shells out with POSIX quoting; the existing CliValidate cases
+// are likewise not exercised on Windows.
+
+#if !defined(_WIN32)
 
 TEST(CliValidate, DtdValidPasses) {
     write_file("leptris_cli_val.dtd",
@@ -433,3 +437,5 @@ TEST(CliValidate, MissingDtdIsIoError) {
                       "leptris_cli_val_ok.xml"});
     EXPECT_EQ((r.exit_code >> 8) & 0xFF, 3) << "stderr: " << r.err;
 }
+
+#endif  /* !_WIN32 */

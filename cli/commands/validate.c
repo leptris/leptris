@@ -236,6 +236,8 @@ static cli_result_t validate_execute(int argc, char** argv) {
             if (derr.message) printf("  %s\n", derr.message);
             invalid = 1;
         }
+        free(derr.message);
+        free(derr.element_name);
         leptris_dtd_free(dtd);
     }
     if (rng_path) {
