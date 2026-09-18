@@ -198,7 +198,8 @@ static void cb_error(void* ud, const char* message, int line, int column) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_ERROR;
-    e->text = pull_strdup_n(message, strlen(message));
+    e->text_len = strlen(message);
+    e->text = pull_strdup_n(message, e->text_len);
     p->failed = 1;
 }
 
