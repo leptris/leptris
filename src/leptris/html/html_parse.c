@@ -6209,6 +6209,18 @@ static LeptrisDocument html_parse_shared(
                                          mi2 < b.afe_n; mi2++)
                                         if (b.afe_marker[mi2])
                                             mk2++;
+                                    /* A table marker that fences
+                                     * NOTHING (no formatting opened
+                                     * inside that table) is dead -
+                                     * drop it so later text can
+                                     * reconstruct the entries behind
+                                     * it (tricky01:8's nested
+                                     * <TABLE><tr></tr></TABLE>). */
+                                    if (b.afe_n > 0 &&
+                                        b.afe_marker[b.afe_n - 1] &&
+                                        b.afe_mkind[b.afe_n - 1] == 1)
+                                        h_afe_remove_idx(&b,
+                                                         b.afe_n - 1);
                                     /* Only with a still-open cell
                                      * (table+cell markers) - with
                                      * cells closed the fostered
@@ -7109,24 +7121,47 @@ static LeptrisDocument html_parse_shared(
                     if (b.whatwg && h_ieq_raw(on, "template"))
                         break;
                     tmpl_last_popped = on;
+                    if (b.whatwg && h_ieq_raw(on, "table")) {
+                        /* The popped table's marker no longer
+                         * fences the list: drop the topmost table
+                         * marker so later character tokens can
+                         * reconstruct the entries behind it
+                         * (tricky01:8). */
+                        for (int mi = b.afe_n - 1; mi >= 0; mi--)
+                            if (b.afe_marker[mi] &&
+                                b.afe_mkind[mi] == 1) {
+                                h_afe_remove_idx(&b, mi);
+                                break;
+                            }
+                    }
                     b.depth--;
                 } else if (b.whatwg && strcmp(name, "table") == 0) {
-                    /* A <table> start bursts across FOREIGN-ns
-                     * entries (svg/foreignObject subtrees) to the
-                     * open HTML table below - the sibling rule then
-                     * applies (tests01:18). HTML-ns barriers (p,
-                     * td/th cells, template) still stop it. */
+                    /* 13.2.6.4.7 "in body" table start: TABLE SCOPE
+                     * - formatting/row/section elements do not fence
+                     * it. Burst down to the open HTML table (crossing
+                     * foreign subtrees and anything else), then the
+                     * sibling rule applies (tests01:18, tricky01:8).
+                     * td/th cells, template and the bare-shape <p>
+                     * still stop it. */
                     int d5 = (int)b.depth, found = -1;
                     while (d5 > 0) {
+                        const char* n5 =
+                            leptris_element_name(b.open[d5 - 1]);
                         if (b.open_ns[d5 - 1] != H_NS_HTML) {
                             d5--;
                             continue;
                         }
-                        if (h_ieq_raw(leptris_element_name(
-                                          b.open[d5 - 1]),
-                                      "table"))
+                        if (h_ieq_raw(n5, "td") ||
+                            h_ieq_raw(n5, "th") ||
+                            h_ieq_raw(n5, "template"))
+                            break;
+                        if (h_ieq_raw(n5, "p") && !b.body_tag_seen)
+                            break;
+                        if (h_ieq_raw(n5, "table")) {
                             found = d5;
-                        break;
+                            break;
+                        }
+                        d5--;
                     }
                     if (found > 0) {
                         b.depth = (size_t)found;
