@@ -6,6 +6,7 @@
  * Uses stateless parsing with hash table storage for O(1) lookup.
  */
 
+#include "../../include/leptris/dtd.h"
 #include "model.h"
 #include "../memory/pool.h"
 #include <stdlib.h>
@@ -357,7 +358,7 @@ LeptrisDTD* leptris_dtd_parse_internal_subset(const char* dtd_content, size_t le
  * @param len Length in bytes
  * @return 1 on success, -1 on invalid arguments
  */
-void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
+LEPTRIS_API void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
                                char* (*loader)(void* user_data,
                                                const char* system_id,
                                                size_t* out_len),
@@ -367,7 +368,7 @@ void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
     dtd->pe_loader_user = user_data;
 }
 
-int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
+LEPTRIS_API int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
                                       size_t len) {
     if (!dtd || !content || len == 0) return -1;
     dtd_parse_into(dtd, content, len, 0);
@@ -811,7 +812,7 @@ void leptris_dtd_free(LeptrisDTD* dtd) {
  * leptris_dtd_parse_internal_subset() directly with the document's
  * pool instead.
  */
-LeptrisDTD* leptris_dtd_parse(const char* dtd_content, size_t len) {
+LEPTRIS_API LeptrisDTD* leptris_dtd_parse(const char* dtd_content, size_t len) {
     LeptrisMemoryPool* pool = leptris_pool_create();
     if (!pool) return NULL;
     LeptrisDTD* dtd = leptris_dtd_parse_internal_subset(dtd_content, len, pool);

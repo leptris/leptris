@@ -10,6 +10,31 @@
 
 #include <stddef.h>
 
+/* Export macro: mirrors leptris.h/sax.h so dtd.h is includable
+ * standalone (bindings include sub-headers directly). See TODO 80. */
+/* Export macro.  Defined fully in leptris.h; sax.h allows standalone
+ * inclusion (leptris.h is not required) so we mirror the same logic.
+ * See TODO 80 (visibility preset) and TODO 122 (SAX surface). */
+#ifndef LEPTRIS_API
+#  ifdef LEPTRIS_FOR_BINDGEN
+#    define LEPTRIS_API
+#  elif defined(_WIN32)
+#    ifdef LEPTRIS_BUILD_SHARED
+#      define LEPTRIS_API __declspec(dllexport)
+#    elif defined(LEPTRIS_BUILDING_DLL)
+       /* Mirrors leptris.h (issue #278): CMake defines
+        * LEPTRIS_BUILDING_DLL on the objects that build the DLL. */
+#      define LEPTRIS_API __declspec(dllexport)
+#    elif defined(LEPTRIS_USE_SHARED)
+#      define LEPTRIS_API __declspec(dllimport)
+#    else
+#      define LEPTRIS_API
+#    endif
+#  else
+#    define LEPTRIS_API __attribute__((visibility("default")))
+#  endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -57,7 +82,7 @@ typedef struct {
  *
  * Memory: Caller must free with leptris_dtd_free()
  */
-LeptrisDTD* leptris_dtd_parse(const char* dtd_content, size_t len);
+LEPTRIS_API LeptrisDTD* leptris_dtd_parse(const char* dtd_content, size_t len);
 
 /**
  * Get the document's DTD (the declarations parsed from the DOCTYPE
@@ -101,7 +126,7 @@ LEPTRIS_API LeptrisDTD* leptris_document_get_dtd(LeptrisDocument doc);
  *   leptris_dtd_parse_external_subset(dtd, buffer, len);
  *   int valid = leptris_dtd_validate(doc, dtd, &error);
  */
-int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
+LEPTRIS_API int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
                                       size_t len);
 
 /**
@@ -126,7 +151,7 @@ int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* content,
  * @param loader Callback (NULL clears it)
  * @param user_data Opaque pointer handed to the loader
  */
-void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
+LEPTRIS_API void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
                                char* (*loader)(void* user_data,
                                                const char* system_id,
                                                size_t* out_len),
@@ -153,14 +178,15 @@ void leptris_dtd_set_pe_loader(LeptrisDTD* dtd,
  *       leptris_dtd_error_free(&error);
  *   }
  */
-int leptris_dtd_validate(LeptrisDocument doc, LeptrisDTD* dtd, LeptrisDTDError* error);
+LEPTRIS_API int leptris_dtd_validate(LeptrisDocument doc, LeptrisDTD* dtd,
+                                        LeptrisDTDError* error);
 
 /**
  * Free DTD object
  *
  * @param dtd DTD to free (can be NULL)
  */
-void leptris_dtd_free(LeptrisDTD* dtd);
+LEPTRIS_API void leptris_dtd_free(LeptrisDTD* dtd);
 
 /**
  * Free DTD error
@@ -169,7 +195,7 @@ void leptris_dtd_free(LeptrisDTD* dtd);
  *
  * @param error Error to free (can be NULL)
  */
-void leptris_dtd_error_free(LeptrisDTDError* error);
+LEPTRIS_API void leptris_dtd_error_free(LeptrisDTDError* error);
 
 #ifdef __cplusplus
 }
