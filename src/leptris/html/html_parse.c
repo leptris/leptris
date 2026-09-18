@@ -4973,6 +4973,26 @@ static LeptrisDocument html_parse_shared(
                  * path; later ones and other <!...> constructs are
                  * just skipped. */
                 const char* q = p + 2;
+                /* A DOCTYPE keyword outside the initial mode is a
+                 * parse error and the WHOLE token is ignored -
+                 * never a bogus comment (domjs-unsafe:44:
+                 * <svg><!DOCTYPE html></svg> keeps svg empty). */
+                int dt_kw = (end - q >= 7);
+                if (dt_kw) {
+                    static const char dtkw[] = "doctype";
+                    for (int i = 0; i < 7; i++)
+                        if (h_lower(q[i]) != dtkw[i]) {
+                            dt_kw = 0;
+                            break;
+                        }
+                }
+                if (dt_kw && (doc->doctype || b.left_initial ||
+                              h_in_head_noscript(&b))) {
+                    while (q < end && *q != '>') q++;
+                    p = (q < end) ? q + 1 : end;
+                    text = p;
+                    continue;
+                }
                 int is_dt = 0;
                 /* 13.2.6.4.x: a DOCTYPE token outside the INITIAL
                  * insertion mode is a parse error and is IGNORED —
@@ -5297,6 +5317,11 @@ static LeptrisDocument html_parse_shared(
              * top level where nothing is open (webkit01:18/20). */
             if (b.whatwg && nlen == 2 && h_lower(ns[0]) == 'b' &&
                 h_lower(ns[1]) == 'r') {
+                /* br is not head-noscript content - the tag exits
+                 * it and reprocesses via the head rules (implied
+                 * body), so br lands in the BODY
+                 * (noscript01:12). */
+                if (h_in_head_noscript(&b)) b.depth--;
                 h_open_element(&b, "br");
                 if (b.depth > 0) b.depth--;   /* br is void */
                 /* br IS body content - a stray </p> after this
@@ -5322,6 +5347,17 @@ static LeptrisDocument html_parse_shared(
                     lname[i] = h_lower(ns[i]);
                 lname[cl] = 0;
                 if (!h_is_void(lname)) {
+                    if (b.whatwg &&
+                        strcmp(lname, "menuitem") == 0) {
+                        /* menuitem is void-shaped in the reference
+                         * - its end tag is ignored and the content
+                         * stays open (menuitem:8:
+                         * <menuitem><p></menuitem>x keeps x in
+                         * the p). */
+                        p = q;
+                        text = p;
+                        continue;
+                    }
                     if (b.whatwg && strcmp(lname, "form") == 0) {
                         /* Vendored rule: </form> closes implied
                          * end-tag layers (option/optgroup/li/dd/
@@ -6175,6 +6211,19 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
+        /* 13.2.6.3: an <html> start tag inside content (never
+         * seen yet, deep in a table/foreign subtree) merges attrs
+         * and is ignored - no element (domjs-unsafe:36:
+         * <table><colgroup><html> keeps colgroup empty). */
+        if (b.whatwg && strcmp(name, "html") == 0 &&
+            !b.html_seen && b.depth > 1) {
+            h_stash_attrs(&b, q, end, b.html_attrs,
+                          &b.html_attr_n);
+            while (q < end && *q != '>') q++;
+            p = (q < end) ? q + 1 : end;
+            text = p;
+            continue;
+        }
         /* #659 second (or later) <html> start tag (tests19:37/38):
          * WHATWG merges the token's attributes onto the existing
          * html element and ignores the token itself. Applies in
