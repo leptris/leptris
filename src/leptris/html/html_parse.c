@@ -2811,6 +2811,11 @@ typedef struct {
      * formatting cannot leak in or out. */
     LeptrisElement afe[64];
     unsigned char afe_marker[64];
+    /* Marker kind: 1 = pushed by a <table> start, 0 = cell/scope.
+     * The a-dup close ignores TABLE markers (an inner table must
+     * not hide an in-cell formatting entry) but stops at CELL
+     * markers (tests1:31/102 vs the adoption greens). */
+    unsigned char afe_mkind[64];
     int afe_n;
     /* #659 per-template insertion mode, indexed by the template's
      * open-stack index (see h_tmpl_content_start). */
@@ -3981,6 +3986,29 @@ static int h_afe_index_of(HBuilder* b, LeptrisElement el) {
 }
 
 /* Last entry after the last marker whose name is subject. */
+static int h_afe_find(HBuilder* b, const char* subject);
+
+static int h_afe_find_kind(HBuilder* b, const char* subject) {
+    int last_cell = -1;
+    for (int i = 0; i < b->afe_n; i++)
+        if (b->afe_marker[i] && !b->afe_mkind[i]) last_cell = i;
+    if (last_cell < 0) {
+        /* No cell marker: plain marker scoping - a table marker
+         * blocks (a(blah) outside the table stays un-closed,
+         * tests1:78/91). */
+        return h_afe_find(b, subject);
+    }
+    /* Inside a cell: table markers are transparent to the dup
+     * close (the in-cell a3 survives an inner table,
+     * tests1:31/102). */
+    for (int i = b->afe_n - 1; i > last_cell; i--) {
+        if (b->afe_marker[i]) continue;
+        const char* n = leptris_element_name(b->afe[i]);
+        if (n && strcmp(n, subject) == 0) return i;
+    }
+    return h_afe_find(b, subject);
+}
+
 static int h_afe_find(HBuilder* b, const char* subject) {
     int last_marker = -1;
     for (int i = 0; i < b->afe_n; i++)
@@ -3997,6 +4025,8 @@ static void h_afe_remove_idx(HBuilder* b, int idx) {
     if (idx < 0 || idx >= b->afe_n) return;
     memmove(&b->afe[idx], &b->afe[idx + 1],
             (b->afe_n - idx - 1) * sizeof(b->afe[0]));
+    memmove(&b->afe_mkind[idx], &b->afe_mkind[idx + 1],
+            (size_t)(b->afe_n - idx - 1));
     memmove(&b->afe_marker[idx], &b->afe_marker[idx + 1],
             (b->afe_n - idx - 1));
     b->afe_n--;
@@ -4069,6 +4099,15 @@ static void h_afe_marker_push(HBuilder* b) {
     if (b->afe_n >= 64) return;
     b->afe[b->afe_n] = NULL;
     b->afe_marker[b->afe_n] = 1;
+    b->afe_mkind[b->afe_n] = 0;   /* cell/scope marker */
+    b->afe_n++;
+}
+
+static void h_afe_table_marker_push(HBuilder* b) {
+    if (b->afe_n >= 64) return;
+    b->afe[b->afe_n] = NULL;
+    b->afe_marker[b->afe_n] = 1;
+    b->afe_mkind[b->afe_n] = 1;   /* table marker */
     b->afe_n++;
 }
 
@@ -6792,7 +6831,7 @@ static LeptrisDocument html_parse_shared(
         int afe_dup_ok = h_template_idx(&b) < 0;
         if (afe_dup_ok && b.whatwg_adopt && elem_ns == H_NS_HTML &&
             (strcmp(name, "a") == 0 || strcmp(name, "nobr") == 0)) {
-            if (h_afe_find(&b, name) >= 0) {
+            if (h_afe_find_kind(&b, name) >= 0) {
                 /* Scope guard: when the entry sits behind a scope
                  * terminator (a table above it), the duplicate
                  * close must NOT run - the new <a> simply inserts
@@ -6827,7 +6866,7 @@ static LeptrisDocument html_parse_shared(
                 /* The agency's 8-iteration cap can leave the
                  * entry — the start-tag branch removes it
                  * unconditionally. */
-                int ai = h_afe_find(&b, name);
+                int ai = h_afe_find_kind(&b, name);
                 if (ai >= 0) {
                     LeptrisElement fe = b.afe[ai];
                     h_afe_remove_idx(&b, ai);
@@ -6884,7 +6923,7 @@ static LeptrisDocument html_parse_shared(
         if (!e) goto done;
         if (strcmp(name, "html") == 0) b.html_seen = 1;
         if (b.whatwg && strcmp(name, "table") == 0)
-            h_afe_marker_push(&b);   /* cleared at </table> (78) */
+            h_afe_table_marker_push(&b);   /* </table> (78) */
         if (strcmp(name, "form") == 0) b.form_open = 1;
         if (b.whatwg && elem_ns == H_NS_HTML &&
             strcmp(name, "template") == 0 && b.depth > 0) {
