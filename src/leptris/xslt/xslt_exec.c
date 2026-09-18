@@ -4180,7 +4180,7 @@ static int from_matches(const XsltInstr* in, LeptrisElement cand,
 }
 
 /* Position of `target` among preceding siblings matching count. */
-static unsigned long sibling_number(const XsltInstr* in,
+static unsigned long long sibling_number(const XsltInstr* in,
                                     LeptrisElement target,
                                     LeptrisDocument doc, XsltExec* ex) {
     int tty = leptris_node_get_type((LeptrisNodeRef)target);
@@ -4195,7 +4195,7 @@ static unsigned long sibling_number(const XsltInstr* in,
             const char* cn =
                 leptris_element_attribute_name_at(owner, i);
             if (cn && a->name && strcmp(cn, a->name) == 0)
-                return (unsigned long)(i + 1);
+                return (unsigned long long)(i + 1);
         }
         return 1;
     }
@@ -4206,7 +4206,7 @@ static unsigned long sibling_number(const XsltInstr* in,
          * name namespace nodes for an explicit count. */
         return 1;
     }
-    unsigned long pos = 1;
+    unsigned long long pos = 1;
     LeptrisElement parent = leptris_node_parent((LeptrisNodeRef)target);
     for (LeptrisElement c = leptris_element_first_child_any(parent); c;
          c = leptris_element_next_sibling_any(c)) {
@@ -4216,7 +4216,7 @@ static unsigned long sibling_number(const XsltInstr* in,
     return pos;
 }
 
-static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
+static unsigned long long any_number(const XsltInstr* in, LeptrisElement node,
                                 LeptrisDocument doc, XsltExec* ex);
 
 /* any: how many matching nodes precede `node` in document order. */
@@ -4233,7 +4233,7 @@ static LeptrisNodeRef next_node_doc_order(LeptrisNodeRef n) {
     return NULL;
 }
 
-static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
+static unsigned long long any_number(const XsltInstr* in, LeptrisElement node,
                                 LeptrisDocument doc, XsltExec* ex) {
     /* Namespace nodes are synthetic — outside the document-order
      * walk. libxslt numbers them through the OWNER element: the
@@ -4256,11 +4256,11 @@ static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
             const char* cn =
                 leptris_element_attribute_name_at(owner, i);
             if (cn && a->name && strcmp(cn, a->name) == 0)
-                return (unsigned long)(i + 1);
+                return (unsigned long long)(i + 1);
         }
         return 1;
     }
-    unsigned long pos = 1;
+    unsigned long long pos = 1;
     LeptrisNodeRef target = (LeptrisNodeRef)node;
     struct leptris_document* sd = (struct leptris_document*)doc;
     LeptrisNodeRef start =
@@ -4289,7 +4289,7 @@ static unsigned long any_number(const XsltInstr* in, LeptrisElement node,
     return 0;   /* detached node: §7.7 says nothing is emitted */
 }
 
-static void emit_number_chunk(unsigned long v, char spec,
+static void emit_number_chunk(unsigned long long v, char spec,
                               int group_size, char group_sep,
                               char* out, size_t outsz) {
     char raw[64];
@@ -4376,7 +4376,7 @@ static int fmt_char_is_token(unsigned char c, const char* p) {
  * the prefix (before the first token), separators (between tokens),
  * and suffix (after the last, emitted only when the last token was
  * used). */
-static void emit_formatted_numbers(const unsigned long* values, int nv,
+static void emit_formatted_numbers(const unsigned long long* values, int nv,
                                    const char* fmt, const XsltInstr* in,
                                    char* out, size_t outsz) {
     char specs[32];
@@ -4482,7 +4482,7 @@ static void emit_formatted_numbers(const unsigned long* values, int nv,
 
 static int op_number(XsltExec* ex, const XsltInstr* in,
                      LeptrisElement node) {
-    unsigned long values[64];
+    unsigned long long values[64];
     int nv = 0;
 
     if (in->num_value) {
@@ -4503,7 +4503,7 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
                                           .text = "0" }, node);
                 return 0;
             }
-            values[0] = (unsigned long)(d + 0.5);
+            values[0] = (unsigned long long)(d + 0.5);
         } else {
             values[0] = 1;
         }
@@ -4511,19 +4511,19 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
     } else if (in->num_level == 2) {
         values[0] = any_number(in, node, ex->source, ex);
         if (!values[0]) return 0;
-        if (in->num_start_at) values[0] += (unsigned long)(in->num_start_at - 1);
+        if (in->num_start_at) values[0] += (unsigned long long)(in->num_start_at - 1);
         nv = 1;
     } else if (in->num_level == 1) {
         /* multiple: every ancestor-or-self matching count, outermost
          * first, stopping above the nearest `from` match. */
-        unsigned long rev[64];
+        unsigned long long rev[64];
         int nr = 0;
         for (LeptrisElement a = node; a && nr < 64;
              a = leptris_node_parent((LeptrisNodeRef)a)) {
             if (count_matches(in, a, node, ex->source, ex))
                 rev[nr++] = sibling_number(in, a, ex->source, ex) +
                             (in->num_start_at
-                                 ? (unsigned long)(in->num_start_at - 1)
+                                 ? (unsigned long long)(in->num_start_at - 1)
                                  : 0);
             if (from_matches(in, a, ex->source, ex)) break;
         }
@@ -4542,7 +4542,7 @@ static int op_number(XsltExec* ex, const XsltInstr* in,
         if (!target) return 0;   /* §7.7: no match → nothing emitted */
         values[0] = sibling_number(in, target, ex->source, ex) +
                     (in->num_start_at
-                         ? (unsigned long)(in->num_start_at - 1) : 0);
+                         ? (unsigned long long)(in->num_start_at - 1) : 0);
         nv = 1;
     }
 
