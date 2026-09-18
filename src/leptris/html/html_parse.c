@@ -4417,6 +4417,11 @@ static int h_afe_end(HBuilder* b, const char* subject) {
                     }
                 }
             } else if (ancestor) {
+                /* Unlink from the old parent first - the block
+                 * is ADOPTED out of the formatting element, not
+                 * copied (tests19:95: the div must not stay
+                 * inside the original <i> as well). */
+                leptris_node_unlink((LeptrisNodeRef)last);
                 leptris_element_append_child_internal_doc(
                     ancestor, (LeptrisNodeRef)last, b->doc);
             } else {
