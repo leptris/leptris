@@ -5768,6 +5768,46 @@ static LeptrisDocument html_parse_shared(
                             continue;
                         }
                     }
+                    /* 13.2.6.5 "in foreign content" end: a
+                     * TABLE-STRUCTURAL end tag pops the foreign
+                     * scope first and reprocesses under the HTML
+                     * table rules - the token reaches the HTML
+                     * element of the same name below the foreign
+                     * subtree (namespace-sensitivity:1: </td>
+                     * behind an svg <td> closes the HTML cell;
+                     * the trailing text then fosters from the
+                     * row). */
+                    if (b.whatwg && b.depth > 0 &&
+                        (strcmp(lname, "td") == 0 ||
+                         strcmp(lname, "th") == 0 ||
+                         strcmp(lname, "tr") == 0 ||
+                         strcmp(lname, "tbody") == 0 ||
+                         strcmp(lname, "thead") == 0 ||
+                         strcmp(lname, "tfoot") == 0 ||
+                         strcmp(lname, "caption") == 0 ||
+                         strcmp(lname, "colgroup") == 0 ||
+                         strcmp(lname, "table") == 0)) {
+                        for (size_t d2 = b.depth; d2 > 0; d2--) {
+                            const char* on2 =
+                                leptris_element_name(b.open[d2 - 1]);
+                            if (!on2) break;
+                            if (b.open_ns[d2 - 1] == H_NS_HTML) {
+                                if (strcmp(on2, lname) == 0 &&
+                                    d2 < b.depth) {
+                                    b.depth = d2;   /* burst the
+                                                    * foreign scope */
+                                    break;
+                                }
+                                /* A SPECIAL HTML element that is
+                                 * not the target ends the burst -
+                                 * the token is out of scope. An
+                                 * ordinary one (span) is just
+                                 * formatting-ish content - walk
+                                 * past it. */
+                                if (h_is_special_ww(on2)) break;
+                            }
+                        }
+                    }
                     for (size_t d = b.depth; d > 0; d--) {
                         const char* on = leptris_element_name(b.open[d - 1]);
                         /* #659: foreign slots store the

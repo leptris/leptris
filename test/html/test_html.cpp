@@ -1998,6 +1998,18 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* 13.2.6.5: a table-structural end tag pops the foreign scope and
+ * reprocesses under HTML table rules - </td> behind an svg <td>
+ * (with HTML span content above it) closes the HTML cell; the
+ * trailing text then fosters before the table
+ * (namespace-sensitivity:1). */
+TEST(HtmlParse, StructuralEndTagBurstsForeignScope) {
+    EXPECT_EQ(Html("<body><table><tr><td><svg><td><foreignObject><span></td>Foo"),
+              "Foo<table><tbody><tr><td>"
+              "<svg><td><foreignObject><span/></foreignObject></td></svg>"
+              "</td></tr></tbody></table>");
+}
+
 /* 13.2.6.4.11 "in cell": a nested <table> is CELL content - the
  * cell fences the table-closes-table walk (bare <table><table>
  * stays siblings, but inside a td the inner table nests;
