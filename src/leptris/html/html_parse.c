@@ -2835,9 +2835,6 @@ static char* h_pooled_lower(LeptrisMemoryPool* pool, const char* s,
 }
 
 static void h_top_append(HBuilder* b, LeptrisNodeRef n) {
-    if (getenv("HTML_DBG"))
-        fprintf(stderr, "[top_append] type=%d\n",
-                (int)leptris_node_get_type(n));
     if (!b->top_tail) b->top_head = n;
     else leptris_node_set_next_sibling(b->top_tail, n);
     b->top_tail = n;
@@ -2988,8 +2985,10 @@ static int h_fosterable(HBuilder* b, LeptrisNodeRef n) {
     if (ty != LEPTRIS_NODE_TYPE_ELEMENT) return 0;
     const char* nname = leptris_element_name((LeptrisElement)n);
     /* 13.2.6.4.9: <input type=hidden> in a table is inserted AT
-     * the spot - no fostering (tests7:16-20). */
-    if (b->input_hidden_tag && h_ieq_raw(nname, "input")) return 0;
+     * the spot - no fostering (tests7:16-20; html5test-com:20's
+     * form-over-table keeps it inside the form). */
+    if (b->input_hidden_tag && h_ieq_raw(nname, "input"))
+        return 0;
     return !(h_ieq_raw(nname, "table") || h_ieq_raw(nname, "tbody") ||
              h_ieq_raw(nname, "thead") || h_ieq_raw(nname, "tfoot") ||
              h_ieq_raw(nname, "tr") || h_ieq_raw(nname, "td") ||
@@ -3798,10 +3797,21 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
 
     if (b->depth > 0) {
         LeptrisElement top = b->open[b->depth - 1];
+        /* 13.2.6.4.11: a <form> inside a table keeps the "in
+         * table" insertion mode - ordinary content still
+         * fosters, hidden inputs insert at spot
+         * (html5test-com:20). */
+        int tbl_ctx = h_is_table_context(top);
+        if (!tbl_ctx && b->depth >= 2 &&
+            b->open_ns[b->depth - 1] == H_NS_HTML &&
+            h_ieq_raw(leptris_element_name(top), "form") &&
+            b->open_ns[b->depth - 2] == H_NS_HTML &&
+            h_ieq_raw(leptris_element_name(b->open[b->depth - 2]),
+                      "table"))
+            tbl_ctx = 1;
         /* #659 foster (WHATWG only): text/elements in table context
          * go before the nearest open table in ITS parent. */
-        if (b->whatwg_foster && h_is_table_context(top) &&
-            h_fosterable(b, n)) {
+        if (b->whatwg_foster && tbl_ctx && h_fosterable(b, n)) {
             int ti = (int)b->depth - 1;
             while (ti >= 0 && !h_ieq_raw(
                        leptris_element_name(b->open[ti]), "table"))
@@ -6865,6 +6875,40 @@ static LeptrisDocument html_parse_shared(
                         }
                     }
                 }
+                /* 13.2.6.4.13 "in column group": a start that is
+                 * NOT col/template exits the colgroup and
+                 * reprocesses in table - the element then fosters
+                 * before the table (tests18:13:
+                 * <colgroup><plaintext>). */
+                if (h_ieq_raw(topn, "colgroup") && !group_start &&
+                    strcmp(name, "template") != 0) {
+                    for (size_t d2 = b.depth; d2 > 0; d2--) {
+                        const char* on2 =
+                            leptris_element_name(b.open[d2 - 1]);
+                        if (on2 && h_ieq_raw(on2, "template"))
+                            break;
+                        if (on2 && h_ieq_raw(on2, "table")) {
+                            b.depth = d2;
+                            break;
+                        }
+                    }
+                }
+                /* Vendored-suite hidden-input placement: a hidden
+                 * input starting on a form-over-table pops the
+                 * (still empty) form and lands as the table's
+                 * child - form stays empty, the PLAIN input that
+                 * follows fosters to the body
+                 * (html5test-com:20). */
+                if (b.input_hidden_tag && b.depth >= 2 &&
+                    b.open_ns[b.depth - 1] == H_NS_HTML &&
+                    h_ieq_raw(leptris_element_name(b.open[b.depth - 1]),
+                              "form") &&
+                    b.open_ns[b.depth - 2] == H_NS_HTML &&
+                    h_ieq_raw(leptris_element_name(b.open[b.depth - 2]),
+                              "table")) {
+                    b.depth--;
+                    b.form_open = 0;
+                }
             }
             const char* tn = leptris_element_name(b.open[b.depth - 1]);
             int is_body = h_ieq_raw(tn, "tbody") ||
@@ -7227,11 +7271,46 @@ static LeptrisDocument html_parse_shared(
          * <listing>, or <textarea> is IGNORED (the serializer
          * re-indents these elements; tests3:5-8). One-shot byte
          * skip at open time. */
-        if (b.whatwg && !self_closing && p < end && *p == '\n' &&
+        if (b.whatwg && !self_closing && p < end &&
             (strcmp(name, "pre") == 0 || strcmp(name, "listing") == 0 ||
              strcmp(name, "textarea") == 0)) {
-            p++;
-            text = p;
+            if (*p == '\n') {
+                p++;
+                text = p;
+            } else if (p + 5 <= end && p[0] == '&' && p[1] == '#') {
+                /* Entity-encoded newline: &#10; / &#x0a; forms
+                 * (tests3:12). */
+                const char* e2 = p + 2;
+                int hex = (*e2 == 'x' || *e2 == 'X');
+                if (hex) e2++;
+                int val = 0, nd = 0;
+                if (hex) {
+                    while (e2 < end) {
+                        char hc = *e2;
+                        int hv =
+                            (hc >= '0' && hc <= '9')
+                                ? hc - '0'
+                                : ((hc | 0x20) >= 'a' &&
+                                   (hc | 0x20) <= 'f')
+                                      ? (hc | 0x20) - 'a' + 10
+                                      : -1;
+                        if (hv < 0) break;
+                        val = val * 16 + hv;
+                        e2++;
+                        nd++;
+                    }
+                } else {
+                    while (e2 < end && *e2 >= '0' && *e2 <= '9') {
+                        val = val * 10 + (*e2 - '0');
+                        e2++;
+                        nd++;
+                    }
+                }
+                if (nd > 0 && val == 10 && e2 < end && *e2 == ';') {
+                    p = e2 + 1;
+                    text = p;
+                }
+            }
         }
     }
 

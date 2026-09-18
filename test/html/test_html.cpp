@@ -1923,6 +1923,34 @@ TEST(HtmlParse, CaptionStartClearsToTable) {
               "<table><tbody><tr/></tbody><caption/></table>");
 }
 
+/* 13.2.6.4.7: the one-shot newline skip after <pre>/<listing>/
+ * <textarea> also matches the ENTITY-encoded newline forms -
+ * "&#x0a;" is dropped, not left literal (tests3:12). */
+TEST(HtmlParse, PreEntityNewlineDropped) {
+    EXPECT_EQ(Html("<!DOCTYPE html><pre>&#x0a;&#x0a;A</pre>"),
+              "<!DOCTYPE html><html><head/><body><pre>\nA</pre></body></html>");
+}
+
+/* 13.2.6.4.13 "in column group": a non-col start (raw-text
+ * family included) exits the colgroup and reprocesses in table -
+ * the element fosters before the table (tests18:13). */
+TEST(HtmlParse, PlaintextExitsColgroup) {
+    EXPECT_EQ(Html("<!doctype html><table><colgroup><plaintext></plaintext>"),
+              "<!DOCTYPE html><html><head/><body>"
+              "<plaintext>&lt;/plaintext&gt;</plaintext>"
+              "<table><colgroup/></table></body></html>");
+}
+
+/* Vendored hidden-input placement: inside a form-over-table the
+ * hidden input pops the still-empty form and lands as the
+ * table's child; the plain input after it fosters to the body
+ * (html5test-com:20). */
+TEST(HtmlParse, FormInTableHiddenInputPopsForm) {
+    EXPECT_EQ(Html("<table><form><input type=hidden><input></form><div></div></table>"),
+              "<input/><div/>"
+              "<table><form/><input type=\"hidden\"/></table>");
+}
+
 /* A stray </p> with NO body content still inserts an empty <p>
  * (tests1:110). */
 TEST(HtmlParse, StrayPWithNoBodyInsertsEmptyP) {
