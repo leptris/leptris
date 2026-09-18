@@ -4025,14 +4025,14 @@ static int op_message(XsltExec* ex, const XsltInstr* in,
 
 /* Format a positive integer per XSLT number formats (1, 01, a, A,
  * i, I with format tokens). */
-static void format_number_token(unsigned long v, char spec,
+static void format_number_token(unsigned long long v, char spec,
                                 char* out, size_t outsz) {
     static const char* lower = "abcdefghijklmnopqrstuvwxyz";
     switch (spec) {
         case 'a': {
             if (v == 0) { snprintf(out, outsz, "a"); break; }
             size_t o = 0;
-            unsigned long x = v;
+            unsigned long long x = v;
             char tmp[16];
             int ti = 0;
             while (x && ti < 15) {
@@ -4052,7 +4052,7 @@ static void format_number_token(unsigned long v, char spec,
         case 'I': {
             if (v > 3999) {
                 /* Beyond roman capacity libxslt prints the digits. */
-                snprintf(out, outsz, "%lu", v);
+                snprintf(out, outsz, "%llu", v);
                 break;
             }
             /* Subtractive algorithm (the 50-entry table only covered
@@ -4062,7 +4062,7 @@ static void format_number_token(unsigned long v, char spec,
             static const char* sym[] = {"m", "cm", "d", "cd", "c", "xc",
                                         "l", "xl", "x", "ix", "v", "iv", "i"};
             size_t o = 0;
-            unsigned long x = v;
+            unsigned long long x = v;
             for (int k = 0; k < 13 && x; k++) {
                 while (x >= val[k] && o + 3 < outsz) {
                     size_t sl = strlen(sym[k]);
@@ -4078,7 +4078,7 @@ static void format_number_token(unsigned long v, char spec,
             break;
         }
         default:
-            snprintf(out, outsz, "%lu", v);
+            snprintf(out, outsz, "%llu", v);
             break;
     }
 }
