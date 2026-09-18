@@ -4375,7 +4375,13 @@ static int h_afe_end(HBuilder* b, const char* subject) {
              * once (lastNode == furthestBlock): moving the block
              * out of the formatting element IS the adoption. The
              * appropriate place is a plain append, or foster
-             * parenting when the ancestor is a table context. */
+             * parenting when the ancestor is a table context.
+             * Either way the block is ADOPTED: unlink it from the
+             * formatting element's chain FIRST - the foster
+             * splice links siblings manually, a stale link would
+             * show the block (and everything after it) under BOTH
+             * parents (tests19:95). */
+            leptris_node_unlink((LeptrisNodeRef)last);
             if (ancestor &&
                 h_is_table_context(ancestor)) {
                 int ti = (int)b->depth - 1;
@@ -4387,9 +4393,7 @@ static int h_afe_end(HBuilder* b, const char* subject) {
                     h_insert_before(b, b->open[ti - 1],
                                     b->open[ti], (LeptrisNodeRef)last);
                 } else {
-                    /* Top-chain splice before the table node —
-                     * unlink from the old parent first. */
-                    leptris_node_unlink((LeptrisNodeRef)last);
+                    /* Top-chain splice before the table node. */
                     if (b->top_head) {
                         if (b->top_head ==
                             (LeptrisNodeRef)b->open[0]) {
@@ -4417,17 +4421,9 @@ static int h_afe_end(HBuilder* b, const char* subject) {
                     }
                 }
             } else if (ancestor) {
-                /* Unlink from the old parent first - the block
-                 * is ADOPTED out of the formatting element, not
-                 * copied (tests19:95: the div must not stay
-                 * inside the original <i> as well). */
-                leptris_node_unlink((LeptrisNodeRef)last);
                 leptris_element_append_child_internal_doc(
                     ancestor, (LeptrisNodeRef)last, b->doc);
             } else {
-                /* Top chain: unlink from the old parent first —
-                 * h_top_append only links siblings. */
-                leptris_node_unlink((LeptrisNodeRef)last);
                 h_top_append(b, (LeptrisNodeRef)last);
             }
         }
@@ -5402,15 +5398,28 @@ static LeptrisDocument html_parse_shared(
             size_t nlen = (size_t)(q - ns);
             while (q < end && *q != '>') q++;
             if (q < end) q++;
-            /* Flush pending text before closing. */
+            /* Flush pending text before closing. A
+             * whitespace-only run in a table context skips the
+             * reconstruct (13.2.6.4.9 - tricky01:6). */
             if (text < p) {
                 size_t dlen = 0;
                 char* dec = h_decode_text(&b, text, p, &dlen);
                 if (dec && *dec) {
+                    int tbl_ws = b.whatwg_foster &&
+                                 b.depth > 0 &&
+                                 h_is_table_context(
+                                     b.open[b.depth - 1]);
+                    if (tbl_ws)
+                        for (const char* w2 = dec; *w2; w2++)
+                            if (*w2 != ' ' && *w2 != '\t' &&
+                                *w2 != '\n' && *w2 != '\r') {
+                                tbl_ws = 0;
+                                break;
+                            }
                     LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
                     if (t) {
-                        h_reconstruct(&b);
+                        if (!tbl_ws) h_reconstruct(&b);
                         h_append(&b, (LeptrisNodeRef)t);
                     }
                 }
@@ -6449,10 +6458,26 @@ static LeptrisDocument html_parse_shared(
             size_t dlen = 0;
                 char* dec = h_decode_text(&b, text, p, &dlen);
             if (dec && *dec) {
+                /* 13.2.6.4.9: a WHITESPACE-ONLY run in a table
+                 * context inserts into the current node WITHOUT
+                 * the in-body reconstruct - no formatting clone
+                 * wraps it (tricky01:6: the ws between
+                 * </center> and <img> goes into the table). */
+                int tbl_ws = b.whatwg_foster && b.depth > 0 &&
+                             h_is_table_context(
+                                 b.open[b.depth - 1]);
+                if (tbl_ws) {
+                    for (const char* w2 = dec; *w2; w2++)
+                        if (*w2 != ' ' && *w2 != '\t' &&
+                            *w2 != '\n' && *w2 != '\r') {
+                            tbl_ws = 0;
+                            break;
+                        }
+                }
                 LeptrisTextNode* t =
                     leptris_text_create(dec, dlen, b.pool);
                 if (t) {
-                    h_reconstruct(&b);
+                    if (!tbl_ws) h_reconstruct(&b);
                     h_append(&b, (LeptrisNodeRef)t);
                 }
             }

@@ -1998,6 +1998,23 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* AA step 14 adopts the furthest block - it is UNLINKED from the
+ * formatting element before the foster splice/append (no
+ * double-linked subtree); 13.2.6.4.9: a whitespace-only run in a
+ * table context inserts into the current node WITHOUT the
+ * in-body reconstruct (tests19:95, tricky01:6). */
+TEST(HtmlParse, AdoptionUnlinksAndTableWsSkipsReconstruct) {
+    EXPECT_EQ(Html("<!doctype html><table><td><table><i>a<div>b<b>c</i>d"),
+              "<!DOCTYPE html><html><head/><body>"
+              "<table><tbody><tr><td>"
+              "<i>a</i><div><i>b<b>c</b></i><b>d</b></div>"
+              "<table/></td></tr></tbody></table></body></html>");
+    EXPECT_EQ(Html("<table><center> <font>a</center> <img> <tr><td> </td> </tr> </table>"),
+              "<center> <font>a</font></center>"
+              "<font><img/> </font>"
+              "<table> <tbody><tr><td> </td> </tr> </tbody></table>");
+}
+
 /* 13.2.6.5: a table-structural end tag pops the foreign scope and
  * reprocesses under HTML table rules - </td> behind an svg <td>
  * (with HTML span content above it) closes the HTML cell; the
