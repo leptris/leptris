@@ -547,6 +547,37 @@ static int match_text_content(RngVal* v, RngPattern* content,
 static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e);
 
 /* Does the content contain element patterns (vs text leaves)? */
+/* Does the content model anywhere accept character data? Walks the
+ * same wrapper shape has_element_patterns treats as element-ish and
+ * resolves refs, so mixed models (interleave with <text/>) report
+ * true while element-only models report false. */
+static int content_allows_text(RngGrammar* g, RngPattern* content,
+                               int depth) {
+    if (depth > 32) return 1; /* cyclic: be permissive, not wrong */
+    for (RngPattern* c = content; c; c = c->next) {
+        switch (c->kind) {
+            case RNG_TEXT: case RNG_DATA: case RNG_VALUE:
+            case RNG_LIST: case RNG_MIXED:
+                return 1;
+            case RNG_REF: {
+                RngDefine* d = find_define(g, c->name);
+                if (d && d->body &&
+                    content_allows_text(g, d->body, depth + 1))
+                    return 1;
+                continue;
+            }
+            case RNG_CHOICE: case RNG_INTERLEAVE: case RNG_GROUP:
+            case RNG_OPTIONAL: case RNG_ZERO_OR_MORE: case RNG_ONE_OR_MORE:
+                if (content_allows_text(g, c->first_child, depth + 1))
+                    return 1;
+                continue;
+            default:
+                continue;
+        }
+    }
+    return 0;
+}
+
 static int has_element_patterns(RngPattern* content) {
     for (RngPattern* c = content; c; c = c->next) {
         switch (c->kind) {
@@ -689,9 +720,14 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     if (!match_attrs(v, p, e)) return 0;
 
     if (!has_element_patterns(p->first_child)) {
-        /* Text-level content: each non-attribute child is a leaf. */
+        /* Text-level content: each non-attribute child is a leaf.
+         * No leaf at all means empty content — wildcard elements
+         * consumed their name class at parse, so non-ws text must
+         * reject there too (#1153). */
+        int saw_leaf = 0;
         for (RngPattern* c = p->first_child; c; c = c->next) {
             if (c->kind == RNG_ATTRIBUTE) continue;
+            saw_leaf = 1;
             if (c->kind == RNG_LIST) {
                 if (!list_ok(v, c, e)) return 0;
                 continue;
@@ -734,6 +770,12 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
                 return 0;
             }
         }
+        if (!saw_leaf && !all_text_ws(e)) {
+            diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID, e,
+                 "element \"%s\" must be empty",
+                 p->name ? p->name : leptris_element_name(e), NULL);
+            return 0;
+        }
         return 1;
     }
 
@@ -746,6 +788,16 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
         diag(v, LEPTRIS_DIAG_NOT_ALLOWED_HERE,  (LeptrisElement)kids[r],
         "element \"%s\" not allowed here",
              leptris_element_name((LeptrisElement)kids[r]), NULL);
+        return 0;
+    }
+    /* Element-only content: stray character data rejects (#1153) —
+     * unless the model also carries a text-accepting leaf (mixed
+     * models, data choices) or allows it via a ref. */
+    if (!content_allows_text(v->g, p->first_child, 0) && !all_text_ws(e)) {
+        diag(v, LEPTRIS_DIAG_CHAR_CONTENT_INVALID, e,
+             "element \"%s\" contains character data but the content "
+             "model allows none",
+             p->name ? p->name : leptris_element_name(e), NULL);
         return 0;
     }
     return 1;
