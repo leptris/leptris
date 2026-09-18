@@ -51,7 +51,14 @@ static char* mut_name_carve(struct leptris_document* doc,
      * The store writes the full word — reserve it so the block-bound
      * check accounts for the write, never just the logical size. */
     if (name_len <= 8) need = sizeof(struct leptris_document*) + 9;
-    if (doc->mut_name_cursor + need > doc->mut_name_end) {
+    /* Keep every slot pointer-aligned: namebp reads the doc
+     * backpointer as ((struct leptris_document**)name)[-1]. The
+     * raw sizes above (17B for the S8 path) walk the cursor
+     * through every alignment mod 8 — misaligned pointer stores
+     * (UB, faults on alignment-strict targets). */
+    need = (need + sizeof(void*) - 1) & ~(sizeof(void*) - 1);
+    if (!doc->mut_name_cursor ||
+        doc->mut_name_cursor + need > doc->mut_name_end) {
         struct leptris_mut_name_block* blk =
             (struct leptris_mut_name_block*)malloc(
                 sizeof(struct leptris_mut_name_block) + MUT_NAME_BLOCK_BYTES);
@@ -107,7 +114,12 @@ static char* mut_str_carve(struct leptris_document* doc, const char* s,
                            size_t len) {
     if (len + 1 > MUT_NAME_BLOCK_BYTES / 4) return NULL;
     size_t need = 8 + len + 1;
-    if (doc->mut_name_cursor + need > doc->mut_name_end) {
+    /* Round the stride like mut_name_carve: this carve shares the
+     * name block's cursor, and an unrounded advance here misaligns
+     * every later namebp slot (doc backpointer stores). */
+    need = (need + sizeof(void*) - 1) & ~(sizeof(void*) - 1);
+    if (!doc->mut_name_cursor ||
+        doc->mut_name_cursor + need > doc->mut_name_end) {
         struct leptris_mut_name_block* blk =
             (struct leptris_mut_name_block*)malloc(
                 sizeof(struct leptris_mut_name_block) + MUT_NAME_BLOCK_BYTES);
