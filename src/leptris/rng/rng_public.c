@@ -151,11 +151,7 @@ LEPTRIS_API size_t leptris_rng_error_report(
         rec->message = r->diags[i].message;
         rec->line = (unsigned)r->diags[i].line;
         rec->column = (unsigned)leptris_rng_error_column(rng, (size_t)i);
-        rec->offender =
-            r->diags[i].offender
-                ? leptris_element_name(
-                      (LeptrisElement)r->diags[i].offender)
-                : NULL;
+        rec->offender = r->diags[i].offender_name;
     }
     r->report_count = (size_t)r->diag_count;
     *out = r->report;
