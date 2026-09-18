@@ -1,6 +1,8 @@
 /* dom/diag.c — unified error narration records (#1126). */
 #include "diag.h"
 #include "node.h"
+#include "element.h"
+#include "../leptris_internal.h"  /* leptris_strdup */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +21,7 @@ LeptrisDiag* leptris_diag_emit(LeptrisDiag** list, int* count, int* cap,
     }
     LeptrisDiag* d = &(*list)[*count];
     d->kind = kind;
-    d->offender = offender;
+    d->offender_name = NULL;
     d->line = 0;
     d->col_start = 0;
     d->col_end = 0;
@@ -29,6 +31,12 @@ LeptrisDiag* leptris_diag_emit(LeptrisDiag** list, int* count, int* cap,
         d->line = pos.line;
         d->col_start = pos.col_start;
         d->col_end = pos.col_end;
+        /* capture the name NOW (#1194): the node belongs to the
+         * validated document, which the caller may free before the
+         * report is read — a stored ref dangles (musl unmaps the
+         * freed region and error_report segfaulted reading it). */
+        const char* nm = leptris_element_name((LeptrisElement)offender);
+        d->offender_name = (nm && *nm) ? leptris_strdup(nm) : NULL;
     }
     va_list ap;
     va_start(ap, fmt);
@@ -40,6 +48,9 @@ LeptrisDiag* leptris_diag_emit(LeptrisDiag** list, int* count, int* cap,
 
 void leptris_diag_free(LeptrisDiag** list, int* count, int* cap) {
     if (!list) return;
+    if (*list && count) {
+        for (int i = 0; i < *count; i++) free((*list)[i].offender_name);
+    }
     free(*list);
     *list = NULL;
     if (count) *count = 0;

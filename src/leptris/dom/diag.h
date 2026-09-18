@@ -32,7 +32,13 @@ typedef enum {
 
 typedef struct {
     LeptrisDiagKind kind;
-    LeptrisNodeRef offender;      /* nullable */
+    char* offender_name;          /* captured at emit time (strdup'd);
+                                   * NULL when the diag has no offender.
+                                   * #1207: a node ref dangles once the
+                                   * validated document is freed — musl
+                                   * unmaps the region and the report
+                                   * pass segfaulted reading it. */
+
     int line;
     int col_start;                /* Jing: element/attr errors */
     int col_end;                  /* Jing: incomplete/content errors */
