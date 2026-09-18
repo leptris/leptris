@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.200] - 2026-09-18
+
+### Added
+
+- leptris diff --summary and --json output modes (#1184) (cli)
+
+### Fixed
+
+- pull ERROR events carry text_len (sax)
+
+
+
 ## [1.9.199] - 2026-09-18
 
 ### Added
