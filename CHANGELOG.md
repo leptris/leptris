@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.195] - 2026-09-18
+
+### Fixed
+
+- required attributes behind <ref> are enforced (#1164) (rng)
+- reject stray character data under element-only content (#1153) (rng)
+- keep public API symbols through ThinLTO (#1154) (export)
+
+
+
 ## [1.9.194] - 2026-09-17
 
 ### Fixed
