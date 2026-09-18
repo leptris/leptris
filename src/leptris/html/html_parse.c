@@ -3730,6 +3730,48 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             while (ti >= 0 && !h_ieq_raw(
                        leptris_element_name(b->open[ti]), "table"))
                 ti--;
+            if (ti < 0) {
+                /* No table in scope (template content): foster to
+                 * the OUTERMOST table-context element's level -
+                 * the node becomes a following sibling of the
+                 * row/section (13.2.1.2.4's html fallback;
+                 * template.dat:45/91: <tr><div> and <tbody><select>
+                 * end up as content siblings). */
+                int oi = -1;
+                for (int k = (int)b->depth - 1; k >= 0; k--)
+                    if (h_is_table_context(b->open[k])) {
+                        oi = k;
+                    }
+                if (oi >= 0) {
+                    LeptrisElement tc = b->open[oi];
+                    LeptrisNodeRef nxt =
+                        leptris_node_get_next_sibling(
+                            (LeptrisNodeRef)tc);
+                    while (nxt &&
+                           leptris_node_get_type(nxt) ==
+                               LEPTRIS_NODE_TYPE_ELEMENT &&
+                           h_is_table_context((LeptrisElement)nxt))
+                        nxt = leptris_node_get_next_sibling(nxt);
+                    leptris_node_set_next_sibling(n, nxt);
+                    if (nxt) {
+                        LeptrisNodeRef pv =
+                            leptris_node_get_next_sibling(
+                                (LeptrisNodeRef)tc);
+                        LeptrisNodeRef last2 = (LeptrisNodeRef)tc;
+                        while (last2 && last2 != nxt)
+                            last2 = leptris_node_get_next_sibling(
+                                last2);
+                        if (last2)
+                            leptris_node_set_next_sibling(
+                                (LeptrisNodeRef)tc, n);
+                    } else {
+                        leptris_node_set_next_sibling(
+                            (LeptrisNodeRef)tc, n);
+                    }
+                    b->depth = (size_t)oi;
+                    return;
+                }
+            }
             if (ti >= 1) {
                 LeptrisElement table = b->open[ti];
                 LeptrisElement tparent = b->open[ti - 1];
@@ -5862,7 +5904,11 @@ static LeptrisDocument html_parse_shared(
             /* depth<=1: at most the (explicit or synthesized) html
              * element is open; frameset-ok is the spec gate and the
              * body is removed wholesale when it converts. */
-            if (!b.frameset && b.frameset_ok) {
+            if (!b.frameset && b.frameset_ok &&
+                h_template_idx(&b) < 0) {
+                /* 13.2.6.4.10: inside a template the frameset is
+                 * IGNORED - the template's "in body" has no body
+                 * to replace (template.dat:42). */
                 /* 13.2.6.4.9: the conversion removes the body
                  * element and everything open above it — the new
                  * frameset opens at html level, not inside the
