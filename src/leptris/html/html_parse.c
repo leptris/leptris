@@ -7629,9 +7629,18 @@ static LeptrisDocument html_parse_shared(
                  * boundary and the EOF classification are exact. */
                 rs = h_script_scan(rs, end, &eof_fffd);
             } else {
+                /* Lever 1 phase 2 (TODO.max-perf): memchr jumps to
+                 * each '<' instead of stepping per byte - raw bodies
+                 * (script/style text) are exactly where this scan
+                 * runs longest. */
                 while (rs < end) {
-                    if (rs + 2 + nlen + 1 <= end && rs[0] == '<' &&
-                        rs[1] == '/') {
+                    const void* lt2 = memchr(rs, '<', (size_t)(end - rs));
+                    if (!lt2) {
+                        rs = end;
+                        break;
+                    }
+                    rs = (const char*)lt2;
+                    if (rs + 2 + nlen + 1 <= end && rs[1] == '/') {
                         size_t i = 0;
                         for (; i < nlen; i++)
                             if (h_lower(rs[2 + i]) != name[i]) break;
