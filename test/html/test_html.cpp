@@ -1998,6 +1998,21 @@ TEST(HtmlParse, ColgroupStartPopsColgroup) {
               "<colgroup><col/><col/></colgroup></table>");
 }
 
+/* 13.2.5.5 PLAINTEXT: raw to EOF - a literal </plaintext> is
+ * CONTENT (tests18:23); character tokens still reconstruct the
+ * active formatting list, so the text lands inside the clone
+ * (tests19:102: <p><a><plaintext>b -> plaintext > a > "b"). */
+TEST(HtmlParse, PlaintextRawToEofReconstructs) {
+    EXPECT_EQ(Html("<!doctype html><svg><title><plaintext>a</plaintext>b"),
+              "<!DOCTYPE html><html><head/><body><svg><title>"
+              "<plaintext>a&lt;/plaintext&gt;b</plaintext>"
+              "</title></svg></body></html>");
+    EXPECT_EQ(Html("<!doctype html><p><a><plaintext>b"),
+              "<!DOCTYPE html><html><head/><body>"
+              "<p><a/></p><plaintext><a>b</a></plaintext>"
+              "</body></html>");
+}
+
 /* A stray </head> closes an (empty) head phase: the ws after it
  * is AFTER-HEAD text and stays an html child between head and body
  * (tests6:1). */
