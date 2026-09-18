@@ -7235,26 +7235,11 @@ static LeptrisDocument html_parse_shared(
             const char* rs = q;
             int eof_fffd = 0;   /* script EOF: escaped-family tail */
             if (strcmp(name, "plaintext") == 0) {
-                /* The vendored suite's tokenizer exits plaintext
-                 * at </plaintext> (tests18:13/19:102 keep the
-                 * table/plaintext split that follows). */
-                const char* pe = q;
-                while (pe + 13 <= end &&
-                       !(pe[0] == '<' && pe[1] == '/' &&
-                         h_lower(pe[2]) == 'p' &&
-                         h_lower(pe[3]) == 'l' &&
-                         h_lower(pe[4]) == 'a' &&
-                         h_lower(pe[5]) == 'i' &&
-                         h_lower(pe[6]) == 'n' &&
-                         h_lower(pe[7]) == 't' &&
-                         h_lower(pe[8]) == 'e' &&
-                         h_lower(pe[9]) == 'x' &&
-                         h_lower(pe[10]) == 't' &&
-                         (pe[11] == '>' || pe[11] == '/' ||
-                          pe[11] == ' ' || pe[11] == '\t' ||
-                          pe[11] == '\n' || pe[11] == '\r')))
-                    pe++;
-                rs = (pe + 13 <= end) ? pe : end;
+                /* 13.2.5.5 PLAINTEXT: raw to EOF - a literal
+                 * </plaintext> is CONTENT, not a close
+                 * (tests18:13: the tail "</plaintext>" is the
+                 * text; tests18:23: "a</plaintext>b"). */
+                rs = end;
             } else if (b.whatwg && strcmp(name, "script") == 0) {
                 /* 13.2.5.5-.33 via the state machine: the close
                  * boundary and the EOF classification are exact. */
@@ -7282,6 +7267,22 @@ static LeptrisDocument html_parse_shared(
                 }
             }
             if (rs > q) {
+                /* 13.2.6.4.7: character tokens reconstruct the
+                 * active formatting list even inside plaintext -
+                 * <p><a><plaintext>b clones the a INTO the
+                 * plaintext, the text lands in the clone
+                 * (tests19:102). */
+                int pt_recon = 0;
+                if (b.whatwg_adopt &&
+                    strcmp(name, "plaintext") == 0) {
+                    h_reconstruct(&b);
+                    pt_recon = 1;
+                }
+                /* With a reconstruction the insertion point is
+                 * the CLONE - the text lands inside it. */
+                LeptrisElement et =
+                    (pt_recon && b.depth > 0)
+                        ? b.open[b.depth - 1] : e;
                 /* RCDATA (title/textarea) decodes entities and
                  * textarea drops one leading newline (13.2.6.2
                  * authoring convenience); the rest is raw. */
@@ -7312,14 +7313,14 @@ static LeptrisDocument html_parse_shared(
                             mapped, strlen(mapped), b.pool);
                         if (t)
                             leptris_element_append_child_internal_doc(
-                                e, (LeptrisNodeRef)t, b.doc);
+                                et, (LeptrisNodeRef)t, b.doc);
                     }
                 } else {
                     LeptrisTextNode* t = leptris_text_create(
                         cs, clen, b.pool);
                     if (t)
                         leptris_element_append_child_internal_doc(
-                            e, (LeptrisNodeRef)t, b.doc);
+                            et, (LeptrisNodeRef)t, b.doc);
                 }
             }
             /* Skip past the close tag - quote-aware: a quoted
