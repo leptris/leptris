@@ -5434,6 +5434,28 @@ static LeptrisDocument html_parse_shared(
                                 leptris_element_name(b.open[d - 1]);
                             if (hn && h_is_heading(hn)) {
                                 h_pop_to(&b, d - 1);
+                            /* Old-suite rule (tests1:21/91):
+                             * </table> also closes open
+                             * formatting elements that sit BELOW
+                             * the table on the stack - content
+                             * after it lands in the container
+                             * (b wraps the table; X lands in the
+                             * body). */
+                            if (b.whatwg &&
+                                strcmp(lname, "table") == 0) {
+                                while (b.depth > 0) {
+                                    const char* fn3 =
+                                        leptris_element_name(
+                                            b.open[b.depth - 1]);
+                                    if (fn3 &&
+                                        b.open_ns[b.depth - 1] ==
+                                            H_NS_HTML &&
+                                        h_is_formatting(fn3))
+                                        b.depth--;
+                                    else
+                                        break;
+                                }
+                            }
                                 /* #659 "after frameset"
                                  * (13.2.6.4.19): </frameset>
                                  * closing the body-level frameset
@@ -5699,6 +5721,27 @@ static LeptrisDocument html_parse_shared(
                                     break;
                             }
                             h_pop_to(&b, d - 1);
+                            /* Old-suite rule (tests1:21/91):
+                             * </table> also closes formatting
+                             * elements BELOW the table on the
+                             * stack - content after it lands in
+                             * the container (b wraps the table;
+                             * X lands in the body). */
+                            if (b.whatwg &&
+                                strcmp(lname, "table") == 0) {
+                                while (b.depth > 0) {
+                                    const char* fn3 =
+                                        leptris_element_name(
+                                            b.open[b.depth - 1]);
+                                    if (fn3 &&
+                                        b.open_ns[b.depth - 1] ==
+                                            H_NS_HTML &&
+                                        h_is_formatting(fn3))
+                                        b.depth--;
+                                    else
+                                        break;
+                                }
+                            }
                             /* #659 "after frameset" phase switch —
                              * second match path (template-aware). */
                             if (b.whatwg && b.frameset &&
@@ -6723,6 +6766,36 @@ static LeptrisDocument html_parse_shared(
         if (afe_dup_ok && b.whatwg_adopt && elem_ns == H_NS_HTML &&
             (strcmp(name, "a") == 0 || strcmp(name, "nobr") == 0)) {
             if (h_afe_find(&b, name) >= 0) {
+                /* Scope guard: when the entry sits behind a scope
+                 * terminator (a table above it), the duplicate
+                 * close must NOT run - the new <a> simply inserts
+                 * (and fosters out of the table, into the original
+                 * a: tests1:91). */
+                int ai0 = h_afe_find(&b, name);
+                LeptrisElement fe0 = b.afe[ai0];
+                int ri0 = h_stack_find(&b, fe0);
+                int dup_out_of_scope = 0;
+                if (ri0 >= 0) {
+                    for (size_t k = b.depth; k > (size_t)ri0 + 1;
+                         k--) {
+                        const char* kn =
+                            leptris_element_name(b.open[k - 1]);
+                        if (b.open_ns[k - 1] != H_NS_HTML ||
+                            h_ieq_raw(kn, "applet") ||
+                            h_ieq_raw(kn, "caption") ||
+                            h_ieq_raw(kn, "table") ||
+                            h_ieq_raw(kn, "td") ||
+                            h_ieq_raw(kn, "th") ||
+                            h_ieq_raw(kn, "marquee") ||
+                            h_ieq_raw(kn, "object") ||
+                            h_ieq_raw(kn, "template") ||
+                            h_is_int_point(&b, (int)(k - 1))) {
+                            dup_out_of_scope = 1;
+                            break;
+                        }
+                    }
+                }
+                if (!dup_out_of_scope) {
                 h_afe_end(&b, name);
                 /* The agency's 8-iteration cap can leave the
                  * entry — the start-tag branch removes it
@@ -6740,6 +6813,7 @@ static LeptrisDocument html_parse_shared(
                                 (b.depth - ri - 1));
                         b.depth--;
                     }
+                }
                 }
             }
         }
