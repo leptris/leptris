@@ -888,7 +888,7 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
 
         if (value) {
             size_t vlen = leptris_cstr_len16(value);
-            if (vlen <= LEPTRIS_ATTR_VALUE_MAX_INLINE) {
+            if (LEPTRIS_ATTR_VALUE_CAN_INLINE && vlen <= LEPTRIS_ATTR_VALUE_MAX_INLINE) {
                 /* lane18 S1: small values store INLINE in the slot —
                  * zero allocation per overwrite. */
                 leptris_attr_value_set_inline(existing, value, vlen);
@@ -954,7 +954,7 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
 
         if (value) {
             size_t vlen = leptris_cstr_len16(value);
-            if (vlen <= LEPTRIS_ATTR_VALUE_MAX_INLINE) {
+            if (LEPTRIS_ATTR_VALUE_CAN_INLINE && vlen <= LEPTRIS_ATTR_VALUE_MAX_INLINE) {
                 /* lane18 S1: small new values inline in the slot —
                  * no carve, no pool round-trip. */
                 leptris_attr_value_set_inline(attr, value, vlen);

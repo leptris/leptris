@@ -130,7 +130,17 @@ int32_t ns_cache_off;
      * 56 B point measured dead and the 32 B split-stream upper
      * bound dead — 40 was the last unmeasured point on the axis. */
 };
+/* The inline form's flag lives in heap.length's top bit, so it
+ * requires a 64-bit size_t: on ILP32 the length word occupies the
+ * same bytes as the inline content. Values there always take the
+ * heap view (#1174); callers must gate set_inline on CAN_INLINE. */
+#if SIZE_MAX == UINT64_MAX
 #define LEPTRIS_ATTR_VALUE_INLINE_BIT ((size_t)1 << 63)
+#define LEPTRIS_ATTR_VALUE_CAN_INLINE 1
+#else
+#define LEPTRIS_ATTR_VALUE_INLINE_BIT ((size_t)0)
+#define LEPTRIS_ATTR_VALUE_CAN_INLINE 0
+#endif
 #define LEPTRIS_ATTR_VALUE_MAX_INLINE 7
 
 static inline LeptrisStringView leptris_attr_value_sv(
@@ -635,11 +645,26 @@ static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
 #  endif
 #endif
 
+/* Size pins are per-wordsize (#1174): the LP64 layouts shrink on
+ * ILP32 targets (armv7, i686) where pointers are 4 bytes. The
+ * pinned structs hold only pointers and int-sized scalars, so i686
+ * and armv7 produce identical layouts. */
+#if SIZE_MAX == UINT64_MAX
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 72,
     "leptris_element source positions layout: 72 bytes");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 40,
     "round 19 attr layout: 16+16+4+2+2 = 40");
+#else
+/* ILP32: LeptrisNode 24->16 (binding_wrapper), element name +
+ * ns_cache pointers 8->4 each -> 56; attribute name_view 16->8
+ * (value union stays 16 via inline_value[16]) -> 32. */
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 56,
+    "leptris_element ILP32 layout: 56 bytes");
+
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 32,
+    "leptris_attribute ILP32 layout: 8+16+4+2+2 = 32");
+#endif
 
 /* ============================================================================
  * Compact tree-edge accessors (Phase 2b of TODO 90)
