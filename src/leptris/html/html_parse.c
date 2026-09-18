@@ -3772,7 +3772,8 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                  * end up as content siblings). */
                 int oi = -1;
                 for (int k = (int)b->depth - 1; k >= 0; k--)
-                    if (h_is_table_context(b->open[k])) {
+                    if (b->open_ns[k] == H_NS_HTML &&
+                        h_is_table_context(b->open[k])) {
                         oi = k;
                     }
                 if (oi >= 0) {
