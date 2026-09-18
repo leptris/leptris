@@ -272,7 +272,14 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
      * hoist against the macos small-doc parse-ratio guard. */
     LeptrisElement memo_root = g_memo_root;
     for (;;) {
-        if (cur == memo_root) return g_memo_doc;
+        /* #1189: a namebp-carrying element is UNATTACHED by
+         * definition - its document lives statelessly in the name
+         * slot and must never resolve through this recyclable-
+         * address memo. A freed root's address recycled by the
+         * allocator made the memo hit with a stale document
+         * before the authoritative namebp was consulted. */
+        if (cur == memo_root && !leptris_elem_has_namebp(cur))
+            return g_memo_doc;
         LeptrisElement parent = leptris_elem_parent(cur);
         if (!parent) break;
         cur = parent;
