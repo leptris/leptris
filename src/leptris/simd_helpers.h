@@ -20,7 +20,7 @@
 #include "common/port.h"
 
 /* Detect platform and include appropriate SIMD headers */
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86) && _M_IX86_FP >= 2)
     #define LEPTRIS_SIMD_SSE2 1
     #include <emmintrin.h>  /* SSE2 intrinsics */
     typedef __m128i simd_vec_t;
