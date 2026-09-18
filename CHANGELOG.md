@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.198] - 2026-09-18
+
+### Fixed
+
+- TLS memo must not resolve namebp-carrying elements (#1189) (dom)
+
+### Performance
+
+- memchr prefilter in the raw-text close-tag scan (html)
+
+
+
 ## [1.9.197] - 2026-09-18
 
 ### Performance
