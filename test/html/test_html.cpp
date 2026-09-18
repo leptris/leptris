@@ -1941,6 +1941,18 @@ TEST(HtmlParse, PlaintextExitsColgroup) {
               "<table><colgroup/></table></body></html>");
 }
 
+/* 13.2.6.4.1: ws still in the "before head" phase drops when
+ * the first body-content token arrives - the \n after an explicit
+ * <html> never becomes a body child (tricky01:4); after an
+ * explicit <body> tag the ws is "in body" content and STAYS
+ * (tricky01:3/5/9). */
+TEST(HtmlParse, BeforeHeadWsAfterExplicitHtmlDrops) {
+    EXPECT_EQ(Html("<html>\n<dl><dt>a"),
+              "<dl><dt>a</dt></dl>");
+    EXPECT_EQ(Html("<html><body>\n<p>x"),
+              "\n<p>x</p>");
+}
+
 /* 13.2.6.4.7 "any other end tag": an ORDINARY target (cite is
  * neither special nor formatting) fences at EVERY special element -
  * </cite> inside the div is ignored, D coalesces into "CD"
