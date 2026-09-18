@@ -308,8 +308,9 @@ static int list_consumes_attr(RngVal* v, RngPattern* head,
 }
 
 /* Check the attribute patterns against e's actual attributes. */
-static int check_required_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
-    for (RngPattern* c = p->first_child; c; c = c->next) {
+static int check_required_list(RngVal* v, RngPattern* head,
+                               LeptrisElement e) {
+    for (RngPattern* c = head; c; c = c->next) {
         switch (c->kind) {
             case RNG_ATTRIBUTE: {
                 if (c->any_name) break;   /* wildcard: satisfiable */
@@ -323,16 +324,30 @@ static int check_required_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
                 break;
             }
             case RNG_GROUP: case RNG_INTERLEAVE: case RNG_ONE_OR_MORE:
-                if (!check_required_attrs(v, c, e)) return 0;
+                if (!check_required_list(v, c->first_child, e)) return 0;
                 break;
+            case RNG_REF: {
+                /* #1164: a required attribute behind <ref> is as
+                 * required as an inline one — metanorma bibdata
+                 * schemas are ref'd attribute groups throughout */
+                RngDefine* d = find_define(v->g, c->name);
+                if (d && d->body &&
+                    !check_required_list(v, d->body, e))
+                    return 0;
+                break;
+            }
             case RNG_CHOICE:
                 /* Simplified: any alternative with all its attrs. */
-                if (!check_required_attrs(v, c, e)) return 0;
+                if (!check_required_list(v, c->first_child, e)) return 0;
                 break;
             default: break;
         }
     }
     return 1;
+}
+
+static int check_required_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
+    return check_required_list(v, p->first_child, e);
 }
 
 static int match_attrs(RngVal* v, RngPattern* content, LeptrisElement e) {
