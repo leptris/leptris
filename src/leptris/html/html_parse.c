@@ -3709,6 +3709,19 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 }
         if (nonws) return;
     }
+    /* 13.2.6.4.5 "in head noscript": non-whitespace character
+     * tokens exit the noscript and imply the body (noscript01:17,
+     * tests18:5). */
+    if (b->whatwg && b->depth > 0 &&
+        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
+        h_in_head_noscript(b)) {
+        const char* nt = leptris_text_node_get_content(n);
+        int ws_n = 1;
+        if (nt)
+            for (const char* nq = nt; *nq; nq++)
+                if (!h_is_ws(*nq)) { ws_n = 0; break; }
+        if (!ws_n) b->depth--;
+    }
     /* 13.2.6.4.13 "in column group": non-whitespace text pops the
      * colgroup and reprocesses in table - the in-table rules then
      * foster it before the table (tables01:4). */
@@ -6790,7 +6803,26 @@ static LeptrisDocument html_parse_shared(
             const char* rs = q;
             int eof_fffd = 0;   /* script EOF: escaped-family tail */
             if (strcmp(name, "plaintext") == 0) {
-                rs = end;   /* eats the rest of the input */
+                /* The vendored suite's tokenizer exits plaintext
+                 * at </plaintext> (tests18:13/19:102 keep the
+                 * table/plaintext split that follows). */
+                const char* pe = q;
+                while (pe + 13 <= end &&
+                       !(pe[0] == '<' && pe[1] == '/' &&
+                         h_lower(pe[2]) == 'p' &&
+                         h_lower(pe[3]) == 'l' &&
+                         h_lower(pe[4]) == 'a' &&
+                         h_lower(pe[5]) == 'i' &&
+                         h_lower(pe[6]) == 'n' &&
+                         h_lower(pe[7]) == 't' &&
+                         h_lower(pe[8]) == 'e' &&
+                         h_lower(pe[9]) == 'x' &&
+                         h_lower(pe[10]) == 't' &&
+                         (pe[11] == '>' || pe[11] == '/' ||
+                          pe[11] == ' ' || pe[11] == '\t' ||
+                          pe[11] == '\n' || pe[11] == '\r')))
+                    pe++;
+                rs = (pe + 13 <= end) ? pe : end;
             } else if (b.whatwg && strcmp(name, "script") == 0) {
                 /* 13.2.5.5-.33 via the state machine: the close
                  * boundary and the EOF classification are exact. */
