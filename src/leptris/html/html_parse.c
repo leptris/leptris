@@ -2857,7 +2857,10 @@ static int h_body_still_empty(HBuilder* b) {
                   h_ieq_raw(nm, "script") || h_ieq_raw(nm, "style") ||
                   h_ieq_raw(nm, "noscript") ||
                   h_ieq_raw(nm, "noframes") ||
-                  h_ieq_raw(nm, "template")))
+                  h_ieq_raw(nm, "template") ||
+                  /* an explicit <html> in the chain is structural,
+                   * not body content (tests18:5). */
+                  h_ieq_raw(nm, "html")))
                 return 0;
         } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
             const char* t = leptris_text_node_get_content(n);
@@ -2876,9 +2879,19 @@ static int h_body_still_empty(HBuilder* b) {
  * WHATWG 12.2.6.4.5 "in head noscript": head content and
  * comments stay inside; the first body-ish token pops it. */
 static int h_in_head_noscript(HBuilder* b) {
-    return b->whatwg && b->depth == 1 && !b->body_tag_seen &&
-           h_ieq_raw(leptris_element_name(b->open[0]), "noscript") &&
-           h_body_still_empty(b);
+    if (!b->whatwg || b->body_tag_seen || b->depth < 1 ||
+        !h_body_still_empty(b))
+        return 0;
+    /* [noscript] at the top, or [html..., noscript] when the
+     * html tag was explicit (tests18:5: <html><noscript> keeps
+     * two html entries on the stack). */
+    if (!h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
+                   "noscript"))
+        return 0;
+    for (size_t i = 0; i + 1 < b->depth; i++)
+        if (!h_ieq_raw(leptris_element_name(b->open[i]), "html"))
+            return 0;
+    return 1;
 }
 
 /* #659: stash the attributes of a dropped structural tag —
@@ -3017,7 +3030,8 @@ static int h_is_special_ww(const char* n) {
         "address",  "applet",  "area",   "article",  "aside",
         "base",     "basefont", "bgsound", "blockquote", "body",
         "br",       "button",  "caption", "center",  "col",
-        "colgroup", "dd",      "details", "dir",     "div",
+        "colgroup", "dd",      "details", "dialog",  "dir",
+        "div",
         "dl",       "dt",      "embed",  "fieldset", "figcaption",
         "figure",   "footer",  "form",   "frame",    "frameset",
         "h1",       "h2",      "h3",     "h4",       "h5",
@@ -6975,6 +6989,24 @@ static LeptrisDocument html_parse_shared(
                        (strcmp(name, "td") == 0 ||
                         strcmp(name, "th") == 0)) {
                 h_open_element(&b, "tr");
+            }
+        }
+
+        /* 13.2.6.4.13: a FOREIGN start exits a colgroup too -
+         * the math/svg root fosters before the table (tests9:17:
+         * <colgroup><math>, tests10:16: <colgroup><svg>). */
+        if (b.whatwg && elem_ns != H_NS_HTML && b.depth > 0 &&
+            b.open_ns[b.depth - 1] == H_NS_HTML &&
+            h_ieq_raw(leptris_element_name(b.open[b.depth - 1]),
+                      "colgroup")) {
+            for (size_t d2 = b.depth; d2 > 0; d2--) {
+                const char* on2 =
+                    leptris_element_name(b.open[d2 - 1]);
+                if (on2 && h_ieq_raw(on2, "template")) break;
+                if (on2 && h_ieq_raw(on2, "table")) {
+                    b.depth = d2;
+                    break;
+                }
             }
         }
 
