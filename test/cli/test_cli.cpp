@@ -402,6 +402,53 @@ TEST(CliXquery, SourceDocumentAndConstructors) {
 }
 #endif  /* !_WIN32 */
 
+// ---- diff output modes (#1184 lever 8) --------------------------------------
+
+TEST(CliDiff, SummaryCountsDeltas) {
+    write_file("leptris_cli_diff_sa.tmp",
+               "<r><i id=\"1\"/><del/><keep/></r>");
+    write_file("leptris_cli_diff_sb.tmp",
+               "<r><i id=\"2\"/><ins/><keep/></r>");
+    auto r = run_cli({"diff", "--summary",
+                      "leptris_cli_diff_sa.tmp",
+                      "leptris_cli_diff_sb.tmp"});
+    EXPECT_NE(r.out.find("1 attribute changed"), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("1 element inserted"), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("1 element deleted"), std::string::npos)
+        << r.out;
+}
+
+TEST(CliDiff, SummaryIdentical) {
+    write_file("leptris_cli_diff_sc.tmp", "<r><a/></r>");
+    auto r = run_cli({"diff", "--summary",
+                      "leptris_cli_diff_sc.tmp",
+                      "leptris_cli_diff_sc.tmp"});
+    EXPECT_NE(r.out.find("identical"), std::string::npos) << r.out;
+}
+
+TEST(CliDiff, JsonOpsListed) {
+    write_file("leptris_cli_diff_ja.tmp", "<r><i id=\"1\">x</i></r>");
+    write_file("leptris_cli_diff_jb.tmp", "<r><i id=\"2\">y</i></r>");
+    auto r = run_cli({"diff", "--json",
+                      "leptris_cli_diff_ja.tmp",
+                      "leptris_cli_diff_jb.tmp"});
+    EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("\"op\": \"update-attr\""), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("\"path\": \"/r/i\""), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("\"name\": \"id\""), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("\"before\": \"1\""), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("\"after\": \"2\""), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("\"op\": \"update-text\""), std::string::npos)
+        << r.out;
+}
+
 // ---- validate --dtd (#1183 lane 16.6) --------------------------------------
 // run_cli shells out with POSIX quoting; the existing CliValidate cases
 // are likewise not exercised on Windows.
