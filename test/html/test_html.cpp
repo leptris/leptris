@@ -1941,6 +1941,33 @@ TEST(HtmlParse, PlaintextExitsColgroup) {
               "<table><colgroup/></table></body></html>");
 }
 
+/* 13.2.6.4.13: a FOREIGN root exits a colgroup too - the
+ * math/svg element fosters before the table (tests9:17/10:16). */
+TEST(HtmlParse, ForeignRootExitsColgroup) {
+    EXPECT_EQ(Html("<!DOCTYPE html><body><table><colgroup><math><mi>x"),
+              "<!DOCTYPE html><html><head/><body>"
+              "<math><mi>x</mi></math><table><colgroup/></table>"
+              "</body></html>");
+}
+
+/* dialog is in the special category: </dialog> closes through
+ * the p (blocks:14). */
+TEST(HtmlParse, DialogEndClosesP) {
+    EXPECT_EQ(Html("<!doctype html><dialog><p>foo</dialog>bar"),
+              "<!DOCTYPE html><html><head/><body>"
+              "<dialog><p>foo</p></dialog>bar</body></html>");
+}
+
+/* In head-noscript (explicit <html> variant too), a raw-text
+ * start is not head content - the noscript pops EMPTY and the
+ * plaintext lands in the body (tests18:5). */
+TEST(HtmlParse, HeadNoscriptPlaintextExits) {
+    EXPECT_EQ(Html("<!doctype html><html><noscript><plaintext></plaintext>"),
+              "<!DOCTYPE html><html><head><noscript/></head>"
+              "<body><plaintext>&lt;/plaintext&gt;</plaintext>"
+              "</body></html>");
+}
+
 /* 13.2.6.4.1: ws still in the "before head" phase drops when
  * the first body-content token arrives - the \n after an explicit
  * <html> never becomes a body child (tricky01:4); after an
