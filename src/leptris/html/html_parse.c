@@ -5885,6 +5885,40 @@ static LeptrisDocument html_parse_shared(
         }
 
         const char* ns = p + 1;
+        /* EOF inside a start tag (an unterminated quoted
+         * attribute) never emits the token - the tag is DROPPED
+         * (webkit02:5). Quote-aware: a '>' inside quotes does
+         * not close. */
+        if (b.whatwg) {
+            const char* scan = ns;
+            char quote = 0;
+            int closed = 0;
+            while (scan < end) {
+                if (quote) {
+                    if (*scan == quote) quote = 0;
+                } else if (*scan == '"' || *scan == '\'') {
+                    quote = *scan;
+                } else if (*scan == '>') {
+                    closed = 1;
+                    break;
+                }
+                scan++;
+            }
+            if (!closed) {
+                if (text < p) {
+                    size_t dlen = 0;
+                    char* dec = h_decode_text(&b, text, p, &dlen);
+                    if (dec && *dec) {
+                        LeptrisTextNode* t = leptris_text_create(
+                            dec, dlen, b.pool);
+                        if (t) h_append(&b, (LeptrisNodeRef)t);
+                    }
+                }
+                p = end;
+                text = p;
+                continue;
+            }
+        }
         const char* q = ns;
         while (q < end && !h_is_ws(*q) && *q != '>' && *q != '/') q++;
         size_t nlen = (size_t)(q - ns);
@@ -6901,7 +6935,7 @@ static LeptrisDocument html_parse_shared(
                     size_t dlen = 0;
                     char* dec = h_decode_ex(b.pool, cs, cs + clen, 0,
                                             b.whatwg, &dlen);
-                    if (dec) {
+                    if (dec && dlen) {
                         LeptrisTextNode* t = leptris_text_create(
                         dec, dlen, b.pool);
                         if (t)
@@ -6911,7 +6945,7 @@ static LeptrisDocument html_parse_shared(
                 } else if (b.whatwg) {
                     char* mapped =
                         h_nul_fffd_copy(b.pool, cs, clen, eof_fffd);
-                    if (mapped) {
+                    if (mapped && mapped[0]) {
                         LeptrisTextNode* t = leptris_text_create(
                             mapped, strlen(mapped), b.pool);
                         if (t)
