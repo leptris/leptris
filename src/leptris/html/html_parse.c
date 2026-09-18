@@ -5773,6 +5773,16 @@ static LeptrisDocument html_parse_shared(
                                          strcmp(on, "address") != 0 &&
                                          strcmp(on, "div") != 0 &&
                                          strcmp(on, "p") != 0;
+                            } else if (!h_is_special_ww(lname)) {
+                                /* 13.2.6.4.7 "any other end tag":
+                                 * an ORDINARY target (not special,
+                                 * not formatting - cite, span,
+                                 * custom names) fences at EVERY
+                                 * special element; address/div/p
+                                 * carve-outs do NOT apply
+                                 * (tests1:60: </cite> ignores at
+                                 * the <div>). */
+                                fenced = h_is_special_ww(on);
                             } else {
                                 /* </address> closes through the
                                  * fence (tests20:41); everything
@@ -6519,9 +6529,13 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
-        /* <col> in body drops - it is table-structure only
-         * (tests25:7: <body><col>A keeps just "A"). */
-        if (b.whatwg && strcmp(name, "col") == 0) {
+        /* <col>/<colgroup> in body drops - they are
+         * table-structure only (tests25:7: <body><col>A keeps
+         * just "A"; tests1:109's trailing <colgroup> after
+         * </table> vanishes). */
+        if (b.whatwg &&
+            (strcmp(name, "col") == 0 ||
+             strcmp(name, "colgroup") == 0)) {
             int col_tbl = 0;
             for (size_t d2 = b.depth; d2 > 0; d2--) {
                 const char* on2 =
@@ -6843,7 +6857,9 @@ static LeptrisDocument html_parse_shared(
                     (rowish && !group_start) ||
                     (h_ieq_raw(topn, "caption") &&
                      strcmp(name, "caption") != 0) ||
-                    (h_ieq_raw(topn, "colgroup") && group_start);
+                    (h_ieq_raw(topn, "colgroup") &&
+                     group_start &&
+                     strcmp(name, "colgroup") != 0);
                 /* 13.2.6.4.9 "in caption": a td/th/tr start pops
                  * the caption and reprocesses in table — the
                  * caption is NOT a table context for cells
