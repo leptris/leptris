@@ -3670,6 +3670,25 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                     *q != '\r') { nonws = 1; break; }
         if (nonws) b->after_body_done = 1;
     }
+    /* Doc-start mixed run: the ws prefix is "before html"
+     * whitespace and drops (doctype01:31, tests19:79). Tightest
+     * gate: document level, NOTHING appended yet, no head/body
+     * phase, and the run has a non-ws tail. */
+    if (b->whatwg && b->depth == 0 && !b->top_head &&
+        !b->head_tag_seen && !b->body_seen && !b->frameset &&
+        leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
+        const char* t9 = leptris_text_node_get_content(n);
+        size_t w9 = 0;
+        if (t9)
+            while (t9[w9] == ' ' || t9[w9] == '\t' ||
+                   t9[w9] == '\n' || t9[w9] == '\r')
+                w9++;
+        if (t9 && w9 && t9[w9]) {
+            LeptrisTextNode* tn9 = (LeptrisTextNode*)n;
+            tn9->content = t9 + w9;
+            tn9->content_len -= w9;
+        }
+    }
     if (b->whatwg && !b->left_initial &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
         int nonws = 0;
@@ -5650,7 +5669,15 @@ static LeptrisDocument html_parse_shared(
                              * ignored (13.2.4.2 boundary list). */
                             int fenced = 0;
                             if (b.whatwg &&
-                                strcmp(lname, "template") != 0) {
+                                strcmp(lname, "template") != 0 &&
+                                b.open_ns[d - 1] == H_NS_HTML) {
+                                /* A foreign match (svg/math names)
+                                 * is the foreign-content close -
+                                 * an integration point above it is
+                                 * not a scope break
+                                 * (webkit02:21: </svg> behind an
+                                 * svg <title> still closes the
+                                 * svg). */
                                 for (size_t k = b.depth; k > d; k--)
                                     if (h_is_int_point(&b, k - 1)) {
                                         fenced = 1;
@@ -6654,8 +6681,11 @@ static LeptrisDocument html_parse_shared(
         /* #659 a/nobr start tags run the adoption agency first
          * when an open element of the same name is still in the
          * active formatting list (13.2.6.4.7) — the duplicate
-         * closes before the new one opens. */
-        if (b.whatwg_adopt && elem_ns == H_NS_HTML &&
+         * closes before the new one opens. NOT inside a template:
+         * the reference keeps them NESTED (template.dat:108:
+         * <template><a><table><a> -> a > [a, table]). */
+        int afe_dup_ok = h_template_idx(&b) < 0;
+        if (afe_dup_ok && b.whatwg_adopt && elem_ns == H_NS_HTML &&
             (strcmp(name, "a") == 0 || strcmp(name, "nobr") == 0)) {
             if (h_afe_find(&b, name) >= 0) {
                 h_afe_end(&b, name);
@@ -6839,7 +6869,17 @@ static LeptrisDocument html_parse_shared(
                         size_t i = 0;
                         for (; i < nlen; i++)
                             if (h_lower(rs[2 + i]) != name[i]) break;
-                        if (i == nlen) break;
+                        /* 13.2.5.9: the close needs a proper-name
+                         * boundary - `</style"` is TEXT
+                         * (tests2:47: the CSS string keeps
+                         * "</style" inside). */
+                        if (i == nlen) {
+                            char bnd = rs[2 + nlen];
+                            if (bnd == ' ' || bnd == '\t' ||
+                                bnd == '\n' || bnd == '\r' ||
+                                bnd == '>' || bnd == '/')
+                                break;
+                        }
                     }
                     rs++;
                 }
