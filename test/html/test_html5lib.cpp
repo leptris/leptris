@@ -768,7 +768,10 @@ TEST(Html5LibCorpus, TreeConstruction) {
      * <template> placement, 623 structural head/body, 556
      * DOCTYPE, 295 adoption agency, 294 foster, 285 two-mode
      * split, 193 before it). */
-    EXPECT_GE(passed, (size_t)1200);
+    /* #659 CLOSED: the vendored WHATWG corpus is fully green -
+     * zero reds, the red-list is retired. */
+    EXPECT_EQ(failed, (size_t)0);
+    EXPECT_GE(passed, (size_t)1555);
 
     /* ---- Nokogiri PARITY (#659's actual target) ----
      *

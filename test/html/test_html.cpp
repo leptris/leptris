@@ -2009,6 +2009,26 @@ TEST(HtmlParse, TableStartBurstsForeignSelect) {
               "<table/><s/><table/></div>");
 }
 
+/* The table-in-table burst reaches the open table across
+ * formatting/row/section entries in TABLE SCOPE (formatting does
+ * not fence it); a closed nested table whose marker fences
+ * nothing is pruned so later text reconstructs the entries
+ * behind it (tricky01:8). */
+TEST(HtmlParse, Tricky08TableScopeAndMarkerPrune) {
+    EXPECT_EQ(Html("<TABLE>\n<TR>\n<CENTER><CENTER><TD></TD></TR><TR>\n"
+                   "<FONT>\n<TABLE><tr></tr></TABLE>\n</P>\n"
+                   "<a></font><font></a>\n"
+                   "This page contains an insanely badly-nested tag sequence."),
+              "<center><center/></center>"
+              "<font>\n</font>"
+              "<table>\n<tbody><tr>\n<td/></tr><tr>\n</tr></tbody></table>"
+              "<table><tbody><tr/></tbody></table>"
+              "<font>\n<p/>\n<a/></font>"
+              "<a><font/></a>"
+              "<font>\nThis page contains an insanely badly-nested tag "
+              "sequence.</font>");
+}
+
 /* Past </html> a comment is a DOCUMENT epilog node - held on a
  * side list at parse and linked after the root at commit, so the
  * frameset assembly cannot wrap it into html (tests18:34). */
