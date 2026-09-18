@@ -35,7 +35,7 @@ function(leptris_add_test name)
     if(TARGET leptris_static)
         target_link_libraries(${name} PRIVATE leptris_static GTest::gtest_main)
     else()
-        target_link_libraries(${name} PRIVATE leptris GTest::gtest_main)
+        target_link_libraries(${name} PRIVATE leptris_objects GTest::gtest_main)
     endif()
     target_include_directories(${name} PRIVATE
         ${PROJECT_SOURCE_DIR}/src/include
