@@ -17,20 +17,9 @@
 extern "C" {
 #endif
 
-typedef enum {
-    LEPTRIS_DIAG_INVALID = 0,
-    LEPTRIS_DIAG_NOT_ALLOWED_ANYWHERE,   /* name never valid in model */
-    LEPTRIS_DIAG_NOT_ALLOWED_HERE,       /* valid name, wrong position */
-    LEPTRIS_DIAG_NOT_ALLOWED_YET,        /* later; missing required first */
-    LEPTRIS_DIAG_INCOMPLETE,             /* content ends before required */
-    LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,
-    LEPTRIS_DIAG_ATTR_NOT_ALLOWED,
-    LEPTRIS_DIAG_ATTR_VALUE_INVALID,
-    LEPTRIS_DIAG_CHAR_CONTENT_INVALID,   /* data/value/list mismatch */
-    LEPTRIS_DIAG_COUNT_
-} LeptrisDiagKind;
+/* LeptrisDiagKind lives in leptris/types.h (public, #1200). */
 
-typedef struct {
+typedef struct LeptrisDiag {
     LeptrisDiagKind kind;
     char* offender_name;          /* captured at emit time (strdup'd);
                                    * NULL when the diag has no offender.

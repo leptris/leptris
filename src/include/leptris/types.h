@@ -246,6 +246,28 @@ typedef enum {
     LEPTRIS_DIFF_IGNORE_WS_TEXT = 1u
 } LeptrisDiffFlags;
 
+/* Unified narration record kinds (#1126). One structured record
+ * per validation/recover event, shared by every validator (RNG
+ * today; XSD/Schematron follow) and the DOM parse's recover
+ * channel (#1200). The kind selects the reporting convention;
+ * append-only. */
+typedef enum {
+    LEPTRIS_DIAG_INVALID = 0,
+    LEPTRIS_DIAG_NOT_ALLOWED_ANYWHERE,   /* name never valid in model */
+    LEPTRIS_DIAG_NOT_ALLOWED_HERE,       /* valid name, wrong position */
+    LEPTRIS_DIAG_NOT_ALLOWED_YET,        /* later; missing required first */
+    LEPTRIS_DIAG_INCOMPLETE,             /* content ends before required */
+    LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,
+    LEPTRIS_DIAG_ATTR_NOT_ALLOWED,
+    LEPTRIS_DIAG_ATTR_VALUE_INVALID,
+    LEPTRIS_DIAG_CHAR_CONTENT_INVALID,   /* data/value/list mismatch */
+    /* Recover-class parse event: the document is usable, the input
+     * was not conformant (duplicate attribute, ...). Not a model
+     * error; SAX-lane "recover" parity (#1200). */
+    LEPTRIS_DIAG_RECOVER,
+    LEPTRIS_DIAG_COUNT_
+} LeptrisDiagKind;
+
 /* Subtree digest flags (issue #869). The digest is content-defined
  * (no pointers/addresses — stable across processes); equality
  * implies subtree equivalence under the flag semantics. */

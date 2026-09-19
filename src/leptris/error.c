@@ -7,6 +7,7 @@
 #include "common/port.h"  /* LEPTRIS_THREAD_LOCAL (TODO.concurrency/01) */
 #include <stdio.h>
 #include <string.h>
+#include "dom/diag.h"   /* LeptrisDiag layout (#1200) */
 
 /* Error state — THREAD-LOCAL since TODO.concurrency/01: concurrent
  * parses (one document per thread) no longer race the channel. The
@@ -131,4 +132,25 @@ LEPTRIS_API const char* leptris_status_string(LeptrisStatus status) {
         case LEPTRIS_ERROR_IO:        return "I/O error";
         default:                     return "Unknown error";
     }
+}
+
+/* ---- #1200: recover-class parse diagnostics ------------------- */
+
+LEPTRIS_API size_t leptris_document_parse_diag_count(LeptrisDocument doc) {
+    return doc ? (size_t)doc->parse_diag_count : 0;
+}
+
+LEPTRIS_API int leptris_document_parse_diag(LeptrisDocument doc,
+                                            size_t index,
+                                            LeptrisDiagKind* kind,
+                                            char* message,
+                                            size_t message_cap) {
+    if (!doc || index >= (size_t)doc->parse_diag_count) return 0;
+    struct LeptrisDiag* d = (struct LeptrisDiag*)doc->parse_diags + index;
+    if (kind) *kind = d->kind;
+    if (message && message_cap) {
+        strncpy(message, d->message, message_cap - 1);
+        message[message_cap - 1] = '\0';
+    }
+    return 1;
 }

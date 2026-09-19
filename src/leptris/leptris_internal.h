@@ -111,6 +111,14 @@ struct leptris_document {
      * thread-local channel). */
     char last_error_message[256];
 
+    /* Recover-class parse diagnostics (#1200): the DOM parse's
+     * parity surface with the SAX lane's recover errors. Pool-free
+     * list (leptris_diag_* owns it); released in document_free. */
+struct LeptrisDiag;
+    struct LeptrisDiag* parse_diags;
+    int parse_diag_count;
+    int parse_diag_cap;
+
     /* EXSLT-style extension pack enabled via leptris_exslt_enable
      * (TODO.concurrency/06). */
     int exslt_enabled;
