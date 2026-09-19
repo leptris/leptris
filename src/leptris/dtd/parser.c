@@ -188,11 +188,16 @@ static DTDEntityDecl* dtd_parse_entity(DTDParser* p) {
         entity->notation_name = dtd_parse_name(p);
     }
 
-    /* Skip to '>' */
+    /* Skip to '>' - unterminated (input exhausted first) is a
+     * malformed declaration: the NULL-on-error contract (#1211). */
     while (!dtd_at_end(p) && dtd_peek(p) != '>') {
         dtd_advance(p);
     }
-    if (dtd_peek(p) == '>') dtd_advance(p);
+    if (dtd_peek(p) == '>') {
+        dtd_advance(p);
+    } else {
+        return NULL;
+    }
 
     return entity;
 }
@@ -227,6 +232,7 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
         int depth = 0;
         int in_quote = 0;
         char quote_char = 0;
+        int closed = 0;
 
         while (!dtd_at_end(p)) {
             char c = dtd_peek(p);
@@ -241,12 +247,15 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
             } else if (c == ')') {
                 depth--;
                 dtd_advance(p);
-                if (depth == 0) break;
+                if (depth == 0) { closed = 1; break; }
                 dtd_advance(p);
                 continue;
             }
             dtd_advance(p);
         }
+        /* #1211: running out of input before the model closes is a
+         * malformed declaration — the NULL-on-error contract. */
+        if (!closed) return NULL;
 
         size_t len = p->pos - start;
         elem->content_model = (char*)leptris_pool_alloc(p->pool, len + 1);
@@ -263,11 +272,16 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
         }
     }
 
-    /* Skip to '>' */
+    /* Skip to '>' - unterminated (input exhausted first) is a
+     * malformed declaration: the NULL-on-error contract (#1211). */
     while (!dtd_at_end(p) && dtd_peek(p) != '>') {
         dtd_advance(p);
     }
-    if (dtd_peek(p) == '>') dtd_advance(p);
+    if (dtd_peek(p) == '>') {
+        dtd_advance(p);
+    } else {
+        return NULL;
+    }
 
     return elem;
 }
@@ -306,11 +320,16 @@ static DTDNotationDecl* dtd_parse_notation(DTDParser* p) {
         }
     }
 
-    /* Skip to '>' */
+    /* Skip to '>' - unterminated (input exhausted first) is a
+     * malformed declaration: the NULL-on-error contract (#1211). */
     while (!dtd_at_end(p) && dtd_peek(p) != '>') {
         dtd_advance(p);
     }
-    if (dtd_peek(p) == '>') dtd_advance(p);
+    if (dtd_peek(p) == '>') {
+        dtd_advance(p);
+    } else {
+        return NULL;
+    }
 
     return notation;
 }
@@ -588,16 +607,22 @@ static void dtd_parse_into(LeptrisDTD* dtd, const char* dtd_content,
             DTDEntityDecl* entity = dtd_parse_entity(&parser);
             if (entity) {
                 ttdtd_add_entity(dtd, entity);
+            } else {
+                dtd->parse_failed = 1;  /* #1211 */
             }
         } else if (dtd_match(&parser, "<!ELEMENT")) {
             DTDElementDecl* elem = dtd_parse_element(&parser);
             if (elem) {
                 ttdtd_add_element(dtd, elem);
+            } else {
+                dtd->parse_failed = 1;  /* #1211 */
             }
         } else if (dtd_match(&parser, "<!NOTATION")) {
             DTDNotationDecl* notation = dtd_parse_notation(&parser);
             if (notation) {
                 ttdtd_add_notation(dtd, notation);
+            } else {
+                dtd->parse_failed = 1;  /* #1211 */
             }
         } else if (dtd_match(&parser, "<!ATTLIST")) {
             /* Parse one or more <!ATTLIST element-name attr-decl+>
@@ -610,6 +635,7 @@ static void dtd_parse_into(LeptrisDTD* dtd, const char* dtd_content,
             char* elem_name = dtd_parse_name(&parser);
             if (!elem_name) {
                 /* Malformed; skip to '>' */
+                dtd->parse_failed = 1;  /* #1211 */
                 while (!dtd_at_end(&parser) && dtd_peek(&parser) != '>') {
                     dtd_advance(&parser);
                 }
@@ -824,5 +850,12 @@ LEPTRIS_API LeptrisDTD* leptris_dtd_parse(const char* dtd_content, size_t len) {
      * Document-pool DTDs (created via the internal parser path) leave
      * owns_pool=0; their pool is destroyed with the document. */
     dtd->owns_pool = 1;
+    /* #1211: the documented NULL-on-error contract — malformed
+     * declarations (keyword matched, structure undeliverable) free
+     * the whole pool; lenient skips never set parse_failed. */
+    if (dtd->parse_failed) {
+        leptris_pool_destroy(pool);
+        return NULL;
+    }
     return dtd;
 }
