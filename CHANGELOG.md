@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.205] - 2026-09-19
+
+### Added
+
+- recover diagnostics on the DOM parse — duplicate attributes report, first wins (#1200 part 2) (parse)
+- ATTR_ORDER flag — attribute-order-identity digest variant (#1200 part 1) (digest)
+
+### Fixed
+
+- move LeptrisDiag forward declaration to file scope (MSVC C2027)
+
+### Performance
+
+- first-char-bucketed tag classifier — WHATWG parse +31-37% (#1218 tail) (html)
+
+
+
 ## [1.9.204] - 2026-09-19
 
 ### Added
