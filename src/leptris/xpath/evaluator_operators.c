@@ -256,6 +256,78 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         const char* loop_var =
             pos_sep ? var_buf : ast->value;
         const char* pos_var = pos_sep ? pos_sep + 1 : NULL;
+        /* Shadowed bindings (XQuery scoping): the loop var may
+         * already be bound by an outer for/let or a function
+         * parameter. Rebinding over the existing entry would
+         * clobber its payload — leaking the nodeset (the ASAN
+         * trail on QT3 fn-string-join). Snapshot, remove, restore
+         * after the loop: the LET operator's discipline. */
+        typedef struct {
+            int had;
+            XPathVariableType type;
+            double num;
+            int b;
+            char* str;             /* owned strdup */
+            XPathNodeSet* ns;      /* owned deep copy */
+        } ForShadow;
+        ForShadow sv = {0, XPATH_VAR_TYPE_NONE, 0, 0, NULL, NULL};
+        ForShadow psv = {0, XPATH_VAR_TYPE_NONE, 0, 0, NULL, NULL};
+        {
+            XPathVariable* old =
+                xpath_variable_set_get(ctx->variable_set, loop_var);
+            if (old) {
+                sv.had = 1;
+                sv.type = old->value.type;
+                switch (old->value.type) {
+                    case XPATH_VAR_TYPE_NUMBER:
+                        sv.num = old->value.v.number_value;
+                        break;
+                    case XPATH_VAR_TYPE_BOOLEAN:
+                        sv.b = old->value.v.boolean_value;
+                        break;
+                    case XPATH_VAR_TYPE_STRING:
+                        sv.str = leptris_strdup(
+                            old->value.v.string_value
+                                ? old->value.v.string_value : "");
+                        break;
+                    case XPATH_VAR_TYPE_NODE_SET:
+                        sv.ns = xpath_nodeset_deep_copy(
+                            old->value.v.nodeset_value);
+                        break;
+                    default:
+                        break;
+                }
+                xpath_variable_set_remove(ctx->variable_set, loop_var);
+            }
+            if (pos_var) {
+                XPathVariable* pold =
+                    xpath_variable_set_get(ctx->variable_set, pos_var);
+                if (pold) {
+                    psv.had = 1;
+                    psv.type = pold->value.type;
+                    switch (pold->value.type) {
+                        case XPATH_VAR_TYPE_NUMBER:
+                            psv.num = pold->value.v.number_value;
+                            break;
+                        case XPATH_VAR_TYPE_BOOLEAN:
+                            psv.b = pold->value.v.boolean_value;
+                            break;
+                        case XPATH_VAR_TYPE_STRING:
+                            psv.str = leptris_strdup(
+                                pold->value.v.string_value
+                                    ? pold->value.v.string_value : "");
+                            break;
+                        case XPATH_VAR_TYPE_NODE_SET:
+                            psv.ns = xpath_nodeset_deep_copy(
+                                pold->value.v.nodeset_value);
+                            break;
+                        default:
+                            break;
+                    }
+                    xpath_variable_set_remove(ctx->variable_set, pos_var);
+                }
+            }
+        }
         for (size_t i = 0; i < n; i++) {
             XPathVariable* var = xpath_variable_set_add(
                 ctx->variable_set, loop_var, XPATH_VAR_TYPE_NODE_SET);
@@ -335,6 +407,60 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 xpath_variable_set_remove(ctx->variable_set, pos_var);
             xpath_variable_set_remove(ctx->variable_set, loop_var);
         }
+        /* Restore the shadowed bindings (snapshot above); entries
+         * that fail to re-bind fall through to the frees below. */
+        if (sv.had) {
+            XPathVariable* var = xpath_variable_set_add(
+                ctx->variable_set, loop_var, sv.type);
+            if (var) {
+                switch (sv.type) {
+                    case XPATH_VAR_TYPE_NUMBER:
+                        xpath_variable_set_number(var, sv.num);
+                        break;
+                    case XPATH_VAR_TYPE_BOOLEAN:
+                        xpath_variable_set_boolean(var, sv.b);
+                        break;
+                    case XPATH_VAR_TYPE_STRING:
+                        xpath_variable_set_string(var,
+                            sv.str ? sv.str : "");
+                        break;
+                    case XPATH_VAR_TYPE_NODE_SET:
+                        xpath_variable_set_nodeset(var, sv.ns);
+                        sv.ns = NULL;   /* transferred */
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        if (psv.had) {
+            XPathVariable* var = xpath_variable_set_add(
+                ctx->variable_set, pos_var, psv.type);
+            if (var) {
+                switch (psv.type) {
+                    case XPATH_VAR_TYPE_NUMBER:
+                        xpath_variable_set_number(var, psv.num);
+                        break;
+                    case XPATH_VAR_TYPE_BOOLEAN:
+                        xpath_variable_set_boolean(var, psv.b);
+                        break;
+                    case XPATH_VAR_TYPE_STRING:
+                        xpath_variable_set_string(var,
+                            psv.str ? psv.str : "");
+                        break;
+                    case XPATH_VAR_TYPE_NODE_SET:
+                        xpath_variable_set_nodeset(var, psv.ns);
+                        psv.ns = NULL;   /* transferred */
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        if (sv.str) free(sv.str);
+        if (sv.ns) xpath_nodeset_free(sv.ns);
+        if (psv.str) free(psv.str);
+        if (psv.ns) xpath_nodeset_free(psv.ns);
         xpath_result_free(domain);
         if (scratch) ctx->variable_set = NULL;
         xpath_variable_set_free(scratch);
