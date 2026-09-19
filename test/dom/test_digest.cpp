@@ -103,6 +103,42 @@ TEST(Digest, DropWsTextSkipsWhitespaceOnlyNodes) {
               digest_of("<r><a/> <b/></r>", LEPTRIS_DIGEST_DEFAULT));
 }
 
+/* #1200: ATTR_ORDER keeps document order in the hash — reordered
+ * attributes digest DIFFERENT, same-order documents stay equal,
+ * and the flag composes with DROP_WS_TEXT. The dedup (first-wins
+ * on the resolved key) still applies. */
+TEST(Digest, AttrOrderSensitiveVariant) {
+    EXPECT_NE(digest_of("<r a='1' b='2'/>", LEPTRIS_DIGEST_ATTR_ORDER),
+              digest_of("<r b='2' a='1'/>", LEPTRIS_DIGEST_ATTR_ORDER));
+    EXPECT_EQ(digest_of("<r a='1' b='2'/>", LEPTRIS_DIGEST_ATTR_ORDER),
+              digest_of("<r a='1' b='2'/>", LEPTRIS_DIGEST_ATTR_ORDER));
+}
+
+TEST(Digest, AttrOrderComposesWithDropWs) {
+    EXPECT_EQ(
+        digest_of("<r a='1' b='2'><a/><b/></r>",
+                  (LeptrisDigestFlags)(LEPTRIS_DIGEST_ATTR_ORDER |
+                                       LEPTRIS_DIGEST_DROP_WS_TEXT)),
+        digest_of("<r a='1' b='2'><a/> <b/></r>",
+                  (LeptrisDigestFlags)(LEPTRIS_DIGEST_ATTR_ORDER |
+                                       LEPTRIS_DIGEST_DROP_WS_TEXT)));
+    EXPECT_NE(
+        digest_of("<r a='1' b='2'><a/></r>",
+                  (LeptrisDigestFlags)(LEPTRIS_DIGEST_ATTR_ORDER |
+                                       LEPTRIS_DIGEST_DROP_WS_TEXT)),
+        digest_of("<r b='2' a='1'><a/></r>",
+                  (LeptrisDigestFlags)(LEPTRIS_DIGEST_ATTR_ORDER |
+                                       LEPTRIS_DIGEST_DROP_WS_TEXT)));
+}
+
+TEST(Digest, AttrOrderRecursesIntoChildren) {
+    /* The child's attribute order participates too: the Merkle
+     * combine feeds each child's digest (with the flag) upward. */
+    EXPECT_NE(
+        digest_of("<r><c x='1' y='2'/></r>", LEPTRIS_DIGEST_ATTR_ORDER),
+        digest_of("<r><c y='2' x='1'/></r>", LEPTRIS_DIGEST_ATTR_ORDER));
+}
+
 /* Null contract: no node, no digest. */
 TEST(Digest, NullNodeIsZero) {
     EXPECT_EQ(leptris_node_digest(nullptr, LEPTRIS_DIGEST_DEFAULT), 0u);
