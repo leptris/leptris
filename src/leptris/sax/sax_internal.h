@@ -154,6 +154,13 @@ struct LeptrisSAXParser {
      * state machine. */
     int    streaming;
 
+    /* One-shot parse (TODO.max-perf/2-3 slice 1): the whole input
+     * arrives in a single feed and stays alive for the parser's
+     * lifetime (pull buffer mode). Tokens can never straddle a
+     * chunk boundary, so name scans run in place with one direct
+     * copy into the frame instead of carry+scratch+frame. */
+    int    one_shot;
+
     /* Emitted start_document once we've committed to parsing --
      * used to avoid emitting twice across feed() calls. */
     int    start_emitted;

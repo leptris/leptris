@@ -69,7 +69,7 @@ Core (src/leptris/)    →  DOM, parser, XPath engine, SAX, DTD, encoding, memor
 - `xinclude/` — built and shipping. `parse="text"` with `xi:fallback` works end-to-end. `parse="xml"` and xpointer are TODO 92.
 
 ### Public API surface (`src/include/leptris/`)
-The public contract. Don't break ABI without a major bump. Headers split by subsystem: `dom/{document,element,serialize}.h`, `xpath/xpath.h`, `sax/sax.h`, plus `types.h`, `error.h`, `dtd.h` at the top level. All handles are opaque typedefs (`LeptrisDocument`, `LeptrisElement`, `LeptrisNodeRef`, …); callers never see struct definitions.
+The public contract. Don't break ABI without a major bump. Headers split by subsystem: `dom/{document,element,serialize}.h`, `xpath/xpath.h`, `sax/sax.h`, `html.h`, plus `types.h`, `error.h`, `dtd.h` at the top level. All handles are opaque typedefs (`LeptrisDocument`, `LeptrisElement`, `LeptrisNodeRef`, …); callers never see struct definitions.
 
 ### Memory model
 - Pool allocator is the dominant allocation path — node creation should go through `leptris_node_create_pooled`.

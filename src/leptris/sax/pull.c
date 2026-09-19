@@ -240,6 +240,10 @@ LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len) {
     if (!p) return NULL;
     p->input = xml;
     p->len = len;
+    /* Memory source: single-feed parse — enable the one-shot fast
+     * paths (TODO.max-perf/2-3 slice 1). File mode keeps the
+     * chunked-streaming paths. */
+    leptris_sax_parser_set_one_shot(p->sax, 1);
     return p;
 }
 
