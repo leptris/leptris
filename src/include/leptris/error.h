@@ -19,7 +19,13 @@
 #      define LEPTRIS_API __declspec(dllimport)
 #    endif
 #  else
-#    define LEPTRIS_API __attribute__((visibility("default")))
+     /* Mirrors leptris.h (GCC LTO externalization, #1204). */
+#    if defined(__GNUC__) && !defined(__clang__)
+#      define LEPTRIS_API __attribute__((visibility("default"), used, \
+                                            externally_visible))
+#    else
+#      define LEPTRIS_API __attribute__((visibility("default"), used))
+#    endif
 #  endif
 #endif
 

@@ -77,8 +77,10 @@ static void print_element_text(LeptrisElement e) {
         fputs(t, stdout);
         return;
     }
-    for (LeptrisNodeRef c = leptris_element_first_child_any(e); c;
-         c = leptris_element_next_sibling_any(c)) {
+    for (LeptrisNodeRef c = (LeptrisNodeRef)leptris_element_first_child_any(e);
+         c;
+         c = (LeptrisNodeRef)leptris_element_next_sibling_any(
+                 (LeptrisElement)c)) {
         const char* txt = leptris_text_node_get_content(c);
         if (txt) fputs(txt, stdout);
     }
