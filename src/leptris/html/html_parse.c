@@ -3061,30 +3061,130 @@ static int h_is_formatting(const char* n) {
 
 /* WHATWG "special" category (13.2.4.2) — the adoption agency's
  * furthest-block candidates. */
+/* Generated tag classifier (#1218 hot path): one first-char
+ * bucket walk replaces the ~78-entry strcmp scans that the
+ * sampler pinned at ~21% of WHATWG parse (h_is_special_ww +
+ * h_reconstructs). Keep in sync with the WHATWG special and
+ * no-formatting sets. */
+typedef struct {
+    char name[12];
+    uint8_t len;
+    uint8_t special;   /* WHATWG 13.2.4 special set */
+    uint8_t no_fmt;    /* never reconstructed (formatting) */
+} HTagInfo;
+
+static const HTagInfo h_tag_infos[] = {
+    {"address", 7, 1, 1},
+    {"applet", 6, 1, 0},
+    {"area", 4, 1, 0},
+    {"article", 7, 1, 1},
+    {"aside", 5, 1, 1},
+    {"base", 4, 1, 1},
+    {"basefont", 8, 1, 1},
+    {"bgsound", 7, 1, 1},
+    {"blockquote", 10, 1, 1},
+    {"body", 4, 1, 1},
+    {"br", 2, 1, 0},
+    {"button", 6, 1, 0},
+    {"caption", 7, 1, 1},
+    {"center", 6, 1, 1},
+    {"col", 3, 1, 1},
+    {"colgroup", 8, 1, 1},
+    {"dd", 2, 1, 1},
+    {"details", 7, 1, 1},
+    {"dialog", 6, 1, 1},
+    {"dir", 3, 1, 1},
+    {"div", 3, 1, 1},
+    {"dl", 2, 1, 1},
+    {"dt", 2, 1, 1},
+    {"embed", 5, 1, 0},
+    {"fieldset", 8, 1, 1},
+    {"figcaption", 10, 1, 1},
+    {"figure", 6, 1, 1},
+    {"footer", 6, 1, 1},
+    {"form", 4, 1, 1},
+    {"frame", 5, 1, 1},
+    {"frameset", 8, 1, 1},
+    {"h1", 2, 1, 1},
+    {"h2", 2, 1, 1},
+    {"h3", 2, 1, 1},
+    {"h4", 2, 1, 1},
+    {"h5", 2, 1, 1},
+    {"h6", 2, 1, 1},
+    {"head", 4, 1, 1},
+    {"header", 6, 1, 1},
+    {"hgroup", 6, 1, 1},
+    {"hr", 2, 1, 1},
+    {"html", 4, 1, 1},
+    {"iframe", 6, 1, 0},
+    {"img", 3, 1, 0},
+    {"input", 5, 1, 0},
+    {"keygen", 6, 1, 0},
+    {"li", 2, 1, 1},
+    {"link", 4, 1, 1},
+    {"listing", 7, 1, 1},
+    {"main", 4, 1, 1},
+    {"marquee", 7, 1, 0},
+    {"menu", 4, 1, 1},
+    {"meta", 4, 1, 1},
+    {"nav", 3, 1, 1},
+    {"noembed", 7, 1, 0},
+    {"noframes", 8, 1, 1},
+    {"noscript", 8, 1, 0},
+    {"object", 6, 1, 0},
+    {"ol", 2, 1, 1},
+    {"p", 1, 1, 1},
+    {"param", 5, 1, 0},
+    {"plaintext", 9, 1, 1},
+    {"pre", 3, 1, 1},
+    {"script", 6, 1, 1},
+    {"search", 6, 1, 1},
+    {"section", 7, 1, 1},
+    {"select", 6, 1, 0},
+    {"source", 6, 1, 0},
+    {"style", 5, 1, 1},
+    {"summary", 7, 1, 1},
+    {"table", 5, 1, 1},
+    {"tbody", 5, 1, 1},
+    {"td", 2, 1, 1},
+    {"template", 8, 1, 1},
+    {"textarea", 8, 1, 1},
+    {"tfoot", 5, 1, 1},
+    {"th", 2, 1, 1},
+    {"thead", 5, 1, 1},
+    {"title", 5, 1, 1},
+    {"tr", 2, 1, 1},
+    {"track", 5, 1, 0},
+    {"ul", 2, 1, 1},
+    {"wbr", 3, 1, 0},
+    {"xmp", 3, 1, 0},
+};
+
+/* bucket[first_char] = start index; bucket[first_char+1] = end */
+static const uint8_t h_tag_bucket[27] = {
+    0, 5, 12, 16, 23, 24, 31, 31, 42,
+    45, 45, 46, 49, 53, 57, 59, 63, 63,
+    63, 70, 81, 82, 82, 83, 84, 84, 84,
+};
+
+/* Resolve a (lowercased) tag name's flags; NULL when unknown. */
+static const HTagInfo* h_tag_lookup(const char* n) {
+    if (!n) return NULL;
+    unsigned char c = (unsigned char)n[0];
+    if (c < 'a' || c > 'z') return NULL;
+    for (int i = h_tag_bucket[c - 'a'];
+         i < h_tag_bucket[c - 'a' + 1]; i++) {
+        const HTagInfo* t = &h_tag_infos[i];
+        if ((uint8_t)n[t->len] == 0 && t->name[t->len - 1] == n[t->len - 1] &&
+            memcmp(n, t->name, t->len) == 0)
+            return t;
+    }
+    return NULL;
+}
+
 static int h_is_special_ww(const char* n) {
-    static const char* const k[] = {
-        "address",  "applet",  "area",   "article",  "aside",
-        "base",     "basefont", "bgsound", "blockquote", "body",
-        "br",       "button",  "caption", "center",  "col",
-        "colgroup", "dd",      "details", "dialog",  "dir",
-        "div",
-        "dl",       "dt",      "embed",  "fieldset", "figcaption",
-        "figure",   "footer",  "form",   "frame",    "frameset",
-        "h1",       "h2",      "h3",     "h4",       "h5",
-        "h6",       "head",    "header", "hgroup",   "hr",
-        "html",     "iframe",  "img",    "input",    "keygen",
-        "li",       "link",    "listing", "main",    "marquee",
-        "menu",     "meta",    "nav",    "noembed",  "noframes",
-        "noscript", "object",  "ol",     "p",        "param",
-        "plaintext", "pre",    "script", "search",   "section",
-        "select",   "source",  "style",  "summary",  "table",
-        "tbody",    "td",      "template", "textarea", "tfoot",
-        "th",       "thead",   "title",  "tr",       "track",
-        "ul",       "wbr",     "xmp",    NULL};
-    if (!n) return 0;
-    for (int i = 0; k[i]; i++)
-        if (strcmp(n, k[i]) == 0) return 1;
-    return 0;
+    const HTagInfo* t = h_tag_lookup(n);
+    return t && t->special;
 }
 
 #define H_NS_HTML 0
@@ -3256,22 +3356,8 @@ static int h_input_type_hidden(const char* q, const char* end) {
  * head set, the block-level set (they close p instead), the table
  * family, and raw-text elements. */
 static int h_reconstructs(const char* n) {
-    static const char* const no[] = {
-        "html",  "head",   "body",   "frameset", "base",  "basefont",
-        "bgsound", "link", "meta",   "script",   "style", "template",
-        "title", "noframes", "address", "article", "aside",
-        "blockquote", "center", "details", "dialog", "dir",
-        "div",   "dl",     "fieldset", "figcaption", "figure",
-        "footer", "header", "hgroup", "main",    "menu",  "nav",
-        "ol",    "p",      "search", "section",  "summary", "ul",
-        "h1",    "h2",     "h3",     "h4",       "h5",    "h6",
-        "pre",   "listing", "form",  "li",       "dd",    "dt",
-        "plaintext", "textarea", "table", "hr",  "caption", "col",
-        "colgroup", "frame", "tbody", "tfoot",   "thead", "td",
-        "th",    "tr",     NULL};
-    for (int i = 0; no[i]; i++)
-        if (strcmp(n, no[i]) == 0) return 0;
-    return 1;
+    const HTagInfo* t = h_tag_lookup(n);
+    return !(t && t->no_fmt);
 }
 
 /* ---- #659 foreign content (WHATWG 12.2.6.5) ---- */
