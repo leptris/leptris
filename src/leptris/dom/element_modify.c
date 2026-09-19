@@ -548,11 +548,39 @@ LeptrisStatus leptris_element_remove_child(LeptrisElement parent, LeptrisElement
 LeptrisStatus leptris_element_remove_all_children(LeptrisElement elem) {
     if (!elem) return LEPTRIS_ERROR_NULL_ARG;
 
-    /* Walk through all children and clear parent references */
-    LeptrisElement child = leptris_element_get_first_child(elem);
+    /* Walk EVERY child. The element-filtered getters skip text and
+     * other non-element nodes, which left their parent backpointers
+     * dangling; a later append then validated a stale mutation-tail
+     * entry against the detached child and spliced the new subtree
+     * onto it instead of the emptied element (#1220: HTML set_text
+     * produced an empty <p/>). */
+    LeptrisNode* child =
+        leptris_node_first_child_internal((LeptrisNode*)elem);
     while (child) {
-        LeptrisElement next = leptris_element_get_next_sibling(child);
-        leptris_elem_set_parent(child, NULL);
+        LeptrisNode* next = leptris_node_get_next_sibling(child);
+        switch (child->type) {
+            case LEPTRIS_NODE_TYPE_ELEMENT:
+                leptris_elem_set_parent((LeptrisElement)child, NULL);
+                break;
+            case LEPTRIS_NODE_TYPE_TEXT:
+                leptris_textnode_set_parent((LeptrisTextNode*)child, NULL);
+                break;
+            case LEPTRIS_NODE_TYPE_COMMENT:
+                leptris_comment_set_parent((LeptrisCommentNode*)child, NULL);
+                break;
+            case LEPTRIS_NODE_TYPE_CDATA:
+                leptris_cdata_set_parent((LeptrisCDATANode*)child, NULL);
+                break;
+            case LEPTRIS_NODE_TYPE_PI:
+                leptris_pi_set_parent((LeptrisPINode*)child, NULL);
+                break;
+            case LEPTRIS_NODE_TYPE_ENTITY_REF:
+                leptris_entity_ref_set_parent(
+                    (LeptrisEntityRefNode*)child, NULL);
+                break;
+            default:
+                break;
+        }
         child = next;
     }
 
