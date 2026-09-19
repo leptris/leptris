@@ -436,10 +436,13 @@ void xpath_context_init_from_document(XPathContext* context) {
  * pathological queries. The free-list owns XPathNodeSet structs only;
  * spilled nodes arrays are freed before push. */
 #define NODESET_FREE_LIST_CAP 64
-/* Under AddressSanitizer the free-lists must NOT retain structs:
- * LSan sees the parked (unreferenced-from-scannable-roots) structs
- * as leaks at process exit — there is no atexit drain. Release
- * builds keep the recycling; sanitizer builds pay the real free. */
+/* Under AddressSanitizer the NODESET free-list must not retain
+ * structs: LSan sees the parked (unreferenced-from-scannable-
+ * roots) structs as leaks at process exit — there is no atexit
+ * drain. Release builds keep the recycling; sanitizer builds pay
+ * the real free. The RESULT free-list keeps parking even under
+ * ASAN — its CACHED sentinel is the documented double-free-is-a-
+ * no-op contract (XPathResults.DoubleFreeIsANoOp). */
 #ifndef __has_feature
 #define __has_feature(x) 0   /* GCC predates __has_feature */
 #endif
@@ -784,9 +787,9 @@ void xpath_result_free(struct leptris_xpath_result* result) {
 
     /* Push onto thread-local free-list (TODO 162). Cap prevents
      * unbounded growth. The CACHED sentinel parked in type makes a
-     * repeat free a no-op (double-free spec). */
-    if (LEPTRIS_XPATH_TLS_CACHE &&
-        g_xpath_tls.result_count < XPATH_RESULT_FREE_LIST_CAP) {
+     * repeat free a no-op (double-free spec) — parking stays on
+     * even under ASAN for exactly that reason. */
+    if (g_xpath_tls.result_count < XPATH_RESULT_FREE_LIST_CAP) {
         struct leptris_xpath_result* next = g_xpath_tls.result_head;
         result->type = XPATH_RESULT_CACHED;
         result->value.nodeset_value = (XPathNodeSet*)next;
