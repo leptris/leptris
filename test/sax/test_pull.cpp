@@ -88,6 +88,38 @@ TEST(Pull, CommentsCdataPiAndEndDocument) {
     EXPECT_EQ(end_doc, 1);
 }
 
+TEST(Pull, EntityTextAndAttrValuesExpandInBufferMode) {
+    /* Buffer-mode (one-shot) pulls borrow event strings from the
+     * input/scratch — entities must still arrive EXPANDED, for both
+     * text and attribute values (borrow-safety pin for
+     * TODO.max-perf/2-3 slice 1). */
+    const char* xml =
+        "<r tag='r&amp;d' code='&#65;'>a &amp; b &lt;c&gt;</r>";
+    LeptrisPullParser p = leptris_pull_new(xml, strlen(xml));
+    ASSERT_NE(p, nullptr);
+    const LeptrisPullEvent* ev = leptris_pull_next(p);
+    ASSERT_NE(ev, nullptr);
+    ASSERT_EQ(ev->type, LEPTRIS_PULL_START_ELEMENT);
+    EXPECT_EQ(leptris_pull_attr_count(p), 2u);
+    EXPECT_STREQ(leptris_pull_attr_name(p, 0), "tag");
+    EXPECT_STREQ(leptris_pull_attr_value(p, 0), "r&d");
+    EXPECT_STREQ(leptris_pull_attr_name(p, 1), "code");
+    EXPECT_STREQ(leptris_pull_attr_value(p, 1), "A");
+    ev = leptris_pull_next(p);
+    ASSERT_NE(ev, nullptr);
+    ASSERT_EQ(ev->type, LEPTRIS_PULL_TEXT);
+    ASSERT_NE(ev->text, nullptr);
+    EXPECT_STREQ(ev->text, "a & b <c>");
+    ev = leptris_pull_next(p);
+    ASSERT_NE(ev, nullptr);
+    ASSERT_EQ(ev->type, LEPTRIS_PULL_END_ELEMENT);
+    EXPECT_STREQ(ev->name, "r");
+    ev = leptris_pull_next(p);
+    ASSERT_NE(ev, nullptr);
+    EXPECT_EQ(ev->type, LEPTRIS_PULL_END_DOCUMENT);
+    leptris_pull_free(p);
+}
+
 TEST(Pull, MalformedInputYieldsErrorEvent) {
     LeptrisPullParser p = leptris_pull_new("<a><b></a>", 10);
     ASSERT_NE(p, nullptr);

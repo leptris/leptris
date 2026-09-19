@@ -8,6 +8,7 @@
  * by the slice, not the document. All event strings are owned by the
  * puller and remain valid until the NEXT leptris_pull_next call. */
 #include "../../include/leptris/sax/sax.h"
+#include "sax_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,11 @@ typedef struct pull_event {
     /* START_ELEMENT attributes: owned flat copies [n1,v1,n2,v2...] */
     char** attrs;
     size_t attr_count;
+    /* One-shot buffer pulls (TODO.max-perf/2-3 slice 1): strings
+     * borrow the sax parser's stable storage (input buffer + scratch,
+     * alive until parser free) — queue_reset_event frees only the
+     * attrs array itself. */
+    int borrowed;
 } pull_event;
 
 struct leptris_pull_parser {
@@ -57,9 +63,14 @@ struct leptris_pull_parser {
 };
 
 static void queue_reset_event(pull_event* e) {
-    free(e->name); free(e->text);
+    if (!e->borrowed) {
+        free(e->name);
+        free(e->text);
+    }
     if (e->attrs) {
-        for (size_t i = 0; i < e->attr_count * 2; i++) free(e->attrs[i]);
+        if (!e->borrowed)
+            for (size_t i = 0; i < e->attr_count * 2; i++)
+                free(e->attrs[i]);
         free(e->attrs);
     }
     memset(e, 0, sizeof(*e));
@@ -71,6 +82,18 @@ static char* pull_strdup_n(const char* s, size_t n) {
     memcpy(c, s, n);
     c[n] = '\0';
     return c;
+}
+
+/* Event strings: borrow in one-shot mode (stable until parser free),
+ * strdup otherwise (streaming file mode — the source chunk dies at
+ * the next feed). */
+static char* ev_string(pull_event* e, const struct leptris_pull_parser* p,
+                       const char* s, size_t n) {
+    if (p->sax->one_shot) {
+        e->borrowed = 1;
+        return (char*)(s ? s : "");
+    }
+    return pull_strdup_n(s ? s : "", n);
 }
 
 static pull_event* queue_push(struct leptris_pull_parser* p) {
@@ -104,16 +127,25 @@ static void cb_start_element(void* ud, const char* name, const char** attrs) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_START_ELEMENT;
-    e->name = pull_strdup_n(name, strlen(name));
+    e->name = ev_string(e, p, name, strlen(name));
     if (attrs) {
         size_t n = 0;
         while (attrs[n]) n += 2;   /* flat [name, value, ..., NULL] */
         e->attr_count = n / 2;
         e->attrs = (char**)calloc(n + 1, sizeof(char*));
         if (e->attrs) {
-            for (size_t i = 0; i < n; i++)
-                e->attrs[i] = pull_strdup_n(attrs[i] ? attrs[i] : "",
-                                            attrs[i] ? strlen(attrs[i]) : 0);
+            if (p->sax->one_shot) {
+                /* Names/values are frame/scratch-owned (parser
+                 * lifetime); the array itself stays queue-owned. */
+                e->borrowed = 1;
+                for (size_t i = 0; i < n; i++)
+                    e->attrs[i] = (char*)(attrs[i] ? attrs[i] : "");
+            } else {
+                for (size_t i = 0; i < n; i++)
+                    e->attrs[i] = pull_strdup_n(
+                        attrs[i] ? attrs[i] : "",
+                        attrs[i] ? strlen(attrs[i]) : 0);
+            }
         }
     }
 }
@@ -123,7 +155,7 @@ static void cb_end_element(void* ud, const char* name) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_END_ELEMENT;
-    e->name = pull_strdup_n(name, strlen(name));
+    e->name = ev_string(e, p, name, strlen(name));
 }
 
 static void cb_characters(void* ud, const char* text, size_t len) {
@@ -131,7 +163,10 @@ static void cb_characters(void* ud, const char* text, size_t len) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_TEXT;
-    e->text = pull_strdup_n(text, len);
+    /* Text spans are raw input-buffer slices — no NUL terminator in
+     * stable storage, so they always copy even in one-shot mode
+     * (the public event contract is NUL-terminated strings). */
+    e->text = pull_strdup_n(text ? text : "", len);
     e->text_len = len;
 }
 
@@ -140,7 +175,7 @@ static void cb_comment(void* ud, const char* comment) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_COMMENT;
-    e->text = pull_strdup_n(comment, strlen(comment));
+    e->text = ev_string(e, p, comment, strlen(comment));
     e->text_len = strlen(comment);
 }
 
@@ -149,7 +184,7 @@ static void cb_cdata(void* ud, const char* cdata) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_CDATA;
-    e->text = pull_strdup_n(cdata, strlen(cdata));
+    e->text = ev_string(e, p, cdata, strlen(cdata));
     e->text_len = strlen(cdata);
 }
 
@@ -158,9 +193,9 @@ static void cb_pi(void* ud, const char* target, const char* data) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_PI;
-    e->name = pull_strdup_n(target, strlen(target));
+    e->name = ev_string(e, p, target, strlen(target));
     if (data) {
-        e->text = pull_strdup_n(data, strlen(data));
+        e->text = ev_string(e, p, data, strlen(data));
         e->text_len = strlen(data);
     }
 }
@@ -177,9 +212,9 @@ static void cb_start_prefix(void* ud, const char* prefix, const char* uri) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_START_PREFIX;
-    e->name = pull_strdup_n(prefix ? prefix : "",
-                            prefix ? strlen(prefix) : 0);
-    e->text = pull_strdup_n(uri ? uri : "", uri ? strlen(uri) : 0);
+    e->name = ev_string(e, p, prefix ? prefix : "",
+                        prefix ? strlen(prefix) : 0);
+    e->text = ev_string(e, p, uri ? uri : "", uri ? strlen(uri) : 0);
     e->text_len = uri ? strlen(uri) : 0;
 }
 
@@ -188,8 +223,8 @@ static void cb_end_prefix(void* ud, const char* prefix) {
     pull_event* e = queue_push(p);
     if (!e) return;
     e->type = LEPTRIS_PULL_END_PREFIX;
-    e->name = pull_strdup_n(prefix ? prefix : "",
-                            prefix ? strlen(prefix) : 0);
+    e->name = ev_string(e, p, prefix ? prefix : "",
+                        prefix ? strlen(prefix) : 0);
 }
 
 static void cb_error(void* ud, const char* message, int line, int column) {
