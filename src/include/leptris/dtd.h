@@ -145,9 +145,12 @@ LEPTRIS_API int leptris_dtd_parse_external_subset(LeptrisDTD* dtd, const char* c
  * this loader for the resource named by the system id. Same pattern
  * as leptris_dtd_parse_external_subset: the library never does I/O.
  *
- * The loader returns a malloc'd (or calloc'd) buffer in *out_len
- * bytes, which the parser consumes and frees; return NULL for
- * "unavailable" (the reference is then skipped, leniently).
+ * The loader returns a buffer in *out_len bytes, which the parser
+ * consumes and frees through the engine's allocator; return NULL
+ * for "unavailable" (the reference is then skipped, leniently).
+ * FFI loaders MUST allocate the buffer with leptris_alloc_buffer
+ * (#1219) so allocator/CRT mismatches cannot corrupt the heap —
+ * in-process C loaders may keep using plain malloc.
  *
  * The loader is consulted when DTD CONTENT IS PARSED — register it
  * before leptris_dtd_parse_external_subset (or before parsing a

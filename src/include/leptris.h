@@ -3537,6 +3537,28 @@ LEPTRIS_API leptris_allocation_function leptris_get_memory_allocation_function(v
  */
 LEPTRIS_API leptris_deallocation_function leptris_get_memory_deallocation_function(void);
 
+/**
+ * Allocate a buffer from the engine's heap (#1219).
+ *
+ * FFI callers that must hand the engine a buffer it later frees —
+ * notably DTD parameter-entity loaders (leptris_dtd_set_pe_loader)
+ * — allocate through this entry so allocator/CRT mismatches cannot
+ * corrupt the heap (the engine DLL may link a different CRT than
+ * the host language runtime). Routes through the custom allocator
+ * when one is installed (leptris_set_memory_management_functions),
+ * malloc otherwise; the engine releases loader buffers through the
+ * matching deallocation path.
+ *
+ * @param len Bytes to allocate
+ * @return Buffer from the engine's heap (release with
+ *         `leptris_free_string`), or NULL when len is 0 or the
+ *         allocation fails
+ *
+ * Memory: Caller-owned unless handed to the engine (PE-loader
+ *         buffers are consumed and freed by the parser).
+ */
+LEPTRIS_API char* leptris_alloc_buffer(size_t len);
+
 /* ============================================================================
  * Per-Document Allocator Hooks (TODO 74)
  *
