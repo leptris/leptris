@@ -9,6 +9,19 @@
 #ifndef LEPTRIS_INTERNAL_H
 #define LEPTRIS_INTERNAL_H
 
+/* Internal entry points must not leak into the shared-library ABI.
+ * Windows already hides them (no __declspec(dllexport)) and macOS
+ * build flags hide non-exported globals, but plain ELF keeps
+ * default visibility — leptris_set_error escaped into the Linux
+ * dynamic table while being absent from the PE exports, which no
+ * cross-platform FFI mirror can attach against (#1197 release
+ * cascade). */
+#if defined(_WIN32) || !(defined(__GNUC__) || defined(__clang__))
+#define LEPTRIS_LOCAL
+#else
+#define LEPTRIS_LOCAL __attribute__((visibility("hidden")))
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -892,7 +905,7 @@ static inline int leptris_strcmp(const char* s1, const char* s2) {
  * ============================================================================ */
 
 /* Set error with basic message */
-void leptris_set_error(leptris_error_code code, const char* message);
+LEPTRIS_LOCAL void leptris_set_error(leptris_error_code code, const char* message);
 
 /* Set error with line/column position */
 void leptris_set_parse_error_position(int line, int column);
