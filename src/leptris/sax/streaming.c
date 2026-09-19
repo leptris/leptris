@@ -1072,7 +1072,15 @@ static int sxs_step_elem_content(LeptrisSAXParser* p, int is_final) {
 
 static int sxs_step_text(LeptrisSAXParser* p, int is_final) {
     const char* start = p->pos;
-    while (p->pos < p->end && *p->pos != '<') p->pos++;
+    /* memchr finds the span end at libc speeds; the loop form costs
+     * a load+compare+branch per byte. Position accounting is
+     * unaffected — this state never updates line/column per text
+     * byte (tag states own the counters). */
+    {
+        const char* lt = (const char*)memchr(p->pos, '<',
+                                             (size_t)(p->end - p->pos));
+        p->pos = lt ? lt : p->end;
+    }
     size_t len = (size_t)(p->pos - start);
 
     if (p->carry_len == 0 && (len == 0 || !memchr(start, '&', len))) {
