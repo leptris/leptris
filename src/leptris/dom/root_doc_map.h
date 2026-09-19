@@ -15,6 +15,8 @@ void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc
 void leptris_root_doc_unregister(LeptrisElement root);
 struct leptris_document* leptris_root_doc_lookup(LeptrisElement root);
 void leptris_root_doc_memo_invalidate(const struct leptris_document* doc);
+/* Test hook (#1242): the memo's current root, or NULL. */
+LeptrisElement leptris_root_doc_memo_root_for_tests(void);
 /* #904: prime the TLS (root, doc) memo from a driver that knows
  * the pair (iterparse yields). Root must be registered. */
 void leptris_root_doc_memo_prime(LeptrisElement root,

@@ -102,6 +102,15 @@ static size_t bucket_index(LeptrisElement root) {
     return (size_t)(v & (ROOT_DOC_BUCKETS - 1));
 }
 
+/* #682 2x lever (sound): last-hit (root, doc) memo. The climb to
+ * the root is unavoidable without a per-element field, but the TLS
+ * bucket-array walk is not — consecutive queries in a transform
+ * hit the same root, so one pointer compare replaces the hash
+ * bucket chain. One TLS access total (the memo pair), and the
+ * 1M-loop sentinel becomes a plain NULL check. */
+static LEPTRIS_THREAD_LOCAL LeptrisElement g_memo_root;
+static LEPTRIS_THREAD_LOCAL struct leptris_document* g_memo_doc;
+
 void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc) {
     if (!root || !doc) return;
     size_t idx = bucket_index(root);
@@ -160,6 +169,17 @@ void leptris_root_doc_drain_thread_caches(void) {
 void leptris_root_doc_unregister(LeptrisElement root) {
     if (!root) return;
     if (!rootmap_marked(root)) return;  /* never registered: O(1) out */
+    /* #1242: the (root, doc) memo trusts the root ADDRESS. An
+     * element-level unregister frees that address while the doc
+     * lives — the doc-keyed invalidation never fires, and the
+     * allocator recycling the address into another element's climb
+     * target made get_document return the WRONG document. Same
+     * exposure class #1038 closed for the map; the memo needs it
+     * at element granularity. */
+    if (g_memo_root == root) {
+        g_memo_root = NULL;
+        g_memo_doc = NULL;
+    }
     size_t idx = bucket_index(root);
     RootDocEntry** pp = &g_root_doc_buckets[idx];
     while (*pp) {
@@ -202,6 +222,13 @@ size_t leptris_root_doc_unregister_doc(struct leptris_document* doc) {
     doc->map_entries = NULL;
     while (e) {
         RootDocEntry* next = e->doc_next;
+        /* #1242: a swept root address must not survive in the memo
+         * even when the memo's doc differs (a previously poisoned
+         * pair). */
+        if (g_memo_root == e->root) {
+            g_memo_root = NULL;
+            g_memo_doc = NULL;
+        }
         size_t idx = bucket_index(e->root);
         RootDocEntry** pp = &g_root_doc_buckets[idx];
         while (*pp) {
@@ -234,15 +261,6 @@ struct leptris_document* leptris_root_doc_lookup(LeptrisElement root) {
  * are skipped entirely (get_document was 3.5% of the light bench).
  * Hint is thread-local-scoped by construction (one transform per
  * thread), validated by the root-walk fallback when it misses. */
-/* #682 2x lever (sound): last-hit (root, doc) memo. The climb to
- * the root is unavoidable without a per-element field, but the TLS
- * bucket-array walk is not — consecutive queries in a transform
- * hit the same root, so one pointer compare replaces the hash
- * bucket chain. One TLS access total (the memo pair), and the
- * 1M-loop sentinel becomes a plain NULL check. */
-static LEPTRIS_THREAD_LOCAL LeptrisElement g_memo_root;
-static LEPTRIS_THREAD_LOCAL struct leptris_document* g_memo_doc;
-
 /* #904: prime the TLS last-root memo from a driver that already
  * knows the (root, doc) pair — the iterparse yield path hands out
  * a subtree that is released before the next, so the memo misses
@@ -261,6 +279,10 @@ void leptris_root_doc_memo_invalidate(const struct leptris_document* doc) {
         g_memo_root = NULL;
         g_memo_doc = NULL;
     }
+}
+
+LeptrisElement leptris_root_doc_memo_root_for_tests(void) {
+    return g_memo_root;
 }
 
 struct leptris_document* leptris_element_get_document(LeptrisElement elem) {

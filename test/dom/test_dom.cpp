@@ -6,6 +6,14 @@
 #include "leptris/error.h"
 /* #1125 pristine-buffer gate: reach doc->xml_buffer directly. */
 #include "../leptris/leptris_internal.h"
+/* Internal root-doc-map surface (#1242 spec); C linkage. */
+extern "C" {
+LeptrisElement leptris_root_doc_memo_root_for_tests(void);
+void leptris_root_doc_register(LeptrisElement root,
+                               struct leptris_document* doc);
+void leptris_root_doc_unregister(LeptrisElement root);
+struct leptris_document* leptris_element_get_document(LeptrisElement elem);
+}
 #include "../leptris/memory/pool.h"
 
 #include <cstring>
@@ -139,6 +147,69 @@ TEST(DomBasics, DocumentSetRootRejectsParentedElement) {
         leptris_element_as_node(leptris_document_root(doc)));
     ASSERT_NE(b, nullptr);
     EXPECT_EQ(leptris_document_set_root(doc, b), LEPTRIS_ERROR_INVALID_ARG);
+    leptris_document_free(doc);
+}
+
+/* #1242: the TLS (root, doc) memo trusts the root address. An
+ * element-level unregister frees that address while the document
+ * lives; a recycled address later made get_document resolve the
+ * WRONG document (per-machine corruption signature). Unregistering
+ * a root must drop the memo. */
+TEST(DomBasics, RootDocMemoClearedWhenRootUnregisters) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_element_create(doc, "r");
+    ASSERT_NE(e, nullptr);
+    leptris_root_doc_register(e, doc);
+    /* Prime the memo through a resolution. */
+    ASSERT_EQ(leptris_element_get_document(e), doc);
+    ASSERT_EQ(leptris_root_doc_memo_root_for_tests(), e);
+    /* Element-level lifecycle: the root goes away, the doc stays. */
+    leptris_root_doc_unregister(e);
+    EXPECT_EQ(leptris_root_doc_memo_root_for_tests(), nullptr)
+        << "stale (root, doc) memo survived root unregistration";
+    leptris_document_free(doc);
+}
+
+/* #1242: every status-returning rejection must refresh the
+ * thread-local error channel — a stale message from an earlier
+ * operation leaking through an EINVAL is the reported signature. */
+TEST(DomBasics, DocumentSetRootRejectionSetsFreshError) {
+    const char xml[] = "<a><b/></a>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    /* Poison the channel with an XPath syntax error and snapshot it. */
+    LeptrisXPathResult bad = leptris_xpath_eval(doc, nullptr, "<<");
+    if (bad) leptris_xpath_result_free(bad);
+    std::string poisoned = leptris_last_error() ? leptris_last_error() : "";
+    ASSERT_FALSE(poisoned.empty());
+
+    LeptrisElement b = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(leptris_document_root(doc)));
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_document_set_root(doc, b), LEPTRIS_ERROR_INVALID_ARG);
+    /* The channel must now describe THIS failure, not the XPath one. */
+    const char* err = leptris_last_error();
+    ASSERT_TRUE(err != nullptr && err[0] != '\0');
+    EXPECT_STRNE(err, poisoned.c_str())
+        << "stale XPath error leaked through set_root EINVAL: " << err;
+    EXPECT_TRUE(strstr(err, "root") != nullptr)
+        << "expected a set_root-specific message, got: " << err;
+
+    /* Cross-document rejection refreshes the channel too. */
+    LeptrisDocument other = leptris_document_create();
+    ASSERT_NE(other, nullptr);
+    LeptrisElement foreign = leptris_element_create(other, "f");
+    ASSERT_NE(foreign, nullptr);
+    EXPECT_EQ(leptris_document_set_root(doc, foreign),
+              LEPTRIS_ERROR_INVALID_ARG);
+    err = leptris_last_error();
+    ASSERT_TRUE(err != nullptr && err[0] != '\0');
+    EXPECT_STRNE(err, poisoned.c_str());
+    EXPECT_TRUE(strstr(err, "document") != nullptr)
+        << "expected a cross-document message, got: " << err;
+    leptris_document_free(other);
     leptris_document_free(doc);
 }
 
