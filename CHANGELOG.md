@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.202] - 2026-09-18
+
+### Fixed
+
+- export the DTD validation surface; gate unmarked public declarations (api)
+
+
+
 ## [1.9.201] - 2026-09-18
 
 <!-- Edit this section with the actual release notes. -->
