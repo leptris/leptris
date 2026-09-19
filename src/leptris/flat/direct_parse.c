@@ -1614,9 +1614,21 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             if (close_local_len <= 8 &&
                 (p.probe_slack ||
                  close_local + 8 <= p.end + 1)) {
+                /* The mask follows MEMORY order: memcpy fills the low
+                 * bytes on little-endian and the high bytes on
+                 * big-endian, so each dialect must mask the end its
+                 * load populated. The unconditional low-bytes mask
+                 * compared bytes past the name on big-endian and
+                 * failed every close tag (#1197). */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+                uint64_t mask = (close_local_len == 8)
+                    ? ~(uint64_t)0
+                    : (~(uint64_t)0 << (64 - close_local_len * 8));
+#else
                 uint64_t mask = (close_local_len == 8)
                     ? ~(uint64_t)0
                     : ((1ull << (close_local_len * 8)) - 1);
+#endif
                 uint64_t a, b;
                 memcpy(&a, open_name, 8);
                 memcpy(&b, close_local, 8);
