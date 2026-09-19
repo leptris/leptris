@@ -4,8 +4,24 @@
 
 ### Fixed
 
-- root-doc memo must not survive element unregistration; set_root refreshes the error channel (#1242) (dom)
-- set a fresh thread-local error on set_root validation failures (dom)
+- Per-machine process-global corruption (#1242): the TLS (root, doc)
+  last-hit memo in `leptris_element_get_document` trusted the root
+  ADDRESS and was cleared only by document identity — an element-level
+  unregistration left `(freed_address, doc)` behind, and a
+  recycled address resolved the WRONG document (poisoning attribute
+  ownership: whole-run all-NULL `leptris_element_attribute` reads;
+  and tripping set_root's cross-document check). The memo is now
+  cleared whenever the outgoing root address matches, in both the
+  element-level unregister and the document sweep — closing the
+  same recycled-address class #1038 fixed for the root-doc map.
+- `leptris_document_set_root` now sets a fresh thread-local error on
+  every rejection (NULL_ARG + both EINVAL paths) — previously the
+  previous operation's message leaked through (the reported "EINVAL
+  with a stale XPath parse error").
+- New diagnostic: `LEPTRIS_DEBUG_ATTR_MISS=1` dumps attribute-chain
+  state on lookup misses (chain length, per-attr name bytes/hash15)
+  — the discriminator for any residual binding-side corruption
+  report.
 
 
 
