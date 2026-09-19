@@ -279,8 +279,13 @@ LEPTRIS_API const LeptrisPullEvent* leptris_pull_next(LeptrisPullParser pull) {
             chunk_ptr = pull->file_buf;
             is_final = (chunk < PULL_SLICE);
         } else {
+            /* In-memory source: the whole buffer is caller-owned and
+             * resident, so slicing buys nothing — ONE feed makes the
+             * parse one-shot (no token ever straddles a chunk
+             * boundary), the precondition for zero-copy slice
+             * emission (TODO.max-perf/2-3, slice 1). File mode keeps
+             * the bounded-memory slicing. */
             chunk = pull->len - pull->pos;
-            if (chunk > PULL_SLICE) chunk = PULL_SLICE;
             chunk_ptr = pull->input + pull->pos;
             pull->pos += chunk;
             is_final = pull->pos == pull->len;
