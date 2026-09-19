@@ -156,8 +156,51 @@ if(LEPTRIS_AMALGAMATED)
 
     # Append #include for every source. Paths are relative to src/ so the
     # file's own #include directives resolve identically to the per-file build.
+    #
+    # Static helpers with the same name in different TUs collide once
+    # everything is one TU (#1217). The generator renames those tokens
+    # per file via #define around the #include — the source files stay
+    # untouched. A new collision surfaces as a conflicting-types error
+    # in the amalgamated CI job; add a line here.
+    set(_amalg_renames
+        "leptris/xpath/functions_exslt.c:arg_number=exslt_arg_number"
+        "leptris/xpath/functions_exslt.c:arg_string=exslt_arg_string"
+        "leptris/common/format_number.c:parse_pattern=fmt_num_parse_pattern"
+        "leptris/sax/iterparse.c:set_error=iterparse_set_error"
+        "leptris/xpath/vm.c:xpath_context_document=vm_xpath_context_document"
+        "leptris/xpath/xpath_public.c:xslt_register_ufn_handlers=xslt_register_ufn_handlers_impl"
+        "leptris/xslt/xslt_functions.c:xslt_register_ufn_handlers=xslt_register_ufn_handlers_impl"
+        "leptris/xslt/xslt_exec.c:utf8_encode=xslt_utf8_encode"
+        "leptris/xslt/xslt_exec.c:ws_only=xslt_ws_only"
+        "leptris/rng/validate.c:match_seq=rng_match_seq"
+        "leptris/sax/pull.c:cb_start_document=pull_cb_start_document"
+        "leptris/sax/pull.c:cb_end_document=pull_cb_end_document"
+        "leptris/sax/pull.c:cb_start_element=pull_cb_start_element"
+        "leptris/sax/pull.c:cb_end_element=pull_cb_end_element"
+        "leptris/sax/pull.c:cb_characters=pull_cb_characters"
+        "leptris/sax/pull.c:cb_comment=pull_cb_comment"
+        "leptris/sax/pull.c:cb_cdata=pull_cb_cdata"
+        "leptris/sax/pull.c:cb_pi=pull_cb_pi"
+        "leptris/sax/pull.c:cb_start_prefix=pull_cb_start_prefix"
+        "leptris/sax/pull.c:cb_end_prefix=pull_cb_end_prefix"
+        "leptris/sax/pull.c:cb_error=pull_cb_error"
+    )
     foreach(_src ${LEPTRIS_SOURCES})
-        file(APPEND "${LEPTRIS_AMALGAMATED_C}" "#include \"${_src}\"\n")
+        set(_amalg_defs "")
+        set(_amalg_undefs "")
+        foreach(_r ${_amalg_renames})
+            string(REPLACE ":" ";" _rr "${_r}")
+            string(REPLACE "=" ";" _rr "${_rr}")
+            list(GET _rr 0 _rfile)
+            list(GET _rr 1 _rold)
+            list(GET _rr 2 _rnew)
+            if(_rfile STREQUAL _src)
+                string(APPEND _amalg_defs "#define ${_rold} ${_rnew}\n")
+                string(APPEND _amalg_undefs "#undef ${_rold}\n")
+            endif()
+        endforeach()
+        file(APPEND "${LEPTRIS_AMALGAMATED_C}"
+             "${_amalg_defs}#include \"${_src}\"\n${_amalg_undefs}\n")
     endforeach()
 
     # Replace the source list with the amalgamated file so the object
