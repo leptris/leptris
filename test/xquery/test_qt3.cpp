@@ -96,9 +96,11 @@ std::string result_string(LeptrisXPathResult r) {
 struct Assertion {
     std::string kind;
     std::string text;
+    /* any-of: at least one child must hold (QT3 disjunction). */
+    std::vector<struct Assertion> children;
 };
 
-/* Flatten all-of; mark unsupported with kind "?". */
+/* Flatten all-of; keep any-of as a group; mark unsupported "?" . */
 void collect(LeptrisElement e, std::vector<Assertion>* out) {
     const char* ln = local_name(leptris_element_name(e));
     if (strcmp(ln, "all-of") == 0) {
@@ -108,12 +110,23 @@ void collect(LeptrisElement e, std::vector<Assertion>* out) {
     }
     Assertion a;
     a.kind = ln;
+    if (strcmp(ln, "any-of") == 0) {
+        for (LeptrisElement c = first_child_elem(e); c; c = next_elem(c))
+            collect(c, &a.children);
+        out->push_back(a);
+        return;
+    }
     const char* t = leptris_element_text(e);
     a.text = t ? t : "";
     out->push_back(a);
 }
 
 bool is_supported(const Assertion& a) {
+    if (a.kind == "any-of") {
+        for (const Assertion& c : a.children)
+            if (is_supported(c)) return true;
+        return false;
+    }
     return a.kind == "assert-string-value" || a.kind == "assert-eq" ||
            a.kind == "assert-true" || a.kind == "assert-false";
 }
@@ -126,6 +139,11 @@ bool is_number(const std::string& s) {
 }
 
 bool check(const Assertion& a, LeptrisXPathResult r) {
+    if (a.kind == "any-of") {
+        for (const Assertion& c : a.children)
+            if (is_supported(c) && check(c, r)) return true;
+        return false;
+    }
     if (a.kind == "assert-true")
         return r && leptris_xpath_result_boolean(r);
     if (a.kind == "assert-false")
@@ -141,6 +159,18 @@ bool check(const Assertion& a, LeptrisXPathResult r) {
     }
     if (is_number(a.text) && is_number(got))
         return strtod(a.text.c_str(), NULL) == strtod(got.c_str(), NULL);
+    /* Non-literal assert-eq operands are XPath expressions —
+     * evaluate them (Saxon-style) and compare the result value. */
+    if (a.kind == "assert-eq" && a.text.find('(') != std::string::npos) {
+        LeptrisXQuery xq2 = leptris_xquery_parse(a.text.c_str(),
+                                                a.text.size());
+        if (!xq2) return false;
+        LeptrisXPathResult r2 = leptris_xquery_eval(xq2, NULL, NULL);
+        std::string want = r2 ? result_string(r2) : "";
+        if (r2) leptris_xpath_result_free(r2);
+        leptris_xquery_free(xq2);
+        return got == want;
+    }
     return got == a.text;
 }
 
@@ -213,10 +243,18 @@ void run_test_set(const char* set_path,
         const char* q = leptris_element_text(test);
         if (!q || !q[0]) continue;
 
+        std::string expect_error;
+        for (LeptrisElement rc = first_child_elem(result); rc; rc = next_elem(rc)) {
+            if (strcmp(local_name(leptris_element_name(rc)), "error") == 0) {
+                const char* code = leptris_element_attribute(rc, "code");
+                expect_error = code ? code : "?";
+                break;
+            }
+        }
         std::vector<Assertion> asserts;
         for (LeptrisElement c = first_child_elem(result); c; c = next_elem(c))
             collect(c, &asserts);
-        bool ok_kinds = !asserts.empty();
+        bool ok_kinds = !asserts.empty() || !expect_error.empty();
         for (const Assertion& a : asserts)
             if (!is_supported(a)) ok_kinds = false;
         if (ok_kinds && strstr(q, "collation/UCA"))
@@ -268,9 +306,18 @@ void run_test_set(const char* set_path,
             r = leptris_xquery_eval(xq, doc, NULL);
         }
         std::string got = r ? result_string(r) : "(no result)";
-        bool pass = r != NULL;
-        for (const Assertion& a : asserts)
-            if (!check(a, r)) pass = false;
+        bool pass;
+        if (!expect_error.empty()) {
+            /* Error-assertion case: the query MUST fail. The code
+             * rides in the red message; code-exact matching is a
+             * later channel. */
+            pass = (r == NULL) && (xq == NULL || 1);
+            if (!pass) got = std::string("expected error ") + expect_error;
+        } else {
+            pass = r != NULL;
+            for (const Assertion& a : asserts)
+                if (!check(a, r)) pass = false;
+        }
         if (r) leptris_xpath_result_free(r);
         if (xq) leptris_xquery_free(xq);
         if (pass) {
@@ -321,4 +368,21 @@ TEST(Qt3Subset, FnConcat) {
      * the libxslt suite). */
     run_test_set("fn/concat.xml", {}, 80,
                  {"xs:double(", "xs:float("});
+}
+
+TEST(Qt3Subset, FnTokenize) {
+    /* Red: fn-tokenize-34 (dot vs CR — see F&O note). */
+    run_test_set("fn/tokenize.xml", {}, 21);
+}
+
+TEST(Qt3Subset, FnReplace) {
+    /* Reds: lazy quantifiers (POSIX has none, excluded pattern
+     families), non-capturing (?:...), $N-beyond-groups
+     error channel. */
+    run_test_set("fn/replace.xml", {}, 56);
+}
+
+TEST(Qt3Subset, FnStringJoin) {
+    /* Red: string-join-23/24 argument-shape cases. */
+    run_test_set("fn/string-join.xml", {}, 37);
 }
