@@ -2722,6 +2722,13 @@ typedef struct {
     /* #659 foreign content: per-slot namespace of the open stack
      * (0 HTML, 1 SVG, 2 MathML) — parallel to open[]. */
     uint8_t open_ns[256];
+    /* #1225: last child of each open element — the builder's own
+     * O(1) append tail. The doc-level direct-mapped tail cache
+     * loses a persistent parent to an address collision roughly
+     * every 1KB of fresh pool allocations; each miss walks the
+     * whole child chain, which is quadratic on table/text-heavy
+     * pages. Slots are refreshed on push (NULL) and by hb_put. */
+    LeptrisNodeRef open_tail[256];
     size_t depth;
     LeptrisElement root;        /* first top-level element */
     LeptrisNodeRef top_head;    /* top-level chain: text, comments, root */
@@ -3658,6 +3665,24 @@ static void h_insert_before(HBuilder* b, LeptrisElement parent,
         parent->child_count++;
 }
 
+/* O(1) append for open-stack parents (#1225): route through the
+ * builder's per-slot tail. Non-open parents fall back to the
+ * shared internal (whose tail cache + walk still apply). The hint
+ * is validated inside leptris_element_append_child_tail, so any
+ * stale slot is silently ignored — correctness never depends on
+ * the bookkeeping. */
+static void hb_put(HBuilder* b, LeptrisElement parent, LeptrisNodeRef n) {
+    for (size_t i = b->depth; i-- > 0;) {
+        if (b->open[i] == parent) {
+            leptris_element_append_child_tail(parent, n, b->doc,
+                                              b->open_tail[i]);
+            b->open_tail[i] = n;
+            return;
+        }
+    }
+    leptris_element_append_child_internal_doc(parent, n, b->doc);
+}
+
 static void h_append(HBuilder* b, LeptrisNodeRef n) {
     /* "in frameset" (13.2.6.4.18): non-whitespace text is IGNORED
      * with a frameset open ANYWHERE on top; whitespace inserts
@@ -3932,7 +3957,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 return;
             }
         }
-        leptris_element_append_child_internal_doc(top, n, b->doc);
+        hb_put(b, top, n);
     } else {
         h_top_append(b, n);
     }
@@ -3999,6 +4024,7 @@ static LeptrisElement h_open_foreign(HBuilder* b, const char* name,
     if (b->depth == 0 && !b->root) b->root = e;
     if (b->depth < 256) {
         b->open[b->depth] = e;
+        b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = (uint8_t)ns;
         b->depth++;
     }
@@ -4036,6 +4062,7 @@ static LeptrisElement h_open_element(HBuilder* b, const char* name) {
     if (b->depth == 0 && !b->root) b->root = e;
     if (b->depth < 256) {
         b->open[b->depth] = e;
+        b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = H_NS_HTML;
         b->depth++;
     }
@@ -4236,6 +4263,7 @@ static LeptrisElement h_afe_open_clone(HBuilder* b, LeptrisElement src) {
     if (b->depth == 0 && !b->root) b->root = c;
     if (b->depth < 256) {
         b->open[b->depth] = c;
+        b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = H_NS_HTML;
         b->depth++;
     }
@@ -4518,6 +4546,7 @@ static LeptrisElement h_open_named(HBuilder* b, const char* name,
     if (b->depth == 0 && !b->root) b->root = e;
     if (push && b->depth < 256) {
         b->open[b->depth] = e;
+        b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = H_NS_HTML;
         b->depth++;
     }
@@ -4532,8 +4561,7 @@ static LeptrisElement h_new_child(HBuilder* b, LeptrisElement parent,
     LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
     if (!e) return NULL;
     leptris_root_doc_register(e, b->doc);
-    leptris_element_append_child_internal_doc(parent, (LeptrisNodeRef)e,
-                                              b->doc);
+    hb_put(b, parent, (LeptrisNodeRef)e);
     return e;
 }
 

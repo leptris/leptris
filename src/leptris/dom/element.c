@@ -687,19 +687,50 @@ const char* leptris_element_lookup_namespace(LeptrisElement elem,
 }
 
 /* Children manipulation */
-void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode* child,
-                                              struct leptris_document* doc);
+void leptris_element_append_child_hint_doc(LeptrisElement elem,
+                                           LeptrisNode* child,
+                                           struct leptris_document* doc,
+                                           LeptrisNode* hint);
 void leptris_element_append_child_internal(LeptrisElement elem, LeptrisNode* child) {
     if (!elem || !child) return;
-    leptris_element_append_child_internal_doc(elem, child,
-                                             leptris_element_get_document(elem));
+    leptris_element_append_child_hint_doc(elem, child,
+                                          leptris_element_get_document(elem),
+                                          NULL);
+}
+
+/* #1225: caller-supplied tail hint. The HTML builder tracks each
+ * open element's last child itself — the shared direct-mapped
+ * tail cache loses a persistent parent to an address collision
+ * every ~1KB of fresh pool allocations, and each eviction costs
+ * an O(children) walk (quadratic on table/text-heavy pages). The
+ * hint is validated (parent back-pointer + no next sibling) and
+ * silently ignored when stale — callers stay correct through the
+ * cache/walk fallback. */
+void leptris_element_append_child_tail(LeptrisElement elem,
+                                       LeptrisNode* child,
+                                       struct leptris_document* doc,
+                                       LeptrisNode* hint) {
+    if (!elem || !child) return;
+    if (hint &&
+        (leptris_node_parent_inline(hint) != (LeptrisElement)elem ||
+         leptris_node_get_next_sibling(hint) != NULL))
+        hint = NULL;
+    leptris_element_append_child_hint_doc(elem, child, doc, hint);
+}
+
+void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode* child,
+                                              struct leptris_document* doc) {
+    leptris_element_append_child_hint_doc(elem, child, doc, NULL);
 }
 
 /* doc is the caller-resolved document (NULL for detached trees) —
  * the public mutation path resolves it once instead of paying the
- * root walk + map lookup on every append (TODO 195c). */
-void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode* child,
-                                              struct leptris_document* doc) {
+ * root walk + map lookup on every append (TODO 195c). hint is a
+ * pre-validated last-child hint (NULL = none). */
+void leptris_element_append_child_hint_doc(LeptrisElement elem,
+                                           LeptrisNode* child,
+                                           struct leptris_document* doc,
+                                           LeptrisNode* hint) {
     if (!elem || !child) return;
 
     /* SAFETY: Verify node type field is valid before accessing it
@@ -765,8 +796,9 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
          * we set its next_sibling via the type-dispatching setter. */
         LeptrisNode* last_node =
             list_empty ? NULL
-                       : (mut_tail ? mut_tail
-                                   : leptris_elem_last_child(elem));
+                       : (hint ? hint
+                               : (mut_tail ? mut_tail
+                                           : leptris_elem_last_child(elem)));
         if (last_node) {
             /* Lane 18 P3: sequential appends' tail is an element —
              * the offset store directly; the type-dispatching node
@@ -787,8 +819,9 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
         /* For non-element children (text, cdata, comment, pi), append to linked list */
         LeptrisNode* last =
             list_empty ? NULL
-                       : (mut_tail ? mut_tail
-                                   : leptris_elem_last_child(elem));
+                       : (hint ? hint
+                               : (mut_tail ? mut_tail
+                                           : leptris_elem_last_child(elem)));
         if (last) {
             leptris_node_set_next_sibling(last, (LeptrisNode*)child);
             leptris_elem_set_last_child(elem, (LeptrisNode*)child);
