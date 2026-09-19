@@ -222,6 +222,36 @@ static int sxs_elem_push(LeptrisSAXParser* p, const char* name, size_t name_len)
     return 0;
 }
 
+/* One-shot push: the name lives in the append-only scratch arena
+ * (parser lifetime) instead of the reusable frame slot, so
+ * handler-visible START/END names stay valid for borrowed consumers
+ * (pull.c ev_string) even after the stack slot serves a later
+ * sibling. */
+static int sxs_elem_push_oneshot(LeptrisSAXParser* p, const char* name,
+                                 size_t name_len) {
+    if (p->elem_depth >= LEPTRIS_SAX_MAX_DEPTH) {
+        sxs_set_error(p, "Element nesting too deep");
+        return -1;
+    }
+    const char* nm = sxs_scratch_append(p, name, name_len);
+    if (!nm) {
+        sxs_set_error(p, "out of memory");
+        return -1;
+    }
+    SaxElementFrame* f = &p->elem_stack[p->elem_depth];
+    f->name       = (char*)nm;   /* frame only ever reads the name */
+    f->name_heap  = NULL;
+    f->name_len   = name_len;
+    f->attrs      = f->attrs_inline;
+    f->attrs_inline[0] = NULL;
+    f->attrs_heap = NULL;
+    f->attr_count = 0;
+    f->attr_cap   = SAX_ATTRS_INLINE;
+    f->self_closing = 0;
+    p->elem_depth++;
+    return 0;
+}
+
 static void sxs_elem_pop(LeptrisSAXParser* p) {
     if (p->elem_depth == 0) return;
     p->elem_depth--;
@@ -591,7 +621,7 @@ static int sxs_step_elem_open_name(LeptrisSAXParser* p, int is_final) {
         }
         const char* nb = p->pos;
         while (p->pos < p->end && sxs_is_name_char(*p->pos)) p->pos++;
-        if (sxs_elem_push(p, nb, (size_t)(p->pos - nb)) < 0) {
+        if (sxs_elem_push_oneshot(p, nb, (size_t)(p->pos - nb)) < 0) {
             return SAX_STEP_ERR;
         }
         p->column += (int)(p->pos - nb);
@@ -716,6 +746,32 @@ static int sxs_step_attr_list(LeptrisSAXParser* p, int is_final) {
  * ============================================================================ */
 
 static int sxs_step_attr_name(LeptrisSAXParser* p, int is_final) {
+    if (p->one_shot) {
+        /* Slice 1 (TODO.max-perf/2-3): single-feed input never
+         * splits the token — scan in place, materialize the name
+         * with ONE scratch copy; the carry path below costs a
+         * reserve+store call per name byte. */
+        if (p->pos >= p->end) {
+            return is_final ? (sxs_set_error(p, "Expected attribute name"), SAX_STEP_ERR)
+                            : SAX_STEP_NEED_MORE;
+        }
+        if (!sxs_is_name_start(*p->pos)) {
+            sxs_set_error(p, "Expected attribute name");
+            return SAX_STEP_ERR;
+        }
+        p->pending_attr_line = p->line;
+        p->pending_attr_column = p->column;
+        const char* nb = p->pos;
+        while (p->pos < p->end && sxs_is_name_char(*p->pos)) {
+            sxs_pos_putc(p, *p->pos);
+            p->pos++;
+        }
+        const char* nm = sxs_scratch_append(p, nb, (size_t)(p->pos - nb));
+        if (!nm) { sxs_set_error(p, "out of memory"); return SAX_STEP_ERR; }
+        p->pending_attr_name = nm;
+        p->state = SAX_ST_ATTR_EQ;
+        return SAX_STEP_OK;
+    }
     /* Diagnostic point for recoverable errors: the name's start
      * (issue #647) — captured before any byte of the name is
      * consumed, including across chunk-boundary resumes (the first
@@ -821,6 +877,26 @@ static int sxs_step_attr_value_quote(LeptrisSAXParser* p, int is_final) {
 
 static int sxs_step_attr_value(LeptrisSAXParser* p, int is_final) {
     char quote = p->carry[0];
+    const char* raw;
+    size_t raw_len;
+    if (p->one_shot) {
+        /* Slice 1: scan the value span in place (same position
+         * accounting as the carry loop); the span below is
+         * materialized with one scratch copy instead of a
+         * reserve+store call per value byte. */
+        raw = p->pos;
+        while (p->pos < p->end && *p->pos != quote) {
+            sxs_pos_putc(p, *p->pos);
+            p->pos++;
+        }
+        if (p->pos >= p->end) {
+            return is_final ? (sxs_set_error(p, "Unterminated attribute value"), SAX_STEP_ERR)
+                            : SAX_STEP_NEED_MORE;
+        }
+        raw_len = (size_t)(p->pos - raw);
+        sxs_pos_putc(p, *p->pos);
+        p->pos++;
+    } else {
     /* p->carry[1..] may already have value bytes if we resumed mid-value. */
     while (p->pos < p->end && *p->pos != quote) {
         if (sxs_carry_putc(p, *p->pos) < 0) {
@@ -838,14 +914,15 @@ static int sxs_step_attr_value(LeptrisSAXParser* p, int is_final) {
     /* p->pos points at closing quote. */
     sxs_pos_putc(p, *p->pos);
     p->pos++;
-    /* Build value: skip carry[0] (quote), copy carry[1..].
+    raw = p->carry + 1;
+    raw_len = p->carry_len - 1;
+    }
+    /* Build value.
      *
      * XML 1.0 3.3.3: attribute values must be delivered with
      * entity/character references expanded. Values without '&'
      * (the common case) copy verbatim; values with '&' decode
      * through a temporary buffer first. */
-    const char* raw = p->carry + 1;
-    size_t raw_len = p->carry_len - 1;
     const char* value;
     if (raw_len && memchr(raw, '&', raw_len)) {
         LeptrisStringView sv = leptris_sv_from_ptr(raw, raw_len);
