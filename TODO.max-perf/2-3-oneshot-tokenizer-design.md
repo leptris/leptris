@@ -1,6 +1,12 @@
 # Levers 2+3 — compiled-dispatch + zero-copy one-shot emission (design)
 
-Status: DESIGNED (2026-09-19). Implementation slices below.
+Status: LANDED (2026-09-19, PR #1236). Slices 1+3 implemented;
+slice 2's class LUT (`sxs_chartype`) + dense state switch already
+existed. Measured: bench_iterparse full-doc 295->52-63us wall,
+15.9->74-91 MB/s, 2.54->0.45-0.55us/event. Residual to the 0.15
+stretch = iterparse per-event DOM construction (element create +
+namespace resolution through the public element API), a consumer
+lever, not string copies.
 Owners: engine repo. Bench: `benchmarks/sax/bench_iterparse.c` (#1195).
 
 ## Problem
