@@ -1062,6 +1062,11 @@ const char* leptris_element_lookup_namespace(LeptrisElement elem,
 void leptris_element_append_child_internal(LeptrisElement elem, LeptrisNode* child);
 void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode* child,
                                               struct leptris_document* doc);
+/* #1225: validated last-child hint skips the tail-cache/walk. */
+void leptris_element_append_child_tail(LeptrisElement elem,
+                                       LeptrisNode* child,
+                                       struct leptris_document* doc,
+                                       LeptrisNode* hint);
 void leptris_element_prepend_child_internal(LeptrisElement elem, LeptrisNode* child);
 
 /* Bulk allocation for subtree copy (10-15% faster for large subtrees) */
