@@ -44,7 +44,17 @@ extern "C" {
 #      define LEPTRIS_API
 #    endif
 #  else
-#    define LEPTRIS_API __attribute__((visibility("default"), used))
+     /* GCC LTO internalizes even visibility("default") symbols with
+      * no in-library caller (#1154/#1196/#1204 class: the CLI under
+      * -flto, ppc64le shared builds). `externally_visible` is the
+      * GCC-side partner of `used`; clang accepts and ignores it, so
+      * it is scoped to GCC to keep -Wall clean elsewhere. */
+#    if defined(__GNUC__) && !defined(__clang__)
+#      define LEPTRIS_API __attribute__((visibility("default"), used, \
+                                            externally_visible))
+#    else
+#      define LEPTRIS_API __attribute__((visibility("default"), used))
+#    endif
 #  endif
 #endif
 #endif  /* LEPTRIS_FOR_BINDGEN */

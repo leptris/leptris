@@ -31,7 +31,15 @@
 #      define LEPTRIS_API
 #    endif
 #  else
-#    define LEPTRIS_API __attribute__((visibility("default")))
+     /* Mirrors leptris.h: GCC LTO needs externally_visible or it
+      * internalizes public symbols with no in-library caller
+      * (#1154/#1196/#1204 class). */
+#    if defined(__GNUC__) && !defined(__clang__)
+#      define LEPTRIS_API __attribute__((visibility("default"), used, \
+                                            externally_visible))
+#    else
+#      define LEPTRIS_API __attribute__((visibility("default"), used))
+#    endif
 #  endif
 #endif
 
