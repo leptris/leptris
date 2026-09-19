@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.206] - 2026-09-19
+
+### Fixed
+
+- endian-neutral close-tag name compare (#1197) (parse)
+
+### Performance
+
+- memchr finds the text span end (TODO.max-perf/2-3 slice 3) (sax)
+- zero-copy slice emission for one-shot pulls (#1178 tail) (sax)
+
+
+
 ## [1.9.205] - 2026-09-19
 
 ### Added
