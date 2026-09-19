@@ -1573,13 +1573,17 @@ void xslt_register_bridge_static(XPathFunctionRegistry* r, void* exec) {
 
 /* Stylesheet-defined EXSLT functions (func:function): one registry
  * entry per definition, user_data = the binding. Per-exec state —
- * never part of the static template. */
-void xslt_register_ufn_handlers(XPathFunctionRegistry* r, XsltExec* ex) {
+ * never part of the static template. The second parameter is void*
+ * (the xpath layer declares it without the XsltExec type); the
+ * declaration and the definition must agree exactly or the
+ * amalgamated single-TU build fails (#1217). */
+void xslt_register_ufn_handlers(XPathFunctionRegistry* r, void* ex) {
     if (!r || !ex) return;
-    XsltUfnBinding* arr = ufn_bindings(ex);
+    XsltExec* exec = (XsltExec*)ex;
+    XsltUfnBinding* arr = ufn_bindings(exec);
     if (arr) {
         size_t i = 0;
-        for (const XsltUserFunc* f = ex->sheet->funcs; f;
+        for (const XsltUserFunc* f = exec->sheet->funcs; f;
              f = f->next, i++)
             xslt_register_handler(r, f->name, xslt_fn_user_func,
                                   0, 8, &arr[i]);
@@ -1588,7 +1592,7 @@ void xslt_register_ufn_handlers(XPathFunctionRegistry* r, XsltExec* ex) {
 
 void xslt_register_bridge_handlers(XPathFunctionRegistry* r, void* exec) {
     xslt_register_bridge_static(r, exec);
-    xslt_register_ufn_handlers(r, (XsltExec*)exec);
+    xslt_register_ufn_handlers(r, exec);
 }
 
 /* The original exec-scoped builder is kept for the future cache

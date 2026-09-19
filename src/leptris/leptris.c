@@ -921,9 +921,11 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         leptris_root_doc_unregister((LeptrisElement)doc->new_dom_root);
     }
     /* #1038: fallback-path registrations (detached elements) die
-     * with the doc too — see leptris_root_doc_unregister_doc. */
+     * with the doc too — see leptris_root_doc_unregister_doc. The
+     * declaration must match root_doc_map.c's size_t return or the
+     * amalgamated single-TU build fails (#1217). */
     {
-        extern void leptris_root_doc_unregister_doc(
+        extern size_t leptris_root_doc_unregister_doc(
             struct leptris_document*);
         leptris_root_doc_unregister_doc(doc);
     }

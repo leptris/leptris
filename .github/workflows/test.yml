@@ -209,3 +209,31 @@ jobs:
               --exclude-regex SymbolExportCheck
           '
 
+
+  test-amalgamated:
+    name: Amalgamated build (single TU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libutf8proc-dev
+
+      - name: Configure (amalgamated, single translation unit)
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DBUILD_TESTING=ON \
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLEPTRIS_AMALGAMATED=ON
+
+      - name: Build
+        run: cmake --build build -j2
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --build-config Release
