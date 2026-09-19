@@ -138,10 +138,10 @@ bool is_number(const std::string& s) {
     return end && *end == '\0';
 }
 
-bool check(const Assertion& a, LeptrisXPathResult r) {
+bool check(const Assertion& a, LeptrisXPathResult r, LeptrisDocument doc) {
     if (a.kind == "any-of") {
         for (const Assertion& c : a.children)
-            if (is_supported(c) && check(c, r)) return true;
+            if (is_supported(c) && check(c, r, doc)) return true;
         return false;
     }
     if (a.kind == "assert-true")
@@ -160,12 +160,13 @@ bool check(const Assertion& a, LeptrisXPathResult r) {
     if (is_number(a.text) && is_number(got))
         return strtod(a.text.c_str(), NULL) == strtod(got.c_str(), NULL);
     /* Non-literal assert-eq operands are XPath expressions —
-     * evaluate them (Saxon-style) and compare the result value. */
+     * evaluate them against the case's context document (Saxon
+     * style) and compare the result value. */
     if (a.kind == "assert-eq" && a.text.find('(') != std::string::npos) {
         LeptrisXQuery xq2 = leptris_xquery_parse(a.text.c_str(),
                                                 a.text.size());
         if (!xq2) return false;
-        LeptrisXPathResult r2 = leptris_xquery_eval(xq2, NULL, NULL);
+        LeptrisXPathResult r2 = leptris_xquery_eval(xq2, doc, NULL);
         std::string want = r2 ? result_string(r2) : "";
         if (r2) leptris_xpath_result_free(r2);
         leptris_xquery_free(xq2);
@@ -316,7 +317,7 @@ void run_test_set(const char* set_path,
         } else {
             pass = r != NULL;
             for (const Assertion& a : asserts)
-                if (!check(a, r)) pass = false;
+                if (!check(a, r, doc)) pass = false;
         }
         if (r) leptris_xpath_result_free(r);
         if (xq) leptris_xquery_free(xq);
@@ -371,18 +372,16 @@ TEST(Qt3Subset, FnConcat) {
 }
 
 TEST(Qt3Subset, FnTokenize) {
-    /* Red: fn-tokenize-34 (dot vs CR — see F&O note). */
-    run_test_set("fn/tokenize.xml", {}, 21);
+    run_test_set("fn/tokenize.xml", {}, 22);
 }
 
 TEST(Qt3Subset, FnReplace) {
-    /* Reds: lazy quantifiers (POSIX has none, excluded pattern
-     families), non-capturing (?:...), $N-beyond-groups
-     error channel. */
-    run_test_set("fn/replace.xml", {}, 56);
+    run_test_set("fn/replace.xml", {}, 65);
 }
 
 TEST(Qt3Subset, FnStringJoin) {
-    /* Red: string-join-23/24 argument-shape cases. */
-    run_test_set("fn/string-join.xml", {}, 37);
+    /* The direct-constructor cases bind the ctor's SERIALIZED
+     * STRING (value-level constructors) — `$e/*` from it is empty.
+     * Node-materializing constructors is the follow-up slice. */
+    run_test_set("fn/string-join.xml", {}, 37, {"<e>", "<a xmlns="});
 }

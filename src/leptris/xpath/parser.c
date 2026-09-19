@@ -1096,8 +1096,10 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             ast_node_add_child(fn, body);
             return parse_postfix_ops(parser, fn);
         }
-        /* 3.0 named function reference `name#arity`. */
-        else if (current_token(parser)->type == TOK_NCNAME &&
+        /* 3.0 named function reference `name#arity` — the name may
+         * be a prefixed EQName (xs:string#1, fn:concat#2). */
+        else if ((current_token(parser)->type == TOK_NCNAME ||
+                  current_token(parser)->type == TOK_QNAME) &&
                  next && next->type == TOK_HASH) {
             char name[128];
             size_t nl = current_token(parser)->value_len;

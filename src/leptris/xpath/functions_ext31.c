@@ -477,113 +477,304 @@ static struct leptris_xpath_result* fn_round_half_even(XPathContext* ctx,
 #ifdef LEPTRIS_HAVE_POSIX_RE
 static int re_flags(const char* flags) {
     int cflags = REG_EXTENDED;
-    int dotall = 0;
     for (const char* p = flags ? flags : ""; *p; p++) {
         if (*p == 'i') cflags |= REG_ICASE;
         else if (*p == 'm') cflags |= REG_NEWLINE;
-        else if (*p == 's') dotall = 1;
-        /* 'x' handled by the caller (pattern rewrite); 'q' handled
-         * by the literal-pattern rewrite. */
+        else if (*p == 's' || *p == 'x' || *p == 'q') continue;
+        else return -1;   /* FORX0001: unknown flag */
     }
-    /* F&O default: '.' does NOT match line terminators. POSIX ERE
-     * dot matches everything, so pin REG_NEWLINE unless 's'
-     * (dot-all) is set — re_pattern_for rewrites '.' to [\s\S]
-     * for dot-all, which REG_NEWLINE cannot express. */
-    if (!dotall) cflags |= REG_NEWLINE;
+    /* F&O dot semantics live entirely in the bracket rewrite below
+     * ('.' never matches \n or \r without 's'). REG_NEWLINE is the
+     * 'm' flag's job alone: it also moves ^/$ to line boundaries,
+     * which F&O keeps whole-string by default. */
     return cflags;
 }
 #endif
 
-/* Compile an XPath-flavor pattern to POSIX ERE: translate the
- * shortcut escapes (\d \D \w \W \s \S) to bracket expressions
- * (outside classes) or POSIX classes (inside), then apply the 'x'
- * flag's whitespace strip. Saxon's regex language is XML-Schema
- * flavored; POSIX ERE is the engine underneath (portable engine
- * swap tracked with TODO.xslt-full/02). */
-static char* re_pattern_for(const char* pat, const char* flags) {
-    int x = 0, s = 0, q = 0;
-    for (const char* p = flags ? flags : ""; *p; p++) {
-        if (*p == 'x') x = 1;
-        else if (*p == 's') s = 1;
-        else if (*p == 'q') q = 1;
+/* ---- XPath-regex -> POSIX ERE translation ---- */
+
+typedef struct {
+    char* s;
+    size_t len, cap;
+} re_buf;
+
+static void re_buf_put(re_buf* b, const char* s, size_t n) {
+    if (b->len + n + 1 > b->cap) {
+        size_t nc = b->cap ? b->cap * 2 : 64;
+        while (b->len + n + 1 > nc) nc *= 2;
+        char* g = (char*)realloc(b->s, nc);
+        if (!g) return;
+        b->s = g;
+        b->cap = nc;
     }
+    if (!b->s) { b->len = 0; return; }
+    memcpy(b->s + b->len, s, n);
+    b->len += n;
+    b->s[b->len] = 0;
+}
+
+static void re_buf_chr(re_buf* b, char c) { re_buf_put(b, &c, 1); }
+
+static void re_buf_str(re_buf* b, const char* s) {
+    re_buf_put(b, s, strlen(s));
+}
+
+/* Translated pattern. xp is the greedy POSIX ERE equivalent. When
+ * the source has a lazy quantifier (POSIX ERE has none), head /
+ * atom / tail / qmin describe the FIRST one and matching runs
+ * through the bounded-repetition loop (re_lazy_*); deeper lazy
+ * quantifiers are rejected. ngroups is the POSIX group count
+ * (non-capturing groups included) — regmatch slots = ngroups+1. */
+typedef struct {
+    char* xp;
+    int lazy;
+    char* head;
+    char* atom;
+    char* tail;
+    int qmin;
+    int ngroups;
+} re_xpat;
+
+static void re_xpat_init(re_xpat* x) { memset(x, 0, sizeof(*x)); }
+
+static void re_xpat_free(re_xpat* x) {
+    free(x->xp);
+    free(x->head);
+    free(x->atom);
+    free(x->tail);
+    re_xpat_init(x);
+}
+
+typedef struct {
+    int posix_groups;
+    int orig_groups;
+    /* cap_map[original_group] = POSIX group index, so $N in the
+     * replacement survives the (?:...) translation (which keeps the
+     * parens for grouping but must not consume a capture slot). */
+    int* cap_map;
+    size_t map_cap;
+    int allow_lazy;
+} re_ctx;
+
+static int re_translate_into(const char* pat, const char* flags,
+                             re_buf* out, re_ctx* cx, re_xpat* x);
+
+/* 0 ok; -1 error (invalid pattern / nested lazy). */
+static int re_translate_into(const char* pat, const char* flags,
+                             re_buf* out, re_ctx* cx, re_xpat* x) {
+    int xflag = strchr(flags, 'x') != NULL;
     size_t len = strlen(pat);
-    char* out = (char*)malloc(len * 8 + 1);
-    if (!out) return NULL;
-    size_t o = 0;
     int in_class = 0;
-    if (q) {
+    int have_atom = 0;
+    size_t last_atom_out = 0;
+
+    if (strchr(flags, 'q')) {
         /* 'q': the pattern is a LITERAL string — escape every
          * character that is special to POSIX ERE. */
-        for (size_t i = 0; i < len; i++) {
-            char c = pat[i];
-            if (strchr("^.[$()|*+?{\\", c)) out[o++] = '\\';
-            out[o++] = c;
+        for (const char* p = pat; *p; p++) {
+            if (strchr("^.[$()|*+?{\\", *p)) re_buf_chr(out, '\\');
+            re_buf_chr(out, *p);
         }
-        out[o] = 0;
-        return out;
+        return 0;
     }
+
     for (size_t i = 0; i < len; i++) {
         char c = pat[i];
-        if (x && !in_class && (c == ' ' || c == '\t' || c == '\n'))
+        if (xflag && !in_class && (c == ' ' || c == '\t' || c == '\n'))
             continue;
         if (c == '.' && !in_class) {
-            /* Bracket-class rewrite with RAW control bytes — POSIX
-             * treats backslash as literal inside brackets, so the
-             * \n/\r escapes would silently match 'n'/'r'. */
-            if (s) {
-                /* dot-all: every character. */
-                out[o++] = '[';
-                strcpy(out + o, "\x00-\x10\x12-\xFF");
-                o += strlen(out + o);
+            have_atom = 1;
+            last_atom_out = out->len;
+            /* Bracket rewrite with RAW control bytes — POSIX treats
+             * backslash as literal inside brackets, so escapes would
+             * silently match 'n'/'r'. NUL cannot live in the
+             * C-string pattern and inputs are C strings, so dot-all
+             * starts its range at \x01. */
+            if (strchr(flags, 's')) {
+                re_buf_chr(out, '[');
+                re_buf_put(out, "\x01-\x10\x12-\xFF]", 7);
             } else {
-                /* F&O default: '.' does not match \n OR \r. */
-                out[o++] = '[';
-                out[o++] = '^';
-                out[o++] = '\n';
-                out[o++] = '\r';
-                out[o++] = ']';
+                re_buf_str(out, "[^\n\r]");
             }
             continue;
         }
         if (c == '\\' && i + 1 < len) {
             char e = pat[i + 1];
-            const char* sub = NULL, *incls = NULL;
-            switch (e) {
-                case 't': out[o++] = '\t'; i++; continue;
-                case 'n': out[o++] = '\n'; i++; continue;
-                case 'r': out[o++] = '\r'; i++; continue;
-                case 'd': sub = "[0-9]"; incls = "[:digit:]"; break;
-                case 'D': sub = "[^0-9]"; incls = "[:^digit:]"; break;
-                case 'w': sub = "[_a-zA-Z0-9]";
-                          incls = "[:alnum:]_"; break;
-                case 'W': sub = "[^_a-zA-Z0-9]";
-                          incls = "[:^alnum:]"; break;
-                case 's': sub = "[ \t\r\n]"; incls = "[:space:]"; break;
-                case 'S': sub = "[^ \t\r\n]";
-                          incls = "[:^space:]"; break;
-                default:
-                    out[o++] = c; out[o++] = e; i++;
-                    continue;
-            }
             if (in_class) {
-                if (e == 'd' || e == 'w' || e == 's')
-                    { out[o++] = '['; }
-                strcpy(out + o, incls); o += strlen(incls);
-                if (e == 'd' || e == 'w' || e == 's')
-                    { out[o++] = ']'; }
-            } else {
-                strcpy(out + o, sub); o += strlen(sub);
+                const char* cls = NULL;
+                switch (e) {
+                    case 'd': cls = "[:digit:]"; break;
+                    case 'D': cls = "[:^digit:]"; break;
+                    case 'w': cls = "[:alnum:]_"; break;
+                    case 'W': cls = "[:^alnum:]"; break;
+                    case 's': cls = "[:space:]"; break;
+                    case 'S': cls = "[:^space:]"; break;
+                    default: break;
+                }
+                if (cls) {
+                    re_buf_chr(out, '[');
+                    re_buf_str(out, cls);
+                    re_buf_chr(out, ']');
+                } else {
+                    /* backslash is literal inside POSIX brackets */
+                    re_buf_chr(out, c);
+                    re_buf_chr(out, e);
+                }
+                i++;
+                continue;
+            }
+            have_atom = 1;
+            last_atom_out = out->len;
+            switch (e) {
+                case 't': re_buf_chr(out, '\t'); break;
+                case 'n': re_buf_chr(out, '\n'); break;
+                case 'r': re_buf_chr(out, '\r'); break;
+                case 'd': re_buf_str(out, "[0-9]"); break;
+                case 'D': re_buf_str(out, "[^0-9]"); break;
+                case 'w': re_buf_str(out, "[_a-zA-Z0-9]"); break;
+                case 'W': re_buf_str(out, "[^_a-zA-Z0-9]"); break;
+                case 's': re_buf_str(out, "[ \t\r\n]"); break;
+                case 'S': re_buf_str(out, "[^ \t\r\n]"); break;
+                default:
+                    re_buf_chr(out, c);
+                    re_buf_chr(out, e);
+                    break;
             }
             i++;
             continue;
         }
-        if (c == '[' && (i == 0 || pat[i-1] != '\\')) in_class = 1;
-        else if (c == ']' && i > 0 && pat[i-1] != '\\') in_class = 0;
-        out[o++] = c;
+        if (c == '[' && !in_class) {
+            in_class = 1;
+            have_atom = 1;
+            last_atom_out = out->len;
+            re_buf_chr(out, c);
+            continue;
+        }
+        if (c == ']' && in_class) {
+            in_class = 0;
+            re_buf_chr(out, c);
+            continue;
+        }
+        if (!in_class && (c == '*' || c == '+')) {
+            if (!have_atom) return -1;
+            if (i + 1 < len && pat[i + 1] == '?') {
+                /* LAZY quantifier: split the translation around the
+                 * atom and translate the rest (lazy-free) as tail.
+                 * xp stays unused on this path — matching goes
+                 * through the bounded head/atom/tail engine. */
+                if (!cx->allow_lazy) return -1;
+                re_buf head = {0}, atom = {0};
+                re_buf_put(&head, out->s, last_atom_out);
+                re_buf_put(&atom, out->s + last_atom_out,
+                           out->len - last_atom_out);
+                re_buf tb = {0};
+                cx->allow_lazy = 0;
+                int rc = re_translate_into(pat + i + 2, flags, &tb,
+                                           cx, NULL);
+                cx->allow_lazy = 1;
+                if (rc != 0) {
+                    free(head.s); free(atom.s); free(tb.s);
+                    return -1;
+                }
+                if (x) {
+                    x->lazy = 1;
+                    x->head = head.s ? head.s : leptris_strdup("");
+                    x->atom = atom.s ? atom.s : leptris_strdup("");
+                    x->tail = tb.s ? tb.s : leptris_strdup("");
+                    x->qmin = (c == '+') ? 1 : 0;
+                    x->ngroups = cx->posix_groups;
+                } else {
+                    free(head.s); free(atom.s); free(tb.s);
+                }
+                return 0;
+            }
+            re_buf_chr(out, c);
+            have_atom = 0;
+            continue;
+        }
+        if (!in_class && c == '?') {
+            if (!have_atom) return -1;
+            if (i + 1 < len && pat[i + 1] == '?')
+                return -1;   /* lazy '?' — unsupported */
+            re_buf_chr(out, c);
+            have_atom = 0;
+            continue;
+        }
+        if (!in_class && c == '{') {
+            if (!have_atom) return -1;
+            re_buf_chr(out, c);
+            for (i++; i < len && pat[i] != '}'; i++)
+                re_buf_chr(out, pat[i]);
+            if (i >= len) return -1;
+            re_buf_chr(out, '}');
+            have_atom = 0;
+            continue;
+        }
+        if (!in_class && c == '(') {
+            int noncap = (i + 2 < len && pat[i + 1] == '?' &&
+                          pat[i + 2] == ':');
+            cx->posix_groups++;
+            if (noncap) {
+                i += 2;
+            } else {
+                cx->orig_groups++;
+                if (cx->cap_map &&
+                    (size_t)cx->orig_groups < cx->map_cap)
+                    cx->cap_map[cx->orig_groups] = cx->posix_groups;
+            }
+            have_atom = 1;
+            last_atom_out = out->len;
+            re_buf_chr(out, '(');
+            continue;
+        }
+        if (!in_class && c == '|') {
+            re_buf_chr(out, c);
+            have_atom = 0;
+            continue;
+        }
+        if (!in_class && (c == '^' || c == '$')) {
+            re_buf_chr(out, c);
+            have_atom = 0;
+            continue;
+        }
+        if (!in_class) {
+            have_atom = 1;
+            last_atom_out = out->len;
+        }
+        re_buf_chr(out, c);
     }
-    out[o] = 0;
-    return out;
+    if (in_class) return -1;
+    if (x) x->ngroups = cx->posix_groups;
+    return 0;
+}
+
+/* Translate an XPath-regex flavor pattern (F&O flags) to POSIX ERE.
+ * cap_map (optional) receives original->POSIX group mapping.
+ * Returns 0 and fills x (re_xpat_free when done), -1 on error. */
+static int re_translate(const char* pat, const char* flags, re_xpat* x,
+                        int* cap_map, size_t map_cap) {
+    re_xpat_init(x);
+    for (const char* p = flags ? flags : ""; *p; p++)
+        if (*p != 'i' && *p != 's' && *p != 'm' && *p != 'x' && *p != 'q')
+            return -1;
+    re_buf b = {0};
+    re_ctx cx;
+    memset(&cx, 0, sizeof(cx));
+    cx.cap_map = cap_map;
+    cx.map_cap = map_cap;
+    cx.allow_lazy = 1;
+    int rc = re_translate_into(pat, flags ? flags : "", &b, &cx, x);
+    if (rc != 0 || !b.s) {
+        free(b.s);
+        re_xpat_free(x);
+        return -1;
+    }
+    if (x->lazy)
+        free(b.s);   /* matching uses head/atom/tail, not xp */
+    else
+        x->xp = b.s;
+    x->ngroups = cx.posix_groups;
+    return 0;
 }
 
 static char* re_str_arg_opt(XPathContext* ctx, XPathASTNode** args,
@@ -604,6 +795,80 @@ static char* re_str_arg(XPathContext* ctx, XPathASTNode** args, size_t i) {
 
 #ifdef LEPTRIS_HAVE_POSIX_RE
 
+/* Lazy-quantifier engine: POSIX regexec is greedy/longest, so a
+ * lazy `X*?` runs as bounded repetitions `X{qmin,k}` with k
+ * ascending. For each start position (ascending) the first k that
+ * matches AT that position wins — PCRE's leftmost-then-shortest
+ * semantics. Compiled k-patterns are cached across the scan. */
+typedef struct {
+    const re_xpat* x;
+    int cflags;
+    size_t kmax;
+    regex_t* rxs;
+    unsigned char* ready;
+} re_lazy;
+
+static void re_lazy_free(re_lazy* e) {
+    if (!e->rxs) return;
+    for (size_t k = 0; k <= e->kmax; k++)
+        if (e->ready[k]) regfree(&e->rxs[k]);
+    free(e->rxs);
+    free(e->ready);
+    e->rxs = NULL;
+    e->ready = NULL;
+}
+
+/* slen: subject length upper bound (bounds the repetition counts). */
+static int re_lazy_init(re_lazy* e, const re_xpat* x, int cflags,
+                        size_t slen) {
+    e->x = x;
+    e->cflags = cflags;
+    e->kmax = slen;
+    e->rxs = (regex_t*)calloc(slen + 1, sizeof(regex_t));
+    e->ready = (unsigned char*)calloc(slen + 1, 1);
+    return e->rxs && e->ready ? 0 : -1;
+}
+
+/* 0 = match (pm filled, anchored at s[start]); REG_NOMATCH = none. */
+static int re_lazy_exec(re_lazy* e, const char* s, size_t start,
+                        size_t nm, regmatch_t* pm) {
+    const re_xpat* x = e->x;
+    size_t slen = strlen(s);
+    if (x->qmin > (int)slen) return REG_NOMATCH;
+    for (size_t pos = start; pos <= slen; pos++) {
+        for (size_t k = (size_t)x->qmin; k <= e->kmax; k++) {
+            if (!e->ready[k]) {
+                re_buf b = {0};
+                re_buf_str(&b, x->head);
+                re_buf_str(&b, x->atom);
+                char span[48];
+                snprintf(span, sizeof(span), "{%d,%zu}", x->qmin, k);
+                re_buf_str(&b, span);
+                re_buf_str(&b, x->tail);
+                int rc = -1;
+                if (b.s)
+                    rc = regcomp(&e->rxs[k], b.s, e->cflags);
+                free(b.s);
+                if (rc != 0) continue;   /* this k not compilable */
+                e->ready[k] = 1;
+            }
+            if (regexec(&e->rxs[k], s + pos, nm, pm, 0) == 0 &&
+                pm[0].rm_so == 0) {
+                /* Rebase the slots onto s+start so callers see the
+                 * same offsets regexec(s+start) would produce. */
+                size_t delta = pos - start;
+                for (size_t gi = 0; gi < nm; gi++) {
+                    if (pm[gi].rm_so < 0) continue;
+                    pm[gi].rm_so += (regoff_t)delta;
+                    pm[gi].rm_eo += (regoff_t)delta;
+                }
+                return 0;
+            }
+        }
+    }
+    return REG_NOMATCH;
+}
+
 static struct leptris_xpath_result* fn_matches(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* in = re_str_arg(ctx, args, 0);
@@ -615,22 +880,44 @@ static struct leptris_xpath_result* fn_matches(XPathContext* ctx,
         if (out) { out->value.boolean_value = 0; return out; }
         return NULL;
     }
-    char* xp = re_pattern_for(pat, fl);
-    regex_t rx;
-    if (xp && regcomp(&rx, xp, re_flags(fl)) == 0) {
-        out->value.boolean_value = regexec(&rx, in, 0, NULL, 0) == 0;
-        regfree(&rx);
-    } else {
+    re_xpat x;
+    re_xpat_init(&x);
+    int cflags = re_flags(fl);
+    if (cflags < 0 || re_translate(pat, fl, &x, NULL, 0) != 0) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                  "Invalid regular expression: %s", pat);
         out->value.boolean_value = 0;
+        free(in); free(pat); free(fl);
+        return out;
     }
-    free(xp);
+    int hit = 0;
+    if (x.lazy) {
+        re_lazy lz;
+        if (re_lazy_init(&lz, &x, cflags, strlen(in)) == 0) {
+            regmatch_t zpm;
+            hit = re_lazy_exec(&lz, in, 0, 1, &zpm) == 0;
+            re_lazy_free(&lz);
+        }
+    } else {
+        regex_t rx;
+        if (regcomp(&rx, x.xp, cflags) == 0) {
+            hit = regexec(&rx, in, 0, NULL, 0) == 0;
+            regfree(&rx);
+        } else {
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "Invalid regular expression: %s", pat);
+        }
+    }
+    re_xpat_free(&x);
+    out->value.boolean_value = hit;
     free(in); free(pat); free(fl);
     return out;
 }
 
-/* fn:replace with $1..$9 capture references. */
+/* fn:replace — $0 whole match, $N maximal digit run naming an
+ * existing group; an unmatched participating group splices empty;
+ * a $ that names no group, a lone trailing \, or a pattern matching
+ * the empty string is the F&O error (FORX0004 / FORX0003). */
 static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* in = re_str_arg(ctx, args, 0);
@@ -647,30 +934,58 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
         return out;
     }
     out->value.string_value = leptris_strdup("");
-    char* xp = re_pattern_for(pat, fl);
+    re_xpat x;
+    re_xpat_init(&x);
+    int cmap[128];
+    int cflags = re_flags(fl);
+    if (cflags < 0 || re_translate(pat, fl, &x, cmap, 128) != 0) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "Invalid regular expression: %s", pat);
+        re_xpat_free(&x);
+        free(in); free(pat); free(rep); free(fl);
+        leptris_xpath_result_free(out);
+        return NULL;
+    }
     regex_t rx;
-    if (xp && regcomp(&rx, xp, re_flags(fl)) == 0) {
-        size_t nm = rx.re_nsub + 1;
+    re_lazy lz;
+    int have_rx = 0, have_lz = 0;
+    size_t nm = (size_t)x.ngroups + 1;
+    int errored = 0;
+    if (x.lazy) {
+        if (re_lazy_init(&lz, &x, cflags, strlen(in)) == 0) have_lz = 1;
+    } else if (regcomp(&rx, x.xp, cflags) == 0) {
+        have_rx = 1;
+        nm = rx.re_nsub + 1;
+    }
+    if (have_lz) {
+        /* nothing */
+    } else if (!have_rx) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "Invalid regular expression: %s", pat);
+        re_xpat_free(&x);
+        free(in); free(pat); free(rep); free(fl);
+        leptris_xpath_result_free(out);
+        return NULL;
+    }
+    {
         regmatch_t* pm = (regmatch_t*)calloc(nm, sizeof(*pm));
         size_t pos = 0, ilen = strlen(in);
         size_t rlen = strlen(rep);
         while (pos <= ilen && pm) {
-            if (regexec(&rx, in + pos, nm, pm, 0) != 0) break;
+            int rc = have_lz
+                ? re_lazy_exec(&lz, in, pos, nm, pm)
+                : regexec(&rx, in + pos, nm, pm, 0);
+            if (rc != 0) break;
             regmatch_t* m = &pm[0];
-            if (m->rm_so == m->rm_eo && m->rm_so == 0 && pos > 0) {
-                /* zero-width match at restart — append one char and
-                 * continue so the scan terminates. */
-                char* grown = (char*)realloc(
-                    out->value.string_value,
-                    strlen(out->value.string_value) + 2);
-                if (grown) {
-                    size_t l = strlen(grown);
-                    grown[l] = in[pos - 1];
-                    grown[l + 1] = 0;
-                    out->value.string_value = grown;
-                }
-                pos++;
-                continue;
+            if (m->rm_so == m->rm_eo) {
+                /* F&O: fn:replace forbids patterns that match the
+                 * empty string (FORX0003). */
+                snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                         "Pattern matches zero-length string: %s", pat);
+                errored = 1;
+                free(pm);
+                pm = NULL;
+                break;
             }
             /* literal before the match */
             {
@@ -702,29 +1017,76 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
                     }
                     continue;
                 }
-                if (rep[k] == '$' && k + 1 < rlen && rep[k + 1] >= '1' &&
-                    rep[k + 1] <= '9') {
-                    /* maximal digit run that names an existing group */
+                if (rep[k] == '$') {
+                    if (k + 1 >= rlen) {
+                        snprintf(ctx->error_msg,
+                                 sizeof(ctx->error_msg),
+                                 "Trailing '$' in replacement");
+                        errored = 1;
+                        free(pm);
+                        pm = NULL;
+                        break;
+                    }
+                    if (rep[k + 1] == '$') {
+                        size_t old = strlen(out->value.string_value);
+                        char* grown = (char*)realloc(
+                            out->value.string_value, old + 2);
+                        if (grown) {
+                            grown[old] = '$';
+                            grown[old + 1] = 0;
+                            out->value.string_value = grown;
+                        }
+                        k++;
+                        continue;
+                    }
+                    if (rep[k + 1] < '0' || rep[k + 1] > '9') {
+                        snprintf(ctx->error_msg,
+                                 sizeof(ctx->error_msg),
+                                 "Invalid '$' reference in replacement");
+                        errored = 1;
+                        free(pm);
+                        pm = NULL;
+                        break;
+                    }
+                    /* maximal digit run that names an existing
+                     * group ($0 = the whole match) */
                     size_t digits_end = k + 1;
                     long g = 0;
                     while (digits_end < rlen &&
                            rep[digits_end] >= '0' &&
                            rep[digits_end] <= '9') {
                         long cand = g * 10 + (rep[digits_end] - '0');
-                        if (cand == 0 || (size_t)cand >= nm) break;
+                        if ((size_t)cand >= nm) break;
+                        if (cand == 0 && digits_end > k + 1) break;
                         g = cand;
                         digits_end++;
                     }
-                    if (g > 0 && (size_t)g < nm && pm[g].rm_so >= 0) {
-                        size_t gl = (size_t)(pm[g].rm_eo - pm[g].rm_so);
-                        size_t old = strlen(out->value.string_value);
-                        char* grown = (char*)realloc(
-                            out->value.string_value, old + gl + 1);
-                        if (grown) {
-                            memcpy(grown + old, in + pos + pm[g].rm_so, gl);
-                            grown[old + gl] = 0;
-                            out->value.string_value = grown;
-                        }
+                    if (digits_end == k + 1) {
+                        /* even the first digit names no group */
+                        snprintf(ctx->error_msg,
+                                 sizeof(ctx->error_msg),
+                                 "No group %c in pattern", rep[k + 1]);
+                        errored = 1;
+                        free(pm);
+                        pm = NULL;
+                        break;
+                    }
+                    size_t gi = (size_t)g;
+                    if (gi > 0 && (size_t)g < 128 &&
+                        cmap[(size_t)g] > 0)
+                        gi = (size_t)cmap[(size_t)g];
+                    size_t old = strlen(out->value.string_value);
+                    size_t gl = 0;
+                    if (pm[gi].rm_so >= 0)
+                        gl = (size_t)(pm[gi].rm_eo - pm[gi].rm_so);
+                    char* grown = (char*)realloc(
+                        out->value.string_value, old + gl + 1);
+                    if (grown) {
+                        if (gl)
+                            memcpy(grown + old,
+                                   in + pos + pm[gi].rm_so, gl);
+                        grown[old + gl] = 0;
+                        out->value.string_value = grown;
                     }
                     k = digits_end - 1;
                 } else if (rep[k] == '\\' && k + 1 < rlen) {
@@ -737,6 +1099,13 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
                         out->value.string_value = grown;
                     }
                     k++;
+                } else if (rep[k] == '\\') {
+                    snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                             "Trailing '\\' in replacement");
+                    errored = 1;
+                    free(pm);
+                    pm = NULL;
+                    break;
                 } else {
                     size_t old = strlen(out->value.string_value);
                     char* grown = (char*)realloc(
@@ -748,24 +1117,10 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
                     }
                 }
             }
-            if (m->rm_eo == m->rm_so) {
-                /* zero-width: copy one char and advance */
-                if (pos + (size_t)m->rm_eo < ilen) {
-                    size_t old = strlen(out->value.string_value);
-                    char* grown = (char*)realloc(
-                        out->value.string_value, old + 2);
-                    if (grown) {
-                        grown[old] = in[pos + m->rm_eo];
-                        grown[old + 1] = 0;
-                        out->value.string_value = grown;
-                    }
-                }
-                pos += (size_t)m->rm_eo + 1;
-            } else {
-                pos += (size_t)m->rm_eo;
-            }
+            if (!pm) break;
+            pos += (size_t)m->rm_eo;
         }
-        if (pos <= ilen) {
+        if (pm && pos <= ilen) {
             size_t old = strlen(out->value.string_value);
             char* grown = (char*)realloc(
                 out->value.string_value, old + (ilen - pos) + 1);
@@ -776,13 +1131,15 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
             }
         }
         free(pm);
-        regfree(&rx);
-    } else {
-        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
-                 "Invalid regular expression: %s", pat);
+        if (have_rx) regfree(&rx);
+        if (have_lz) re_lazy_free(&lz);
     }
-    free(xp);
+    re_xpat_free(&x);
     free(in); free(pat); free(rep); free(fl);
+    if (errored) {
+        leptris_xpath_result_free(out);
+        return NULL;
+    }
     return out;
 }
 
@@ -800,21 +1157,6 @@ static void re_normalize_ws(char* s) {
             if (sp && w != s) *w++ = ' ';
             sp = 0;
             *w++ = (char)ch;
-        }
-    }
-    *w = 0;
-}
-
-/* F&O 3.1 5.7.4: line-ending normalization — CRLF and CR both
- * become LF before the regex is applied. */
-static void re_normalize_cr(char* s) {
-    char* w = s;
-    for (char* r = s; *r; r++) {
-        if (r[0] == '\r') {
-            *w++ = '\n';
-            if (r[1] == '\n') r++;
-        } else {
-            *w++ = r[0];
         }
     }
     *w = 0;
@@ -841,48 +1183,69 @@ static struct leptris_xpath_result* fn_tokenize(XPathContext* ctx,
     /* F&O: zero-length input (including the empty sequence) yields
      * an EMPTY sequence, not one empty token. */
     if (in[0] == 0) { free(in); free(pat); free(fl); return out; }
-    char* xp = re_pattern_for(pat, fl);
+    re_xpat x;
+    re_xpat_init(&x);
+    int cflags = re_flags(fl);
+    if (cflags < 0 || re_translate(pat, fl, &x, NULL, 0) != 0) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "Invalid regular expression: %s", pat);
+        re_xpat_free(&x);
+        free(in); free(pat); free(fl);
+        return out;
+    }
     regex_t rx;
-    if (xp && regcomp(&rx, xp, re_flags(fl)) == 0) {
-        size_t nm = rx.re_nsub + 1;
-        regmatch_t* pm = (regmatch_t*)calloc(nm, sizeof(*pm));
+    re_lazy lz;
+    int have_rx = 0, have_lz = 0;
+    if (x.lazy) {
+        if (re_lazy_init(&lz, &x, cflags, strlen(in)) == 0) have_lz = 1;
+    } else if (regcomp(&rx, x.xp, cflags) == 0) {
+        have_rx = 1;
+    }
+    if (have_rx || have_lz) {
+        regmatch_t m;
         size_t pos = 0, ilen = strlen(in);
-        while (pos <= ilen && pm) {
-            if (regexec(&rx, in + pos, nm, pm, 0) != 0) break;
-            regmatch_t* m = &pm[0];
-            if (m->rm_eo == m->rm_so && pos == 0) {
+        while (pos <= ilen) {
+            int rc = have_lz
+                ? re_lazy_exec(&lz, in, pos, 1, &m)
+                : regexec(&rx, in + pos, 1, &m, 0);
+            if (rc != 0) break;
+            if (m.rm_eo == m.rm_so && pos == 0) {
                 /* zero-width at the very start: empty leading token. */
                 seq_push_str(out, "");
                 pos++;
                 continue;
             }
             /* token = text before the match */
-            char seg[512];
-            size_t pre = (size_t)m->rm_so;
-            if (pre < sizeof seg) {
-                memcpy(seg, in + pos, pre);
-                seg[pre] = 0;
-                seq_push_str(out, seg);
+            {
+                size_t pre = (size_t)m.rm_so;
+                char* tok = (char*)malloc(pre + 1);
+                if (tok) {
+                    memcpy(tok, in + pos, pre);
+                    tok[pre] = 0;
+                    seq_push_str(out, tok);
+                    free(tok);
+                }
             }
-            pos += (size_t)m->rm_eo;
-            if (m->rm_eo == m->rm_so) pos++;
+            pos += (size_t)m.rm_eo;
+            if (m.rm_eo == m.rm_so) pos++;
         }
         if (pos <= ilen) {
-            char seg[512];
             size_t rem = ilen - pos;
-            if (rem < sizeof seg) {
-                memcpy(seg, in + pos, rem);
-                seg[rem] = 0;
-                seq_push_str(out, seg);
+            char* tok = (char*)malloc(rem + 1);
+            if (tok) {
+                memcpy(tok, in + pos, rem);
+                tok[rem] = 0;
+                seq_push_str(out, tok);
+                free(tok);
             }
         }
-        free(pm);
-        regfree(&rx);
+        if (have_rx) regfree(&rx);
+        if (have_lz) re_lazy_free(&lz);
     } else {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                  "Invalid regular expression: %s", pat);
     }
-    free(xp);
+    re_xpat_free(&x);
     free(in); free(pat); free(fl);
     return out;
 }
@@ -4150,28 +4513,44 @@ static struct leptris_xpath_result* fn_analyze_string(XPathContext* ctx,
     char* pat = re_str_arg(ctx, args, 1);
     char* fl = (n >= 3) ? re_str_arg(ctx, args, 2) : leptris_strdup("");
     if (!in || !pat) { free(in); free(pat); free(fl); return NULL; }
-    char* xp = re_pattern_for(pat, fl);
+    re_xpat xr;
+    re_xpat_init(&xr);
+    int aflags = re_flags(fl);
     struct leptris_xpath_result* out = NULL;
-    regex_t rx;
-    if (xp && regcomp(&rx, xp, re_flags(fl)) == 0) {
-        LeptrisDocument doc = leptris_document_create();
-        LeptrisElement root =
-            doc ? leptris_element_create(doc, "fn:analyze-string") : NULL;
-        if (root) {
-            /* F+O model: the result carries the functions namespace,
-             * resolvable through one root declaration (#846). */
-            leptris_element_add_namespace_definition(
-                root, "fn", "http://www.w3.org/2005/xpath-functions");
-            regmatch_t pm[12];
-            /* #857: ask for exactly re_nsub+1 slots — BSD regexec
-             * leaves the remainder untouched, so stale stack data
-             * (from a previous analyze-string call) read as phantom
-             * groups and corrupted the match/group spans. */
-            const size_t nmatch =
-                (size_t)rx.re_nsub + 1 <= 12 ? (size_t)rx.re_nsub + 1 : 12;
-            const int max_group = (int)nmatch - 1;
-            const char* p = in;
-            while (*p && regexec(&rx, p, nmatch, pm, 0) == 0) {
+    if (aflags >= 0 && re_translate(pat, fl, &xr, NULL, 0) == 0) {
+        regex_t rx;
+        re_lazy az;
+        int have_rx = 0, have_az = 0;
+        if (xr.lazy) {
+            if (re_lazy_init(&az, &xr, aflags, strlen(in)) == 0)
+                have_az = 1;
+        } else if (regcomp(&rx, xr.xp, aflags) == 0) {
+            have_rx = 1;
+        }
+        if (have_rx || have_az) {
+            LeptrisDocument doc = leptris_document_create();
+            LeptrisElement root =
+                doc ? leptris_element_create(doc, "fn:analyze-string") : NULL;
+            if (root) {
+                /* F+O model: the result carries the functions namespace,
+                 * resolvable through one root declaration (#846). */
+                leptris_element_add_namespace_definition(
+                    root, "fn", "http://www.w3.org/2005/xpath-functions");
+                regmatch_t pm[12];
+                /* #857: ask for exactly re_nsub+1 slots — BSD regexec
+                 * leaves the remainder untouched, so stale stack data
+                 * (from a previous analyze-string call) read as phantom
+                 * groups and corrupted the match/group spans. */
+                size_t ngroups = have_rx ? (size_t)rx.re_nsub
+                                         : (size_t)xr.ngroups;
+                const size_t nmatch =
+                    ngroups + 1 <= 12 ? ngroups + 1 : 12;
+                const int max_group = (int)nmatch - 1;
+                const char* p = in;
+                while (*p &&
+                       (have_az
+                            ? re_lazy_exec(&az, p, 0, nmatch, pm)
+                            : regexec(&rx, p, nmatch, pm, 0)) == 0) {
                 if (pm[0].rm_so > 0) {
                     LeptrisElement nm =
                         leptris_element_create(doc, "fn:non-match");
@@ -4243,16 +4622,20 @@ static struct leptris_xpath_result* fn_analyze_string(XPathContext* ctx,
             if (!out || xq_anchor_on_source(ctx, doc) != 0) {
                 if (out) { xpath_result_free(out); out = NULL; }
             }
-        } else if (doc) {
-            leptris_document_free(doc);
+            } else if (doc) {
+                leptris_document_free(doc);
+            }
+            if (have_rx) regfree(&rx);
+            if (have_az) re_lazy_free(&az);
         }
-        regfree(&rx);
+        re_xpat_free(&xr);
+    } else {
+        re_xpat_free(&xr);
     }
     if (!out) {
         out = xpath_result_new(XPATH_RESULT_STRING);
         if (out) out->value.string_value = leptris_strdup("");
     }
-    free(xp);
     free(in);
     free(pat);
     free(fl);
