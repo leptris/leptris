@@ -181,7 +181,11 @@ static uint64_t digest_element(LeptrisElement e, LeptrisDigestFlags flags) {
                 attrs[n].value_len = leptris_attr_value_sv(a).length;
                 n++;
             }
-            qsort(attrs, n, sizeof(DigestAttr), digest_attr_cmp);
+            /* ATTR_ORDER (#1200): document order is canonical — the
+             * walk above already collected in document order, so
+             * skip the sort and attribute order feeds the hash. */
+            if (!(flags & LEPTRIS_DIGEST_ATTR_ORDER))
+                qsort(attrs, n, sizeof(DigestAttr), digest_attr_cmp);
         }
         h = digest_mix_u64(h, n);
         for (size_t i = 0; i < n; i++) {

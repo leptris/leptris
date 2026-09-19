@@ -253,7 +253,13 @@ typedef enum {
     LEPTRIS_DIGEST_DEFAULT     = 0,
     /* Skip whitespace-only text nodes entirely (comparator's
      * strip-profile default). */
-    LEPTRIS_DIGEST_DROP_WS_TEXT = 1u
+    LEPTRIS_DIGEST_DROP_WS_TEXT = 1u,
+    /* Hash attributes in DOCUMENT order instead of the sorted
+     * canonical order — documents differing only in attribute
+     * order digest DIFFERENT under this flag (canon's verbose
+     * diff gate, #1200). Equality under this flag additionally
+     * implies attribute-order identity. */
+    LEPTRIS_DIGEST_ATTR_ORDER  = 2u
 } LeptrisDigestFlags;
 
 typedef struct {
