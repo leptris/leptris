@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.208] - 2026-09-19
+
+### Fixed
+
+- root-doc memo must not survive element unregistration; set_root refreshes the error channel (#1242) (dom)
+- set a fresh thread-local error on set_root validation failures (dom)
+
+
+
 ## [1.9.207] - 2026-09-19
 
 ### Fixed
