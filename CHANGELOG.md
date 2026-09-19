@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.208] - 2026-09-19
+
+### Fixed
+
+- set a fresh thread-local error on set_root validation failures (dom)
+
+
+
 ## [1.9.207] - 2026-09-19
 
 ### Fixed
