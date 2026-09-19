@@ -1225,3 +1225,28 @@ TEST(DtdValidate, ExternalPEWithoutLoaderIsSkippedLeniently) {
     leptris_dtd_free(dtd);
     leptris_document_free(doc);
 }
+
+
+// ---- #1211: the documented NULL-on-error contract ----
+
+TEST(DtdParse, MalformedDeclarationYieldsNull) {
+    const char* broken = "<!ELEMENT broken (>";
+    EXPECT_EQ(leptris_dtd_parse(broken, std::strlen(broken)),
+              nullptr);
+}
+
+TEST(DtdParse, UnclosedDeclarationYieldsNull) {
+    const char* broken = "<!ELEMENT r (item+)";
+    EXPECT_EQ(leptris_dtd_parse(broken, std::strlen(broken)),
+              nullptr);
+}
+
+TEST(DtdParse, CommentsAndWhitespaceStayNonFatal) {
+    /* Lenient skips that must keep parsing: comments, PIs, blank
+     * runs between declarations. */
+    const char* ok = "<!-- note -->\n<?pitarget data?>\n"
+                     "<!ELEMENT r EMPTY>\n";
+    LeptrisDTD* dtd = leptris_dtd_parse(ok, std::strlen(ok));
+    ASSERT_NE(dtd, nullptr);
+    leptris_dtd_free(dtd);
+}

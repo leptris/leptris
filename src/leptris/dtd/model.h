@@ -130,6 +130,12 @@ struct LeptrisDTD {
      * from the document parser). ttdtd_free destroys the pool only
      * when this flag is set. */
     int owns_pool;
+    /* #1211: a declaration matched its keyword but the parser could
+     * not deliver the promised structure (malformed ELEMENT/ATTLIST/
+     * ENTITY/NOTATION). leptris_dtd_parse frees and returns NULL.
+     * Lenient paths — comments, PIs, unresolved external PEs,
+     * duplicates — never set this. */
+    int parse_failed;
 
     /* External parameter-entity loader (application-owned I/O).
      * NULL = external PEs are not resolvable and are skipped.
