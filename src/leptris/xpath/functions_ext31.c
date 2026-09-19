@@ -477,12 +477,19 @@ static struct leptris_xpath_result* fn_round_half_even(XPathContext* ctx,
 #ifdef LEPTRIS_HAVE_POSIX_RE
 static int re_flags(const char* flags) {
     int cflags = REG_EXTENDED;
+    int dotall = 0;
     for (const char* p = flags ? flags : ""; *p; p++) {
         if (*p == 'i') cflags |= REG_ICASE;
         else if (*p == 'm') cflags |= REG_NEWLINE;
-        /* 'x' handled by the caller (pattern rewrite); 's' is a
-         * no-op for POSIX (dot excludes newline in ERE). */
+        else if (*p == 's') dotall = 1;
+        /* 'x' handled by the caller (pattern rewrite); 'q' handled
+         * by the literal-pattern rewrite. */
     }
+    /* F&O default: '.' does NOT match line terminators. POSIX ERE
+     * dot matches everything, so pin REG_NEWLINE unless 's'
+     * (dot-all) is set — re_pattern_for rewrites '.' to [\s\S]
+     * for dot-all, which REG_NEWLINE cannot express. */
+    if (!dotall) cflags |= REG_NEWLINE;
     return cflags;
 }
 #endif
@@ -494,22 +501,58 @@ static int re_flags(const char* flags) {
  * flavored; POSIX ERE is the engine underneath (portable engine
  * swap tracked with TODO.xslt-full/02). */
 static char* re_pattern_for(const char* pat, const char* flags) {
-    int x = 0;
-    for (const char* p = flags ? flags : ""; *p; p++)
+    int x = 0, s = 0, q = 0;
+    for (const char* p = flags ? flags : ""; *p; p++) {
         if (*p == 'x') x = 1;
+        else if (*p == 's') s = 1;
+        else if (*p == 'q') q = 1;
+    }
     size_t len = strlen(pat);
     char* out = (char*)malloc(len * 8 + 1);
     if (!out) return NULL;
     size_t o = 0;
     int in_class = 0;
+    if (q) {
+        /* 'q': the pattern is a LITERAL string — escape every
+         * character that is special to POSIX ERE. */
+        for (size_t i = 0; i < len; i++) {
+            char c = pat[i];
+            if (strchr("^.[$()|*+?{\\", c)) out[o++] = '\\';
+            out[o++] = c;
+        }
+        out[o] = 0;
+        return out;
+    }
     for (size_t i = 0; i < len; i++) {
         char c = pat[i];
         if (x && !in_class && (c == ' ' || c == '\t' || c == '\n'))
             continue;
+        if (c == '.' && !in_class) {
+            /* Bracket-class rewrite with RAW control bytes — POSIX
+             * treats backslash as literal inside brackets, so the
+             * \n/\r escapes would silently match 'n'/'r'. */
+            if (s) {
+                /* dot-all: every character. */
+                out[o++] = '[';
+                strcpy(out + o, "\x00-\x10\x12-\xFF");
+                o += strlen(out + o);
+            } else {
+                /* F&O default: '.' does not match \n OR \r. */
+                out[o++] = '[';
+                out[o++] = '^';
+                out[o++] = '\n';
+                out[o++] = '\r';
+                out[o++] = ']';
+            }
+            continue;
+        }
         if (c == '\\' && i + 1 < len) {
             char e = pat[i + 1];
             const char* sub = NULL, *incls = NULL;
             switch (e) {
+                case 't': out[o++] = '\t'; i++; continue;
+                case 'n': out[o++] = '\n'; i++; continue;
+                case 'r': out[o++] = '\r'; i++; continue;
                 case 'd': sub = "[0-9]"; incls = "[:digit:]"; break;
                 case 'D': sub = "[^0-9]"; incls = "[:^digit:]"; break;
                 case 'w': sub = "[_a-zA-Z0-9]";
@@ -594,6 +637,9 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
     char* pat = re_str_arg(ctx, args, 1);
     char* rep = re_str_arg(ctx, args, 2);
     char* fl = (n >= 4) ? re_str_arg(ctx, args, 3) : leptris_strdup("");
+    int qflag = 0;
+    for (const char* fp = fl ? fl : ""; *fp; fp++)
+        if (*fp == 'q') qflag = 1;
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
     if (!out || !in || !pat || !rep) {
         if (out) out->value.string_value = leptris_strdup("");
@@ -638,12 +684,38 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
                     out->value.string_value = grown;
                 }
             }
-            /* replacement with $N splices */
+            /* Replacement splices. With 'q' the replacement is
+             * verbatim (no $ or \ processing). $N takes the maximal
+             * digit run that names an existing group, falling back
+             * to shorter — "$1520" with 15 groups is group 15 then
+             * the literal "20" (QT3 fn-replace-40..42). */
+            int qlit = (qflag != 0);
             for (size_t k = 0; k < rlen; k++) {
+                if (qlit) {
+                    size_t old = strlen(out->value.string_value);
+                    char* grown = (char*)realloc(
+                        out->value.string_value, old + 2);
+                    if (grown) {
+                        grown[old] = rep[k];
+                        grown[old + 1] = 0;
+                        out->value.string_value = grown;
+                    }
+                    continue;
+                }
                 if (rep[k] == '$' && k + 1 < rlen && rep[k + 1] >= '1' &&
                     rep[k + 1] <= '9') {
-                    int g = rep[k + 1] - '0';
-                    if ((size_t)g < nm && pm[g].rm_so >= 0) {
+                    /* maximal digit run that names an existing group */
+                    size_t digits_end = k + 1;
+                    long g = 0;
+                    while (digits_end < rlen &&
+                           rep[digits_end] >= '0' &&
+                           rep[digits_end] <= '9') {
+                        long cand = g * 10 + (rep[digits_end] - '0');
+                        if (cand == 0 || (size_t)cand >= nm) break;
+                        g = cand;
+                        digits_end++;
+                    }
+                    if (g > 0 && (size_t)g < nm && pm[g].rm_so >= 0) {
                         size_t gl = (size_t)(pm[g].rm_eo - pm[g].rm_so);
                         size_t old = strlen(out->value.string_value);
                         char* grown = (char*)realloc(
@@ -654,7 +726,7 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
                             out->value.string_value = grown;
                         }
                     }
-                    k++;
+                    k = digits_end - 1;
                 } else if (rep[k] == '\\' && k + 1 < rlen) {
                     size_t old = strlen(out->value.string_value);
                     char* grown = (char*)realloc(
@@ -714,14 +786,61 @@ static struct leptris_xpath_result* fn_replace(XPathContext* ctx,
     return out;
 }
 
+/* In-place XML-whitespace collapse + trim (the one-argument
+ * tokenize rule: equivalent to normalize-space then split on " "). */
+static void re_normalize_ws(char* s) {
+    char* w = s;
+    char* r = s;
+    int sp = 0;
+    while (*r) {
+        unsigned char ch = (unsigned char)*r++;
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+            sp = 1;
+        } else {
+            if (sp && w != s) *w++ = ' ';
+            sp = 0;
+            *w++ = (char)ch;
+        }
+    }
+    *w = 0;
+}
+
+/* F&O 3.1 5.7.4: line-ending normalization — CRLF and CR both
+ * become LF before the regex is applied. */
+static void re_normalize_cr(char* s) {
+    char* w = s;
+    for (char* r = s; *r; r++) {
+        if (r[0] == '\r') {
+            *w++ = '\n';
+            if (r[1] == '\n') r++;
+        } else {
+            *w++ = r[0];
+        }
+    }
+    *w = 0;
+}
+
 /* fn:tokenize — zero-width matches yield EMPTY tokens (Saxon). */
 static struct leptris_xpath_result* fn_tokenize(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* in = re_str_arg(ctx, args, 0);
-    char* pat = re_str_arg(ctx, args, 1);
-    char* fl = (n >= 3) ? re_str_arg(ctx, args, 2) : leptris_strdup("");
+    /* One-argument form: split on whitespace — equivalent to
+     * tokenize(normalize-space($in), " "). */
+    char* pat;
+    char* fl;
+    if (n == 1) {
+        re_normalize_ws(in);
+        pat = leptris_strdup(" ");
+        fl = leptris_strdup("");
+    } else {
+        pat = re_str_arg(ctx, args, 1);
+        fl = (n >= 3) ? re_str_arg(ctx, args, 2) : leptris_strdup("");
+    }
     struct leptris_xpath_result* out = seq_new();
     if (!out || !in || !pat) { free(in); free(pat); free(fl); return out; }
+    /* F&O: zero-length input (including the empty sequence) yields
+     * an EMPTY sequence, not one empty token. */
+    if (in[0] == 0) { free(in); free(pat); free(fl); return out; }
     char* xp = re_pattern_for(pat, fl);
     regex_t rx;
     if (xp && regcomp(&rx, xp, re_flags(fl)) == 0) {
@@ -4294,7 +4413,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "hours-from-duration", fn_hours_from_dur, 1, 1);
     xpath_function_registry_register(registry, "matches", fn_matches, 2, 3);
     xpath_function_registry_register(registry, "replace", fn_replace, 3, 4);
-    xpath_function_registry_register(registry, "tokenize", fn_tokenize, 2, 3);
+    xpath_function_registry_register(registry, "tokenize", fn_tokenize, 1, 3);
     /* Maps (08, first slice) — canonical map: prefix. */
     xpath_function_registry_register(registry, "map:get", fn_map_get, 2, 2);
     xpath_function_registry_register(registry, "map:size", fn_map_size, 1, 1);
