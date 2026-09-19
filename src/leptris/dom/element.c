@@ -746,6 +746,12 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
             mut_tail = s->child;
     }
 
+    /* An empty child list must win over any cached tail: a NULL
+     * first_child with a non-NULL tail is a stale cache (or stale
+     * tail pointer), and appending through it splices the child
+     * onto a detached node while first_child stays NULL (#1220). */
+    int list_empty = (leptris_elem_first_child(elem) == NULL);
+
     /* For element children, set up linked list structure */
     if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
         LeptrisElement child_elem = (LeptrisElement)child;
@@ -757,7 +763,10 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
         /* Append to end of children list.
          * last_child may point to any node type (text/comment/etc.) so
          * we set its next_sibling via the type-dispatching setter. */
-        LeptrisNode* last_node = mut_tail ? mut_tail : leptris_elem_last_child(elem);
+        LeptrisNode* last_node =
+            list_empty ? NULL
+                       : (mut_tail ? mut_tail
+                                   : leptris_elem_last_child(elem));
         if (last_node) {
             /* Lane 18 P3: sequential appends' tail is an element —
              * the offset store directly; the type-dispatching node
@@ -776,7 +785,10 @@ void leptris_element_append_child_internal_doc(LeptrisElement elem, LeptrisNode*
         elem->child_count++;
     } else {
         /* For non-element children (text, cdata, comment, pi), append to linked list */
-        LeptrisNode* last = mut_tail ? mut_tail : leptris_elem_last_child(elem);
+        LeptrisNode* last =
+            list_empty ? NULL
+                       : (mut_tail ? mut_tail
+                                   : leptris_elem_last_child(elem));
         if (last) {
             leptris_node_set_next_sibling(last, (LeptrisNode*)child);
             leptris_elem_set_last_child(elem, (LeptrisNode*)child);

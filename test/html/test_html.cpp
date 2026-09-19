@@ -2189,3 +2189,54 @@ TEST(HtmlParse, SelectInsertsHr) {
               "<select><option/><hr/></select>");
     EXPECT_EQ(Html("<select><button>b</button>"), "<select>b</select>");
 }
+
+TEST(HtmlParse, SetTextSurvivesSerialization) {
+    /* #1220: mutations on HTML-parsed documents were lost —
+     * remove_all_children only cleared parent backpointers of
+     * ELEMENT children, so the detached text child still validated
+     * the append tail cache and the replacement text was spliced
+     * onto it, leaving <p/> in the tree. */
+    auto find_first_elem = [](LeptrisElement e) -> LeptrisElement {
+        for (LeptrisElement c = leptris_element_first_child_any(e); c;
+             c = leptris_element_next_sibling_any(c)) {
+            if (leptris_node_get_type((LeptrisNodeRef)c) ==
+                LEPTRIS_NODE_TYPE_ELEMENT)
+                return c;
+        }
+        return nullptr;
+    };
+    auto find_body = [](LeptrisElement root) -> LeptrisElement {
+        for (LeptrisElement c = leptris_element_first_child_any(root); c;
+             c = leptris_element_next_sibling_any(c)) {
+            if (leptris_node_get_type((LeptrisNodeRef)c) ==
+                    LEPTRIS_NODE_TYPE_ELEMENT &&
+                std::strcmp(leptris_element_name(c), "body") == 0)
+                return c;
+        }
+        return nullptr;
+    };
+
+    const char* in = "<html><body><p>hi</p></body></html>";
+    for (int mode = 0; mode < 2; mode++) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument doc =
+            mode == 0 ? leptris_parse_html_string(in, std::strlen(in), &st)
+                      : leptris_parse_html4_string(in, std::strlen(in), &st);
+        ASSERT_NE(doc, nullptr);
+        LeptrisElement body = find_body(leptris_document_root(doc));
+        ASSERT_NE(body, nullptr);
+        LeptrisElement p = find_first_elem(body);
+        ASSERT_NE(p, nullptr);
+        ASSERT_STREQ(leptris_element_text(p), "hi");
+
+        ASSERT_EQ(leptris_element_set_text(p, "mutated"), LEPTRIS_OK);
+        EXPECT_STREQ(leptris_element_text(p), "mutated");
+        char* out = leptris_document_serialize(doc, nullptr);
+        ASSERT_NE(out, nullptr);
+        std::string xml(out);
+        leptris_free_string(out);
+        EXPECT_NE(xml.find("<p>mutated</p>"), std::string::npos)
+            << "mode " << mode << ": " << xml;
+        leptris_document_free(doc);
+    }
+}
