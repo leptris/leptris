@@ -199,3 +199,23 @@ LEPTRIS_API LeptrisStatus leptris_document_set_standalone(
     doc->had_declaration = 1;
     return LEPTRIS_OK;
 }
+
+/* #1229: the remove-half — back to as-if-the-input-had-none. The
+ * setters' malloc'd strings are released here (document_free checks
+ * for NULL), and the standalone marker returns to unset. */
+LEPTRIS_API LeptrisStatus leptris_document_clear_declaration(
+    struct leptris_document* doc) {
+    if (!doc) return LEPTRIS_ERROR_NULL_ARG;
+    if (doc->xml_version) {
+        leptris_free(doc->xml_version);
+        doc->xml_version = NULL;
+    }
+    if (doc->encoding) {
+        leptris_free(doc->encoding);
+        doc->encoding = NULL;
+    }
+    doc->standalone = -1;
+    doc->decl_encoding_verbatim = 0;
+    doc->had_declaration = 0;
+    return LEPTRIS_OK;
+}

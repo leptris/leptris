@@ -74,6 +74,33 @@ LEPTRIS_API LeptrisDoctype leptris_document_set_doctype(
     return (LeptrisDoctype)dt;
 }
 
+/* #1229: the remove-half of set_doctype. The node is pool-owned, so
+ * it is unlinked (document children chain, when linked) — never
+ * freed; it stays readable until leptris_document_free. */
+LEPTRIS_API LeptrisStatus leptris_document_remove_doctype(
+    LeptrisDocument doc) {
+    if (!doc) return LEPTRIS_ERROR_NULL_ARG;
+    LeptrisDoctypeNode* dt = (LeptrisDoctypeNode*)doc->doctype;
+    if (!dt) return LEPTRIS_ERROR_NOT_FOUND;
+    LeptrisNode* prev = NULL;
+    for (LeptrisNode* c = (LeptrisNode*)doc->doc_children_head; c; ) {
+        LeptrisNode* next = leptris_node_get_next_sibling(c);
+        if (c == (LeptrisNode*)dt) {
+            if (prev)
+                leptris_node_set_next_sibling(prev, next);
+            else
+                doc->doc_children_head = next;
+            if (doc->doc_children_tail == c)
+                doc->doc_children_tail = prev;
+            break;
+        }
+        prev = c;
+        c = next;
+    }
+    doc->doctype = NULL;
+    return LEPTRIS_OK;
+}
+
 LEPTRIS_API const char* leptris_doctype_get_name(LeptrisDoctypeNode* doctype) {
     return doctype ? doctype->name : NULL;
 }
