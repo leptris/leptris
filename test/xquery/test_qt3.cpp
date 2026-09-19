@@ -371,6 +371,10 @@ TEST(Qt3Subset, FnConcat) {
                  {"xs:double(", "xs:float("});
 }
 
+/* The regex trio (matches/replace/tokenize/analyze-string) compiles
+ * only where <regex.h> exists; on _WIN32 the engine stubs these
+ * functions, so the regex-shaped sets cannot run there. */
+#ifndef _WIN32
 TEST(Qt3Subset, FnTokenize) {
     run_test_set("fn/tokenize.xml", {}, 22);
 }
@@ -378,6 +382,7 @@ TEST(Qt3Subset, FnTokenize) {
 TEST(Qt3Subset, FnReplace) {
     run_test_set("fn/replace.xml", {}, 65);
 }
+#endif
 
 TEST(Qt3Subset, FnStringJoin) {
     /* The direct-constructor cases bind the ctor's SERIALIZED

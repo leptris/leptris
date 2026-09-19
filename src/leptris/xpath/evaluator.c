@@ -436,6 +436,16 @@ void xpath_context_init_from_document(XPathContext* context) {
  * pathological queries. The free-list owns XPathNodeSet structs only;
  * spilled nodes arrays are freed before push. */
 #define NODESET_FREE_LIST_CAP 64
+/* Under AddressSanitizer the free-lists must NOT retain structs:
+ * LSan sees the parked (unreferenced-from-scannable-roots) structs
+ * as leaks at process exit — there is no atexit drain. Release
+ * builds keep the recycling; sanitizer builds pay the real free. */
+#if defined(__SANITIZE_ADDRESS__) ||                                \
+    (defined(__has_feature) && __has_feature(address_sanitizer))
+#define LEPTRIS_XPATH_TLS_CACHE 0
+#else
+#define LEPTRIS_XPATH_TLS_CACHE 1
+#endif
 /* TLS consolidation (#682 lever 2): one thread-local object for
  * all four free-list variables. Each separate __thread variable
  * costs its own tlv_get_addr thunk per access; members of a single
@@ -589,7 +599,8 @@ void xpath_nodeset_free(XPathNodeSet* nodeset) {
      * Cap prevents unbounded growth. inline_data[0] is reused as the
      * next-pointer for the singly-linked free-list; it is reset by
      * xpath_nodeset_new_with_capacity on pop. */
-    if (g_xpath_tls.nodeset_count < NODESET_FREE_LIST_CAP) {
+    if (LEPTRIS_XPATH_TLS_CACHE &&
+        g_xpath_tls.nodeset_count < NODESET_FREE_LIST_CAP) {
         nodeset->count = 0;
         nodeset->capacity = 0;
         nodeset->owns_attributes = 0;
@@ -772,7 +783,8 @@ void xpath_result_free(struct leptris_xpath_result* result) {
     /* Push onto thread-local free-list (TODO 162). Cap prevents
      * unbounded growth. The CACHED sentinel parked in type makes a
      * repeat free a no-op (double-free spec). */
-    if (g_xpath_tls.result_count < XPATH_RESULT_FREE_LIST_CAP) {
+    if (LEPTRIS_XPATH_TLS_CACHE &&
+        g_xpath_tls.result_count < XPATH_RESULT_FREE_LIST_CAP) {
         struct leptris_xpath_result* next = g_xpath_tls.result_head;
         result->type = XPATH_RESULT_CACHED;
         result->value.nodeset_value = (XPathNodeSet*)next;
