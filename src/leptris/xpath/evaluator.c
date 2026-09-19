@@ -440,8 +440,10 @@ void xpath_context_init_from_document(XPathContext* context) {
  * LSan sees the parked (unreferenced-from-scannable-roots) structs
  * as leaks at process exit — there is no atexit drain. Release
  * builds keep the recycling; sanitizer builds pay the real free. */
-#if defined(__SANITIZE_ADDRESS__) ||                                \
-    (defined(__has_feature) && __has_feature(address_sanitizer))
+#ifndef __has_feature
+#define __has_feature(x) 0   /* GCC predates __has_feature */
+#endif
+#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
 #define LEPTRIS_XPATH_TLS_CACHE 0
 #else
 #define LEPTRIS_XPATH_TLS_CACHE 1
