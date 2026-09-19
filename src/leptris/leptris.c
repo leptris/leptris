@@ -253,12 +253,19 @@ struct leptris_document* leptris_document_create_on_arena(
  */
 LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
                                                     LeptrisElement root) {
-    if (!doc || !root) return LEPTRIS_ERROR_NULL_ARG;
+    if (!doc || !root) {
+        leptris_set_error(LEPTRIS_ERROR_NULL_ARG,
+                          "set_root: NULL document or element");
+        return LEPTRIS_ERROR_NULL_ARG;
+    }
 
     /* Already attached under a parent? (parent_off == 0 encodes NULL;
      * leptris_elem_parent is the static inline accessor from dom/element.h) */
-    if (leptris_elem_parent(root))
+    if (leptris_elem_parent(root)) {
+        leptris_set_error(LEPTRIS_ERROR_INVALID_ARG,
+                          "set_root: element is attached to a parent");
         return LEPTRIS_ERROR_INVALID_ARG;
+    }
 
     /* Cross-document attach would dangle the source pool on free.
      * Lane 18 P1: resolve via get_document (map + namebp fallback)
@@ -266,8 +273,11 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
      * lookup rejected every one of them. */
     extern struct leptris_document* leptris_element_get_document(
         LeptrisElement elem);
-    if (leptris_element_get_document(root) != doc)
+    if (leptris_element_get_document(root) != doc) {
+        leptris_set_error(LEPTRIS_ERROR_INVALID_ARG,
+                          "set_root: element belongs to a different document");
         return LEPTRIS_ERROR_INVALID_ARG;
+    }
 
     doc->root = root;
     doc->new_dom_root = root;

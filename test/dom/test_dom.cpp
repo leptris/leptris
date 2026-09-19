@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "leptris.h"
+#include "leptris/error.h"
 /* #1125 pristine-buffer gate: reach doc->xml_buffer directly. */
 #include "../leptris/leptris_internal.h"
 #include "../leptris/memory/pool.h"
@@ -90,6 +91,30 @@ TEST(DomBasics, DocumentSetRootRejectsNullInputs) {
     LeptrisElement root = leptris_element_create(doc, "r");
     EXPECT_EQ(leptris_document_set_root(nullptr, root), LEPTRIS_ERROR_NULL_ARG);
     leptris_document_free(doc);
+}
+
+// #1242 symptom 2: a failed set_root must set a FRESH thread-local
+// error — the binding's exception message was stitched from whatever
+// the previous operation left behind (a stale XPath parse error).
+TEST(DomBasics, DocumentSetRootFailureSetsFreshError) {
+    LeptrisDocument doc_a = leptris_document_create();
+    LeptrisDocument doc_b = leptris_document_create();
+    ASSERT_NE(doc_a, nullptr);
+    ASSERT_NE(doc_b, nullptr);
+    /* Poison the thread-local slot with an unrelated message. */
+    ASSERT_EQ(leptris_parse_string("<a><b></a>", 10, nullptr), nullptr);
+
+    LeptrisElement foreign = leptris_element_create(doc_b, "b");
+    ASSERT_NE(foreign, nullptr);
+    EXPECT_EQ(leptris_document_set_root(doc_a, foreign),
+              LEPTRIS_ERROR_INVALID_ARG);
+    const char* msg = leptris_last_error();
+    ASSERT_NE(msg, nullptr);
+    EXPECT_EQ(strstr(msg, "set_root"), msg)
+        << "expected a fresh set_root message, got: " << msg;
+
+    leptris_document_free(doc_a);
+    leptris_document_free(doc_b);
 }
 
 TEST(DomBasics, DocumentSetRootRejectsForeignElement) {
