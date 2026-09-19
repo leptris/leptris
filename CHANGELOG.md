@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.204] - 2026-09-19
+
+### Added
+
+- leptris/html.h subsystem header; one-shot name fast paths (slice 1); document HTML parsing (api+perf)
+
+### Performance
+
+- buffer-mode pull feeds in ONE call (slice-1 prerequisite) (sax)
+
+
+
 ## [1.9.203] - 2026-09-19
 
 ### Fixed
