@@ -4,16 +4,29 @@
 
 ### Added
 
-- recover diagnostics on the DOM parse — duplicate attributes report, first wins (#1200 part 2) (parse)
-- ATTR_ORDER flag — attribute-order-identity digest variant (#1200 part 1) (digest)
+- Parse recover diagnostics (#1200): the DOM parse now records
+  duplicate-attribute events on the document — `LeptrisDiagKind`
+  (with the new `LEPTRIS_DIAG_RECOVER` kind) is public in
+  types.h, and the diag list reads through
+  `leptris_document_parse_diag_count` /
+  `leptris_document_parse_diag` (error.h). First definition wins,
+  matching the SAX lane's libxml2-recover surface; the digest
+  gate no longer needs a SAX probe pass.
+- `LEPTRIS_DIGEST_ATTR_ORDER` (#1200 part 1): opt-in digest flag
+  that makes attribute order identity-bearing instead of sorted
+  away.
 
 ### Fixed
 
-- move LeptrisDiag forward declaration to file scope (MSVC C2027)
+- MSVC C2027 in `leptris_internal.h`: the `LeptrisDiag` forward
+  declaration moved to file scope (broke the windows-dll-exports
+  leg).
 
 ### Performance
 
-- first-char-bucketed tag classifier — WHATWG parse +31-37% (#1218 tail) (html)
+- First-char-bucketed tag classifier for the WHATWG HTML path:
+  the tokenizer's name-list strcmp scans become one-load bucket
+  lookups — parse +31-37% on the #1218 bench shapes.
 
 
 
