@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.203] - 2026-09-19
+
+### Fixed
+
+- leptris_dtd_parse honors the NULL-on-error contract (#1211) (dtd)
+
+
+
 ## [1.9.202] - 2026-09-18
 
 ### Fixed
