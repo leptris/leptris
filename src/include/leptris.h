@@ -1068,6 +1068,18 @@ LEPTRIS_API LeptrisStatus leptris_document_set_standalone(
     LeptrisDocument doc, int standalone);
 
 /**
+ * Un-set the XML declaration (#1229): the document stops being
+ * declaration-bearing and serialization emits none — exactly as if
+ * the input had none. Clears the version/encoding strings and the
+ * standalone marker. Idempotent.
+ *
+ * @param doc Document handle
+ * @return LEPTRIS_OK, or LEPTRIS_ERROR_NULL_ARG
+ */
+LEPTRIS_API LeptrisStatus leptris_document_clear_declaration(
+    LeptrisDocument doc);
+
+/**
  * Programmatic DOCTYPE (#1094): create and set the document's
  * DOCTYPE (root name + optional PUBLIC/SYSTEM external
  * identifiers). Serializes in document position once set; read
@@ -1079,6 +1091,19 @@ LEPTRIS_API LeptrisStatus leptris_document_set_standalone(
 LEPTRIS_API LeptrisDoctype leptris_document_set_doctype(
     LeptrisDocument doc, const char* name,
     const char* public_id, const char* system_id);
+
+/**
+ * Un-set the document's DOCTYPE (#1229). The LeptrisDoctype node
+ * stays pool-owned and readable until leptris_document_free; it
+ * simply leaves the document children chain and the serializer's
+ * view. leptris_document_internal_subset returns NULL afterwards.
+ *
+ * @param doc Document handle
+ * @return LEPTRIS_OK; LEPTRIS_ERROR_NOT_FOUND when no DOCTYPE is
+ *         set; LEPTRIS_ERROR_NULL_ARG for a NULL document.
+ */
+LEPTRIS_API LeptrisStatus leptris_document_remove_doctype(
+    LeptrisDocument doc);
 
 /**
  * Get the document's internal DTD subset — the DOCTYPE declaration

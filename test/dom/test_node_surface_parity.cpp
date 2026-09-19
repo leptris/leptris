@@ -203,6 +203,87 @@ TEST(Doctype, SetDoctypeInternalOnly) {
     leptris_document_free(doc);
 }
 
+// ---- #1229: the remove-half of the document-level surface ----------
+
+TEST(Declaration, ClearStopsEmissionAndResetsState) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_element_create(doc, "r");
+    ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
+    ASSERT_EQ(leptris_document_set_version(doc, "1.1"), LEPTRIS_OK);
+    ASSERT_EQ(leptris_document_set_encoding(doc, "UTF-8"), LEPTRIS_OK);
+    ASSERT_EQ(leptris_document_set_standalone(doc, 1), LEPTRIS_OK);
+
+    /* As-if-the-input-had-none: no emission, readers see the
+     * declaration-less defaults, and clearing again is a no-op. */
+    ASSERT_EQ(leptris_document_clear_declaration(doc), LEPTRIS_OK);
+    EXPECT_EQ(leptris_document_clear_declaration(doc), LEPTRIS_OK);
+    EXPECT_EQ(leptris_document_version(doc), nullptr);
+    EXPECT_EQ(leptris_document_encoding(doc), nullptr);
+    EXPECT_EQ(leptris_document_standalone(doc), -1);
+    char* out = leptris_document_serialize(doc, NULL);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r/>");
+    leptris_free_string(out);
+
+    /* The document can be re-declared afterwards. */
+    ASSERT_EQ(leptris_document_set_version(doc, "1.0"), LEPTRIS_OK);
+    out = leptris_document_serialize(doc, NULL);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<?xml version=\"1.0\"?><r/>");
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(Declaration, ClearOnParsedDeclarationRoundTrips) {
+    const char* xml = "<?xml version=\"1.0\"?><r/>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+    ASSERT_EQ(leptris_document_clear_declaration(doc), LEPTRIS_OK);
+    char* out = leptris_document_serialize(doc, NULL);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r/>");
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(Doctype, RemoveLeavesSerializationAndView) {
+    const char* xml = "<!DOCTYPE r><r/>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+    ASSERT_EQ(leptris_document_remove_doctype(doc), LEPTRIS_OK);
+    char* out = leptris_document_serialize(doc, NULL);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r/>");
+    leptris_free_string(out);
+    /* No DOCTYPE is set anymore: NOT_FOUND, and the document keeps
+     * working (re-set is possible). */
+    EXPECT_EQ(leptris_document_remove_doctype(doc),
+              LEPTRIS_ERROR_NOT_FOUND);
+    LeptrisDoctype again = leptris_document_set_doctype(doc, "r", NULL, NULL);
+    ASSERT_NE(again, nullptr);
+    out = leptris_document_serialize(doc, NULL);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<!DOCTYPE r><r/>");
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
+
+TEST(Doctype, RemovedNodeStaysReadable) {
+    const char* xml =
+        "<!DOCTYPE r PUBLIC \"pub\" \"sys\"><r/>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+    LeptrisDoctype dt = leptris_document_internal_subset(doc);
+    ASSERT_NE(dt, nullptr);
+    ASSERT_EQ(leptris_document_remove_doctype(doc), LEPTRIS_OK);
+    EXPECT_EQ(leptris_document_internal_subset(doc), nullptr);
+    /* Pool-owned: readable until document free, just detached. */
+    EXPECT_STREQ(leptris_doctype_get_name(dt), "r");
+    EXPECT_STREQ(leptris_doctype_get_public_id(dt), "pub");
+    leptris_document_free(doc);
+}
+
 // ---- Document-PI parity --------------------------------------------
 
 TEST(DocumentPI, AppendPiAnchorsEpilogueAfterRoot) {
