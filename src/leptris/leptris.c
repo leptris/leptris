@@ -836,6 +836,13 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         /* The pool will be destroyed below, freeing all elements */
     }
 
+    /* Parse diagnostics (#1200): the recover-channel list. */
+    {
+        extern void leptris_diag_free(struct LeptrisDiag**, int*, int*);
+        leptris_diag_free(&doc->parse_diags, &doc->parse_diag_count,
+                          &doc->parse_diag_cap);
+    }
+
     /* Free document fields */
     if (doc->encoding) {
         LEPTRIS_FREE(doc->encoding);

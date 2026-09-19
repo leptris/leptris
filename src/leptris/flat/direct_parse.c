@@ -437,7 +437,47 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
      * Careful: first_attribute_off == 0 means empty list. We can't decode
      * the pointer and check for NULL — at offset 0 the decoded pointer
      * is `elem` itself, which is non-NULL. Check the offset field. */
+    /* #1200: duplicate-attribute detection. Prefilter on (len,
+     * first byte) — a mismatching pair costs two loads; the memcmp
+     * only runs on genuine candidates. First definition wins
+     * (libxml2 recover semantics, and the digest's first-wins
+     * becomes official); the duplicate never enters the chain, it
+     * costs its already-carved slot. */
     if (elem->first_attribute_off != 0) {
+        int dup = 0;
+        for (struct leptris_attribute* a =
+                 (struct leptris_attribute*)((char*)elem +
+                                             elem->first_attribute_off);
+             a; a = leptris_attr_next(a)) {
+            if (a->name_view.length == attr->name_view.length &&
+                a->name_view.data[0] == attr->name_view.data[0] &&
+                memcmp(a->name_view.data, attr->name_view.data,
+                       attr->name_view.length) == 0) {
+                dup = 1;
+                break;
+            }
+        }
+        if (dup) {
+            if (p->doc) {
+                extern struct LeptrisDiag* leptris_diag_emit(
+                    struct LeptrisDiag**, int*, int*,
+                    LeptrisDiagKind, LeptrisNodeRef,
+                    const char*, ...);
+                char qname[130];
+                size_t ql = attr->name_view.length < 129
+                                ? attr->name_view.length : 129;
+                memcpy(qname, attr->name_view.data, ql);
+                qname[ql] = '\0';
+                leptris_diag_emit(&p->doc->parse_diags,
+                                  &p->doc->parse_diag_count,
+                                  &p->doc->parse_diag_cap,
+                                  LEPTRIS_DIAG_RECOVER, NULL,
+                                  "Attribute %s redefined", qname);
+            }
+            /* 1 = duplicate skipped (keep first): the caller skips
+             * the raw-attr registration so BOTH surfaces agree. */
+            return 1;
+        }
         /* Cache should always be valid mid-parse. Fall back to walk
          * only if cache is NULL (defensive — shouldn't happen). */
         struct leptris_attribute* tail = p->current_elem_last_attr;
@@ -845,13 +885,16 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             continue;
         }
 
-        /* Regular attribute — zero-copy name/value, bulk-allocated struct. */
-        if (dp_add_attr_inline(p, elem, name_start, name_len,
-                                val_start, val_len, has_amp, has_ws,
-                                attr_colon) != 0)
+        /* Regular attribute — zero-copy name/value, bulk-allocated
+         * struct. 1 = duplicate skipped: neither surface sees it. */
+        int arc = dp_add_attr_inline(p, elem, name_start, name_len,
+                                     val_start, val_len, has_amp,
+                                     has_ws, attr_colon);
+        if (arc < 0) return -1;
+        if (arc == 0 &&
+            dp_raw_attr(p, elem, name_start, name_len,
+                        val_start, val_len) != 0)
             return -1;
-        if (dp_raw_attr(p, elem, name_start, name_len,
-                        val_start, val_len) != 0) return -1;
     }
     /* for (;;): every exit is a return inside the loop (0 = tag
      * closed, 1 = self-closing, -1 = error) — there is no

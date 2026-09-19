@@ -563,3 +563,46 @@ TEST(FreshDocumentContract, TruncatedLengthIsACleanParseError) {
     EXPECT_EQ(doc, nullptr);
     EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
 }
+
+// ---- #1200 part 2: recover diagnostics on the DOM parse -------
+
+TEST(ParseDiag, DuplicateAttributeKeepsFirstAndReports) {
+    /* libxml2/SAX-lane parity: recover-class diagnostic on the DOM
+     * parse instead of silence. First definition wins (the digest's
+     * first-wins semantics made official). */
+    const char xml[] =
+        "<body lang=\"en\" xml:lang=\"en\" xml:lang=\"fr\"><div/></body>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(leptris_document_parse_diag_count(doc), 1u);
+    LeptrisDiagKind kind = (LeptrisDiagKind)-1;
+    char msg[192] = {0};
+    ASSERT_EQ(leptris_document_parse_diag(doc, 0, &kind, msg,
+                                          sizeof(msg)), 1);
+    EXPECT_EQ(kind, LEPTRIS_DIAG_RECOVER);
+    EXPECT_STREQ(msg, "Attribute xml:lang redefined");
+
+    /* First value survived; the duplicate never entered the list. */
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(leptris_element_attribute_count(root), 2u);
+    EXPECT_STREQ(leptris_element_attribute(root, "xml:lang"), "en");
+    leptris_document_free(doc);
+}
+
+TEST(ParseDiag, CleanDocumentHasNoDiags) {
+    const char xml[] = "<body lang=\"en\" xml:lang=\"en\"><div/></body>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), NULL);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_document_parse_diag_count(doc), 0u);
+    LeptrisDiagKind kind;
+    char msg[64];
+    EXPECT_EQ(leptris_document_parse_diag(doc, 0, &kind, msg,
+                                          sizeof(msg)), 0);
+    EXPECT_EQ(leptris_document_parse_diag(NULL, 0, &kind, msg,
+                                          sizeof(msg)), 0);
+    EXPECT_EQ(leptris_document_parse_diag_count(NULL), 0u);
+    leptris_document_free(doc);
+}
