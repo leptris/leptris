@@ -104,6 +104,8 @@ struct leptris_mut_attr_block {
     char bytes[];
 };
 
+struct LeptrisDiag;
+
 struct leptris_document {
     struct leptris_element* root;             /* Root element (legacy API) */
     /* Snapshot of this document's last failing parse message
@@ -114,7 +116,6 @@ struct leptris_document {
     /* Recover-class parse diagnostics (#1200): the DOM parse's
      * parity surface with the SAX lane's recover errors. Pool-free
      * list (leptris_diag_* owns it); released in document_free. */
-struct LeptrisDiag;
     struct LeptrisDiag* parse_diags;
     int parse_diag_count;
     int parse_diag_cap;
