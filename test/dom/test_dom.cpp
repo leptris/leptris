@@ -32,6 +32,30 @@ TEST(DomBasics, EmptyDocumentRoundTrips) {
     leptris_document_free(doc);
 }
 
+// #1197: the close-tag fast-path compare masked the wrong end of the
+// 8-byte load on big-endian and failed every paired close tag. The
+// unit corpus was self-closing-heavy and never caught it; sweep the
+// compare across all mask lengths plus the wide-family report.
+TEST(DomBasics, CloseTagCompareAcrossNameLengths) {
+    for (int len = 1; len <= 9; len++) {
+        std::string name(static_cast<size_t>(len), 'n');
+        std::string xml = "<" + name + "><" + name + "/></" + name + ">";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument doc =
+            leptris_parse_string(xml.data(), xml.size(), &st);
+        ASSERT_NE(doc, nullptr)
+            << "close-tag name of length " << len << " failed to parse";
+        leptris_document_free(doc);
+    }
+    std::string xml = "<r>";
+    for (int i = 1; i <= 80; i++) xml += "<n" + std::to_string(i) + "/>";
+    xml += "</r>";
+    LeptrisDocument doc =
+        leptris_parse_string(xml.data(), xml.size(), NULL);
+    ASSERT_NE(doc, nullptr) << "80-child family failed to parse";
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, DocumentCreateHasNoRoot) {
     LeptrisDocument doc = leptris_document_create();
     ASSERT_NE(doc, nullptr);
