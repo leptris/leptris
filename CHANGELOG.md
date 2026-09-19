@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.207] - 2026-09-19
+
+### Fixed
+
+- stop leptris_set_error leaking into the ELF dynamic table (build)
+
+
+
 ## [1.9.206] - 2026-09-19
 
 ### Fixed
