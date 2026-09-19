@@ -1203,6 +1203,94 @@ TEST(DtdValidate, ExternalParameterEntityLoaderFeedsContentModel) {
     leptris_document_free(doc2);
 }
 
+/* #1219: FFI loaders allocate from the ENGINE's heap via
+ * leptris_alloc_buffer, and the parser releases the buffer through
+ * the same allocator — custom-allocator installs stay symmetric
+ * (no cross-CRT free on Windows wheels). */
+static char* engine_heap_pe_loader(void* user, const char* system_id,
+                                   size_t* out_len) {
+    (void)user;
+    if (std::strcmp(system_id, "model.dtd") != 0) return NULL;
+    const char body[] = "(a,b)";
+    char* buf = leptris_alloc_buffer(sizeof(body));
+    if (!buf) return NULL;
+    std::memcpy(buf, body, sizeof(body));
+    *out_len = sizeof(body) - 1;
+    return buf;
+}
+
+static int g_hook_allocs;
+static int g_hook_frees;
+static void* counting_alloc(size_t n) {
+    g_hook_allocs++;
+    return std::malloc(n);
+}
+static void counting_free(void* p) {
+    g_hook_frees++;
+    std::free(p);
+}
+
+TEST(DtdValidate, PELoaderBuffersRideTheEngineHeap) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><a/><b/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    const char dtd_text[] =
+        "<!ENTITY % m SYSTEM \"model.dtd\">"
+        "<!ELEMENT root %m;>";
+    LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+    ASSERT_NE(dtd, nullptr);
+    leptris_dtd_set_pe_loader(dtd, engine_heap_pe_loader, NULL);
+    ASSERT_EQ(leptris_dtd_parse_external_subset(
+                  dtd, dtd_text, std::strlen(dtd_text)), 1);
+
+    LeptrisDTDError err = {0};
+    EXPECT_EQ(leptris_dtd_validate(doc, dtd, &err), 1);
+
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+}
+
+TEST(DtdValidate, PELoaderBuffersAreSymmetricUnderCustomAllocator) {
+    /* The counting hooks wrap every engine alloc/free while the
+     * loader's leptris_alloc_buffer buffer is in flight; symmetry
+     * (no crash, hook sees the free) is the contract. */
+    g_hook_allocs = 0;
+    g_hook_frees = 0;
+    leptris_set_memory_management_functions(counting_alloc,
+                                            counting_free);
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><a/><b/></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_GT(g_hook_allocs, 0);
+
+    const char dtd_text[] =
+        "<!ENTITY % m SYSTEM \"model.dtd\">"
+        "<!ELEMENT root %m;>";
+    LeptrisDTD* dtd = leptris_document_get_dtd(doc);
+    ASSERT_NE(dtd, nullptr);
+    int before_load = g_hook_allocs;
+    leptris_dtd_set_pe_loader(dtd, engine_heap_pe_loader, NULL);
+    ASSERT_EQ(leptris_dtd_parse_external_subset(
+                  dtd, dtd_text, std::strlen(dtd_text)), 1);
+    /* The loader's buffer came through the hook... */
+    EXPECT_GT(g_hook_allocs, before_load);
+    /* ...and the parser released it through the matching free. */
+    int freed = g_hook_frees;
+
+    LeptrisDTDError err = {0};
+    EXPECT_EQ(leptris_dtd_validate(doc, dtd, &err), 1);
+    leptris_dtd_error_free(&err);
+    leptris_dtd_free(dtd);
+    leptris_document_free(doc);
+    EXPECT_GT(g_hook_frees, freed);
+
+    leptris_set_memory_management_functions(NULL, NULL);
+}
+
 TEST(DtdValidate, ExternalPEWithoutLoaderIsSkippedLeniently) {
     /* No loader registered: the external PE inside the decl is left
      * as-is and the declaration is skipped (no crash, no hang). */

@@ -96,6 +96,14 @@ LEPTRIS_API leptris_deallocation_function leptris_get_memory_deallocation_functi
     return g_leptris_dealloc_function;
 }
 
+/* #1219: engine-heap buffer for FFI callers whose buffers the
+ * engine later frees (DTD PE loaders). The hook pair keeps the
+ * custom-allocator configuration symmetric. */
+LEPTRIS_API char* leptris_alloc_buffer(size_t len) {
+    if (len == 0) return NULL;
+    return (char*)leptris_alloc_hook(len);
+}
+
 LEPTRIS_API LeptrisStatus leptris_document_set_allocators(
     LeptrisDocument doc,
     leptris_allocation_function alloc,

@@ -9,6 +9,9 @@
 #include "../../include/leptris/dtd.h"
 #include "model.h"
 #include "../memory/pool.h"
+/* Engine-heap free for PE-loader buffers (#1219); declared
+ * locally — the full internal header tangles include order. */
+extern void leptris_free_hook(void* ptr);
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -463,7 +466,7 @@ if (text[i] == '%' && i + 1 < len) {
                         memcpy(grown + w + loaded, text + j + 1,
                                len - j - 1);
                         grown[w + loaded + (len - j - 1)] = '\0';
-                        free(got);
+                        leptris_free_hook(got);
                         /* Recurse once for nested refs in the
                          * loaded content. */
                         char* rec = dtd_substitute_decl_pes(
@@ -471,7 +474,7 @@ if (text[i] == '%' && i + 1 < len) {
                             w + loaded + (len - j - 1), depth + 1);
                         return rec ? rec : grown;
                     }
-                    free(got);
+                    leptris_free_hook(got);
                 }
             }
             if (val) {
