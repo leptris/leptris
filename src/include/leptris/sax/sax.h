@@ -293,6 +293,17 @@ LEPTRIS_API void leptris_sax_parser_free(LeptrisSAXParser* parser);
  */
 LEPTRIS_API int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int streaming);
 
+/**
+ * Mark the input as one-shot: the whole document arrives in a
+ * single feed() and stays alive for the parser's lifetime. The
+ * tokenizer then uses in-place scans with single-copy name storage
+ * instead of the chunk-safe carry paths. No effect on correctness
+ * for any conforming caller; only enable when the input truly is
+ * one-shot (leptris_pull_new does this for its memory source).
+ */
+LEPTRIS_API void leptris_sax_parser_set_one_shot(LeptrisSAXParser* parser,
+                                                 int one_shot);
+
 /* ============================================================================
  * Pull (StAX-style) API — TODO.bindings/04, issue #510 Tier 2
  * ============================================================================ */

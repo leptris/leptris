@@ -320,6 +320,32 @@ if (r) {
 Supported: all 13 axes, all 27 functions, all 15 operators, full
 predicate syntax.  See <<api,xpath-coverage>> for details.
 
+==== HTML parsing (WHATWG + libxml2-compat)
+
+HTML is a first-class input — two tolerant parsers, both declared in
+`leptris/html.h`:
+
+[source,c]
+----
+LeptrisStatus st;
+/* WHATWG-conformant tree construction (html5lib corpus green). */
+LeptrisDocument doc =
+    leptris_parse_html_string("<p>Hello <b>world", 18, &st);
+
+/* Nokogiri byte-for-byte shape: no synthesized <html>/<head>/<body>,
+ * no implied <tbody>, leading script/style content stays in <body>. */
+LeptrisDocument frag =
+    leptris_parse_html4_string("<p>Hello <b>world", 18, &st);
+----
+
+Both handle implied end tags (`p`/`li`/`td`/`tr`/`th`/`dt`/`dd`/
+`option`/...), void elements, raw-text `script`/`style`, minimized
+and unquoted attribute values, case-insensitive tag/attribute names,
+and the HTML named-entity table.  Malformed input never fails the
+parse — it degrades to text; the result serializes and queries
+(XPath/XSLT) like any XML document.  Memory contract identical to
+`leptris_parse_string`.
+
 ==== Parsing models: DOM, SAX, StAX, iterparse
 
 One engine, four consumption models. Pick by how you want to pay:

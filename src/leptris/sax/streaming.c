@@ -574,6 +574,31 @@ static int sxs_step_top(LeptrisSAXParser* p, int is_final) {
  * ============================================================================ */
 
 static int sxs_step_elem_open_name(LeptrisSAXParser* p, int is_final) {
+    if (p->one_shot) {
+        /* Slice 1 (TODO.max-perf/2-3): single-feed input never
+         * splits a token — validate the name-start byte, scan the
+         * name in place, copy ONCE into the frame. The carry+scratch
+         * path below makes two more copies plus a per-byte carry
+         * call per name byte. Names cannot contain newlines, so one
+         * batched column update keeps error positions exact. */
+        if (p->pos >= p->end) {
+            return is_final ? (sxs_set_error(p, "Expected element name"), SAX_STEP_ERR)
+                            : SAX_STEP_NEED_MORE;
+        }
+        if (!sxs_is_name_start(*p->pos)) {
+            sxs_set_error(p, "Expected element name");
+            return SAX_STEP_ERR;
+        }
+        const char* nb = p->pos;
+        while (p->pos < p->end && sxs_is_name_char(*p->pos)) p->pos++;
+        if (sxs_elem_push(p, nb, (size_t)(p->pos - nb)) < 0) {
+            return SAX_STEP_ERR;
+        }
+        p->column += (int)(p->pos - nb);
+        p->state = SAX_ST_ATTR_LIST;
+        return SAX_STEP_OK;
+    }
+
     /* First byte must be a name-start char. */
     if (p->carry_len == 0) {
         if (p->pos >= p->end) {
@@ -1040,7 +1065,37 @@ static int sxs_step_text(LeptrisSAXParser* p, int is_final) {
  * Inside '</'.  Scan name, match against top of elem_stack, skip '>'.
  * ============================================================================ */
 
+static int sxs_step_closing_tag_finish(LeptrisSAXParser* p,
+                                       SaxElementFrame* f, int is_final);
+
 static int sxs_step_closing_tag(LeptrisSAXParser* p, int is_final) {
+    if (p->one_shot) {
+        /* Slice 1: scan the closing name in place and compare
+         * against the frame directly — no carry copy at all. */
+        if (p->pos >= p->end) {
+            return is_final ? (sxs_set_error(p, "Expected closing tag name"), SAX_STEP_ERR)
+                            : SAX_STEP_NEED_MORE;
+        }
+        if (!sxs_is_name_start(*p->pos)) {
+            sxs_set_error(p, "Expected closing tag name");
+            return SAX_STEP_ERR;
+        }
+        const char* nb = p->pos;
+        while (p->pos < p->end && sxs_is_name_char(*p->pos)) p->pos++;
+        SaxElementFrame* f = sxs_elem_top(p);
+        if (!f) {
+            sxs_set_error(p, "Closing tag without matching open");
+            return SAX_STEP_ERR;
+        }
+        if ((size_t)(p->pos - nb) != f->name_len ||
+            memcmp(nb, f->name, f->name_len) != 0) {
+            sxs_set_error(p, "Mismatched closing tag");
+            return SAX_STEP_ERR;
+        }
+        p->column += (int)(p->pos - nb);
+        return sxs_step_closing_tag_finish(p, f, is_final);
+    }
+
     /* Name. */
     if (p->carry_len == 0) {
         if (p->pos >= p->end) {
@@ -1073,7 +1128,13 @@ static int sxs_step_closing_tag(LeptrisSAXParser* p, int is_final) {
         return SAX_STEP_ERR;
     }
     sxs_carry_reset(p);
+    return sxs_step_closing_tag_finish(p, f, is_final);
+}
 
+/* Shared tail of </name>: skip ws + '>', emit end_element + prefix
+ * mappings, pop the frame, resume content. */
+static int sxs_step_closing_tag_finish(LeptrisSAXParser* p,
+                                       SaxElementFrame* f, int is_final) {
     /* Skip whitespace + '>'. */
     while (p->pos < p->end && sxs_is_ws(*p->pos)) p->pos++;
     if (p->pos >= p->end) {
@@ -1466,4 +1527,9 @@ LEPTRIS_API int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int s
     if (!parser) return -1;
     parser->streaming = streaming ? 1 : 0;
     return 0;
+}
+
+LEPTRIS_API void leptris_sax_parser_set_one_shot(LeptrisSAXParser* parser,
+                                                 int one_shot) {
+    if (parser) parser->one_shot = one_shot;
 }

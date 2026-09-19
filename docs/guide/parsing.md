@@ -303,6 +303,36 @@ void find_by_attribute(LeptrisElement parent,
 }
 ```
 
+## Parsing HTML
+
+HTML is a first-class input: the WHATWG-conformant tolerant parser
+(`leptris_parse_html_string`) plus a libxml2/Nokogiri-compatibility
+mode (`leptris_parse_html4_string`), both declared in
+`leptris/html.h`:
+
+```c
+#include "leptris/html.h"
+
+LeptrisStatus st = LEPTRIS_OK;
+LeptrisDocument doc =
+    leptris_parse_html_string("<p>Hello <b>world", 18, &st);
+/* Implied end tags, void elements, raw-text <script>/<style>,
+ * minimized + unquoted attribute values, case-insensitive names and
+ * the HTML named-entity table are all handled. Malformed input
+ * never fails the parse — it degrades to text. The result
+ * serializes and queries (XPath/XSLT) like any XML document. */
+```
+
+Choose the mode by contract:
+
+| Function | Mode | Shape |
+|----------|------|-------|
+| `leptris_parse_html_string` | WHATWG | full html5lib-conformant tree construction |
+| `leptris_parse_html4_string` | libxml2/Nokogiri | fragment shape: no synthesized `<html>/<head>/<body>`, no implied `<tbody>`; leading `<script>/<style>` content stays in `<body>` |
+
+Memory: identical to XML — `leptris_document_free` releases
+everything; input must be valid UTF-8.
+
 ## Performance Tips
 
 1. **Use in-place parsing** for string data when possible
