@@ -178,7 +178,49 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
         if (!uri) return NULL;                             /* (4) */
         attr = find_attr_expanded(elem, uri, colon + 1);   /* (2) */
     }
-    if (!attr) return NULL;
+    if (!attr) {
+        /* #1242 diagnostic: LEPTRIS_DEBUG_ATTR_MISS=1 dumps the
+         * element's attribute-chain state for the first 5 misses in
+         * the process — distinguishes construction loss
+         * (chain_len=0) from storage corruption (garbage name
+         * bytes) from hash-discipline drift (correct bytes,
+         * mismatching hash15). Off by default; fprintf only on
+         * miss. */
+        static int dumped = 0;
+        if (dumped < 5 && getenv("LEPTRIS_DEBUG_ATTR_MISS")) {
+            dumped++;
+            size_t chain = 0;
+            for (struct leptris_attribute* a =
+                     leptris_element_get_first_attribute(elem);
+                 a; a = leptris_attr_next(a))
+                chain++;
+            fprintf(stderr,
+                    "[leptris-attr-miss] elem=%p needle='%s' "
+                    "chain_len=%zu\n",
+                    (void*)elem, name, chain);
+            size_t i = 0;
+            for (struct leptris_attribute* a =
+                     leptris_element_get_first_attribute(elem);
+                 a && i < 8; a = leptris_attr_next(a), i++) {
+                char nb[17];
+                size_t nl = a->name_view.length < 16
+                                ? a->name_view.length : 16;
+                for (size_t k = 0; k < nl; k++) {
+                    unsigned char c = (unsigned char)a->name_view.data[k];
+                    nb[k] = (c >= 32 && c < 127) ? (char)c : '.';
+                }
+                nb[nl] = '\0';
+                fprintf(stderr,
+                        "  attr[%zu] addr=%p name_ptr=%p len=%zu "
+                        "bytes='%s' hash15=%u entities=%d\n",
+                        i, (void*)a, (void*)a->name_view.data,
+                        a->name_view.length, nb,
+                        (unsigned)(a->name_hash & 0x7FFFu),
+                        (int)((a->name_hash & 0x8000u) != 0));
+            }
+        }
+        return NULL;
+    }
 
     /* Single representation (round 4): entity values expand lazily
      * INTO the view (owned copy); no-entity views are already
