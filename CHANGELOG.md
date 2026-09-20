@@ -1,5 +1,30 @@
 ## [Unreleased]
 
+## [1.9.212] - 2026-09-21
+
+### Added — the QT3 date/time family (lever 6 stage-2, #1182)
+
+Three corpus-driven batches land the date/time surface with the
+W3C QT3 suite as the gate:
+
+- **Extractors (#1261)**: 12 vendored test-sets (300/300) —
+  year/month/day-from-date{,Time}, hours/minutes/seconds-from-
+  {time,dateTime} — plus five language fixes: function-call
+  operands for eq/ne/lt/le/gt/ge (unprefixed and fn:-prefixed),
+  the `idiv` operator, unary `+`, the timezone scan in date
+  parsing (zoned values were treated as naive), and the
+  empty-sequence/fractional-seconds extractor contracts.
+- **Timezone + RFC 5322 (#1262)**: 5 sets (90/90) —
+  timezone-from-* accessors and fn:parse-ietf-date (both lexical
+  orders, obsolete US zones, verbatim fractions). The QT3 harness
+  grew inline param environments and external-declaration
+  prepending.
+- **op:dayTimeDuration value model (#1263)**: 8 sets (287/287) —
+  duration arithmetic (+, -, *, div), comparisons, min/max over
+  duration sequences, canonical formatting, FODT0002 range errors
+  (including a fixed fortified-runtime abort on giant values), and
+  adjust-* attaching the implicit timezone to naive values.
+
 ## [1.9.211] - 2026-09-20
 
 ### Performance
