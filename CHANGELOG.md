@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.212] - 2026-09-20
+
+### Added
+
+- op:dayTimeDuration value model — 8 sets, 287/287 (xquery)
+- QT3 timezone + parse-ietf-date batch — 5 sets, 90/90 (xquery)
+- QT3 date/time extractor batch — 12 sets, 300/300 + five language fixes (xquery)
+
+### Fixed
+
+- free operands on the duration-hook early returns (LSan) (xpath)
+
+
+
 ## [1.9.211] - 2026-09-20
 
 ### Performance
