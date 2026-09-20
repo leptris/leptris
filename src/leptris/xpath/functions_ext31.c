@@ -2444,11 +2444,11 @@ int leptris_dt_shift_months(const char* ds, double delta_months,
         }
         snprintf(buf, cap, "%s%04lld-%02lld-%02lldT%02d:%02d:%s%s",
                  ny < 0 ? "-" : "", ny < 0 ? -ny : ny,
-                 nm + 1, nd, h, mi, secs, zone);
+                 nm + 1, (long long)nd, h, mi, secs, zone);
     } else {
         snprintf(buf, cap, "%s%04lld-%02lld-%02lld%s",
                  ny < 0 ? "-" : "", ny < 0 ? -ny : ny,
-                 nm + 1, nd, zone);
+                 nm + 1, (long long)nd, zone);
     }
     return 1;
 }
