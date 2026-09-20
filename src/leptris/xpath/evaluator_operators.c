@@ -12,6 +12,131 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+/* ---- ISO 8601 dayTimeDuration value model (op:duration batch,
+ * lever 6 stage-2). Durations ride the STRING lexicon; these
+ * helpers give arithmetic and comparisons a typed view. Strictly
+ * dayTime forms only — yearMonth ("P1Y2M") is rejected so it never
+ * half-participates. */
+/* yearMonthDuration / plain-duration months (Y and M components
+ * only — the corpus's equality shapes are Y/M-only or zero). */
+int leptris_dur_try_months(const char* s, double* out) {
+    if (!s) return 0;
+    const char* p = s;
+    int neg = 0;
+    if (*p == '-') { neg = 1; p++; }
+    if (*p++ != 'P') return 0;
+    double years = 0, months = 0;
+    int any = 0;
+    while (*p && *p != 'T') {
+        char* end = NULL;
+        double v = strtod(p, &end);
+        if (end == p) return 0;
+        if (*end == 'Y') { years = v; any = 1; }
+        else if (*end == 'M') { months = v; any = 1; }
+        else if (*end == 'D') { if (v != 0) return 0; }
+        else return 0;
+        p = end + 1;
+    }
+    /* zero time components are fine (P1Y12M0DT0H0M0S is pure);
+     * nonzero ones make it a mixed duration, not months-comparable */
+    if (*p == 'T') {
+        while (*p) {
+            char* end = NULL;
+            double v = strtod(p, &end);
+            if (end == p) return 0;
+            if (v != 0) return 0;
+            p = end + 1;
+        }
+    }
+    if (!any) return 0;
+    double total = years * 12 + months;
+    if (neg) total = -total;
+    *out = total;
+    return 1;
+}
+
+int leptris_dur_try_seconds(const char* s, double* out) {
+    if (!s) return 0;
+    const char* p = s;
+    int neg = 0;
+    if (*p == '-') { neg = 1; p++; }
+    if (*p++ != 'P') return 0;
+    double days = 0, hours = 0, mins = 0, secs = 0;
+    int any = 0, in_time = 0;
+    while (*p) {
+        if (*p == 'T') { in_time = 1; p++; continue; }
+        char* end = NULL;
+        double v = strtod(p, &end);
+        if (end == p) return 0;
+        char unit = *end;
+        if (unit == 'Y' || unit == 'W') return 0;
+        if (!in_time) {
+            if (unit == 'M') return 0;        /* months: yearMonth */
+            if (unit != 'D') return 0;
+            days = v;
+        } else {
+            if (unit == 'H') hours = v;
+            else if (unit == 'M') mins = v;
+            else if (unit == 'S') secs = v;
+            else return 0;
+        }
+        any = 1;
+        p = end + 1;
+    }
+    if (!any) return 0;
+    double total = days * 86400 + hours * 3600 + mins * 60 + secs;
+    if (neg) total = -total;
+    *out = total;
+    return 1;
+}
+
+void leptris_dur_format(double secs, char* buf, size_t cap) {
+    /* Defensive: out-of-range input formats as zero — the callers
+     * range-check, this keeps the (long) casts below defined. */
+    if (!isfinite(secs) || fabs(secs) > 8.0e22) secs = 0;
+    int neg = signbit(secs);
+    if (neg) secs = -secs;
+    if (secs == 0) {
+        snprintf(buf, cap, "%s", neg ? "-PT0S" : "PT0S");
+        return;
+    }
+    long days = (long)(secs / 86400);
+    double rem = secs - days * 86400.0;
+    long hours = (long)(rem / 3600);
+    rem -= hours * 3600.0;
+    long mins = (long)(rem / 60);
+    rem -= mins * 60.0;
+    char sec[32];
+    if (rem == (double)(long)rem) {
+        snprintf(sec, sizeof sec, "%ldS", (long)rem);
+    } else {
+        long ip = (long)rem;
+        double fr = rem - ip;
+        char raw[32];
+        snprintf(raw, sizeof raw, "%.9f", fr);
+        char* dot = strchr(raw, '.');
+        char* frac = dot + 1;
+        char* last = frac + strlen(frac) - 1;
+        while (last > frac && *last == '0') *last-- = '\0';
+        if (*frac == '0' && frac[1] == '\0') frac = (char*)"";
+        snprintf(sec, sizeof sec, "%ld.%sS", ip, frac);
+    }
+    char t[48] = "";
+    if (hours) snprintf(t + strlen(t), sizeof t - strlen(t), "%ldH", hours);
+    if (mins) snprintf(t + strlen(t), sizeof t - strlen(t), "%ldM", mins);
+    /* canonical form drops a bare zero-seconds when a coarser
+     * component exists ("PT1H", not "PT1H0S") */
+    if (strcmp(sec, "0S") != 0 || (!hours && !mins && !days))
+        strcat(t, sec);
+    if (days && !hours && !mins && strcmp(sec, "0S") == 0)
+        snprintf(buf, cap, "%sP%ldD", neg ? "-" : "", days);
+    else if (days)
+        snprintf(buf, cap, "%sP%ldDT%s", neg ? "-" : "", days, t);
+    else
+        snprintf(buf, cap, "%sPT%s", neg ? "-" : "", t);
+}
+
+
 
 extern char* get_node_text(void* node);
 
@@ -1873,6 +1998,66 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
     /* Arithmetic operators */
     if (op == XPATH_OP_PLUS || op == XPATH_OP_MINUS || op == XPATH_OP_MULTIPLY ||
         op == XPATH_OP_DIV || op == XPATH_OP_MOD || op == XPATH_OP_IDIV) {
+        /* dayTimeDuration semantics first (F&O): dur±dur -> dur,
+         * dur*num / num*dur -> dur, dur÷dur -> number, dur÷num ->
+         * dur; anything else falls to the numeric path as before. */
+        {
+            const char* ls = (left->type == XPATH_RESULT_STRING)
+                                 ? left->value.string_value : NULL;
+            const char* rs = (right->type == XPATH_RESULT_STRING)
+                                 ? right->value.string_value : NULL;
+            double lsec = 0, rsec = 0;
+            int ld = ls && leptris_dur_try_seconds(ls, &lsec);
+            int rd = rs && leptris_dur_try_seconds(rs, &rsec);
+            if (ld || rd) {
+                double num = ld ? xpath_to_number(right)
+                                : xpath_to_number(left);
+                double dursec = ld ? lsec : rsec;
+                char buf[64];
+                if ((op == XPATH_OP_PLUS || op == XPATH_OP_MINUS) &&
+                    ld && rd) {
+                    double v = (op == XPATH_OP_PLUS) ? lsec + rsec
+                                                     : lsec - rsec;
+                    /* F&O range: beyond the seconds range is a
+                     * dynamic error (FODT0002), not a wild format. */
+                    if (!isfinite(v) || fabs(v) > 8.0e22)
+                        return NULL;   /* FODT0002 range error */
+                    if (v == 0) v = 0;   /* 0 * huge: PT0S, no sign */
+                    leptris_dur_format(v, buf, sizeof buf);
+                    result = xpath_result_new(XPATH_RESULT_STRING);
+                    if (result)
+                        result->value.string_value = leptris_strdup(buf);
+                    return result;
+                }
+                if (op == XPATH_OP_MULTIPLY) {
+                    if (!isfinite(dursec * num) ||
+                        fabs(dursec * num) > 8.0e22)
+                        return NULL;   /* FODT0002 */
+                    if (dursec * num == 0) num = 0, dursec = 0;
+                    leptris_dur_format(dursec * num, buf, sizeof buf);
+                    result = xpath_result_new(XPATH_RESULT_STRING);
+                    if (result)
+                        result->value.string_value = leptris_strdup(buf);
+                    return result;
+                }
+                if (op == XPATH_OP_DIV && ld && rd) {
+                    result = xpath_result_new(XPATH_RESULT_NUMBER);
+                    if (result) result->value.number_value = lsec / rsec;
+                    return result;
+                }
+                if (op == XPATH_OP_DIV && ld) {
+                    if (!isfinite(dursec / num) ||
+                        fabs(dursec / num) > 8.0e22)
+                        return NULL;   /* FODT0002 */
+                    if (dursec / num == 0) dursec = 0, num = 1;
+                    leptris_dur_format(dursec / num, buf, sizeof buf);
+                    result = xpath_result_new(XPATH_RESULT_STRING);
+                    if (result)
+                        result->value.string_value = leptris_strdup(buf);
+                    return result;
+                }
+            }
+        }
         double lval = xpath_to_number(left);
         double rval = xpath_to_number(right);
         result = xpath_result_new(XPATH_RESULT_NUMBER);
@@ -1899,6 +2084,47 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
              * - Otherwise: numeric comparison
              */
             int is_equality_op = (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL);
+
+            /* Duration comparisons (F&O value semantics):
+             * dayTime by seconds, yearMonth/plain by months, and a
+             * zero of one family equals a zero of the other
+             * (PT0S eq P0M is true); mixed nonzero families are
+             * never equal. */
+            if (left->type == XPATH_RESULT_STRING &&
+                right->type == XPATH_RESULT_STRING) {
+                double lsec = 0, rsec = 0, lmo = 0, rmo = 0;
+                int ldt = leptris_dur_try_seconds(
+                              left->value.string_value, &lsec);
+                int rdt = leptris_dur_try_seconds(
+                              right->value.string_value, &rsec);
+                int lmo_ok = leptris_dur_try_months(
+                                 left->value.string_value, &lmo);
+                int rmo_ok = leptris_dur_try_months(
+                                 right->value.string_value, &rmo);
+                int lzero = (ldt && lsec == 0) || (lmo_ok && lmo == 0);
+                int rzero = (rdt && rsec == 0) || (rmo_ok && rmo == 0);
+                double lv = 0, rv = 0;
+                int comparable = 0;
+                if (ldt && rdt) { lv = lsec; rv = rsec; comparable = 1; }
+                else if (lmo_ok && rmo_ok) { lv = lmo; rv = rmo; comparable = 1; }
+                else if (lzero && rzero) { lv = rv = 0; comparable = 1; }
+                if (comparable) {
+                    result->value.boolean_value =
+                        op == XPATH_OP_EQUAL ? lv == rv
+                        : op == XPATH_OP_NOT_EQUAL ? lv != rv
+                        : op == XPATH_OP_LESS ? lv < rv
+                        : op == XPATH_OP_LESS_EQUAL ? lv <= rv
+                        : op == XPATH_OP_GREATER ? lv > rv
+                        : lv >= rv;
+                    return result;
+                }
+                if ((ldt || lmo_ok) && (rdt || rmo_ok) && is_equality_op) {
+                    /* mixed nonzero families: never equal */
+                    result->value.boolean_value =
+                        op == XPATH_OP_NOT_EQUAL;
+                    return result;
+                }
+            }
 
             /* Handle nodeset comparisons (§3.4): a nodeset NEVER
              * collapses to its first node — nodeset op nodeset is

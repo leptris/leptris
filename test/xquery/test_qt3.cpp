@@ -438,22 +438,40 @@ TEST(Qt3Subset, DateExtractors) {
  * batch 2): timezone-from-* accessors (new registrations),
  * implicit-timezone, and parse-ietf-date (new function — the
  * fraction substring is carried verbatim). */
+/* op:duration value arithmetic (lever 6 stage-2 dates, batch 3):
+ * dayTimeDuration + - * div and the lt/gt/eq families. */
+TEST(Qt3Subset, OpDayTimeDuration) {
+    /* local:* helper functions are corpus plumbing outside the
+     * engine surface (the tz-batch precedent). */
+    /* local:* helpers are corpus plumbing; dateTime±duration is the
+     * op-date batch; beyond-double-precision giants and the
+     * 15-digit number formatter wait on decimal arithmetic. */
+    const std::vector<const char*> no_local = {
+        "local:", "current-dateTime() -", "distinct-values((",
+        "round-half-to-even(", "P9223372036854775807D",
+    };
+    run_test_set("op/add-dayTimeDurations.xml", {}, 24, no_local);
+    run_test_set("op/subtract-dayTimeDurations.xml", {}, 25, no_local);
+    run_test_set("op/multiply-dayTimeDuration.xml", {}, 30, no_local);
+    run_test_set("op/divide-dayTimeDuration.xml", {}, 21, no_local);
+    run_test_set("op/divide-dayTimeDuration-by-dayTimeDuration.xml", {}, 21, no_local);
+    run_test_set("op/dayTimeDuration-less-than.xml", {}, 28, no_local);
+    run_test_set("op/dayTimeDuration-greater-than.xml", {}, 28, no_local);
+    run_test_set("op/duration-equal.xml", {}, 110, no_local);
+}
+
 TEST(Qt3Subset, TimezoneAndIetf) {
     /* Duration VALUE arithmetic (+, -, div, le/lt/ge, min/max) on
      * timezone results is the op:duration batch — the exclusions
      * wait on it (the concat E-notation precedent). local:* helper
      * functions are outside the engine surface. */
-    const std::vector<const char*> dur_arith = {
-        " fn:timezone-from-", "fn:min(fn:timezone", "fn:max(fn:timezone",
-        "local:", " * 0", " * -0", "implicit-timezone() - ",
-        "= implicit-timezone()",
-        " + xs:dayTimeDuration", "ge xs:dayTimeDuration",
-        "le xs:dayTimeDuration",
-    };
-    run_test_set("fn/timezone-from-dateTime.xml", {}, 15, dur_arith);
-    run_test_set("fn/timezone-from-date.xml", {}, 17, dur_arith);
-    run_test_set("fn/timezone-from-time.xml", {}, 16, dur_arith);
-    run_test_set("fn/implicit-timezone.xml", {}, 2, dur_arith);
+    /* Duration VALUE arithmetic now rides the op:duration model;
+     * local:* helpers remain outside the engine surface. */
+    const std::vector<const char*> dur_arith = {"local:"};
+    run_test_set("fn/timezone-from-dateTime.xml", {}, 25, dur_arith);
+    run_test_set("fn/timezone-from-date.xml", {}, 26, dur_arith);
+    run_test_set("fn/timezone-from-time.xml", {}, 25, dur_arith);
+    run_test_set("fn/implicit-timezone.xml", {}, 7, dur_arith);
     run_test_set("fn/parse-ietf-date.xml", {}, 40);
 }
 
