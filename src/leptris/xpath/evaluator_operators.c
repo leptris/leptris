@@ -2027,6 +2027,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     result = xpath_result_new(XPATH_RESULT_STRING);
                     if (result)
                         result->value.string_value = leptris_strdup(buf);
+                    xpath_result_free(left);
+                    xpath_result_free(right);
                     return result;
                 }
                 if (op == XPATH_OP_MULTIPLY) {
@@ -2038,11 +2040,15 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     result = xpath_result_new(XPATH_RESULT_STRING);
                     if (result)
                         result->value.string_value = leptris_strdup(buf);
+                    xpath_result_free(left);
+                    xpath_result_free(right);
                     return result;
                 }
                 if (op == XPATH_OP_DIV && ld && rd) {
                     result = xpath_result_new(XPATH_RESULT_NUMBER);
                     if (result) result->value.number_value = lsec / rsec;
+                    xpath_result_free(left);
+                    xpath_result_free(right);
                     return result;
                 }
                 if (op == XPATH_OP_DIV && ld) {
@@ -2054,6 +2060,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     result = xpath_result_new(XPATH_RESULT_STRING);
                     if (result)
                         result->value.string_value = leptris_strdup(buf);
+                    xpath_result_free(left);
+                    xpath_result_free(right);
                     return result;
                 }
             }
@@ -2116,12 +2124,16 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         : op == XPATH_OP_LESS_EQUAL ? lv <= rv
                         : op == XPATH_OP_GREATER ? lv > rv
                         : lv >= rv;
+                    xpath_result_free(left);
+                    xpath_result_free(right);
                     return result;
                 }
                 if ((ldt || lmo_ok) && (rdt || rmo_ok) && is_equality_op) {
                     /* mixed nonzero families: never equal */
                     result->value.boolean_value =
                         op == XPATH_OP_NOT_EQUAL;
+                    xpath_result_free(left);
+                    xpath_result_free(right);
                     return result;
                 }
             }
