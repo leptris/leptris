@@ -100,15 +100,17 @@ void leptris_dur_format(double secs, char* buf, size_t cap) {
         snprintf(buf, cap, "%s", neg ? "-PT0S" : "PT0S");
         return;
     }
-    long days = (long)(secs / 86400);
-    double rem = secs - days * 86400.0;
-    long hours = (long)(rem / 3600);
-    rem -= hours * 3600.0;
-    long mins = (long)(rem / 60);
-    rem -= mins * 60.0;
+    /* long long: MSVC's long is 32-bit and the day count can
+     * exceed it for guarded-but-huge durations. */
+    long long days = (long long)(secs / 86400);
+    double rem = secs - (double)days * 86400.0;
+    long long hours = (long long)(rem / 3600);
+    rem -= (double)hours * 3600.0;
+    long long mins = (long long)(rem / 60);
+    rem -= (double)mins * 60.0;
     char sec[32];
     if (rem == (double)(long)rem) {
-        snprintf(sec, sizeof sec, "%ldS", (long)rem);
+        snprintf(sec, sizeof sec, "%lldS", (long long)rem);
     } else {
         long ip = (long)rem;
         double fr = rem - ip;
@@ -119,19 +121,19 @@ void leptris_dur_format(double secs, char* buf, size_t cap) {
         char* last = frac + strlen(frac) - 1;
         while (last > frac && *last == '0') *last-- = '\0';
         if (*frac == '0' && frac[1] == '\0') frac = (char*)"";
-        snprintf(sec, sizeof sec, "%ld.%sS", ip, frac);
+        snprintf(sec, sizeof sec, "%lld.%sS", ip, frac);
     }
     char t[48] = "";
-    if (hours) snprintf(t + strlen(t), sizeof t - strlen(t), "%ldH", hours);
-    if (mins) snprintf(t + strlen(t), sizeof t - strlen(t), "%ldM", mins);
+    if (hours) snprintf(t + strlen(t), sizeof t - strlen(t), "%lldH", hours);
+    if (mins) snprintf(t + strlen(t), sizeof t - strlen(t), "%lldM", mins);
     /* canonical form drops a bare zero-seconds when a coarser
      * component exists ("PT1H", not "PT1H0S") */
     if (strcmp(sec, "0S") != 0 || (!hours && !mins && !days))
         strcat(t, sec);
     if (days && !hours && !mins && strcmp(sec, "0S") == 0)
-        snprintf(buf, cap, "%sP%ldD", neg ? "-" : "", days);
+        snprintf(buf, cap, "%sP%lldD", neg ? "-" : "", days);
     else if (days)
-        snprintf(buf, cap, "%sP%ldDT%s", neg ? "-" : "", days, t);
+        snprintf(buf, cap, "%sP%lldDT%s", neg ? "-" : "", days, t);
     else
         snprintf(buf, cap, "%sPT%s", neg ? "-" : "", t);
 }
