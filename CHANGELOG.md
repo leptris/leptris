@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [1.9.211] - 2026-09-20
+
+### Fixed
+
+- MSVC-portable env toggles for the interleaved spec (test)
+- rename lane ws_only to il_ws_only (amalgamated TU collision) (parse)
+
+### Performance
+
+- interleaved slice 3a — upfront record capacity + NUL-view element names (parse)
+- interleaved slice 2 — sentinel discipline + fused scans in il_scan (parse)
+- interleaved-parse lane slice 1 (env-gated, bails to classic) (parse)
+- validated single-slot append-tail memo on the exec (#682) (xslt)
+
+
+
 ## [1.9.210] - 2026-09-20
 
 ### Added
