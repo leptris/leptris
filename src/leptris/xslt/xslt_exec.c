@@ -24,8 +24,11 @@
  * re-derives the doc by root-climb + map lookup per node (#682). */
 static void out_append_child(XsltExec* ex, LeptrisElement parent,
                              void* child) {
-    leptris_element_append_child_internal_doc(
-        parent, (LeptrisNode*)child, ex->result);
+    leptris_element_append_child_tail(
+        parent, (LeptrisNode*)child, ex->result,
+        (ex->last_append_parent == parent) ? ex->last_append_child : NULL);
+    ex->last_append_parent = parent;
+    ex->last_append_child = (LeptrisNodeRef)child;
     leptris_element_index_invalidate(ex->result);
 }
 #include <stdlib.h>
