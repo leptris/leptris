@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.209] - 2026-09-20
+
+### Performance
+
+- classifier bits replace the close-tag strcmp scans (#1218 round 2) (html)
+
+
+
 ## [1.9.208] - 2026-09-19
 
 ### Fixed
