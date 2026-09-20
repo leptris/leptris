@@ -55,6 +55,9 @@ void leptris_arena_reset(LeptrisArena* arena);
  * All pointers handed out by the arena become invalid. */
 void leptris_arena_destroy(LeptrisArena* arena);
 
+/* Release retained arena blocks (leptris_thread_cleanup drain). */
+void leptris_arena_retain_drain(void);
+
 /* Bump-allocate `size` bytes, 8-byte aligned. NOT zeroed.
  * Returns NULL when the request does not fit in remaining space —
  * no fallback allocation, ever (see the contract above). */

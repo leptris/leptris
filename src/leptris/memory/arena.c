@@ -51,7 +51,20 @@ static inline size_t align_up(size_t n) {
  * twice per document lifetime, so contention is irrelevant. */
 #define ARENA_RETAIN_MIN (256u * 1024u)
 #define ARENA_RETAIN_MAX_BLOCKS 4u
-#define ARENA_RETAIN_MAX_BYTES (32u * 1024u * 1024u)
+/* 96MB: a large-document parse arena (~4x input with the
+ * pre-sized estimate) must survive the free to be reused by the
+ * next parse — at the old 32MB ceiling, every big-doc cycle
+ * freed and re-malloc'd tens of MB (libc madvise showed ~2% of
+ * repeated-parse wall time). One document's worth of parking. */
+#define ARENA_RETAIN_MAX_BYTES (96u * 1024u * 1024u)
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ARENA_RETAIN_ASAN 1
+#endif
+#elif defined(__SANITIZE_ADDRESS__)
+#define ARENA_RETAIN_ASAN 1
+#endif
 
 static struct {
     char* base[ARENA_RETAIN_MAX_BLOCKS];
@@ -106,6 +119,14 @@ static char* retain_take(size_t request, size_t* capacity) {
 }
 
 static void retain_give(char* base, size_t size) {
+#ifdef ARENA_RETAIN_ASAN
+    /* ASAN: retained blocks have no TLS destructor and read as
+     * LSan leaks — free for real (the recycle win is measurable
+     * only in repeated-parse loops, which ASAN runs don't gate). */
+    (void)size;
+    leptris_free_hook(base);
+    return;
+#endif
     if (size < ARENA_RETAIN_MIN) {
         leptris_free_hook(base);
         return;
@@ -121,6 +142,18 @@ static void retain_give(char* base, size_t size) {
     g_retain.size[g_retain.count] = size;
     g_retain.count++;
     g_retain.bytes += size;
+    retain_unlock();
+}
+
+/* Host-invoked drain (leptris_thread_cleanup): the retained
+ * blocks are process-lifetime parking by design; release them so
+ * embedded hosts and leak checkers see a clean exit. */
+void leptris_arena_retain_drain(void) {
+    retain_lock();
+    for (size_t i = 0; i < g_retain.count; i++)
+        leptris_free_hook(g_retain.base[i]);
+    g_retain.count = 0;
+    g_retain.bytes = 0;
     retain_unlock();
 }
 
