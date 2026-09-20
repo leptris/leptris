@@ -2004,7 +2004,7 @@ typedef struct IlCtx {
     uint32_t open[DP_MAX_DEPTH];
     uint32_t last_child[DP_MAX_DEPTH];
     int depth;
-    size_t str_bytes;        /* pool bytes for element name copies */
+
 } IlCtx;
 
 static int il_push(IlCtx* c, const IlRec* r) {
@@ -2085,7 +2085,10 @@ static int il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
         size_t nl = j - n0;
 
         IlRec r;
-        memset(&r, 0, sizeof(r));
+        r.kind = 0;
+        r.self_closing = 0;
+        r.open_prefixed = 0;
+        r.elem_end = 0;
         r.off = (uint32_t)n0;
         r.len = (uint32_t)nl;
         r.line = line_ok ? (uint32_t)i + 1u : 0u;
@@ -2161,7 +2164,7 @@ static int il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
         if (r.self_closing) r.elem_end = r.start_tag_end;
         if (!il_push(c, &r)) return 0;
         uint32_t ri = (uint32_t)(c->nrec - 1);
-        c->str_bytes += nl + 1;
+        /* names stay as NUL'd views into scratch (post-pass) */
         if (r.has_open_parent && c->last_child[c->depth - 1] != IL_NONE)
             c->recs[c->last_child[c->depth - 1]].next_sib = ri;
         c->last_child[c->depth - 1] = ri;
@@ -2209,8 +2212,13 @@ static int il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
             j = (size_t)(tend - s);
             if (tl > 0 && !(drop_ws && il_ws_only(s + t0, tl))) {
                 IlRec tr;
-                memset(&tr, 0, sizeof(tr));
                 tr.kind = 1;
+                tr.self_closing = 0;
+                tr.open_prefixed = 0;
+                tr.start_tag_end = 0;
+                tr.elem_end = 0;
+                tr.first_attr = IL_NONE;
+                tr.attr_count = 0;
                 tr.off = (uint32_t)t0;
                 tr.len = (uint32_t)tl;
                 tr.parent = c->open[c->depth - 1];
@@ -2291,7 +2299,7 @@ static struct leptris_document* dp_il_build(
     size_t need = c->nrec * sizeof(struct leptris_element) +
                   c->nrec * sizeof(LeptrisTextNode) +
                   c->nattr * sizeof(struct leptris_attribute) +
-                  c->str_bytes + 8 * 1024 + 64 * 1024;
+                  8 * 1024 + 64 * 1024;
     LeptrisArena* arena = leptris_arena_create(need);
     if (!arena) goto oom_early;
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
@@ -2356,12 +2364,6 @@ static struct leptris_document* dp_il_build(
     }
     /* Pool string arena for element names (writable — split_hash
      * NULs the colon there, as classic does on its copies). */
-    char* strb = NULL;
-    if (c->str_bytes) {
-        strb = (char*)leptris_pool_alloc(pool, c->str_bytes);
-        if (!strb) goto oom_pool;
-    }
-    size_t strused = 0;
 
     DParser pp;
     memset(&pp, 0, sizeof(pp));
@@ -2391,11 +2393,12 @@ static struct leptris_document* dp_il_build(
             e->base.frozen = 1;
             e->start_tag_end_off = r->start_tag_end;
             e->element_end_off = r->elem_end;
-            char* nm = strb + strused;
-            memcpy(nm, scratch + r->off, r->len);
-            nm[r->len] = '\0';
-            strused += r->len + 1;
-            dp_split_hash_name(&pp, e, nm, r->len);
+            /* Element name as a NUL'd scratch view — the byte
+             * after the name (ws/'>'/'/') is dead after the scan,
+             * same as attr names/values. Removes the per-element
+             * name memcpy + the packed region. */
+            scratch[r->off + r->len] = '\0';
+            dp_split_hash_name(&pp, e, scratch + r->off, r->len);
 
             /* attrs: dup first-wins + wiring (classic tail).
              * attr_count counts WIRED attrs only — the dup path
@@ -2569,6 +2572,19 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
 
     IlCtx c;
     memset(&c, 0, sizeof(c));
+    /* Slice 3a: upfront capacity from the input size — the growth
+     * path started at 0/256 and a 13MB doc pays ~16 reallocs plus
+     * the copy-overs. len/24 elems / len/48 attrs covers typical
+     * shapes outright; pathological docs still grow. */
+    c.crec = len / 24 + 64;
+    c.recs = (IlRec*)malloc(c.crec * sizeof(IlRec));
+    c.cattr = len / 48 + 32;
+    c.attrs = (IlAttr*)malloc(c.cattr * sizeof(IlAttr));
+    if (!c.recs || !c.attrs) {
+        free(c.recs); free(c.attrs);
+        free(scratch);
+        return NULL;
+    }
     uint32_t root;
     size_t toff, tlen;
     if (!il_scan(scratch, len, drop_ws, &c, &root, &toff, &tlen)) {
