@@ -4,11 +4,22 @@
 
 ### Added
 
-- the node-layout fork's document block (slice 1) (memory)
+- The node-layout fork's document block (slice 1, #1253): two
+  contiguous geometrically-grown regions per document (dense node
+  array + string arena) with region-relative byte-offset edges —
+  growth never invalidates an offset. Foundation for the pugixml-
+  class parse layout (TODO.max-perf/node-layout-fork.md).
 
 ### Performance
 
-- raise the retain ceiling to 96MB + thread-cleanup drain (arena)
+- Large-document parse (#1222/#1238 lane, #1255): the parse arena
+  (~4x input) exceeded the arena retain cache's 32MB ceiling, so
+  every repeated-parse cycle freed and re-malloc'd tens of MB.
+  Ceiling raised to 96MB (one document's worth of parking) with a
+  thread-cleanup drain and ASAN free-for-real. Measured: 13MB
+  attr shape 341 -> 472 MB/s (+38%); the text shape's size-decline
+  eliminated (465 -> 163 MB/s falling across 1.5-13MB, now
+  ~605-627 flat).
 
 
 
