@@ -4,7 +4,12 @@
 
 ### Performance
 
-- classifier bits replace the close-tag strcmp scans (#1218 round 2) (html)
+- WHATWG HTML parse, #1218 round 2: the per-close-tag name-list
+  scans (a 40-name implied-end set and a 33-name open-side set,
+  ~7% of parse self-time on table-heavy pages) are now membership
+  bits on the first-char-bucketed tag classifier — both lookups
+  are one bucket walk, sets preserved bit-for-bit.
+  bench_html_parse plain fixture: 24.1 → 25.1-26.7 MB/s.
 
 
 
