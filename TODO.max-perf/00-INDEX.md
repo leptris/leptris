@@ -24,3 +24,7 @@ Next portability gate: s390x big-endian (#1194, PR #1202).
 The node-layout fork (row 4 successor, owner green-lit 2026-09-20):
 TODO.max-perf/node-layout-fork.md — 5 slices, addresses #1222 +
 #1179 residual + #1238 parse side.
+
+The interleaved-parse rewrite (owner-directed 2026-09-20):
+TODO.max-perf/interleaved-parse.md — the #1222 step-change; slices 0-4,
+each CI-benchmark-gated.
