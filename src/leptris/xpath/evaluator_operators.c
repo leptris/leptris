@@ -1872,7 +1872,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
 
     /* Arithmetic operators */
     if (op == XPATH_OP_PLUS || op == XPATH_OP_MINUS || op == XPATH_OP_MULTIPLY ||
-        op == XPATH_OP_DIV || op == XPATH_OP_MOD) {
+        op == XPATH_OP_DIV || op == XPATH_OP_MOD || op == XPATH_OP_IDIV) {
         double lval = xpath_to_number(left);
         double rval = xpath_to_number(right);
         result = xpath_result_new(XPATH_RESULT_NUMBER);
@@ -1883,6 +1883,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 case XPATH_OP_MULTIPLY: result->value.number_value = lval * rval; break;
                 case XPATH_OP_DIV: result->value.number_value = lval / rval; break;
                 case XPATH_OP_MOD: result->value.number_value = fmod(lval, rval); break;
+                case XPATH_OP_IDIV: result->value.number_value =
+                  (rval == 0) ? 0 : (double)((long long)lval / (long long)rval); break;
                 default: break;
             }
         }

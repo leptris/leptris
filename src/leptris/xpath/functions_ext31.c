@@ -1749,18 +1749,30 @@ static struct leptris_xpath_result* fn_passthrough_ctor(XPathContext* ctx,
 /* Extract an integer field from an ISO date/dateTime/time/duration
  * string. which: 1 year 2 month 3 day 4 hours 5 minutes
  * 6 seconds 7 duration-days 8 duration-hours. */
+static int il_arg_empty(XPathContext* ctx, XPathASTNode* arg) {
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, arg);
+    if (!r) return 0;   /* evaluation error is not an empty signal */
+    int empty = (r->type == XPATH_RESULT_NODESET &&
+                 (!r->value.nodeset_value ||
+                  r->value.nodeset_value->count == 0));
+    leptris_xpath_result_free(r);
+    return empty;
+}
+
 static struct leptris_xpath_result* fn_date_field(XPathContext* ctx,
         XPathASTNode** args, size_t n, int which) {
+    /* F&O: the extractor functions take the empty sequence and
+     * return the empty sequence (count == 0), not a 0. */
+    if (il_arg_empty(ctx, args[0])) return seq_new();
     char* in = re_str_arg(ctx, args, 0);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!out) { free(in); return NULL; }
     long v = 0;
+    double se = 0, dsec = 0;
     if (in) {
         int y = 0, mo = 0, d = 0, h = 0, mi = 0;
-        double se = 0;
         const char* t = strstr(in, "T");
         long dd = 0, dh = 0, dm = 0;
-        double dsec = 0;
         if (in[0] == 'P' || (in[0] == '-' && in[1] == 'P')) {
             /* ISO 8601 duration P[nY][nM][nD][T[nH][nM][nS]]: 'M'
              * means months before T, minutes after. */
@@ -1795,7 +1807,11 @@ static struct leptris_xpath_result* fn_date_field(XPathContext* ctx,
               : (which == 6) ? (long)se : 0;
         }
     }
-    out->value.number_value = (double)v;
+    /* seconds fields keep their fraction (F&O: seconds-from-*
+     * returns xs:decimal — 12.43 stays 12.43, not 12). */
+    out->value.number_value = (which == 6) ? se
+                            : (which == 10) ? dsec
+                            : (double)v;
     free(in);
     (void)n;
     return out;
@@ -1866,25 +1882,26 @@ static int h_dt_parse(const char* in, int* y, int* mo, int* d,
     } else if (sscanf(in, "%d:%d:%lf", h, mi, se) != 3) {
         return 0;
     }
-    const char* z = strrchr(in, 'Z');
-    if (z && !isdigit((unsigned char)z[1])) {
-        *has_off = 1;
-    } else {
-        const char* p = in;
-        while (*p) {
-            if (*p == 'T' || isdigit((unsigned char)*p) ||
-                *p == '-' || *p == ':' || *p == '.') {
-                p++;
-                continue;
-            }
-            break;
-        }
-        if ((*p == '+' || *p == '-') && strlen(p) >= 6 &&
-            p[3] == ':') {
-            int oh = 0, om = 0;
-            if (sscanf(p + 1, "%d:%d", &oh, &om) == 2) {
-                *off_min = (*p == '-') ? -(oh * 60 + om)
-                                       : (oh * 60 + om);
+    /* Tail-anchored offset scan. The old forward walk allowed '-'
+     * (a date separator), so it ran THROUGH "-05:00" and never saw
+     * the offset — every adjustment treated zoned values as naive
+     * (QT3 fn-month-from-dateTime-3: 19:20-05:00 never rolled to
+     * the next UTC day). */
+    {
+        size_t len = strlen(in);
+        if (len >= 1 && in[len - 1] == 'Z') {
+            *has_off = 1;
+        } else if (len >= 6) {
+            const char* p = in + len - 6;
+            if ((p[0] == '+' || p[0] == '-') && p[3] == ':' &&
+                isdigit((unsigned char)p[1]) &&
+                isdigit((unsigned char)p[2]) &&
+                isdigit((unsigned char)p[4]) &&
+                isdigit((unsigned char)p[5])) {
+                int oh = (p[1] - '0') * 10 + (p[2] - '0');
+                int om = (p[4] - '0') * 10 + (p[5] - '0');
+                *off_min = (p[0] == '-') ? -(oh * 60 + om)
+                                         : (oh * 60 + om);
                 *has_off = 1;
             }
         }

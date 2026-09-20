@@ -640,6 +640,50 @@ static XPathASTNode* parse_string_concat_expr(XPathParser* parser) {
     return left;
 }
 
+/* True when the token AFTER a bare value-comparison keyword may
+ * START an operand. The base list covers scalars/parens; an NCName
+ * qualifies ONLY when it opens a function call — a bare NCName
+ * follower stays a path step (XPath 1.0 name-test precedence). */
+static int kw_operand_boundary(XPathParser* parser, XPathToken* nx) {
+    if (!nx) return 1;
+    switch (nx->type) {
+        case TOK_EOF: case TOK_RPAREN: case TOK_COMMA:
+        case TOK_RBRACE: case TOK_LBRACE: case TOK_NUMBER:
+        case TOK_STRING: case TOK_DOLLAR: case TOK_LPAREN:
+        case TOK_MINUS: case TOK_PLUS:
+            return 1;
+        case TOK_QNAME:
+            /* prefixed call: QName '(' — a lone QName stays a path
+             * step (name-test precedence, like NCName). */
+        case TOK_NCNAME: {
+            /* unprefixed call: name '(' ... prefixed call:
+             * name ':' name '(' (the QT3 corpus writes fn:year-...). */
+            XPathToken* nnx =
+                parser->token_pos + 2 < parser->token_count
+                    ? &parser->tokens[parser->token_pos + 2]
+                    : NULL;
+            if (nnx && nnx->type == TOK_LPAREN) return 1;
+            XPathToken* t3 =
+                parser->token_pos + 3 < parser->token_count
+                    ? &parser->tokens[parser->token_pos + 3]
+                    : NULL;
+            XPathToken* t4 =
+                parser->token_pos + 4 < parser->token_count
+                    ? &parser->tokens[parser->token_pos + 4]
+                    : NULL;
+            XPathToken* t5 =
+                parser->token_pos + 5 < parser->token_count
+                    ? &parser->tokens[parser->token_pos + 5]
+                    : NULL;
+            return nnx && nnx->type == TOK_COLON && t3 &&
+                   t3->type == TOK_NCNAME && t4 &&
+                   t4->type == TOK_LPAREN && t5;
+        }
+        default:
+            return 0;
+    }
+}
+
 static XPathASTNode* parse_relational_expr(XPathParser* parser) {
     XPathASTNode* left = parse_string_concat_expr(parser);
     if (!left) return NULL;
@@ -660,13 +704,7 @@ static XPathASTNode* parse_relational_expr(XPathParser* parser) {
                     parser->token_pos + 1 < parser->token_count
                         ? &parser->tokens[parser->token_pos + 1]
                         : NULL;
-                int boundary =
-                    !nx || nx->type == TOK_EOF ||
-                    nx->type == TOK_RPAREN || nx->type == TOK_COMMA ||
-                    nx->type == TOK_RBRACE || nx->type == TOK_LBRACE ||
-                    nx->type == TOK_NUMBER || nx->type == TOK_STRING ||
-                    nx->type == TOK_DOLLAR || nx->type == TOK_LPAREN ||
-                    nx->type == TOK_MINUS;
+                int boundary = kw_operand_boundary(parser, nx);
                 if (boundary) {
                     if (t->value_len == 2 &&
                         (memcmp(t->value, "eq", 2) == 0 ||
@@ -779,12 +817,30 @@ static XPathASTNode* parse_multiplicative_expr(XPathParser* parser) {
     while (1) {
         XPathOperatorType op_type;
 
+        /* XPath 2.0 `idiv` — a bare NCName here is NOT a step
+         * boundary candidate (XPath 1.0 reserved div/mod are lexer
+         * tokens; idiv stays a keyword so `x/idiv/y` paths keep
+         * working). Same conservative operand check as eq. */
+        int kw_idiv = 0;
+        {
+            XPathToken* t = current_token(parser);
+            if (t && t->type == TOK_NCNAME && t->value_len == 4 &&
+                memcmp(t->value, "idiv", 4) == 0) {
+                XPathToken* nx =
+                    parser->token_pos + 1 < parser->token_count
+                        ? &parser->tokens[parser->token_pos + 1]
+                        : NULL;
+                kw_idiv = kw_operand_boundary(parser, nx);
+            }
+        }
         if (current_token_is(parser, TOK_STAR)) {
             op_type = XPATH_OP_MULTIPLY;
         } else if (current_token_is(parser, TOK_DIV)) {
             op_type = XPATH_OP_DIV;
         } else if (current_token_is(parser, TOK_MOD)) {
             op_type = XPATH_OP_MOD;
+        } else if (kw_idiv) {
+            op_type = XPATH_OP_IDIV;
         } else {
             break;
         }
@@ -805,6 +861,12 @@ static XPathASTNode* parse_multiplicative_expr(XPathParser* parser) {
 
 /* Parse unary expressions: '-' UnaryExpr | UnionExpr */
 static XPathASTNode* parse_unary_expr(XPathParser* parser) {
+    /* XPath 2.0 unary plus — numeric identity; consume and descend
+     * (QT3 +fn:year-from-date(...) hit this). */
+    if (current_token_is(parser, TOK_PLUS)) {
+        advance_token(parser);
+        return parse_unary_expr(parser);
+    }
     if (current_token_is(parser, TOK_MINUS)) {
         advance_token(parser);
         XPathASTNode* expr = parse_unary_expr(parser);
