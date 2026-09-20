@@ -2289,6 +2289,92 @@ static long h_tz_duration_min(const char* in) {
         return out;                                                  \
     }
 
+/* op-date family: date/time/dateTime lexical + a signed second
+ * delta. Keeps the operand's KIND (date / time / dateTime) and zone
+ * suffix; time wraps the day; dates keep the date part. Returns 0
+ * when ds is not a lexical date/time. */
+int leptris_dt_shift(const char* ds, double delta, char* buf,
+                     size_t cap) {
+    int y, mo, d, h, mi;
+    double se;
+    long off;
+    int has_off;
+    if (!h_dt_parse(ds, &y, &mo, &d, &h, &mi, &se, &off, &has_off))
+        return 0;
+    char zone[8];
+    if (!has_off) zone[0] = '\0';
+    else if (off == 0) snprintf(zone, sizeof zone, "Z");
+    else {
+        int oh = (int)(off / 60), om = (int)(off % 60);
+        snprintf(zone, sizeof zone, "%s%02d:%02d",
+                 off < 0 ? "-" : "+", oh < 0 ? -oh : oh,
+                 om < 0 ? -om : om);
+    }
+    const char* first_colon = strchr(ds, ':');
+    const char* first_dash = strchr(ds, '-');
+    int is_time = first_colon &&
+                  (!first_dash || first_dash > first_colon);
+    char secs[24];
+    if (se == (double)(long)se) {
+        snprintf(secs, sizeof secs, "%02ld", (long)se);
+    } else {
+        long ip = (long)se;
+        double fr = se - ip;
+        char raw[32];
+        snprintf(raw, sizeof raw, "%.9f", fr);
+        char* dot = strchr(raw, '.');
+        char* frac = dot + 1;
+        char* last = frac + strlen(frac) - 1;
+        while (last > frac && *last == '0') *last-- = '\0';
+        if (*frac == '0' && frac[1] == '\0') frac = (char*)"";
+        snprintf(secs, sizeof secs, "%02ld.%s", ip, frac);
+    }
+    if (is_time) {
+        long tot = (long)(h * 3600L + mi * 60L + se + delta);
+        tot %= 86400;
+        if (tot < 0) tot += 86400;
+        snprintf(buf, cap, "%02d:%02d:%02d%s",
+                 (int)(tot / 3600), (int)(tot % 3600 / 60),
+                 (int)(tot % 60), zone);
+        return 1;
+    }
+    long days = h_days_from_civil(y, mo, d);
+    if (strchr(ds, 'T') == NULL) {
+        /* date: whole-duration shift, keep the date part (floor) */
+        double exact = (days * 86400.0 + delta) / 86400.0;
+        long ndf = (long)floor(exact);
+        int ny, nm, ndd;
+        h_civil_from_days(ndf, &ny, &nm, &ndd);
+        snprintf(buf, cap, "%04d-%02d-%02d%s", ny, nm, ndd, zone);
+        return 1;
+    }
+    long base = (long)(days * 86400.0 + h * 3600.0 + mi * 60.0 +
+                       se + delta);
+    long nd = base / 86400, rem = base % 86400;
+    if (rem < 0) { rem += 86400; nd--; }
+    int ny, nm, ndd;
+    h_civil_from_days(nd, &ny, &nm, &ndd);
+    /* seconds from the SHIFTED instant; a fractional input second
+     * survives the whole-second delta untouched */
+    if (se == (double)(long)se)
+        snprintf(secs, sizeof secs, "%02ld", rem % 60);
+    else {
+        long ip = rem % 60;
+        double fr = se - (double)(long)se;
+        char raw[32];
+        snprintf(raw, sizeof raw, "%.9f", fr);
+        char* dot = strchr(raw, '.');
+        char* frac = dot + 1;
+        char* last = frac + strlen(frac) - 1;
+        while (last > frac && *last == '0') *last-- = '\0';
+        snprintf(secs, sizeof secs, "%02ld.%s", ip, frac);
+    }
+    snprintf(buf, cap, "%04d-%02d-%02dT%02d:%02d:%s%s",
+             ny, nm, ndd, (int)(rem / 3600), (int)(rem % 3600 / 60),
+             secs, zone);
+    return 1;
+}
+
 ADJUST_TZ(adjust_dttz, 1)
 ADJUST_TZ(adjust_dtetz, 2)
 ADJUST_TZ(adjust_ttz, 3)

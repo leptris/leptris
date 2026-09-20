@@ -2014,6 +2014,28 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                 : xpath_to_number(left);
                 double dursec = ld ? lsec : rsec;
                 char buf[64];
+                /* op-date family: date/time/dateTime +- duration */
+                if ((op == XPATH_OP_PLUS || op == XPATH_OP_MINUS) &&
+                    (ld != rd)) {
+                    const char* ds = ld ? rs : ls;
+                    double dsec = ld ? lsec : rsec;
+                    if (ds && ds[0] >= '0' && ds[0] <= '9') {
+                        double delta = (op == XPATH_OP_PLUS)
+                                           ? dsec : -dsec;
+                        char dbuf[64];
+                        if (leptris_dt_shift(ds, delta, dbuf,
+                                             sizeof dbuf)) {
+                            result = xpath_result_new(
+                                XPATH_RESULT_STRING);
+                            if (result)
+                                result->value.string_value =
+                                    leptris_strdup(dbuf);
+                            xpath_result_free(left);
+                            xpath_result_free(right);
+                            return result;
+                        }
+                    }
+                }
                 if ((op == XPATH_OP_PLUS || op == XPATH_OP_MINUS) &&
                     ld && rd) {
                     double v = (op == XPATH_OP_PLUS) ? lsec + rsec
@@ -2132,6 +2154,36 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     /* mixed nonzero families: never equal */
                     result->value.boolean_value =
                         op == XPATH_OP_NOT_EQUAL;
+                    xpath_result_free(left);
+                    xpath_result_free(right);
+                    return result;
+                }
+            }
+
+            /* ISO date/time-shaped strings compare chronologically
+             * with plain lexical order (zero-padded, same-zone
+             * corpus forms) — the numeric path would NaN them. */
+            if (left->type == XPATH_RESULT_STRING &&
+                right->type == XPATH_RESULT_STRING) {
+                const char* lvs = left->value.string_value;
+                const char* rvs = right->value.string_value;
+                int lok = lvs && lvs[0] >= '0' && lvs[0] <= '9' &&
+                          (strchr(lvs, ':') ||
+                           (strlen(lvs) >= 8 && lvs[4] == '-' &&
+                            lvs[7] == '-'));
+                int rok = rvs && rvs[0] >= '0' && rvs[0] <= '9' &&
+                          (strchr(rvs, ':') ||
+                           (strlen(rvs) >= 8 && rvs[4] == '-' &&
+                            rvs[7] == '-'));
+                if (lok && rok) {
+                    int c = strcmp(lvs, rvs);
+                    result->value.boolean_value =
+                        op == XPATH_OP_EQUAL ? c == 0
+                        : op == XPATH_OP_NOT_EQUAL ? c != 0
+                        : op == XPATH_OP_LESS ? c < 0
+                        : op == XPATH_OP_LESS_EQUAL ? c <= 0
+                        : op == XPATH_OP_GREATER ? c > 0
+                        : c >= 0;
                     xpath_result_free(left);
                     xpath_result_free(right);
                     return result;

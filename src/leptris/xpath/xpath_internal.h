@@ -135,4 +135,5 @@ void xpath_ast_cache_store_bc(const char* expr, size_t expr_len,
 /* dayTimeDuration value model (op:duration, lever 6 stage-2) */
 int leptris_dur_try_seconds(const char* s, double* out);
 int leptris_dur_try_months(const char* s, double* out);
+int leptris_dt_shift(const char* ds, double delta, char* buf, size_t cap);
 void leptris_dur_format(double secs, char* buf, size_t cap);

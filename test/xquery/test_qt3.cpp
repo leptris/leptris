@@ -460,6 +460,18 @@ TEST(Qt3Subset, OpDayTimeDuration) {
     run_test_set("op/duration-equal.xml", {}, 110, no_local);
 }
 
+/* op-date family (lever 6 stage-2 dates, batch 4): date/time/
+ * dateTime +/- dayTimeDuration. */
+TEST(Qt3Subset, OpDateArithmetic) {
+    const std::vector<const char*> no_local = {"local:"};
+    run_test_set("op/add-dayTimeDuration-to-dateTime.xml", {}, 20, no_local);
+    run_test_set("op/add-dayTimeDuration-to-date.xml", {}, 22, no_local);
+    run_test_set("op/add-dayTimeDuration-to-time.xml", {}, 23, no_local);
+    run_test_set("op/subtract-dayTimeDuration-from-dateTime.xml", {}, 20, no_local);
+    run_test_set("op/subtract-dayTimeDuration-from-date.xml", {}, 21, no_local);
+    run_test_set("op/subtract-dayTimeDuration-from-time.xml", {}, 22, no_local);
+}
+
 TEST(Qt3Subset, TimezoneAndIetf) {
     /* Duration VALUE arithmetic (+, -, div, le/lt/ge, min/max) on
      * timezone results is the op:duration batch — the exclusions
