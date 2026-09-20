@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.210] - 2026-09-20
+
+### Added
+
+- the node-layout fork's document block (slice 1) (memory)
+
+### Performance
+
+- raise the retain ceiling to 96MB + thread-cleanup drain (arena)
+
+
+
 ## [1.9.209] - 2026-09-20
 
 ### Performance
