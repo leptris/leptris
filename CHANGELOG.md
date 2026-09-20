@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.213] - 2026-09-20
+
+### Added
+
+- yearMonthDuration family — 11 sets, 264/264 (xquery)
+- op-date family — date/time/dateTime +/- duration, 6 sets, 128/128 (xquery)
+
+### Fixed
+
+- (long long)nd in month-shift date prints (MSVC va_arg) (xpath)
+- long long ip in dur_format's fraction path (ILP32 SegFault) (xpath)
+- long long in date/duration shift math (MSVC + ILP32 long) (xpath)
+
+
+
 ## [1.9.212] - 2026-09-21
 
 ### Added — the QT3 date/time family (lever 6 stage-2, #1182)
