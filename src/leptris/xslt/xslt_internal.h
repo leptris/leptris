@@ -750,6 +750,15 @@ typedef struct xslt_exec {
      * frag-list tail is exact by construction. */
     LeptrisNodeRef root_sib_tail;
     void* frag_tail;
+    /* #682 dispatch-heavy profile: elem_last_child sibling walks
+     * under op_result_elem were the hottest transform leaf. The
+     * same discipline for in-tree appends: a validated single-slot
+     * (parent, last-child) memo — append_child_tail re-checks the
+     * parent back-pointer + NULL next, so stale entries (result
+     * swap, detach, address reuse) degrade to one rewalk, never a
+     * wrong append. */
+    LeptrisElement last_append_parent;
+    LeptrisNodeRef last_append_child;
 } XsltExec;
 
 /* xslt_exec.c — public transform entry. */
