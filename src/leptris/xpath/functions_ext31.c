@@ -313,6 +313,31 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!out) { free_items(items, cnt); return NULL; }
     if (!cnt) { out->value.number_value = 0; free_items(items, cnt); return out; }
+    /* min/max over dayTimeDuration items pick by seconds and return
+     * the ORIGINAL lexical item (F&O: fn:min#3). */
+    if (which >= 2) {
+        double s0;
+        int all_dur = 1;
+        for (size_t k = 0; k < cnt && all_dur; k++)
+            if (!leptris_dur_try_seconds(items[k], &s0)) all_dur = 0;
+        if (all_dur && cnt > 0) {
+            size_t bi = 0;
+            double bs = 0;
+            for (size_t k = 0; k < cnt; k++) {
+                double sk;
+                leptris_dur_try_seconds(items[k], &sk);
+                if (k == 0 ||
+                    (which == 2 && sk < bs) ||
+                    (which == 3 && sk > bs)) { bs = sk; bi = k; }
+            }
+            xpath_result_free(out);
+            out = xpath_result_new(XPATH_RESULT_STRING);
+            if (out)
+                out->value.string_value = leptris_strdup(items[bi]);
+            free_items(items, cnt);
+            return out;
+        }
+    }
     double acc = 0, best = 0;
     size_t numeric = 0;
     int first = 1;
@@ -2189,6 +2214,12 @@ static long h_tz_duration_min(const char* in) {
                         &has_off)) { free(in); return out; }         \
         long target = 0;                                              \
         int remove = 0;                                               \
+        if (!has_off && n < 2) {                                      \
+            /* F&O: adjusting a naive value with no explicit zone    \
+             * attaches the implicit timezone (fixed UTC here). */   \
+            has_off = 1;                                              \
+            off = 0;                                                  \
+        }                                                             \
         if (n >= 2) {                                                 \
             char* tzs = re_str_arg_opt(ctx, a, 1);                   \
             if (!tzs) {                                              \
@@ -2235,8 +2266,8 @@ static long h_tz_duration_min(const char* in) {
             int ny, nm, ndd;                                          \
             h_civil_from_days(nd, &ny, &nm, &ndd);                    \
             if (WHICH == 2 && !strstr(in, "T"))                       \
-                snprintf(buf, sizeof buf, "%04d-%02d-%02d",           \
-                         ny, nm, ndd);                                \
+                snprintf(buf, sizeof buf, "%04d-%02d-%02d%s",         \
+                         ny, nm, ndd, remove ? "" : "Z");             \
             else if (remove)                                          \
                 snprintf(buf, sizeof buf,                             \
                          "%04d-%02d-%02dT%02d:%02d:%02d",            \
