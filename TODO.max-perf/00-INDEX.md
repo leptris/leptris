@@ -9,7 +9,7 @@ RED bench first where perf claims are made.
 | 1 | SIMD/memchr HTML tokenizer scans | perf | memchr ×2 (#1176/#1190) + LUT (#1199, +30%/+51%) | DONE v1.9.199 |
 | 7 | leptris validate CLI + bindings | feature | engine half merged #1198 (--dtd + DTD engine fixes); bindings remain | half done |
 | 8 | native XML diff consumer surface | feature | CLI diff text/JSON/--summary + engine API shipped | DONE (#1184 closed) |
-| 4 | compact-node micro-opts (non-layout) | perf | audited: TODOs 172/195/Lane18-P3 already in; residual = node-creation cost (node-layout fork, owner call) | parked on fork |
+| 4 | compact-node micro-opts (non-layout) | perf | residual = node-creation cost; SUPERSEDED by the node-layout fork (TODO.max-perf/node-layout-fork.md, owner green-lit 2026-09-20) | folded into fork |
 | 2 | compiled-dispatch tokenizer | perf | slices 1+3 landed #1236; slice 2's class LUT + dense switch pre-existed; residual = iterparse consumer (row 3) | mostly done |
 | 5 | XSLT 2x per-bench profile rounds (#682) | perf | medium, ongoing | in progress |
 | 6 | language tails (QT3/dates/fn-items/lane 15) | correctness | medium-large | queued |
@@ -20,3 +20,7 @@ Portability wave 2026-09-18 (v1.9.199): ILP32 layout port #1193 —
 per-wordsize pins, SSE2 gate, xsl:number 64-bit chain, ILP32 +
 native-arm64 + Intel-macOS CI legs, concurrency groups everywhere.
 Next portability gate: s390x big-endian (#1194, PR #1202).
+
+The node-layout fork (row 4 successor, owner green-lit 2026-09-20):
+TODO.max-perf/node-layout-fork.md — 5 slices, addresses #1222 +
+#1179 residual + #1238 parse side.
